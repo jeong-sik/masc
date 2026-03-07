@@ -26,6 +26,16 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v rg >/dev/null 2>&1; then
+  echo "rg is required"
+  exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required"
+  exit 1
+fi
+
 if [ ! -x "$SERVER_EXE" ]; then
   echo "server executable not found: $SERVER_EXE"
   echo "build it first with: dune build --root . @default"

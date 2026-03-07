@@ -95,8 +95,12 @@
 
 ```json
 {
-  "tool": "masc_operation_start",
-  "arguments": {
+  "method": "POST",
+  "path": "/api/v1/command-plane/operations",
+  "headers": {
+    "x-masc-agent-name": "codex"
+  },
+  "body": {
     "assigned_unit_id": "squad-verify",
     "objective": "Verify and quarantine new research items",
     "autonomy_level": "L4_Autonomous",
@@ -110,6 +114,7 @@
 
 - `masc_observe_operations`에 operation이 보임
 - `trace_id`가 발급됨
+- actor header를 생략하면 operation `created_by`가 `dashboard`로 떨어질 수 있음
 
 ## detachment materialization
 

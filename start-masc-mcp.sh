@@ -200,6 +200,7 @@ resolve_base_path() {
 }
 
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
+export MASC_BASE_PATH="$RESOLVED_BASE_PATH"
 
 # Wait for port to become available.
 # Default behavior is fail-fast on conflict to prevent duplicate server startup.

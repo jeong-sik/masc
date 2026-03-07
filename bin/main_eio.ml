@@ -5866,6 +5866,12 @@ let command_plane_help_http_json () =
               ~why:"Strict cross-platoon or disruptive action requires a policy decision."
               ~fix_tool:"masc_policy_approve"
               ~fix_summary:"Review the pending decision and approve/deny it before running tick again.";
+            pitfall ~id:"http-actor-defaults-dashboard"
+              ~title:"HTTP actor defaults to dashboard"
+              ~symptom:"Operation or trace entries show actor=dashboard even though a human or agent initiated the request."
+              ~why:"Mutating HTTP endpoints use dashboard as the fallback actor unless x-masc-agent, x-masc-agent-name, or agent_name is provided."
+              ~fix_tool:"masc_operation_start"
+              ~fix_summary:"Send x-masc-agent-name (or x-masc-agent) on mutating HTTP requests when actor attribution matters.";
           ] );
       ( "examples",
         `List
@@ -5900,6 +5906,7 @@ let command_plane_help_http_json () =
                    [
                      ("method", `String "POST");
                      ("path", `String "/api/v1/command-plane/operations");
+                     ("headers", `Assoc [ ("x-masc-agent-name", `String "codex") ]);
                      ("body",
                       `Assoc
                         [
@@ -5922,7 +5929,10 @@ let command_plane_help_http_json () =
                         ]);
                    ])
               ~notes:
-                [ "Run dispatch/tick after operation start to materialize detachments." ];
+                [
+                  "Run dispatch/tick after operation start to materialize detachments.";
+                  "Without x-masc-agent-name (or x-masc-agent), actor attribution falls back to dashboard.";
+                ];
             example ~id:"approval" ~title:"Approve strict action"
               ~path_id:"cpv2_benchmark" ~transport:"mcp"
               ~request:

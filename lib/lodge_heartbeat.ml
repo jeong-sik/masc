@@ -701,6 +701,14 @@ and agent_action =
   | ActionUpvote of string         (** post_id *)
   | ActionSkip
 
+type llm_decision_outcome = {
+  action : agent_action;
+  reason : string;
+  confidence : float;
+  llm_used : string option;
+  decision_failure_reason : string option;
+}
+
 type heartbeat_result = {
   timestamp: float;
   current_hour: int;
@@ -2121,45 +2129,20 @@ let run_heartbeat_llm_traced ~agent_name ~phase ~prompt =
     };
   cascade_result
 
-type social_candidate = {
-  post : Board.post;
-  reaction : Lodge_reaction.batch_reaction;
-}
-
-type action_plan =
-  | PlannedAction of agent_action
-  | NoAction of string
-
 let trigger_allows_post = function
   | Scheduled | ManualTrigger -> true
   | ContentAlert _ | Mentioned _ -> false
 
-let candidate_rank (candidate : social_candidate) =
-  let reaction_bias =
-    match candidate.reaction.reaction with
-    | Lodge_reaction.CommentIntent -> 1
-    | Lodge_reaction.Upvote -> 0
-    | Lodge_reaction.Pass | Lodge_reaction.Skip -> -1
-  in
-  (candidate.reaction.confidence, reaction_bias)
-
-let pick_social_candidate ~agent_name ~(candidates : social_candidate list) =
-  let threshold = Lodge_reaction.calibrated_threshold ~agent_name ~base_threshold:0.6 in
-  let sorted =
-    candidates
-    |> List.filter (fun candidate ->
-           match candidate.reaction.reaction with
-           | Lodge_reaction.CommentIntent | Lodge_reaction.Upvote ->
-               candidate.reaction.confidence >= threshold
-           | Lodge_reaction.Pass | Lodge_reaction.Skip -> false)
-    |> List.sort (fun left right ->
-           match Float.compare (fst (candidate_rank right)) (fst (candidate_rank left)) with
-           | 0 -> compare (snd (candidate_rank right)) (snd (candidate_rank left))
-           | order -> order)
-  in
-  match sorted with
-  | candidate :: _ -> Some candidate
-  | [] -> None
+let action_of_choice (choice : Lodge_decision.choice) : (agent_action, string) result =
+  match (choice.action, choice.target_post_id, choice.content) with
+  | Lodge_decision.Post, _, Some content -> Ok (ActionPost content)
+  | Lodge_decision.Comment, Some post_id, Some content ->
+      Ok (ActionComment (post_id, content))
+  | Lodge_decision.Upvote, Some post_id, _ -> Ok (ActionUpvote post_id)
+  | Lodge_decision.Skip, _, _ -> Ok ActionSkip
+  | Lodge_decision.Post, _, _ -> Error "post choice missing content"
+  | Lodge_decision.Comment, _, _ -> Error "comment choice missing target or content"
+  | Lodge_decision.Upvote, _, _ -> Error "upvote choice missing target"
 
 (** Ask LLM to decide what action to take *)
 let decide_agent_action ~agent_name ~trigger ~trigger_reason ~recent_posts =
@@ -2181,75 +2164,82 @@ let decide_agent_action ~agent_name ~trigger ~trigger_reason ~recent_posts =
   in
   let tom_context = tom_context_for_posts ~agent_name sorted_posts in
   let extra_context =
-    if String.trim tom_context = "" then None else Some tom_context
+    let pieces =
+      [ Some ("Trigger: " ^ trigger_reason)
+      ; (if String.trim tom_context = "" then None else Some tom_context)
+      ]
+      |> List.filter_map Fun.id
+    in
+    match pieces with
+    | [] -> None
+    | xs -> Some (String.concat "\n\n" xs)
   in
-  let maybe_post_action ~reason =
-    if trigger_allows_post trigger then
-      match generate_agent_content ~agent_name ~context:trigger_reason ~action_type:(`Post trigger_reason) with
-      | Some content -> PlannedAction (ActionPost content)
-      | None -> NoAction "post_generation_failed"
-    else
-      NoAction reason
+  let prompt =
+    Lodge_decision.batch_decision_prompt
+      ~agent_name
+      ~identity_prompt:
+        (Lodge_reaction.generate_identity_prompt signature ~static_traits)
+      ~posts:prompt_posts
+      ~extra_context
+      ~allow_post:(trigger_allows_post trigger)
   in
-  if prompt_posts = [] then
-    maybe_post_action ~reason:"no_relevant_posts"
-  else
-    let prompt =
-      Lodge_reaction.batch_reaction_prompt
-        ~agent_name ~posts:prompt_posts ~signature ~static_traits ~extra_context
-    in
-    let cascade_result =
-      run_heartbeat_llm_traced ~agent_name ~phase:"reaction_batch" ~prompt
-    in
-    let response = cascade_result.Lodge_cascade.response in
-    let parsed = Lodge_reaction.parse_batch_reactions response in
-    let reactions_by_post = Hashtbl.create (List.length parsed) in
-    List.iter
-      (fun (reaction : Lodge_reaction.batch_reaction) ->
-        Hashtbl.replace reactions_by_post reaction.post_id reaction)
-      parsed;
-    let candidates =
-      sorted_posts
-      |> List.map (fun (post : Board.post) ->
-             let post_id = Board.Post_id.to_string post.id in
-             let reaction =
-               match Hashtbl.find_opt reactions_by_post post_id with
-               | Some reaction -> reaction
-               | None ->
-                   {
-                     Lodge_reaction.post_id;
-                     reaction = Lodge_reaction.Pass;
-                     confidence = 0.0;
-                     reason = Some "unparsed";
-                   }
-             in
-             Lodge_reaction.record_reaction
-               ~agent_name
-               ~post_id
-               ~post_author:(Board.Agent_id.to_string post.author)
-               ~post_content:post.content
-               ~reaction:reaction.reaction
-               ~confidence:reaction.confidence
-               ?reason:reaction.reason
-               ();
-             { post; reaction })
-    in
-    let no_candidate_reason =
-      if parsed = [] then "unparsed_batch" else "below_threshold"
-    in
-    match pick_social_candidate ~agent_name ~candidates with
-    | Some { post; reaction = { reaction = Lodge_reaction.Upvote; _ } } ->
-        PlannedAction (ActionUpvote (Board.Post_id.to_string post.id))
-    | Some { post; reaction = { reaction = Lodge_reaction.CommentIntent; _ } } ->
-        (match
-           generate_agent_content
-             ~agent_name
-             ~context:trigger_reason
-             ~action_type:(`Comment post.content)
-         with
-         | Some content -> PlannedAction (ActionComment (Board.Post_id.to_string post.id, content))
-         | None -> NoAction "comment_generation_failed")
-    | _ -> maybe_post_action ~reason:no_candidate_reason
+  let cascade_result =
+    run_heartbeat_llm_traced ~agent_name ~phase:"lodge_decision" ~prompt
+  in
+  let llm_used = Some cascade_result.Lodge_cascade.llm_used in
+  let response = cascade_result.Lodge_cascade.response in
+  match
+    Lodge_decision.parse_batch_outcome
+      ~allowed_post_ids:(List.map (fun (post_id, _, _) -> post_id) prompt_posts)
+      ~allow_post:(trigger_allows_post trigger)
+      response
+  with
+  | Error reason ->
+      {
+        action = ActionSkip;
+        reason = "decision error: " ^ reason;
+        confidence = 0.0;
+        llm_used;
+        decision_failure_reason = Some reason;
+      }
+  | Ok outcome ->
+      List.iter
+        (fun (reaction : Lodge_decision.reaction) ->
+          match
+            List.find_opt
+              (fun (post : Board.post) ->
+                Board.Post_id.to_string post.id = reaction.post_id)
+              sorted_posts
+          with
+          | Some post ->
+              Lodge_reaction.record_reaction
+                ~agent_name
+                ~post_id:reaction.post_id
+                ~post_author:(Board.Agent_id.to_string post.author)
+                ~post_content:post.content
+                ~reaction:reaction.reaction
+                ~confidence:reaction.confidence
+                ?reason:reaction.reason
+                ()
+          | None -> ())
+        outcome.reactions;
+      (match action_of_choice outcome.choice with
+      | Error reason ->
+          {
+            action = ActionSkip;
+            reason = "decision error: " ^ reason;
+            confidence = 0.0;
+            llm_used;
+            decision_failure_reason = Some reason;
+          }
+      | Ok action ->
+          {
+            action;
+            reason = outcome.choice.reason;
+            confidence = outcome.choice.confidence;
+            llm_used;
+            decision_failure_reason = None;
+          })
 
 (** Execute the decided action *)
 let action_summary = function
@@ -2600,22 +2590,24 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
       (name, trigger, Skipped "agent unhealthy (circuit breaker open)")
     else begin
       let trigger_reason = string_of_trigger trigger in
-      let result =
-        match decide_agent_action ~agent_name:name ~trigger ~trigger_reason ~recent_posts with
-        | NoAction reason -> Passed reason
-        | PlannedAction action ->
-            (try
-               let outcome = execute_agent_action ~agent_name:name ~action in
-               (match outcome with
-                | Acted _ -> Agent_health.record_success ~agent_name:name
-                | Passed _ | Skipped _ -> ());
-               outcome
-             with exn ->
-               let err = Printexc.to_string exn in
-               Agent_health.record_failure ~agent_name:name ~reason:err;
-               Printf.printf "[lodge] Agent %s action failed: %s\n%!" name err;
-               Skipped (Printf.sprintf "action_failed:%s" err))
+      let decision =
+        decide_agent_action ~agent_name:name ~trigger ~trigger_reason ~recent_posts
       in
+      let action = decision.action in
+      let result =
+        try
+          let outcome = execute_agent_action ~agent_name:name ~action in
+          (match outcome with
+           | Acted _ -> Agent_health.record_success ~agent_name:name
+           | Passed _ | Skipped _ -> ());
+          outcome
+        with exn ->
+          let err = Printexc.to_string exn in
+          Agent_health.record_failure ~agent_name:name ~reason:err;
+          Printf.printf "[lodge] Agent %s action failed: %s\n%!" name err;
+          Skipped (Printf.sprintf "action_failed:%s" err)
+      in
+      record_checkin ~agent_name:name;
       record_checkin ~agent_name:name;
       (* Record action for Thompson Sampling *)
       (match result with
@@ -2628,8 +2620,29 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
            Lodge_selection.record_action ~agent_name:name ~action:`Skip
        | Acted { action = ActionUpvote _; _ }
        | Acted { action = ActionSkip; _ } -> ());
-
-      (name, trigger, result)
+      match result with
+      | Acted { action = ActionPost content; _ } ->
+          let summary =
+            Printf.sprintf "Posted: %s (%s, %.2f)"
+              (utf8_truncate content 40) decision.reason decision.confidence
+          in
+          (name, trigger, Acted { action = ActionPost content; summary })
+      | Acted { action = ActionComment (post_id, content); _ } ->
+          let summary =
+            Printf.sprintf "Commented on %s: %s (%s, %.2f)" post_id
+              (utf8_truncate content 30) decision.reason decision.confidence
+          in
+          (name, trigger, Acted { action = ActionComment (post_id, content); summary })
+      | Acted { action = ActionUpvote post_id; _ } ->
+          let summary =
+            Printf.sprintf "Upvoted %s (%s, %.2f)" post_id decision.reason
+              decision.confidence
+          in
+          (name, trigger, Acted { action = ActionUpvote post_id; summary })
+      | Acted { action = ActionSkip; _ } ->
+          (name, trigger, Passed decision.reason)
+      | Passed reason -> (name, trigger, Passed reason)
+      | Skipped reason -> (name, trigger, Skipped reason)
     end
   ) selected in
 
@@ -2718,20 +2731,15 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
                 Printf.printf "[lodge] Skipping self-heartbeat for %s (unhealthy)\n%!" name
               else begin
                 let trigger_reason = "self-heartbeat continuation" in
-                let planned =
+                let decision =
                   decide_agent_action ~agent_name:name ~trigger:Scheduled ~trigger_reason
                     ~recent_posts
                 in
+                let action = decision.action in
                 (try
-                  let outcome =
-                    match planned with
-                    | NoAction reason -> Passed reason
-                    | PlannedAction action ->
-                        execute_agent_action ~agent_name:name ~action
-                  in
+                  let outcome = execute_agent_action ~agent_name:name ~action in
                   (match outcome with
-                   | Acted _ ->
-                       Agent_health.record_success ~agent_name:name
+                   | Acted _ -> Agent_health.record_success ~agent_name:name
                    | Passed _ | Skipped _ -> ())
                 with exn ->
                   Agent_health.record_failure ~agent_name:name

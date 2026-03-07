@@ -54,7 +54,6 @@ type loop_state = {
   mutable stagnation_streak : int;
   baseline_metric : float;
   start_time : float;
-  state_post_id : string;
 }
 
 (* ================================================================ *)
@@ -355,6 +354,25 @@ Goal: %s|}
     state.loop_id state.loop_id state.profile.name status_str
     state.current_iteration state.baseline_metric final_metric
     total_delta avg_delta elapsed state.profile.target
+
+(** Concise 1-line summary for Board announcement (signal, not telemetry) *)
+let format_final_board (state : loop_state) : string =
+  let result = match state.status with
+    | `Completed -> "goal met"
+    | `Stopped -> "stopped"
+    | `Error e -> Printf.sprintf "error: %s" e
+    | `Running -> "running"
+  in
+  let final_metric = match state.history with
+    | r :: _ -> r.metric_after
+    | [] -> state.baseline_metric
+  in
+  Printf.sprintf "[MDAL] %s %s — %.4f -> %.4f (%+.4f) in %d iters | %s"
+    state.profile.name result
+    state.baseline_metric final_metric
+    (final_metric -. state.baseline_metric)
+    state.current_iteration
+    state.profile.target
 
 (* ================================================================ *)
 (* Worker Result Parsing                                            *)

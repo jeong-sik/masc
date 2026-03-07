@@ -244,6 +244,11 @@ let test_snapshot_json_reports_consistent_sections () =
        |> Yojson.Safe.Util.member "summary"
        |> Yojson.Safe.Util.member "total"
        |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "alerts total" 0
+        (snapshot |> Yojson.Safe.Util.member "alerts"
+       |> Yojson.Safe.Util.member "summary"
+       |> Yojson.Safe.Util.member "total"
+       |> Yojson.Safe.Util.to_int);
       Alcotest.(check string) "operation objective retained" "Run snapshot drill"
         (snapshot |> Yojson.Safe.Util.member "operations"
        |> Yojson.Safe.Util.member "operations"

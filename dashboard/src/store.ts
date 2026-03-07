@@ -511,7 +511,6 @@ function normalizeMdalLoop(raw: unknown): MdalLoop | null {
     history,
   }
 }
-
 export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<void> {
   const now = Date.now()
   const cached = _dashboardCache[mode]
@@ -610,7 +609,6 @@ export async function refreshMdal(): Promise<void> {
     mdalLoading.value = false
   }
 }
-
 // --- SSE event reaction ---
 // When lastEvent changes, invalidate cache and re-fetch
 
@@ -678,7 +676,13 @@ export function setupSSEReaction(): () => void {
     }
   })
 
-  return unsubscribe
+  return () => {
+    unsubscribe()
+    if (_mdalDebounce) {
+      clearTimeout(_mdalDebounce)
+      _mdalDebounce = null
+    }
+  }
 }
 
 // --- Periodic refresh (for keeper presence heartbeats that don't emit SSE) ---

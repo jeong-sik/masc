@@ -143,6 +143,7 @@ let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
       report_formats = [ Team_session_types.Markdown; Team_session_types.Json ];
       turn_count = 0;
       agent_names;
+      planned_workers = [];
       broadcast_count = 0;
       portal_count = 0;
       cascade_attempted = 0;
@@ -317,6 +318,7 @@ let test_recover_elapsed_session () =
       report_formats = [ Team_session_types.Markdown; Team_session_types.Json ];
       turn_count = 0;
       agent_names = [ "tester" ];
+      planned_workers = [];
       broadcast_count = 0;
       portal_count = 0;
       cascade_attempted = 0;
@@ -610,6 +612,22 @@ let test_proof_exposes_spawn_selection_rationale () =
           ("output_preview", `String "worker turn recorded");
           ("ts_iso", `String (Types.now_iso ()));
         ]);
+  ignore
+    (Team_session_store.update_session config session_id (fun s ->
+         {
+           s with
+           planned_workers =
+             Team_session_types.dedup_planned_workers
+               [
+                 {
+                   Team_session_types.spawn_agent = "llama";
+                   runtime_actor = Some "llama-local-proof";
+                   spawn_role = Some "planner";
+                   spawn_model = Some spawn_model;
+                 };
+               ];
+           updated_at_iso = Types.now_iso ();
+         }));
   let turn_ok, _ =
     dispatch_exn ctx ~name:"masc_team_session_turn"
       ~args:
@@ -652,11 +670,21 @@ let test_proof_exposes_spawn_selection_rationale () =
     evidence |> Yojson.Safe.Util.member "spawn_selection_note_summary"
     |> Yojson.Safe.Util.to_string
   in
+  let planned_worker_count =
+    evidence |> Yojson.Safe.Util.member "planned_worker_count"
+    |> Yojson.Safe.Util.to_int
+  in
+  let runtime_actor_count =
+    evidence |> Yojson.Safe.Util.member "unique_spawn_runtime_actors_count"
+    |> Yojson.Safe.Util.to_int
+  in
   let recorded_models =
     evidence |> Yojson.Safe.Util.member "spawn_models"
     |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string
   in
   Alcotest.(check string) "selection note summary" selection_note recorded_note;
+  Alcotest.(check int) "planned worker count" 1 planned_worker_count;
+  Alcotest.(check int) "runtime actor count" 1 runtime_actor_count;
   Alcotest.(check bool) "spawn model included" true
     (List.mem spawn_model recorded_models);
   let proof_md_path =
@@ -1106,12 +1134,97 @@ let test_step_spawn_llama_requires_spawn_model () =
     detail |> Yojson.Safe.Util.member "spawn_model"
   in
   Alcotest.(check bool) "spawn_model absent in failure event" true (spawn_model = `Null);
+  let attached_events =
+    Team_session_store.read_events config session_id
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "event_type" json
+           = `String "session_agent_attached")
+  in
+  Alcotest.(check int) "no phantom attachment on validation failure" 0
+    (List.length attached_events);
   let recorded_selection_note =
     detail |> Yojson.Safe.Util.member "spawn_selection_note"
     |> Yojson.Safe.Util.to_string_option
   in
   Alcotest.(check (option string)) "selection note recorded in failure event"
     (Some selection_note) recorded_selection_note;
+  cleanup_dir base_dir
+
+let test_step_spawn_batch_records_planned_workers () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"step-spawn-batch-planned-workers" |> get_session_id in
+  let selection_note =
+    "[model-selection] leader selected qwen3.5-35b-a3b-ud-q8-xl from inventory"
+  in
+  let step_ok, step_body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ( "spawn_batch",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("spawn_agent", `String "llama");
+                      ("spawn_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
+                      ("spawn_role", `String "planner");
+                      ("spawn_selection_note", `String selection_note);
+                      ("spawn_prompt", `String "planner prompt");
+                    ];
+                  `Assoc
+                    [
+                      ("spawn_agent", `String "llama");
+                      ("spawn_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
+                      ("spawn_role", `String "implementer-a");
+                      ("spawn_selection_note", `String selection_note);
+                      ("spawn_prompt", `String "implementer prompt");
+                    ];
+                ] );
+          ])
+  in
+  Alcotest.(check bool) "batch step fails without proc manager" false step_ok;
+  let body = parse_json_exn step_body in
+  let message = body |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string in
+  Alcotest.(check bool) "proc manager error surfaced" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "process manager unavailable")
+           message 0
+       in
+       true
+     with Not_found -> false);
+  let session =
+    Team_session_store.load_session config session_id |> Option.get
+  in
+  Alcotest.(check int) "planned workers recorded" 2
+    (List.length session.planned_workers);
+  let attached_events =
+    Team_session_store.read_events config session_id
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "event_type" json
+           = `String "session_agent_attached")
+  in
+  Alcotest.(check int) "no attachment when proc manager missing" 0
+    (List.length attached_events);
+  let planned_events =
+    Team_session_store.read_events config session_id
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "event_type" json
+           = `String "session_planned_workers_updated")
+  in
+  Alcotest.(check int) "planned worker event recorded" 1
+    (List.length planned_events);
   cleanup_dir base_dir
 
 let test_prove_strong_requires_additional_evidence () =
@@ -1376,6 +1489,8 @@ let () =
             test_step_spawn_requires_proc_mgr;
           Alcotest.test_case "step-spawn-llama-requires-spawn-model" `Quick
             test_step_spawn_llama_requires_spawn_model;
+          Alcotest.test_case "step-spawn-batch-records-planned-workers"
+            `Quick test_step_spawn_batch_records_planned_workers;
           Alcotest.test_case "prove-strong-requires-additional-evidence" `Quick
             test_prove_strong_requires_additional_evidence;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;

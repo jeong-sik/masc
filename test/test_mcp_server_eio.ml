@@ -394,6 +394,44 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
 
+let test_handle_request_tools_list_with_names_filter () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 120);
+    ("method", `String "tools/list");
+    ("params", `Assoc [
+      ("names", `List [ `String "masc_status"; `String "masc_broadcast" ]);
+    ]);
+  ]) in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw state request
+  in
+  (match response with
+   | `Assoc fields ->
+       (match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) ->
+            (match List.assoc_opt "tools" result_fields with
+             | Some (`List tools) ->
+                 let names =
+                   tools
+                   |> List.filter_map (function
+                        | `Assoc tool_fields -> List.assoc_opt "name" tool_fields
+                        | _ -> None)
+                   |> List.filter_map (function `String s -> Some s | _ -> None)
+                 in
+                 Alcotest.(check (list string)) "filtered tool names"
+                   [ "masc_status"; "masc_broadcast" ]
+                   names
+             | _ -> Alcotest.fail "tools not a list")
+        | _ -> Alcotest.fail "result not an object")
+   | _ -> Alcotest.fail "response not an object");
+  cleanup_dir base_path
+
 let test_handle_request_tools_list_with_placeholder_flag () =
   with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" "1" (fun () ->
     Eio_main.run @@ fun env ->
@@ -884,10 +922,12 @@ let response_tests = [
 let eio_tests = [
   "handle initialize", `Quick, test_handle_request_initialize;
   "handle initialize operator profile", `Quick,
-  test_handle_request_initialize_operator_profile;
+    test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;
+  "handle tools/list with names filter", `Quick,
+    test_handle_request_tools_list_with_names_filter;
   "handle tools/list operator profile", `Quick,
-  test_handle_request_tools_list_operator_profile;
+    test_handle_request_tools_list_operator_profile;
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;

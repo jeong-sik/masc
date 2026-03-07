@@ -91,6 +91,11 @@ let masc_mcp_tools = [
   "mcp__masc__masc_heartbeat_list";
 ]
 
+let llama_mcp_tools = [
+  "mcp__masc__masc_team_session_status";
+  "mcp__masc__masc_team_session_turn";
+]
+
 let masc_lifecycle_suffix = {| 
 --- 
 [MASC LIFECYCLE PROTOCOL - Auto-injected] 
@@ -796,7 +801,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
            Local_agent_eio.run_worker ~sw ~base_path ~worker_name ~model
              ~team_session_id:runtime_session_id ~role:runtime_role
              ~selection_note:runtime_selection_note
-             ~prompt:augmented_prompt ~allowed_tools:masc_mcp_tools
+             ~prompt:augmented_prompt ~allowed_tools:llama_mcp_tools
              ~timeout_sec:timeout
          with
          | Ok result ->

@@ -564,6 +564,16 @@ let test_masc_team_session_step_spawn_selection_note_schema () =
             (List.mem_assoc "spawn_selection_note" props)
       | None -> Alcotest.fail "masc_team_session_step missing properties"
 
+let test_masc_team_session_step_spawn_batch_schema () =
+  match find_tool "masc_team_session_step" with
+  | None -> Alcotest.fail "masc_team_session_step not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has spawn_batch" true
+            (List.mem_assoc "spawn_batch" props)
+      | None -> Alcotest.fail "masc_team_session_step missing properties"
+
 (* ============================================================ *)
 (* 13. Cache Tool Tests                                          *)
 (* ============================================================ *)
@@ -886,6 +896,8 @@ let () =
       Alcotest.test_case "llama-models" `Quick test_masc_llama_models_schema;
       Alcotest.test_case "team-session-step-spawn-selection-note" `Quick
         test_masc_team_session_step_spawn_selection_note_schema;
+      Alcotest.test_case "team-session-step-spawn-batch" `Quick
+        test_masc_team_session_step_spawn_batch_schema;
     ];
     "cache_tools", [
       Alcotest.test_case "cache_set" `Quick test_masc_cache_set_schema;

@@ -160,6 +160,14 @@ let test_masc_mcp_tools_contains_run_deliverable () =
   check bool "contains run_deliverable" true
     (List.mem "mcp__masc__masc_run_deliverable" Spawn_eio.masc_mcp_tools)
 
+let test_llama_mcp_tools_curated () =
+  check (list string) "llama tools"
+    [
+      "mcp__masc__masc_team_session_status";
+      "mcp__masc__masc_team_session_turn";
+    ]
+    Spawn_eio.llama_mcp_tools
+
 (* ============================================================
    masc_lifecycle_suffix Tests
    ============================================================ *)
@@ -496,6 +504,7 @@ let () =
         test_masc_mcp_tools_contains_vote_create;
       test_case "contains run_deliverable" `Quick
         test_masc_mcp_tools_contains_run_deliverable;
+      test_case "llama curated subset" `Quick test_llama_mcp_tools_curated;
     ];
     "masc_lifecycle_suffix", [
       test_case "not empty" `Quick test_masc_lifecycle_suffix_not_empty;

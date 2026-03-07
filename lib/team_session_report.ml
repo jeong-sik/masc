@@ -86,6 +86,12 @@ let summary_metrics (session : Team_session_types.session) config =
     else min 100.0 (100.0 *. (elapsed /. float_of_int session.duration_seconds))
   in
   let active_agents = Team_session_types.participant_names session in
+  let planned_runtime_actors =
+    Team_session_types.planned_worker_actor_names session
+  in
+  let planned_participants =
+    Team_session_types.planned_participant_names session
+  in
   let room_active_agents =
     Room.get_agents_raw config
     |> List.map (fun (a : Types.agent) -> a.name)
@@ -103,6 +109,14 @@ let summary_metrics (session : Team_session_types.session) config =
         ("done_delta_total", `Int done_delta_total);
         ("done_delta_by_agent", Team_session_types.assoc_int_to_json delta_by_agent);
         ("active_agents", `List (List.map (fun a -> `String a) active_agents));
+        ( "planned_workers",
+          `List
+            (List.map Team_session_types.planned_worker_to_yojson
+               session.planned_workers) );
+        ( "planned_runtime_actors",
+          `List (List.map (fun a -> `String a) planned_runtime_actors) );
+        ( "planned_participants",
+          `List (List.map (fun a -> `String a) planned_participants) );
         ("room_active_agents", `List (List.map (fun a -> `String a) room_active_agents));
       ],
     done_delta_total,
@@ -254,6 +268,16 @@ let markdown_of_report ~(session : Team_session_types.session)
     | `List xs -> List.length xs
     | _ -> 0
   in
+  let planned_participants =
+    match summary_json |> member "planned_participants" with
+    | `List xs -> List.length xs
+    | _ -> health_active
+  in
+  let planned_workers =
+    match summary_json |> member "planned_workers" with
+    | `List xs -> xs
+    | _ -> []
+  in
   let health_required =
     team_health_json |> member "required_agents" |> to_int_option
     |> Option.value ~default:0
@@ -370,6 +394,8 @@ let markdown_of_report ~(session : Team_session_types.session)
       "## Team Health";
       Printf.sprintf "- Health status: %s" health_status;
       Printf.sprintf "- Session participants: %d" health_active;
+      Printf.sprintf "- Planned participants: %d" planned_participants;
+      Printf.sprintf "- Planned workers: %d" (List.length planned_workers);
       Printf.sprintf "- Room active agents: %d" room_active;
       Printf.sprintf "- Required agents(min_agents): %d" health_required;
       Printf.sprintf "- min_agents_violation events: %d" violation_count;
@@ -565,6 +591,19 @@ let team_step_spawn_agent (json : Yojson.Safe.t) =
   else
     None
 
+let team_step_runtime_actor (json : Yojson.Safe.t) =
+  if has_event_type json "team_step_spawn" then
+    match
+      Yojson.Safe.Util.member "detail" json
+      |> Yojson.Safe.Util.member "runtime_actor"
+    with
+    | `String actor ->
+        let actor = String.trim actor in
+        if actor = "" then None else Some actor
+    | _ -> None
+  else
+    None
+
 let team_step_spawn_success (json : Yojson.Safe.t) =
   if has_event_type json "team_step_spawn" then
     match
@@ -695,8 +734,12 @@ let proof_profile_summary ~proof_level ~required_spawn_agents ~min_turn_events
     ]
 
 let required_spawn_agents_for_session (session : Team_session_types.session) =
-  let participants = max 1 (List.length session.agent_names) in
-  max 1 (min 4 participants)
+  let planned_workers = List.length session.planned_workers in
+  if planned_workers > 0 then
+    max 1 (min 4 planned_workers)
+  else
+    let participants = max 1 (List.length session.agent_names) in
+    max 1 (min 4 participants)
 
 let min_turn_events_for_session required_turn_actors =
   max 4 (required_turn_actors * 3)
@@ -762,6 +805,10 @@ let parse_spawn_selection_note json =
 let spawn_agent_of_event json =
   if has_event_type json "team_step_spawn" then parse_spawn_agent json else None
 
+let spawn_runtime_actor_of_event json =
+  if has_event_type json "team_step_spawn" then team_step_runtime_actor json
+  else None
+
 let spawn_success_of_event json =
   if has_event_type json "team_step_spawn" then parse_spawn_success json else None
 
@@ -774,6 +821,10 @@ let spawn_selection_note_of_event json =
 
 let collect_spawn_agents events =
   events |> List.filter_map spawn_agent_of_event |> Team_session_types.dedup_strings
+
+let collect_spawn_runtime_actors events =
+  events |> List.filter_map spawn_runtime_actor_of_event
+  |> Team_session_types.dedup_strings
 
 let collect_spawn_models events =
   events |> List.filter_map spawn_model_of_event |> Team_session_types.dedup_strings
@@ -825,6 +876,8 @@ let proof_markdown ~(session : Team_session_types.session)
     ~(checkpoints_count : int) ~(events_count : int) ~(turn_events : int)
     ~(report_exists : bool) ~(unique_turn_actors_count : int)
     ~(required_turn_actors : int) ~(spawn_models : string list)
+    ~(planned_workers : Team_session_types.planned_worker list)
+    ~(unique_spawn_runtime_actors_count : int)
     ~(spawn_selection_note_summary : string option)
     ~(proof_generated_at_iso : string) =
   let criteria_lines =
@@ -846,6 +899,24 @@ let proof_markdown ~(session : Team_session_types.session)
            Printf.sprintf "- [%s] %s%s" status name
              (if detail = "" then "" else " - " ^ detail))
   in
+  let planned_worker_lines =
+    planned_workers
+    |> List.map (fun worker ->
+           let role =
+             Option.value ~default:"(unspecified)"
+               (Option.map String.trim worker.Team_session_types.spawn_role)
+           in
+           let model =
+             Option.value ~default:"(default)"
+               (Option.map String.trim worker.Team_session_types.spawn_model)
+           in
+           let actor =
+             Option.value ~default:"(pending)"
+               (Option.map String.trim worker.Team_session_types.runtime_actor)
+           in
+           Printf.sprintf "- %s | role=%s | model=%s | runtime_actor=%s"
+             worker.Team_session_types.spawn_agent role model actor)
+  in
   String.concat "\n"
     [
       "# Team Session Proof";
@@ -864,6 +935,9 @@ let proof_markdown ~(session : Team_session_types.session)
       Printf.sprintf "- Turn events count: %d" turn_events;
       Printf.sprintf "- Unique turn actors: %d (required >= %d)"
         unique_turn_actors_count required_turn_actors;
+      Printf.sprintf "- Planned workers: %d" (List.length planned_workers);
+      Printf.sprintf "- Unique spawned runtime actors: %d"
+        unique_spawn_runtime_actors_count;
       Printf.sprintf "- Spawn models: %s"
         (match spawn_models with
         | [] -> "(not recorded)"
@@ -873,6 +947,10 @@ let proof_markdown ~(session : Team_session_types.session)
         | Some note -> note
         | None -> "(not recorded)");
       Printf.sprintf "- Report artifacts exist: %b" report_exists;
+      "";
+      "## Planned Worker Roster";
+      (if planned_worker_lines = [] then "- (not recorded)"
+       else String.concat "\n" planned_worker_lines);
       "";
       "## Criteria";
       (if criteria_lines = [] then "- (no criteria)"
@@ -945,6 +1023,13 @@ let generate_proof ?(proof_level = default_proof_level) config
       collect_spawn_agents events |> Team_session_types.dedup_strings
     in
     let unique_spawn_agents_count = List.length unique_spawn_agents in
+    let unique_spawn_runtime_actors =
+      collect_spawn_runtime_actors events
+      |> Team_session_types.dedup_strings
+    in
+    let unique_spawn_runtime_actors_count =
+      List.length unique_spawn_runtime_actors
+    in
     let spawn_models = collect_spawn_models events in
     let spawn_selection_notes = collect_spawn_selection_notes events in
     let spawn_selection_note_summary =
@@ -965,7 +1050,9 @@ let generate_proof ?(proof_level = default_proof_level) config
       | Team_session_types.Proof_strong ->
           standard_criteria
           @ make_strong_criteria ~required_spawn_agents ~spawn_events
-              ~spawn_success_count ~unique_spawn_agents_count
+              ~spawn_success_count
+              ~unique_spawn_agents_count:
+                (max unique_spawn_agents_count unique_spawn_runtime_actors_count)
               ~required_turn_actors ~min_turn_events ~turn_events
               ~min_communication ~communication_total ~vote_events
               ~run_deliverables
@@ -1007,6 +1094,16 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ("spawn_success_count", `Int spawn_success_count);
                 ("unique_spawn_agents", `List (List.map (fun a -> `String a) unique_spawn_agents));
                 ("unique_spawn_agents_count", `Int unique_spawn_agents_count);
+                ( "unique_spawn_runtime_actors",
+                  `List
+                    (List.map (fun a -> `String a) unique_spawn_runtime_actors) );
+                ( "unique_spawn_runtime_actors_count",
+                  `Int unique_spawn_runtime_actors_count );
+                ( "planned_workers",
+                  `List
+                    (List.map Team_session_types.planned_worker_to_yojson
+                       session.planned_workers) );
+                ("planned_worker_count", `Int (List.length session.planned_workers));
                 ("spawn_models", `List (List.map (fun m -> `String m) spawn_models));
                 ( "spawn_selection_notes",
                   `List (List.map (fun note -> `String note) spawn_selection_notes)
@@ -1030,6 +1127,8 @@ let generate_proof ?(proof_level = default_proof_level) config
         ~checkpoints_count ~events_count:(List.length events) ~turn_events
         ~report_exists:(report_json_exists && report_md_exists)
         ~unique_turn_actors_count ~required_turn_actors ~spawn_models
+        ~planned_workers:session.planned_workers
+        ~unique_spawn_runtime_actors_count
         ~spawn_selection_note_summary
         ~proof_generated_at_iso:generated_at_iso
     in

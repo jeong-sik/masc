@@ -218,6 +218,8 @@ let summary_json_of_session (config : Room.config)
   in
   let deltas, done_total = done_delta_metrics config session in
   let active_agents = session_active_agent_names session in
+  let planned_runtime_actors = Team_session_types.planned_worker_actor_names session in
+  let planned_participants = Team_session_types.planned_participant_names session in
   let room_active_agents = room_active_agent_names config in
   `Assoc
     [
@@ -229,6 +231,14 @@ let summary_json_of_session (config : Room.config)
       ("done_delta_total", `Int done_total);
       ("done_delta_by_agent", Team_session_types.assoc_int_to_json deltas);
       ("active_agents", `List (List.map (fun a -> `String a) active_agents));
+      ( "planned_workers",
+        `List
+          (List.map Team_session_types.planned_worker_to_yojson
+             session.planned_workers) );
+      ( "planned_runtime_actors",
+        `List (List.map (fun a -> `String a) planned_runtime_actors) );
+      ( "planned_participants",
+        `List (List.map (fun a -> `String a) planned_participants) );
       ("room_active_agents", `List (List.map (fun a -> `String a) room_active_agents));
       ( "last_checkpoint_at",
         Option.fold ~none:`Null ~some:(fun v -> `Float v)
@@ -692,6 +702,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
            else report_formats);
         turn_count = 0;
         agent_names = selected_agents;
+        planned_workers = [];
         broadcast_count = 0;
         portal_count = 0;
         cascade_attempted = 0;

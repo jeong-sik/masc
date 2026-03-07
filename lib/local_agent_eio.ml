@@ -138,6 +138,8 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
       "-H";
       "accept: application/json, text/event-stream";
       "-H";
+      "x-masc-force-json: 1";
+      "-H";
       ("mcp-session-id: " ^ session_id);
     ]
     @
@@ -191,11 +193,22 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
       in
       Ok { text = extract_tool_text json; is_error }
 
-let list_masc_tools ~sw ~(auth_token : string option) ~session_id () :
+let list_masc_tools ~sw ~(auth_token : string option) ~session_id
+    ?(names : string list option = None) () :
     (Types.tool_schema list, string) result =
   let open Yojson.Safe.Util in
+  let params =
+    match names with
+    | None -> `Assoc []
+    | Some values ->
+        `Assoc
+          [
+            ( "names",
+              `List (List.map (fun value -> `String value) values) );
+          ]
+  in
   match call_jsonrpc ~sw ~auth_token ~session_id ~method_name:"tools/list"
-          ~params:(`Assoc [])
+          ~params
   with
   | Error e -> Error e
   | Ok json ->
@@ -373,7 +386,10 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
             allowed_tools |> List.map strip_mcp_prefix |> unique_preserve_order
           in
           let listed_schemas =
-            match list_masc_tools ~sw ~auth_token ~session_id:mcp_session_id () with
+            match
+              list_masc_tools ~sw ~auth_token ~session_id:mcp_session_id
+                ~names:(Some allowed_names) ()
+            with
             | Ok schemas -> schemas
             | Error e -> raise (Failure ("tools/list failed: " ^ e))
           in

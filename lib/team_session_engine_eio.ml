@@ -43,11 +43,17 @@ let take_last max_items xs =
       in
       drop (len - max_items) xs
 
-let active_agent_names (config : Room.config) =
+let room_active_agent_names (config : Room.config) =
   Room.get_agents_raw config
   |> List.map (fun (a : Types.agent) -> a.name)
   |> Team_session_types.dedup_strings
   |> List.sort String.compare
+
+let session_active_agent_names (session : Team_session_types.session) =
+  Team_session_types.participant_names session
+
+let bootstrap_grace_seconds (session : Team_session_types.session) =
+  float_of_int (session.checkpoint_interval_sec * max 1 session.min_agents)
 
 let session_visible_to_agent ~(agent_name : string)
     (session : Team_session_types.session) =
@@ -211,7 +217,10 @@ let summary_json_of_session (config : Room.config)
       min 100.0 (100.0 *. (elapsed /. float_of_int session.duration_seconds))
   in
   let deltas, done_total = done_delta_metrics config session in
-  let active_agents = active_agent_names config in
+  let active_agents = session_active_agent_names session in
+  let planned_runtime_actors = Team_session_types.planned_worker_actor_names session in
+  let planned_participants = Team_session_types.planned_participant_names session in
+  let room_active_agents = room_active_agent_names config in
   `Assoc
     [
       ("session_id", `String session.session_id);
@@ -222,6 +231,15 @@ let summary_json_of_session (config : Room.config)
       ("done_delta_total", `Int done_total);
       ("done_delta_by_agent", Team_session_types.assoc_int_to_json deltas);
       ("active_agents", `List (List.map (fun a -> `String a) active_agents));
+      ( "planned_workers",
+        `List
+          (List.map Team_session_types.planned_worker_to_yojson
+             session.planned_workers) );
+      ( "planned_runtime_actors",
+        `List (List.map (fun a -> `String a) planned_runtime_actors) );
+      ( "planned_participants",
+        `List (List.map (fun a -> `String a) planned_participants) );
+      ("room_active_agents", `List (List.map (fun a -> `String a) room_active_agents));
       ( "last_checkpoint_at",
         Option.fold ~none:`Null ~some:(fun v -> `Float v)
           session.last_checkpoint_at );
@@ -230,7 +248,7 @@ let summary_json_of_session (config : Room.config)
 
 let status_sections (config : Room.config) (session : Team_session_types.session) =
   let summary = summary_json_of_session config session in
-  let active_agents = active_agent_names config in
+  let active_agents = session_active_agent_names session in
   let team_health = team_health_json session active_agents in
   let communication_metrics = communication_metrics_json session in
   let orchestration_state = orchestration_state_json session in
@@ -287,7 +305,7 @@ let write_checkpoint (config : Room.config) (session : Team_session_types.sessio
     else
       min 100.0 (100.0 *. (elapsed /. float_of_int session.duration_seconds))
   in
-  let active_agents = active_agent_names config in
+  let active_agents = session_active_agent_names session in
   let checkpoint : Team_session_types.checkpoint =
     {
       ts = now;
@@ -404,9 +422,13 @@ let maybe_add_fallback_task ~(config : Room.config)
 
 let apply_runtime_policy ~(config : Room.config)
     (session : Team_session_types.session) : Team_session_types.session =
-  let active_agents = active_agent_names config in
+  let active_agents = session_active_agent_names session in
   let active_count = List.length active_agents in
   let under_min_agents = active_count < session.min_agents in
+  let now = Time_compat.now () in
+  let within_bootstrap_grace =
+    now -. session.started_at < bootstrap_grace_seconds session
+  in
   if not under_min_agents then begin
     if session.min_agents_violation_streak > 0 then
       Team_session_store.append_event config session.session_id
@@ -419,7 +441,9 @@ let apply_runtime_policy ~(config : Room.config)
               ("ts_iso", `String (now_iso ()));
             ]);
     { session with min_agents_violation_streak = 0 }
-  end else
+  end else if within_bootstrap_grace then
+    session
+  else
     let next_streak = session.min_agents_violation_streak + 1 in
     let violation_label =
       Printf.sprintf "active_agents_below_min:%d<%d" active_count session.min_agents
@@ -647,7 +671,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
       if agent_names <> [] then
         Team_session_types.dedup_strings agent_names
       else
-        let discovered = active_agent_names config in
+        let discovered = room_active_agent_names config in
         if discovered = [] then [ created_by ] else discovered
     in
     let baseline_done_counts =
@@ -678,6 +702,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
            else report_formats);
         turn_count = 0;
         agent_names = selected_agents;
+        planned_workers = [];
         broadcast_count = 0;
         portal_count = 0;
         cascade_attempted = 0;

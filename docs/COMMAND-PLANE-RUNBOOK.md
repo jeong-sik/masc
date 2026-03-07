@@ -107,6 +107,7 @@
 
 ```http
 POST /api/v1/command-plane/operations
+x-masc-agent-name: codex
 Content-Type: application/json
 
 {
@@ -129,6 +130,11 @@ Content-Type: application/json
   }
 }
 ```
+
+주의:
+
+- HTTP mutating call에서 `x-masc-agent` 또는 `x-masc-agent-name`, 혹은 `agent_name` query를 안 주면 actor가 `dashboard`로 기록된다.
+- trace / operation `created_by` attribution이 중요하면 header를 반드시 붙인다.
 
 그 다음 바로:
 

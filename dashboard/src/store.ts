@@ -609,12 +609,27 @@ export async function refreshMdal(): Promise<void> {
     mdalLoading.value = false
   }
 }
+
+// --- Council refresh registration (avoids circular import) ---
+let _refreshCouncilFn: (() => void) | null = null
+export function registerCouncilRefresh(fn: () => void): void {
+  _refreshCouncilFn = fn
+}
 // --- SSE event reaction ---
 // When lastEvent changes, invalidate cache and re-fetch
 
 let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
 let _boardDebounce: ReturnType<typeof setTimeout> | null = null
+let _councilDebounce: ReturnType<typeof setTimeout> | null = null
 let _mdalDebounce: ReturnType<typeof setTimeout> | null = null
+
+function scheduleCouncilRefresh(): void {
+  if (_councilDebounce) return
+  _councilDebounce = setTimeout(() => {
+    _refreshCouncilFn?.()
+    _councilDebounce = null
+  }, 500)
+}
 
 function scheduleMdalRefresh(): void {
   if (_mdalDebounce) return
@@ -666,6 +681,11 @@ export function setupSSEReaction(): () => void {
       invalidateDashboardCache()
     }
 
+    // Council decision events trigger council refresh
+    if (event.type.startsWith('decision_')) {
+      scheduleCouncilRefresh()
+    }
+
     if (
       event.type === 'mdal_started'
       || event.type === 'mdal_iteration'
@@ -678,6 +698,10 @@ export function setupSSEReaction(): () => void {
 
   return () => {
     unsubscribe()
+    if (_councilDebounce) {
+      clearTimeout(_councilDebounce)
+      _councilDebounce = null
+    }
     if (_mdalDebounce) {
       clearTimeout(_mdalDebounce)
       _mdalDebounce = null

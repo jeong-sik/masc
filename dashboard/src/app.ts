@@ -22,7 +22,7 @@ import {
 import { Overview } from './components/overview'
 import { Command } from './components/command'
 import { Ops } from './components/ops'
-import { Council } from './components/council'
+import { Council, refreshCouncil } from './components/council'
 import { Board } from './components/board'
 import { Activity } from './components/activity'
 import { Agents } from './components/agents'
@@ -138,6 +138,7 @@ function SideRail() {
               if (current === 'command') refreshCommandPlaneSnapshot()
               if (current === 'ops') refreshOperatorSnapshot()
               if (current === 'board') refreshBoard()
+              if (current === 'council') refreshCouncil()
               if (current === 'trpg') refreshTrpg()
               if (current === 'goals') {
                 refreshGoals()
@@ -230,6 +231,7 @@ export function App() {
     if (tab === 'command') refreshCommandPlaneSnapshot()
     if (tab === 'ops') refreshOperatorSnapshot()
     if (tab === 'board') refreshBoard()
+    if (tab === 'council') refreshCouncil()
     if (tab === 'trpg') refreshTrpg()
     if (tab === 'goals') {
       refreshGoals()

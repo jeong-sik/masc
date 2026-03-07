@@ -1381,10 +1381,14 @@ let post_activity_report ~(result : heartbeat_result) =
       match r with Acted _ -> true | _ -> false
     ) result.checkins in
     if has_actions then begin
-      let store = Board.global () in
       let content = Printf.sprintf "🫀 **Lodge Activity Report**\n\n%s" result.activity_report in
-      (try ignore (Board.create_post store ~author:"lodge-system" ~content ~ttl_hours:24 ())
-       with exn -> Printf.eprintf "[lodge] Board.create_post(lodge-system) failed: %s\n%!" (Printexc.to_string exn))
+      (* SSE broadcast only — telemetry, not a Board announcement *)
+      (try Sse.broadcast (`Assoc [
+         ("type", `String "lodge_activity_report");
+         ("author", `String "lodge-system");
+         ("content", `String content);
+       ])
+       with _ -> ())
     end
 
 (** {1 Daemon Loop} *)

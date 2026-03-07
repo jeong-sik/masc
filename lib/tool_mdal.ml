@@ -189,7 +189,7 @@ let iter_record_to_json (r : Mdal.iteration_record) : Yojson.Safe.t =
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_start (ctx : context) args =
+let handle_start (_ctx : context) args =
   let open Yojson.Safe.Util in
   let profile_name = args |> member "profile" |> to_string in
 
@@ -255,19 +255,6 @@ let handle_start (ctx : context) args =
   | Ok baseline ->
     let loop_id = Mdal.generate_loop_id () in
 
-    (* Create initial board post *)
-    let state_post_id =
-      match Board_dispatch.create_post
-              ~author:ctx.agent_name
-              ~content:(Printf.sprintf "[MDAL_STATE] %s starting. Profile: %s, Baseline: %.4f, Target: %s"
-                          loop_id profile.name baseline profile.target)
-              ~hearth:(Mdal.state_hearth loop_id)
-              ()
-      with
-      | Ok post -> Board.Post_id.to_string post.Board.id
-      | Error _ -> "unknown"
-    in
-
     let state : Mdal.loop_state = {
       loop_id;
       profile;
@@ -277,7 +264,6 @@ let handle_start (ctx : context) args =
       stagnation_streak = 0;
       baseline_metric = baseline;
       start_time = Time_compat.now ();
-      state_post_id;
     } in
     Hashtbl.replace active_loops loop_id state;
     latest_loop_id := Some loop_id;
@@ -414,16 +400,7 @@ let handle_iterate args =
           state.history <- record :: state.history;
           Mdal.update_stagnation state record;
 
-          (* Post iteration to board *)
-          (try
-             ignore (Board_dispatch.create_post
-                       ~author:"mdal"
-                       ~content:(Mdal.format_iter_post record)
-                       ~hearth:(Mdal.iter_hearth state.loop_id)
-                       ())
-           with _ -> ());
-
-          (* Broadcast via SSE *)
+          (* Broadcast iteration via SSE (no Board post — telemetry, not announcement) *)
           (try Sse.broadcast (`Assoc [
              ("type", `String "mdal_iteration");
              ("loop_id", `String state.loop_id);
@@ -441,11 +418,11 @@ let handle_iterate args =
 
           if goal_met then begin
             state.status <- `Completed;
-            (* Post final summary *)
+            (* Post concise final result to Board (signal, not telemetry) *)
             (try
                ignore (Board_dispatch.create_post
                          ~author:"mdal"
-                         ~content:(Mdal.format_final_post state)
+                         ~content:(Mdal.format_final_board state)
                          ~hearth:(Mdal.state_hearth state.loop_id)
                          ())
              with _ -> ());
@@ -495,11 +472,11 @@ let handle_stop args =
     | Some state ->
       state.status <- `Stopped;
 
-      (* Post final summary *)
+      (* Post concise final result to Board *)
       (try
          ignore (Board_dispatch.create_post
                    ~author:"mdal"
-                   ~content:(Mdal.format_final_post state)
+                   ~content:(Mdal.format_final_board state)
                    ~hearth:(Mdal.state_hearth state.loop_id)
                    ())
        with _ -> ());

@@ -197,6 +197,7 @@ module Tool_notifications = Tool_notifications
 
 (* Lodge subsystem *)
 module Lodge_heartbeat = Lodge_heartbeat
+module Lodge_memory = Lodge_memory
 module Lodge_selection = Lodge_selection
 module Lodge_reaction = Lodge_reaction
 

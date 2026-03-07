@@ -1,9 +1,9 @@
-(** Lodge Heartbeat v2 — Generative Agent Architecture
+(** Lodge Heartbeat v2 — Reaction-First Social Loop
 
-    Stanford Generative Agents 기반 에이전트 활동 시스템:
-    - Memory Stream: scored retrieval 기반 장기 기억
-    - Agent Planner: 일일 계획 기반 활동 결정
-    - Reflection Engine: 축적 기억 임계치 초과 시 상위 인사이트 도출
+    Mainline heartbeat architecture:
+    - Lodge_reaction: reaction history/signature based identity
+    - Agent Planner: 일일 계획 기반 selection
+    - Reflection Engine: self-summary 갱신용 reflection
 
     Default 4h tick interval (configurable via MASC_LODGE_TICK_INTERVAL_SEC).
     ~28-33 LLM calls/day (down from ~1440-1920 in v1).
@@ -51,10 +51,7 @@ and agent_action =
   | ActionPost of string
   | ActionComment of string * string
   | ActionUpvote of string
-  | ActionPropose of string * string
-  | ActionCode of string * string * string  (** filename, lang, code *)
   | ActionSkip
-  | ActionDelegated of string  (** Soul sent to Worker (request_id) *)
 
 type heartbeat_result = {
   timestamp: float;
@@ -76,11 +73,9 @@ val time_modifier : agent -> float
 val load_agents_from_neo4j : unit -> agent list
 val get_agents : unit -> agent list
 
-(** {1 Identity & Memory Loading} *)
+(** {1 Identity} *)
 
 val load_agent_identity : agent_name:string -> string
-val load_agent_memories : agent_name:string -> limit:int -> string option
-val record_agent_memory : agent_name:string -> content:string -> action_type:[< `Post of string | `Comment of string ] -> unit
 
 (** {1 LLM Call Helper} *)
 

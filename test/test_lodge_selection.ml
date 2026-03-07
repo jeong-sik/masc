@@ -181,6 +181,43 @@ let test_select_content_alert_priority () =
   check bool "content alert agent selected" true
     (List.exists (fun r -> r.Lodge_selection.agent_name = "agent-r") results)
 
+let test_stronger_trigger_replaces_weaker_duplicate () =
+  let agents = ["agent-dupe"] in
+  List.iter Lodge_selection.init_agent agents;
+  let triggers = [
+    ("agent-dupe", Lodge_selection.ContentAlert "alert");
+    ("agent-dupe", Lodge_selection.Mentioned "mention");
+  ] in
+  let results = Lodge_selection.select_with_feedback
+    ~agents
+    ~max_n:1
+    ~pending_triggers:triggers
+    ~tick_interval_s:14400.0
+  in
+  let selected = List.hd results in
+  match selected.Lodge_selection.trigger with
+  | Lodge_selection.Mentioned _ ->
+      check bool "mentioned overrides alert for same agent" true true
+  | _ ->
+      fail "expected Mentioned trigger to override ContentAlert"
+
+let test_stronger_trigger_uses_winner_order () =
+  let agents = ["agent-a"; "agent-b"] in
+  List.iter Lodge_selection.init_agent agents;
+  let triggers = [
+    ("agent-a", Lodge_selection.ContentAlert "alert-first");
+    ("agent-b", Lodge_selection.Mentioned "mention-b");
+    ("agent-a", Lodge_selection.Mentioned "mention-a");
+  ] in
+  let results = Lodge_selection.select_with_feedback
+    ~agents
+    ~max_n:2
+    ~pending_triggers:triggers
+    ~tick_interval_s:14400.0
+  in
+  let first = List.hd results in
+  check string "winner ordering follows stronger trigger position" "agent-b" first.agent_name
+
 (** {1 Quality Signal Tests (Phase 3)} *)
 
 module Pv = Masc_mcp.Post_verifier
@@ -280,6 +317,21 @@ let test_mentioned_bypasses_health () =
     r.Lodge_selection.agent_name = "hg-mentioned") results in
   check bool "mentioned bypasses health gate" true selected
 
+let test_content_alert_respects_health () =
+  let _ = fresh_agent "hg-alert" in
+  for _ = 1 to 10 do
+    Ah.record_failure ~agent_name:"hg-alert" ~reason:"test_fail"
+  done;
+  let results = Lodge_selection.select_with_feedback
+    ~agents:["hg-alert"]
+    ~max_n:1
+    ~pending_triggers:[("hg-alert", Lodge_selection.ContentAlert "needs-attention")]
+    ~tick_interval_s:60.0
+  in
+  let selected = List.exists (fun r ->
+    r.Lodge_selection.agent_name = "hg-alert") results in
+  check bool "content alert respects health gate" false selected
+
 (** {1 Selection Entropy Tests} *)
 
 let test_selection_entropy_empty () =
@@ -319,6 +371,8 @@ let () =
       test_case "respects max_n" `Quick test_select_respects_max_n;
       test_case "mentioned priority" `Quick test_select_mentioned_priority;
       test_case "content alert priority" `Quick test_select_content_alert_priority;
+      test_case "stronger trigger overrides weaker duplicate" `Quick test_stronger_trigger_replaces_weaker_duplicate;
+      test_case "stronger trigger uses winner order" `Quick test_stronger_trigger_uses_winner_order;
     ];
     "quality_signal", [
       test_case "pass boosts alpha" `Quick test_quality_pass_boosts_alpha;
@@ -330,6 +384,7 @@ let () =
     "health_gate", [
       test_case "unhealthy excluded" `Quick test_unhealthy_excluded_from_thompson;
       test_case "mentioned bypasses health" `Quick test_mentioned_bypasses_health;
+      test_case "content alert respects health" `Quick test_content_alert_respects_health;
     ];
     "monitoring", [
       test_case "selection entropy" `Quick test_selection_entropy_empty;

@@ -57,6 +57,15 @@
    level2_config
    level4_config
    local_agent_eio
+   agent_swarm_client
+   agent_swarm_dev_tools
+   agent_swarm_external_agent
+   agent_swarm_fleet
+   agent_swarm_prompts
+   agent_swarm_runner
+   agent_swarm_swarm
+   agent_swarm_tool_input
+   agent_swarm_tools
    llm_client_eio
    llm_direct
    log
@@ -296,6 +305,8 @@
    ipaddr
    cohttp
    cohttp-eio
+   agent_sdk
+   uri
    tls
    tls-eio
    domain-name

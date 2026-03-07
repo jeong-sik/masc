@@ -5067,6 +5067,20 @@ let keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts =
       if remaining > 0.0 then `Float remaining else `Null
   | _ -> `Null
 
+let keeper_diagnostic_summary ~health_state ~quiet_reason =
+  match health_state with
+  | "offline" | "stale" | "degraded" ->
+      "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
+  | _ ->
+      (match quiet_reason with
+       | Some "quiet_hours" ->
+           "Lodge quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep."
+       | Some "min_gap" ->
+           "Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait."
+       | Some "never_started" ->
+           "Keeper metadata exists but no reply turn has been recorded yet."
+       | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
+
 let keeper_diagnostic_json
     ~(meta : keeper_meta)
     ~(agent_status : Yojson.Safe.t)
@@ -5092,6 +5106,8 @@ let keeper_diagnostic_json
       ( "quiet_reason",
         match quiet_reason with Some reason -> `String reason | None -> `Null );
       ("next_action_path", `String next_action_path);
+      ("recoverable", `Bool (String.equal next_action_path "recover"));
+      ("summary", `String (keeper_diagnostic_summary ~health_state ~quiet_reason));
       ("last_reply_status", last_reply_status);
       ("last_reply_at", last_reply_at);
       ("last_reply_preview", last_reply_preview);

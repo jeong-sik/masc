@@ -223,8 +223,9 @@ What it does:
 6. spawns a full llama worker team (`planner`, `implementer-a`, `implementer-b`)
 7. records the explicit model-selection note in the session
 8. passes the same note into every spawned worker prompt
-9. performs supervisor interventions over `/mcp/operator`
-10. stops the session and generates proof artifacts
+9. requires every worker to leave a non-empty `team_turn` note
+10. performs supervisor interventions over `/mcp/operator`
+11. stops the session and generates proof artifacts
 
 Run it against a real local llama team:
 

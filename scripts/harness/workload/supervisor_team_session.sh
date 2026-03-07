@@ -382,6 +382,21 @@ require_tool_success "$prove_raw"
 prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
 printf '%s' "$prove_result" | jq -e '.proof.verdict == "proved"' >/dev/null
 printf '%s' "$prove_result" | jq -e '.proof.evidence.unique_turn_actors_count >= 4' >/dev/null
+printf '%s' "$prove_result" | jq -e '.proof.evidence.empty_note_turn_count == 0' >/dev/null
+report_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 18 "masc_team_session_report" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,force_regenerate:false}')")"
+require_tool_success "$report_raw"
+report_result="$(printf '%s' "$report_raw" | extract_tool_result)"
+report_json_path="$(printf '%s' "$report_result" | jq -r '.json_path // empty')"
+if [ -z "$report_json_path" ]; then
+  echo "FAIL: missing report json path"
+  printf '%s\n' "$report_result"
+  exit 1
+fi
+if ! jq -e '.incidents.empty_note_turn_count == 0' "$report_json_path" >/dev/null; then
+  echo "FAIL: report json recorded empty note turns"
+  cat "$report_json_path"
+  exit 1
+fi
 
 printf '[summary]\n'
 events_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 16 "masc_team_session_events" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,event_types:["team_turn"],limit:200}')")"

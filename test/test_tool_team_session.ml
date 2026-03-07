@@ -476,6 +476,16 @@ let test_turn_events_and_prove () =
           ])
   in
   Alcotest.(check bool) "invalid turn kind rejected" false invalid_turn_ok;
+  let empty_note_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_turn"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+          ])
+  in
+  Alcotest.(check bool) "empty note rejected" false empty_note_ok;
 
   let engine_intruder_result =
     Team_session_engine_eio.record_turn ~config ~session_id ~actor:"intruder"
@@ -1410,6 +1420,11 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
     failed_role;
   Alcotest.(check string) "proof detached reason recorded"
     "spawn_failed_without_turn" detached_reason;
+  let empty_note_turn_count =
+    evidence |> Yojson.Safe.Util.member "empty_note_turn_count"
+    |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check int) "proof empty note count stays zero" 0 empty_note_turn_count;
   let report_json_path = Team_session_store.report_json_path config session_id in
   let report_doc = Room_utils.read_json config report_json_path in
   let report_failed_roster =
@@ -1422,10 +1437,17 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
     |> Yojson.Safe.Util.member "detached_actor_roster"
     |> Yojson.Safe.Util.to_list
   in
+  let report_empty_note_count =
+    report_doc |> Yojson.Safe.Util.member "incidents"
+    |> Yojson.Safe.Util.member "empty_note_turn_count"
+    |> Yojson.Safe.Util.to_int
+  in
   Alcotest.(check int) "report failed spawn roster length" 1
     (List.length report_failed_roster);
   Alcotest.(check int) "report detached actor roster length" 1
     (List.length report_detached_roster);
+  Alcotest.(check int) "report empty note count stays zero" 0
+    report_empty_note_count;
   let proof_md_path =
     prove_result |> Yojson.Safe.Util.member "proof_md_path"
     |> Yojson.Safe.Util.to_string
@@ -1456,6 +1478,106 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
        let _ =
          Str.search_forward (Str.regexp_string "llama-local-failed | reason=spawn_failed_without_turn")
            proof_md 0
+       in
+       true
+     with Not_found -> false);
+  cleanup_dir base_dir
+
+let test_report_and_proof_expose_empty_note_turn_evidence () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"empty-note-evidence" |> get_session_id in
+  Team_session_store.append_event config session_id ~event_type:"team_turn"
+    ~detail:
+      (`Assoc
+        [
+          ("turn_no", `Int 1);
+          ("kind", `String "note");
+          ("actor", `String "llama-local-empty");
+          ("message", `Null);
+          ("ts_iso", `String (Types.now_iso ()));
+        ]);
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_turn"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("turn_kind", `String "note");
+             ("message", `String "supervisor note");
+           ]));
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "empty_note_evidence_done");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "prove ok for empty note evidence" true prove_ok;
+  let prove_result = parse_json_exn prove_body |> result_field in
+  let evidence =
+    prove_result |> Yojson.Safe.Util.member "proof"
+    |> Yojson.Safe.Util.member "evidence"
+  in
+  let empty_note_turn_count =
+    evidence |> Yojson.Safe.Util.member "empty_note_turn_count"
+    |> Yojson.Safe.Util.to_int
+  in
+  let empty_note_turn_actors =
+    evidence |> Yojson.Safe.Util.member "empty_note_turn_actors"
+    |> Yojson.Safe.Util.to_list
+  in
+  Alcotest.(check int) "proof empty note count" 1 empty_note_turn_count;
+  Alcotest.(check int) "proof empty note actors length" 1
+    (List.length empty_note_turn_actors);
+  Alcotest.(check string) "proof empty note actor recorded"
+    "llama-local-empty"
+    (List.hd empty_note_turn_actors |> Yojson.Safe.Util.to_string);
+  let report_json_path = Team_session_store.report_json_path config session_id in
+  let report_doc = Room_utils.read_json config report_json_path in
+  let report_empty_note_count =
+    report_doc |> Yojson.Safe.Util.member "incidents"
+    |> Yojson.Safe.Util.member "empty_note_turn_count"
+    |> Yojson.Safe.Util.to_int
+  in
+  let report_empty_note_actors =
+    report_doc |> Yojson.Safe.Util.member "incidents"
+    |> Yojson.Safe.Util.member "empty_note_turn_actors"
+    |> Yojson.Safe.Util.to_list
+  in
+  Alcotest.(check int) "report empty note count" 1 report_empty_note_count;
+  Alcotest.(check int) "report empty note actors length" 1
+    (List.length report_empty_note_actors);
+  let proof_md_path =
+    prove_result |> Yojson.Safe.Util.member "proof_md_path"
+    |> Yojson.Safe.Util.to_string
+  in
+  let proof_md = Stdlib.In_channel.with_open_bin proof_md_path Stdlib.In_channel.input_all in
+  Alcotest.(check bool) "proof markdown includes empty note evidence" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "Empty note turns: 1") proof_md 0
+       in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "proof markdown includes empty actor" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "- llama-local-empty") proof_md 0
        in
        true
      with Not_found -> false);
@@ -1731,6 +1853,8 @@ let () =
             `Quick test_reconcile_failed_spawn_actor_retains_after_turn;
           Alcotest.test_case "proof-exposes-failed-spawn-and-detach-counts"
             `Quick test_proof_exposes_failed_spawn_and_detach_counts;
+          Alcotest.test_case "report-and-proof-expose-empty-note-turn-evidence"
+            `Quick test_report_and_proof_expose_empty_note_turn_evidence;
           Alcotest.test_case "prove-strong-requires-additional-evidence" `Quick
             test_prove_strong_requires_additional_evidence;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;

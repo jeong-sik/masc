@@ -703,6 +703,10 @@ a:hover {
   background: var(--warn);
 }
 
+.status-dot.listening {
+  background: #38bdf8;
+}
+
 .status-dot.warn {
   background: #f97316;
 }
@@ -730,6 +734,10 @@ a:hover {
 .status-dot-inline.busy,
 .status-dot-inline.in_progress {
   background: var(--warn);
+}
+
+.status-dot-inline.listening {
+  background: #38bdf8;
 }
 
 .status-dot-inline.offline,

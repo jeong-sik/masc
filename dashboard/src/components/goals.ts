@@ -323,7 +323,7 @@ export function Goals() {
           <div>
             <h2 class="planning-headline">Direction lives here. Goals define intent, MDAL shows whether iteration is moving the metric.</h2>
             <p class="planning-subtitle">
-              Goals refresh on tab open or manual refresh. MDAL reads the current loop snapshot exposed by <code>masc_mdal_status</code>.
+              Goals refresh on tab open or manual refresh. MDAL reads the current loop snapshot exposed by <code>/api/v1/mdal/loops</code>.
             </p>
           </div>
           <div class="planning-actions">
@@ -351,7 +351,7 @@ export function Goals() {
           <${FreshnessRow}
             label="MDAL loops"
             timestamp=${lastMdalRefreshAt.value}
-            source="masc_mdal_status"
+            source="/api/v1/mdal/loops"
             note=${mdalNote}
           />
         </div>

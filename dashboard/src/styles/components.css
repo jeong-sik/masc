@@ -38,6 +38,7 @@
 }
 .status-badge.active { background: rgba(74,222,128,0.15); color: #4ade80; }
 .status-badge.busy { background: rgba(251,191,36,0.15); color: #fbbf24; }
+.status-badge.listening { background: rgba(56,189,248,0.15); color: #38bdf8; }
 .status-badge.idle { background: rgba(136,136,136,0.15); color: #888; }
 .status-badge.offline { background: rgba(85,85,85,0.15); color: #555; }
 .status-badge.todo { background: rgba(136,136,136,0.15); color: #888; }
@@ -1569,6 +1570,14 @@ button.agent-card:hover {
 
 .agent .agent-status.active {
   background: #4ade80;
+}
+
+.agent .agent-status.busy {
+  background: #fbbf24;
+}
+
+.agent .agent-status.listening {
+  background: #38bdf8;
 }
 
 .agent .agent-status.idle {

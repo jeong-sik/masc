@@ -20,7 +20,7 @@ import type {
   MdalLoop,
   MdalIterationRecord,
 } from './types'
-import { fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, fetchLatestMdalLoop, type DashboardMode } from './api'
+import { fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, fetchMdalLoops, type DashboardMode } from './api'
 import { lastEvent } from './sse'
 import { deriveKeeperDiagnostic, normalizeLodgeRuntimeStatus } from './keeper-runtime'
 
@@ -76,7 +76,13 @@ export const lastMdalRefreshAt = signal<string | null>(null)
 // --- Derived state ---
 
 export const activeAgents: ReadonlySignal<Agent[]> = computed(() =>
-  agents.value.filter(a => a.status === 'active' || a.status === 'idle')
+  agents.value.filter(
+    a =>
+      a.status === 'active'
+      || a.status === 'busy'
+      || a.status === 'listening'
+      || a.status === 'idle',
+  )
 )
 
 export const tasksByStatus = computed(() => {
@@ -190,8 +196,17 @@ function toIsoTimestamp(value: unknown): string | undefined {
 
 function normalizeAgentStatus(value: unknown): Agent['status'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
-  if (raw === 'active' || raw === 'idle' || raw === 'inactive' || raw === 'offline') return raw
-  if (raw === 'busy' || raw === 'in_progress' || raw === 'claimed') return 'active'
+  if (
+    raw === 'active'
+    || raw === 'busy'
+    || raw === 'listening'
+    || raw === 'idle'
+    || raw === 'inactive'
+    || raw === 'offline'
+  ) {
+    return raw
+  }
+  if (raw === 'in_progress' || raw === 'claimed') return 'busy'
   if (raw === 'dead' || raw === 'left') return 'offline'
   return 'offline'
 }
@@ -443,6 +458,60 @@ function normalizeServerStatus(raw: unknown): ServerStatus | null {
   }
 }
 
+function normalizeMdalStatus(value: unknown): MdalLoop['status'] {
+  const raw = typeof value === 'string' ? value.toLowerCase() : ''
+  if (raw === 'running' || raw === 'completed' || raw === 'stopped' || raw === 'error') return raw
+  if (raw.startsWith('error')) return 'error'
+  return 'running'
+}
+
+function normalizeMdalIteration(raw: unknown): MdalIterationRecord | null {
+  if (!isRecord(raw)) return null
+  const iteration = asNumber(raw.iteration)
+  if (iteration == null) return null
+  const metricBefore = asNumber(raw.metric_before) ?? 0
+  const metricAfter = asNumber(raw.metric_after) ?? metricBefore
+  return {
+    iteration,
+    metric_before: metricBefore,
+    metric_after: metricAfter,
+    delta: asNumber(raw.delta) ?? (metricAfter - metricBefore),
+    changes: asString(raw.changes) ?? '',
+    failed_attempts: asString(raw.failed_attempts) ?? '',
+    next_suggestion: asString(raw.next_suggestion) ?? '',
+    elapsed_ms: asNumber(raw.elapsed_ms) ?? 0,
+    cost_usd: asNumber(raw.cost_usd) ?? null,
+  }
+}
+
+function normalizeMdalLoop(raw: unknown): MdalLoop | null {
+  if (!isRecord(raw)) return null
+  const loopId = asString(raw.loop_id)
+  if (!loopId) return null
+  const baseline = asNumber(raw.baseline_metric) ?? 0
+  const history = Array.isArray(raw.history)
+    ? raw.history.map(normalizeMdalIteration).filter((row): row is MdalIterationRecord => row !== null)
+    : []
+  const currentMetric =
+    asNumber(raw.current_metric)
+    ?? history[0]?.metric_after
+    ?? baseline
+  return {
+    loop_id: loopId,
+    profile: asString(raw.profile) ?? 'unknown',
+    status: normalizeMdalStatus(raw.status),
+    current_iteration: asNumber(raw.current_iteration) ?? history[0]?.iteration ?? 0,
+    max_iterations: asNumber(raw.max_iterations) ?? 0,
+    baseline_metric: baseline,
+    current_metric: currentMetric,
+    target: asString(raw.target) ?? '',
+    stagnation_streak: asNumber(raw.stagnation_streak) ?? 0,
+    stagnation_limit: asNumber(raw.stagnation_limit) ?? 0,
+    elapsed_seconds: asNumber(raw.elapsed_seconds) ?? 0,
+    history,
+  }
+}
+
 export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<void> {
   const now = Date.now()
   const cached = _dashboardCache[mode]
@@ -519,47 +588,26 @@ export async function refreshGoals(): Promise<void> {
 }
 
 export async function refreshMdal(): Promise<void> {
-  const refreshSeq = ++_mdalRefreshSeq
   mdalLoading.value = true
   try {
-    const latestResult = await fetchLatestMdalLoop()
-    if (refreshSeq !== _mdalRefreshSeq) return
-    if (latestResult.state === 'error') {
-      mdalSnapshotState.value = 'error'
-      lastMdalError.value = latestResult.message
-      return
+    const data = await fetchMdalLoops()
+    const rows = Array.isArray(data.loops) ? data.loops : []
+    const next = new Map<string, MdalLoop>()
+    for (const row of rows) {
+      const loop = normalizeMdalLoop(row)
+      if (!loop) continue
+      next.set(loop.loop_id, loop)
     }
-
+    mdalLoops.value = next
     lastMdalRefreshAt.value = new Date().toISOString()
     lastMdalError.value = null
-    if (latestResult.state === 'idle') {
-      mdalSnapshotState.value = 'idle'
-      const next = new Map(mdalLoops.value)
-      for (const [loopId, loop] of next.entries()) {
-        if (loop.status === 'running') {
-          next.set(loopId, { ...loop, status: 'stopped' })
-        }
-      }
-      mdalLoops.value = next
-      return
-    }
-
-    const latest = latestResult.loop
-    mdalSnapshotState.value = 'ready'
-    const next = new Map(mdalLoops.value)
-    const existing = next.get(latest.loop_id)
-    next.set(latest.loop_id, {
-      ...(existing ?? {}),
-      ...latest,
-      history: latest.history.length > 0 ? latest.history : (existing?.history ?? []),
-    })
-    mdalLoops.value = next
+    mdalSnapshotState.value = next.size === 0 ? 'idle' : 'ready'
   } catch (err) {
     console.error('MDAL fetch error:', err)
+    mdalSnapshotState.value = 'error'
+    lastMdalError.value = err instanceof Error ? err.message : String(err)
   } finally {
-    if (refreshSeq === _mdalRefreshSeq) {
-      mdalLoading.value = false
-    }
+    mdalLoading.value = false
   }
 }
 
@@ -568,7 +616,15 @@ export async function refreshMdal(): Promise<void> {
 
 let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
 let _boardDebounce: ReturnType<typeof setTimeout> | null = null
-let _mdalRefreshSeq = 0
+let _mdalDebounce: ReturnType<typeof setTimeout> | null = null
+
+function scheduleMdalRefresh(): void {
+  if (_mdalDebounce) return
+  _mdalDebounce = setTimeout(() => {
+    refreshMdal()
+    _mdalDebounce = null
+  }, 350)
+}
 
 export function setupSSEReaction(): () => void {
   // Subscribe to SSE events and trigger refreshes
@@ -612,88 +668,13 @@ export function setupSSEReaction(): () => void {
       invalidateDashboardCache()
     }
 
-    // MDAL events — update loop state in-place from SSE
-    if (event.type === 'mdal_started' && event.loop_id) {
-      const next = new Map(mdalLoops.value)
-      next.set(event.loop_id, {
-        ...(next.get(event.loop_id) ?? {}),
-        loop_id: event.loop_id,
-        profile: event.profile ?? 'custom',
-        status: 'running',
-        current_iteration: event.iteration ?? 0,
-        max_iterations: 0,
-        baseline_metric: event.baseline ?? 0,
-        current_metric: event.baseline ?? 0,
-        target: event.target ?? '',
-        stagnation_streak: 0,
-        stagnation_limit: 0,
-        elapsed_seconds: 0,
-        history: [],
-      })
-      mdalLoops.value = next
-    }
-
-    if (event.type === 'mdal_iteration' && event.loop_id) {
-      const next = new Map(mdalLoops.value)
-      const metricBefore = event.metric_before ?? event.metric_after ?? 0
-      const metricAfter = event.metric_after ?? metricBefore
-      const existing = next.get(event.loop_id) ?? {
-        loop_id: event.loop_id,
-        profile: event.profile ?? 'unknown',
-        status: 'running',
-        current_iteration: event.iteration ?? 0,
-        max_iterations: 0,
-        baseline_metric: metricBefore,
-        current_metric: metricAfter,
-        target: event.target ?? '',
-        stagnation_streak: 0,
-        stagnation_limit: 0,
-        elapsed_seconds: 0,
-        history: [],
-      }
-      const record: MdalIterationRecord = {
-        iteration: event.iteration ?? 0,
-        metric_before: metricBefore,
-        metric_after: metricAfter,
-        delta: event.delta ?? 0,
-        changes: '',
-        failed_attempts: '',
-        next_suggestion: '',
-        elapsed_ms: 0,
-        cost_usd: null,
-      }
-      next.set(event.loop_id, {
-        ...existing,
-        current_iteration: event.iteration ?? existing.current_iteration,
-        current_metric: metricAfter,
-        history: [record, ...existing.history],
-      })
-      mdalLoops.value = next
-    }
-
-    if ((event.type === 'mdal_completed' || event.type === 'mdal_stopped') && event.loop_id) {
-      const next = new Map(mdalLoops.value)
-      const existing = next.get(event.loop_id) ?? {
-        loop_id: event.loop_id,
-        profile: event.profile ?? 'unknown',
-        status: 'running',
-        current_iteration: event.iteration ?? 0,
-        max_iterations: 0,
-        baseline_metric: event.baseline ?? event.metric_before ?? event.metric_after ?? 0,
-        current_metric: event.metric_after ?? event.metric_before ?? event.baseline ?? 0,
-        target: event.target ?? '',
-        stagnation_streak: 0,
-        stagnation_limit: 0,
-        elapsed_seconds: 0,
-        history: [],
-      }
-      next.set(event.loop_id, {
-        ...existing,
-        current_iteration: event.iteration ?? existing.current_iteration,
-        current_metric: event.metric_after ?? existing.current_metric,
-        status: event.type === 'mdal_completed' ? 'completed' : 'stopped',
-      })
-      mdalLoops.value = next
+    if (
+      event.type === 'mdal_started'
+      || event.type === 'mdal_iteration'
+      || event.type === 'mdal_completed'
+      || event.type === 'mdal_stopped'
+    ) {
+      scheduleMdalRefresh()
     }
   })
 

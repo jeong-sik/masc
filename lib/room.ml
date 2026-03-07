@@ -1059,12 +1059,30 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
         match task_opt with
         | None -> Error (Types.TaskNotFound task_id)
         | Some task ->
-            let can_complete = match task.task_status with
-              | Claimed { assignee; _ } | InProgress { assignee; _ } -> assignee = agent_name
-              | Todo | Done _ | Cancelled _ -> false
+            let completion_error =
+              match task.task_status with
+              | Claimed { assignee; _ } | InProgress { assignee; _ } ->
+                  if assignee = agent_name then
+                    None
+                  else
+                    Some (Types.TaskAlreadyClaimed { task_id; by = assignee })
+              | Todo -> Some (Types.TaskNotClaimed task_id)
+              | Done { assignee; _ } ->
+                  Some
+                    (Types.TaskInvalidState
+                       (Printf.sprintf
+                          "task %s is already done by %s; inspect task history instead of calling masc_done again"
+                          task_id assignee))
+              | Cancelled { cancelled_by; _ } ->
+                  Some
+                    (Types.TaskInvalidState
+                       (Printf.sprintf
+                          "task %s was cancelled by %s; reopen or create a new task instead of calling masc_done"
+                          task_id cancelled_by))
             in
-            if not can_complete then Error (Types.TaskNotClaimed task_id)
-            else begin
+            match completion_error with
+            | Some err -> Error err
+            | None -> begin
               let new_tasks = List.map (fun t ->
                 if t.id = task_id then
                   { t with task_status = Done { assignee = agent_name; completed_at = now_iso (); notes = if notes = "" then None else Some notes } }

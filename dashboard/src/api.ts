@@ -273,6 +273,32 @@ export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<Dashboa
   return get(`/api/v1/dashboard?mode=${mode}`)
 }
 
+export interface FetchMdalLoopsOptions {
+  limit?: number
+  historyLimit?: number
+  status?: 'running' | 'completed' | 'stopped' | 'error'
+}
+
+export interface MdalLoopsResponse {
+  loops?: unknown[]
+  total?: number
+  returned?: number
+  limit?: number
+  history_limit?: number
+  status?: string | null
+}
+
+export function fetchMdalLoops(options: FetchMdalLoopsOptions = {}): Promise<MdalLoopsResponse> {
+  return withRetries('fetchMdalLoops', async () => {
+    const params = new URLSearchParams()
+    if (options.limit != null) params.set('limit', String(options.limit))
+    if (options.historyLimit != null) params.set('history_limit', String(options.historyLimit))
+    if (options.status) params.set('status', options.status)
+    const query = params.toString()
+    return get<MdalLoopsResponse>(`/api/v1/mdal/loops${query ? `?${query}` : ''}`)
+  })
+}
+
 export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
   return get('/api/v1/operator')
 }

@@ -58,12 +58,37 @@ let test_lodge_heartbeat_post_fallback_policy () =
   check bool "content alerts do not fallback to post"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "| ContentAlert _ | Mentioned _ -> false");
-  check bool "unparsed batch reactions default to pass"
+  check bool "unparsed reactions are recorded"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" {|reason = Some "unparsed"|});
-  check bool "no viable social candidate falls back to maybe_post_action"
+  check bool "batch parse failures become explicit reason"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "| _ -> maybe_post_action ()")
+    (file_contains_pattern "lib/lodge_heartbeat.ml"
+       {|if parsed = [] then "unparsed_batch" else "below_threshold"|});
+  check bool "scheduled fallback still routes through maybe_post_action"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "| _ -> maybe_post_action ~reason:no_candidate_reason")
+
+let test_lodge_heartbeat_hidden_fallbacks_removed () =
+  check bool "comment generation no longer auto-upvotes"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|None -> ActionUpvote|});
+  check bool "post rate limit no longer converts to comment"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "converting to COMMENT");
+  check bool "tick no longer pre-gates on post rate limit"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml"
+       {|else if not (check_rate_limit ~agent_name:name `Post) then|});
+  check bool "comment rate limit enforced explicitly"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|Skipped "comment_rate_limited"|});
+  check bool "post rate limit enforced explicitly"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|Skipped "post_rate_limited"|});
+  check bool "comment generation failure stays explicit"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|NoAction "comment_generation_failed"|})
 
 let test_lodge_heartbeat_public_memory_helpers_removed () =
   check bool "load_agent_memories removed from mli"
@@ -90,6 +115,7 @@ let () =
           test_case "reflection updates self summary" `Quick test_lodge_heartbeat_updates_self_summary;
           test_case "ToM context used" `Quick test_lodge_heartbeat_uses_tom_context;
           test_case "post fallback policy locked" `Quick test_lodge_heartbeat_post_fallback_policy;
+          test_case "hidden fallbacks removed" `Quick test_lodge_heartbeat_hidden_fallbacks_removed;
           test_case "legacy public surface removed" `Quick test_lodge_heartbeat_public_memory_helpers_removed;
         ]);
     ]

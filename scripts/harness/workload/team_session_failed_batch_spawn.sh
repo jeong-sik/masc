@@ -15,6 +15,7 @@ STOP_WAIT_SEC="${STOP_WAIT_SEC:-30}"
 TEAM_GOAL="${TEAM_GOAL:-Replay a deterministic llama batch-spawn failure and verify detach + proof accounting}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 FAIL_LLAMA_SERVER_URL="${FAIL_LLAMA_SERVER_URL:-http://127.0.0.1:1}"
+PORT_WAS_EXPLICIT="false"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required"
@@ -56,6 +57,8 @@ print(s.getsockname()[1])
 s.close()
 PY
 )"
+else
+  PORT_WAS_EXPLICIT="true"
 fi
 
 if [ -z "$BASE_PATH" ]; then
@@ -91,8 +94,14 @@ jsonrpc_call() {
     cmd+=( -H "Authorization: Bearer $token" )
   fi
   local response
+  set +e
   response="$("${cmd[@]}")"
+  local curl_status=$?
+  set -e
   rm -f "$body_file"
+  if [ "$curl_status" -ne 0 ]; then
+    return "$curl_status"
+  fi
   local sse_data
   sse_data="$(printf '%s' "$response" | sed -n 's/^data: //p')"
   if [ -n "$sse_data" ]; then
@@ -100,6 +109,16 @@ jsonrpc_call() {
   else
     printf '%s' "$response"
   fi
+}
+
+allocate_port() {
+  python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
 }
 
 call_tool() {
@@ -234,9 +253,29 @@ join_with_token() {
 }
 
 printf '[1/8] start server with deterministic llama failure endpoint\n'
-env LLAMA_SERVER_URL="$FAIL_LLAMA_SERVER_URL" "$SERVER_EXE" --port "$PORT" --base-path "$BASE_PATH" >"$LOG_FILE" 2>&1 &
-SERVER_PID="$!"
-if ! wait_for_health; then
+server_started="false"
+for attempt in 1 2 3 4 5; do
+  if [ "$PORT_WAS_EXPLICIT" != "true" ]; then
+    PORT="$(allocate_port)"
+  fi
+  MCP_URL="http://127.0.0.1:${PORT}/mcp"
+  : >"$LOG_FILE"
+  env LLAMA_SERVER_URL="$FAIL_LLAMA_SERVER_URL" "$SERVER_EXE" --port "$PORT" --base-path "$BASE_PATH" >"$LOG_FILE" 2>&1 &
+  SERVER_PID="$!"
+  if wait_for_health; then
+    server_started="true"
+    break
+  fi
+  if [ "$PORT_WAS_EXPLICIT" != "true" ] && rg -q 'Address already in use|EADDRINUSE' "$LOG_FILE"; then
+    kill "$SERVER_PID" >/dev/null 2>&1 || true
+    wait "$SERVER_PID" >/dev/null 2>&1 || true
+    SERVER_PID=""
+    sleep 1
+    continue
+  fi
+  break
+done
+if [ "$server_started" != "true" ]; then
   echo "FAIL: server did not become healthy"
   read_file "$LOG_FILE"
   exit 1

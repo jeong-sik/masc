@@ -2619,11 +2619,11 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
            Lodge_selection.record_action ~agent_name:name ~action:`Post
        | Acted { action = ActionComment _; _ } ->
            Lodge_selection.record_action ~agent_name:name ~action:`Comment
-       | Acted { action = ActionSkip; _ }
        | Passed _
        | Skipped _ ->
            Lodge_selection.record_action ~agent_name:name ~action:`Skip
-       | Acted { action = ActionUpvote _; _ } -> ());
+       | Acted { action = ActionUpvote _; _ }
+       | Acted { action = ActionSkip; _ } -> ());
 
       (name, trigger, result)
     end
@@ -2721,7 +2721,7 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
                 (try
                   let outcome =
                     match planned with
-                    | NoAction _ -> Passed "self_heartbeat_no_action"
+                    | NoAction reason -> Passed reason
                     | PlannedAction action ->
                         execute_agent_action ~agent_name:name ~action
                   in

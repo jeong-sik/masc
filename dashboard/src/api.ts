@@ -336,7 +336,6 @@ export function confirmOperatorAction(actor: string, confirmToken: string): Prom
     confirm_token: confirmToken,
   })
 }
-
 // --- Board ---
 
 const SYSTEM_BOARD_AUTHORS = new Set(['lodge-system', 'team-session'])

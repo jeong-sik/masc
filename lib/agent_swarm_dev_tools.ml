@@ -25,6 +25,28 @@ let normalize_path path =
   ) [] parts in
   "/" ^ String.concat "/" (List.rev resolved)
 
+(** Split a target path into the deepest existing ancestor and the missing
+    segments below it. This lets us resolve symlinks in the existing prefix
+    while still validating paths that don't exist yet. *)
+let rec split_existing_path path missing =
+  if Sys.file_exists path then (path, missing)
+  else
+    let parent = Filename.dirname path in
+    if parent = path then (path, missing)
+    else split_existing_path parent (Filename.basename path :: missing)
+
+(** Resolve symlinks in the existing prefix of a path and then append the
+    remaining missing path segments lexically. *)
+let resolve_path path =
+  let abs = normalize_path path in
+  let existing_prefix, missing_segments = split_existing_path abs [] in
+  let resolved_prefix =
+    try Unix.realpath existing_prefix |> normalize_path
+    with Unix.Unix_error _ -> normalize_path existing_prefix
+  in
+  List.fold_left Filename.concat resolved_prefix missing_segments
+  |> normalize_path
+
 (** Check whether [path] is exactly [dir] or a descendant of [dir]. *)
 let is_within_dir ~dir path =
   path = dir
@@ -33,17 +55,17 @@ let is_within_dir ~dir path =
 (** Path allowlist. When workdir is set, restrict to workdir + /tmp only.
     When unset, allow /tmp, cwd subtree, and ~/me subtree (backward compat). *)
 let validate_path ?workdir path =
-  let abs = normalize_path path in
+  let resolved = resolve_path path in
   match workdir with
   | Some wd ->
-    let abs_wd = normalize_path wd in
-    is_within_dir ~dir:"/tmp" abs
-    || is_within_dir ~dir:abs_wd abs
+    let resolved_wd = resolve_path wd in
+    is_within_dir ~dir:(resolve_path "/tmp") resolved
+    || is_within_dir ~dir:resolved_wd resolved
   | None ->
-    is_within_dir ~dir:"/tmp" abs
-    || is_within_dir ~dir:(normalize_path (Sys.getcwd ())) abs
+    is_within_dir ~dir:(resolve_path "/tmp") resolved
+    || is_within_dir ~dir:(resolve_path (Sys.getcwd ())) resolved
     || (match Sys.getenv_opt "HOME" with
-        | Some home -> is_within_dir ~dir:(normalize_path (Filename.concat home "me")) abs
+        | Some home -> is_within_dir ~dir:(resolve_path (Filename.concat home "me")) resolved
         | None -> false)
 
 (** Command blocklist: reject destructive patterns. *)
@@ -93,12 +115,13 @@ let make_file_read ?workdir () =
        match Agent_swarm_tool_input.extract_string "path" input with
        | Error e -> Error e
        | Ok path ->
-         if not (validate_path ?workdir path) then
+         let resolved_path = resolve_path path in
+         if not (validate_path ?workdir resolved_path) then
            Error (Printf.sprintf
              "Path blocked: %s (outside allowed directories)" path)
          else
            try
-             let content = In_channel.with_open_text path In_channel.input_all in
+             let content = In_channel.with_open_text resolved_path In_channel.input_all in
              if String.length content > 100_000 then
                Ok (String.sub content 0 100_000 ^ "\n[TRUNCATED at 100KB]")
              else Ok content
@@ -124,16 +147,17 @@ let make_file_write ?workdir () =
              Agent_swarm_tool_input.extract_string "content" input with
        | Error e, _ | _, Error e -> Error e
        | Ok path, Ok content ->
-         if not (validate_path ?workdir path) then
+         let resolved_path = resolve_path path in
+         if not (validate_path ?workdir resolved_path) then
            Error (Printf.sprintf
              "Path blocked: %s (outside allowed directories)" path)
          else
            try
-             mkdir_p (Filename.dirname path) 0o755;
-             Out_channel.with_open_text path
+             mkdir_p (Filename.dirname resolved_path) 0o755;
+             Out_channel.with_open_text resolved_path
                (fun oc -> Out_channel.output_string oc content);
              Ok (Printf.sprintf "Written %d bytes to %s"
-               (String.length content) path)
+               (String.length content) resolved_path)
            with Sys_error msg ->
              Error (Printf.sprintf "Cannot write: %s" msg))
 

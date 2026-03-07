@@ -101,6 +101,23 @@ let test_file_read_rejects_prefix_sibling () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "should reject sibling path that only shares a prefix"
 
+let test_file_read_rejects_tmp_symlink_escape () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tool = find_tool "file_read" tools in
+  let path = "/tmp/agent_swarm_symlink_read_escape" in
+  (try Sys.remove path with Sys_error _ -> ());
+  Unix.symlink "/etc/passwd" path;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      let result = Tool.execute tool (`Assoc [("path", `String path)]) in
+      match result with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "should reject /tmp symlink escaping outside allowlist")
+
 let test_file_read_truncation () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -177,6 +194,25 @@ let test_file_write_rejects_prefix_sibling () =
   match result with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "should reject sibling path that only shares a prefix"
+
+let test_file_write_rejects_tmp_symlink_escape () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tool = find_tool "file_write" tools in
+  let path = "/tmp/agent_swarm_symlink_write_escape" in
+  (try Sys.remove path with Sys_error _ -> ());
+  Unix.symlink "/etc" path;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      let result = Tool.execute tool
+        (`Assoc [("path", `String (Filename.concat path "passwd_copy"));
+                 ("content", `String "bad")]) in
+      match result with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "should reject /tmp symlink escaping outside allowlist")
 
 (* --- shell_exec tests --- *)
 
@@ -275,6 +311,8 @@ let () =
       Alcotest.test_case "read blocked path" `Quick test_file_read_blocked_path;
       Alcotest.test_case "path traversal blocked" `Quick test_file_read_path_traversal;
       Alcotest.test_case "prefix sibling blocked" `Quick test_file_read_rejects_prefix_sibling;
+      Alcotest.test_case "tmp symlink escape blocked" `Quick
+        test_file_read_rejects_tmp_symlink_escape;
       Alcotest.test_case "read truncation 100KB" `Quick test_file_read_truncation;
     ];
     "file_write", [
@@ -282,6 +320,8 @@ let () =
       Alcotest.test_case "write blocked path" `Quick test_file_write_blocked_path;
       Alcotest.test_case "write prefix sibling blocked" `Quick
         test_file_write_rejects_prefix_sibling;
+      Alcotest.test_case "write tmp symlink escape blocked" `Quick
+        test_file_write_rejects_tmp_symlink_escape;
     ];
     "shell_exec", [
       Alcotest.test_case "echo hello" `Quick test_shell_exec_echo;

@@ -26,6 +26,7 @@ import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
 import { navigate } from '../router'
 import { connected, eventCount, journal } from '../sse'
+import { openActivityPanel } from '../activity-panel'
 
 const QUIET_AGENT_MS = 10 * 60 * 1000
 const STALE_AGENT_MS = 20 * 60 * 1000
@@ -484,7 +485,7 @@ export function Overview() {
       title: 'Live feed is reconnecting',
       detail: 'Dashboard telemetry is stale until the SSE stream recovers.',
       timestamp: null,
-      action: () => navigate('activity'),
+      action: openActivityPanel,
     })
   }
   if (monitorTone(boardMonitor?.alert_level) !== 'ok') {

@@ -3,7 +3,6 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { signal } from '@preact/signals'
 import { route, initRouter, navigate } from './router'
 import { connected, eventCount, connectSSE, disconnectSSE } from './sse'
 import {
@@ -35,9 +34,9 @@ import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
 import { refreshOperatorSnapshot } from './operator-store'
 import { refreshCommandPlaneSnapshot } from './command-store'
+import { activityPanelOpen, closeActivityPanel, toggleActivityPanel } from './activity-panel'
 
 const QUICK_ACTIONS_OPEN_KEY = 'masc_dashboard_quick_actions_open'
-const activityPanelOpen = signal(false)
 
 function ConnectionStatus() {
   const isConnected = connected.value
@@ -244,7 +243,7 @@ export function App() {
         <div class="header-right">
           <button
             class="activity-panel-toggle ${activityPanelOpen.value ? 'active' : ''}"
-            onClick=${() => { activityPanelOpen.value = !activityPanelOpen.value }}
+            onClick=${toggleActivityPanel}
             title="Toggle Activity Panel"
           >
             Activity
@@ -263,11 +262,11 @@ export function App() {
       </div>
 
       ${activityPanelOpen.value ? html`
-        <div class="activity-panel-backdrop" onClick=${() => { activityPanelOpen.value = false }} />
+        <div class="activity-panel-backdrop" onClick=${closeActivityPanel} />
         <aside class="activity-panel">
           <div class="activity-panel-header">
             <h3>Activity Feed</h3>
-            <button class="activity-panel-close" onClick=${() => { activityPanelOpen.value = false }}>Close</button>
+            <button class="activity-panel-close" onClick=${closeActivityPanel}>Close</button>
           </div>
           <div class="activity-panel-body">
             <${Activity} />

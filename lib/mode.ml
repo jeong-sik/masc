@@ -135,7 +135,7 @@ let tool_category tool_name =
   | "masc_observe_topology" | "masc_observe_operations"
   | "masc_observe_capacity" | "masc_observe_alerts"
   | "masc_observe_traces"
-  | "masc_operator_snapshot" | "masc_operator_action"
+  | "masc_operator_snapshot" | "masc_operator_digest" | "masc_operator_action"
   | "masc_operator_confirm" -> Core
 
   (* Communication tools *)

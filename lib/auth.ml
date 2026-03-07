@@ -228,6 +228,7 @@ let permission_for_tool = function
   | "masc_agents" | "masc_portal_status" | "masc_pending_interrupts"
   | "masc_votes" | "masc_vote_status" | "masc_worktree_list"
   | "masc_cost_report" | "masc_task_history" | "masc_operator_snapshot"
+  | "masc_operator_digest"
   | "masc_llama_models" | "masc_unit_list" | "masc_operation_status"
   | "masc_policy_status" | "masc_dispatch_plan" | "masc_dispatch_route"
   | "masc_observe_topology" | "masc_observe_operations"

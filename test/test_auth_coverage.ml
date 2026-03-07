@@ -250,6 +250,11 @@ let test_permission_for_tool_operator_snapshot () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
+let test_permission_for_tool_operator_digest () =
+  match Auth.permission_for_tool "masc_operator_digest" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
 let test_permission_for_tool_operator_action () =
   match Auth.permission_for_tool "masc_operator_action" with
   | Some Types.CanBroadcast -> ()
@@ -331,6 +336,7 @@ let () =
       test_case "auth_status" `Quick test_permission_for_tool_auth_status;
       test_case "llama_models" `Quick test_permission_for_tool_llama_models;
       test_case "operator_snapshot" `Quick test_permission_for_tool_operator_snapshot;
+      test_case "operator_digest" `Quick test_permission_for_tool_operator_digest;
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
       test_case "unknown" `Quick test_permission_for_tool_unknown;

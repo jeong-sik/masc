@@ -1196,7 +1196,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     { Tool_team_session.config; agent_name; sw; clock; proc_mgr = state.Mcp_server.proc_mgr }
   in
   let simple_ctx_operator =
-    { Tool_operator.config; agent_name; sw; clock; mcp_session_id }
+    {
+      Tool_operator.config;
+      agent_name;
+      sw;
+      clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
+      mcp_session_id;
+    }
   in
   let simple_ctx_command_plane : Tool_command_plane.context = { config; agent_name } in
   let simple_ctx_cache = { Tool_cache.config } in

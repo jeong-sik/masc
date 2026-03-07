@@ -7,6 +7,7 @@ type 'a context = {
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
+  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   mcp_session_id : string option;
 }
 
@@ -393,6 +394,13 @@ let available_actions_json =
         ];
       `Assoc
         [
+          ("action_type", `String "team_worker_spawn_batch");
+          ("target_type", `String "team_session");
+          ("description", `String "Use this when you need to spawn or replace one or more team-session workers through a preview-confirm path.");
+          ("confirm_required", `Bool true);
+        ];
+      `Assoc
+        [
           ("action_type", `String "team_stop");
           ("target_type", `String "team_session");
           ("description", `String "Use this when you need to stop a running team session.");
@@ -608,7 +616,9 @@ let attention_item_to_yojson (item : attention_item) =
     ]
 
 let recommended_confirm_required = function
-  | "room_pause" | "team_stop" | "task_inject" | "team_task_inject" -> true
+  | "room_pause" | "team_stop" | "task_inject" | "team_task_inject"
+  | "team_worker_spawn_batch" ->
+      true
   | _ -> false
 
 let recommended_action_to_yojson ~actor (item : recommended_action) =
@@ -647,6 +657,45 @@ let worker_card_to_yojson (card : worker_card) =
       ("has_turn", `Bool card.has_turn);
       ("last_turn_ts_iso", string_option_to_json card.last_turn_ts_iso);
     ]
+
+let spawn_batch_stub_of_cards (cards : worker_card list) =
+  let items =
+    cards
+    |> List.filter_map (fun (card : worker_card) ->
+           match card.spawn_agent with
+           | None -> None
+           | Some spawn_agent ->
+               let label =
+                 match (card.spawn_role, card.actor) with
+                 | Some role, _ when String.trim role <> "" -> role
+                 | _, Some actor when String.trim actor <> "" -> actor
+                 | _ -> spawn_agent
+               in
+               let fields =
+                 [
+                   ("spawn_agent", `String spawn_agent);
+                   ( "spawn_prompt",
+                     `String
+                       (Printf.sprintf
+                          "REQUIRED: provide explicit spawn_prompt for replacement worker %s"
+                          label) );
+                 ]
+               in
+               let fields =
+                 match card.spawn_role with
+                 | Some role when String.trim role <> "" ->
+                     ("spawn_role", `String role) :: fields
+                 | _ -> fields
+               in
+               let fields =
+                 match card.spawn_model with
+                 | Some model when String.trim model <> "" ->
+                     ("spawn_model", `String model) :: fields
+                 | _ -> fields
+               in
+               Some (`Assoc (List.rev fields)))
+  in
+  `Assoc [ ("spawn_batch", `List items) ]
 
 let session_card_to_yojson ~actor (digest : session_digest) =
   let top_attention =
@@ -992,7 +1041,13 @@ let session_attention_items ~(session : Team_session_types.session)
   List.sort compare_attention base
 
 let session_recommendations ~(session : Team_session_types.session)
-    ~(attentions : attention_item list) =
+    ~(attentions : attention_item list) ~(worker_cards : worker_card list) =
+  let no_turn_worker_cards =
+    worker_cards
+    |> List.filter (fun (card : worker_card) ->
+           String.equal card.status "planned_no_turn"
+           && Option.is_some card.spawn_agent)
+  in
   let suggestions =
     attentions
     |> List.filter_map (fun item ->
@@ -1063,21 +1118,33 @@ let session_recommendations ~(session : Team_session_types.session)
                        ];
                  }
            | "planned_worker_without_turn" ->
-               Some
-                 {
-                   action_type = "team_note";
-                   target_type = "team_session";
-                   target_id = Some session.session_id;
-                   severity = item.severity;
-                   reason = item.summary;
-                   suggested_payload =
-                     `Assoc
-                       [
-                         ( "message",
-                           `String
-                             "[operator] Planned workers have not reported yet. Record a concrete progress note or detach and replace the missing worker." );
-                       ];
-                 }
+               if no_turn_worker_cards = [] then
+                 Some
+                   {
+                     action_type = "team_note";
+                     target_type = "team_session";
+                     target_id = Some session.session_id;
+                     severity = item.severity;
+                     reason = item.summary;
+                     suggested_payload =
+                       `Assoc
+                         [
+                           ( "message",
+                             `String
+                               "[operator] Planned workers have not reported yet. Record a concrete progress note or detach and replace the missing worker." );
+                         ];
+                   }
+               else
+                 Some
+                   {
+                     action_type = "team_worker_spawn_batch";
+                     target_type = "team_session";
+                     target_id = Some session.session_id;
+                     severity = item.severity;
+                     reason = item.summary;
+                     suggested_payload =
+                       spawn_batch_stub_of_cards no_turn_worker_cards;
+                   }
            | _ -> None)
   in
   dedup_recommendations suggestions
@@ -1105,7 +1172,7 @@ let build_session_digest config (session : Team_session_types.session) ~now =
   let worker_cards = build_worker_cards ~session ~events ~now in
   let attention_items = session_attention_items ~session ~events ~worker_cards ~now in
   let recommended_actions =
-    session_recommendations ~session ~attentions:attention_items
+    session_recommendations ~session ~attentions:attention_items ~worker_cards
   in
   let active_agent_count =
     match U.member "active_agents" summary with
@@ -1360,6 +1427,7 @@ let canonical_action_type action_type =
   | "team_note" -> "team_note"
   | "team_broadcast" -> "team_broadcast"
   | "team_task_inject" -> "team_task_inject"
+  | "team_worker_spawn_batch" -> "team_worker_spawn_batch"
   | "keeper_msg" -> "keeper_message"
   | "keeper_message" -> "keeper_message"
   | "keeper_probe" -> "keeper_probe"
@@ -1369,7 +1437,9 @@ let canonical_action_type action_type =
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "room_pause" | "room_resume" | "task_inject" | "lodge_tick" -> "room"
-  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" | "team_stop" -> "team_session"
+  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject"
+  | "team_worker_spawn_batch" | "team_stop" ->
+      "team_session"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | _ -> ""
 
@@ -1417,7 +1487,9 @@ let delegated_tool_for action_type =
   | "room_pause" -> "masc_pause"
   | "room_resume" -> "masc_resume"
   | "lodge_tick" -> "lodge_tick"
-  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" -> "masc_team_session_turn"
+  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" ->
+      "masc_team_session_turn"
+  | "team_worker_spawn_batch" -> "masc_team_session_step"
   | "team_stop" -> "masc_team_session_stop"
   | "keeper_message" -> "masc_keeper_msg"
   | "keeper_probe" -> "masc_keeper_status"
@@ -1426,7 +1498,9 @@ let delegated_tool_for action_type =
   | _ -> "unknown"
 
 let confirm_required = function
-  | "room_pause" | "team_stop" | "task_inject" | "team_task_inject" -> true
+  | "room_pause" | "team_stop" | "task_inject" | "team_task_inject"
+  | "team_worker_spawn_batch" ->
+      true
   | _ -> false
 
 let preview_of_action (request : action_request) =
@@ -1547,6 +1621,33 @@ let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
 
 let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
   match Tool_keeper.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
+  | Some (true, body) -> Ok (json_of_dispatch_output body)
+  | Some (false, err) -> Error err
+  | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
+
+let dispatch_team_session_json_as (ctx : 'a context) ~session_id ~requested_actor
+    ~tool_name ~args =
+  let* authorized_actor =
+    match Team_session_store.load_session ctx.config session_id with
+    | None -> Error (Printf.sprintf "team session not found: %s" session_id)
+    | Some session ->
+        if String.equal requested_actor session.created_by
+           || List.exists (String.equal requested_actor) session.agent_names
+        then
+          Ok requested_actor
+        else
+          Ok session.created_by
+  in
+  let team_ctx : _ Tool_team_session.context =
+    {
+      config = ctx.config;
+      agent_name = authorized_actor;
+      sw = ctx.sw;
+      clock = ctx.clock;
+      proc_mgr = ctx.proc_mgr;
+    }
+  in
+  match Tool_team_session.dispatch team_ctx ~name:tool_name ~args with
   | Some (true, body) -> Ok (json_of_dispatch_output body)
   | Some (false, err) -> Error err
   | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
@@ -1740,6 +1841,34 @@ let execute_action (ctx : 'a context) (request : action_request) :
         ~message:(get_string_opt request.payload "message")
         ~target_agent:(get_string_opt request.payload "target_agent")
         ~task_title:(Some task_title) ~task_description ~task_priority
+  | "team_worker_spawn_batch" ->
+      let* () = validate_target_type "team_session" request in
+      let* session_id = require_target_id request in
+      let spawn_batch =
+        match U.member "spawn_batch" request.payload with
+        | `List [] -> Error "payload.spawn_batch must contain at least one item"
+        | `List _ as xs -> Ok xs
+        | _ -> Error "payload.spawn_batch is required"
+      in
+      let* spawn_batch = spawn_batch in
+      let args =
+        `Assoc
+          [
+            ("session_id", `String session_id);
+            ("actor", `String request.actor);
+            ("spawn_batch", spawn_batch);
+          ]
+      in
+      let* result_json =
+        dispatch_team_session_json_as ctx ~session_id ~requested_actor:request.actor
+          ~tool_name:"masc_team_session_step" ~args
+      in
+      Ok
+        (`Assoc
+          [
+            ("delegated_tool", `String "masc_team_session_step");
+            ("result", result_json);
+          ])
   | "team_stop" ->
       let* () = validate_target_type "team_session" request in
       let* session_id = require_target_id request in
@@ -1928,7 +2057,8 @@ let validate_request request =
   match request.action_type with
   | "broadcast" | "room_pause" | "room_resume" | "lodge_tick"
   | "team_turn" | "team_note"
-  | "team_broadcast" | "team_task_inject" | "team_stop"
+  | "team_broadcast" | "team_task_inject" | "team_worker_spawn_batch"
+  | "team_stop"
   | "keeper_message" | "keeper_probe" | "keeper_recover" | "task_inject" ->
       Ok ()
   | "" -> Error "action_type is required"

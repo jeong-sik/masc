@@ -3,6 +3,7 @@ type 'a context = {
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
+  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   mcp_session_id : string option;
 }
 

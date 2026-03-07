@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { showToast } from './common/toast'
+import type { OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
 import {
   confirmOperatorPendingAction,
   dispatchOperatorAction,
@@ -62,6 +63,37 @@ function relativeAge(seconds?: number): string {
   if (seconds < 60) return `${Math.round(seconds)}s ago`
   if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`
   return `${Math.round(seconds / 3600)}h ago`
+}
+
+type OpsPriorityTone = 'ok' | 'warn' | 'bad'
+
+interface OpsPriorityCardData {
+  key: string
+  label: string
+  value: string | number
+  detail: string
+  tone: OpsPriorityTone
+}
+
+function normalizeStatus(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function sessionPriorityTone(session: OperatorSessionSnapshot): OpsPriorityTone {
+  const status = normalizeStatus(session.status)
+  if (status === 'paused') return 'bad'
+  const health = normalizeStatus(session.team_health?.status)
+  if (health && health !== 'ok' && health !== 'healthy' && health !== 'green') return 'warn'
+  if (status && status !== 'active' && status !== 'running' && status !== 'ended') return 'warn'
+  return 'ok'
+}
+
+function keeperPriorityTone(keeper: OperatorKeeperSnapshot): OpsPriorityTone {
+  const status = normalizeStatus(keeper.status)
+  if (status === 'offline' || status === 'inactive' || status === 'error') return 'bad'
+  if ((keeper.context_ratio ?? 0) >= 0.8) return 'warn'
+  if ((keeper.last_turn_ago_s ?? 0) >= 3600) return 'warn'
+  return 'ok'
 }
 
 async function executeAction(input: {
@@ -234,6 +266,46 @@ export function Ops() {
   const recentMessages = snapshot?.recent_messages ?? []
   const selectedSession = sessions.find(session => session.session_id === selectedSessionId.value) ?? sessions[0] ?? null
   const selectedKeeper = keepers.find(keeper => keeper.name === selectedKeeperName.value) ?? keepers[0] ?? null
+  const flaggedSessions = sessions.filter(session => sessionPriorityTone(session) !== 'ok')
+  const flaggedKeepers = keepers.filter(keeper => keeperPriorityTone(keeper) !== 'ok')
+  const priorityCards: OpsPriorityCardData[] = [
+    {
+      key: 'room',
+      label: 'Room Gate',
+      value: room.paused ? 'Paused' : 'Open',
+      detail: room.paused
+        ? `Resume gate armed${room.pause_reason ? ` · ${room.pause_reason}` : ''}`
+        : 'Commands are live and the room is accepting new work',
+      tone: room.paused ? 'bad' : 'ok',
+    },
+    {
+      key: 'confirm',
+      label: 'Pending Confirm',
+      value: pendingConfirms.length,
+      detail: pendingConfirms.length > 0
+        ? 'Previewed operator actions are waiting for confirmation'
+        : 'No confirm gates are currently blocking execution',
+      tone: pendingConfirms.length > 0 ? 'warn' : 'ok',
+    },
+    {
+      key: 'session',
+      label: 'Session Risk',
+      value: flaggedSessions.length,
+      detail: flaggedSessions.length > 0
+        ? 'Team sessions need steering, stop, or checkpoint attention'
+        : 'Team sessions look healthy from the operator snapshot',
+      tone: flaggedSessions.some(session => normalizeStatus(session.status) === 'paused') ? 'bad' : flaggedSessions.length > 0 ? 'warn' : 'ok',
+    },
+    {
+      key: 'keeper',
+      label: 'Keeper Pressure',
+      value: flaggedKeepers.length,
+      detail: flaggedKeepers.length > 0
+        ? 'At least one keeper is stale, offline, or running hot'
+        : 'Keepers are available for direct intervention',
+      tone: flaggedKeepers.some(keeper => keeperPriorityTone(keeper) === 'bad') ? 'bad' : flaggedKeepers.length > 0 ? 'warn' : 'ok',
+    },
+  ]
 
   return html`
     <section class="ops-view">
@@ -264,9 +336,26 @@ export function Ops() {
         <section class="ops-banner error">${operatorError.value}</section>
       ` : null}
 
+      <section class="card">
+        <div class="monitor-section-head">
+          <h2 class="monitor-headline">Action Priority</h2>
+          <p class="monitor-subheadline">Ops is the command surface. These four signals explain when to intervene before you drop into a specific control panel.</p>
+        </div>
+        <div class="ops-priority-grid">
+          ${priorityCards.map(card => html`
+            <div key=${card.key} class="ops-priority-card ${card.tone}">
+              <span class="ops-priority-label">${card.label}</span>
+              <strong>${card.value}</strong>
+              <div class="ops-priority-detail">${card.detail}</div>
+            </div>
+          `)}
+        </div>
+      </section>
+
       ${pendingConfirms.length > 0 ? html`
         <section class="card ops-confirmations">
           <div class="card-title">Pending Confirmations</div>
+          <p class="ops-context-note">Only previewed actions that still need an explicit operator confirmation stay here.</p>
           <div class="ops-confirmation-list">
             ${pendingConfirms.map(item => html`
               <article key=${item.confirm_token} class="ops-confirmation-card">
@@ -381,7 +470,8 @@ export function Ops() {
           </div>
 
           ${recentMessages.length > 0 ? html`
-            <div class="ops-section-head">Recent Messages</div>
+            <div class="ops-section-head">Context Tail</div>
+            <div class="ops-context-note">Recent room chatter stays available for context, but command work remains the primary focus of this tab.</div>
             <div class="ops-feed-list">
               ${recentMessages.slice(0, 6).map(message => html`
                 <article key=${message.seq ?? message.id ?? message.timestamp} class="ops-feed-item">

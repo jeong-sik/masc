@@ -73,7 +73,7 @@ a:hover {
 }
 
 .app-shell {
-  width: min(1520px, 100% - 32px);
+  width: calc(100% - 32px);
   margin: 16px auto 28px;
 }
 
@@ -148,16 +148,6 @@ a:hover {
   background: rgba(255, 255, 255, 0.09);
 }
 
-/* Tab bar wrapper */
-.tab-sticky-wrap {
-  position: sticky;
-  top: calc(var(--header-h) + 8px);
-  z-index: var(--z-tab-sticky);
-  margin-top: 10px;
-  display: grid;
-  gap: 8px;
-}
-
 .kpi-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -204,14 +194,14 @@ a:hover {
   position: relative;
   z-index: var(--z-layout);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 18px;
+  grid-template-columns: clamp(300px, 24vw, 360px) minmax(0, 1fr);
+  gap: 20px;
   margin-top: 14px;
   align-items: start;
 }
 
 .dashboard-layout.rail-compact {
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: 260px minmax(0, 1fr);
 }
 
 .dashboard-main {
@@ -223,7 +213,7 @@ a:hover {
 
 .dashboard-rail {
   position: sticky;
-  top: calc(var(--header-h) + 84px);
+  top: calc(var(--header-h) + 16px);
   z-index: var(--z-layout);
   display: flex;
   flex-direction: column;
@@ -241,12 +231,48 @@ a:hover {
   padding: 14px;
 }
 
+.rail-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .rail-card h3 {
   color: var(--text-strong);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin-bottom: 10px;
+}
+
+.rail-card-head h3 {
+  margin-bottom: 0;
+}
+
+.rail-section-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-body);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(138, 163, 211, 0.18);
+}
+
+.rail-section-chip.ok {
+  color: #86efac;
+  border-color: rgba(74, 222, 128, 0.3);
+  background: rgba(74, 222, 128, 0.12);
+}
+
+.rail-section-chip.bad {
+  color: #fda4af;
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.12);
 }
 
 .rail-head-row {
@@ -333,18 +359,22 @@ a:hover {
 
 .rail-tab-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 6px;
 }
 
 .rail-tab-btn {
   border: 1px solid var(--card-border);
-  border-radius: 9px;
-  padding: 7px 8px;
+  border-radius: 10px;
+  padding: 10px 11px;
   color: var(--text-body);
   background: rgba(255, 255, 255, 0.03);
   cursor: pointer;
   font-size: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
 }
 
 .rail-tab-btn.active {
@@ -355,6 +385,51 @@ a:hover {
 
 .rail-tab-btn:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.rail-tab-icon {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.rail-tab-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.rail-tab-copy strong {
+  color: var(--text-strong);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.rail-tab-copy span {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.rail-tab-btn.active .rail-tab-copy span {
+  color: #c7dcf7;
+}
+
+.rail-nav-group + .rail-nav-group {
+  margin-top: 14px;
+}
+
+.rail-group-label {
+  color: var(--text-strong);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rail-group-copy {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 4px 0 8px;
 }
 
 .rail-links {
@@ -379,7 +454,7 @@ a:hover {
 }
 
 .rail-view-note {
-  margin-top: 10px;
+  margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid rgba(138, 163, 211, 0.2);
   display: grid;
@@ -402,6 +477,50 @@ a:hover {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.rail-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rail-stat-card {
+  border: 1px solid rgba(138, 163, 211, 0.16);
+  border-radius: 10px;
+  padding: 10px 11px;
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 4px;
+}
+
+.rail-stat-card span {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.rail-stat-card strong {
+  color: var(--text-strong);
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.rail-snapshot-copy {
+  margin-top: 10px;
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.rail-inline-actions {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .rail-density {
@@ -445,41 +564,34 @@ a:hover {
   color: #bde6ff;
 }
 
-.rail-stats {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.rail-stat-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.rail-stat-row strong {
-  color: var(--text-strong);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum";
-}
-
 .rail-refresh-btn {
-  margin-top: 11px;
   width: 100%;
-  border: 1px solid rgba(74, 222, 128, 0.45);
-  border-radius: 9px;
-  background: rgba(74, 222, 128, 0.16);
-  color: #9af3ba;
-  padding: 8px 12px;
+  border: 1px solid rgba(71, 184, 255, 0.4);
+  border-radius: 10px;
+  background: rgba(71, 184, 255, 0.12);
+  color: #d7efff;
+  padding: 9px 11px;
   font-size: 12px;
   cursor: pointer;
 }
 
 .rail-refresh-btn:hover {
-  background: rgba(74, 222, 128, 0.24);
+  background: rgba(71, 184, 255, 0.2);
+}
+
+.rail-secondary-btn {
+  width: 100%;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-body);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rail-secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 /* Core cards and sections */
@@ -716,6 +828,10 @@ a:hover {
     gap: 10px;
   }
 
+  .rail-tab-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .kpi-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -761,7 +877,7 @@ a:hover {
   }
 
   .rail-tab-list {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -786,8 +902,12 @@ a:hover {
     width: 100%;
   }
 
+  .rail-inline-actions {
+    grid-template-columns: 1fr;
+  }
+
   .rail-tab-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 }
 

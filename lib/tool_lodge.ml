@@ -241,14 +241,25 @@ let graphql_request_curl body : (string, string) Stdlib.result =
           let process_eio_result =
             if Process_eio.is_initialized () then
               try
-                let output = Process_eio.run_argv ~timeout_sec:15.0 argv in
-                ensure_graphql_json_response output
+                Ok (Process_eio.run_argv ~timeout_sec:15.0 argv)
               with exn -> Error (Printf.sprintf "❌ GraphQL curl: %s" (Printexc.to_string exn))
             else
               Error "❌ GraphQL curl: Process_eio not initialized"
           in
           match process_eio_result with
-          | Ok _ as success -> success
+          | Ok output -> (
+              match ensure_graphql_json_response output with
+              | Ok _ as success -> success
+              | Error "❌ GraphQL: empty response" ->
+                  Printf.eprintf
+                    "[GraphQL] Process_eio curl failed (empty response), trying Unix curl fallback...\n%!";
+                  (match run_argv_unix argv with
+                   | Ok unix_output -> ensure_graphql_json_response unix_output
+                   | Error unix_err ->
+                       Error
+                         (Printf.sprintf "❌ GraphQL curl: process_eio=empty response; unix=%s"
+                            unix_err))
+              | Error msg -> Error msg)
           | Error process_err ->
               Printf.eprintf
                 "[GraphQL] Process_eio curl failed (%s), trying Unix curl fallback...\n%!"

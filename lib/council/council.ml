@@ -37,7 +37,9 @@ type council_result = {
   data: Yojson.Safe.t option;
 }
 
-let make_config ~base_path = { base_path }
+let make_config ~base_path =
+  Consensus.init ~base_path;
+  { base_path }
 
 (** {1 Debate API} *)
 

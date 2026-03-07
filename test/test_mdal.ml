@@ -48,7 +48,6 @@ let dummy_state ?(loop_id = "mdal-test") ?(baseline = 0.5)
     stagnation_streak = stagnation;
     baseline_metric = baseline;
     start_time = Time_compat.now ();
-    state_post_id = "post-test";
   }
 
 let dummy_record ?(iteration = 1) ?(before = 0.5) ?(after = 0.6) ?(delta = 0.1)

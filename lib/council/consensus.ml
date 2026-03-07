@@ -68,6 +68,189 @@ type error =
 (** In-memory session store *)
 let sessions : (string, session) Hashtbl.t = Hashtbl.create 16
 
+(** {1 File-based Persistence} *)
+
+(** Optional base_path for file storage — set via [init] *)
+let _base_path : string option ref = ref None
+
+let read_file_safe path =
+  try
+    let ic = open_in path in
+    let content =
+      Fun.protect ~finally:(fun () -> close_in_noerr ic)
+        (fun () -> really_input_string ic (in_channel_length ic))
+    in
+    Ok content
+  with e -> Error (Printexc.to_string e)
+
+let list_dir_safe dir =
+  try Ok (Array.to_list (Sys.readdir dir))
+  with e -> Error (Printexc.to_string e)
+
+let consensus_dir base =
+  Filename.concat (Filename.concat base ".masc") "consensus"
+
+let session_path base session_id =
+  Filename.concat (consensus_dir base) (session_id ^ ".json")
+
+let rec ensure_dir path =
+  if not (Sys.file_exists path) then begin
+    let parent = Filename.dirname path in
+    if parent <> path && not (Sys.file_exists parent) then
+      ensure_dir parent;
+    try Unix.mkdir path 0o755
+    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+(** Write JSON to file atomically (temp file + rename) *)
+let write_json path json =
+  let content = Yojson.Safe.pretty_to_string json in
+  let dir = Filename.dirname path in
+  let base_name = Filename.basename path in
+  let tmp_path = Filename.concat dir (Printf.sprintf ".%s.tmp.%d" base_name (Unix.getpid ())) in
+  let oc = open_out tmp_path in
+  let closed = ref false in
+  Fun.protect ~finally:(fun () ->
+    if not !closed then (try close_out oc with _ -> ());
+    if Sys.file_exists tmp_path then
+      try Sys.remove tmp_path with _ -> ()
+  ) (fun () ->
+    output_string oc content;
+    flush oc;
+    close_out oc;
+    closed := true;
+    Sys.rename tmp_path path
+  )
+
+(** {1 JSON Serialization (full, for persistence)} *)
+
+let decision_of_yojson = function
+  | `String "approve" -> Ok Approve
+  | `String "reject" -> Ok Reject
+  | `String "abstain" -> Ok Abstain
+  | j -> Error (Printf.sprintf "Unknown decision: %s" (Yojson.Safe.to_string j))
+
+let voting_state_of_yojson = function
+  | `String "open" -> Ok Open
+  | `String "closed" -> Ok Closed
+  | `String "cancelled" -> Ok Cancelled
+  | j -> Error (Printf.sprintf "Unknown voting_state: %s" (Yojson.Safe.to_string j))
+
+let vote_to_yojson (v : vote) : Yojson.Safe.t =
+  let base = [
+    ("agent", `String v.agent);
+    ("decision", decision_to_yojson v.decision);
+    ("reason", `String v.reason);
+    ("timestamp", `Float v.timestamp);
+    ("weight", `Float v.weight);
+  ] in
+  let with_archetype = match v.archetype with
+    | None -> base
+    | Some a -> ("archetype", `String a) :: base
+  in
+  `Assoc with_archetype
+
+let vote_of_yojson (json : Yojson.Safe.t) : (vote, string) result =
+  let open Yojson.Safe.Util in
+  try
+    let agent = json |> member "agent" |> to_string in
+    let decision_json = json |> member "decision" in
+    match decision_of_yojson decision_json with
+    | Error e -> Error e
+    | Ok decision ->
+        let reason = json |> member "reason" |> to_string in
+        let timestamp = json |> member "timestamp" |> to_float in
+        let weight = (try json |> member "weight" |> to_float with _ -> 1.0) in
+        let archetype = match json |> member "archetype" with
+          | `String s -> Some s
+          | _ -> None
+        in
+        Ok { agent; decision; reason; timestamp; archetype; weight }
+  with e ->
+    Error (Printf.sprintf "Failed to parse vote: %s" (Printexc.to_string e))
+
+let full_session_to_yojson (s : session) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String s.id);
+    ("topic", `String s.topic);
+    ("initiator", `String s.initiator);
+    ("votes", `List (List.map vote_to_yojson s.votes));
+    ("quorum", `Int s.quorum);
+    ("threshold", `Float s.threshold);
+    ("state", voting_state_to_yojson s.state);
+    ("created_at", `Float s.created_at);
+    ("closed_at", match s.closed_at with Some t -> `Float t | None -> `Null);
+  ]
+
+let full_session_of_yojson (json : Yojson.Safe.t) : (session, string) result =
+  let open Yojson.Safe.Util in
+  try
+    let id = json |> member "id" |> to_string in
+    let topic = json |> member "topic" |> to_string in
+    let initiator = json |> member "initiator" |> to_string in
+    let quorum = json |> member "quorum" |> to_int in
+    let threshold = json |> member "threshold" |> to_float in
+    let state_json = json |> member "state" in
+    match voting_state_of_yojson state_json with
+    | Error e -> Error e
+    | Ok state ->
+        let created_at = json |> member "created_at" |> to_float in
+        let closed_at = match json |> member "closed_at" with
+          | `Float t -> Some t
+          | _ -> None
+        in
+        let votes_json = json |> member "votes" |> to_list in
+        let rec collect_votes acc = function
+          | [] -> Ok (List.rev acc)
+          | hd :: rest ->
+              match vote_of_yojson hd with
+              | Error e -> Error e
+              | Ok v -> collect_votes (v :: acc) rest
+        in
+        (match collect_votes [] votes_json with
+         | Error e -> Error e
+         | Ok votes ->
+             Ok { id; topic; initiator; votes; quorum; threshold; state; created_at; closed_at })
+  with e ->
+    Error (Printf.sprintf "Failed to parse session: %s" (Printexc.to_string e))
+
+(** Save session to disk (write-through) *)
+let save_session (s : session) =
+  match !_base_path with
+  | None -> ()  (* No persistence configured *)
+  | Some base ->
+    let dir = consensus_dir base in
+    ensure_dir dir;
+    let path = session_path base s.id in
+    (try write_json path (full_session_to_yojson s)
+     with _ -> ())  (* Best-effort: don't fail mutation on I/O error *)
+
+(** Load all sessions from disk into memory *)
+let load_sessions base =
+  let dir = consensus_dir base in
+  if Sys.file_exists dir then
+    match list_dir_safe dir with
+    | Error _ -> ()
+    | Ok files ->
+        List.iter (fun filename ->
+          if Filename.check_suffix filename ".json" then
+            let path = Filename.concat dir filename in
+            match read_file_safe path with
+            | Error _ -> ()
+            | Ok content ->
+                (try
+                   let json = Yojson.Safe.from_string content in
+                   match full_session_of_yojson json with
+                   | Ok session -> Hashtbl.replace sessions session.id session
+                   | Error _ -> ()
+                 with _ -> ())
+        ) files
+
+(** Initialize consensus with file persistence *)
+let init ~base_path =
+  _base_path := Some base_path;
+  load_sessions base_path
+
 (** Generate unique session ID *)
 let generate_id () =
   let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
@@ -90,6 +273,7 @@ let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5) () : (sessio
       closed_at = None;
     } in
     Hashtbl.replace sessions session.id session;
+    save_session session;
     Ok session
 
 (** Cast a vote in a session *)
@@ -112,6 +296,7 @@ let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.
       } in
       let updated = { session with votes = vote :: session.votes } in
       Hashtbl.replace sessions session_id updated;
+      save_session updated;
       Ok updated
 
 (** Count votes by decision type *)
@@ -184,12 +369,13 @@ let close_session ~session_id : (session, error) Result.t =
   match Hashtbl.find_opt sessions session_id with
   | None -> Error (Session_not_found session_id)
   | Some session ->
-    let updated = { 
-      session with 
+    let updated = {
+      session with
       state = Closed;
       closed_at = Some (Time_compat.now ());
     } in
     Hashtbl.replace sessions session_id updated;
+    save_session updated;
     Ok updated
 
 (** Cancel a voting session *)
@@ -197,12 +383,13 @@ let cancel_session ~session_id : (session, error) Result.t =
   match Hashtbl.find_opt sessions session_id with
   | None -> Error (Session_not_found session_id)
   | Some session ->
-    let updated = { 
-      session with 
+    let updated = {
+      session with
       state = Cancelled;
       closed_at = Some (Time_compat.now ());
     } in
     Hashtbl.replace sessions session_id updated;
+    save_session updated;
     Ok updated
 
 (** Get session by ID *)

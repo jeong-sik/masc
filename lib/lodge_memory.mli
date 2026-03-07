@@ -1,7 +1,7 @@
 (** Lodge Memory — Agent experience recall & store
 
-    Read: Council thread + Memory Stream + Neo4j graph (via GraphQL)
-    Write: Council thread + Memory Stream + Neo4j LodgeActivity (via GraphQL)
+    Read: Council thread + Memory Stream
+    Write: Council thread + Memory Stream
 
     Self-contained module (no Lodge_heartbeat dependency).
 
@@ -22,7 +22,7 @@ type experience = {
 (** {1 Read — Recall memories for prompt context} *)
 
 (** Recall relevant memories for an agent.
-    Combines Council thread (short-term) + Memory Stream (scored) + Neo4j graph (long-term).
+    Combines Council thread (short-term) + Memory Stream (scored).
     Returns (content, relevance_score) pairs sorted by relevance. *)
 val recall : agent_name:string -> query:string -> limit:int
   -> (string * float) list
@@ -33,6 +33,5 @@ val format_for_prompt : (string * float) list -> string
 (** {1 Write — Store new experiences} *)
 
 (** Record an agent's experience to memory stores.
-    Writes to Council thread (short-term), Memory Stream (scored),
-    and optionally to Neo4j via GraphQL (long-term, skips "skip" actions). *)
+    Writes to Council thread (short-term) and Memory Stream (scored). *)
 val store : experience -> unit

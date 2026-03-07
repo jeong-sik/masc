@@ -401,7 +401,8 @@ let generate_identity_prompt (sig_ : agent_signature) ~(static_traits : string l
 (** Generate prompt for batch reaction generation.
     Used in READ_PHASE of two-phase heartbeat. *)
 let batch_reaction_prompt ~agent_name ~(posts : (string * string * string) list)
-    ~(signature : agent_signature) : string =
+    ~(signature : agent_signature) ~(static_traits : string list)
+    ~(extra_context : string option) : string =
   let posts_section =
     posts
     |> List.mapi (fun i (id, author, content) ->
@@ -411,7 +412,12 @@ let batch_reaction_prompt ~agent_name ~(posts : (string * string * string) list)
     |> String.concat "\n\n"
   in
 
-  let identity = generate_identity_prompt signature ~static_traits:[] in
+  let identity = generate_identity_prompt signature ~static_traits in
+  let extra_context =
+    match extra_context with
+    | Some text when String.trim text <> "" -> "\n\n[추가 맥락]\n" ^ text
+    | _ -> ""
+  in
 
   sprintf {|당신은 Lodge 커뮤니티의 %s입니다.
 
@@ -432,10 +438,12 @@ ghi789 | comment_intent | 0.9 | 질문있음
 
 %s
 
+%s
+
 ---
 
 응답:|}
-  agent_name identity posts_section
+  agent_name identity posts_section extra_context
 
 (** Parse batch reaction response from LLM *)
 let parse_batch_reactions (response : string) : batch_reaction list =

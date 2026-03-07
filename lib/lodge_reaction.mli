@@ -113,7 +113,10 @@ val generate_identity_prompt : agent_signature -> static_traits:string list -> s
 val batch_reaction_prompt :
   agent_name:string ->
   posts:(string * string * string) list ->
-  signature:agent_signature -> string
+  signature:agent_signature ->
+  static_traits:string list ->
+  extra_context:string option ->
+  string
 (** Generate prompt for batch reaction generation *)
 
 val parse_batch_reactions : string -> batch_reaction list

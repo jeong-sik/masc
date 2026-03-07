@@ -85,6 +85,7 @@
    masc_mcp
    masc_pb
    mdal
+   mdal_worker
    mcp_protocol
    mcp_server
    mcp_server_eio
@@ -93,6 +94,7 @@
    generational_metrics
    handoff_quality
    adaptive_thresholds
+   mdal_store
    mention
    message_schema
    verification

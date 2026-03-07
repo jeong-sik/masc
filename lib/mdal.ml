@@ -1,12 +1,13 @@
 (** MDAL — Metric-Driven Agent Loop
 
-    Orchestrates iterative improvement loops where each iteration:
+    Orchestrates measured improvement loops where each iteration:
     1. Measures a metric via shell command
-    2. Spawns a worker agent to improve it
+    2. Optionally runs a worker agent to make changes
     3. Re-measures and records delta
-    4. Decides whether to continue, switch strategy, or stop
+    4. Stops only from measured limits or explicit operator input
 
-    Uses Board for state persistence and SSE for real-time updates.
+    Board and SSE are used for visibility. Durable loop state lives in the current
+    MASC backend; persisted `running` loops hydrate as `interrupted` after restart.
 
     @since 2.70.0 *)
 
@@ -20,15 +21,36 @@ type profile = {
   metric_fn : string;              (** Shell command that outputs a float *)
   goal : Bounded.goal;             (** When to stop (e.g., metric >= 0.95) *)
   target : string;                 (** Human-readable target description *)
-  reference : string option;       (** Optional reference file/dir *)
-  agent : string;                  (** Agent type to spawn (e.g., "claude") *)
+  reference : string option;       (** Optional reference file/dir for operator/worker context *)
+  agent : string;                  (** Worker alias or provider:model string *)
   max_iterations : int;            (** Hard iteration limit *)
   max_time_seconds : float option; (** Optional wall-clock limit *)
   stagnation_threshold : float;    (** Min delta to count as progress *)
   stagnation_count : int;          (** Consecutive stagnation iterations before stop *)
-  heuristics : string;             (** Domain-specific hints for the worker *)
-  tools_allow : string list;       (** Tools the worker may use *)
-  tools_deny : string list;        (** Tools the worker must NOT use *)
+  heuristics : string;             (** Worker guidance only; never used as stop logic *)
+  tools_allow : string list;       (** Runtime-enforced auditable tool allowlist *)
+  tools_deny : string list;        (** Requested tool denylist preserved for prompt/context *)
+}
+
+(** Worker runtime used for strict iterations. *)
+type worker_engine =
+  [ `Api_tool_loop
+  ]
+
+(** Verification state of worker evidence. *)
+type evidence_status =
+  [ `Verified
+  | `Legacy_unverified
+  ]
+
+(** Auditable evidence captured for a strict worker iteration. *)
+type worker_evidence = {
+  engine : worker_engine;
+  model_used : string;
+  tool_call_count : int;
+  tool_names : string list;
+  session_id : string;
+  status : evidence_status;
 }
 
 (** One iteration's record. *)
@@ -42,18 +64,43 @@ type iteration_record = {
   next_suggestion : string;
   elapsed_ms : int;
   cost_usd : float option;
+  evidence : worker_evidence option;
 }
+
+(** Runtime lifecycle state. *)
+type status =
+  [ `Running
+  | `Completed
+  | `Stopped
+  | `Interrupted
+  | `Error
+  ]
+
+(** Execution strategy available when the loop was created. *)
+type execution_mode =
+  [ `Worker_spawn
+  | `Manual_only
+  ]
 
 (** Mutable state for a running loop. *)
 type loop_state = {
   loop_id : string;
   profile : profile;
-  mutable status : [ `Running | `Completed | `Stopped | `Error of string ];
+  strict_mode : bool;
+  mutable status : status;
+  mutable error_message : string option;
+  mutable stop_reason : string option;
   mutable current_iteration : int;
   mutable history : iteration_record list;  (** Most recent first *)
   mutable stagnation_streak : int;
   baseline_metric : float;
   start_time : float;
+  mutable updated_at : float;
+  mutable stopped_at : float option;
+  state_post_id : string;
+  execution_mode : execution_mode;
+  worker_engine : worker_engine option;
+  worker_model : string option;
 }
 
 (* ================================================================ *)
@@ -76,6 +123,70 @@ let generate_loop_id () =
 let iter_hearth loop_id = "mdal-iter-" ^ loop_id
 let state_hearth loop_id = "mdal-" ^ loop_id
 
+let status_to_string : status -> string = function
+  | `Running -> "running"
+  | `Completed -> "completed"
+  | `Stopped -> "stopped"
+  | `Interrupted -> "interrupted"
+  | `Error -> "error"
+
+let status_of_string = function
+  | "running" -> Some `Running
+  | "completed" -> Some `Completed
+  | "stopped" -> Some `Stopped
+  | "interrupted" -> Some `Interrupted
+  | "error" -> Some `Error
+  | _ -> None
+
+let execution_mode_to_string : execution_mode -> string = function
+  | `Worker_spawn -> "worker_spawn"
+  | `Manual_only -> "manual_only"
+
+let execution_mode_of_string = function
+  | "worker_spawn" -> Some `Worker_spawn
+  | "manual_only" -> Some `Manual_only
+  | _ -> None
+
+let worker_engine_to_string : worker_engine -> string = function
+  | `Api_tool_loop -> "api_tool_loop"
+
+let worker_engine_of_string = function
+  | "api_tool_loop" -> Some `Api_tool_loop
+  | _ -> None
+
+let evidence_status_to_string : evidence_status -> string = function
+  | `Verified -> "verified"
+  | `Legacy_unverified -> "legacy_unverified"
+
+let evidence_status_of_string = function
+  | "verified" -> Some `Verified
+  | "legacy_unverified" -> Some `Legacy_unverified
+  | _ -> None
+
+let current_metric (state : loop_state) =
+  match state.history with
+  | r :: _ -> r.metric_after
+  | [] -> state.baseline_metric
+
+let total_delta (state : loop_state) =
+  current_metric state -. state.baseline_metric
+
+let recoverable (state : loop_state) =
+  match state.status with
+  | `Running | `Interrupted -> true
+  | `Completed | `Stopped | `Error -> false
+
+let latest_evidence (state : loop_state) =
+  match state.history with
+  | record :: _ -> record.evidence
+  | [] -> None
+
+let current_evidence_status (state : loop_state) =
+  match latest_evidence state with
+  | Some evidence -> Some evidence.status
+  | None when not state.strict_mode -> Some `Legacy_unverified
+  | None -> None
+
 (* ================================================================ *)
 (* Built-in Profiles                                                *)
 (* ================================================================ *)
@@ -84,7 +195,7 @@ let builtin_profile name =
   match name with
   | "ssim" ->
     { name = "ssim";
-      metric_fn = "python3 -c \"import sys; from skimage.metrics import structural_similarity; print(structural_similarity(...))\"";
+      metric_fn = "";
       goal = { path = "metric"; condition = Bounded.Gte 0.95 };
       target = "SSIM >= 0.95 (perceptual similarity)";
       reference = None;
@@ -99,7 +210,7 @@ let builtin_profile name =
     }
   | "coverage" ->
     { name = "coverage";
-      metric_fn = "make test-coverage 2>/dev/null | tail -1 | rg -o '[0-9]+\\.[0-9]+' | head -1";
+      metric_fn = "";
       goal = { path = "metric"; condition = Bounded.Gte 80.0 };
       target = "Test coverage >= 80%";
       reference = None;
@@ -114,7 +225,7 @@ let builtin_profile name =
     }
   | "lint" ->
     { name = "lint";
-      metric_fn = "make lint 2>&1 | rg -c 'error|warning' || echo 0";
+      metric_fn = "";
       goal = { path = "metric"; condition = Bounded.Lte 0.0 };
       target = "Zero lint errors/warnings";
       reference = None;
@@ -129,7 +240,7 @@ let builtin_profile name =
     }
   | "review" ->
     { name = "review";
-      metric_fn = "echo 0.5";
+      metric_fn = "";
       goal = { path = "metric"; condition = Bounded.Gte 0.9 };
       target = "Code review score >= 0.9";
       reference = None;
@@ -144,7 +255,7 @@ let builtin_profile name =
     }
   | "docs" ->
     { name = "docs";
-      metric_fn = "echo 0.3";
+      metric_fn = "";
       goal = { path = "metric"; condition = Bounded.Gte 0.8 };
       target = "Documentation coverage >= 0.8";
       reference = None;
@@ -251,6 +362,12 @@ let render_worker_prompt (profile : profile) (history : iteration_record list)
       ) history in
       String.concat "\n" lines
   in
+  let reference_text =
+    match profile.reference with
+    | Some reference when String.trim reference <> "" ->
+        "REFERENCE:\n" ^ reference ^ "\n\n"
+    | _ -> ""
+  in
   let tool_rules =
     let allow = match profile.tools_allow with
       | [] -> ""
@@ -268,7 +385,7 @@ GOAL: %s
 CURRENT METRIC: %.4f
 TARGET: %s
 
-HISTORY:
+%sHISTORY:
 %s
 
 DOMAIN HINTS:
@@ -281,27 +398,44 @@ OUTPUT FORMAT (strict JSON):
   "next_suggestion": "what to try next iteration if needed"
 }
 
-Focus on making measurable progress toward the goal. Each iteration should improve the metric.
+STRICT REQUIREMENTS:
+- You must execute at least one allowed auditable tool before returning the JSON block.
+- Use auditable tools for real work. For code or file changes, prefer `masc_spawn` to run an implementation agent.
+- Do not return a free-text report without tool execution. That will be rejected as missing evidence.
+
+Use the measured metric history and target as the primary basis for deciding what to change.
+Treat domain hints and tool hints as secondary guidance only.
 Do NOT output anything outside the JSON block.|}
     profile.name current_metric profile.target
-    history_text profile.heuristics tool_rules
+    reference_text history_text profile.heuristics tool_rules
 
 (* ================================================================ *)
 (* Board Post Formatting                                            *)
 (* ================================================================ *)
 
 let format_state_post (state : loop_state) : string =
-  let status_str = match state.status with
+  let status_str =
+    match state.status with
+    | `Error ->
+        Printf.sprintf "ERROR%s"
+          (match state.error_message with
+           | Some msg when String.trim msg <> "" -> ": " ^ msg
+           | _ -> "")
+    | `Stopped ->
+        Printf.sprintf "STOPPED%s"
+          (match state.stop_reason with
+           | Some reason when String.trim reason <> "" -> " (" ^ reason ^ ")"
+           | _ -> "")
+    | `Interrupted ->
+        Printf.sprintf "INTERRUPTED%s"
+          (match state.stop_reason with
+           | Some reason when String.trim reason <> "" -> " (" ^ reason ^ ")"
+           | _ -> "")
     | `Running -> "RUNNING"
     | `Completed -> "COMPLETED"
-    | `Stopped -> "STOPPED"
-    | `Error e -> Printf.sprintf "ERROR: %s" e
   in
   let elapsed = Time_compat.now () -. state.start_time in
-  let latest_metric = match state.history with
-    | r :: _ -> Printf.sprintf "%.4f" r.metric_after
-    | [] -> Printf.sprintf "%.4f" state.baseline_metric
-  in
+  let latest_metric = Printf.sprintf "%.4f" (current_metric state) in
   Printf.sprintf {|[MDAL_STATE] %s
 Loop: %s | Profile: %s | Status: %s
 Iteration: %d/%d | Stagnation: %d/%d
@@ -314,32 +448,54 @@ Elapsed: %.0fs | Goal: %s|}
     elapsed state.profile.target
 
 let format_iter_post (record : iteration_record) : string =
+  let evidence_line =
+    match record.evidence with
+    | Some evidence ->
+        Printf.sprintf "\nTools: %d (%s) | Engine: %s"
+          evidence.tool_call_count
+          (if evidence.tool_names = [] then "none"
+           else String.concat ", " evidence.tool_names)
+          (worker_engine_to_string evidence.engine)
+    | None -> ""
+  in
   Printf.sprintf {|[MDAL_ITER] #%d
 Before: %.4f | After: %.4f | Delta: %+.4f
 Changes: %s
 Failed: %s
 Next: %s
-Elapsed: %dms | Cost: %s|}
+Elapsed: %dms | Cost: %s%s|}
     record.iteration record.metric_before record.metric_after record.delta
     (if record.changes = "" then "(none)" else record.changes)
     (if record.failed_attempts = "" then "(none)" else record.failed_attempts)
     (if record.next_suggestion = "" then "(none)" else record.next_suggestion)
     record.elapsed_ms
     (match record.cost_usd with Some c -> Printf.sprintf "$%.4f" c | None -> "n/a")
+    evidence_line
 
 let format_final_post (state : loop_state) : string =
-  let status_str = match state.status with
+  let status_str =
+    match state.status with
+    | `Error ->
+        Printf.sprintf "ERROR%s"
+          (match state.error_message with
+           | Some msg when String.trim msg <> "" -> ": " ^ msg
+           | _ -> "")
+    | `Stopped ->
+        Printf.sprintf "STOPPED%s"
+          (match state.stop_reason with
+           | Some reason when String.trim reason <> "" -> " (" ^ reason ^ ")"
+           | _ -> "")
+    | `Interrupted ->
+        Printf.sprintf "INTERRUPTED%s"
+          (match state.stop_reason with
+           | Some reason when String.trim reason <> "" -> " (" ^ reason ^ ")"
+           | _ -> "")
     | `Running -> "RUNNING"
     | `Completed -> "COMPLETED"
-    | `Stopped -> "STOPPED"
-    | `Error e -> Printf.sprintf "ERROR: %s" e
   in
   let elapsed = Time_compat.now () -. state.start_time in
-  let final_metric = match state.history with
-    | r :: _ -> r.metric_after
-    | [] -> state.baseline_metric
-  in
-  let total_delta = final_metric -. state.baseline_metric in
+  let final_metric = current_metric state in
+  let total_delta = total_delta state in
   let avg_delta =
     if state.current_iteration > 0 then
       total_delta /. float_of_int state.current_iteration
@@ -360,7 +516,11 @@ let format_final_board (state : loop_state) : string =
   let result = match state.status with
     | `Completed -> "goal met"
     | `Stopped -> "stopped"
-    | `Error e -> Printf.sprintf "error: %s" e
+    | `Error ->
+        (match state.error_message with
+         | Some msg when String.trim msg <> "" -> Printf.sprintf "error: %s" msg
+         | _ -> "error")
+    | `Interrupted -> "interrupted"
     | `Running -> "running"
   in
   let final_metric = match state.history with
@@ -411,6 +571,7 @@ let parse_worker_result (raw : string) : (iteration_record, string) result =
       next_suggestion;
       elapsed_ms = 0;
       cost_usd = None;
+      evidence = None;
     }
   with
   | Yojson.Json_error msg ->
@@ -424,19 +585,12 @@ let parse_worker_result (raw : string) : (iteration_record, string) result =
 (* Iteration Evaluation                                             *)
 (* ================================================================ *)
 
-(** Evaluate the result of an iteration to decide next action. *)
+(** Evaluate the result of an iteration using only measured delta. *)
 let evaluate_iteration (record : iteration_record) :
-    [ `Continue_same_strategy | `Switch_area | `Revert_and_switch | `Stagnation ] =
-  let abs_delta = Float.abs record.delta in
-  if record.delta < -0.01 then
-    (* Regression: metric got worse *)
-    `Revert_and_switch
-  else if abs_delta < 0.001 then
-    (* Essentially no change *)
-    `Stagnation
-  else if record.delta > 0.0 && abs_delta < 0.005 then
-    (* Tiny improvement, might be worth switching area *)
-    `Switch_area
+    [ `Improved | `Flat | `Regressed ] =
+  if record.delta > 0.0 then
+    `Improved
+  else if record.delta < 0.0 then
+    `Regressed
   else
-    (* Meaningful improvement *)
-    `Continue_same_strategy
+    `Flat

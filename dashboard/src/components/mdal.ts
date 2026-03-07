@@ -16,6 +16,8 @@ const loopsList = computed(() => {
   loops.sort((a, b) => {
     if (a.status === 'running' && b.status !== 'running') return -1
     if (b.status === 'running' && a.status !== 'running') return 1
+    if (a.status === 'interrupted' && b.status !== 'interrupted') return -1
+    if (b.status === 'interrupted' && a.status !== 'interrupted') return 1
     return b.elapsed_seconds - a.elapsed_seconds
   })
   return loops
@@ -29,11 +31,16 @@ const completedCount = computed(() =>
   Array.from(mdalLoops.value.values()).filter(l => l.status === 'completed').length
 )
 
+const interruptedCount = computed(() =>
+  Array.from(mdalLoops.value.values()).filter(l => l.status === 'interrupted').length
+)
+
 // -- Helpers --
 
 function statusColor(status: string): string {
   switch (status) {
     case 'running': return '#fbbf24'
+    case 'interrupted': return '#38bdf8'
     case 'completed': return '#4ade80'
     case 'stopped': return '#94a3b8'
     case 'error': return '#fb7185'
@@ -83,6 +90,10 @@ function MetricSpark({ history }: { history: MdalIterationRecord[] }) {
 
 function IterationRow({ record }: { record: MdalIterationRecord }) {
   const deltaClass = record.delta > 0 ? 'positive' : record.delta < 0 ? 'negative' : 'neutral'
+  const evidenceText =
+    record.evidence
+      ? `${record.evidence.tool_call_count} tool${record.evidence.tool_call_count === 1 ? '' : 's'}: ${record.evidence.tool_names.join(', ')}`
+      : 'No evidence snapshot'
   return html`
     <div class="mdal-iter-row">
       <span class="mdal-iter-num">#${record.iteration}</span>
@@ -90,6 +101,7 @@ function IterationRow({ record }: { record: MdalIterationRecord }) {
       <span class="mdal-iter-arrow">\u2192</span>
       <span class="mdal-iter-metric">${record.metric_after.toFixed(4)}</span>
       <span class="mdal-iter-delta ${deltaClass}">${formatDelta(record.delta)}</span>
+      <span class="mdal-iter-evidence" title=${evidenceText}>${evidenceText}</span>
       <span class="mdal-iter-time">${record.elapsed_ms}ms</span>
     </div>
   `
@@ -97,6 +109,14 @@ function IterationRow({ record }: { record: MdalIterationRecord }) {
 
 function LoopCard({ loop }: { loop: MdalLoop }) {
   const totalDelta = loop.current_metric - loop.baseline_metric
+  const statusNote =
+    loop.status === 'error'
+      ? (loop.error_message ?? loop.stop_reason ?? 'Runtime error')
+      : loop.stop_reason ?? null
+  const latestTools =
+    loop.latest_tool_names && loop.latest_tool_names.length > 0
+      ? loop.latest_tool_names.join(', ')
+      : 'none'
 
   return html`
     <${Card} title=${`${loop.loop_id}`} class="mdal-loop-card">
@@ -146,6 +166,21 @@ function LoopCard({ loop }: { loop: MdalLoop }) {
         <${MetricSpark} history=${loop.history} />
       </div>
 
+      <div class="mdal-loop-footnotes">
+        <span>${loop.strict_mode ? 'Strict hard evidence' : 'Legacy loop'}</span>
+        <span>Mode ${loop.execution_mode ?? 'unknown'}</span>
+        <span>Engine ${loop.worker_engine ?? 'unknown'}</span>
+        <span>Model ${loop.worker_model ?? 'unknown'}</span>
+        <span>Latest tools ${loop.latest_tool_call_count ?? 0}: ${latestTools}</span>
+        <span>Evidence ${loop.evidence_status ?? 'unknown'}</span>
+        <span>Storage ${loop.persistence_backend ?? 'unknown'}</span>
+        <span>${loop.recoverable ? 'Recoverable' : 'Terminal'}</span>
+      </div>
+
+      ${statusNote
+        ? html`<div class="mdal-loop-status-note">${statusNote}</div>`
+        : null}
+
       ${loop.history.length > 0 ? html`
         <details class="mdal-history-details">
           <summary>Iteration History (${loop.history.length})</summary>
@@ -163,8 +198,9 @@ function LoopCard({ loop }: { loop: MdalLoop }) {
 export function Mdal() {
   const loops = loopsList.value
   const running = runningCount.value
+  const interrupted = interruptedCount.value
   const completed = completedCount.value
-  const stopped = loops.filter(l => l.status === 'stopped').length
+  const terminal = loops.filter(l => l.status === 'stopped' || l.status === 'error').length
 
   return html`
     <style>
@@ -182,6 +218,8 @@ export function Mdal() {
       .mdal-spark-section { margin: 8px 0; }
       .mdal-spark { font-family: monospace; font-size: 18px; letter-spacing: 1px; color: #38bdf8; }
       .mdal-spark-empty { color: #64748b; font-size: 13px; }
+      .mdal-loop-footnotes { display: flex; gap: 12px; flex-wrap: wrap; color: #64748b; font-size: 12px; margin: 8px 0 0; }
+      .mdal-loop-status-note { margin-top: 8px; color: #cbd5e1; font-size: 13px; }
       .mdal-history-details { margin-top: 8px; }
       .mdal-history-details summary { cursor: pointer; color: #94a3b8; font-size: 13px; }
       .mdal-iter-list { margin-top: 6px; }
@@ -193,6 +231,7 @@ export function Mdal() {
       .mdal-iter-delta.positive { color: #4ade80; }
       .mdal-iter-delta.negative { color: #fb7185; }
       .mdal-iter-delta.neutral { color: #94a3b8; }
+      .mdal-iter-evidence { color: #38bdf8; min-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .mdal-iter-time { color: #64748b; margin-left: auto; }
     </style>
 
@@ -206,8 +245,12 @@ export function Mdal() {
         <div class="stat-value" style="color:${statusColor('completed')}">${completed}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Stopped</div>
-        <div class="stat-value" style="color:${statusColor('stopped')}">${stopped}</div>
+        <div class="stat-label">Interrupted</div>
+        <div class="stat-value" style="color:${statusColor('interrupted')}">${interrupted}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Terminal</div>
+        <div class="stat-value" style="color:${statusColor('stopped')}">${terminal}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Total Loops</div>

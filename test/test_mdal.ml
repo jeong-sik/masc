@@ -7,7 +7,7 @@
     - Goal parsing (6 operators + error cases)
     - Stagnation detection and update
     - Worker result JSON parsing (valid + noisy + error)
-    - Iteration evaluation (4 decision categories)
+    - Iteration evaluation (delta-based categories)
     - Board post formatting (state, iter, final)
     - Worker prompt rendering
 
@@ -40,14 +40,24 @@ let dummy_profile ?(name = "test") ?(max_iter = 5) ?(stag_threshold = 0.01)
 let dummy_state ?(loop_id = "mdal-test") ?(baseline = 0.5)
     ?(status = `Running) ?(iteration = 0) ?(history = [])
     ?(stagnation = 0) () : Mdal.loop_state =
+  let now = Time_compat.now () in
   { loop_id;
     profile = dummy_profile ();
+    strict_mode = false;
     status;
+    error_message = None;
+    stop_reason = None;
     current_iteration = iteration;
     history;
     stagnation_streak = stagnation;
     baseline_metric = baseline;
-    start_time = Time_compat.now ();
+    start_time = now;
+    updated_at = now;
+    stopped_at = None;
+    state_post_id = "post-test";
+    execution_mode = `Manual_only;
+    worker_engine = None;
+    worker_model = None;
   }
 
 let dummy_record ?(iteration = 1) ?(before = 0.5) ?(after = 0.6) ?(delta = 0.1)
@@ -55,7 +65,7 @@ let dummy_record ?(iteration = 1) ?(before = 0.5) ?(after = 0.6) ?(delta = 0.1)
     ?(elapsed = 1000) () : Mdal.iteration_record =
   { iteration; metric_before = before; metric_after = after; delta;
     changes; failed_attempts = failed; next_suggestion = next;
-    elapsed_ms = elapsed; cost_usd = None;
+    elapsed_ms = elapsed; cost_usd = None; evidence = None;
   }
 
 (* ================================================================ *)
@@ -100,27 +110,32 @@ let test_builtin_ssim () =
   let p = Mdal.builtin_profile "ssim" in
   Alcotest.(check string) "name" "ssim" p.name;
   Alcotest.(check int) "max_iterations" 20 p.max_iterations;
+  Alcotest.(check string) "metric_fn is explicit-only" "" p.metric_fn;
   Alcotest.(check string) "agent" "claude" p.agent
 
 let test_builtin_coverage () =
   let p = Mdal.builtin_profile "coverage" in
   Alcotest.(check string) "name" "coverage" p.name;
-  Alcotest.(check int) "max_iterations" 15 p.max_iterations
+  Alcotest.(check int) "max_iterations" 15 p.max_iterations;
+  Alcotest.(check string) "metric_fn is explicit-only" "" p.metric_fn
 
 let test_builtin_lint () =
   let p = Mdal.builtin_profile "lint" in
   Alcotest.(check string) "name" "lint" p.name;
-  Alcotest.(check int) "max_iterations" 10 p.max_iterations
+  Alcotest.(check int) "max_iterations" 10 p.max_iterations;
+  Alcotest.(check string) "metric_fn is explicit-only" "" p.metric_fn
 
 let test_builtin_review () =
   let p = Mdal.builtin_profile "review" in
   Alcotest.(check string) "name" "review" p.name;
-  Alcotest.(check int) "max_iterations" 5 p.max_iterations
+  Alcotest.(check int) "max_iterations" 5 p.max_iterations;
+  Alcotest.(check string) "metric_fn is explicit-only" "" p.metric_fn
 
 let test_builtin_docs () =
   let p = Mdal.builtin_profile "docs" in
   Alcotest.(check string) "name" "docs" p.name;
-  Alcotest.(check int) "max_iterations" 10 p.max_iterations
+  Alcotest.(check int) "max_iterations" 10 p.max_iterations;
+  Alcotest.(check string) "metric_fn is explicit-only" "" p.metric_fn
 
 let test_builtin_unknown () =
   let raised = ref false in
@@ -263,36 +278,32 @@ let test_parse_missing_fields () =
 let test_eval_regression () =
   let r = dummy_record ~delta:(-0.05) () in
   match Mdal.evaluate_iteration r with
-  | `Revert_and_switch -> ()
-  | _ -> Alcotest.fail "expected Revert_and_switch"
+  | `Regressed -> ()
+  | _ -> Alcotest.fail "expected Regressed"
 
 let test_eval_stagnation () =
-  let r = dummy_record ~delta:0.0005 () in
+  let r = dummy_record ~delta:0.0 () in
   match Mdal.evaluate_iteration r with
-  | `Stagnation -> ()
-  | _ -> Alcotest.fail "expected Stagnation"
+  | `Flat -> ()
+  | _ -> Alcotest.fail "expected Flat"
 
-let test_eval_switch_area () =
+let test_eval_improved_small_delta () =
   let r = dummy_record ~delta:0.003 () in
   match Mdal.evaluate_iteration r with
-  | `Switch_area -> ()
-  | _ -> Alcotest.fail "expected Switch_area"
+  | `Improved -> ()
+  | _ -> Alcotest.fail "expected Improved"
 
-let test_eval_continue () =
+let test_eval_improved_large_delta () =
   let r = dummy_record ~delta:0.05 () in
   match Mdal.evaluate_iteration r with
-  | `Continue_same_strategy -> ()
-  | _ -> Alcotest.fail "expected Continue_same_strategy"
+  | `Improved -> ()
+  | _ -> Alcotest.fail "expected Improved"
 
-let test_eval_borderline_regression () =
+let test_eval_small_negative_delta () =
   let r = dummy_record ~delta:(-0.005) () in
-  (* delta > -0.01, abs_delta < 0.01, but delta < 0 and abs_delta >= 0.001 *)
-  (* delta is negative but > -0.01, abs_delta = 0.005 which is >= 0.001 *)
-  (* Since delta > -0.01 (not regression), and abs_delta >= 0.001 (not stagnation) *)
-  (* delta > 0.0 is false, so it falls to Continue *)
   match Mdal.evaluate_iteration r with
-  | `Continue_same_strategy -> ()
-  | _ -> Alcotest.fail "expected Continue_same_strategy for small negative delta"
+  | `Regressed -> ()
+  | _ -> Alcotest.fail "expected Regressed"
 
 (* ================================================================ *)
 (* Board Post Formatting                                            *)
@@ -343,7 +354,9 @@ let test_format_final_post_completed () =
      with Not_found -> false)
 
 let test_format_final_post_error () =
-  let state = dummy_state ~status:(`Error "timeout") () in
+  let state =
+    { (dummy_state ~status:`Error ()) with error_message = Some "timeout" }
+  in
   let text = Mdal.format_final_post state in
   Alcotest.(check bool) "contains ERROR" true
     (try ignore (Str.search_forward (Str.regexp_string "ERROR: timeout") text 0); true
@@ -443,10 +456,10 @@ let () =
     ];
     "evaluate_iteration", [
       Alcotest.test_case "regression" `Quick test_eval_regression;
-      Alcotest.test_case "stagnation" `Quick test_eval_stagnation;
-      Alcotest.test_case "switch area" `Quick test_eval_switch_area;
-      Alcotest.test_case "continue" `Quick test_eval_continue;
-      Alcotest.test_case "borderline" `Quick test_eval_borderline_regression;
+      Alcotest.test_case "flat" `Quick test_eval_stagnation;
+      Alcotest.test_case "improved small delta" `Quick test_eval_improved_small_delta;
+      Alcotest.test_case "improved large delta" `Quick test_eval_improved_large_delta;
+      Alcotest.test_case "small negative delta" `Quick test_eval_small_negative_delta;
     ];
     "board_formatting", [
       Alcotest.test_case "iter post" `Quick test_format_iter_post;

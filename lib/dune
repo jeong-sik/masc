@@ -44,6 +44,7 @@
    federation
    gcm_compat
    glm_pool
+   graphql_endpoint
    graphql_api
    handover_eio
    hat

@@ -476,30 +476,70 @@ let with_auth_header_file api_key f =
          close_out oc;
          f (Some path))
 
+let with_body_file body f =
+  let path = Filename.temp_file "masc-gql-body-" ".json" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () ->
+       let oc = open_out_bin path in
+       Fun.protect
+         ~finally:(fun () -> close_out_noerr oc)
+         (fun () -> output_string oc body);
+       f path)
+
+let run_argv_unix (argv : string list)
+  : (string, string) Stdlib.result =
+  match argv with
+  | [] -> Error "empty argv"
+  | prog :: _ -> (
+      try
+        let ic = Unix.open_process_args_in prog (Array.of_list argv) in
+        let output =
+          Fun.protect
+            ~finally:(fun () -> ignore (Unix.close_process_in ic))
+            (fun () -> In_channel.input_all ic)
+        in
+        Ok output
+      with exn -> Error (Printexc.to_string exn))
+
 (** curl-based GraphQL request — reliable DNS resolution in Railway containers *)
 let graphql_request_curl body : (string, string) Stdlib.result =
   let url = graphql_url () in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   with_auth_header_file api_key (fun auth_header_file ->
-      let argv =
-        [ "curl"; "-s"; "-m"; "10"; "-X"; "POST"; url;
-          "-H"; "Content-Type: application/json";
-          "-H"; "Accept: application/json"
-        ]
-        |> fun base ->
-        match auth_header_file with
-        | None -> base
-        | Some header_file -> base @ [ "-H"; "@" ^ header_file ]
-        |> fun with_auth ->
-        (* Read request body from stdin to avoid quoting/escaping issues. *)
-        with_auth @ [ "-d"; "@-" ]
-      in
-      try
-        let output =
-          Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv
-        in
-        ensure_graphql_json_response output
-      with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn)))
+      with_body_file body (fun body_file ->
+          let argv =
+            [ "curl"; "-s"; "-m"; "10"; "-X"; "POST"; url;
+              "-H"; "Content-Type: application/json";
+              "-H"; "Accept: application/json"
+            ]
+            |> fun base ->
+            match auth_header_file with
+            | None -> base
+            | Some header_file -> base @ [ "-H"; "@" ^ header_file ]
+            |> fun with_auth ->
+            with_auth @ [ "-d"; "@" ^ body_file ]
+          in
+          let process_eio_result =
+            if Process_eio.is_initialized () then
+              try
+                let output = Process_eio.run_argv ~timeout_sec:15.0 argv in
+                ensure_graphql_json_response output
+              with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn))
+            else
+              Error "Process_eio not initialized"
+          in
+          match process_eio_result with
+          | Ok _ as success -> success
+          | Error process_err ->
+              Printf.eprintf
+                "[Heartbeat] Process_eio curl failed (%s), trying Unix curl fallback...\n%!"
+                process_err;
+              (match run_argv_unix argv with
+               | Ok output -> ensure_graphql_json_response output
+               | Error unix_err ->
+                   Error
+                     (Printf.sprintf "curl(process_eio=%s; unix=%s)" process_err unix_err))))
 
 (** GraphQL request via Cohttp_eio with curl fallback.
     Falls back to curl if Cohttp fails (Railway DNS issues). *)

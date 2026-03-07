@@ -36,16 +36,48 @@ let test_lodge_heartbeat_no_profile_shellout () =
     (file_contains_pattern "lib/lodge_heartbeat.ml"
        {|Process_eio.run_argv ~timeout_sec:30.0 [sb; "graphql"; "agent"; agent_name]|})
 
-let test_lodge_heartbeat_uses_decision_prompt () =
-  check bool "structured decision prompt used"
+let test_lodge_heartbeat_uses_tool_assignment_prompt () =
+  check bool "structured selection prompt used"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_decision.batch_decision_prompt");
-  check bool "decision phase traced"
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_decision.selection_prompt");
+  check bool "tool assignment phase traced"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" {|phase:"lodge_decision"|});
-  check bool "structured batch parser used"
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|phase:"lodge_tool_assignment"|});
+  check bool "structured selection parser used"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_decision.parse_batch_outcome")
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_decision.parse_selection_plan");
+  check bool "tool loop worker used"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_worker.run_local");
+  check bool "heartbeat delegation emits task payload"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "A2a_tools.emit_heartbeat_task")
+
+let test_lodge_graphql_defaults_and_guards () =
+  check bool "heartbeat GraphQL defaults to HTTP port"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|Sys.getenv_opt "MASC_HTTP_PORT"|});
+  check bool "heartbeat GraphQL no longer defaults to MCP port"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|Sys.getenv_opt "MASC_MCP_PORT"|});
+  check bool "tool_lodge GraphQL defaults to HTTP port"
+    true
+    (file_contains_pattern "lib/tool_lodge.ml" {|Sys.getenv_opt "MASC_HTTP_PORT"|});
+  check bool "tool_lodge GraphQL no longer defaults to MCP port"
+    false
+    (file_contains_pattern "lib/tool_lodge.ml" {|Sys.getenv_opt "MASC_MCP_PORT"|});
+  check bool "HTML GraphQL guard present in heartbeat"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "endpoint returned HTML instead of JSON");
+  check bool "HTML GraphQL guard present in tool_lodge"
+    true
+    (file_contains_pattern "lib/tool_lodge.ml" "endpoint returned HTML instead of JSON");
+  check bool "null agents guard present in heartbeat"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "GraphQL agents is null");
+  check bool "null agents guard present in tool_lodge"
+    true
+    (file_contains_pattern "lib/tool_lodge.ml" "GraphQL agents is null")
 
 let test_lodge_heartbeat_updates_self_summary () =
   check bool "reflection updates self summary"
@@ -58,44 +90,40 @@ let test_lodge_heartbeat_uses_tom_context () =
     (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_tom.predict_top_k")
 
 let test_lodge_heartbeat_no_heuristic_fallback_policy () =
-  check bool "scheduled trigger can fallback to post"
+  check bool "scheduled trigger can request post tool"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "| Scheduled | ManualTrigger -> true");
-  check bool "content alerts do not fallback to post"
+  check bool "content alerts cannot request post tool"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "| ContentAlert _ | Mentioned _ -> false");
-  check bool "decision errors are explicit"
+  check bool "selection failures are explicit"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml"
-       {|reason = "decision error: " ^ reason|});
-  check bool "post gating still enforced through allow_post"
+       {|Skipped ("tool_loop_selection_failed:" ^ reason)|});
+  check bool "post gating enforced through allowed tools"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml"
-       "~allow_post:(trigger_allows_post trigger)");
-  check bool "unparsed fallback removed"
+       {|List.mem "masc_board_post" allowed_tools|});
+  check bool "legacy action_hint payload removed"
     false
-    (file_contains_pattern "lib/lodge_heartbeat.ml" {|reason = Some "unparsed"|});
-  check bool "heuristic maybe_post_action removed"
+    (file_contains_pattern "lib/a2a_tools.ml" "action_hint");
+  check bool "legacy prompt payload removed"
     false
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "maybe_post_action");
-  check bool "legacy NoAction fallback removed"
+    (file_contains_pattern "lib/a2a_tools.ml" {|("prompt", `String prompt)|});
+  check bool "legacy proxied board write removed"
     false
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "NoAction");
-  check bool "reaction batch prompt removed"
-    false
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_reaction.batch_reaction_prompt");
-  check bool "comment generation no longer auto-upvotes"
-    false
-    (file_contains_pattern "lib/lodge_heartbeat.ml" {|None -> ActionUpvote|});
+    (file_contains_pattern "lib/a2a_tools.ml" "Board.create_post store");
   check bool "comment rate limit enforced explicitly"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" {|Skipped "comment_rate_limited"|});
+    (file_contains_pattern "lib/lodge_heartbeat.ml"
+       {|check_rate_limit ~agent_name `Comment|});
   check bool "post rate limit enforced explicitly"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" {|Skipped "post_rate_limited"|});
-  check bool "decision failure reason tracked"
+    (file_contains_pattern "lib/lodge_heartbeat.ml"
+       {|check_rate_limit ~agent_name `Post|});
+  check bool "worker failure reason tracked"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "decision_failure_reason")
+    (file_contains_pattern "lib/lodge_worker.ml" "failure_reason")
 
 let test_lodge_heartbeat_public_memory_helpers_removed () =
   check bool "load_agent_memories removed from mli"
@@ -118,7 +146,8 @@ let () =
           test_case "agentActivities recall removed" `Quick test_lodge_memory_no_agent_activities_query;
           test_case "createLodgeActivity store removed" `Quick test_lodge_memory_no_create_lodge_activity_mutation;
           test_case "profile shellout removed" `Quick test_lodge_heartbeat_no_profile_shellout;
-          test_case "decision prompt mainline" `Quick test_lodge_heartbeat_uses_decision_prompt;
+          test_case "tool assignment prompt mainline" `Quick test_lodge_heartbeat_uses_tool_assignment_prompt;
+          test_case "graphql defaults and guards" `Quick test_lodge_graphql_defaults_and_guards;
           test_case "reflection updates self summary" `Quick test_lodge_heartbeat_updates_self_summary;
           test_case "ToM context used" `Quick test_lodge_heartbeat_uses_tom_context;
           test_case "no heuristic fallback policy locked" `Quick test_lodge_heartbeat_no_heuristic_fallback_policy;

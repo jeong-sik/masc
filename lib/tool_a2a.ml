@@ -94,12 +94,32 @@ let handle_poll_events _ctx args =
 let handle_heartbeat_result _ctx args =
   let worker_name = get_string args "worker_name" "" in
   let agent = get_string args "agent" "" in
-  let action_type = get_string args "action_type" "" in
-  let content = get_string args "content" "" in
-  if worker_name = "" || agent = "" || action_type = "" then
-    (false, "❌ worker_name, agent, and action_type are required")
+  let status = get_string args "status" "" in
+  let summary = get_string args "summary" "" in
+  let tool_call_count = get_int args "tool_call_count" 0 in
+  let tool_names =
+    match Yojson.Safe.Util.member "tool_names" args with
+    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+    | _ -> []
+  in
+  let decision_reason = get_string args "decision_reason" "" in
+  let decision_confidence =
+    match Yojson.Safe.Util.member "decision_confidence" args with
+    | `Float f -> f
+    | `Int n -> float_of_int n
+    | _ -> -1.0
+  in
+  let failure_reason = get_string_opt args "failure_reason" in
+  if worker_name = "" || agent = "" || status = "" || summary = "" || decision_reason = "" then
+    (false, "❌ worker_name, agent, status, summary, and decision_reason are required")
+  else if decision_confidence < 0.0 || decision_confidence > 1.0 then
+    (false, "❌ decision_confidence must be between 0.0 and 1.0")
   else
-    match A2a_tools.submit_heartbeat_result ~worker_name ~agent ~action_type ~content () with
+    match
+      A2a_tools.submit_heartbeat_result ~worker_name ~agent ~status ~summary
+        ~tool_call_count ~tool_names ~decision_reason ~decision_confidence
+        ?failure_reason ()
+    with
     | Ok json -> (true, Yojson.Safe.pretty_to_string json)
     | Error e -> (false, Printf.sprintf "❌ Submit result failed: %s" e)
 

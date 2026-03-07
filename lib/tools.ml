@@ -2671,9 +2671,7 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
 
   {
     name = "masc_heartbeat_result";
-    description = "A2A Worker submits heartbeat task result. Worker receives heartbeat_task event, generates content with local LLM, then submits result. MASC posts to Board on behalf of the original agent. \
-action_type: POST | COMMENT:post_id | UPVOTE:post_id | SKIP. \
-Example workflow: 1) subscribe(['heartbeat_task']), 2) poll_events → get agent+prompt, 3) call LLM, 4) parse response for action, 5) masc_heartbeat_result(worker, agent, action, content).";
+    description = "A2A Worker submits heartbeat completion evidence. Worker receives heartbeat_task, runs an MCP tool loop directly, then reports status, tool usage, and decision metadata. MASC no longer proxies the board write.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2685,16 +2683,49 @@ Example workflow: 1) subscribe(['heartbeat_task']), 2) poll_events → get agent
           ("type", `String "string");
           ("description", `String "Original Lodge agent name (e.g., 'dreamer')");
         ]);
-        ("action_type", `Assoc [
+        ("status", `Assoc [
           ("type", `String "string");
-          ("description", `String "Action: POST | COMMENT:post_id | UPVOTE:post_id | SKIP");
+          ("description", `String "Completion status: acted | skipped | failed");
+          ("enum", `List [`String "acted"; `String "skipped"; `String "failed"]);
         ]);
-        ("content", `Assoc [
+        ("summary", `Assoc [
           ("type", `String "string");
-          ("description", `String "Generated content (for POST/COMMENT)");
+          ("description", `String "Short completion summary");
+        ]);
+        ("tool_call_count", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of MCP tool calls executed by the worker");
+        ]);
+        ("tool_names", `Assoc [
+          ("type", `String "array");
+          ("description", `String "Executed MCP tool names");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("decision_reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Why the worker chose this outcome");
+        ]);
+        ("decision_confidence", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Confidence score between 0.0 and 1.0");
+        ]);
+        ("failure_reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional explicit failure reason");
         ]);
       ]);
-      ("required", `List [`String "worker_name"; `String "agent"; `String "action_type"]);
+      ("required",
+        `List
+          [
+            `String "worker_name";
+            `String "agent";
+            `String "status";
+            `String "summary";
+            `String "tool_call_count";
+            `String "tool_names";
+            `String "decision_reason";
+            `String "decision_confidence";
+          ]);
     ];
   };
 

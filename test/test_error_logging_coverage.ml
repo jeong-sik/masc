@@ -6,7 +6,7 @@
     Coverage:
     - spawn_registry: Agent_name.of_string failure → "[spawn_registry]" prefix
     - tool_task: complete_task on nonexistent task → "[task]" prefix
-    - a2a_tools: submit_heartbeat_result with unknown action → "[a2a]" prefix
+    - a2a_tools: submit_heartbeat_result with unknown status → "[a2a]" prefix
 
     Stderr capture approach: Unix.pipe + Unix.dup2 redirect.
     The pipe is set non-blocking to avoid blocking on empty read.
@@ -169,22 +169,26 @@ let test_tool_task_cancel_nonexistent_logs () =
     true (str_contains output "[task]")
 
 (* ============================================================
-   a2a_tools: submit_heartbeat_result unknown action → "[a2a]" on stderr
+   a2a_tools: submit_heartbeat_result unknown status → "[a2a]" on stderr
    ============================================================ *)
 
-(** submit_heartbeat_result with an action_type that is not "POST",
-    "COMMENT:...", "UPVOTE:...", or "SKIP".
-    result becomes Error "Unknown action type: ..." and the [a2a] eprintf fires. *)
-let test_a2a_submit_unknown_action_logs () =
+(** submit_heartbeat_result with a status that is not "acted", "skipped",
+    or "failed". result becomes Error "Unknown worker status: ..." and the
+    [a2a] eprintf fires. *)
+let test_a2a_submit_unknown_status_logs () =
   let output = capture_stderr (fun () ->
     ignore (A2a_tools.submit_heartbeat_result
       ~worker_name:"test-worker"
       ~agent:"test-agent"
-      ~action_type:"INVALID_ACTION_XYZ"
-      ~content:"test content"
+      ~status:"INVALID_STATUS_XYZ"
+      ~summary:"test summary"
+      ~tool_call_count:0
+      ~tool_names:[]
+      ~decision_reason:"invalid test"
+      ~decision_confidence:0.0
       ())
   ) in
-  check bool "stderr contains [a2a] prefix for unknown action"
+  check bool "stderr contains [a2a] prefix for unknown status"
     true (str_contains output "[a2a]")
 
 (* ============================================================
@@ -208,7 +212,7 @@ let () =
         `Quick test_tool_task_cancel_nonexistent_logs;
     ];
     "a2a_tools", [
-      test_case "submit_heartbeat unknown action logs [a2a]"
-        `Quick test_a2a_submit_unknown_action_logs;
+      test_case "submit_heartbeat unknown status logs [a2a]"
+        `Quick test_a2a_submit_unknown_status_logs;
     ];
   ]

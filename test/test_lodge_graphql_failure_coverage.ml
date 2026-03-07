@@ -7,6 +7,18 @@ open Masc_mcp
 
 let () = Printf.printf "\n=== Lodge GraphQL Fallback Coverage Tests ===\n"
 
+let with_env key value f =
+  let prev = Sys.getenv_opt key in
+  (match value with
+   | Some v -> Unix.putenv key v
+   | None -> Unix.putenv key "");
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
 let test name f =
   try
     f ();
@@ -18,45 +30,29 @@ let test name f =
 (* Test: curl fallback works when Eio net not initialized *)
 let () = test "load_agents_from_neo4j_curl_fallback" (fun () ->
   (* When Eio net is not initialized, Cohttp fails but curl fallback succeeds.
-     If GRAPHQL_API_KEY is set and network is available, agents are returned. *)
-  let has_api_key =
-    match Sys.getenv_opt "GRAPHQL_API_KEY" with
-    | Some s when String.length s > 0 -> true
-    | _ -> false
-  in
+     On invalid/empty GraphQL payloads, Lodge now falls back to builtin agents. *)
   let agents = Lodge_heartbeat.load_agents_from_neo4j () in
-  if has_api_key then
-    (* With API key, curl fallback should return agents (or [] if network down) *)
-    Printf.printf "  (curl fallback returned %d agents)\n" (List.length agents)
-  else
-    (* Without API key, expect empty list *)
-    assert (agents = [])
+  assert (List.length agents >= 5);
+  Printf.printf "  (fallback returned %d agents)\n" (List.length agents)
 )
 
-(* Test: load_lodge_agents_full also uses curl fallback *)
-let () = test "load_lodge_agents_full_curl_fallback" (fun () ->
-  let has_api_key =
-    match Sys.getenv_opt "GRAPHQL_API_KEY" with
-    | Some s when String.length s > 0 -> true
-    | _ -> false
-  in
-  match Lodge_heartbeat.load_lodge_agents_full () with
-  | Ok json ->
-      if has_api_key then begin
-        (* Try to count agents from JSON response, handle different structures *)
-        try
-          let open Yojson.Safe.Util in
-          let edges = json |> member "data" |> member "agents" |> member "edges" |> to_list in
-          Printf.printf "  (curl fallback returned %d full agents)\n" (List.length edges)
-        with Yojson.Safe.Util.Type_error _ ->
-          (* Different JSON structure - just verify we got valid JSON *)
-          Printf.printf "  (curl fallback returned valid JSON response)\n"
-      end else
-        Printf.printf "  (returned response without API key)\n"
-  | Error msg ->
-      (* Error is acceptable if network is truly unavailable *)
-      let short_msg = if String.length msg > 50 then String.sub msg 0 50 else msg in
-      Printf.printf "  (GraphQL error as expected: %s...)\n" short_msg
-)
+let () = test "load_agents_from_neo4j_invalid_endpoint_uses_builtin_fallback" (fun () ->
+  with_env "GRAPHQL_URL" (Some "http://127.0.0.1:9/graphql") (fun () ->
+      let agents = Lodge_heartbeat.load_agents_from_neo4j () in
+      assert (List.length agents >= 5)))
+
+let () = test "load_lodge_agents_full_invalid_endpoint_errors_cleanly" (fun () ->
+  with_env "GRAPHQL_URL" (Some "http://127.0.0.1:9/graphql") (fun () ->
+      match Lodge_heartbeat.load_lodge_agents_full () with
+      | Ok (`Assoc fields) ->
+          ignore (List.assoc "agents" fields)
+      | Ok _ -> failwith "expected agents payload"
+      | Error msg -> assert (String.length msg > 0)))
+
+let () = test "tool_lodge_invalid_endpoint_uses_builtin_cache_fallback" (fun () ->
+  with_env "GRAPHQL_URL" (Some "http://127.0.0.1:9/graphql") (fun () ->
+      Tool_lodge.load_agents_config ();
+      let agents = Tool_lodge.get_all_agents () in
+      assert (List.length agents >= 5)))
 
 let () = Printf.printf "\n✅ All Lodge GraphQL fallback tests passed!\n"

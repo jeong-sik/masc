@@ -422,9 +422,62 @@ let sb_path () =
 
 (** Use local GraphQL by default for local MCP runs.
     Set GRAPHQL_URL explicitly to force remote endpoint. *)
+let trim_trailing_slash s =
+  let trimmed = String.trim s in
+  let len = String.length trimmed in
+  if len > 0 && trimmed.[len - 1] = '/' then
+    String.sub trimmed 0 (len - 1)
+  else
+    trimmed
+
 let default_graphql_url () =
-  let port = Sys.getenv_opt "MASC_MCP_PORT" |> Option.value ~default:"8935" in
-  Printf.sprintf "http://127.0.0.1:%s/graphql" port
+  match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
+  | Some raw when String.trim raw <> "" ->
+      trim_trailing_slash raw ^ "/graphql"
+  | _ ->
+      let port = Sys.getenv_opt "MASC_HTTP_PORT" |> Option.value ~default:"8935" in
+      Printf.sprintf "http://127.0.0.1:%s/graphql" port
+
+let graphql_url () =
+  match Sys.getenv_opt "GRAPHQL_URL" with
+  | Some raw when String.trim raw <> "" -> String.trim raw
+  | _ -> default_graphql_url ()
+
+let looks_like_html_response body =
+  let trimmed = String.lowercase_ascii (String.trim body) in
+  trimmed <> "" && trimmed.[0] = '<'
+
+let ensure_graphql_json_response body =
+  if String.length body = 0 then
+    Error "empty response"
+  else if looks_like_html_response body then
+    Error "endpoint returned HTML instead of JSON"
+  else
+    Ok body
+
+let graphql_error_message json =
+  match Yojson.Safe.Util.member "errors" json with
+  | `List (first :: _) ->
+      first |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option
+  | _ -> None
+
+let graphql_agents_edges json =
+  match graphql_error_message json with
+  | Some msg -> Error ("GraphQL error: " ^ msg)
+  | None ->
+      let open Yojson.Safe.Util in
+      let data = member "data" json in
+      if data = `Null then
+        Error "GraphQL data is null"
+      else
+        let agents = member "agents" data in
+        if agents = `Null then
+          Error "GraphQL agents is null"
+        else
+          match member "edges" agents with
+          | `List edges -> Ok edges
+          | `Null -> Ok []
+          | _ -> Error "GraphQL agents.edges is not a list"
 
 (** Keep auth token out of argv so process errors don't leak secrets. *)
 let with_auth_header_file api_key f =
@@ -442,12 +495,13 @@ let with_auth_header_file api_key f =
 
 (** curl-based GraphQL request — reliable DNS resolution in Railway containers *)
 let graphql_request_curl body : (string, string) Stdlib.result =
-  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:(default_graphql_url ()) in
+  let url = graphql_url () in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   with_auth_header_file api_key (fun auth_header_file ->
       let argv =
-        [ "curl"; "-s"; "-m"; "10"; url;
-          "-H"; "Content-Type: application/json"
+        [ "curl"; "-s"; "-m"; "10"; "-X"; "POST"; url;
+          "-H"; "Content-Type: application/json";
+          "-H"; "Accept: application/json"
         ]
         |> fun base ->
         match auth_header_file with
@@ -461,13 +515,13 @@ let graphql_request_curl body : (string, string) Stdlib.result =
         let output =
           Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv
         in
-        if String.length output = 0 then Error "curl: empty response" else Ok output
+        ensure_graphql_json_response output
       with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn)))
 
 (** GraphQL request via Cohttp_eio with curl fallback.
     Falls back to curl if Cohttp fails (Railway DNS issues). *)
 let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
-  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:(default_graphql_url ()) in
+  let url = graphql_url () in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let max_response_bytes = 1_000_000 in
   let suppress_body _s = "body suppressed" in
@@ -501,12 +555,10 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
           let body_str =
             Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
           in
-          if String.length body_str = 0 then
-            Error "empty response"
-          else if Cohttp.Code.is_success status then
-            Ok body_str
-          else
+          if not (Cohttp.Code.is_success status) then
             Error (Printf.sprintf "HTTP %d (%s)" status (suppress_body body_str))
+          else
+            ensure_graphql_json_response body_str
         )
       in
       match Eio_context.get_clock_opt () with
@@ -758,67 +810,56 @@ let load_agents_from_neo4j () =
   match graphql_request ~timeout_sec:5.0 gql_query with
   | Error err ->
       Eio.traceln "⚠️ [Heartbeat] GraphQL request failed: %s" err;
-      []
+      builtin_core_agents ()
   | Ok json_str ->
       Printf.eprintf "[Heartbeat] GraphQL response: %d bytes\n%!" (String.length json_str);
       try
         let json = Yojson.Safe.from_string json_str in
-        (* Check for GraphQL errors before parsing data *)
-        (match Yojson.Safe.Util.member "errors" json with
-         | `List errors when errors <> [] ->
-           let msg = try
-             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-           with Yojson.Safe.Util.Type_error _ | Failure _ -> "unknown error" in
-           Eio.traceln "⚠️ GraphQL error loading agents: %s" msg;
-           []
-         | _ ->
-        let edges = json
-          |> Yojson.Safe.Util.member "data"
-          |> Yojson.Safe.Util.member "agents"
-          |> Yojson.Safe.Util.member "edges"
-          |> Yojson.Safe.Util.to_list
-        in
-        let parsed =
-          List.filter_map (fun edge ->
-            try
-              let node = Yojson.Safe.Util.member "node" edge in
-              let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-              let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
-              let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
-              let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
-              let activity_level =
-                match Yojson.Safe.Util.(member "activityLevel" node) with
-                | `Null -> 0.5
-                | v -> Yojson.Safe.Util.to_float v
-              in
-              (* Client-side filter: only agents with preferredHours *)
-              let interests =
-                try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
-                with Yojson.Safe.Util.Type_error _ | Failure _ -> []
-              in
-              let personality_hint =
-                match Yojson.Safe.Util.(member "personalityHint" node) with
-                | `String s -> Some s
-                | _ -> None
-              in
-              if preferred_hours <> [] then
-                Some { name; preferred_hours; peak_hour; traits; interests;
-                       personality_hint; activity_level }
-              else
-                None
-            with Yojson.Safe.Util.Type_error (msg, _) ->
-              Eio.traceln "⚠️ Agent parse error: %s" msg;
-              None
-          ) edges
-        in
-        if parsed <> [] then parsed
-        else begin
-          Eio.traceln "⚠️ GraphQL agents empty, using builtin core agents fallback";
-          builtin_core_agents ()
-        end)
+        (match graphql_agents_edges json with
+         | Error msg ->
+             Eio.traceln "⚠️ GraphQL error loading agents: %s" msg;
+             builtin_core_agents ()
+         | Ok edges ->
+             let parsed =
+               List.filter_map (fun edge ->
+                 try
+                   let node = Yojson.Safe.Util.member "node" edge in
+                   let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+                   let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
+                   let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
+                   let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
+                   let activity_level =
+                     match Yojson.Safe.Util.(member "activityLevel" node) with
+                     | `Null -> 0.5
+                     | v -> Yojson.Safe.Util.to_float v
+                   in
+                   let interests =
+                     try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
+                     with Yojson.Safe.Util.Type_error _ | Failure _ -> []
+                   in
+                   let personality_hint =
+                     match Yojson.Safe.Util.(member "personalityHint" node) with
+                     | `String s -> Some s
+                     | _ -> None
+                   in
+                   if preferred_hours <> [] then
+                     Some { name; preferred_hours; peak_hour; traits; interests;
+                            personality_hint; activity_level }
+                   else
+                     None
+                 with Yojson.Safe.Util.Type_error (msg, _) ->
+                   Eio.traceln "⚠️ Agent parse error: %s" msg;
+                   None
+               ) edges
+             in
+             if parsed <> [] then parsed
+             else begin
+               Eio.traceln "⚠️ GraphQL agents empty, using builtin core agents fallback";
+               builtin_core_agents ()
+             end)
       with e ->
         Eio.traceln "⚠️ Failed to load agents from GraphQL: %s" (Printexc.to_string e);
-        []
+        builtin_core_agents ()
 
 (** Cached agents - loaded once at startup, refreshed periodically *)
 let agents_cache = ref []
@@ -1161,52 +1202,42 @@ let load_lodge_agents_full () =
   | Ok json_str ->
       try
         let json = Yojson.Safe.from_string json_str in
-        (match Yojson.Safe.Util.member "errors" json with
-         | `List errors when errors <> [] ->
-           let msg = try
-             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-           with _ -> "unknown error" in
-           Error (Printf.sprintf "GraphQL error: %s" msg)
-         | _ ->
-        let edges = json
-          |> Yojson.Safe.Util.member "data"
-          |> Yojson.Safe.Util.member "agents"
-          |> Yojson.Safe.Util.member "edges"
-          |> Yojson.Safe.Util.to_list
-        in
-        let agents = List.filter_map (fun edge ->
-          try
-            let node = Yojson.Safe.Util.member "node" edge in
-            let open Yojson.Safe.Util in
-            let name = member "name" node |> to_string in
-            let emoji = (match member "emoji" node with `String s -> s | _ -> "🤖") in
-            let korean_name = (match member "koreanName" node with `String s -> Some s | _ -> None) in
-            let traits = (try member "traits" node |> to_list |> List.map to_string with exn -> Printf.eprintf "[heartbeat] traits parse: %s\n%!" (Printexc.to_string exn); []) in
-            let interests = (try member "interests" node |> to_list |> List.map to_string with exn -> Printf.eprintf "[heartbeat] interests parse: %s\n%!" (Printexc.to_string exn); []) in
-            let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
-            let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with exn -> Printf.eprintf "[heartbeat] preferred_hours parse: %s\n%!" (Printexc.to_string exn); []) in
-            let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
-            let model = (match member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
-            let status = (match member "status" node with `String s -> s | _ -> "active") in
-            let primary_value = (match member "primaryValue" node with `String s -> Some s | _ -> None) in
-            let personality_hint = (match member "personalityHint" node with `String s -> Some s | _ -> None) in
-            Some (`Assoc [
-              ("name", `String name);
-              ("emoji", `String emoji);
-              ("koreanName", match korean_name with Some s -> `String s | None -> `Null);
-              ("traits", `List (List.map (fun s -> `String s) traits));
-              ("interests", `List (List.map (fun s -> `String s) interests));
-              ("activityLevel", `Float activity_level);
-              ("preferredHours", `List (List.map (fun i -> `Int i) preferred_hours));
-              ("peakHour", match peak_hour with Some i -> `Int i | None -> `Null);
-              ("model", `String model);
-              ("status", `String status);
-              ("primaryValue", match primary_value with Some s -> `String s | None -> `Null);
-              ("personalityHint", match personality_hint with Some s -> `String s | None -> `Null);
-            ])
-          with _ -> None
-        ) edges in
-        Ok (`Assoc [("agents", `List agents)]))
+        (match graphql_agents_edges json with
+         | Error msg -> Error msg
+         | Ok edges ->
+             let agents = List.filter_map (fun edge ->
+               try
+                 let node = Yojson.Safe.Util.member "node" edge in
+                 let open Yojson.Safe.Util in
+                 let name = member "name" node |> to_string in
+                 let emoji = (match member "emoji" node with `String s -> s | _ -> "🤖") in
+                 let korean_name = (match member "koreanName" node with `String s -> Some s | _ -> None) in
+                 let traits = (try member "traits" node |> to_list |> List.map to_string with exn -> Printf.eprintf "[heartbeat] traits parse: %s\n%!" (Printexc.to_string exn); []) in
+                 let interests = (try member "interests" node |> to_list |> List.map to_string with exn -> Printf.eprintf "[heartbeat] interests parse: %s\n%!" (Printexc.to_string exn); []) in
+                 let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
+                 let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with exn -> Printf.eprintf "[heartbeat] preferred_hours parse: %s\n%!" (Printexc.to_string exn); []) in
+                 let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
+                 let model = (match member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
+                 let status = (match member "status" node with `String s -> s | _ -> "active") in
+                 let primary_value = (match member "primaryValue" node with `String s -> Some s | _ -> None) in
+                 let personality_hint = (match member "personalityHint" node with `String s -> Some s | _ -> None) in
+                 Some (`Assoc [
+                   ("name", `String name);
+                   ("emoji", `String emoji);
+                   ("koreanName", match korean_name with Some s -> `String s | None -> `Null);
+                   ("traits", `List (List.map (fun s -> `String s) traits));
+                   ("interests", `List (List.map (fun s -> `String s) interests));
+                   ("activityLevel", `Float activity_level);
+                   ("preferredHours", `List (List.map (fun i -> `Int i) preferred_hours));
+                   ("peakHour", match peak_hour with Some i -> `Int i | None -> `Null);
+                   ("model", `String model);
+                   ("status", `String status);
+                   ("primaryValue", match primary_value with Some s -> `String s | None -> `Null);
+                   ("personalityHint", match personality_hint with Some s -> `String s | None -> `Null);
+                 ])
+               with _ -> None
+             ) edges in
+             Ok (`Assoc [("agents", `List agents)]))
       with e ->
         Error (Printf.sprintf "Failed to load agents: %s" (Printexc.to_string e))
 
@@ -1516,17 +1547,10 @@ let load_agent_profiles_from_graphql () : agent_profile list =
   | Ok json_str ->
       try
         let json = Yojson.Safe.from_string json_str in
-        match Yojson.Safe.Util.member "errors" json with
-        | `List errors when errors <> [] -> []
-        | _ ->
+        match graphql_agents_edges json with
+        | Error _ -> []
+        | Ok edges ->
             let open Yojson.Safe.Util in
-            let edges =
-              json
-              |> member "data"
-              |> member "agents"
-              |> member "edges"
-              |> to_list
-            in
             List.filter_map
               (fun edge ->
                 try
@@ -2133,6 +2157,129 @@ let trigger_allows_post = function
   | Scheduled | ManualTrigger -> true
   | ContentAlert _ | Mentioned _ -> false
 
+let heartbeat_tool_context (posts : Board.post list) =
+  posts
+  |> List.map (fun (post : Board.post) ->
+         Printf.sprintf "[target_post_id=%s]\nauthor=%s\n%s"
+           (Board.Post_id.to_string post.id)
+           (Board.Agent_id.to_string post.author)
+           (utf8_truncate post.content 300))
+  |> String.concat "\n\n"
+
+let heartbeat_read_tools =
+  [
+    "masc_board_get";
+    "masc_board_list";
+    "masc_board_search";
+    "lodge_search";
+    "lodge_profile";
+    "lodge_research";
+  ]
+
+let heartbeat_allowed_tools ~agent_name ~trigger ~recent_posts =
+  let tools = ref heartbeat_read_tools in
+  if recent_posts <> [] then tools := !tools @ [ "masc_board_vote" ];
+  if recent_posts <> [] && check_rate_limit ~agent_name `Comment then
+    tools := !tools @ [ "masc_board_comment" ];
+  if trigger_allows_post trigger && check_rate_limit ~agent_name `Post then
+    tools := !tools @ [ "masc_board_post" ];
+  List.sort_uniq String.compare !tools
+
+let classify_completion_action (completion : Lodge_worker.completion) =
+  if List.mem "masc_board_post" completion.tool_names then `Post
+  else if List.mem "masc_board_comment" completion.tool_names then `Comment
+  else if List.mem "masc_board_vote" completion.tool_names then `Vote
+  else `Skip
+
+let checkin_result_of_completion ~agent_name (completion : Lodge_worker.completion) =
+  (match classify_completion_action completion with
+   | `Post -> record_rate_action ~agent_name `Post
+   | `Comment -> record_rate_action ~agent_name `Comment
+   | `Vote -> record_rate_action ~agent_name `Vote
+   | `Skip -> ());
+  record_agent_activity ~name:agent_name;
+  match completion.status with
+  | Lodge_worker.Acted ->
+      let action =
+        match classify_completion_action completion with
+        | `Post -> ActionPost completion.summary
+        | `Comment -> ActionComment ("tool-loop", completion.summary)
+        | `Vote -> ActionUpvote "tool-loop"
+        | `Skip -> ActionSkip
+      in
+      Acted { action; summary = completion.summary }
+  | Lodge_worker.Skipped -> Passed completion.decision_reason
+  | Lodge_worker.Failed ->
+      Skipped
+        (Option.value ~default:completion.summary completion.failure_reason)
+
+let select_tool_loop_assignment ~agent_name ~trigger ~trigger_reason ~recent_posts =
+  let profile = load_agent_profile ~agent_name in
+  let signature = Lodge_reaction.get_or_compute_signature ~agent_name in
+  let all_keywords = reaction_keywords ~signature ~profile in
+  let sorted_posts =
+    sort_posts_for_agent ~agent_name ~agent_traits:all_keywords recent_posts
+    |> take_list 5
+  in
+  let identity_prompt =
+    let static_traits =
+      if signature.total_reactions < 5 then profile.traits @ profile.interests else []
+    in
+    if signature.total_reactions > 0 || static_traits <> [] then
+      Lodge_reaction.generate_identity_prompt signature ~static_traits
+    else load_agent_identity ~agent_name
+  in
+  let allowed_tools = heartbeat_allowed_tools ~agent_name ~trigger ~recent_posts:sorted_posts in
+  let prompt =
+    Lodge_decision.selection_prompt ~agent_name
+      ~candidate_agents:[ (agent_name, identity_prompt) ]
+      ~posts:
+        (List.map
+           (fun (post : Board.post) ->
+             ( Board.Post_id.to_string post.id,
+               Board.Agent_id.to_string post.author,
+               utf8_truncate post.content 300 ))
+           sorted_posts)
+      ~extra_context:
+        (Some
+           (Printf.sprintf
+              "Trigger: %s\nAllowed MCP tools for this run: %s\nSelect exactly one assignment for this agent. The worker will use tools directly."
+              trigger_reason (String.concat ", " allowed_tools)))
+      ~max_agents:1 ~allow_post:(List.mem "masc_board_post" allowed_tools)
+  in
+  let cascade_result =
+    run_heartbeat_llm_traced ~agent_name ~phase:"lodge_tool_assignment" ~prompt
+  in
+  match
+    Lodge_decision.parse_selection_plan ~allowed_agents:[ agent_name ]
+      ~allowed_post_ids:
+        (List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id) sorted_posts)
+      ~max_agents:1 cascade_result.Lodge_cascade.response
+  with
+  | Ok { assignments = assignment :: _; _ } ->
+      Ok (assignment, identity_prompt, sorted_posts, allowed_tools)
+  | Ok _ -> Error "selection returned no assignments"
+  | Error reason -> Error reason
+
+let run_agent_tool_loop ~agent_name ~trigger ~trigger_reason ~recent_posts =
+  match select_tool_loop_assignment ~agent_name ~trigger ~trigger_reason ~recent_posts with
+  | Error reason -> Skipped ("tool_loop_selection_failed:" ^ reason)
+  | Ok (assignment, identity_prompt, sorted_posts, allowed_tools) ->
+      let context = heartbeat_tool_context sorted_posts in
+      if Env_config.LodgeV2.delegate_llm then begin
+        A2a_tools.emit_heartbeat_task ~agent:agent_name ~goal:assignment.goal ~context
+          ~allowed_tools ~decision_reason:assignment.reason
+          ~decision_confidence:assignment.confidence ();
+        Passed ("delegated_tool_loop:" ^ assignment.reason)
+      end else
+        match
+          Lodge_worker.run_local ~agent_name ~identity_prompt ~goal:assignment.goal
+            ~context ~allow_post:(List.mem "masc_board_post" allowed_tools)
+            ~allowed_tools_override:allowed_tools ()
+        with
+        | Error err -> Skipped ("tool_loop_failed:" ^ err)
+        | Ok completion -> checkin_result_of_completion ~agent_name completion
+
 let action_of_choice (choice : Lodge_decision.choice) : (agent_action, string) result =
   match (choice.action, choice.target_post_id, choice.content) with
   | Lodge_decision.Post, _, Some content -> Ok (ActionPost content)
@@ -2590,13 +2737,11 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
       (name, trigger, Skipped "agent unhealthy (circuit breaker open)")
     else begin
       let trigger_reason = string_of_trigger trigger in
-      let decision =
-        decide_agent_action ~agent_name:name ~trigger ~trigger_reason ~recent_posts
-      in
-      let action = decision.action in
       let result =
         try
-          let outcome = execute_agent_action ~agent_name:name ~action in
+          let outcome =
+            run_agent_tool_loop ~agent_name:name ~trigger ~trigger_reason ~recent_posts
+          in
           (match outcome with
            | Acted _ -> Agent_health.record_success ~agent_name:name
            | Passed _ | Skipped _ -> ());
@@ -2615,34 +2760,11 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
            Lodge_selection.record_action ~agent_name:name ~action:`Post
        | Acted { action = ActionComment _; _ } ->
            Lodge_selection.record_action ~agent_name:name ~action:`Comment
-       | Passed _
-       | Skipped _ ->
-           Lodge_selection.record_action ~agent_name:name ~action:`Skip
        | Acted { action = ActionUpvote _; _ }
-       | Acted { action = ActionSkip; _ } -> ());
-      match result with
-      | Acted { action = ActionPost content; _ } ->
-          let summary =
-            Printf.sprintf "Posted: %s (%s, %.2f)"
-              (utf8_truncate content 40) decision.reason decision.confidence
-          in
-          (name, trigger, Acted { action = ActionPost content; summary })
-      | Acted { action = ActionComment (post_id, content); _ } ->
-          let summary =
-            Printf.sprintf "Commented on %s: %s (%s, %.2f)" post_id
-              (utf8_truncate content 30) decision.reason decision.confidence
-          in
-          (name, trigger, Acted { action = ActionComment (post_id, content); summary })
-      | Acted { action = ActionUpvote post_id; _ } ->
-          let summary =
-            Printf.sprintf "Upvoted %s (%s, %.2f)" post_id decision.reason
-              decision.confidence
-          in
-          (name, trigger, Acted { action = ActionUpvote post_id; summary })
-      | Acted { action = ActionSkip; _ } ->
-          (name, trigger, Passed decision.reason)
-      | Passed reason -> (name, trigger, Passed reason)
-      | Skipped reason -> (name, trigger, Skipped reason)
+       | Acted { action = ActionSkip; _ }
+       | Passed _ | Skipped _ ->
+           Lodge_selection.record_action ~agent_name:name ~action:`Skip);
+      (name, trigger, result)
     end
   ) selected in
 
@@ -2731,13 +2853,11 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
                 Printf.printf "[lodge] Skipping self-heartbeat for %s (unhealthy)\n%!" name
               else begin
                 let trigger_reason = "self-heartbeat continuation" in
-                let decision =
-                  decide_agent_action ~agent_name:name ~trigger:Scheduled ~trigger_reason
-                    ~recent_posts
-                in
-                let action = decision.action in
                 (try
-                  let outcome = execute_agent_action ~agent_name:name ~action in
+                  let outcome =
+                    run_agent_tool_loop ~agent_name:name ~trigger:Scheduled
+                      ~trigger_reason ~recent_posts
+                  in
                   (match outcome with
                    | Acted _ -> Agent_health.record_success ~agent_name:name
                    | Passed _ | Skipped _ -> ())

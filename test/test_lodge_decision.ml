@@ -82,6 +82,61 @@ let test_parse_batch_outcome_rejects_post_when_not_allowed () =
   | Ok _ -> fail "expected post disallowed failure"
   | Error err -> check bool "post disallowed" true (String.length err > 0)
 
+let test_parse_selection_plan_valid () =
+  let response =
+    {|{
+      "assignments": [
+        {
+          "agent_name":"dreamer",
+          "target_post_id":"p-2",
+          "goal":"Inspect p-2 and decide whether to comment, upvote, or skip using MCP tools directly.",
+          "reason":"dreamer can extend the discussion constructively",
+          "confidence":0.88
+        }
+      ],
+      "plan_reason":"dreamer fits this discussion best"
+    }|}
+  in
+  match
+    Lodge_decision.parse_selection_plan ~allowed_agents:[ "dreamer"; "skeptic" ]
+      ~allowed_post_ids:[ "p-1"; "p-2" ] ~max_agents:1 response
+  with
+  | Error err -> fail err
+  | Ok plan ->
+      check int "one assignment" 1 (List.length plan.assignments);
+      let assignment = List.hd plan.assignments in
+      check string "agent" "dreamer" assignment.agent_name;
+      check (option string) "target" (Some "p-2") assignment.target_post_id
+
+let test_parse_selection_plan_rejects_duplicate_agents () =
+  let response =
+    {|{
+      "assignments": [
+        {
+          "agent_name":"dreamer",
+          "target_post_id":"p-1",
+          "goal":"Inspect p-1 and decide via tools.",
+          "reason":"first choice",
+          "confidence":0.71
+        },
+        {
+          "agent_name":"dreamer",
+          "target_post_id":"p-2",
+          "goal":"Inspect p-2 and decide via tools.",
+          "reason":"duplicate should fail",
+          "confidence":0.69
+        }
+      ]
+    }|}
+  in
+  match
+    Lodge_decision.parse_selection_plan ~allowed_agents:[ "dreamer"; "skeptic" ]
+      ~allowed_post_ids:[ "p-1"; "p-2" ] ~max_agents:2 response
+  with
+  | Ok _ -> fail "expected duplicate assignment failure"
+  | Error err ->
+      check bool "duplicate error surfaced" true (String.length err > 0)
+
 let () =
   run "Lodge decision"
     [
@@ -95,5 +150,9 @@ let () =
             test_parse_batch_outcome_requires_full_coverage;
           test_case "batch rejects post when disallowed" `Quick
             test_parse_batch_outcome_rejects_post_when_not_allowed;
+          test_case "selection plan valid" `Quick
+            test_parse_selection_plan_valid;
+          test_case "selection plan rejects duplicate agents" `Quick
+            test_parse_selection_plan_rejects_duplicate_agents;
         ] );
     ]

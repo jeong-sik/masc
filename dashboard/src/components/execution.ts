@@ -5,11 +5,10 @@ import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { type MonitorTone, toEpoch, toneRank, normalizeKey, limitText, taskPriorityValue, taskPriorityLabel } from './common/monitor'
-import { buildAgentMotion, type AgentMotionSnapshot } from './common/agent-motion'
+import type { AgentMotionSnapshot } from './common/agent-motion'
 import { openAgentDetail } from './agent-detail'
-import { agents, boardPosts, keepers, messages, tasks } from '../store'
+import { agents, tasks, agentMotionMap } from '../store'
 import type { Agent, Task } from '../types'
-import { journal } from '../sse'
 
 const QUIET_EXECUTION_MS = 10 * 60 * 1000
 const STALE_EXECUTION_MS = 20 * 60 * 1000
@@ -82,22 +81,6 @@ function dispatchStateLabel(state: DispatchState): string {
 
 function lastTouchedAt(task: Task): string | null {
   return task.updated_at ?? task.created_at ?? null
-}
-
-function buildMotionMap(agentList: Agent[]): Map<string, AgentMotionSnapshot> {
-  const map = new Map<string, AgentMotionSnapshot>()
-  for (const agent of agentList) {
-    map.set(
-      normalizeKey(agent.name),
-      buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
-        currentTask: agent.current_task,
-        lastSeen: agent.last_seen,
-        boardPosts: boardPosts.value,
-        keepers: keepers.value,
-      }),
-    )
-  }
-  return map
 }
 
 function buildTaskRow(
@@ -371,7 +354,7 @@ export function Execution() {
   const agentList = agents.value
   const taskList = tasks.value
   const agentsByName = new Map(agentList.map(agent => [normalizeKey(agent.name), agent] as const))
-  const motionByName = buildMotionMap(agentList)
+  const motionByName = agentMotionMap.value
 
   const activeRows = taskList
     .filter(task => task.status === 'claimed' || task.status === 'in_progress')

@@ -21,8 +21,9 @@ import type {
   MdalIterationRecord,
 } from './types'
 import { fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, fetchMdalLoops, type DashboardMode } from './api'
-import { lastEvent } from './sse'
+import { lastEvent, connected, journal } from './sse'
 import { deriveKeeperDiagnostic, normalizeLodgeRuntimeStatus } from './keeper-runtime'
+import { buildAgentMotion, type AgentMotionSnapshot } from './components/common/agent-motion'
 
 // --- Core state signals ---
 
@@ -92,6 +93,27 @@ export const tasksByStatus = computed(() => {
     inProgress: all.filter(t => t.status === 'in_progress' || t.status === 'claimed'),
     done: all.filter(t => t.status === 'done'),
   }
+})
+
+export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = computed(() => {
+  const map = new Map<string, AgentMotionSnapshot>()
+  const taskList = tasks.value
+  const messageList = messages.value
+  const journalList = journal.value
+  const boardPostList = boardPosts.value
+  const keeperList = keepers.value
+  for (const agent of agents.value) {
+    map.set(
+      agent.name.trim().toLowerCase(),
+      buildAgentMotion(agent.name, taskList, messageList, journalList, {
+        currentTask: agent.current_task,
+        lastSeen: agent.last_seen,
+        boardPosts: boardPostList,
+        keepers: keeperList,
+      }),
+    )
+  }
+  return map
 })
 
 // --- Keeper lifecycle derivation ---
@@ -685,29 +707,40 @@ function scheduleMdalRefresh(): void {
   }, 350)
 }
 
+// Events that affect dashboard data (agents, tasks, messages, keepers, status).
+// Other events have their own handlers (board, council, mdal) or need no fetch (keeper_heartbeat).
+const DASHBOARD_REFRESH_EVENTS = new Set([
+  'task_update', 'task_claimed', 'task_done',
+  'agent_joined', 'agent_left',
+  'broadcast',
+  'keeper_handoff', 'keeper_compaction', 'keeper_guardrail',
+])
+
 export function setupSSEReaction(): () => void {
-  // Subscribe to SSE events and trigger refreshes
+  // Subscribe to SSE events and trigger selective refreshes
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
 
-    // Handle keeper heartbeat events — update heartbeat map without full refresh
+    // Handle keeper heartbeat events — update heartbeat map without any fetch
     if (event.type === 'keeper_heartbeat' && event.name) {
       const next = new Map(keeperHeartbeats.value)
       next.set(event.name, event.ts_unix ? event.ts_unix * 1000 : Date.now())
       keeperHeartbeats.value = next
+      return // No dashboard fetch needed
     }
 
-    invalidateDashboardCache()
-
-    // Debounced dashboard refresh
-    if (!_fetchDebounce) {
-      _fetchDebounce = setTimeout(() => {
-        refreshDashboard()
-        _fetchDebounce = null
-      }, 500)
+    // Dashboard data events — debounced full refresh
+    if (DASHBOARD_REFRESH_EVENTS.has(event.type)) {
+      invalidateDashboardCache()
+      if (!_fetchDebounce) {
+        _fetchDebounce = setTimeout(() => {
+          refreshDashboard()
+          _fetchDebounce = null
+        }, 500)
+      }
     }
 
-    // Board-specific events trigger board refresh
+    // Board-specific events trigger board refresh only
     if (
       event.type === 'board_post'
       || event.type === 'masc/board_post'
@@ -722,16 +755,12 @@ export function setupSSEReaction(): () => void {
       }
     }
 
-    // Keeper events trigger dashboard refresh for up-to-date metrics
-    if (event.type === 'keeper_handoff' || event.type === 'keeper_compaction' || event.type === 'keeper_guardrail') {
-      invalidateDashboardCache()
-    }
-
-    // Council decision events trigger council refresh
+    // Council decision events trigger council refresh only
     if (event.type.startsWith('decision_')) {
       scheduleCouncilRefresh()
     }
 
+    // MDAL events trigger mdal refresh only
     if (
       event.type === 'mdal_started'
       || event.type === 'mdal_iteration'
@@ -762,8 +791,10 @@ let _periodicId: ReturnType<typeof setInterval> | null = null
 export function startPeriodicRefresh(): void {
   if (_periodicId) return
   _periodicId = setInterval(() => {
-    invalidateDashboardCache()
-    refreshDashboard()
+    if (!connected.value) {
+      invalidateDashboardCache()
+      refreshDashboard()
+    }
   }, 10000)
 }
 

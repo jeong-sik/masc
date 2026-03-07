@@ -4,8 +4,7 @@ import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
-import { buildAgentMotion } from './common/agent-motion'
-import { agents, tasks, messages, boardPosts, keepers } from '../store'
+import { agents, tasks, messages, boardPosts, keepers, agentMotionMap } from '../store'
 import { connected, eventCount, journal } from '../sse'
 import { classifyJournalKind, journalActor, journalDisplayText } from '../journal-entry'
 import type { Message, JournalEntry, Task, BoardPost, Keeper } from '../types'
@@ -171,23 +170,20 @@ const filteredRows = computed(() => {
   return rows.slice(0, MAX_VISIBLE_ROWS)
 })
 
-const agentMotionRows = computed(() =>
-  agents.value
+const agentMotionRows = computed(() => {
+  const motionMap = agentMotionMap.value
+  const defaultMotion = { activeAssignedCount: 0, lastActivityAt: null, lastActivityText: null }
+  return agents.value
     .map(agent => ({
       agent,
-      motion: buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
-        currentTask: agent.current_task,
-        lastSeen: agent.last_seen,
-        boardPosts: boardPosts.value,
-        keepers: keepers.value,
-      }),
+      motion: motionMap.get(agent.name.trim().toLowerCase()) ?? defaultMotion,
     }))
     .sort((a, b) => {
       const countDiff = b.motion.activeAssignedCount - a.motion.activeAssignedCount
       if (countDiff !== 0) return countDiff
       return toEpoch(b.motion.lastActivityAt ?? 0) - toEpoch(a.motion.lastActivityAt ?? 0)
     })
-)
+})
 
 function formatClock(timestamp: string): string {
   const date = new Date(timestamp)

@@ -6,7 +6,6 @@ import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { type MonitorTone, toEpoch, toneRank, normalizeKey, limitText, taskPriorityValue, taskPriorityLabel } from './common/monitor'
-import { buildAgentMotion } from './common/agent-motion'
 import { Execution } from './execution'
 import {
   agents,
@@ -18,14 +17,13 @@ import {
   tasksByStatus,
   keeperLifecycles,
   staleKeepers,
-  messages,
-  boardPosts,
+  agentMotionMap,
 } from '../store'
 import type { Agent, Keeper, LodgeRuntimeStatus, Task } from '../types'
 import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
 import { navigate } from '../router'
-import { connected, eventCount, journal } from '../sse'
+import { connected, eventCount } from '../sse'
 import { openActivityPanel } from '../activity-panel'
 
 const QUIET_AGENT_MS = 10 * 60 * 1000
@@ -265,14 +263,10 @@ export function Overview() {
     agentList.map(agent => [normalizeKey(agent.name), agent] as [string, Agent]),
   )
 
+  const motionMap = agentMotionMap.value
   const agentPulses: AgentPulse[] = agentList
     .map(agent => {
-      const motion = buildAgentMotion(agent.name, taskList, messages.value, journal.value, {
-        currentTask: agent.current_task,
-        lastSeen: agent.last_seen,
-        boardPosts: boardPosts.value,
-        keepers: keeperList,
-      })
+      const motion = motionMap.get(normalizeKey(agent.name)) ?? { activeAssignedCount: 0, lastActivityAt: null, lastActivityText: null }
       const lastSignalAt = motion.lastActivityAt ?? agent.last_seen ?? null
       const signalAgeMs = lastSignalAt ? Math.max(0, Date.now() - toEpoch(lastSignalAt)) : Number.POSITIVE_INFINITY
       const activeTaskCount = motion.activeAssignedCount
@@ -393,12 +387,7 @@ export function Overview() {
     .map(task => {
       const owner = task.assignee ? (agentsByName.get(normalizeKey(task.assignee)) ?? null) : null
       const ownerMotion = owner
-        ? buildAgentMotion(owner.name, taskList, messages.value, journal.value, {
-            currentTask: owner.current_task,
-            lastSeen: owner.last_seen,
-            boardPosts: boardPosts.value,
-            keepers: keeperList,
-          })
+        ? (motionMap.get(normalizeKey(owner.name)) ?? null)
         : null
       const lastSignalAt = ownerMotion?.lastActivityAt ?? owner?.last_seen ?? null
       const signalAgeMs = lastSignalAt ? Math.max(0, Date.now() - toEpoch(lastSignalAt)) : Number.POSITIVE_INFINITY

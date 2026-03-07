@@ -5733,6 +5733,11 @@ let command_plane_help_http_json () =
                 ("title", `String "Supervisor Mode");
                 ("path", `String "docs/SUPERVISOR-MODE.md");
               ];
+            `Assoc
+              [
+                ("title", `String "Swarm Delivery Runbook");
+                ("path", `String "docs/SWARM-DELIVERY-RUNBOOK.md");
+              ];
           ] );
       ( "concepts",
         `List

@@ -6,6 +6,7 @@ Canonical benchmark / swarm path는 이 문서가 아니다.
 
 - CPv2 benchmark / swarm: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 - benchmark compare recipe: [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)
+- swarm-driven implementation delivery: [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)
 
 The goal is not a new autonomous control plane. The goal is a small, explicit loop that Codex or Claude Code can run safely:
 
@@ -262,6 +263,7 @@ two-worker llama batch spawn, and verifies:
 
 ## Related Docs
 
+- `docs/SWARM-DELIVERY-RUNBOOK.md`
 - `docs/REMOTE-MCP-OPERATOR.md`
 - `docs/TEAM-SESSION.md`
 - `scripts/harness_supervisor_team_session.sh`

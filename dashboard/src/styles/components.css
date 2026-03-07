@@ -4173,6 +4173,17 @@ button.council-row.selected {
   gap: 12px;
 }
 
+.command-swarm-summary {
+  margin-top: 12px;
+}
+
+.command-swarm-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
 .command-guide-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
@@ -4284,6 +4295,15 @@ button.council-row.selected {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
   gap: 16px;
+}
+
+@media (max-width: 1100px) {
+  .command-swarm-layout,
+  .command-surface-grid,
+  .command-grid,
+  .command-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .command-section {

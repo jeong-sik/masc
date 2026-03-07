@@ -149,6 +149,7 @@
    sse_client
    streamable_http
    subscriptions
+   swarm_status
    swarm_behaviors_eio
    swarm_eio
    telemetry_eio

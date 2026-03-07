@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
 import { showToast } from './common/toast'
 import type { OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
 import {
@@ -254,10 +253,6 @@ async function confirmPending(confirmToken: string) {
 }
 
 export function Ops() {
-  useEffect(() => {
-    void refreshOperatorSnapshot()
-  }, [])
-
   const snapshot = operatorSnapshot.value
   const room = snapshot?.room ?? {}
   const sessions = snapshot?.sessions ?? []

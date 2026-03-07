@@ -10,6 +10,10 @@ import type {
   CommandPlaneHelpStep,
   CommandPlaneOperationCard,
   CommandPlaneSurface,
+  CommandPlaneSwarmFlag,
+  CommandPlaneSwarmGap,
+  CommandPlaneSwarmLane,
+  CommandPlaneSwarmTimelineEvent,
   CommandPlaneTraceEvent,
   CommandPlaneTreeNode,
   Task,
@@ -165,6 +169,143 @@ function SummaryCards() {
       <div class="monitor-stat-card"><span>Approvals</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0} tracked</small></div>
       <div class="monitor-stat-card"><span>Alerts</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0} warn</small></div>
     </div>
+  `
+}
+
+function swarmLaneTone(lane: CommandPlaneSwarmLane): string {
+  if (lane.motion_state === 'stalled') return 'bad'
+  if (lane.hard_flags.some(flag => flag.severity === 'bad')) return 'bad'
+  if (lane.motion_state === 'waiting') return 'warn'
+  if (lane.hard_flags.some(flag => flag.severity === 'warn')) return 'warn'
+  return 'ok'
+}
+
+function SwarmLaneCard({ lane }: { lane: CommandPlaneSwarmLane }) {
+  const counts = lane.counts ?? {}
+  const tone = swarmLaneTone(lane)
+  return html`
+    <article class="command-card compact">
+      <div class="command-card-head">
+        <div>
+          <strong>${lane.label}</strong>
+          <div class="command-card-sub">${lane.source_of_truth}</div>
+        </div>
+        <div class="command-tag-row">
+          <span class="command-chip ${toneClass(tone)}">${lane.phase}</span>
+          <span class="command-chip ${toneClass(tone)}">${lane.motion_state}</span>
+          <span class="command-chip">${relativeTime(lane.last_movement_at)}</span>
+        </div>
+      </div>
+      <div class="command-card-grid">
+        <span>Movement</span><span>${lane.movement_reason}</span>
+        <span>Step</span><span>${lane.current_step}</span>
+        <span>Counts</span><span>${counts.operations ?? 0} ops · ${counts.detachments ?? 0} dets · ${counts.workers ?? 0} workers · ${counts.approvals ?? 0} approvals · ${counts.alerts ?? 0} alerts</span>
+      </div>
+      ${lane.blockers.length > 0
+        ? html`<div class="command-card-foot">Blockers: ${lane.blockers.join(' · ')}</div>`
+        : null}
+      ${lane.hard_flags.length > 0
+        ? html`
+            <div class="command-tag-row">
+              ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="command-tag ${toneClass(flag.severity)}">${flag.code}</span>`)}
+            </div>
+          `
+        : null}
+    </article>
+  `
+}
+
+function SwarmTimelineRow({ event }: { event: CommandPlaneSwarmTimelineEvent }) {
+  return html`
+    <div class="command-trace-row">
+      <div class="command-trace-head">
+        <strong>${event.title}</strong>
+        <span class="command-chip ${toneClass(event.tone)}">${event.lane_id}</span>
+        <span class="command-chip">${event.kind}</span>
+        <span class="command-chip">${relativeTime(event.timestamp)}</span>
+      </div>
+      <div class="command-card-sub">${event.source}</div>
+      <div class="command-card-foot">${event.detail}</div>
+    </div>
+  `
+}
+
+function SwarmGapRow({ gap }: { gap: CommandPlaneSwarmGap }) {
+  return html`
+    <div class="command-guide-inline">
+      <div class="command-guide-head">
+        <strong>${gap.code}</strong>
+        <span class="command-chip ${toneClass(gap.severity)}">${gap.count}</span>
+      </div>
+      <p>${gap.summary}</p>
+      ${gap.lane_ids.length > 0
+        ? html`<div class="command-tag-row">${gap.lane_ids.map(laneId => html`<span class="command-tag">${laneId}</span>`)}</div>`
+        : null}
+    </div>
+  `
+}
+
+function SwarmPanel() {
+  const swarm = commandPlaneSnapshot.value?.swarm_status
+  const lanes = swarm?.lanes.filter(lane => lane.present) ?? []
+  const gaps = swarm?.gaps.items ?? []
+  const timeline = swarm?.timeline.slice(0, 6) ?? []
+  const overview = swarm?.overview
+  const recommendation = swarm?.recommended_next_action
+
+  return html`
+    <section class="card command-section">
+      <div class="card-title">Swarm</div>
+      ${swarm
+        ? html`
+            <div class="command-summary-grid command-swarm-summary">
+              <div class="monitor-stat-card"><span>Active Lanes</span><strong>${overview?.active_lanes ?? 0}</strong><small>${overview?.moving_lanes ?? 0} moving</small></div>
+              <div class="monitor-stat-card"><span>Stalled</span><strong>${overview?.stalled_lanes ?? 0}</strong><small>${overview?.projected_lanes ?? 0} projected</small></div>
+              <div class="monitor-stat-card"><span>Last Movement</span><strong>${relativeTime(overview?.last_movement_at)}</strong><small>${swarm.generated_at ? `snapshot ${relativeTime(swarm.generated_at)}` : 'snapshot now'}</small></div>
+              <div class="monitor-stat-card"><span>Next Action</span><strong>${recommendation?.label ?? 'Observe operator state'}</strong><small>${recommendation?.tool ?? 'masc_operator_snapshot'}</small></div>
+            </div>
+
+            <div class="command-swarm-layout">
+              <div class="command-card-stack">
+                ${lanes.length > 0
+                  ? lanes.map(lane => html`<${SwarmLaneCard} lane=${lane} />`)
+                  : html`<div class="empty-state">No active swarm lanes.</div>`}
+              </div>
+
+              <div class="command-card-stack">
+                <div class="command-guide-card highlight">
+                  <div class="command-guide-head">
+                    <strong>${recommendation?.label ?? 'Observe operator state'}</strong>
+                    <span class="command-chip">${recommendation?.lane_id ?? 'global'}</span>
+                  </div>
+                  <p>${recommendation?.reason ?? 'No active swarm lane is visible yet.'}</p>
+                  <div class="command-card-foot">${recommendation?.tool ?? 'masc_operator_snapshot'}</div>
+                </div>
+
+                <div class="command-guide-card ${gaps.length > 0 ? 'warn' : 'ok'}">
+                  <div class="command-guide-head">
+                    <strong>Hard Gaps</strong>
+                    <span class="command-chip ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
+                  </div>
+                  ${gaps.length > 0
+                    ? html`<div class="command-card-stack">${gaps.slice(0, 4).map(gap => html`<${SwarmGapRow} gap=${gap} />`)}</div>`
+                    : html`<p>No hard gaps are currently visible.</p>`}
+                </div>
+
+                <div class="command-guide-card">
+                  <div class="command-guide-head">
+                    <strong>Movement Timeline</strong>
+                    <span class="command-chip">${timeline.length}</span>
+                  </div>
+                  ${timeline.length > 0
+                    ? html`<div class="command-card-stack">${timeline.map(event => html`<${SwarmTimelineRow} event=${event} />`)}</div>`
+                    : html`<p>No recent movement events are attached yet.</p>`}
+                </div>
+              </div>
+            </div>
+          `
+        : html`<div class="empty-state">Swarm status is unavailable.</div>`}
+    </section>
   `
 }
 
@@ -772,7 +913,6 @@ function SurfaceBody() {
 
 export function Command() {
   useEffect(() => {
-    void refreshCommandPlaneSnapshot()
     void refreshCommandPlaneHelp()
   }, [])
 
@@ -807,6 +947,7 @@ export function Command() {
         : null}
 
       <${SummaryCards} />
+      <${SwarmPanel} />
       <${GuidedPanel} />
       <${SurfaceTabs} />
       <${SurfaceBody} />

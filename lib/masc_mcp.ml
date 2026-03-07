@@ -125,6 +125,7 @@ module Generational_metrics = Generational_metrics
 module Handoff_quality = Handoff_quality
 module Adaptive_thresholds = Adaptive_thresholds
 module Dashboard = Dashboard
+module Swarm_status = Swarm_status
 module Tempo = Tempo
 module Federation = Federation
 module Lodge_decision = Lodge_decision

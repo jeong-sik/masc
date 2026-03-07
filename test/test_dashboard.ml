@@ -74,6 +74,7 @@ let test_generate_compact () =
   Alcotest.(check bool) "contains Rooms" true (contains output "Rooms:");
   Alcotest.(check bool) "contains Tasks" true (contains output "Tasks:");
   Alcotest.(check bool) "contains Current" true (contains output "Current:");
+  Alcotest.(check bool) "contains Swarm" true (contains output "Swarm:");
   Alcotest.(check bool) "contains Tempo" true (contains output "Tempo:");
   cleanup_dir dir
 
@@ -85,6 +86,7 @@ let test_generate_full () =
   Alcotest.(check bool) "contains MASC Dashboard" true (contains output "MASC Dashboard");
   Alcotest.(check bool) "contains Scope" true (contains output "Scope: all");
   Alcotest.(check bool) "contains Rooms section" true (contains output "Rooms");
+  Alcotest.(check bool) "contains Swarm section" true (contains output "Swarm");
   Alcotest.(check bool) "contains default room" true (contains output "Room: default");
   Alcotest.(check bool) "contains watch hint" true (contains output "watch");
   cleanup_dir dir

@@ -57,35 +57,36 @@ let test_lodge_heartbeat_uses_tom_context () =
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_tom.predict_top_k")
 
-let test_lodge_heartbeat_post_fallback_policy () =
+let test_lodge_heartbeat_no_heuristic_fallback_policy () =
   check bool "scheduled trigger can fallback to post"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "| Scheduled | ManualTrigger -> true");
   check bool "content alerts do not fallback to post"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "| ContentAlert _ | Mentioned _ -> false");
-  check bool "batch parse failures become explicit decision error"
+  check bool "decision errors are explicit"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml"
        {|reason = "decision error: " ^ reason|});
   check bool "post gating still enforced through allow_post"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml"
-       "~allow_post:(trigger_allows_post trigger)")
-
-let test_lodge_heartbeat_hidden_fallbacks_removed () =
+       "~allow_post:(trigger_allows_post trigger)");
+  check bool "unparsed fallback removed"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|reason = Some "unparsed"|});
+  check bool "heuristic maybe_post_action removed"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "maybe_post_action");
+  check bool "legacy NoAction fallback removed"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "NoAction");
   check bool "reaction batch prompt removed"
     false
     (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_reaction.batch_reaction_prompt");
   check bool "comment generation no longer auto-upvotes"
     false
     (file_contains_pattern "lib/lodge_heartbeat.ml" {|None -> ActionUpvote|});
-  check bool "scheduled fallback helper removed"
-    false
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "maybe_post_action");
-  check bool "legacy NoAction fallback removed"
-    false
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "NoAction");
   check bool "comment rate limit enforced explicitly"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" {|Skipped "comment_rate_limited"|});
@@ -120,8 +121,7 @@ let () =
           test_case "decision prompt mainline" `Quick test_lodge_heartbeat_uses_decision_prompt;
           test_case "reflection updates self summary" `Quick test_lodge_heartbeat_updates_self_summary;
           test_case "ToM context used" `Quick test_lodge_heartbeat_uses_tom_context;
-          test_case "post fallback policy locked" `Quick test_lodge_heartbeat_post_fallback_policy;
-          test_case "hidden fallbacks removed" `Quick test_lodge_heartbeat_hidden_fallbacks_removed;
+          test_case "no heuristic fallback policy locked" `Quick test_lodge_heartbeat_no_heuristic_fallback_policy;
           test_case "legacy public surface removed" `Quick test_lodge_heartbeat_public_memory_helpers_removed;
         ]);
     ]

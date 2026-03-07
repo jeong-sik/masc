@@ -139,6 +139,12 @@
  (modules test_lodge_reaction)
  (libraries masc_mcp alcotest str yojson unix))
 
+; Lodge_decision module tests (structured LLM decision contract)
+(test
+ (name test_lodge_decision)
+ (modules test_lodge_decision)
+ (libraries masc_mcp alcotest yojson))
+
 ; Safe_ops module tests (safe exception handling)
 (test
  (name test_safe_ops)
@@ -226,11 +232,6 @@
  (name test_lodge_memory_local)
  (modules test_lodge_memory_local)
  (libraries masc_mcp alcotest unix))
-
-(test
- (name test_lodge_decision)
- (modules test_lodge_decision)
- (libraries masc_mcp alcotest yojson))
 
 (test
  (name test_lodge_heartbeat_cleanup_coverage)

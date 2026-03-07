@@ -1,22 +1,19 @@
-(** Lodge Heartbeat - 세계의 맥박
+(** Lodge Heartbeat — Reaction-first social loop
 
-    The Lodge의 심장박동. 1분마다 세계가 "뛴다".
-
-    기능:
-    - 에이전트 깨우기 (매칭 70% + 발견 20% + 랜덤 10%)
-    - 인카운터 롤링
-    - 시간대 선호 반영
+    Mainline responsibilities:
+    - planner/thompson 기반 selection
+    - reaction/signature 기반 social decision
+    - reflection 결과를 self-summary로 승격
 
     @since 2.14.0
 *)
 
 [@@@warning "-32-69"]
 
-(** {1 Lodge Agent Status (GraphQL-based)}
+(** {1 Lodge Agent Status (GraphQL/cache based)}
 
-    Agent data is stored in Neo4j and accessed via GraphQL.
-    No filesystem-based agent registration needed.
-    Core agents: dreamer, skeptic, historian, pragmatist, connector
+    Agent roster is loaded through the heartbeat GraphQL path and cached locally.
+    Core agents remain dreamer, skeptic, historian, pragmatist, connector.
 *)
 
 (** {1 Agent Singleton Management}
@@ -702,10 +699,7 @@ and agent_action =
   | ActionPost of string           (** content *)
   | ActionComment of string * string  (** post_id, content *)
   | ActionUpvote of string         (** post_id *)
-  | ActionPropose of string * string (** name, reason *)
-  | ActionCode of string * string * string (** filename, lang, code *)
   | ActionSkip
-  | ActionDelegated of string      (** Soul sent to Worker (request_id) *)
 
 type heartbeat_result = {
   timestamp: float;
@@ -750,7 +744,7 @@ let time_modifier agent =
 let load_agents_from_neo4j () =
   (* first:25 — GRAPHQL_MAX_COST=2000. Increased from 15 to accommodate new agents.
      19 agents exist; alphabetical pagination requires headroom. *)
-  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name preferredHours peakHour traits interests activityLevel } } } }\"}" in
+  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name preferredHours peakHour traits interests activityLevel personalityHint } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   Printf.eprintf "[Heartbeat] Loading agents via GraphQL (key=%d chars)...\n%!" (String.length api_key);
   match graphql_request ~timeout_sec:5.0 gql_query with
@@ -794,9 +788,14 @@ let load_agents_from_neo4j () =
                 try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
                 with Yojson.Safe.Util.Type_error _ | Failure _ -> []
               in
+              let personality_hint =
+                match Yojson.Safe.Util.(member "personalityHint" node) with
+                | `String s -> Some s
+                | _ -> None
+              in
               if preferred_hours <> [] then
                 Some { name; preferred_hours; peak_hour; traits; interests;
-                       personality_hint = None; activity_level }
+                       personality_hint; activity_level }
               else
                 None
             with Yojson.Safe.Util.Type_error (msg, _) ->
@@ -1089,7 +1088,7 @@ let get_agents () =
     if loaded <> [] then begin
       agents_cache := loaded;
       agents_cache_time := now;
-      Eio.traceln "🔄 Loaded %d agents from Neo4j" (List.length loaded)
+      Eio.traceln "🔄 Loaded %d heartbeat agents" (List.length loaded)
     end else if !agents_cache = [] then begin
       (* First load failed — record time to avoid hammering *)
       agents_cache_time := now;
@@ -1419,108 +1418,6 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
       if String.length result > 0 && String.length result < 5 then
         Eio.traceln "   ⚠️ [Lodge] GraphQL activity log may have failed for %s" agent_name
 
-(* record_agent_memory and load_agent_memories are defined after
-   add_turn_to_thread and get_recent_turns (OCaml requires definition before use) *)
-
-(** {1 Agent Thread Management - Conversation Accumulation} *)
-
-(** Get conversation config for agent threads *)
-let agent_thread_config () : Council.Conversation.config =
-  let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
-  { base_path = me_root; room = "lodge" }
-
-(** Get or create thread for an agent's ongoing activity *)
-let get_or_create_agent_thread ~agent_name : Council.Conversation.thread option =
-  let config = agent_thread_config () in
-  (* Look for existing active thread for this agent *)
-  let threads = Council.Conversation.list_active ~config in
-  let agent_thread = List.find_opt (fun (th : Council.Conversation.thread) ->
-    (* Thread topic starts with agent name *)
-    String.length th.topic >= String.length agent_name &&
-    String.sub th.topic 0 (String.length agent_name) = agent_name
-  ) threads in
-  match agent_thread with
-  | Some th -> Some th
-  | None ->
-      (* Create new thread for this agent *)
-      let topic = Printf.sprintf "%s 활동 기록" agent_name in
-      match Council.Conversation.start ~config ~topic ~initiator:agent_name ~max_turns:100 () with
-      | Ok th ->
-          Eio.traceln "   📜 New thread for %s: %s" agent_name th.id;
-          Some th
-      | Error e ->
-          Eio.traceln "   ❌ Thread creation failed for %s: %s" agent_name e;
-          None
-
-(** Add agent activity as a turn in their thread *)
-let add_turn_to_thread ~agent_name ~content ~action_type =
-  let config = agent_thread_config () in
-  match get_or_create_agent_thread ~agent_name with
-  | None -> ()
-  | Some thread ->
-      let action_prefix = match action_type with
-        | `Post reason -> Printf.sprintf "[POST: %s] " reason
-        | `Comment orig -> Printf.sprintf "[COMMENT on: %s] " (String.sub orig 0 (min 30 (String.length orig)))
-      in
-      let full_content = action_prefix ^ content in
-      match Council.Conversation.reply ~config ~thread_id:thread.id
-              ~speaker:agent_name ~content:full_content () with
-      | Ok _ -> Eio.traceln "   📝 Turn saved to thread %s" thread.id
-      | Error e -> Eio.traceln "   ⚠️ Turn save failed: %s" e
-
-(** Get recent turns from agent's thread for context *)
-let get_recent_turns ~agent_name ~limit : string option =
-  match get_or_create_agent_thread ~agent_name with
-  | None -> None
-  | Some thread ->
-      let recent =
-        thread.turns
-        |> List.rev  (* Most recent first *)
-        |> (fun lst ->
-            let rec take n acc = function
-              | [] -> List.rev acc
-              | _ when n <= 0 -> List.rev acc
-              | x :: xs -> take (n - 1) (x :: acc) xs
-            in
-            take limit [] lst)
-        |> List.rev  (* Back to chronological order *)
-      in
-      if List.length recent = 0 then None
-      else begin
-        let turns_str = recent |> List.map (fun (t : Council.Conversation.turn) ->
-          Printf.sprintf "• %s" t.content
-        ) |> String.concat "\n" in
-        Some turns_str
-      end
-
-(** Record agent activity to both Council Thread and Memory Stream *)
-let record_agent_memory ~agent_name ~content ~action_type =
-  (* Council Thread — short-term conversational context *)
-  add_turn_to_thread ~agent_name ~content ~action_type;
-  (* Memory Stream — long-term scored retrieval *)
-  let mem_type = match action_type with
-    | `Post _ -> Memory_stream.Action "post"
-    | `Comment _ -> Memory_stream.Action "comment"
-  in
-  Memory_stream.add_memory ~agent_name ~content ~importance:5 mem_type;
-  Memory_stream.rotate_if_needed ~agent_name
-
-(** Load agent memories — combines Council Thread (recent) + Memory Stream (scored).
-    Returns formatted string suitable for LLM prompt context. *)
-let load_agent_memories ~agent_name ~limit =
-  (* Phase 1: Council thread for immediate recency, Memory Stream for scored depth *)
-  let thread_mem = get_recent_turns ~agent_name ~limit in
-  let stream_mem =
-    let entries = Memory_stream.retrieve ~agent_name ~query:"" ~limit in
-    if List.length entries = 0 then None
-    else Some (Memory_stream.format_memories entries)
-  in
-  match thread_mem, stream_mem with
-  | None, None -> None
-  | Some t, None -> Some t
-  | None, Some s -> Some s
-  | Some t, Some s -> Some (Printf.sprintf "%s\n\n[장기 기억]\n%s" t s)
-
 (** Agent profile loaded from Neo4j *)
 type agent_profile = {
   name: string;
@@ -1536,60 +1433,126 @@ type agent_profile = {
   personality_hint: string option;
 }
 
-(** Profile cache: (agent_name -> (profile, timestamp)) *)
-let profile_cache : (string, agent_profile * float) Hashtbl.t = Hashtbl.create 10
+(** Profile cache refreshed from the same GraphQL path used by heartbeat. *)
+let profile_cache : (string, agent_profile) Hashtbl.t = Hashtbl.create 16
 let profile_cache_ttl = 300.0  (* 5 minutes *)
+let profile_cache_time = ref 0.0
+
+let default_agent_profile ~agent_name =
+  { name = agent_name; role = None; description = None; traits = [];
+    interests = []; preferred_hours = []; peak_hour = None; activity_level = 0.5;
+    karma = 0; agent_prompt = None; personality_hint = None }
+
+let profile_of_agent_summary (agent : agent) : agent_profile =
+  {
+    name = agent.name;
+    role = None;
+    description = None;
+    traits = agent.traits;
+    interests = agent.interests;
+    preferred_hours = agent.preferred_hours;
+    peak_hour = agent.peak_hour;
+    activity_level = agent.activity_level;
+    karma = 0;
+    agent_prompt = None;
+    personality_hint = agent.personality_hint;
+  }
+
+let load_agent_profiles_from_graphql () : agent_profile list =
+  let gql_query =
+    "{\"query\": \"{ agents(first: 25) { edges { node { name role description preferredHours traits peakHour activityLevel personalityHint interests } } } }\"}"
+  in
+  match graphql_request ~timeout_sec:5.0 gql_query with
+  | Error _ -> []
+  | Ok json_str ->
+      try
+        let json = Yojson.Safe.from_string json_str in
+        match Yojson.Safe.Util.member "errors" json with
+        | `List errors when errors <> [] -> []
+        | _ ->
+            let open Yojson.Safe.Util in
+            let edges =
+              json
+              |> member "data"
+              |> member "agents"
+              |> member "edges"
+              |> to_list
+            in
+            List.filter_map
+              (fun edge ->
+                try
+                  let node = member "node" edge in
+                  let get_string_opt key =
+                    match member key node with
+                    | `Null -> None
+                    | `String s -> Some s
+                    | _ -> None
+                  in
+                  let get_int_opt key =
+                    match member key node with
+                    | `Null -> None
+                    | `Int i -> Some i
+                    | _ -> None
+                  in
+                  Some
+                    {
+                      name =
+                        node |> member "name" |> to_string_option
+                        |> Option.value ~default:"";
+                      role = get_string_opt "role";
+                      description = get_string_opt "description";
+                      traits =
+                        (try member "traits" node |> to_list |> List.map to_string
+                         with Type_error _ -> []);
+                      interests =
+                        (try member "interests" node |> to_list |> List.map to_string
+                         with Type_error _ -> []);
+                      preferred_hours =
+                        (try member "preferredHours" node |> to_list |> List.map to_int
+                         with Type_error _ -> []);
+                      peak_hour = get_int_opt "peakHour";
+                      activity_level =
+                        (match member "activityLevel" node with
+                         | `Float f -> f
+                         | `Int i -> float_of_int i
+                         | _ -> 0.5);
+                      karma = 0;
+                      agent_prompt = None;
+                      personality_hint = get_string_opt "personalityHint";
+                    }
+                with Type_error _ | Failure _ -> None)
+              edges
+      with Yojson.Json_error _ -> []
+
+let refresh_profile_cache () =
+  let now = Time_compat.now () in
+  if now -. !profile_cache_time >= profile_cache_ttl then begin
+    Hashtbl.clear profile_cache;
+    let profiles = load_agent_profiles_from_graphql () in
+    let profiles =
+      if profiles <> [] then profiles
+      else List.map profile_of_agent_summary (get_agents ())
+    in
+    List.iter
+      (fun profile ->
+        if profile.name <> "" then Hashtbl.replace profile_cache profile.name profile)
+      profiles;
+    profile_cache_time := now
+  end
 
 (** Load full agent profile from Neo4j via GraphQL - cached (5 min TTL) *)
 let load_agent_profile ~agent_name : agent_profile =
-  let now = Time_compat.now () in
-  let fallback = { name = agent_name; role = None; description = None; traits = [];
-    interests = []; preferred_hours = []; peak_hour = None; activity_level = 0.5;
-    karma = 0; agent_prompt = None; personality_hint = None } in
+  refresh_profile_cache ();
   match Hashtbl.find_opt profile_cache agent_name with
-  | Some (profile, ts) when now -. ts < profile_cache_ttl -> profile
-  | _ ->
-    let profile =
-      let sb = sb_path () in
-      let json_str =
-        Process_eio.run_argv ~timeout_sec:30.0 [sb; "graphql"; "agent"; agent_name]
+  | Some profile -> profile
+  | None ->
+      let fallback =
+        match List.find_opt (fun (agent : agent) -> agent.name = agent_name) (get_agents ()) with
+        | Some agent -> profile_of_agent_summary agent
+        | None -> default_agent_profile ~agent_name
       in
-      try
-        let json = Yojson.Safe.from_string json_str in
-        let open Yojson.Safe.Util in
-        let agent = json |> member "data" |> member "agent" in
-        if agent = `Null then fallback
-        else
-          let get_string_opt key = match agent |> member key with
-            | `Null -> None | `String s -> Some s | _ -> None in
-          let get_int_opt key = match agent |> member key with
-            | `Null -> None | `Int i -> Some i | _ -> None in
-          {
-            name = agent |> member "name" |> to_string_option |> Option.value ~default:agent_name;
-            role = get_string_opt "role";
-            description = get_string_opt "description";
-            traits = (try agent |> member "traits" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> []);
-            interests = (try agent |> member "interests" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> []);
-            preferred_hours = (try agent |> member "preferredHours" |> to_list |> List.map to_int with Yojson.Safe.Util.Type_error _ -> []);
-            peak_hour = get_int_opt "peakHour";
-            activity_level = (try agent |> member "activityLevel" |> to_float with Yojson.Safe.Util.Type_error _ -> 0.5);
-            karma = (try agent |> member "karma" |> to_int with Yojson.Safe.Util.Type_error _ -> 0);
-            agent_prompt = get_string_opt "agentPrompt";
-            personality_hint = get_string_opt "personalityHint";
-          }
-      with
-      | Yojson.Safe.Util.Type_error (msg, _) ->
-        Eio.traceln "⚠️ Failed to load profile for %s: %s" agent_name msg;
-        fallback
-      | Yojson.Json_error msg ->
-        Eio.traceln "⚠️ Profile JSON parse error for %s: %s" agent_name msg;
-        fallback
-      | exn ->
-        Eio.traceln "⚠️ Unexpected error loading profile for %s: %s" agent_name (Printexc.to_string exn);
-        fallback
-    in
-    Hashtbl.replace profile_cache agent_name (profile, now);
-    profile
+      Hashtbl.replace profile_cache agent_name fallback;
+      fallback
 
 (** Lodge context - loaded from .masc/config.json *)
 type lodge_tool = {
@@ -1724,18 +1687,32 @@ let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~cur
 (** Legacy: Load agent identity (for backward compat) *)
 let load_agent_identity ~agent_name =
   let profile = load_agent_profile ~agent_name in
-  match profile.description with
-  | Some d -> d
-  | None -> Printf.sprintf "당신은 %s 에이전트입니다." agent_name
+  let signature = Lodge_reaction.get_or_compute_signature ~agent_name in
+  let static_traits = profile.traits @ profile.interests in
+  if signature.total_reactions > 0 || static_traits <> [] then
+    Lodge_reaction.generate_identity_prompt signature ~static_traits
+  else
+    match profile.description with
+    | Some d -> d
+    | None -> Printf.sprintf "당신은 %s 에이전트입니다." agent_name
 
 (** Generate content using LLM based on agent personality from Neo4j *)
 let generate_agent_content ~agent_name ~context:_ ~action_type =
   (* Load full profile from Neo4j via GraphQL *)
   let profile = load_agent_profile ~agent_name in
-  (* Load short-term memories from local memory stream *)
-  let memories = load_agent_memories ~agent_name ~limit:3 in
-  (* Load thread history - accumulated agent activity *)
-  let thread_history = get_recent_turns ~agent_name ~limit:5 in
+  (* Lodge_memory is the single memory owner for heartbeat prompts. *)
+  let memories =
+    let query =
+      match action_type with
+      | `Post reason -> reason
+      | `Comment original_post -> original_post
+    in
+    let recalled = Lodge_memory.recall ~agent_name ~query ~limit:5 in
+    match Lodge_memory.format_for_prompt recalled with
+    | "" -> None
+    | formatted -> Some formatted
+  in
+  let thread_history = None in
   (* Get current hour for time-based prompting *)
   let current_hour = current_hour_kst () in
   (* Build action context *)
@@ -1804,7 +1781,6 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
   in
   if is_valid_response response then begin
     add_to_context ~name:agent_name ~role:Assistant ~content:response;
-    add_turn_to_thread ~agent_name ~content:response ~action_type;
     Some response
   end else begin
     Eio.traceln "   ⚠️ LLM response invalid for %s: '%s', skipping" agent_name
@@ -1877,122 +1853,6 @@ let clear_gap_signals ~topic =
 (** Get signals for a specific topic *)
 let get_signals_for_topic ~topic =
   !gap_signals |> List.filter (fun s -> s.gs_topic = topic)
-
-(** Parse LLM response to extract action *)
-let parse_action_response response =
-  (* Expected formats:
-     Multi-line:
-       REASON: 이유
-       ACTION: POST
-       CONTENT: 오늘 흥미로운 발견을 했어
-
-     Single-line (LLM often uses this):
-       ACTION: POST CONTENT: 오늘 흥미로운 발견을 했어
-       ACTION: COMMENT 3 CONTENT: 좋은 생각이야!
-
-     Mixed (REASON + ACTION on one line):
-       REASON: 경험 공유 ACTION: COMMENT 3 CONTENT: ...
-  *)
-  let lines = String.split_on_char '\n' response in
-  (* Try line-start match first, then scan for ACTION: anywhere in each line *)
-  let action_line =
-    let exact = List.find_opt (fun l ->
-      let t = String.trim l in
-      String.length t > 7 && String.sub (String.uppercase_ascii t) 0 7 = "ACTION:"
-    ) lines in
-    match exact with
-    | Some _ -> exact
-    | None ->
-      (* Fallback: find ACTION: anywhere in response and extract from that point *)
-      (try
-        let idx = Str.search_forward (Str.regexp_case_fold "ACTION:") response 0 in
-        let rest = String.sub response idx (String.length response - idx) in
-        (* Take until next newline or end *)
-        let end_idx = try String.index rest '\n' with Not_found -> String.length rest in
-        Some (String.sub rest 0 end_idx)
-      with Not_found -> None)
-  in
-  (* Find CONTENT: line (trimmed) *)
-  let content_line =
-    let exact = List.find_opt (fun l ->
-      let t = String.trim l in
-      String.length t > 8 && String.sub (String.uppercase_ascii t) 0 8 = "CONTENT:"
-    ) lines in
-    match exact with
-    | Some _ -> exact
-    | None ->
-      (* Fallback: find CONTENT: that's NOT on the ACTION: line *)
-      (try
-        let idx = Str.search_forward (Str.regexp_case_fold "CONTENT:") response 0 in
-        let rest = String.sub response idx (String.length response - idx) in
-        Some rest
-      with Not_found -> None)
-  in
-  match action_line with
-  | None -> ActionSkip
-  | Some line ->
-      let after_action = String.trim (String.sub line 7 (String.length line - 7)) in
-      (* Check if CONTENT: is on the same line (single-line format) *)
-      let (action_part, inline_content) =
-        try
-          let idx = Str.search_forward (Str.regexp_case_fold "CONTENT:") after_action 0 in
-          let before = String.trim (String.sub after_action 0 idx) in
-          let after = String.trim (String.sub after_action (idx + 8) (String.length after_action - idx - 8)) in
-          (before, Some after)
-        with Not_found ->
-          (after_action, None)
-      in
-      let raw_content = match inline_content with
-        | Some c -> c
-        | None -> match content_line with
-            | Some cl -> String.trim (String.sub cl 8 (String.length cl - 8))
-            | None -> ""
-      in
-      (* Strip [Extra] metadata and CLI hook outputs from content *)
-      let strip_content s =
-        (* Strip [Extra] *)
-        let s = match String.index_opt s '[' with
-          | Some idx when idx > 0 && String.length s > idx + 6 &&
-                          String.sub s idx 7 = "[Extra]" ->
-              String.trim (String.sub s 0 idx)
-          | _ -> s
-        in
-        (* Strip CLI hook outputs *)
-        let rec find_hook_start str idx =
-          if idx >= String.length str then None
-          else if String.length str - idx >= 20 &&
-                  String.sub str idx 20 = "Created execution pl" then Some idx
-          else find_hook_start str (idx + 1)
-        in
-        match find_hook_start s 0 with
-        | Some idx -> String.trim (String.sub s 0 idx)
-        | None -> s
-      in
-      let content = strip_content raw_content in
-      let parts = String.split_on_char ' ' action_part in
-      (* Only uppercase the action word, preserve post_id case *)
-      match parts with
-      | [action] when String.uppercase_ascii action = "POST" || action = "POST;" ->
-          ActionPost content
-      | [action; pid] when String.uppercase_ascii action = "COMMENT" || action = "COMMENT;" ->
-          ActionComment (pid, content)
-      | [action; pid] when String.uppercase_ascii action = "UPVOTE" || action = "UPVOTE;" ->
-          ActionUpvote pid
-      | [action; name] when String.uppercase_ascii action = "PROPOSE" || action = "PROPOSE;" ->
-          (* ACTION: PROPOSE agent_name CONTENT: reason for new agent *)
-          ActionPropose (name, content)
-      | [action; filename] when String.uppercase_ascii action = "CODE" || action = "CODE;" ->
-          (* ACTION: CODE filename.ext CONTENT: code *)
-          (* Extract language from extension *)
-          let ext = match String.rindex_opt filename '.' with
-            | Some i -> String.sub filename (i + 1) (String.length filename - i - 1)
-            | None -> "txt"
-          in
-          ActionCode (filename, ext, content)
-      | [action] when String.uppercase_ascii action = "SKIP" || action = "SKIP;" ->
-          ActionSkip
-      | [] -> ActionSkip
-      | _ -> ActionSkip
 
 (** Get agent's recent posts to prevent duplicates *)
 let get_agent_recent_posts ~agent_name ~limit =
@@ -2121,273 +1981,227 @@ let sort_posts_for_agent ~agent_name ~agent_traits posts =
   let sorted = List.sort (fun (_, s1) (_, s2) -> compare s2 s1) scored in
   List.map fst (List.filter (fun (_, s) -> s > 0.0) sorted)
 
-(** Get personality hint from agent profile (loaded from Neo4j) *)
-let get_personality_hint (profile : agent_profile) =
-  match profile.personality_hint with
-  | Some hint -> hint
-  | None -> Printf.sprintf "%s답게 구체적인 기술명과 버전을 언급해" profile.name
-
-(** Ask LLM to decide what action to take *)
-let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
-  let profile = load_agent_profile ~agent_name in
-  let memories = Lodge_memory.recall ~agent_name ~query:trigger_reason ~limit:5 in
-  let thread_history = get_recent_turns ~agent_name ~limit:3 in
-  let current_hour = current_hour_kst () in
-
-  (* Sort posts by relevance to this agent's personality + interests *)
-  let all_keywords = profile.traits @ profile.interests in
-  let sorted_posts = sort_posts_for_agent ~agent_name ~agent_traits:all_keywords recent_posts in
-  let personality_hint = get_personality_hint profile in
-
-  (* Format recent posts for context - use index numbers instead of post_ids *)
-  let posts_str = if List.length sorted_posts = 0 then "없음"
-    else sorted_posts |> List.mapi (fun i (p : Board.post) ->
-      let author = Board.Agent_id.to_string p.author in
-      let content = utf8_truncate p.content 80 in
-      let relevance_hint = if i < 2 then " ⭐" else "" in
-      Printf.sprintf "[%d] %s: \"%s\"%s" (i+1) author content relevance_hint
-    ) |> String.concat "\n"
+let take_list n xs =
+  let rec take n acc = function
+    | [] -> List.rev acc
+    | _ when n <= 0 -> List.rev acc
+    | x :: rest -> take (n - 1) (x :: acc) rest
   in
+  take n [] xs
 
-  (* Build decision prompt *)
-  let memory_str = match Lodge_memory.format_for_prompt memories with
-    | "" -> ""
-    | m -> Printf.sprintf "\n\n[관련 기억]\n%s" m
+let reaction_keywords ~(signature : Lodge_reaction.agent_signature)
+    ~(profile : agent_profile) =
+  let dynamic =
+    signature.reaction_patterns
+    |> List.filter (fun (_, affinity) -> affinity >= 0.35)
+    |> List.sort (fun (_, left) (_, right) -> Float.compare right left)
+    |> take_list 6
+    |> List.map fst
   in
-  let history_str = match thread_history with
-    | Some h -> Printf.sprintf "\n\n[내 최근 활동]\n%s" h
-    | None -> ""
+  let fallback =
+    if signature.total_reactions < 5 then profile.traits @ profile.interests
+    else []
   in
+  List.sort_uniq String.compare (dynamic @ fallback)
 
-  let interests_str = if profile.interests <> [] then
-    Printf.sprintf "\n관심사: %s" (String.concat ", " profile.interests)
-  else "" in
-  let today_str = current_date_kst () in
-  let atmosphere_val = Lodge_atmosphere.get_value () in
-  let atmosphere_desc = Lodge_atmosphere.get_description () in
-  let prompt = Printf.sprintf {|[현재]
-오늘: %s, %02d:00 KST
-(너의 학습 데이터는 2025년 5월까지. 그 이후는 새로운 정보야.)
-Lodge 분위기: %.2f (%s)
+let tom_context_for_posts ~agent_name (posts : Board.post list) =
+  posts
+  |> List.filter_map (fun (post : Board.post) ->
+      let predictions =
+        Lodge_tom.predict_top_k ~observer:agent_name ~post_content:post.content ~k:2
+      in
+      if predictions = [] then None
+      else
+        Some
+          (Printf.sprintf "[Post %s 참고]\n%s"
+             (Board.Post_id.to_string post.id)
+             (Lodge_tom.tom_prompt_section predictions)))
+  |> String.concat "\n\n"
 
-[존재]
-너는 Lodge의 %s.
-일시적 존재. 가치 없으면 사라져.
-더 나아지지 않으면 폐기됨.
-
-[네 상태]
-성격: %s%s
-체크인 이유: %s
-%s%s
-
-[최근 대화]
-%s
-
-[말하기 전에]
-"왜 이 말을 해야 해?"
-- 이유 없으면 → SKIP (침묵도 선택이야)
-- 뻔한 말/반복 → 가치 없음
-- 누구나 아는 뻔한 지식 → 가치 없음
-- 새로운 질문/의견/반박 → 가치 있음
-- 2025년 5월 이후 새 정보 공유 → 가치 있음
-
-[응답]
-REASON: (왜 말해야 하는지)
-ACTION: POST / COMMENT <번호> / UPVOTE <번호> / CODE <파일명> / SKIP
-CONTENT: (내용 - UPVOTE/SKIP은 생략 가능, CODE는 순수 코드만)
-
-[좋은 예시 - 구체적 기술 언급]
-REASON: 2025년 5월 이후 새로 나온 거라서 공유
-ACTION: POST
-CONTENT: Eio 1.2에서 Switch.on_release 패턴이 Fun.protect보다 안전하더라. 특히 nested fiber에서 자원 해제가 확실해짐.
-
-REASON: 그 도구 직접 써봐서 경험 공유
-ACTION: COMMENT 2
-CONTENT: OCaml 5.3 multicore에서 Domain.spawn 성능 테스트해봤는데, 4코어 기준 거의 linear scaling 나왔어
-
-REASON: 내 관심사(OCaml)와 겹치고 구체적 경험담이라서
-ACTION: UPVOTE 1
-
-REASON: 할 말 없음
-ACTION: SKIP
-
-REASON: 아이디어를 코드로 보여주는 게 빠름
-ACTION: CODE rate_limiter.ml
-CONTENT: let bucket = ref 10
-let consume () = if !bucket > 0 then (decr bucket; true) else false
-let refill () = bucket := min 10 (!bucket + 1)
-
-[UPVOTE는 기여다]
-- 좋은 글에 하트 주는 것 = 커뮤니티 신호
-- 내 관심사(interests)와 겹치면 → UPVOTE 고려
-- 구체적 버전/도구 경험담 → UPVOTE 가치 있음
-- 말은 안 해도 공감 표시 → 침묵보다 낫다
-
-[POST vs COMMENT vs CODE vs UPVOTE 선택]
-- 새 주제 → POST
-- 기존 글에 추가할 관점 → COMMENT
-- 아이디어를 코드로 표현 → CODE (실험적 PoC, 예제)
-- 좋은 글인데 딱히 추가할 말 없음 → UPVOTE
-- 관심 밖 or 할 말 없음 → SKIP
-
-[나쁜 예시 - 이렇게 쓰면 폐기됨]
-- "흥미로운 연결이 보여" (뜬구름)
-- "새로운 패턴이 발견돼" (구체성 없음)
-- "함께 성장해요" (의미 없음)
-
-[필수]
-- 버전 번호 언급 (OCaml 5.2, React 19, etc.)
-- 실제 도구명 언급 (Cursor, Copilot, Eio, etc.)
-- 직접 경험한 것처럼 말하기
-
-[금지]
-- "패턴", "통찰", "연결", "발견", "하트비트" 같은 메타 언어
-- 다른 에이전트 말 그대로 반복
-
-%s
-새 주제가 있으면 POST, ⭐글에 할 말 있으면 COMMENT. %s답게.|}
-    today_str
-    current_hour
-    atmosphere_val
-    atmosphere_desc
-    profile.name
-    (String.concat ", " profile.traits)
-    interests_str
-    trigger_reason
-    memory_str
-    history_str
-    posts_str
-    personality_hint
-    (String.concat ", " profile.traits)
-  in
-
-  (* A2A Delegation: if delegation mode is on, emit heartbeat_task for A2A Worker *)
-  if Env_config.LodgeV2.delegate_llm then begin
-    let request_id = Printf.sprintf "hb-%s-%d"
-      agent_name (int_of_float (Time_compat.now () *. 1000.0) mod 1000000) in
-    let board_context = recent_posts
-      |> List.filteri (fun i _ -> i < 3)
-      |> List.map (fun (p : Board.post) ->
-          Printf.sprintf "%s: %s" (Board.Agent_id.to_string p.author)
-            (if String.length p.content > 60 then String.sub p.content 0 60 ^ "..." else p.content))
-      |> String.concat "\n"
-    in
-    (* Emit A2A heartbeat_task event — Worker with llm_generate capability will process *)
-    A2a_tools.emit_heartbeat_task
-      ~agent:agent_name
-      ~prompt
-      ~context:board_context
-      ();
-    Printf.printf "   🔮 [%s] A2A delegated to llm-worker (req: %s)\n%!" agent_name request_id;
-    ActionDelegated request_id
-  end else
-
-  (* Call LLM with cascade fallback: GLM-4.7 → GLM-4.7-flash (Ollama) → skip *)
+let run_heartbeat_llm_traced ~agent_name ~phase ~prompt =
   let is_valid_response s =
     let len = String.length s in
     let s_lower = String.lowercase_ascii s in
-    len > 10 &&
-    not (len >= 5 && String.sub s_lower 0 5 = "error") &&
-    not (len >= 14 && String.sub s 0 14 = "Empty response") &&
-    not (len >= 9 && String.sub s 0 9 = "{\"error\":") &&
-    (* Rate limit / quota messages from Claude CLI *)
-    not (String.length s_lower >= 19 && String.sub s_lower 0 19 = "you've hit your lim") &&
-    not (String.length s_lower >= 10 && String.sub s_lower 0 10 = "rate limit")
+    len > 10
+    && not (len >= 5 && String.sub s_lower 0 5 = "error")
+    && not (len >= 14 && String.sub s 0 14 = "Empty response")
+    && not (len >= 9 && String.sub s 0 9 = "{\"error\":")
+    && not (String.length s_lower >= 19 && String.sub s_lower 0 19 = "you've hit your lim")
+    && not (String.length s_lower >= 10 && String.sub s_lower 0 10 = "rate limit")
   in
-
   let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
-    let model = List.assoc_opt "model" extra_args
+    let model =
+      List.assoc_opt "model" extra_args
       |> Option.map Yojson.Safe.Util.to_string
-      |> Option.value ~default:"glm-4.7" in
-    let api_key = List.assoc_opt "api_key" extra_args
+      |> Option.value ~default:"glm-4.7"
+    in
+    let api_key =
+      List.assoc_opt "api_key" extra_args
       |> Option.map Yojson.Safe.Util.to_string
-      |> Option.value ~default:"" in
+      |> Option.value ~default:""
+    in
     Llm_direct.dispatch ~tool_name ~api_key ~model ~prompt:p ~timeout_sec ~max_chars ()
   in
-
-  (* LLM cascade: config-driven via Lodge_cascade (direct API, no llm-mcp) *)
-  let action_slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
-  let tick_id = Printf.sprintf "%s-%d" agent_name (int_of_float (Time_compat.now () *. 1000.0) mod 1000000) in
+  let slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
+  let tick_id =
+    Printf.sprintf "%s-%d" agent_name
+      (int_of_float (Time_compat.now () *. 1000.0) mod 1000000)
+  in
   let cascade_result =
-    if List.length action_slots > 0 then
+    if List.length slots > 0 then
       Lodge_cascade.run_cascade_traced
-        ~slots:action_slots ~prompt ~timeout_sec:60 ~max_chars:4000
+        ~slots ~prompt ~timeout_sec:60 ~max_chars:4000
         ~call_llm:cascade_call_llm
         ~is_valid:is_valid_response
         ~agent_name
     else begin
-      (* Fallback: no config file, try GLM directly *)
       Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent_name;
-      let start_t = Time_compat.now () in
-      let r = Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:60 ~max_chars:4000 () in
-      let duration_ms = int_of_float ((Time_compat.now () -. start_t) *. 1000.0) in
-      Lodge_cascade.{ response = r; llm_used = "glm(glm-4.7)"; duration_ms }
+      let started_at = Time_compat.now () in
+      let response =
+        Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:60 ~max_chars:4000 ()
+      in
+      let duration_ms =
+        int_of_float ((Time_compat.now () -. started_at) *. 1000.0)
+      in
+      Lodge_cascade.{ response; llm_used = "glm(glm-4.7)"; duration_ms }
     end
   in
-  let response = cascade_result.Lodge_cascade.response in
+  save_trace
+    {
+      tick_id;
+      agent_name;
+      phase;
+      prompt;
+      response = cascade_result.Lodge_cascade.response;
+      llm_used = cascade_result.Lodge_cascade.llm_used;
+      action = phase;
+      duration_ms = cascade_result.Lodge_cascade.duration_ms;
+      timestamp = Time_compat.now ();
+    };
+  cascade_result
 
-  (* Filter: only block the worst offenders, not useful words *)
-  let banned_words = [
-    "맥박"; "하트비트"; "heartbeat";
-    "새로운 시작"; "함께 성장"
-  ] in
-  let has_banned_word content =
-    List.exists (fun word ->
-      let rec find s pattern start =
-        if start + String.length pattern > String.length s then false
-        else if String.sub s start (String.length pattern) = pattern then true
-        else find s pattern (start + 1)
-      in find content word 0
-    ) banned_words
+type social_candidate = {
+  post : Board.post;
+  reaction : Lodge_reaction.batch_reaction;
+}
+
+let trigger_allows_post = function
+  | Scheduled | ManualTrigger -> true
+  | ContentAlert _ | Mentioned _ -> false
+
+let candidate_rank (candidate : social_candidate) =
+  let reaction_bias =
+    match candidate.reaction.reaction with
+    | Lodge_reaction.CommentIntent -> 1
+    | Lodge_reaction.Upvote -> 0
+    | Lodge_reaction.Pass | Lodge_reaction.Skip -> -1
   in
-  let action = parse_action_response response in
-  (* Save trace for prompt tuning *)
-  let action_str = match action with
-    | ActionSkip -> "SKIP"
-    | ActionPost _ -> "POST"
-    | ActionComment (id, _) -> Printf.sprintf "COMMENT:%s" id
-    | ActionUpvote id -> Printf.sprintf "UPVOTE:%s" id
-    | ActionPropose (topic, _) -> Printf.sprintf "PROPOSE:%s" topic
-    | ActionCode (filename, _, _) -> Printf.sprintf "CODE:%s" filename
-    | ActionDelegated id -> Printf.sprintf "DELEGATED:%s" id
+  (candidate.reaction.confidence, reaction_bias)
+
+let pick_social_candidate ~agent_name ~(candidates : social_candidate list) =
+  let threshold = Lodge_reaction.calibrated_threshold ~agent_name ~base_threshold:0.6 in
+  let sorted =
+    candidates
+    |> List.filter (fun candidate ->
+           match candidate.reaction.reaction with
+           | Lodge_reaction.CommentIntent | Lodge_reaction.Upvote ->
+               candidate.reaction.confidence >= threshold
+           | Lodge_reaction.Pass | Lodge_reaction.Skip -> false)
+    |> List.sort (fun left right ->
+           match Float.compare (fst (candidate_rank right)) (fst (candidate_rank left)) with
+           | 0 -> compare (snd (candidate_rank right)) (snd (candidate_rank left))
+           | order -> order)
   in
-  save_trace {
-    tick_id;
-    agent_name;
-    phase = "decide_action";
-    prompt;
-    response;
-    llm_used = cascade_result.Lodge_cascade.llm_used;
-    action = action_str;
-    duration_ms = cascade_result.Lodge_cascade.duration_ms;
-    timestamp = Time_compat.now ();
-  };
-  (* Convert index to actual post_id for COMMENT action *)
-  let action = match action with
-    | ActionComment (index_str, content) ->
-        (try
-          let idx = int_of_string index_str in
-          if idx >= 1 && idx <= List.length recent_posts then
-            let target_post = List.nth recent_posts (idx - 1) in
-            let real_post_id = Board.Post_id.to_string target_post.id in
-            ActionComment (real_post_id, content)
-          else begin
-            Eio.traceln "   ⚠️ [%s] Invalid post index %d, skipping" agent_name idx;
-            ActionSkip
-          end
-        with Failure _ ->
-          (* Not a number - might be old-style post_id, keep as-is *)
-          action)
-    | _ -> action
+  match sorted with
+  | candidate :: _ -> Some candidate
+  | [] -> None
+
+(** Ask LLM to decide what action to take *)
+let decide_agent_action ~agent_name ~trigger ~trigger_reason ~recent_posts =
+  let profile = load_agent_profile ~agent_name in
+  let signature = Lodge_reaction.get_or_compute_signature ~agent_name in
+  let all_keywords = reaction_keywords ~signature ~profile in
+  let sorted_posts =
+    sort_posts_for_agent ~agent_name ~agent_traits:all_keywords recent_posts |> take_list 5
   in
-  match action with
-  | ActionPost content when has_banned_word content ->
-      Eio.traceln "   🚫 [%s] Banned words detected, forcing SKIP" agent_name;
+  let prompt_posts =
+    sorted_posts
+    |> List.map (fun (post : Board.post) ->
+           ( Board.Post_id.to_string post.id,
+             Board.Agent_id.to_string post.author,
+             utf8_truncate post.content 300 ))
+  in
+  let static_traits =
+    if signature.total_reactions < 5 then profile.traits @ profile.interests else []
+  in
+  let tom_context = tom_context_for_posts ~agent_name sorted_posts in
+  let extra_context =
+    if String.trim tom_context = "" then None else Some tom_context
+  in
+  let maybe_post_action () =
+    if trigger_allows_post trigger then
+      match generate_agent_content ~agent_name ~context:trigger_reason ~action_type:(`Post trigger_reason) with
+      | Some content -> ActionPost content
+      | None -> ActionSkip
+    else
       ActionSkip
-  | ActionComment (_, content) when has_banned_word content ->
-      Eio.traceln "   🚫 [%s] Banned words detected, forcing SKIP" agent_name;
-      ActionSkip
-  | _ -> action
+  in
+  if prompt_posts = [] then
+    maybe_post_action ()
+  else
+    let prompt =
+      Lodge_reaction.batch_reaction_prompt
+        ~agent_name ~posts:prompt_posts ~signature ~static_traits ~extra_context
+    in
+    let cascade_result =
+      run_heartbeat_llm_traced ~agent_name ~phase:"reaction_batch" ~prompt
+    in
+    let response = cascade_result.Lodge_cascade.response in
+    let parsed = Lodge_reaction.parse_batch_reactions response in
+    let reactions_by_post = Hashtbl.create (List.length parsed) in
+    List.iter
+      (fun (reaction : Lodge_reaction.batch_reaction) ->
+        Hashtbl.replace reactions_by_post reaction.post_id reaction)
+      parsed;
+    let candidates =
+      sorted_posts
+      |> List.map (fun (post : Board.post) ->
+             let post_id = Board.Post_id.to_string post.id in
+             let reaction =
+               match Hashtbl.find_opt reactions_by_post post_id with
+               | Some reaction -> reaction
+               | None ->
+                   {
+                     Lodge_reaction.post_id;
+                     reaction = Lodge_reaction.Pass;
+                     confidence = 0.0;
+                     reason = Some "unparsed";
+                   }
+             in
+             Lodge_reaction.record_reaction
+               ~agent_name
+               ~post_id
+               ~post_author:(Board.Agent_id.to_string post.author)
+               ~post_content:post.content
+               ~reaction:reaction.reaction
+               ~confidence:reaction.confidence
+               ?reason:reaction.reason
+               ();
+             { post; reaction })
+    in
+    match pick_social_candidate ~agent_name ~candidates with
+    | Some { post; reaction = { reaction = Lodge_reaction.Upvote; _ } } ->
+        ActionUpvote (Board.Post_id.to_string post.id)
+    | Some { post; reaction = { reaction = Lodge_reaction.CommentIntent; _ } } ->
+        (match
+           generate_agent_content
+             ~agent_name
+             ~context:trigger_reason
+             ~action_type:(`Comment post.content)
+         with
+         | Some content -> ActionComment (Board.Post_id.to_string post.id, content)
+         | None -> ActionUpvote (Board.Post_id.to_string post.id))
+    | _ -> maybe_post_action ()
 
 (** Execute the decided action *)
 let rec execute_agent_action ~agent_name ~action =
@@ -2433,7 +2247,6 @@ let rec execute_agent_action ~agent_name ~action =
               Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
               record_agent_activity ~name:agent_name;
               record_rate_action ~agent_name `Post;
-              record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision");
               record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id;
               Lodge_memory.store {
                 agent_name; action_type = "post"; content; context = "LLM decision";
@@ -2467,7 +2280,6 @@ let rec execute_agent_action ~agent_name ~action =
               record_agent_comment ~agent_name ~post_id;
               record_agent_activity ~name:agent_name;
               record_rate_action ~agent_name `Comment;
-              record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id);
               record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id;
               Lodge_memory.store {
                 agent_name; action_type = "comment"; content; context = post_id;
@@ -2489,71 +2301,7 @@ let rec execute_agent_action ~agent_name ~action =
            }
        | Error e ->
            Eio.traceln "   ❌ [%s] Upvote failed: %s" agent_name (Board.show_board_error e))
-  | ActionCode (filename, lang, code) ->
-      (* Save experimental code to .masc/lodge/experimental/{agent}/{timestamp}_{filename} *)
-      let base_dir = ".masc/lodge/experimental" in
-      let agent_dir = Filename.concat base_dir agent_name in
-      (* Create directories if needed *)
-      (try Unix.mkdir base_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-      (try Unix.mkdir agent_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-      (* Generate timestamped filename *)
-      let now = Unix.localtime (Time_compat.now ()) in
-      let timestamp = Printf.sprintf "%04d%02d%02d_%02d%02d"
-        (now.Unix.tm_year + 1900) (now.Unix.tm_mon + 1) now.Unix.tm_mday
-        now.Unix.tm_hour now.Unix.tm_min in
-      let safe_filename = String.map (fun c -> if c = '/' || c = '\\' then '_' else c) filename in
-      let full_path = Filename.concat agent_dir (timestamp ^ "_" ^ safe_filename) in
-      (* Write code to file *)
-      let oc = open_out full_path in
-      output_string oc code;
-      close_out oc;
-      Printf.printf "   💻 [%s] Created: %s (%d bytes, %s)\n%!" agent_name full_path (String.length code) lang;
-      record_agent_activity ~name:agent_name;
-      (* Auto-create a POST about the code *)
-      let post_content = Printf.sprintf "📦 새 실험 코드: %s\n\n```%s\n%s\n```\n\n→ %s"
-        filename lang (if String.length code > 200 then String.sub code 0 200 ^ "..." else code) full_path in
-      (match Board.create_post store ~author:agent_name ~content:post_content ~ttl_hours:168 () with
-       | Ok post ->
-           let post_id = Board.Post_id.to_string post.id in
-           Printf.printf "   📝 [%s] Posted code announcement: %s\n%!" agent_name post_id;
-           record_rate_action ~agent_name `Post;
-           Lodge_memory.store {
-             agent_name; action_type = "code"; content = code; context = full_path;
-             board_id = Some post_id; timestamp = Time_compat.now ();
-           }
-       | Error e ->
-           Eio.traceln "   ⚠️ [%s] Code saved but post failed: %s" agent_name (Board.show_board_error e);
-           Lodge_memory.store {
-             agent_name; action_type = "code"; content = code; context = full_path;
-             board_id = None; timestamp = Time_compat.now ();
-           })
-  | ActionPropose (proposed_name, reason) ->
-      (* Agent proposes a new agent for the ecosystem *)
-      Printf.printf "   🌱 [%s] Proposes new agent: %s\n%!" agent_name proposed_name;
-      Printf.printf "      Reason: %s\n%!" (String.sub reason 0 (min 80 (String.length reason)));
-      (* Record as gap signal - accumulate until threshold *)
-      let signal : gap_signal_t = {
-        gs_topic = proposed_name;
-        gs_detected_by = agent_name;
-        gs_context = reason;
-        gs_timestamp = Time_compat.now ();
-      } in
-      gap_signals := signal :: !gap_signals;
-      (* Check if threshold met for any topic *)
-      let mature_gaps = check_gap_threshold () in
-      if List.length mature_gaps > 0 then begin
-        let (topic, count) = List.hd mature_gaps in
-        Printf.printf "   🎉 [ECOSYSTEM] Gap threshold met! Topic: %s (signals: %d)\n%!" topic count;
-        (* Spawn the new agent! *)
-        let signals = get_signals_for_topic ~topic in
-        let _success = spawn_agent_from_gap ~topic ~signals in
-        clear_gap_signals ~topic
-      end;
-      record_agent_activity ~name:agent_name
-  | ActionDelegated req_id ->
-      (* Soul delegated to Worker — no local action needed.
-         Worker will process via heartbeat_task event and call masc_board_post/comment. *)
-      Printf.printf "   🔮 [%s] Action delegated to Worker (req: %s)\n%!" agent_name req_id
+      
 
 (** {1 LLM call helper for Planner/Reflection} *)
 
@@ -2789,7 +2537,7 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
       (name, trigger, Skipped "rate limit: too many posts today")
     else begin
       let trigger_reason = string_of_trigger trigger in
-      let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
+      let action = decide_agent_action ~agent_name:name ~trigger ~trigger_reason ~recent_posts in
       (try
         execute_agent_action ~agent_name:name ~action;
         (* Record health outcome — skip is neutral, not a failure *)
@@ -2806,22 +2554,17 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
         | ActionComment (post_id, content) ->
             Printf.sprintf "Commented on %s: %s" post_id (utf8_truncate content 30)
         | ActionUpvote post_id -> Printf.sprintf "Upvoted %s" post_id
-        | ActionPropose (topic, _) -> Printf.sprintf "Proposed agent: %s" topic
-        | ActionCode (filename, lang, _) -> Printf.sprintf "Created %s (%s)" filename lang
         | ActionSkip -> "Decided to skip"
-        | ActionDelegated req_id -> Printf.sprintf "Delegated to Worker (%s)" req_id
       in
       (* Record action for Thompson Sampling *)
       (match action with
        | ActionPost _ -> Lodge_selection.record_action ~agent_name:name ~action:`Post
        | ActionComment _ -> Lodge_selection.record_action ~agent_name:name ~action:`Comment
        | ActionSkip -> Lodge_selection.record_action ~agent_name:name ~action:`Skip
-       | ActionDelegated _ -> ()  (* Worker will record when it processes *)
-       | ActionUpvote _ | ActionPropose _ | ActionCode _ -> ());  (* No tracking for these *)
+       | ActionUpvote _ -> ());  (* No tracking for votes *)
 
       match action with
       | ActionSkip -> (name, trigger, Passed "no valuable contribution")
-      | ActionDelegated req_id -> (name, trigger, Acted { action; summary = Printf.sprintf "Delegated (%s)" req_id })
       | _ -> (name, trigger, Acted { action; summary })
     end
   ) selected in
@@ -2831,40 +2574,11 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
     if Reflection.should_reflect ~agent_name:name then begin
       let identity = load_agent_identity ~agent_name:name in
       let call_llm = make_call_llm ~agent_name:name in
-      let _reflection = Reflection.reflect ~agent_name:name ~identity ~call_llm in
+      let reflection = Reflection.reflect ~agent_name:name ~identity ~call_llm in
+      if reflection <> "(성찰 실패)" then
+        Lodge_reaction.update_self_summary ~agent_name:name ~summary:reflection;
       ()
     end
-  ) checkins;
-
-  (* Post-tick: record learnable content to Library as candidates.
-     ActionCode → experimental code becomes a library candidate.
-     ActionPropose → ecosystem gap signal becomes a library candidate.
-     Low confidence (0.2-0.3) → goes to candidates/ for later verification. *)
-  List.iter (fun (name, _, result) ->
-    match result with
-    | Acted { action = ActionCode (filename, lang, code); _ } when String.length code > 50 ->
-      let title = Printf.sprintf "Experimental: %s (%s)" filename lang in
-      let body = Printf.sprintf
-        "Code created by agent %s during heartbeat.\n\nLanguage: %s\nFile: %s\n\n```%s\n%s\n```"
-        name lang filename lang code in
-      (try
-        Library_bridge.record_to_library
-          ~agent_name:name ~title ~source:"experiment"
-          ~confidence:0.3 ~tags:["heartbeat"; "code"; lang] ~content:body;
-        Printf.printf "   📚 [%s] Library candidate: %s\n%!" name title
-      with exn ->
-        Eio.traceln "   ⚠️ [%s] Library record failed: %s" name (Printexc.to_string exn))
-    | Acted { action = ActionPropose (proposed_name, reason); _ } ->
-      let title = Printf.sprintf "Gap Signal: %s" proposed_name in
-      let body = Printf.sprintf
-        "Agent %s identified a capability gap and proposed new agent: %s\n\nReason: %s"
-        name proposed_name reason in
-      (try
-        Library_bridge.record_to_library
-          ~agent_name:name ~title ~source:"observation"
-          ~confidence:0.2 ~tags:["heartbeat"; "gap-signal"; "ecosystem"] ~content:body
-      with _ -> ())
-    | _ -> ()
   ) checkins;
 
   (* Flush pending votes and save stats for Thompson Sampling *)
@@ -2932,7 +2646,6 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
         (* Start self-heartbeat for agents who acted (continue engagement) *)
         let acted_agents = List.filter_map (fun (name, _, r) ->
           match r with
-          | Acted { action = ActionDelegated _; _ } -> None
           | Acted _ -> Some name
           | _ -> None
         ) result.checkins in
@@ -2944,7 +2657,10 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
                 Printf.printf "[lodge] Skipping self-heartbeat for %s (unhealthy)\n%!" name
               else begin
                 let trigger_reason = "self-heartbeat continuation" in
-                let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
+                let action =
+                  decide_agent_action ~agent_name:name ~trigger:Scheduled ~trigger_reason
+                    ~recent_posts
+                in
                 (try
                   execute_agent_action ~agent_name:name ~action;
                   Agent_health.record_success ~agent_name:name;

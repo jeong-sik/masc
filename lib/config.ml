@@ -73,44 +73,48 @@ let save room_path config =
   output_string oc content;
   close_out oc
 
-(** Placeholder tools that are hidden by default.
-
-    Set MASC_PLACEHOLDER_TOOLS_ENABLED=1 to expose them for manual testing.
-*)
-let placeholder_tools = [ "masc_archive_save" ]
-
-let placeholder_tools_enabled () =
-  match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
-  | Some "1" | Some "true" | Some "TRUE" | Some "yes" | Some "YES" -> true
-  | _ -> false
-
-let is_tool_visible tool_name =
-  if placeholder_tools_enabled () then
-    true
-  else
-    not (List.mem tool_name placeholder_tools)
+let dedupe_schemas (schemas : Types.tool_schema list) =
+  let seen = Hashtbl.create (List.length schemas) in
+  List.filter
+    (fun (schema : Types.tool_schema) ->
+      if Hashtbl.mem seen schema.name then
+        false
+      else (
+        Hashtbl.add seen schema.name ();
+        true))
+    schemas
 
 let all_tool_schemas : Types.tool_schema list =
-  Tools.all_schemas
-  @ Tool_board.tools
-  @ Tool_lodge.tools
-  @ Tool_perpetual.schemas
-  @ Tool_mdal.schemas
-  @ Tool_keeper.schemas
-  @ Tool_operator.schemas
-  @ Tool_llama.schemas
-  @ Tool_command_plane.schemas
-  @ Tool_goals.schemas
-  @ Tool_team_session.schemas
-  @ Tool_protocol_game_view.schemas
+  dedupe_schemas
+    (Tools.raw_schemas
+    @ Tool_board.tools
+    @ Tool_lodge.tools
+    @ Tool_perpetual.schemas
+    @ Tool_mdal.schemas
+    @ Tool_keeper.schemas
+    @ Tool_operator.schemas
+    @ Tool_llama.schemas
+    @ Tool_command_plane.schemas
+    @ Tool_goals.schemas
+    @ Tool_team_session.schemas
+    @ Tool_protocol_game_view.schemas
+    @ Tool_experiment.schemas
+    @ Tool_trpg.schemas)
 
-let visible_tool_schemas () : Types.tool_schema list =
-  List.filter (fun (schema : Types.tool_schema) -> is_tool_visible schema.name)
+let is_tool_visible tool_name =
+  Tool_catalog.is_visible tool_name
+
+let visible_tool_schemas ?(include_hidden = false) ?(include_deprecated = false) () :
+    Types.tool_schema list =
+  List.filter
+    (fun (schema : Types.tool_schema) ->
+      Tool_catalog.is_visible ~include_hidden ~include_deprecated schema.name)
     all_tool_schemas
 
-let enabled_tool_schemas (enabled_categories : Mode.category list) :
+let enabled_tool_schemas ?(include_hidden = false) ?(include_deprecated = false)
+    (enabled_categories : Mode.category list) :
     Types.tool_schema list =
-  visible_tool_schemas ()
+  visible_tool_schemas ~include_hidden ~include_deprecated ()
   |> List.filter (fun (schema : Types.tool_schema) ->
          Mode.is_tool_enabled enabled_categories schema.name)
 
@@ -152,18 +156,14 @@ let get_config_summary room_path =
   let disabled_names = List.map category_to_string disabled in
   let enabled = enabled_tool_schemas config.enabled_categories in
   let tool_count = List.length enabled in
-  let hidden_placeholder_tools =
-    if placeholder_tools_enabled () then []
-    else
-      placeholder_tools
-  in
+  let hidden_placeholder_tools = Tool_catalog.hidden_placeholder_tools () in
   `Assoc [
     ("mode", `String (mode_to_string config.mode));
     ("mode_description", `String (mode_description config.mode));
     ("enabled_categories", `List (List.map (fun s -> `String s) enabled_names));
     ("disabled_categories", `List (List.map (fun s -> `String s) disabled_names));
     ("enabled_tool_count", `Int tool_count);
-    ("placeholder_tools_enabled", `Bool (placeholder_tools_enabled ()));
+    ("placeholder_tools_enabled", `Bool (Tool_catalog.placeholder_tools_enabled ()));
     ("hidden_placeholder_tools", `List (List.map (fun s -> `String s) hidden_placeholder_tools));
     ("available_modes", `List [
       `Assoc [("name", `String "minimal"); ("description", `String (mode_description Minimal))];

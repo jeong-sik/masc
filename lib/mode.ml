@@ -206,7 +206,9 @@ let tool_category tool_name =
   | _ when String.starts_with ~prefix:"lodge_" tool_name -> Comm
   | _ when String.starts_with ~prefix:"decision." tool_name -> Core
   | _ when String.starts_with ~prefix:"experiment." tool_name -> Core
+  | _ when String.starts_with ~prefix:"experiment_" tool_name -> Core
   | _ when String.starts_with ~prefix:"trpg." tool_name -> Core
+  | _ when String.starts_with ~prefix:"masc_trpg_" tool_name -> Core
   | _ when String.starts_with ~prefix:"client." tool_name -> Core
 
   (* Keep backward compatibility for unmapped masc_* tools, but do not

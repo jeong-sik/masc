@@ -248,9 +248,11 @@ let permission_for_tool = function
   | "masc_operation_finalize" | "masc_dispatch_assign"
   | "masc_dispatch_rebalance" | "masc_dispatch_escalate"
   | "masc_dispatch_recall" | "masc_policy_approve"
-  | "masc_policy_deny" | "masc_policy_update"
-  | "masc_policy_freeze_unit" | "masc_policy_kill_switch" ->
+  | "masc_policy_deny" | "masc_policy_update" ->
       Some CanBroadcast
+  (* Command-plane write operations require Admin *)
+  | "masc_policy_freeze_unit" | "masc_policy_kill_switch" ->
+      Some CanAdmin
   | "masc_portal_open" | "masc_portal_close" -> Some CanOpenPortal
   | "masc_portal_send" -> Some CanSendPortal
   | "masc_worktree_create" -> Some CanCreateWorktree
@@ -276,18 +278,13 @@ let is_tool_auth_strict_enabled () =
   | None -> false
 
 let is_masc_tool_name tool_name =
-  String.length tool_name >= 5 && String.sub tool_name 0 5 = "masc_"
-
-let string_starts_with s prefix =
-  let len_s = String.length s in
-  let len_p = String.length prefix in
-  len_s >= len_p && String.sub s 0 len_p = prefix
+  String.starts_with ~prefix:"masc_" tool_name
 
 let is_protocol_canonical_tool_name tool_name =
-  string_starts_with tool_name "decision."
-  || string_starts_with tool_name "experiment."
-  || string_starts_with tool_name "trpg."
-  || string_starts_with tool_name "client."
+  String.starts_with ~prefix:"decision." tool_name
+  || String.starts_with ~prefix:"experiment." tool_name
+  || String.starts_with ~prefix:"trpg." tool_name
+  || String.starts_with ~prefix:"client." tool_name
 
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =

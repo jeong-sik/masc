@@ -137,6 +137,20 @@ let handle_dispatch_escalate (ctx : context) args : result =
 let handle_dispatch_recall (ctx : context) args : result =
   json_result (Command_plane_v2.dispatch_recall_json ctx.config ~actor:ctx.agent_name args)
 
+let handle_dispatch_tick (ctx : context) args : result =
+  json_result (Command_plane_v2.dispatch_tick_json ctx.config ~actor:ctx.agent_name args)
+
+let handle_detachment_list (ctx : context) args : result =
+  let operation_id = get_string_opt args "operation_id" in
+  let detachment_id = get_string_opt args "detachment_id" in
+  ( true,
+    Yojson.Safe.to_string
+      (Command_plane_v2.list_detachments_json ctx.config ?operation_id
+         ?detachment_id) )
+
+let handle_detachment_status (ctx : context) args : result =
+  json_result (Command_plane_v2.detachment_status_json ctx.config args)
+
 let handle_policy_status (ctx : context) : result =
   (true, Yojson.Safe.to_string (Command_plane_v2.policy_status_json ctx.config))
 
@@ -177,6 +191,9 @@ let dispatch (ctx : context) ~name ~args : result option =
   | "masc_dispatch_rebalance" -> Some (handle_dispatch_rebalance ctx args)
   | "masc_dispatch_escalate" -> Some (handle_dispatch_escalate ctx args)
   | "masc_dispatch_recall" -> Some (handle_dispatch_recall ctx args)
+  | "masc_dispatch_tick" -> Some (handle_dispatch_tick ctx args)
+  | "masc_detachment_list" -> Some (handle_detachment_list ctx args)
+  | "masc_detachment_status" -> Some (handle_detachment_status ctx args)
   | "masc_policy_status" -> Some (handle_policy_status ctx)
   | "masc_policy_approve" -> Some (handle_policy_approve ctx args)
   | "masc_policy_deny" -> Some (handle_policy_deny ctx args)
@@ -444,6 +461,38 @@ let schemas : tool_schema list =
           [
             ("operation_id", string_prop "Managed operation id.");
             ("note", string_prop "Optional recall note.");
+          ];
+    };
+    {
+      name = "masc_dispatch_tick";
+      description =
+        "Run one deterministic Command Plane V2 reconcile tick. This syncs managed detachments, detects stalled leaders, promotes same-squad failover when possible, and creates company approvals when escalation is required.";
+      input_schema =
+        object_schema
+          [
+            ("operation_id", string_prop "Optional operation filter.");
+            ("detachment_id", string_prop "Optional detachment filter.");
+          ];
+    };
+    {
+      name = "masc_detachment_list";
+      description =
+        "List Command Plane V2 detachments, including managed and projected rows, with optional filters for operation_id or detachment_id.";
+      input_schema =
+        object_schema
+          [
+            ("operation_id", string_prop "Optional operation or trace filter.");
+            ("detachment_id", string_prop "Optional detachment id filter.");
+          ];
+    };
+    {
+      name = "masc_detachment_status";
+      description =
+        "Inspect one Command Plane V2 detachment with runtime, heartbeat, failover, and approval context.";
+      input_schema =
+        object_schema ~required:[ "detachment_id" ]
+          [
+            ("detachment_id", string_prop "Managed detachment id.");
           ];
     };
     {

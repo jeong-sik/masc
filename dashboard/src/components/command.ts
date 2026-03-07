@@ -22,6 +22,7 @@ import {
   pauseCommandPlaneOperation,
   recallCommandPlaneOperation,
   refreshCommandPlaneSnapshot,
+  runCommandPlaneDispatchTick,
   resumeCommandPlaneOperation,
   setCommandPlaneSurface,
   toggleCommandPlaneFreeze,
@@ -47,6 +48,25 @@ function relativeTime(iso?: string | null): string {
   if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}m ago`
   if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}h ago`
   return `${Math.round(deltaSec / 86400)}d ago`
+}
+
+function expiryTone(iso?: string | null): string {
+  if (!iso) return 'warn'
+  const ts = Date.parse(iso)
+  if (Number.isNaN(ts)) return 'warn'
+  return ts <= Date.now() ? 'bad' : 'ok'
+}
+
+function deadlineLabel(iso?: string | null): string {
+  if (!iso) return 'n/a'
+  const ts = Date.parse(iso)
+  if (Number.isNaN(ts)) return iso
+  const deltaSec = Math.round((ts - Date.now()) / 1000)
+  if (deltaSec <= 0) return 'expired'
+  if (deltaSec < 60) return `in ${deltaSec}s`
+  if (deltaSec < 3600) return `in ${Math.round(deltaSec / 60)}m`
+  if (deltaSec < 86400) return `in ${Math.round(deltaSec / 3600)}h`
+  return `in ${Math.round(deltaSec / 86400)}d`
 }
 
 function toneClass(tone?: string | null): string {
@@ -217,7 +237,18 @@ function DetachmentCard({ card }: { card: CommandPlaneDetachmentCard }) {
         <span>Leader</span><span>${detachment.leader_id ?? 'unassigned'}</span>
         <span>Roster</span><span>${detachment.roster.length}</span>
         <span>Session</span><span>${detachment.session_id ?? 'none'}</span>
+        <span>Runtime</span><span>${detachment.runtime_kind ?? 'managed'}</span>
+        <span>Runtime Ref</span><span>${detachment.runtime_ref ?? 'n/a'}</span>
+        <span>Progress</span><span>${relativeTime(detachment.last_progress_at)}</span>
+        <span>Heartbeat</span><span>${deadlineLabel(detachment.heartbeat_deadline)}</span>
         <span>Updated</span><span>${relativeTime(detachment.updated_at)}</span>
+      </div>
+      <div class="command-tag-row">
+        ${detachment.heartbeat_deadline
+          ? html`<span class="command-tag ${expiryTone(detachment.heartbeat_deadline)}">
+              deadline ${detachment.heartbeat_deadline}
+            </span>`
+          : null}
       </div>
     </article>
   `
@@ -451,6 +482,15 @@ export function Command() {
           <p>Operations-first command surface for company → platoon → squad → agent orchestration, approvals, alerts, and traceability.</p>
         </div>
         <div class="panel-actions">
+          <button
+            class="control-btn ghost"
+            onClick=${() => {
+              void fire(() => runCommandPlaneDispatchTick())
+            }}
+            disabled=${actionDisabled('dispatch:tick')}
+          >
+            ${actionDisabled('dispatch:tick') ? 'Reconciling…' : 'Run Tick'}
+          </button>
           <button class="control-btn ghost" onClick=${() => { void refreshCommandPlaneSnapshot() }} disabled=${commandPlaneLoading.value}>
             ${commandPlaneLoading.value ? 'Refreshing…' : 'Refresh'}
           </button>

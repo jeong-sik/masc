@@ -68,25 +68,53 @@ let validate_path ?workdir path =
         | Some home -> is_within_dir ~dir:(resolve_path (Filename.concat home "me")) resolved
         | None -> false)
 
-(** Command blocklist: reject destructive patterns. *)
-let blocked_patterns =
-  ["rm -rf /"; "mkfs"; "dd if="; "> /dev/"; ":(){ :|:& };:"]
+(** shell_exec intentionally supports only a narrow allowlist of dev/test
+    commands and rejects shell control syntax to keep execution predictable. *)
+let allowed_commands =
+  [
+    "cat"; "cargo"; "cmake"; "cut"; "dune"; "echo"; "env"; "file"; "find";
+    "git"; "go"; "gofmt"; "gradle"; "grep"; "head"; "java"; "javac"; "ls";
+    "make"; "mvn"; "node"; "npm"; "ninja"; "npx"; "opam"; "pip"; "pnpm";
+    "printf"; "pwd"; "pyright"; "pytest"; "python"; "python3"; "rg"; "ruff";
+    "rustc"; "sed"; "sort"; "stat"; "tail"; "tr"; "uniq"; "uv"; "wc";
+    "which"; "yarn";
+  ]
+
+let forbidden_shell_chars =
+  [ ';'; '|'; '&'; '>'; '<'; '`'; '$'; '\n'; '\r' ]
+
+let contains_forbidden_shell_chars cmd =
+  String.exists (fun ch -> List.mem ch forbidden_shell_chars) cmd
+
+let extract_command_name cmd =
+  let trimmed = String.trim cmd in
+  if trimmed = "" then None
+  else
+    let len = String.length trimmed in
+    let rec find_sep i =
+      if i >= len then len
+      else
+        match trimmed.[i] with
+        | ' ' | '\t' -> i
+        | _ -> find_sep (i + 1)
+    in
+    let token = String.sub trimmed 0 (find_sep 0) in
+    Some (Filename.basename token)
 
 let validate_command cmd =
-  let cmd_lower = String.lowercase_ascii cmd in
-  not (List.exists (fun pat ->
-    let pat_lower = String.lowercase_ascii pat in
-    (* Simple substring check — no regex needed for these patterns *)
-    let pat_len = String.length pat_lower in
-    let cmd_len = String.length cmd_lower in
-    if pat_len > cmd_len then false
-    else
-      let found = ref false in
-      for i = 0 to cmd_len - pat_len do
-        if String.sub cmd_lower i pat_len = pat_lower then found := true
-      done;
-      !found
-  ) blocked_patterns)
+  let trimmed = String.trim cmd in
+  if trimmed = "" then Error "command must not be empty"
+  else if contains_forbidden_shell_chars trimmed then
+    Error "shell metacharacters are not allowed"
+  else
+    match extract_command_name trimmed with
+    | None -> Error "command must not be empty"
+    | Some name when List.mem name allowed_commands -> Ok ()
+    | Some name ->
+      Error
+        (Printf.sprintf
+           "Command blocked: %s is not in the approved dev command allowlist"
+           name)
 
 (* --- Recursive mkdir --- *)
 
@@ -167,8 +195,8 @@ let make_shell_exec ~proc_mgr ~clock =
     ~description:"Execute a shell command and return stdout+stderr. \
       Timeout: 30s default, max 120s. \
       Use for: running tests, git commands, build tools, directory listing. \
-      Unlike file_read (single file), this handles any CLI operation. \
-      Commands run in /bin/sh."
+      Unlike file_read (single file), this handles approved CLI operations. \
+      Commands run in /bin/sh but shell control syntax is rejected."
     ~parameters:[
       { name = "command";
         description = "Shell command to execute";
@@ -181,9 +209,9 @@ let make_shell_exec ~proc_mgr ~clock =
        match Agent_swarm_tool_input.extract_string "command" input with
        | Error e -> Error e
        | Ok command ->
-         if not (validate_command command) then
-           Error (Printf.sprintf "Command blocked: %s" command)
-         else
+         (match validate_command command with
+          | Error e -> Error e
+          | Ok () ->
            let timeout =
              Agent_swarm_tool_input.extract_float "timeout_s" input
              |> Option.value ~default:30.0
@@ -210,7 +238,7 @@ let make_shell_exec ~proc_mgr ~clock =
                   Eio.Time.sleep clock timeout;
                   Error (Printf.sprintf "Timeout after %.0fs: %s" timeout command))
            with exn ->
-             Error (Printf.sprintf "Command failed: %s" (Printexc.to_string exn)))
+             Error (Printf.sprintf "Command failed: %s" (Printexc.to_string exn))))
 
 (** Create dev tools that close over Eio capabilities.
     Returns [file_read; file_write; shell_exec]. *)

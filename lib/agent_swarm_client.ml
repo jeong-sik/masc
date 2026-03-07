@@ -155,10 +155,10 @@ let broadcast ~sw t ~message =
 (** Send a direct message to a specific agent. Unlike broadcast (room-wide),
     this is private 1:1 delivery. *)
 let send_direct ~sw t ~target ~message =
-  call_rpc ~sw t ~masc_method:"masc_a2a_send"
+  call_rpc ~sw t ~masc_method:"masc_a2a_delegate"
     ~arguments:[
-      ("agent_name", `String t.agent_name);
-      ("target", `String target);
+      ("target_agent", `String target);
+      ("task_type", `String "async");
       ("message", `String message);
     ]
 

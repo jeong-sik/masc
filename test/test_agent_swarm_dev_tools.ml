@@ -244,6 +244,18 @@ let test_shell_exec_blocked_command () =
        (String.length msg > 0)
    | Ok _ -> Alcotest.fail "should reject rm -rf /")
 
+let test_shell_exec_rejects_shell_metacharacters () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tool = find_tool "shell_exec" tools in
+  let result = Tool.execute tool
+    (`Assoc [("command", `String "echo hello; pwd")]) in
+  (match result with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "should reject shell metacharacters")
+
 let test_shell_exec_nonexistent_cmd () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -326,6 +338,8 @@ let () =
     "shell_exec", [
       Alcotest.test_case "echo hello" `Quick test_shell_exec_echo;
       Alcotest.test_case "blocked command" `Quick test_shell_exec_blocked_command;
+      Alcotest.test_case "reject shell metacharacters" `Quick
+        test_shell_exec_rejects_shell_metacharacters;
       Alcotest.test_case "nonexistent command" `Quick test_shell_exec_nonexistent_cmd;
       Alcotest.test_case "missing param" `Quick test_shell_exec_missing_param;
     ];

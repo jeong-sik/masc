@@ -229,11 +229,63 @@ let mcp_improvements (session : Team_session_types.session) events checkpoints_c
     :: with_turns
   else with_turns
 
+let spawn_failure_count_for_report events =
+  List.fold_left
+    (fun acc json ->
+      match Yojson.Safe.Util.member "event_type" json with
+      | `String "team_step_spawn" -> (
+          match
+            Yojson.Safe.Util.member "detail" json
+            |> Yojson.Safe.Util.member "success"
+          with
+          | `Bool false -> acc + 1
+          | _ -> acc)
+      | _ -> acc)
+    0 events
+
+let failed_spawn_roster_for_report events =
+  let open Yojson.Safe.Util in
+  events
+  |> List.filter_map (fun json ->
+         match member "event_type" json with
+         | `String "team_step_spawn" -> (
+             match member "detail" json |> member "success" with
+             | `Bool false ->
+                 Some
+                   (`Assoc
+                     [
+                       ("runtime_actor", member "detail" json |> member "runtime_actor");
+                       ("spawn_agent", member "detail" json |> member "spawn_agent");
+                       ("spawn_role", member "detail" json |> member "spawn_role");
+                       ("spawn_model", member "detail" json |> member "spawn_model");
+                       ("error", member "detail" json |> member "error");
+                       ("elapsed_ms", member "detail" json |> member "elapsed_ms");
+                       ("ts_iso", member "ts_iso" json);
+                     ])
+             | _ -> None)
+         | _ -> None)
+
+let detached_actor_roster_for_report events =
+  let open Yojson.Safe.Util in
+  events
+  |> List.filter_map (fun json ->
+         match member "event_type" json with
+         | `String "session_agent_detached" ->
+             Some
+               (`Assoc
+                 [
+                   ("actor", member "detail" json |> member "actor");
+                   ("reason", member "detail" json |> member "reason");
+                   ("ts_iso", member "ts_iso" json);
+                 ])
+         | _ -> None)
+
 let markdown_of_report ~(session : Team_session_types.session)
     ~(summary_json : Yojson.Safe.t) ~(events : Yojson.Safe.t list)
     ~(checkpoints_count : int) ~(done_delta_by_agent : (string * int) list)
     ~(turn_count_by_agent : (string * int) list)
     ~(team_health_json : Yojson.Safe.t)
+    ~(incidents_json : Yojson.Safe.t)
     ~(communication_metrics_json : Yojson.Safe.t)
     ~(llm_cache_metrics_json : Yojson.Safe.t)
     ~(cascade_metrics_json : Yojson.Safe.t) ~(alert_count : int)
@@ -346,6 +398,67 @@ let markdown_of_report ~(session : Team_session_types.session)
           Printf.sprintf "- %s: turns=%d, done_delta=%d" agent turns done_delta)
         contribution_agents
   in
+  let spawn_failure_count =
+    match incidents_json with
+    | `Assoc _ ->
+        incidents_json |> member "spawn_failure_count" |> to_int_option
+        |> Option.value ~default:0
+    | _ -> 0
+  in
+  let detached_agent_count =
+    match incidents_json with
+    | `Assoc _ ->
+        incidents_json |> member "detached_agent_count" |> to_int_option
+        |> Option.value ~default:0
+    | _ -> 0
+  in
+  let failed_spawn_roster =
+    match incidents_json with
+    | `Assoc _ -> (
+        match incidents_json |> member "failed_spawn_roster" with
+        | `List xs -> xs
+        | _ -> [])
+    | _ -> []
+  in
+  let detached_actor_roster =
+    match incidents_json with
+    | `Assoc _ -> (
+        match incidents_json |> member "detached_actor_roster" with
+        | `List xs -> xs
+        | _ -> [])
+    | _ -> []
+  in
+  let failed_spawn_lines =
+    failed_spawn_roster
+    |> List.map (fun item ->
+           let runtime_actor =
+             item |> member "runtime_actor" |> to_string_option
+             |> Option.value ~default:"(unknown)"
+           in
+           let spawn_role =
+             item |> member "spawn_role" |> to_string_option
+             |> Option.value ~default:"(unspecified)"
+           in
+           let error =
+             item |> member "error" |> to_string_option
+             |> Option.value ~default:"(not recorded)"
+           in
+           Printf.sprintf "- %s | role=%s | error=%s" runtime_actor spawn_role
+             error)
+  in
+  let detached_actor_lines =
+    detached_actor_roster
+    |> List.map (fun item ->
+           let actor =
+             item |> member "actor" |> to_string_option
+             |> Option.value ~default:"(unknown)"
+           in
+           let reason =
+             item |> member "reason" |> to_string_option
+             |> Option.value ~default:"(not recorded)"
+           in
+           Printf.sprintf "- %s | reason=%s" actor reason)
+  in
   let policy_lines =
     [
       Printf.sprintf "- Orchestration mode: %s"
@@ -399,6 +512,14 @@ let markdown_of_report ~(session : Team_session_types.session)
       Printf.sprintf "- Room active agents: %d" room_active;
       Printf.sprintf "- Required agents(min_agents): %d" health_required;
       Printf.sprintf "- min_agents_violation events: %d" violation_count;
+      "";
+      "## Spawn Failure Evidence";
+      Printf.sprintf "- Failed spawn events: %d" spawn_failure_count;
+      Printf.sprintf "- Detached failed actors: %d" detached_agent_count;
+      (if failed_spawn_lines = [] then "- Failed spawn roster: (none)"
+       else String.concat "\n" failed_spawn_lines);
+      (if detached_actor_lines = [] then "- Detached actor roster: (none)"
+       else String.concat "\n" detached_actor_lines);
       "";
       "## Goal vs Outcome";
       Printf.sprintf "- Goal statement: %s" session.goal;
@@ -457,10 +578,26 @@ let generate config (session : Team_session_types.session) :
     let turn_count_by_agent = turn_counts_by_agent events in
     let alert_count = event_count events "alert_emitted" in
     let violation_count = event_count events "min_agents_violation" in
+    let spawn_failure_count = spawn_failure_count_for_report events in
+    let detached_agent_count = event_count events "session_agent_detached" in
+    let failed_spawn_roster = failed_spawn_roster_for_report events in
+    let detached_actor_roster = detached_actor_roster_for_report events in
     let mcp_notes =
       mcp_improvements session events checkpoints_count done_delta_total
     in
     let llm_cache_metrics = Prometheus.llm_cache_metrics_json () in
+    let incidents_json =
+      `Assoc
+        [
+          ("status", `String (Team_session_types.status_to_string session.status));
+          ("alert_count", `Int alert_count);
+          ("min_agents_violation_count", `Int violation_count);
+          ("spawn_failure_count", `Int spawn_failure_count);
+          ("detached_agent_count", `Int detached_agent_count);
+          ("failed_spawn_roster", `List failed_spawn_roster);
+          ("detached_actor_roster", `List detached_actor_roster);
+        ]
+    in
     let report_json =
       `Assoc
         [
@@ -501,13 +638,7 @@ let generate config (session : Team_session_types.session) :
                     (if done_delta_total > 0 then "achieved"
                      else "inconclusive") );
               ] );
-          ( "incidents",
-            `Assoc
-              [
-                ("status", `String (Team_session_types.status_to_string session.status));
-                ("alert_count", `Int alert_count);
-                ("min_agents_violation_count", `Int violation_count);
-              ] );
+          ("incidents", incidents_json);
           ("mcp_improvements", `List (List.map (fun s -> `String s) mcp_notes));
           ( "evidence",
             `Assoc
@@ -516,12 +647,15 @@ let generate config (session : Team_session_types.session) :
                 ("checkpoints_count", `Int checkpoints_count);
                 ("turn_count", `Int session.turn_count);
                 ("active_agents", `List (List.map (fun a -> `String a) active_agents));
+                ("spawn_failure_count", `Int spawn_failure_count);
+                ("detached_agent_count", `Int detached_agent_count);
               ] );
         ]
     in
     let markdown =
       markdown_of_report ~session ~summary_json ~events ~checkpoints_count
         ~done_delta_by_agent ~turn_count_by_agent ~team_health_json:team_health
+        ~incidents_json
         ~communication_metrics_json:communication_metrics
         ~llm_cache_metrics_json:llm_cache_metrics
         ~cascade_metrics_json:cascade_metrics ~alert_count ~violation_count
@@ -799,6 +933,12 @@ let parse_event_string path json =
       if t = "" then None else Some t
   | _ -> None
 
+let parse_event_int path json =
+  match Yojson.Safe.Util.member path json with
+  | `Int n -> Some n
+  | `Intlit s -> int_of_string_opt s
+  | _ -> None
+
 let parse_event_detail json = Yojson.Safe.Util.member "detail" json
 
 let parse_spawn_agent json = parse_event_detail json |> parse_event_string "spawn_agent"
@@ -809,6 +949,27 @@ let parse_spawn_model json = parse_event_detail json |> parse_event_string "spaw
 
 let parse_spawn_selection_note json =
   parse_event_detail json |> parse_event_string "spawn_selection_note"
+
+let parse_spawn_role json = parse_event_detail json |> parse_event_string "spawn_role"
+
+let parse_spawn_error json = parse_event_detail json |> parse_event_string "error"
+
+let parse_spawn_elapsed_ms json =
+  parse_event_detail json |> parse_event_int "elapsed_ms"
+
+let parse_detached_actor json =
+  if has_event_type json "session_agent_detached" then
+    parse_event_detail json |> parse_event_string "actor"
+  else
+    None
+
+let parse_detached_reason json =
+  if has_event_type json "session_agent_detached" then
+    parse_event_detail json |> parse_event_string "reason"
+  else
+    None
+
+let parse_ts_iso json = parse_event_string "ts_iso" json
 
 let spawn_agent_of_event json =
   if has_event_type json "team_step_spawn" then parse_spawn_agent json else None
@@ -840,6 +1001,56 @@ let collect_spawn_models events =
 let collect_spawn_selection_notes events =
   events |> List.filter_map spawn_selection_note_of_event
   |> Team_session_types.dedup_strings
+
+let failed_spawn_roster_of_events events =
+  events
+  |> List.filter_map (fun json ->
+         match team_step_spawn_success json with
+         | Some false ->
+             Some
+               (`Assoc
+                 [
+                   ( "runtime_actor",
+                     Option.fold ~none:`Null ~some:(fun s -> `String s)
+                       (team_step_runtime_actor json) );
+                   ( "spawn_agent",
+                     Option.fold ~none:`Null ~some:(fun s -> `String s)
+                       (parse_spawn_agent json) );
+                   ( "spawn_role",
+                     Option.fold ~none:`Null ~some:(fun s -> `String s)
+                       (parse_spawn_role json) );
+                   ( "spawn_model",
+                     Option.fold ~none:`Null ~some:(fun s -> `String s)
+                       (parse_spawn_model json) );
+                   ( "error",
+                     Option.fold ~none:`Null ~some:(fun s -> `String s)
+                       (parse_spawn_error json) );
+                   ( "elapsed_ms",
+                     Option.fold ~none:`Null ~some:(fun n -> `Int n)
+                       (parse_spawn_elapsed_ms json) );
+                   ( "ts_iso",
+                     Option.fold ~none:`Null ~some:(fun s -> `String s)
+                       (parse_ts_iso json) );
+                 ])
+         | _ -> None)
+
+let detached_actor_roster_of_events events =
+  events
+  |> List.filter_map (fun json ->
+         match parse_detached_actor json with
+         | Some actor ->
+             Some
+               (`Assoc
+                 [
+                   ("actor", `String actor);
+                   ( "reason",
+                     Option.fold ~none:`Null ~some:(fun s -> `String s)
+                       (parse_detached_reason json) );
+                   ( "ts_iso",
+                     Option.fold ~none:`Null ~some:(fun s -> `String s)
+                       (parse_ts_iso json) );
+                 ])
+         | None -> None)
 
 let proof_level_name proof_level = proof_level_to_string proof_level
 
@@ -885,6 +1096,8 @@ let proof_markdown ~(session : Team_session_types.session)
     ~(report_exists : bool) ~(unique_turn_actors_count : int)
     ~(required_turn_actors : int) ~(spawn_models : string list)
     ~(spawn_failure_count : int) ~(detached_agent_count : int)
+    ~(failed_spawn_roster : Yojson.Safe.t list)
+    ~(detached_actor_roster : Yojson.Safe.t list)
     ~(planned_workers : Team_session_types.planned_worker list)
     ~(unique_spawn_runtime_actors_count : int)
     ~(spawn_selection_note_summary : string option)
@@ -926,6 +1139,53 @@ let proof_markdown ~(session : Team_session_types.session)
            Printf.sprintf "- %s | role=%s | model=%s | runtime_actor=%s"
              worker.Team_session_types.spawn_agent role model actor)
   in
+  let failed_spawn_lines =
+    failed_spawn_roster
+    |> List.map (fun item ->
+           let open Yojson.Safe.Util in
+           let runtime_actor =
+             item |> member "runtime_actor" |> to_string_option
+             |> Option.value ~default:"(unknown)"
+           in
+           let spawn_agent =
+             item |> member "spawn_agent" |> to_string_option
+             |> Option.value ~default:"(unknown)"
+           in
+           let spawn_role =
+             item |> member "spawn_role" |> to_string_option
+             |> Option.value ~default:"(unspecified)"
+           in
+           let spawn_model =
+             item |> member "spawn_model" |> to_string_option
+             |> Option.value ~default:"(unknown)"
+           in
+           let error =
+             item |> member "error" |> to_string_option
+             |> Option.value ~default:"(not recorded)"
+           in
+           let elapsed_ms =
+             item |> member "elapsed_ms" |> to_int_option
+             |> Option.map string_of_int
+             |> Option.value ~default:"?"
+           in
+           Printf.sprintf
+             "- %s | agent=%s | role=%s | model=%s | elapsed_ms=%s | error=%s"
+             runtime_actor spawn_agent spawn_role spawn_model elapsed_ms error)
+  in
+  let detached_actor_lines =
+    detached_actor_roster
+    |> List.map (fun item ->
+           let open Yojson.Safe.Util in
+           let actor =
+             item |> member "actor" |> to_string_option
+             |> Option.value ~default:"(unknown)"
+           in
+           let reason =
+             item |> member "reason" |> to_string_option
+             |> Option.value ~default:"(not recorded)"
+           in
+           Printf.sprintf "- %s | reason=%s" actor reason)
+  in
   String.concat "\n"
     [
       "# Team Session Proof";
@@ -962,6 +1222,14 @@ let proof_markdown ~(session : Team_session_types.session)
       "## Planned Worker Roster";
       (if planned_worker_lines = [] then "- (not recorded)"
        else String.concat "\n" planned_worker_lines);
+      "";
+      "## Failed Spawn Roster";
+      (if failed_spawn_lines = [] then "- (none)"
+       else String.concat "\n" failed_spawn_lines);
+      "";
+      "## Detached Failed Actors";
+      (if detached_actor_lines = [] then "- (none)"
+       else String.concat "\n" detached_actor_lines);
       "";
       "## Criteria";
       (if criteria_lines = [] then "- (no criteria)"
@@ -1049,6 +1317,8 @@ let generate_proof ?(proof_level = default_proof_level) config
       | [] -> None
       | xs -> Some (String.concat " | " xs)
     in
+    let failed_spawn_roster = failed_spawn_roster_of_events events in
+    let detached_actor_roster = detached_actor_roster_of_events events in
     let detached_agent_count = count_event_type events "session_agent_detached" in
     let min_turn_events = min_turn_events_for_session required_turn_actors in
     let min_communication = min_communication_for_session required_turn_actors in
@@ -1106,6 +1376,7 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ("spawn_events", `Int spawn_events);
                 ("spawn_success_count", `Int spawn_success_count);
                 ("spawn_failure_count", `Int spawn_failure_count);
+                ("failed_spawn_roster", `List failed_spawn_roster);
                 ("unique_spawn_agents", `List (List.map (fun a -> `String a) unique_spawn_agents));
                 ("unique_spawn_agents_count", `Int unique_spawn_agents_count);
                 ( "unique_spawn_runtime_actors",
@@ -1126,6 +1397,7 @@ let generate_proof ?(proof_level = default_proof_level) config
                   Option.fold ~none:`Null ~some:(fun note -> `String note)
                     spawn_selection_note_summary );
                 ("detached_agent_count", `Int detached_agent_count);
+                ("detached_actor_roster", `List detached_actor_roster);
                 ("vote_events", `Int vote_events);
                 ("run_deliverables", `Int run_deliverables);
                 ("broadcast_count", `Int session.broadcast_count);
@@ -1143,6 +1415,7 @@ let generate_proof ?(proof_level = default_proof_level) config
         ~report_exists:(report_json_exists && report_md_exists)
         ~unique_turn_actors_count ~required_turn_actors ~spawn_models
         ~spawn_failure_count ~detached_agent_count
+        ~failed_spawn_roster ~detached_actor_roster
         ~planned_workers:session.planned_workers
         ~unique_spawn_runtime_actors_count
         ~spawn_selection_note_summary

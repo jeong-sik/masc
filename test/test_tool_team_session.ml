@@ -1380,6 +1380,52 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
   in
   Alcotest.(check int) "spawn failure count recorded" 1 spawn_failure_count;
   Alcotest.(check int) "detached agent count recorded" 1 detached_agent_count;
+  let failed_spawn_roster =
+    evidence |> Yojson.Safe.Util.member "failed_spawn_roster"
+    |> Yojson.Safe.Util.to_list
+  in
+  let detached_actor_roster =
+    evidence |> Yojson.Safe.Util.member "detached_actor_roster"
+    |> Yojson.Safe.Util.to_list
+  in
+  Alcotest.(check int) "proof failed spawn roster length" 1
+    (List.length failed_spawn_roster);
+  Alcotest.(check int) "proof detached actor roster length" 1
+    (List.length detached_actor_roster);
+  let failed_runtime_actor =
+    List.hd failed_spawn_roster |> Yojson.Safe.Util.member "runtime_actor"
+    |> Yojson.Safe.Util.to_string
+  in
+  let failed_role =
+    List.hd failed_spawn_roster |> Yojson.Safe.Util.member "spawn_role"
+    |> Yojson.Safe.Util.to_string
+  in
+  let detached_reason =
+    List.hd detached_actor_roster |> Yojson.Safe.Util.member "reason"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "proof failed runtime actor recorded" "llama-local-failed"
+    failed_runtime_actor;
+  Alcotest.(check string) "proof failed spawn role recorded" "implementer-a"
+    failed_role;
+  Alcotest.(check string) "proof detached reason recorded"
+    "spawn_failed_without_turn" detached_reason;
+  let report_json_path = Team_session_store.report_json_path config session_id in
+  let report_doc = Room_utils.read_json config report_json_path in
+  let report_failed_roster =
+    report_doc |> Yojson.Safe.Util.member "incidents"
+    |> Yojson.Safe.Util.member "failed_spawn_roster"
+    |> Yojson.Safe.Util.to_list
+  in
+  let report_detached_roster =
+    report_doc |> Yojson.Safe.Util.member "incidents"
+    |> Yojson.Safe.Util.member "detached_actor_roster"
+    |> Yojson.Safe.Util.to_list
+  in
+  Alcotest.(check int) "report failed spawn roster length" 1
+    (List.length report_failed_roster);
+  Alcotest.(check int) "report detached actor roster length" 1
+    (List.length report_detached_roster);
   let proof_md_path =
     prove_result |> Yojson.Safe.Util.member "proof_md_path"
     |> Yojson.Safe.Util.to_string
@@ -1394,6 +1440,22 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
     (try
        let _ =
          Str.search_forward (Str.regexp_string "Detached failed actors: 1") proof_md 0
+       in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "markdown includes failed actor roster" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "llama-local-failed | agent=llama | role=implementer-a")
+           proof_md 0
+       in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "markdown includes detached reason" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "llama-local-failed | reason=spawn_failed_without_turn")
+           proof_md 0
        in
        true
      with Not_found -> false);

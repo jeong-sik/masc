@@ -106,3 +106,7 @@ curl -sS "http://127.0.0.1:8935/api/v1/trpg/state?room_id=<ROOM_ID>" | jq
 - `scripts/viewer-local-e2e-check.sh`: 로컬 Viewer + TRPG 계약/스모크 점검
 - `scripts/run_trpg_grimland_smoke.sh`: keeper 자동 배치 + 라운드 실행 워크로드
 - `scripts/harness_trpg_session_contract.sh`: 세션 부트스트랩 계약 점검
+
+## 9. 다음 문서
+
+- 운영자가 Dashboard에서 실제 개입 절차와 복구 루틴까지 보려면 `docs/TRPG-OPS-MANUAL.md`를 함께 본다.

@@ -605,125 +605,112 @@ let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Sa
     end
   ) subscriptions
 
-(** {1 Heartbeat Task Events — Soul + Body Pattern}
+(** {1 Heartbeat Task Events — Soul + Tool Loop Pattern}
 
-    MASC server emits heartbeat_task events when an agent should "speak".
-    Workers subscribe to these events and invoke LLM to generate responses.
-    This enables local LLM (Ollama) to power remote agent activity.
-
-    Flow:
-    1. MASC heartbeat tick → Thompson Sampling → agent selected
-    2. emit_heartbeat_task ~agent ~prompt ~context
-    3. Worker receives event via poll_events or SSE
-    4. Worker invokes local LLM with agent's prompt
-    5. Worker broadcasts result back to MASC
+    MASC emits heartbeat_task events when an external worker should act as a Lodge
+    agent through the MCP tool loop. The payload carries the goal, context, and
+    allowed tools. The worker performs tools directly, then reports completion
+    evidence back to MASC.
 *)
 
 (** Emit a heartbeat_task event for Worker to process.
     @param agent Agent name (soul to embody)
-    @param prompt The prompt for LLM (includes agent personality)
+    @param goal Concrete goal for the worker
     @param context Board state, recent posts, etc.
+    @param allowed_tools Curated MCP tool allowlist for the worker
     @param board_id Optional target board ID *)
 let emit_heartbeat_task
     ~agent
-    ~prompt
+    ~goal
     ~context
+    ~allowed_tools
     ?(board_id : string option)
-    ?(action_hint : string option)
+    ?(worker_mode = "mcp_tool_loop")
+    ?(mcp_base_url : string option)
+    ?(session_id : string option)
+    ?(decision_reason : string option)
+    ?(decision_confidence : float option)
+    ?(auth_token : string option)
     () : unit =
   let data = `Assoc ([
     ("agent", `String agent);
-    ("prompt", `String prompt);
+    ("goal", `String goal);
     ("context", `String context);
+    ("worker_mode", `String worker_mode);
+    ("allowed_tools", `List (List.map (fun name -> `String name) allowed_tools));
   ] @ (match board_id with
     | Some bid -> [("board_id", `String bid)]
     | None -> [])
-  @ (match action_hint with
-    | Some hint -> [("action_hint", `String hint)]
+  @ (match mcp_base_url with
+    | Some url -> [("mcp_base_url", `String url)]
+    | None -> [])
+  @ (match session_id with
+    | Some id -> [("session_id", `String id)]
+    | None -> [])
+  @ (match decision_reason with
+    | Some reason -> [("decision_reason", `String reason)]
+    | None -> [])
+  @ (match decision_confidence with
+    | Some confidence -> [("decision_confidence", `Float confidence)]
+    | None -> [])
+  @ (match auth_token with
+    | Some token -> [("auth_token", `String token)]
     | None -> []))
   in
   notify_event ~event_type:HeartbeatTask ~agent ~data;
-  Log.info ~ctx:"heartbeat" "💓 HeartbeatTask emitted for %s (prompt: %d chars, hint: %s)"
-    agent (String.length prompt) (Option.value ~default:"none" action_hint)
+  Log.info ~ctx:"heartbeat"
+    "💓 HeartbeatTask emitted for %s (goal: %d chars, tools: %d, worker_mode: %s)"
+    agent (String.length goal) (List.length allowed_tools) worker_mode
 
-(** {1 A2A Worker Response — Complete the delegation cycle}
+(** {1 A2A Worker Response — Completion Evidence}
 
-    Worker processes heartbeat_task and submits result.
-    The result is then posted to Board on behalf of the original agent.
+    Worker processes heartbeat_task, performs MCP tools directly, and submits a
+    completion/evidence record. MASC no longer proxies the board write.
 *)
 
 (** Submit heartbeat task result from A2A Worker.
     @param worker_name Worker agent name (e.g., "llm-worker-local")
     @param agent Original agent name (soul owner)
-    @param action_type "POST" | "COMMENT:post_id" | "UPVOTE:post_id" | "SKIP"
-    @param content Generated content
+    @param status "acted" | "skipped" | "failed"
+    @param summary Short completion summary
+    @param tool_call_count Number of MCP tool calls the worker made
+    @param tool_names Executed MCP tool names
+    @param decision_reason Why the worker chose this outcome
+    @param decision_confidence Confidence score (0.0-1.0)
+    @param failure_reason Optional explicit error reason
     @return Success/error *)
 let submit_heartbeat_result
     ~worker_name
     ~agent
-    ~action_type
-    ~content
+    ~status
+    ~summary
+    ~tool_call_count
+    ~tool_names
+    ~decision_reason
+    ~decision_confidence
+    ?failure_reason
     () : (Yojson.Safe.t, string) result =
-  Log.info ~ctx:"a2a" "📥 Worker %s submitting result for %s: %s"
-    worker_name agent action_type;
-
-  let store = Board.global () in
-
-  (* Parse action type and execute *)
+  let normalized_status = String.lowercase_ascii (String.trim status) in
   let result =
-    if action_type = "POST" then begin
-      match Board.create_post store ~author:agent ~content ~ttl_hours:168 () with
-      | Ok post ->
-          let post_id = Board.Post_id.to_string post.id in
-          Ok (`Assoc [
-            ("success", `Bool true);
-            ("action", `String "post");
-            ("post_id", `String post_id);
-            ("agent", `String agent);
-            ("worker", `String worker_name);
-          ])
-      | Error e ->
-          Error (Printf.sprintf "Board post failed: %s" (Board.show_board_error e))
-    end
-    else if String.length action_type > 8 && String.sub action_type 0 8 = "COMMENT:" then begin
-      let post_id = String.sub action_type 8 (String.length action_type - 8) in
-      match Board.add_comment store ~post_id ~author:agent ~content () with
-      | Ok comment ->
-          let comment_id = Board.Comment_id.to_string comment.id in
-          Ok (`Assoc [
-            ("success", `Bool true);
-            ("action", `String "comment");
-            ("post_id", `String post_id);
-            ("comment_id", `String comment_id);
-            ("agent", `String agent);
-            ("worker", `String worker_name);
-          ])
-      | Error e ->
-          Error (Printf.sprintf "Board comment failed: %s" (Board.show_board_error e))
-    end
-    else if String.length action_type > 7 && String.sub action_type 0 7 = "UPVOTE:" then begin
-      let post_id = String.sub action_type 7 (String.length action_type - 7) in
-      match Board.vote store ~voter:agent ~post_id ~direction:Board.Up with
-      | Ok _ ->
-          Ok (`Assoc [
-            ("success", `Bool true);
-            ("action", `String "upvote");
-            ("post_id", `String post_id);
-            ("agent", `String agent);
-            ("worker", `String worker_name);
-          ])
-      | Error e ->
-          Error (Printf.sprintf "Board vote failed: %s" (Board.show_board_error e))
-    end
-    else if action_type = "SKIP" then
-      Ok (`Assoc [
-        ("success", `Bool true);
-        ("action", `String "skip");
-        ("agent", `String agent);
-        ("worker", `String worker_name);
-      ])
-    else
-      Error (Printf.sprintf "Unknown action type: %s" action_type)
+    match normalized_status with
+    | "acted" | "skipped" | "failed" ->
+        Ok (`Assoc [
+          ("success", `Bool true);
+          ("status", `String normalized_status);
+          ("agent", `String agent);
+          ("worker", `String worker_name);
+          ("summary", `String summary);
+          ("tool_call_count", `Int tool_call_count);
+          ("tool_names", `List (List.map (fun name -> `String name) tool_names));
+          ("decision_reason", `String decision_reason);
+          ("decision_confidence", `Float decision_confidence);
+          ("failure_reason",
+            match failure_reason with
+            | Some reason -> `String reason
+            | None -> `Null);
+        ])
+    | other ->
+        Error (Printf.sprintf "Unknown worker status: %s" other)
   in
 
   (* Broadcast completion event *)
@@ -732,9 +719,18 @@ let submit_heartbeat_result
        notify_event ~event_type:Completion ~agent
          ~data:(`Assoc [
            ("worker", `String worker_name);
-           ("action", `String action_type);
+           ("status", `String normalized_status);
+           ("summary", `String summary);
+           ("tool_call_count", `Int tool_call_count);
+           ("tool_names", `List (List.map (fun name -> `String name) tool_names));
+           ("decision_reason", `String decision_reason);
+           ("decision_confidence", `Float decision_confidence);
+           ("failure_reason",
+           match failure_reason with
+            | Some reason -> `String reason
+            | None -> `Null);
          ])
    | Error msg ->
-       Printf.eprintf "[a2a] notification failed: %s\n%!" msg);
+       Printf.eprintf "[a2a] heartbeat result rejected: %s\n%!" msg);
 
   result

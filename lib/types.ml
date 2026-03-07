@@ -941,6 +941,7 @@ type permission =
   | CanVote
   | CanInterrupt
   | CanApprove
+  | CanAdmin
 [@@deriving show { with_path = false }]
 
 (** Get permissions for a role *)
@@ -962,6 +963,7 @@ let permissions_for_role = function
       CanOpenPortal; CanSendPortal;
       CanCreateWorktree; CanRemoveWorktree;
       CanVote; CanInterrupt; CanApprove;
+      CanAdmin;
     ]
 
 (** Check if role has permission *)

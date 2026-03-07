@@ -43,6 +43,16 @@ let metadata name =
       allow_direct_call_when_hidden = false;
     }
   in
+  let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true) reason =
+    {
+      visibility = Hidden;
+      lifecycle = Active;
+      canonical_name;
+      replacement;
+      reason = Some reason;
+      allow_direct_call_when_hidden;
+    }
+  in
   match name with
   | "masc_archive_save" ->
       {
@@ -68,6 +78,13 @@ let metadata name =
         ~canonical_name:"masc_unit_define"
         ~replacement:"masc_unit_define"
         "Alias retained for compatibility; use masc_unit_define."
+  | "masc_post_create" | "masc_post_list" | "masc_post_get"
+  | "masc_comment_add" | "masc_comment_list" | "masc_vote" ->
+      hidden_active
+        "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface."
+  | "masc_vote_create" | "masc_vote_cast" | "masc_vote_status" | "masc_votes" ->
+      hidden_active
+        "Low-usage room vote utility hidden from the default tool list; prefer decision.*, masc_consensus_*, or masc_debate_* for primary coordination workflows."
   | _ when String.starts_with ~prefix:"masc_swarm_" name ->
       deprecated
         "Swarm public tools are deprecated. Use Command Plane V2 dispatch, detachment, and policy tools instead."

@@ -760,6 +760,28 @@ let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
   | Some (false, err) -> Error err
   | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
 
+let keeper_diagnostic_health_state json =
+  match U.member "health_state" json with
+  | `String value -> Some (String.lowercase_ascii value)
+  | _ -> None
+
+let keeper_diagnostic_recoverable json =
+  match U.member "recoverable" json with
+  | `Bool value -> value
+  | _ -> false
+
+let keeper_recovery_outcome after_diagnostic =
+  match keeper_diagnostic_health_state after_diagnostic with
+  | Some ("healthy" | "idle") when not (keeper_diagnostic_recoverable after_diagnostic) ->
+      (true, None)
+  | Some state ->
+      ( false,
+        Some
+          (Printf.sprintf
+             "keeper remained %s after recovery attempt"
+             state) )
+  | None -> (false, Some "keeper recovery did not return a health_state")
+
 let resolve_team_turn_actor config ~requested_actor ~session_id =
   match Team_session_store.load_session config session_id with
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
@@ -1036,6 +1058,9 @@ let execute_action (ctx : 'a context) (request : action_request) :
           | `Assoc _ as json -> json
           | _ -> `Null
         in
+        let recovered, skipped_reason =
+          keeper_recovery_outcome after_diagnostic
+        in
         Ok
           (`Assoc
             [
@@ -1043,7 +1068,11 @@ let execute_action (ctx : 'a context) (request : action_request) :
               ( "result",
                 `Assoc
                   [
-                    ("recovered", `Bool true);
+                    ("recovered", `Bool recovered);
+                    ( "skipped_reason",
+                      match skipped_reason with
+                      | Some reason -> `String reason
+                      | None -> `Null );
                     ("before", before_diagnostic);
                     ("after", after_diagnostic);
                     ("down", down_result);

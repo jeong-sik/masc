@@ -13,7 +13,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
   `}const ui="masc_dashboard_sse_session_id",Qr=1e3,Xr=15e3,Lt=m(!1),is=m(0),yo=m(null),re=m([]);function Zr(){let t=sessionStorage.getItem(ui);return t||(t=typeof crypto.randomUUID=="function"?`dash_${crypto.randomUUID()}`:`dash_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`,sessionStorage.setItem(ui,t)),t}const tl=200;function el(t,e,n="system",s={}){const a={agent:t,text:e,timestamp:Date.now(),kind:n,...s};re.value=[a,...re.value].slice(0,tl)}function Vs(t,e=88){const n=(t??"").replace(/\s+/g," ").trim();return n?n.length>e?`${n.slice(0,e-3)}...`:n:void 0}function di(t,e){const n=Vs(e);return n?`${t}: ${n}`:`New ${t.toLowerCase()}`}function at(t,e,n,s,a={}){el(t,e,n,{eventType:s,...a})}let vt=null,se=null,Ys=0;function bo(){se&&(clearTimeout(se),se=null)}function nl(){if(se)return;Ys++;const t=Math.min(Ys,5),e=Math.min(Xr,Qr*Math.pow(2,t));se=setTimeout(()=>{se=null,ko()},e)}function ko(){bo(),vt&&(vt.close(),vt=null);const t=new URLSearchParams(window.location.search),e=new URLSearchParams,n=t.get("agent")??t.get("agent_name"),s=t.get("token");n&&e.set("agent",n),s&&e.set("token",s),e.set("session_id",Zr());const a=e.toString()?`/sse?${e.toString()}`:"/sse",i=new EventSource(a);vt=i,i.onopen=()=>{vt===i&&(Ys=0,Lt.value=!0)},i.onerror=()=>{vt===i&&(Lt.value=!1,i.close(),vt=null,nl())},i.onmessage=r=>{try{const l=JSON.parse(r.data);is.value++,yo.value=l,sl(l)}catch{}}}function sl(t){const e=t.type,n=t.agent??t.author??t.from??t.from_agent??"";switch(e){case"agent_joined":at(n,"Joined","system","agent_joined");break;case"agent_left":at(n,"Left","system","agent_left");break;case"broadcast":at(n,`${(t.message??t.content??"").slice(0,80)}`,"system","broadcast");break;case"task_update":at(n,`Task: ${t.task_id??""} -> ${t.status??""}`,"tasks","task_update");break;case"board_post":case"masc/board_post":at(n,di("Post",t.content??t.message),"board","board_post",{author:t.author??n,preview:Vs(t.content??t.message),postId:t.post_id});break;case"board_comment":case"masc/board_comment":at(n,di("Comment",t.content??t.message),"board","board_comment",{author:t.author??n,preview:Vs(t.content??t.message),postId:t.post_id});break;case"keeper_heartbeat":at(t.name??n,`Heartbeat gen=${t.generation??"?"} ctx=${t.context_ratio!=null?Math.round(t.context_ratio*100)+"%":"?"}`,"keepers","keeper_heartbeat");break;case"keeper_handoff":at(t.name??n,`Handoff gen ${t.from_generation??"?"} -> ${t.to_generation??"?"} (${t.to_model??"?"})`,"keepers","keeper_handoff");break;case"keeper_compaction":at(t.name??n,`Compaction saved ${t.saved_tokens??"?"} tokens (${t.trigger??"?"})`,"keepers","keeper_compaction");break;case"keeper_guardrail":at(t.name??n,`Guardrail: ${t.reason??"stopped"}`,"keepers","keeper_guardrail");break;default:at(n,e,"system","unknown")}}function al(){bo(),vt&&(vt.close(),vt=null),Lt.value=!1}function xo(){return new URLSearchParams(window.location.search)}function wo(){const t=xo(),e={},n=t.get("token"),s=t.get("agent")??t.get("agent_name");return n&&(e.Authorization=`Bearer ${n}`),s&&(e["X-MASC-Agent"]=s),e}function So(){return{...wo(),"Content-Type":"application/json"}}const il=15e3,Ao=3e4,ol=6e4,pi=new Set([408,425,429,500,502,503,504]);class Ze extends Error{constructor(n){const s=n.method.toUpperCase(),a=n.timeout===!0,i=a?`${s} ${n.path}: timeout after ${n.timeoutMs??0}ms`:`${s} ${n.path}: ${n.status??"unknown"} ${n.statusText??""}`.trim();super(i);Gt(this,"method");Gt(this,"path");Gt(this,"status");Gt(this,"statusText");Gt(this,"timeout");this.name="ApiRequestError",this.method=s,this.path=n.path,this.status=n.status,this.statusText=n.statusText,this.timeout=a}}async function Pa(t,e,n){const s=new AbortController,a=setTimeout(()=>s.abort(),n);try{return await fetch(t,{...e,signal:s.signal})}catch(i){if(i instanceof Error&&i.name==="AbortError"){const r=typeof e.method=="string"?e.method.toUpperCase():"GET";throw new Ze({method:r,path:t,timeout:!0,timeoutMs:n})}throw i}finally{clearTimeout(a)}}function rl(){var e,n;const t=xo();return((e=t.get("agent"))==null?void 0:e.trim())||((n=t.get("agent_name"))==null?void 0:n.trim())||"dashboard-user"}async function kt(t){const e=await Pa(t,{headers:wo()},il);if(!e.ok)throw new Ze({method:"GET",path:t,status:e.status,statusText:e.statusText});return e.json()}function ll(t){return new Promise(e=>setTimeout(e,t))}function cl(t){const e=t.match(/\b(\d{3})\b/);if(!e)return null;const n=e[1];if(!n)return null;const s=Number.parseInt(n,10);return Number.isFinite(s)?s:null}function ul(t){if(t instanceof Ze)return t.timeout||typeof t.status=="number"&&pi.has(t.status);if(!(t instanceof Error))return!1;if(/timeout after \d+ms/i.test(t.message))return!0;const e=cl(t.message);return e!==null&&pi.has(e)}async function tn(t,e,n=2){let s=0;for(;;)try{return await e()}catch(a){if(!ul(a)||s>=n)throw a;const i=250*(s+1);console.warn(`[dashboard/api] ${t} failed (attempt ${s+1}), retrying in ${i}ms`,a),await ll(i),s+=1}}async function xt(t,e,n){const s=await Pa(t,{method:"POST",headers:{...So(),...n??{}},body:JSON.stringify(e)},Ao);if(!s.ok)throw new Ze({method:"POST",path:t,status:s.status,statusText:s.statusText});return s.json()}async function dl(t,e,n,s=Ao){const a=await Pa(t,{method:"POST",headers:{...So(),...n??{}},body:JSON.stringify(e)},s);if(!a.ok)throw new Ze({method:"POST",path:t,status:a.status,statusText:a.statusText});return a.text()}function pl(t){const e=t.split(`
 `).find(s=>s.startsWith("data: ")),n=e?e.slice(6).trim():t.trim();return JSON.parse(n)}function vl(t){var e,n,s,a,i,r,l;if((e=t.error)!=null&&e.message)throw new Error(t.error.message);if((n=t.result)!=null&&n.isError){const u=((a=(s=t.result.content)==null?void 0:s[0])==null?void 0:a.text)??"MCP tool call failed";throw new Error(u)}return((l=(r=(i=t.result)==null?void 0:i.content)==null?void 0:r[0])==null?void 0:l.text)??""}async function G(t,e){const n=await dl("/mcp",{jsonrpc:"2.0",method:"tools/call",params:{name:t,arguments:e},id:Math.floor(Date.now()%1e6)},{Accept:"application/json, text/event-stream"},ol),s=pl(n);return vl(s)}function ml(t="compact"){return kt(`/api/v1/dashboard?mode=${t}`)}function fl(){return kt("/api/v1/operator")}function en(t){return xt("/api/v1/operator/action",t)}function _l(t,e){return xt("/api/v1/operator/confirm",{actor:t,confirm_token:e})}const gl=new Set(["lodge-system","team-session"]);function le(t){if(typeof t=="string"&&t.trim())return t;if(typeof t!="number"||Number.isNaN(t))return new Date().toISOString();const e=t<1e12?t*1e3:t;return new Date(e).toISOString()}function $l(t){return gl.has(t.trim().toLowerCase())}function hl(t){return t.filter(e=>!$l(e.author))}function yl(t){var a;const e=t.trim(),s=((a=(e.startsWith("[flair:")?e.replace(/^\[flair:[^\]]+\]\s*/i,""):e).split(`
 `)[0])==null?void 0:a.trim())||"Untitled post";return s.length<=96?s:`${s.slice(0,93)}...`}function To(t){if(!N(t))return null;const e=_(t.id,"").trim(),n=_(t.author,"").trim(),s=_(t.content,"").trim();if(!e||!n)return null;const a=C(t.score,0),i=C(t.votes_up,0),r=C(t.votes_down,0),l=C(t.votes,a||i-r),u=C(t.comment_count,C(t.reply_count,0)),c=(()=>{const g=t.flair;if(typeof g=="string"&&g.trim())return g.trim();if(N(g)){const x=_(g.name,"").trim();if(x)return x}return _(t.flair_name,"").trim()||void 0})(),p=_(t.created_at_iso,"").trim()||le(t.created_at),d=_(t.updated_at_iso,"").trim()||(t.updated_at!==void 0?le(t.updated_at):p),f=_(t.title,"").trim()||yl(s);return{id:e,author:n,title:f,content:s,tags:[],votes:l,vote_balance:a,comment_count:u,created_at:p,updated_at:d,flair:c,hearth_count:C(t.hearth_count,0)}}function bl(t){if(!N(t))return null;const e=_(t.id,"").trim(),n=_(t.post_id,"").trim(),s=_(t.author,"").trim();return!e||!s?null:{id:e,post_id:n,author:s,content:_(t.content,""),created_at:le(t.created_at)}}async function kl(t,e){return tn("fetchBoard",async()=>{const n=new URLSearchParams;t&&n.set("sort_by",t),e!=null&&e.excludeSystem&&n.set("exclude_system","true"),n.set("limit",e!=null&&e.excludeSystem?"150":"100");const s=n.toString(),a=await kt(`/api/v1/board${s?`?${s}`:""}`),i=Array.isArray(a.posts)?a.posts.map(To).filter(l=>l!==null):[];return{posts:e!=null&&e.excludeSystem?hl(i):i}})}async function xl(t){return tn("fetchBoardPost",async()=>{const e=await kt(`/api/v1/board/${t}?format=flat`),n=N(e.post)?e.post:e,s=To(n)??{id:t,author:"unknown",title:"Post",content:"",tags:[],votes:0,comment_count:0,created_at:new Date().toISOString(),updated_at:new Date().toISOString()},i=(Array.isArray(e.comments)?e.comments:[]).map(bl).filter(r=>r!==null);return{...s,comments:i}})}function Co(t,e){return xt("/api/v1/tools/masc_board_vote",{post_id:t,direction:e,vote:e,voter:rl()})}function wl(t,e,n){return xt("/api/v1/tools/masc_board_comment",{post_id:t,author:e,content:n})}function Sl(t){const e=_(t,"").trim().toLowerCase();if(e==="win"||e==="won"||e==="victory")return"victory";if(e==="lose"||e==="lost"||e==="defeat")return"defeat";if(e==="draw"||e==="stalemate"||e==="tie")return"draw"}function B(...t){for(const e of t){const n=_(e,"");if(n.trim())return n.trim()}return""}function vi(t){const e=Sl(B(t.outcome,t.result,t.result_code));if(!e)return;const n=B(t.reason,t.reason_code,t.description,t.detail),s=B(t.summary,t.summary_ko,t.summary_en,t.note),a=B(t.details,t.details_text,t.text,t.note),i=B(t.winner,t.winner_name,t.actor_winner,t.winner_actor),r=B(t.winner_actor_id,t.winner_actor,t.actor_winner_id),l=B(t.raw_reason,t.raw_reason_code,t.error_message),u=(()=>{const d=t.evidence??t.evidence_ids??t.supporting_events??t.event_ids??[];return typeof d=="string"?[d]:Array.isArray(d)?d.map(v=>{if(typeof v=="string")return v.trim();if(N(v)){const f=_(v.summary,"").trim();if(f)return f;const g=_(v.text,"").trim();if(g)return g;const k=_(v.type,"").trim();return k||_(v.event_id,"").trim()}return""}).filter(v=>v.length>0):[]})(),c=(()=>{const d=C(t.turn,Number.NaN);if(Number.isFinite(d))return d;const v=C(t.turn_number,Number.NaN);if(Number.isFinite(v))return v;const f=C(t.current_turn,Number.NaN);if(Number.isFinite(f))return f;const g=C(t.round,Number.NaN);return Number.isFinite(g)?g:void 0})(),p=B(t.phase,t.phase_name,t.current_phase,t.phase_id);return{result:e,reason:n||void 0,summary:s||void 0,details:a||void 0,winner:i||void 0,winner_actor_id:r||void 0,evidence:u.length>0?u:void 0,raw_reason:l||void 0,turn:c,phase:p||void 0}}function Al(t,e){const n=N(t.state)?t.state:{};if(_(n.status,"active").toLowerCase()!=="ended")return;const a=[...e].reverse().find(r=>N(r)?_(r.type,"")==="session.outcome":!1),i=N(n.session_outcome)?n.session_outcome:{};if(N(i)&&Object.keys(i).length>0){const r=vi(i);if(r)return r}if(N(a))return vi(N(a.payload)?a.payload:{})}function N(t){return typeof t=="object"&&t!==null}function _(t,e=""){return typeof t=="string"?t:e}function C(t,e=0){return typeof t=="number"&&Number.isFinite(t)?t:e}function Ct(t){if(typeof t=="number"&&Number.isFinite(t))return Math.trunc(t);if(typeof t=="string"){const e=Number.parseInt(t.trim(),10);if(Number.isFinite(e))return e}}function Qs(t,e=!1){return typeof t=="boolean"?t:e}function fe(t){return Array.isArray(t)?t.map(e=>{if(typeof e=="string")return e.trim();if(N(e)){const n=_(e.name,"").trim(),s=_(e.id,"").trim(),a=_(e.skill,"").trim();return n||s||a}return""}).filter(e=>e.length>0):[]}function Tl(t){const e={};if(!N(t)&&!Array.isArray(t))return e;if(N(t))return Object.entries(t).forEach(([n,s])=>{const a=n.trim(),i=_(s,"").trim();!a||!i||(e[a]=i)}),e;for(const n of t){if(!N(n))continue;const s=B(n.to,n.target,n.actor_id,n.name,n.id),a=B(n.relationship,n.relation,n.type,n.kind);!s||!a||(e[s]=a)}return e}function Cl(t,e,n){if(t==="dm"||t==="player"||t==="npc")return t;const s=e.trim().toLowerCase();return s==="dm"||s.startsWith("dm-")?"dm":s.startsWith("npc-")||s.startsWith("enemy-")||s.startsWith("mob-")?"npc":/^p\d+$/i.test(s)||s.startsWith("player-")?"player":typeof n=="string"&&n.trim()!==""?n.trim().toLowerCase().includes("dm")?"dm":"player":"npc"}function Z(t,e,n,s=0){const a=t[e];if(typeof a=="number"&&Number.isFinite(a))return a;if(n){const i=t[n];if(typeof i=="number"&&Number.isFinite(i))return i}return s}const Nl=new Set(["str","dex","con","int","wis","cha","strength","dexterity","constitution","intelligence","wisdom","charisma","hp","max_hp","mp","max_mp","level","xp"]);function Rl(t){const e=N(t.stats)?t.stats:{},n={};return Object.entries(e).forEach(([s,a])=>{const i=s.trim();i&&(Nl.has(i.toLowerCase())||typeof a=="number"&&Number.isFinite(a)&&(n[i]=a))}),n}function Ll(t,e){if(t!=="dice.rolled")return;const n=C(e.raw_d20,0),s=C(e.total,0),a=C(e.bonus,0),i=_(e.action,"roll"),r=C(e.dc,0);return{notation:r>0?`${i} (DC ${r})`:i,rolls:n>0?[n]:[],total:s,modifier:a}}function Dl(t){const e=JSON.stringify(t);return e?e.length>160?`${e.slice(0,157)}...`:e:""}function Pl(t){const e=t.trim().toLowerCase();return e?e.startsWith("dice.")?"dice":e.startsWith("combat.")||e.includes(".attack")||e.includes(".damage")?"combat":e.includes("actor.")?"actor":e.includes("turn.")||e==="turn.started"||e==="phase.changed"?"turn":e.includes("join.")?"join":e.includes("memory")?"memory":e.includes("world.")?"world":e.includes("narration")?"story":"meta":"meta"}function El(t,e,n,s){const a=n||e||_(s.actor_id,"")||_(s.actor_name,"");switch(t){case"turn.action.proposed":{const i=_(s.proposed_action,_(s.reply,""));return i?`${a||"actor"}: ${i}`:"Action proposed"}case"turn.action.resolved":{const i=_(s.reply,_(s.result,""));return i?`Resolved: ${i}`:"Action resolved"}case"narration.posted":return _(s.reply,_(s.content,_(s.text,"Narration")));case"dice.rolled":{const i=_(s.action,"roll"),r=C(s.total,0),l=C(s.dc,0),u=_(s.label,""),c=a||"actor",p=l>0?` vs DC ${l}`:"",d=u?` (${u})`:"";return`${c} ${i}: ${r}${p}${d}`}case"turn.started":return`Turn ${C(s.turn,1)} started`;case"phase.changed":return`Phase: ${_(s.phase,"round")}`;case"actor.spawned":return`Actor spawned: ${_(s.name,N(s.actor)?_(s.actor.name,a||"unknown"):a||"unknown")}`;case"actor.claimed":return`${_(s.keeper_name,_(s.keeper,"keeper"))} claimed ${a||"actor"}`;case"actor.released":return`${_(s.keeper_name,_(s.keeper,"keeper"))} released ${a||"actor"}`;case"join.window.opened":return`Join window opened (turn ${C(s.turn,0)})`;case"join.window.closed":return`Join window closed (turn ${C(s.turn,0)})`;case"mid.join.requested":return`Mid-join requested: ${a||_(s.actor_id,"actor")}`;case"mid.join.granted":return`Mid-join granted: ${a||_(s.actor_id,"actor")}`;case"mid.join.rejected":return`Mid-join rejected: ${_(s.reason_code,"unknown")}`;case"memory.signal":{const i=N(s.entity_refs)?s.entity_refs:{},r=_(i.requested_tier,""),l=_(i.effective_tier,""),u=Qs(i.guardrail_applied,!1),c=_(s.summary_en,_(s.summary_ko,"Memory signal"));if(!r&&!l)return c;const p=r&&l?`${r}->${l}`:l||r;return`${c} [${p}${u?" (guardrail)":""}]`}case"world.event":{if(_(s.event_type,"")==="canon.check"){const r=_(s.status,"unknown"),l=_(s.contract_id,"n/a");return`Canon ${r}: ${l}`}return _(s.description,_(s.summary,"World event"))}case"combat.attack":return _(s.summary,_(s.result,"Attack resolved"));case"combat.defense":return _(s.summary,_(s.result,"Defense resolved"));case"session.outcome":return _(s.summary,_(s.outcome,"Session ended"));default:{const i=Dl(s);return i?`${t}: ${i}`:t}}}function Il(t,e){const n=N(t)?t:{},s=_(n.type,"event"),a=typeof n.actor_id=="string"&&n.actor_id.trim()?n.actor_id.trim():"",i=_(n.actor_name,"").trim()||e[a]||_(N(n.payload)?n.payload.actor_name:"",""),r=N(n.payload)?n.payload:{},l=_(n.ts,_(n.timestamp,new Date().toISOString())),u=_(n.phase,_(r.phase,"")),c=_(n.category,"");return{type:s,actor:i||a||_(r.actor_name,""),actor_id:a||_(r.actor_id,""),actor_name:i,seq:n.seq,room_id:_(n.room_id,""),phase:u||void 0,category:c||Pl(s),visibility:_(n.visibility,_(r.visibility,"public")),event_id:_(n.event_id,""),content:El(s,a,i,r),dice_roll:Ll(s,r),timestamp:l}}function Ml(t,e,n){var st,_t;const s=_(t.room_id,"")||n||"default",a=N(t.state)?t.state:{},i=N(a.party)?a.party:{},r=N(a.actor_control)?a.actor_control:{},l=N(a.join_gate)?a.join_gate:{},u=N(a.contribution_ledger)?a.contribution_ledger:{},c=Object.entries(i).map(([E,K])=>{const $=N(K)?K:{},an=Z($,"max_hp",void 0,10),Wa=Z($,"hp",void 0,an),dr=Z($,"max_mp",void 0,0),pr=Z($,"mp",void 0,0),vr=Z($,"level",void 0,1),mr=Z($,"xp",void 0,0),fr=Qs($.alive,Wa>0),Ga=r[E],Ja=typeof Ga=="string"?Ga:void 0,_r=Cl($.role,E,Ja),gr=Ct($.generation),$r=B($.joined_at,$.joinedAt,$.started_at,$.startedAt),hr=B($.claimed_at,$.claimedAt,$.assigned_at,$.assignedAt,$.assigned_time),yr=B($.last_seen,$.lastSeen,$.last_seen_at,$.lastSeenAt,$.last_active,$.lastActive),br=B($.scene,$.current_scene,$.currentScene,$.world_scene,$.scene_name,$.sceneName),kr=B($.location,$.current_location,$.currentLocation,$.position,$.zone,$.area);return{id:E,name:_($.name,E),role:_r,keeper:Ja,archetype:_($.archetype,""),persona:_($.persona,""),portrait:_($.portrait,"")||void 0,background:_($.background,"")||void 0,traits:fe($.traits),skills:fe($.skills),stats_raw:Rl($),status:fr?"active":"dead",generation:gr,joined_at:$r||void 0,claimed_at:hr||void 0,last_seen:yr||void 0,scene:br||void 0,location:kr||void 0,inventory:fe($.inventory),notes:fe($.notes),relationships:Tl($.relationships),stats:{hp:Wa,max_hp:an,mp:pr,max_mp:dr,level:vr,xp:mr,strength:Z($,"strength","str",10),dexterity:Z($,"dexterity","dex",10),constitution:Z($,"constitution","con",10),intelligence:Z($,"intelligence","int",10),wisdom:Z($,"wisdom","wis",10),charisma:Z($,"charisma","cha",10)}}}),p=c.filter(E=>E.status!=="dead"),d=Al(t,e),v={phase_open:Qs(l.phase_open,!0),min_points:C(l.min_points,3),window:_(l.window,"round_boundary_only"),last_opened_turn:typeof l.last_opened_turn=="number"?l.last_opened_turn:null,last_closed_turn:typeof l.last_closed_turn=="number"?l.last_closed_turn:null},f=Object.entries(u).map(([E,K])=>{const $=N(K)?K:{};return{actor_id:E,score:C($.score,0),last_reason:_($.last_reason,"")||null,reasons:fe($.reasons)}}),g=c.reduce((E,K)=>(E[K.id]=K.name,E),{}),k=e.map(E=>Il(E,g)),x=C(a.turn,1),R=_(a.phase,"round"),A=_(a.map,""),P=N(a.world)?a.world:{},S=A||_(P.ascii_map,_(P.map,"")),L=k.filter((E,K)=>{const $=e[K];if(!N($))return!1;const an=N($.payload)?$.payload:{};return C(an.turn,-1)===x}),nt=(L.length>0?L:k).slice(-12),Et=_(a.status,"active");return{session:{id:s,room:s,status:Et==="ended"?"ended":Et==="paused"?"paused":"active",round:x,actors:p,created_at:((st=k[0])==null?void 0:st.timestamp)??new Date().toISOString()},current_round:{round_number:x,phase:R,events:nt,timestamp:((_t=k[k.length-1])==null?void 0:_t.timestamp)??new Date().toISOString()},map:S||void 0,join_gate:v,contribution_ledger:f,outcome:d,party:p,story_log:k,history:[]}}async function Ol(t){const e=`?room_id=${encodeURIComponent(t)}`,n=await kt(`/api/v1/trpg/events${e}`);return Array.isArray(n.events)?n.events:[]}async function jl(t){const e=`?room_id=${encodeURIComponent(t)}`,[n,s]=await Promise.all([kt(`/api/v1/trpg/state${e}`),Ol(t)]);return Ml(n,s,t)}function Fl(t){return xt("/api/v1/trpg/rounds/run",{room_id:t})}function zl(t){const e="".trim().toLowerCase();if(e)switch(e){case"discussion":case"discuss":case"party_discussion":case"player_discussion":case"action":case"dice":return"round";case"ended":return"end";default:return e}}function ql(t){const e={room_id:t.roomId,actor_id:t.actorId,action:t.action,stat_value:t.statValue,dc:t.dc};return t.rawD20!=null&&(e.raw_d20=t.rawD20),t.ruleModule&&(e.rule_module=t.ruleModule),xt("/api/v1/trpg/dice/roll",e)}function Kl(t,e){const n=zl();return xt("/api/v1/trpg/turns/advance",{room_id:t,...n?{phase:n}:{}})}function Hl(t,e){var a;const n=(a=e.idempotencyKey)==null?void 0:a.trim(),s={room_id:t};return e.actor_id&&e.actor_id.trim()&&(s.actor_id=e.actor_id.trim()),e.name&&e.name.trim()&&(s.name=e.name.trim()),e.role&&(s.role=e.role),e.archetype&&e.archetype.trim()&&(s.archetype=e.archetype.trim()),e.persona&&e.persona.trim()&&(s.persona=e.persona.trim()),e.portrait&&e.portrait.trim()&&(s.portrait=e.portrait.trim()),e.background&&e.background.trim()&&(s.background=e.background.trim()),e.hp!=null&&(s.hp=e.hp),e.max_hp!=null&&(s.max_hp=e.max_hp),e.alive!=null&&(s.alive=e.alive),Array.isArray(e.traits)&&e.traits.length>0&&(s.traits=e.traits),Array.isArray(e.skills)&&e.skills.length>0&&(s.skills=e.skills),Array.isArray(e.inventory)&&e.inventory.length>0&&(s.inventory=e.inventory),e.stats&&Object.keys(e.stats).length>0&&(s.stats=e.stats),n&&(s.idempotency_key=n),xt("/api/v1/trpg/actors/spawn",s,n?{"Idempotency-Key":n}:void 0)}function Ul(t,e,n){return xt("/api/v1/trpg/actors/claim",{room_id:t,actor_id:e,keeper:n})}async function Bl(t,e,n){const s=await G("trpg.join.eligibility",{room_id:t,actor_id:e,...n?{keeper_name:n}:{}});return JSON.parse(s)}async function Wl(t){const e=await G("trpg.mid_join.request",t);return JSON.parse(e)}async function No(t,e){await G("masc_broadcast",{agent_name:t,message:e})}async function Gl(t,e,n=1){await G("masc_add_task",{title:t,description:e,priority:n})}async function Jl(t){return G("masc_join",{agent_name:t})}async function Ro(t){await G("masc_leave",{agent_name:t})}async function Vl(t){await G("masc_heartbeat",{agent_name:t})}async function Yl(t=40){return(await G("masc_messages",{limit:t})).split(`
-`).map(n=>n.trim()).filter(n=>n!=="")}async function Ql(t,e=20){return G("masc_task_history",{task_id:t,limit:e})}async function Xl(){return tn("fetchDebates",async()=>{const t=await kt("/api/v1/council/debates?limit=100");return Array.isArray(t.debates)?t.debates.map(e=>{if(!N(e))return null;const n=_(e.id,"").trim(),s=_(e.topic,"").trim();return!n||!s?null:{id:n,topic:s,status:_(e.status,"open"),argument_count:C(e.argument_count,0),created_at:le(e.created_at_iso??e.created_at)}}).filter(e=>e!==null):[]})}async function Zl(){return tn("fetchCouncilSessions",async()=>{const t=await kt("/api/v1/council/sessions?limit=100");return Array.isArray(t.sessions)?t.sessions.map(e=>{if(!N(e))return null;const n=_(e.id,"").trim(),s=_(e.topic,"").trim();return!n||!s?null:{id:n,topic:s,initiator:_(e.initiator,"system"),votes:C(e.votes,0),quorum:C(e.quorum,0),state:_(e.state,"open"),created_at:le(e.created_at_iso??e.created_at)}}).filter(e=>e!==null):[]})}async function tc(t){const e=await G("masc_debate_start",{topic:t});try{return JSON.parse(e)}catch{return null}}async function ec(t){return tn("fetchDebateStatus",async()=>{const e=encodeURIComponent(t),n=await kt(`/api/v1/council/debates/${e}/summary`);if(!N(n))return null;const s=_(n.id,"").trim();return s?{id:s,topic:_(n.topic,""),status:_(n.status,"open"),support_count:C(n.support_count,0),oppose_count:C(n.oppose_count,0),neutral_count:C(n.neutral_count,0),total_arguments:C(n.total_arguments,0),created_at:le(n.created_at_iso??n.created_at),summary_text:_(n.summary_text,"")}:null})}function nc(t,e,n){return G("masc_keeper_msg",{name:t,message:e})}function sc(t){const e=_(t,"").trim().toLowerCase();return e.startsWith("error")?"error":e==="running"||e==="completed"||e==="stopped"?e:"running"}function ac(t){return N(t)?{iteration:Ct(t.iteration)??0,metric_before:C(t.metric_before,0),metric_after:C(t.metric_after,0),delta:C(t.delta,0),changes:_(t.changes,""),failed_attempts:_(t.failed_attempts,""),next_suggestion:_(t.next_suggestion,""),elapsed_ms:Ct(t.elapsed_ms)??0,cost_usd:typeof t.cost_usd=="number"&&Number.isFinite(t.cost_usd)?t.cost_usd:null}:null}function ic(t){if(!N(t))return null;const e=_(t.loop_id,"").trim();if(!e)return null;const n=Array.isArray(t.history)?t.history.map(ac).filter(s=>s!==null):[];return{loop_id:e,profile:_(t.profile,"custom"),status:sc(t.status),current_iteration:Ct(t.iteration)??Ct(t.current_iteration)??0,max_iterations:Ct(t.max_iterations)??0,baseline_metric:C(t.baseline_metric,0),current_metric:C(t.current_metric,C(t.baseline_metric,0)),target:_(t.target,""),stagnation_streak:Ct(t.stagnation_streak)??0,stagnation_limit:Ct(t.stagnation_limit)??0,elapsed_seconds:C(t.elapsed_seconds,0),history:n}}function mi(t){return t.trim().toLowerCase().includes("no mdal loop running")}async function oc(){try{const t=await G("masc_mdal_status",{}),e=JSON.parse(t),n=N(e)?_(e.error,"").trim():"";if(mi(n))return{state:"idle"};if(n)return{state:"error",message:n};const s=ic(e);return s?{state:"ready",loop:s}:{state:"error",message:"Unexpected MDAL payload"}}catch(t){const e=t instanceof Error?t.message:"Unknown MDAL fetch error";return mi(e)?{state:"idle"}:{state:"error",message:e}}}async function rc(){try{const t=await G("masc_goal_list",{});if(typeof t=="string"){const e=JSON.parse(t);return Array.isArray(e)?e:e.goals??[]}return Array.isArray(t)?t:t.goals??[]}catch{return[]}}const ke=m(""),yt=m({}),W=m({}),Xs=m({}),Zs=m({}),ta=m({}),ea=m({}),bt=m({});function U(t,e,n){t.value={...t.value,[e]:n}}function wt(t){return typeof t=="object"&&t!==null&&!Array.isArray(t)}function M(t){return typeof t=="string"&&t.trim()!==""?t.trim():void 0}function ot(t){return typeof t=="number"&&Number.isFinite(t)?t:void 0}function Zt(t){return typeof t=="boolean"?t:void 0}function na(t){return typeof t=="string"&&t.trim()!==""?t:typeof t!="number"||!Number.isFinite(t)||t<=0?null:new Date(t*1e3).toISOString()}function sa(t){return Array.isArray(t)?t.map(e=>M(e)).filter(e=>!!e):[]}function lc(t){var n;const e=(n=M(t))==null?void 0:n.toLowerCase();return e==="user"||e==="assistant"||e==="system"||e==="tool"?e:"other"}function cc(t){switch(t){case"user":return"User";case"assistant":return"Keeper";case"system":return"System";case"tool":return"Tool";default:return"Event"}}function ds(t,e){if(!Array.isArray(t))return[];const n=[];for(const s of t){if(!wt(s))continue;const a=M(s.name);if(!a)continue;const i=M(s[e]);e==="summary"?n.push({name:a,summary:i}):n.push({name:a,reason:i})}return n}function uc(t){if(!wt(t))return null;const e=M(t.name);return e?{name:e,trigger:M(t.trigger),outcome:M(t.outcome),summary:M(t.summary),reason:M(t.reason)}:null}function dc(t){const e=t.toLowerCase();return e.includes("graphql")?"graphql_error":e.includes("timeout")||e.includes("model")||e.includes("llm")||e.includes("api key")||e.includes("api_key")||e.includes("provider")?"llm_error":"unknown"}function pc(t,e){return t==="offline"||t==="degraded"||t==="stale"?"Keeper is not in a healthy reply state. Probe or recover before relying on automation.":e==="quiet_hours"?"Lodge quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep.":e==="min_gap"?"Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait.":e==="never_started"?"Keeper metadata exists but no reply turn has been recorded yet.":"Keeper is reachable. Send a direct message for an immediate response."}function Dn(t){if(!wt(t))return null;const e=M(t.health_state),n=M(t.next_action_path),s=M(t.last_reply_status);return!e||!n||!s?null:{health_state:e,quiet_reason:M(t.quiet_reason)??null,next_action_path:n,last_reply_status:s,last_reply_at:na(t.last_reply_at),last_reply_preview:M(t.last_reply_preview)??null,last_error:M(t.last_error)??null,next_eligible_at_s:ot(t.next_eligible_at_s)??null,recoverable:typeof t.recoverable=="boolean"?t.recoverable:void 0,summary:M(t.summary),keepalive_running:typeof t.keepalive_running=="boolean"?t.keepalive_running:void 0}}function Ea(t){return wt(t)?{hour:ot(t.hour),checked:ot(t.checked)??0,acted:ot(t.acted)??0,acted_names:sa(t.acted_names),activity_report:M(t.activity_report),quiet_hours_overridden:Zt(t.quiet_hours_overridden),skipped_reason:M(t.skipped_reason),acted_rows:ds(t.acted_rows,"summary").map(e=>({name:e.name,summary:e.summary})),passed_rows:ds(t.passed_rows,"reason").map(e=>({name:e.name,reason:e.reason})),skipped_rows:ds(t.skipped_rows,"reason").map(e=>({name:e.name,reason:e.reason})),checkins:Array.isArray(t.checkins)?t.checkins.map(uc).filter(e=>e!==null):[]}:null}function vc(t){return wt(t)?{enabled:Zt(t.enabled)??!1,interval_s:ot(t.interval_s)??0,quiet_start:ot(t.quiet_start),quiet_end:ot(t.quiet_end),quiet_active:Zt(t.quiet_active),use_planner:Zt(t.use_planner),delegate_llm:Zt(t.delegate_llm),agent_count:ot(t.agent_count),agents:sa(t.agents),last_tick_ago_s:ot(t.last_tick_ago_s)??null,last_tick_ago:M(t.last_tick_ago),total_ticks:ot(t.total_ticks),total_checkins:ot(t.total_checkins),last_skip_reason:M(t.last_skip_reason)??null,last_tick_result:Ea(t.last_tick_result),active_self_heartbeats:sa(t.active_self_heartbeats)}:null}function mc(t){return wt(t)?{status:t.status,diagnostic:Dn(t.diagnostic)}:null}function fc(t){return wt(t)?{recovered:Zt(t.recovered)??!1,skipped_reason:M(t.skipped_reason)??null,before:Dn(t.before),after:Dn(t.after),down:t.down,up:t.up}:null}function _c(t,e){var A,P;if(!(t!=null&&t.name))return null;const n=M((A=t.agent)==null?void 0:A.status)??M(t.status)??"unknown",s=M((P=t.agent)==null?void 0:P.error)??null,a=t.presence_keepalive??!0,i=t.keepalive_running??!1,r=t.turn_count??0,l=t.last_turn_ago_s??null,u=t.proactive_enabled??!1,c=t.proactive_cooldown_sec??0,p=t.last_proactive_ago_s??null,d=u&&p!=null?Math.max(0,c-p):null,v=r<=0||l==null?"never":l>900?"stale":"fresh",f=typeof t.last_heartbeat=="string"&&t.last_heartbeat.trim()?t.last_heartbeat:null,g=s??(a&&!i?"keeper keepalive is not running":null),k=n==="offline"||n==="inactive"?"offline":g?"degraded":v==="stale"?"stale":v==="never"?"idle":"healthy",x=g?dc(g):e!=null&&e.quiet_active&&v!=="fresh"?"quiet_hours":a&&!i?"disabled":r<=0?"never_started":d!=null&&d>0?"min_gap":v==="fresh"||v==="stale"?"no_recent_activity":"unknown",R=k==="offline"||k==="degraded"||k==="stale"?"recover":x==="quiet_hours"?"manual_lodge_poke":x==="unknown"?"probe":"direct_message";return{health_state:k,quiet_reason:x,next_action_path:R,last_reply_status:v,last_reply_at:f,last_reply_preview:null,last_error:g,next_eligible_at_s:d!=null&&d>0?d:null,recoverable:R==="recover",summary:pc(k,x),keepalive_running:i}}function gc(t,e){if(!wt(t))return null;const n=lc(t.role),s=M(t.content)??M(t.preview);if(!s)return null;const a=na(t.ts_unix)??na(t.timestamp);return{id:`${n}-${a??"entry"}-${e}`,role:n,label:cc(n),text:s,timestamp:a,delivery:"history"}}function $c(t,e,n){const s=wt(n)?n:null,a=Array.isArray(s==null?void 0:s.history_tail)?s.history_tail.map((i,r)=>gc(i,r)).filter(i=>i!==null):[];return{name:t,diagnostic:Dn(s==null?void 0:s.diagnostic),history:a,rawText:e,rawStatus:n,loadedAt:new Date().toISOString()}}function fi(t,e){const n=W.value[t]??[];W.value={...W.value,[t]:[...n,e].slice(-50)}}function hc(t,e){W.value={...W.value,[t]:e.slice(-50)}}function os(t,e){yt.value={...yt.value,[t]:e},hc(t,e.history)}function _i(t,e){const n=yt.value[t];if(!n)return;const s=n.diagnostic??{health_state:"idle",next_action_path:"direct_message",last_reply_status:"unknown"};os(t,{...n,diagnostic:{...s,...e}})}async function Ia(){ce();try{await Bt()}catch(t){console.warn("[keeper-runtime] dashboard refresh failed",t)}}function yn(t){ke.value=t.trim()}async function Lo(t,e=!1){const n=t.trim();if(!n)return null;if(!e&&yt.value[n])return yt.value[n];U(Xs,n,!0),U(bt,n,null);try{const s=await G("masc_keeper_status",{name:n,fast:!1,include_context:!0,include_metrics_overview:!0,include_memory_bank:!1,include_history_tail:!0,include_compaction_history:!1,tail_turns:5,tail_messages:10});let a=null;try{a=JSON.parse(s)}catch{a=null}const i=$c(n,s,a);return os(n,i),i}catch(s){const a=s instanceof Error?s.message:`Failed to inspect ${n}`;return U(bt,n,a),null}finally{U(Xs,n,!1)}}async function yc(t,e){const n=t.trim(),s=e.trim();if(!n||!s)return;const a=`local-${Date.now()}`;fi(n,{id:a,role:"user",label:"You",text:s,timestamp:new Date().toISOString(),delivery:"sending"}),U(Zs,n,!0),U(bt,n,null);try{const i=await nc(n,s);W.value={...W.value,[n]:(W.value[n]??[]).map(r=>r.id===a?{...r,delivery:"delivered"}:r)},fi(n,{id:`reply-${Date.now()}`,role:"assistant",label:n,text:i.trim()||"(empty reply)",timestamp:new Date().toISOString(),delivery:"delivered"}),_i(n,{last_reply_status:"delivered",last_reply_at:new Date().toISOString(),last_reply_preview:(i.trim()||"(empty reply)").slice(0,200),last_error:null}),await Ia()}catch(i){const r=i instanceof Error?i.message:`Failed to send direct message to ${n}`;throw W.value={...W.value,[n]:(W.value[n]??[]).map(l=>l.id===a?{...l,delivery:"error",error:r}:l)},_i(n,{last_reply_status:"error",last_error:r}),U(bt,n,r),i}finally{U(Zs,n,!1)}}async function bc(t,e){const n=t.trim();if(!n)return null;U(ta,n,!0),U(bt,n,null);try{const s=await en({actor:e,action_type:"keeper_probe",target_type:"keeper",target_id:n,payload:{}}),a=mc(s.result),i=(a==null?void 0:a.diagnostic)??null;if(i){const r=yt.value[n];os(n,{name:n,diagnostic:i,history:(r==null?void 0:r.history)??W.value[n]??[],rawText:(r==null?void 0:r.rawText)??"",rawStatus:s.result,loadedAt:new Date().toISOString()})}return await Ia(),i}catch(s){const a=s instanceof Error?s.message:`Failed to probe ${n}`;throw U(bt,n,a),s}finally{U(ta,n,!1)}}async function kc(t,e){const n=t.trim();if(!n)return null;U(ea,n,!0),U(bt,n,null);try{const s=await en({actor:e,action_type:"keeper_recover",target_type:"keeper",target_id:n,payload:{}}),a=fc(s.result),i=(a==null?void 0:a.after)??null;if(i){const r=yt.value[n];os(n,{name:n,diagnostic:i,history:(r==null?void 0:r.history)??W.value[n]??[],rawText:(r==null?void 0:r.rawText)??"",rawStatus:s.result,loadedAt:new Date().toISOString()})}return await Ia(),i}catch(s){const a=s instanceof Error?s.message:`Failed to recover ${n}`;throw U(bt,n,a),s}finally{U(ea,n,!1)}}const Ht=m([]),St=m([]),nn=m([]),ct=m([]),Pt=m(null),he=m(null),aa=m(new Map),Ut=m([]),Ue=m("hot"),jt=m(!0),Do=m(null),$t=m(""),Be=m([]),te=m(!1),rt=m(new Map),bn=m("unknown"),ia=m(null),oa=m(!1),We=m(!1),ra=m(!1),ee=m(!1),xc=m(null),la=m(null),Po=m(null),Eo=m(null),Io=X(()=>Ht.value.filter(t=>t.status==="active"||t.status==="idle")),Ma=X(()=>{const t=St.value;return{todo:t.filter(e=>e.status==="todo"),inProgress:t.filter(e=>e.status==="in_progress"||e.status==="claimed"),done:t.filter(e=>e.status==="done")}});function wc(t){var i;const e=((i=t.status)==null?void 0:i.toLowerCase())??"";if(e==="offline"||e==="inactive")return"offline";const n=t.metrics_series;if(!n||n.length===0)return"idle";const s=n[n.length-1];if(!s)return"idle";if(s.is_handoff)return"handoff-imminent";if(s.is_compaction)return"compacting";const a=s.context_ratio;return a>.85?"handoff-imminent":a>.7?"preparing":a>.5?"compacting":"active"}const Mo=X(()=>{const t=new Map;for(const e of ct.value)t.set(e.name,wc(e));return t}),Sc=12e4;function Ac(t,e){const n=e.get(t.name);if(n!=null)return n;const s=t.last_heartbeat?Date.parse(t.last_heartbeat):Number.NaN;if(!Number.isNaN(s))return s;const a=[t.last_turn_ago_s,t.last_proactive_ago_s,t.last_handoff_ago_s,t.last_compaction_ago_s].find(i=>typeof i=="number"&&Number.isFinite(i)&&i>=0);return typeof a=="number"?Date.now()-a*1e3:null}const Oo=X(()=>{const t=Date.now(),e=new Set,n=aa.value;for(const s of ct.value){const a=Ac(s,n);a!=null&&t-a>Sc&&e.add(s.name)}return e}),Pn={},Tc=5e3;function ce(){delete Pn.compact,delete Pn.full}function et(t){return typeof t=="object"&&t!==null}function y(t){return typeof t=="string"&&t.trim()!==""?t:void 0}function w(t){return typeof t=="number"&&Number.isFinite(t)?t:void 0}function xe(t){if(!Array.isArray(t))return;const e=t.filter(n=>typeof n=="string"&&n.trim()!=="");return e.length>0?e:void 0}function Cc(t){if(typeof t=="string"&&t.trim()!=="")return t;if(!(typeof t!="number"||!Number.isFinite(t)||t<=0))return new Date(t*1e3).toISOString()}function jo(t){const e=typeof t=="string"?t.toLowerCase():"";return e==="active"||e==="idle"||e==="inactive"||e==="offline"?e:e==="busy"||e==="in_progress"||e==="claimed"?"active":"offline"}function Nc(t){const e=typeof t=="string"?t.toLowerCase():"";return e==="todo"||e==="in_progress"||e==="claimed"||e==="done"||e==="cancelled"?e:e==="inprogress"?"in_progress":"todo"}function Rc(t){if(!et(t))return null;const e=y(t.name);return e?{name:e,status:jo(t.status),current_task:y(t.current_task)??null,last_seen:y(t.last_seen),emoji:y(t.emoji),koreanName:y(t.koreanName)??y(t.korean_name),model:y(t.model),traits:xe(t.traits),interests:xe(t.interests),activityLevel:w(t.activityLevel)??w(t.activity_level),primaryValue:y(t.primaryValue)??y(t.primary_value)}:null}function Lc(t){if(!et(t))return null;const e=y(t.id),n=y(t.title);return!e||!n?null:{id:e,title:n,status:Nc(t.status),priority:w(t.priority),assignee:y(t.assignee),description:y(t.description),created_at:y(t.created_at),updated_at:y(t.updated_at)}}function Dc(t){if(!et(t))return null;const e=y(t.from)??y(t.from_agent)??"system",n=y(t.content)??"",s=y(t.timestamp)??new Date().toISOString();return{id:y(t.id),seq:w(t.seq),from:e,content:n,timestamp:s,type:y(t.type)}}function Pc(t){return Array.isArray(t)?t.map(e=>{if(!et(e))return null;const n=w(e.ts_unix);if(n==null)return null;const s=et(e.handoff)?e.handoff:null;return{ts:n,context_ratio:w(e.context_ratio)??0,context_tokens:w(e.context_tokens)??0,context_max:w(e.context_max)??0,latency_ms:w(e.latency_ms)??0,generation:w(e.generation)??0,channel:typeof e.channel=="string"?e.channel:"turn",is_handoff:s!=null&&e.handoff_performed===!0,is_compaction:e.compacted===!0,compaction_saved_tokens:w(e.compaction_saved_tokens)??0,compaction_trigger:typeof e.compaction_trigger=="string"?e.compaction_trigger:null,model_used:typeof e.model_used=="string"?e.model_used:"",cost_usd:w(e.cost_usd)??0,handoff_to_model:s&&typeof s.to_model=="string"?s.to_model:null,handoff_new_generation:s?w(s.new_generation)??null:null}}).filter(e=>e!==null):[]}function gi(t){if(!et(t))return null;const e=y(t.health_state),n=y(t.next_action_path),s=y(t.last_reply_status);return!e||!n||!s?null:{health_state:e,quiet_reason:y(t.quiet_reason)??null,next_action_path:n,last_reply_status:s,last_reply_at:Cc(t.last_reply_at)??y(t.last_reply_at)??null,last_reply_preview:y(t.last_reply_preview)??null,last_error:y(t.last_error)??null,next_eligible_at_s:w(t.next_eligible_at_s)??null,recoverable:typeof t.recoverable=="boolean"?t.recoverable:void 0,summary:y(t.summary),keepalive_running:typeof t.keepalive_running=="boolean"?t.keepalive_running:void 0}}function Ec(t,e){return(Array.isArray(t)?t:et(t)&&Array.isArray(t.keepers)?t.keepers:[]).map(s=>{if(!et(s))return null;const a=et(s.agent)?s.agent:null,i=et(s.context)?s.context:null,r=et(s.metrics_window)?s.metrics_window:void 0,l=y(s.name);if(!l)return null;const u=w(s.context_ratio)??w(i==null?void 0:i.context_ratio),c=y(s.status)??y(a==null?void 0:a.status)??"offline",p=jo(c),d=y(s.model)??y(s.active_model)??y(s.primary_model),v=xe(s.skill_secondary),f=i?{source:y(i.source),context_ratio:w(i.context_ratio),context_tokens:w(i.context_tokens),context_max:w(i.context_max),message_count:w(i.message_count),has_checkpoint:typeof i.has_checkpoint=="boolean"?i.has_checkpoint:void 0}:void 0,g=a?{name:y(a.name),exists:typeof a.exists=="boolean"?a.exists:void 0,error:y(a.error),status:y(a.status),current_task:y(a.current_task)??null,last_seen:y(a.last_seen),last_seen_ago_s:w(a.last_seen_ago_s),is_zombie:typeof a.is_zombie=="boolean"?a.is_zombie:void 0}:void 0,k=Pc(s.metrics_series),x={name:l,emoji:y(s.emoji),koreanName:y(s.koreanName)??y(s.korean_name),agent_name:y(s.agent_name),trace_id:y(s.trace_id),model:d,primary_model:y(s.primary_model),active_model:y(s.active_model),next_model_hint:y(s.next_model_hint)??null,status:p,presence_keepalive:typeof s.presence_keepalive=="boolean"?s.presence_keepalive:void 0,presence_keepalive_sec:w(s.presence_keepalive_sec),keepalive_running:typeof s.keepalive_running=="boolean"?s.keepalive_running:void 0,proactive_enabled:typeof s.proactive_enabled=="boolean"?s.proactive_enabled:void 0,proactive_idle_sec:w(s.proactive_idle_sec),proactive_cooldown_sec:w(s.proactive_cooldown_sec),last_heartbeat:y(s.last_heartbeat)??y(a==null?void 0:a.last_seen),generation:w(s.generation),turn_count:w(s.turn_count)??w(s.total_turns),keeper_age_s:w(s.keeper_age_s),last_turn_ago_s:w(s.last_turn_ago_s),last_handoff_ago_s:w(s.last_handoff_ago_s),last_compaction_ago_s:w(s.last_compaction_ago_s),last_proactive_ago_s:w(s.last_proactive_ago_s),context_ratio:u,context_tokens:w(s.context_tokens)??w(i==null?void 0:i.context_tokens),context_max:w(s.context_max)??w(i==null?void 0:i.context_max),context_source:y(s.context_source)??y(i==null?void 0:i.source),context:f,traits:xe(s.traits),interests:xe(s.interests),primaryValue:y(s.primaryValue)??y(s.primary_value),activityLevel:w(s.activityLevel)??w(s.activity_level),memory_recent_note:y(s.memory_recent_note)??null,conversation_tail_count:w(s.conversation_tail_count),k2k_count:w(s.k2k_count),handoff_count_total:w(s.handoff_count_total)??w(s.trace_history_count),compaction_count:w(s.compaction_count),last_compaction_saved_tokens:w(s.last_compaction_saved_tokens),diagnostic:gi(s.diagnostic),skill_primary:y(s.skill_primary)??null,skill_secondary:v,skill_reason:y(s.skill_reason)??null,metrics_series:k.length>0?k:void 0,metrics_window:r,agent:g};return x.diagnostic=gi(s.diagnostic)??_c(x,(e==null?void 0:e.lodge)??null),x}).filter(s=>s!==null)}function Ic(t){return et(t)?{...t,lodge:vc(t.lodge)??void 0}:null}async function Bt(t="full"){var s,a,i;const e=Date.now(),n=Pn[t];if(!(n&&e-n.time<Tc)){oa.value=!0;try{const r=await ml(t);Pn[t]={data:r,time:e},Ht.value=(Array.isArray((s=r.agents)==null?void 0:s.agents)?r.agents.agents:[]).map(Rc).filter(u=>u!==null),St.value=(Array.isArray((a=r.tasks)==null?void 0:a.tasks)?r.tasks.tasks:[]).map(Lc).filter(u=>u!==null),nn.value=(Array.isArray((i=r.messages)==null?void 0:i.messages)?r.messages.messages:[]).map(Dc).filter(u=>u!==null);const l=Ic(r.status);Pt.value=l,ct.value=Ec(r.keepers,l),he.value=r.perpetual??null,xc.value=new Date().toISOString()}catch(r){console.error("Dashboard fetch error:",r)}finally{oa.value=!1}}}async function mt(){We.value=!0;try{const t=await kl(Ue.value,{excludeSystem:jt.value});Ut.value=t.posts??[],la.value=new Date().toISOString()}catch(t){console.error("Board fetch error:",t)}finally{We.value=!1}}async function ht(){var t;ra.value=!0;try{const e=$t.value||((t=Pt.value)==null?void 0:t.room)||"default";$t.value||($t.value=e);const n=await jl(e);Do.value=n}catch(e){console.error("TRPG fetch error:",e)}finally{ra.value=!1}}async function we(){te.value=!0;try{const t=await rc();Be.value=Array.isArray(t)?t:[],Po.value=new Date().toISOString()}catch(t){console.error("Goals fetch error:",t)}finally{te.value=!1}}async function Se(){const t=++ms;ee.value=!0;try{const e=await oc();if(t!==ms)return;if(e.state==="error"){bn.value="error",ia.value=e.message;return}if(Eo.value=new Date().toISOString(),ia.value=null,e.state==="idle"){bn.value="idle";const i=new Map(rt.value);for(const[r,l]of i.entries())l.status==="running"&&i.set(r,{...l,status:"stopped"});rt.value=i;return}const n=e.loop;bn.value="ready";const s=new Map(rt.value),a=s.get(n.loop_id);s.set(n.loop_id,{...a??{},...n,history:n.history.length>0?n.history:(a==null?void 0:a.history)??[]}),rt.value=s}catch(e){console.error("MDAL fetch error:",e)}finally{t===ms&&(ee.value=!1)}}let ps=null,vs=null,ms=0;function Mc(){return yo.subscribe(e=>{if(e){if(e.type==="keeper_heartbeat"&&e.name){const n=new Map(aa.value);n.set(e.name,e.ts_unix?e.ts_unix*1e3:Date.now()),aa.value=n}if(ce(),ps||(ps=setTimeout(()=>{Bt(),ps=null},500)),(e.type==="board_post"||e.type==="masc/board_post"||e.type==="board_comment"||e.type==="masc/board_comment")&&(vs||(vs=setTimeout(()=>{mt(),vs=null},500))),(e.type==="keeper_handoff"||e.type==="keeper_compaction"||e.type==="keeper_guardrail")&&ce(),e.type==="mdal_started"&&e.loop_id){const n=new Map(rt.value);n.set(e.loop_id,{...n.get(e.loop_id)??{},loop_id:e.loop_id,profile:e.profile??"custom",status:"running",current_iteration:e.iteration??0,max_iterations:0,baseline_metric:e.baseline??0,current_metric:e.baseline??0,target:e.target??"",stagnation_streak:0,stagnation_limit:0,elapsed_seconds:0,history:[]}),rt.value=n}if(e.type==="mdal_iteration"&&e.loop_id){const n=new Map(rt.value),s=e.metric_before??e.metric_after??0,a=e.metric_after??s,i=n.get(e.loop_id)??{loop_id:e.loop_id,profile:e.profile??"unknown",status:"running",current_iteration:e.iteration??0,max_iterations:0,baseline_metric:s,current_metric:a,target:e.target??"",stagnation_streak:0,stagnation_limit:0,elapsed_seconds:0,history:[]},r={iteration:e.iteration??0,metric_before:s,metric_after:a,delta:e.delta??0,changes:"",failed_attempts:"",next_suggestion:"",elapsed_ms:0,cost_usd:null};n.set(e.loop_id,{...i,current_iteration:e.iteration??i.current_iteration,current_metric:a,history:[r,...i.history]}),rt.value=n}if((e.type==="mdal_completed"||e.type==="mdal_stopped")&&e.loop_id){const n=new Map(rt.value),s=n.get(e.loop_id)??{loop_id:e.loop_id,profile:e.profile??"unknown",status:"running",current_iteration:e.iteration??0,max_iterations:0,baseline_metric:e.baseline??e.metric_before??e.metric_after??0,current_metric:e.metric_after??e.metric_before??e.baseline??0,target:e.target??"",stagnation_streak:0,stagnation_limit:0,elapsed_seconds:0,history:[]};n.set(e.loop_id,{...s,current_iteration:e.iteration??s.current_iteration,current_metric:e.metric_after??s.current_metric,status:e.type==="mdal_completed"?"completed":"stopped"}),rt.value=n}}})}let Ae=null;function Oc(){Ae||(Ae=setInterval(()=>{ce(),Bt()},1e4))}function jc(){Ae&&(clearInterval(Ae),Ae=null)}function b({title:t,class:e,children:n}){return o`
+`).map(n=>n.trim()).filter(n=>n!=="")}async function Ql(t,e=20){return G("masc_task_history",{task_id:t,limit:e})}async function Xl(){return tn("fetchDebates",async()=>{const t=await kt("/api/v1/council/debates?limit=100");return Array.isArray(t.debates)?t.debates.map(e=>{if(!N(e))return null;const n=_(e.id,"").trim(),s=_(e.topic,"").trim();return!n||!s?null:{id:n,topic:s,status:_(e.status,"open"),argument_count:C(e.argument_count,0),created_at:le(e.created_at_iso??e.created_at)}}).filter(e=>e!==null):[]})}async function Zl(){return tn("fetchCouncilSessions",async()=>{const t=await kt("/api/v1/council/sessions?limit=100");return Array.isArray(t.sessions)?t.sessions.map(e=>{if(!N(e))return null;const n=_(e.id,"").trim(),s=_(e.topic,"").trim();return!n||!s?null:{id:n,topic:s,initiator:_(e.initiator,"system"),votes:C(e.votes,0),quorum:C(e.quorum,0),state:_(e.state,"open"),created_at:le(e.created_at_iso??e.created_at)}}).filter(e=>e!==null):[]})}async function tc(t){const e=await G("masc_debate_start",{topic:t});try{return JSON.parse(e)}catch{return null}}async function ec(t){return tn("fetchDebateStatus",async()=>{const e=encodeURIComponent(t),n=await kt(`/api/v1/council/debates/${e}/summary`);if(!N(n))return null;const s=_(n.id,"").trim();return s?{id:s,topic:_(n.topic,""),status:_(n.status,"open"),support_count:C(n.support_count,0),oppose_count:C(n.oppose_count,0),neutral_count:C(n.neutral_count,0),total_arguments:C(n.total_arguments,0),created_at:le(n.created_at_iso??n.created_at),summary_text:_(n.summary_text,"")}:null})}function nc(t,e,n){return G("masc_keeper_msg",{name:t,message:e})}function sc(t){const e=_(t,"").trim().toLowerCase();return e.startsWith("error")?"error":e==="running"||e==="completed"||e==="stopped"?e:"running"}function ac(t){return N(t)?{iteration:Ct(t.iteration)??0,metric_before:C(t.metric_before,0),metric_after:C(t.metric_after,0),delta:C(t.delta,0),changes:_(t.changes,""),failed_attempts:_(t.failed_attempts,""),next_suggestion:_(t.next_suggestion,""),elapsed_ms:Ct(t.elapsed_ms)??0,cost_usd:typeof t.cost_usd=="number"&&Number.isFinite(t.cost_usd)?t.cost_usd:null}:null}function ic(t){if(!N(t))return null;const e=_(t.loop_id,"").trim();if(!e)return null;const n=Array.isArray(t.history)?t.history.map(ac).filter(s=>s!==null):[];return{loop_id:e,profile:_(t.profile,"custom"),status:sc(t.status),current_iteration:Ct(t.iteration)??Ct(t.current_iteration)??0,max_iterations:Ct(t.max_iterations)??0,baseline_metric:C(t.baseline_metric,0),current_metric:C(t.current_metric,C(t.baseline_metric,0)),target:_(t.target,""),stagnation_streak:Ct(t.stagnation_streak)??0,stagnation_limit:Ct(t.stagnation_limit)??0,elapsed_seconds:C(t.elapsed_seconds,0),history:n}}function mi(t){return t.trim().toLowerCase().includes("no mdal loop running")}async function oc(){try{const t=await G("masc_mdal_status",{}),e=JSON.parse(t),n=N(e)?_(e.error,"").trim():"";if(mi(n))return{state:"idle"};if(n)return{state:"error",message:n};const s=ic(e);return s?{state:"ready",loop:s}:{state:"error",message:"Unexpected MDAL payload"}}catch(t){const e=t instanceof Error?t.message:"Unknown MDAL fetch error";return mi(e)?{state:"idle"}:{state:"error",message:e}}}async function rc(){try{const t=await G("masc_goal_list",{});if(typeof t=="string"){const e=JSON.parse(t);return Array.isArray(e)?e:e.goals??[]}return Array.isArray(t)?t:t.goals??[]}catch{return[]}}const ke=m(""),yt=m({}),W=m({}),Xs=m({}),Zs=m({}),ta=m({}),ea=m({}),bt=m({});function U(t,e,n){t.value={...t.value,[e]:n}}function wt(t){return typeof t=="object"&&t!==null&&!Array.isArray(t)}function M(t){return typeof t=="string"&&t.trim()!==""?t.trim():void 0}function ot(t){return typeof t=="number"&&Number.isFinite(t)?t:void 0}function Zt(t){return typeof t=="boolean"?t:void 0}function na(t){return typeof t=="string"&&t.trim()!==""?t:typeof t!="number"||!Number.isFinite(t)||t<=0?null:new Date(t*1e3).toISOString()}function sa(t){return Array.isArray(t)?t.map(e=>M(e)).filter(e=>!!e):[]}function lc(t){var n;const e=(n=M(t))==null?void 0:n.toLowerCase();return e==="user"||e==="assistant"||e==="system"||e==="tool"?e:"other"}function cc(t){switch(t){case"user":return"User";case"assistant":return"Keeper";case"system":return"System";case"tool":return"Tool";default:return"Event"}}function ds(t,e){if(!Array.isArray(t))return[];const n=[];for(const s of t){if(!wt(s))continue;const a=M(s.name);if(!a)continue;const i=M(s[e]);e==="summary"?n.push({name:a,summary:i}):n.push({name:a,reason:i})}return n}function uc(t){if(!wt(t))return null;const e=M(t.name);return e?{name:e,trigger:M(t.trigger),outcome:M(t.outcome),summary:M(t.summary),reason:M(t.reason)}:null}function dc(t){const e=t.toLowerCase();return e.includes("graphql")?"graphql_error":e.includes("timeout")||e.includes("model")||e.includes("llm")||e.includes("api key")||e.includes("api_key")||e.includes("provider")?"llm_error":"unknown"}function pc(t,e){return t==="offline"||t==="degraded"||t==="stale"?"Keeper is not in a healthy reply state. Probe or recover before relying on automation.":e==="quiet_hours"?"Lodge quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep.":e==="min_gap"?"Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait.":e==="never_started"?"Keeper metadata exists but no reply turn has been recorded yet.":"Keeper is reachable. Send a direct message for an immediate response."}function Dn(t){if(!wt(t))return null;const e=M(t.health_state),n=M(t.next_action_path),s=M(t.last_reply_status);return!e||!n||!s?null:{health_state:e,quiet_reason:M(t.quiet_reason)??null,next_action_path:n,last_reply_status:s,last_reply_at:na(t.last_reply_at),last_reply_preview:M(t.last_reply_preview)??null,last_error:M(t.last_error)??null,next_eligible_at_s:ot(t.next_eligible_at_s)??null,recoverable:typeof t.recoverable=="boolean"?t.recoverable:void 0,summary:M(t.summary),keepalive_running:typeof t.keepalive_running=="boolean"?t.keepalive_running:void 0}}function Ea(t){return wt(t)?{hour:ot(t.hour),checked:ot(t.checked)??0,acted:ot(t.acted)??0,acted_names:sa(t.acted_names),activity_report:M(t.activity_report),quiet_hours_overridden:Zt(t.quiet_hours_overridden),skipped_reason:M(t.skipped_reason),acted_rows:ds(t.acted_rows,"summary").map(e=>({name:e.name,summary:e.summary})),passed_rows:ds(t.passed_rows,"reason").map(e=>({name:e.name,reason:e.reason})),skipped_rows:ds(t.skipped_rows,"reason").map(e=>({name:e.name,reason:e.reason})),checkins:Array.isArray(t.checkins)?t.checkins.map(uc).filter(e=>e!==null):[]}:null}function vc(t){return wt(t)?{enabled:Zt(t.enabled)??!1,interval_s:ot(t.interval_s)??0,quiet_start:ot(t.quiet_start),quiet_end:ot(t.quiet_end),quiet_active:Zt(t.quiet_active),use_planner:Zt(t.use_planner),delegate_llm:Zt(t.delegate_llm),agent_count:ot(t.agent_count),agents:sa(t.agents),last_tick_ago_s:ot(t.last_tick_ago_s)??null,last_tick_ago:M(t.last_tick_ago),total_ticks:ot(t.total_ticks),total_checkins:ot(t.total_checkins),last_skip_reason:M(t.last_skip_reason)??null,last_tick_result:Ea(t.last_tick_result),active_self_heartbeats:sa(t.active_self_heartbeats)}:null}function mc(t){return wt(t)?{status:t.status,diagnostic:Dn(t.diagnostic)}:null}function fc(t){return wt(t)?{recovered:Zt(t.recovered)??!1,skipped_reason:M(t.skipped_reason)??null,before:Dn(t.before),after:Dn(t.after),down:t.down,up:t.up}:null}function _c(t,e){var A,P;if(!(t!=null&&t.name))return null;const n=M((A=t.agent)==null?void 0:A.status)??M(t.status)??"unknown",s=M((P=t.agent)==null?void 0:P.error)??null,a=t.presence_keepalive??!0,i=t.keepalive_running??!1,r=t.turn_count??0,l=t.last_turn_ago_s??null,u=t.proactive_enabled??!1,c=t.proactive_cooldown_sec??0,p=t.last_proactive_ago_s??null,d=u&&p!=null?Math.max(0,c-p):null,v=r<=0||l==null?"never":l>900?"stale":"fresh",f=typeof t.last_heartbeat=="string"&&t.last_heartbeat.trim()?t.last_heartbeat:null,g=s??(a&&!i?"keeper keepalive is not running":null),k=n==="offline"||n==="inactive"?"offline":g?"degraded":v==="stale"?"stale":v==="never"?"idle":"healthy",x=g?dc(g):e!=null&&e.quiet_active&&v!=="fresh"?"quiet_hours":a&&!i?"disabled":r<=0?"never_started":d!=null&&d>0?"min_gap":v==="fresh"||v==="stale"?"no_recent_activity":"unknown",R=k==="offline"||k==="degraded"||k==="stale"?"recover":x==="quiet_hours"?"manual_lodge_poke":x==="unknown"?"probe":"direct_message";return{health_state:k,quiet_reason:x,next_action_path:R,last_reply_status:v,last_reply_at:f,last_reply_preview:null,last_error:g,next_eligible_at_s:d!=null&&d>0?d:null,recoverable:R==="recover",summary:pc(k,x),keepalive_running:i}}function gc(t,e){if(!wt(t))return null;const n=lc(t.role),s=M(t.content)??M(t.preview);if(!s)return null;const a=na(t.ts_unix)??na(t.timestamp);return{id:`${n}-${a??"entry"}-${e}`,role:n,label:cc(n),text:s,timestamp:a,delivery:"history"}}function $c(t,e,n){const s=wt(n)?n:null,a=Array.isArray(s==null?void 0:s.history_tail)?s.history_tail.map((i,r)=>gc(i,r)).filter(i=>i!==null):[];return{name:t,diagnostic:Dn(s==null?void 0:s.diagnostic),history:a,rawText:e,rawStatus:n,loadedAt:new Date().toISOString()}}function fi(t,e){const n=W.value[t]??[];W.value={...W.value,[t]:[...n,e].slice(-50)}}function hc(t,e){return t.role!==e.role||t.text!==e.text?!1:t.timestamp&&e.timestamp?t.timestamp===e.timestamp:!0}function yc(t,e){const s=(W.value[t]??[]).filter(a=>a.delivery!=="history"&&!e.some(i=>hc(a,i)));W.value={...W.value,[t]:[...e,...s].slice(-50)}}function os(t,e){yt.value={...yt.value,[t]:e},yc(t,e.history)}function _i(t,e){const n=yt.value[t];if(!n)return;const s=n.diagnostic??{health_state:"idle",next_action_path:"direct_message",last_reply_status:"unknown"};os(t,{...n,diagnostic:{...s,...e}})}async function Ia(){ce();try{await Bt()}catch(t){console.warn("[keeper-runtime] dashboard refresh failed",t)}}function yn(t){ke.value=t.trim()}async function Lo(t,e=!1){const n=t.trim();if(!n)return null;if(!e&&yt.value[n])return yt.value[n];U(Xs,n,!0),U(bt,n,null);try{const s=await G("masc_keeper_status",{name:n,fast:!1,include_context:!0,include_metrics_overview:!0,include_memory_bank:!1,include_history_tail:!0,include_compaction_history:!1,tail_turns:5,tail_messages:10});let a=null;try{a=JSON.parse(s)}catch{a=null}const i=$c(n,s,a);return os(n,i),i}catch(s){const a=s instanceof Error?s.message:`Failed to inspect ${n}`;return U(bt,n,a),null}finally{U(Xs,n,!1)}}async function bc(t,e){const n=t.trim(),s=e.trim();if(!n||!s)return;const a=`local-${Date.now()}`;fi(n,{id:a,role:"user",label:"You",text:s,timestamp:new Date().toISOString(),delivery:"sending"}),U(Zs,n,!0),U(bt,n,null);try{const i=await nc(n,s);W.value={...W.value,[n]:(W.value[n]??[]).map(r=>r.id===a?{...r,delivery:"delivered"}:r)},fi(n,{id:`reply-${Date.now()}`,role:"assistant",label:n,text:i.trim()||"(empty reply)",timestamp:new Date().toISOString(),delivery:"delivered"}),_i(n,{last_reply_status:"delivered",last_reply_at:new Date().toISOString(),last_reply_preview:(i.trim()||"(empty reply)").slice(0,200),last_error:null}),await Ia()}catch(i){const r=i instanceof Error?i.message:`Failed to send direct message to ${n}`;throw W.value={...W.value,[n]:(W.value[n]??[]).map(l=>l.id===a?{...l,delivery:"error",error:r}:l)},_i(n,{last_reply_status:"error",last_error:r}),U(bt,n,r),i}finally{U(Zs,n,!1)}}async function kc(t,e){const n=t.trim();if(!n)return null;U(ta,n,!0),U(bt,n,null);try{const s=await en({actor:e,action_type:"keeper_probe",target_type:"keeper",target_id:n,payload:{}}),a=mc(s.result),i=(a==null?void 0:a.diagnostic)??null;if(i){const r=yt.value[n];os(n,{name:n,diagnostic:i,history:(r==null?void 0:r.history)??W.value[n]??[],rawText:(r==null?void 0:r.rawText)??"",rawStatus:s.result,loadedAt:new Date().toISOString()})}return await Ia(),i}catch(s){const a=s instanceof Error?s.message:`Failed to probe ${n}`;throw U(bt,n,a),s}finally{U(ta,n,!1)}}async function xc(t,e){const n=t.trim();if(!n)return null;U(ea,n,!0),U(bt,n,null);try{const s=await en({actor:e,action_type:"keeper_recover",target_type:"keeper",target_id:n,payload:{}}),a=fc(s.result),i=(a==null?void 0:a.after)??null;if(i){const r=yt.value[n];os(n,{name:n,diagnostic:i,history:(r==null?void 0:r.history)??W.value[n]??[],rawText:(r==null?void 0:r.rawText)??"",rawStatus:s.result,loadedAt:new Date().toISOString()})}return await Ia(),i}catch(s){const a=s instanceof Error?s.message:`Failed to recover ${n}`;throw U(bt,n,a),s}finally{U(ea,n,!1)}}const Ht=m([]),St=m([]),nn=m([]),ct=m([]),Pt=m(null),he=m(null),aa=m(new Map),Ut=m([]),Ue=m("hot"),jt=m(!0),Do=m(null),$t=m(""),Be=m([]),te=m(!1),rt=m(new Map),bn=m("unknown"),ia=m(null),oa=m(!1),We=m(!1),ra=m(!1),ee=m(!1),wc=m(null),la=m(null),Po=m(null),Eo=m(null),Io=X(()=>Ht.value.filter(t=>t.status==="active"||t.status==="idle")),Ma=X(()=>{const t=St.value;return{todo:t.filter(e=>e.status==="todo"),inProgress:t.filter(e=>e.status==="in_progress"||e.status==="claimed"),done:t.filter(e=>e.status==="done")}});function Sc(t){var i;const e=((i=t.status)==null?void 0:i.toLowerCase())??"";if(e==="offline"||e==="inactive")return"offline";const n=t.metrics_series;if(!n||n.length===0)return"idle";const s=n[n.length-1];if(!s)return"idle";if(s.is_handoff)return"handoff-imminent";if(s.is_compaction)return"compacting";const a=s.context_ratio;return a>.85?"handoff-imminent":a>.7?"preparing":a>.5?"compacting":"active"}const Mo=X(()=>{const t=new Map;for(const e of ct.value)t.set(e.name,Sc(e));return t}),Ac=12e4;function Tc(t,e){const n=e.get(t.name);if(n!=null)return n;const s=t.last_heartbeat?Date.parse(t.last_heartbeat):Number.NaN;if(!Number.isNaN(s))return s;const a=[t.last_turn_ago_s,t.last_proactive_ago_s,t.last_handoff_ago_s,t.last_compaction_ago_s].find(i=>typeof i=="number"&&Number.isFinite(i)&&i>=0);return typeof a=="number"?Date.now()-a*1e3:null}const Oo=X(()=>{const t=Date.now(),e=new Set,n=aa.value;for(const s of ct.value){const a=Tc(s,n);a!=null&&t-a>Ac&&e.add(s.name)}return e}),Pn={},Cc=5e3;function ce(){delete Pn.compact,delete Pn.full}function et(t){return typeof t=="object"&&t!==null}function y(t){return typeof t=="string"&&t.trim()!==""?t:void 0}function w(t){return typeof t=="number"&&Number.isFinite(t)?t:void 0}function xe(t){if(!Array.isArray(t))return;const e=t.filter(n=>typeof n=="string"&&n.trim()!=="");return e.length>0?e:void 0}function Nc(t){if(typeof t=="string"&&t.trim()!=="")return t;if(!(typeof t!="number"||!Number.isFinite(t)||t<=0))return new Date(t*1e3).toISOString()}function jo(t){const e=typeof t=="string"?t.toLowerCase():"";return e==="active"||e==="idle"||e==="inactive"||e==="offline"?e:e==="busy"||e==="in_progress"||e==="claimed"?"active":"offline"}function Rc(t){const e=typeof t=="string"?t.toLowerCase():"";return e==="todo"||e==="in_progress"||e==="claimed"||e==="done"||e==="cancelled"?e:e==="inprogress"?"in_progress":"todo"}function Lc(t){if(!et(t))return null;const e=y(t.name);return e?{name:e,status:jo(t.status),current_task:y(t.current_task)??null,last_seen:y(t.last_seen),emoji:y(t.emoji),koreanName:y(t.koreanName)??y(t.korean_name),model:y(t.model),traits:xe(t.traits),interests:xe(t.interests),activityLevel:w(t.activityLevel)??w(t.activity_level),primaryValue:y(t.primaryValue)??y(t.primary_value)}:null}function Dc(t){if(!et(t))return null;const e=y(t.id),n=y(t.title);return!e||!n?null:{id:e,title:n,status:Rc(t.status),priority:w(t.priority),assignee:y(t.assignee),description:y(t.description),created_at:y(t.created_at),updated_at:y(t.updated_at)}}function Pc(t){if(!et(t))return null;const e=y(t.from)??y(t.from_agent)??"system",n=y(t.content)??"",s=y(t.timestamp)??new Date().toISOString();return{id:y(t.id),seq:w(t.seq),from:e,content:n,timestamp:s,type:y(t.type)}}function Ec(t){return Array.isArray(t)?t.map(e=>{if(!et(e))return null;const n=w(e.ts_unix);if(n==null)return null;const s=et(e.handoff)?e.handoff:null;return{ts:n,context_ratio:w(e.context_ratio)??0,context_tokens:w(e.context_tokens)??0,context_max:w(e.context_max)??0,latency_ms:w(e.latency_ms)??0,generation:w(e.generation)??0,channel:typeof e.channel=="string"?e.channel:"turn",is_handoff:s!=null&&e.handoff_performed===!0,is_compaction:e.compacted===!0,compaction_saved_tokens:w(e.compaction_saved_tokens)??0,compaction_trigger:typeof e.compaction_trigger=="string"?e.compaction_trigger:null,model_used:typeof e.model_used=="string"?e.model_used:"",cost_usd:w(e.cost_usd)??0,handoff_to_model:s&&typeof s.to_model=="string"?s.to_model:null,handoff_new_generation:s?w(s.new_generation)??null:null}}).filter(e=>e!==null):[]}function gi(t){if(!et(t))return null;const e=y(t.health_state),n=y(t.next_action_path),s=y(t.last_reply_status);return!e||!n||!s?null:{health_state:e,quiet_reason:y(t.quiet_reason)??null,next_action_path:n,last_reply_status:s,last_reply_at:Nc(t.last_reply_at)??y(t.last_reply_at)??null,last_reply_preview:y(t.last_reply_preview)??null,last_error:y(t.last_error)??null,next_eligible_at_s:w(t.next_eligible_at_s)??null,recoverable:typeof t.recoverable=="boolean"?t.recoverable:void 0,summary:y(t.summary),keepalive_running:typeof t.keepalive_running=="boolean"?t.keepalive_running:void 0}}function Ic(t,e){return(Array.isArray(t)?t:et(t)&&Array.isArray(t.keepers)?t.keepers:[]).map(s=>{if(!et(s))return null;const a=et(s.agent)?s.agent:null,i=et(s.context)?s.context:null,r=et(s.metrics_window)?s.metrics_window:void 0,l=y(s.name);if(!l)return null;const u=w(s.context_ratio)??w(i==null?void 0:i.context_ratio),c=y(s.status)??y(a==null?void 0:a.status)??"offline",p=jo(c),d=y(s.model)??y(s.active_model)??y(s.primary_model),v=xe(s.skill_secondary),f=i?{source:y(i.source),context_ratio:w(i.context_ratio),context_tokens:w(i.context_tokens),context_max:w(i.context_max),message_count:w(i.message_count),has_checkpoint:typeof i.has_checkpoint=="boolean"?i.has_checkpoint:void 0}:void 0,g=a?{name:y(a.name),exists:typeof a.exists=="boolean"?a.exists:void 0,error:y(a.error),status:y(a.status),current_task:y(a.current_task)??null,last_seen:y(a.last_seen),last_seen_ago_s:w(a.last_seen_ago_s),is_zombie:typeof a.is_zombie=="boolean"?a.is_zombie:void 0}:void 0,k=Ec(s.metrics_series),x={name:l,emoji:y(s.emoji),koreanName:y(s.koreanName)??y(s.korean_name),agent_name:y(s.agent_name),trace_id:y(s.trace_id),model:d,primary_model:y(s.primary_model),active_model:y(s.active_model),next_model_hint:y(s.next_model_hint)??null,status:p,presence_keepalive:typeof s.presence_keepalive=="boolean"?s.presence_keepalive:void 0,presence_keepalive_sec:w(s.presence_keepalive_sec),keepalive_running:typeof s.keepalive_running=="boolean"?s.keepalive_running:void 0,proactive_enabled:typeof s.proactive_enabled=="boolean"?s.proactive_enabled:void 0,proactive_idle_sec:w(s.proactive_idle_sec),proactive_cooldown_sec:w(s.proactive_cooldown_sec),last_heartbeat:y(s.last_heartbeat)??y(a==null?void 0:a.last_seen),generation:w(s.generation),turn_count:w(s.turn_count)??w(s.total_turns),keeper_age_s:w(s.keeper_age_s),last_turn_ago_s:w(s.last_turn_ago_s),last_handoff_ago_s:w(s.last_handoff_ago_s),last_compaction_ago_s:w(s.last_compaction_ago_s),last_proactive_ago_s:w(s.last_proactive_ago_s),context_ratio:u,context_tokens:w(s.context_tokens)??w(i==null?void 0:i.context_tokens),context_max:w(s.context_max)??w(i==null?void 0:i.context_max),context_source:y(s.context_source)??y(i==null?void 0:i.source),context:f,traits:xe(s.traits),interests:xe(s.interests),primaryValue:y(s.primaryValue)??y(s.primary_value),activityLevel:w(s.activityLevel)??w(s.activity_level),memory_recent_note:y(s.memory_recent_note)??null,conversation_tail_count:w(s.conversation_tail_count),k2k_count:w(s.k2k_count),handoff_count_total:w(s.handoff_count_total)??w(s.trace_history_count),compaction_count:w(s.compaction_count),last_compaction_saved_tokens:w(s.last_compaction_saved_tokens),diagnostic:gi(s.diagnostic),skill_primary:y(s.skill_primary)??null,skill_secondary:v,skill_reason:y(s.skill_reason)??null,metrics_series:k.length>0?k:void 0,metrics_window:r,agent:g};return x.diagnostic=gi(s.diagnostic)??_c(x,(e==null?void 0:e.lodge)??null),x}).filter(s=>s!==null)}function Mc(t){return et(t)?{...t,lodge:vc(t.lodge)??void 0}:null}async function Bt(t="full"){var s,a,i;const e=Date.now(),n=Pn[t];if(!(n&&e-n.time<Cc)){oa.value=!0;try{const r=await ml(t);Pn[t]={data:r,time:e},Ht.value=(Array.isArray((s=r.agents)==null?void 0:s.agents)?r.agents.agents:[]).map(Lc).filter(u=>u!==null),St.value=(Array.isArray((a=r.tasks)==null?void 0:a.tasks)?r.tasks.tasks:[]).map(Dc).filter(u=>u!==null),nn.value=(Array.isArray((i=r.messages)==null?void 0:i.messages)?r.messages.messages:[]).map(Pc).filter(u=>u!==null);const l=Mc(r.status);Pt.value=l,ct.value=Ic(r.keepers,l),he.value=r.perpetual??null,wc.value=new Date().toISOString()}catch(r){console.error("Dashboard fetch error:",r)}finally{oa.value=!1}}}async function mt(){We.value=!0;try{const t=await kl(Ue.value,{excludeSystem:jt.value});Ut.value=t.posts??[],la.value=new Date().toISOString()}catch(t){console.error("Board fetch error:",t)}finally{We.value=!1}}async function ht(){var t;ra.value=!0;try{const e=$t.value||((t=Pt.value)==null?void 0:t.room)||"default";$t.value||($t.value=e);const n=await jl(e);Do.value=n}catch(e){console.error("TRPG fetch error:",e)}finally{ra.value=!1}}async function we(){te.value=!0;try{const t=await rc();Be.value=Array.isArray(t)?t:[],Po.value=new Date().toISOString()}catch(t){console.error("Goals fetch error:",t)}finally{te.value=!1}}async function Se(){const t=++ms;ee.value=!0;try{const e=await oc();if(t!==ms)return;if(e.state==="error"){bn.value="error",ia.value=e.message;return}if(Eo.value=new Date().toISOString(),ia.value=null,e.state==="idle"){bn.value="idle";const i=new Map(rt.value);for(const[r,l]of i.entries())l.status==="running"&&i.set(r,{...l,status:"stopped"});rt.value=i;return}const n=e.loop;bn.value="ready";const s=new Map(rt.value),a=s.get(n.loop_id);s.set(n.loop_id,{...a??{},...n,history:n.history.length>0?n.history:(a==null?void 0:a.history)??[]}),rt.value=s}catch(e){console.error("MDAL fetch error:",e)}finally{t===ms&&(ee.value=!1)}}let ps=null,vs=null,ms=0;function Oc(){return yo.subscribe(e=>{if(e){if(e.type==="keeper_heartbeat"&&e.name){const n=new Map(aa.value);n.set(e.name,e.ts_unix?e.ts_unix*1e3:Date.now()),aa.value=n}if(ce(),ps||(ps=setTimeout(()=>{Bt(),ps=null},500)),(e.type==="board_post"||e.type==="masc/board_post"||e.type==="board_comment"||e.type==="masc/board_comment")&&(vs||(vs=setTimeout(()=>{mt(),vs=null},500))),(e.type==="keeper_handoff"||e.type==="keeper_compaction"||e.type==="keeper_guardrail")&&ce(),e.type==="mdal_started"&&e.loop_id){const n=new Map(rt.value);n.set(e.loop_id,{...n.get(e.loop_id)??{},loop_id:e.loop_id,profile:e.profile??"custom",status:"running",current_iteration:e.iteration??0,max_iterations:0,baseline_metric:e.baseline??0,current_metric:e.baseline??0,target:e.target??"",stagnation_streak:0,stagnation_limit:0,elapsed_seconds:0,history:[]}),rt.value=n}if(e.type==="mdal_iteration"&&e.loop_id){const n=new Map(rt.value),s=e.metric_before??e.metric_after??0,a=e.metric_after??s,i=n.get(e.loop_id)??{loop_id:e.loop_id,profile:e.profile??"unknown",status:"running",current_iteration:e.iteration??0,max_iterations:0,baseline_metric:s,current_metric:a,target:e.target??"",stagnation_streak:0,stagnation_limit:0,elapsed_seconds:0,history:[]},r={iteration:e.iteration??0,metric_before:s,metric_after:a,delta:e.delta??0,changes:"",failed_attempts:"",next_suggestion:"",elapsed_ms:0,cost_usd:null};n.set(e.loop_id,{...i,current_iteration:e.iteration??i.current_iteration,current_metric:a,history:[r,...i.history]}),rt.value=n}if((e.type==="mdal_completed"||e.type==="mdal_stopped")&&e.loop_id){const n=new Map(rt.value),s=n.get(e.loop_id)??{loop_id:e.loop_id,profile:e.profile??"unknown",status:"running",current_iteration:e.iteration??0,max_iterations:0,baseline_metric:e.baseline??e.metric_before??e.metric_after??0,current_metric:e.metric_after??e.metric_before??e.baseline??0,target:e.target??"",stagnation_streak:0,stagnation_limit:0,elapsed_seconds:0,history:[]};n.set(e.loop_id,{...s,current_iteration:e.iteration??s.current_iteration,current_metric:e.metric_after??s.current_metric,status:e.type==="mdal_completed"?"completed":"stopped"}),rt.value=n}}})}let Ae=null;function jc(){Ae||(Ae=setInterval(()=>{ce(),Bt()},1e4))}function Fc(){Ae&&(clearInterval(Ae),Ae=null)}function b({title:t,class:e,children:n}){return o`
     <div class="card ${e??""}">
       ${t?o`<div class="card-title">${t}</div>`:null}
       ${n}
@@ -23,20 +23,20 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       <span class="status-dot-inline ${t}"></span>
       ${e??t}
     </span>
-  `}function Fc(t){const e=Date.now(),n=typeof t=="number"?t<1e12?t*1e3:t:new Date(t).getTime(),s=Math.floor((e-n)/1e3);if(s<60)return`${s}s ago`;const a=Math.floor(s/60);if(a<60)return`${a}m ago`;const i=Math.floor(a/60);return i<24?`${i}h ago`:`${Math.floor(i/24)}d ago`}function j({timestamp:t}){const e=Fc(t),n=typeof t=="string"?t:new Date(t<1e12?t*1e3:t).toISOString();return o`<span class="time-ago" title=${n}>${e}</span>`}function Mt(t){return(t??"").trim().toLowerCase()}function J(t){const e=typeof t=="number"?t:Date.parse(t);return Number.isNaN(e)?0:e}function kn(t,e=88){const n=t.replace(/\s+/g," ").trim();return n&&(n.length>e?`${n.slice(0,e-3)}...`:n)}function ln(t){return typeof t!="number"||!Number.isFinite(t)||t<0?null:new Date(Date.now()-t*1e3).toISOString()}function _e(t){return t.last_heartbeat??ln(t.last_turn_ago_s)??ln(t.last_proactive_ago_s)??ln(t.last_handoff_ago_s)??ln(t.last_compaction_ago_s)}function zc(t){const e=t.title.trim();return e||kn(t.content)}function qc(t){const e=t.generation??"?",n=typeof t.context_ratio=="number"&&Number.isFinite(t.context_ratio)?`${Math.round(t.context_ratio*100)}%`:"?";return t.last_heartbeat?`Heartbeat gen=${e} ctx=${n}`:`Keeper snapshot gen=${e} ctx=${n}`}function Oa(t,e,n,s,a={}){var P;const i=Mt(t),r=e.filter(S=>Mt(S.assignee)===i&&(S.status==="claimed"||S.status==="in_progress")).length,l=n.filter(S=>Mt(S.from)===i).sort((S,L)=>J(L.timestamp)-J(S.timestamp))[0],u=s.filter(S=>Mt(S.agent)===i||Mt(S.author)===i).sort((S,L)=>J(L.timestamp)-J(S.timestamp))[0],c=(a.boardPosts??[]).filter(S=>Mt(S.author)===i).sort((S,L)=>J(L.updated_at||L.created_at)-J(S.updated_at||S.created_at))[0],p=(a.keepers??[]).filter(S=>Mt(S.name)===i&&_e(S)!==null).sort((S,L)=>J(_e(L)??0)-J(_e(S)??0))[0],d=l?J(l.timestamp):0,v=u?J(u.timestamp):0,f=c?J(c.updated_at||c.created_at):0,g=p?J(_e(p)??0):0,k=a.lastSeen?J(a.lastSeen):0,x=((P=a.currentTask)==null?void 0:P.trim())||(r>0?`${r} claimed tasks`:null);if(d===0&&v===0&&f===0&&g===0&&k===0)return{activeAssignedCount:r,lastActivityAt:null,lastActivityText:x};const A=[l?{timestamp:l.timestamp,ts:d,text:kn(l.content)}:null,c?{timestamp:c.updated_at||c.created_at,ts:f,text:`Post: ${kn(zc(c))}`}:null,p?{timestamp:_e(p),ts:g,text:qc(p)}:null,u?{timestamp:new Date(u.timestamp).toISOString(),ts:v,text:kn(u.text)}:null].filter(S=>S!==null).sort((S,L)=>L.ts-S.ts)[0];return A&&A.ts>=k?{activeAssignedCount:r,lastActivityAt:A.timestamp,lastActivityText:A.text}:{activeAssignedCount:r,lastActivityAt:a.lastSeen??null,lastActivityText:x??"Presence heartbeat"}}let Kc=0;const Ft=m([]);function h(t,e="success",n=4e3){const s=++Kc;Ft.value=[...Ft.value,{id:s,message:t,type:e}],setTimeout(()=>{Ft.value=Ft.value.filter(a=>a.id!==s)},n)}function Hc(t){Ft.value=Ft.value.filter(e=>e.id!==t)}function Uc(){const t=Ft.value;return t.length===0?null:o`
+  `}function zc(t){const e=Date.now(),n=typeof t=="number"?t<1e12?t*1e3:t:new Date(t).getTime(),s=Math.floor((e-n)/1e3);if(s<60)return`${s}s ago`;const a=Math.floor(s/60);if(a<60)return`${a}m ago`;const i=Math.floor(a/60);return i<24?`${i}h ago`:`${Math.floor(i/24)}d ago`}function j({timestamp:t}){const e=zc(t),n=typeof t=="string"?t:new Date(t<1e12?t*1e3:t).toISOString();return o`<span class="time-ago" title=${n}>${e}</span>`}function Mt(t){return(t??"").trim().toLowerCase()}function J(t){const e=typeof t=="number"?t:Date.parse(t);return Number.isNaN(e)?0:e}function kn(t,e=88){const n=t.replace(/\s+/g," ").trim();return n&&(n.length>e?`${n.slice(0,e-3)}...`:n)}function ln(t){return typeof t!="number"||!Number.isFinite(t)||t<0?null:new Date(Date.now()-t*1e3).toISOString()}function _e(t){return t.last_heartbeat??ln(t.last_turn_ago_s)??ln(t.last_proactive_ago_s)??ln(t.last_handoff_ago_s)??ln(t.last_compaction_ago_s)}function qc(t){const e=t.title.trim();return e||kn(t.content)}function Kc(t){const e=t.generation??"?",n=typeof t.context_ratio=="number"&&Number.isFinite(t.context_ratio)?`${Math.round(t.context_ratio*100)}%`:"?";return t.last_heartbeat?`Heartbeat gen=${e} ctx=${n}`:`Keeper snapshot gen=${e} ctx=${n}`}function Oa(t,e,n,s,a={}){var P;const i=Mt(t),r=e.filter(S=>Mt(S.assignee)===i&&(S.status==="claimed"||S.status==="in_progress")).length,l=n.filter(S=>Mt(S.from)===i).sort((S,L)=>J(L.timestamp)-J(S.timestamp))[0],u=s.filter(S=>Mt(S.agent)===i||Mt(S.author)===i).sort((S,L)=>J(L.timestamp)-J(S.timestamp))[0],c=(a.boardPosts??[]).filter(S=>Mt(S.author)===i).sort((S,L)=>J(L.updated_at||L.created_at)-J(S.updated_at||S.created_at))[0],p=(a.keepers??[]).filter(S=>Mt(S.name)===i&&_e(S)!==null).sort((S,L)=>J(_e(L)??0)-J(_e(S)??0))[0],d=l?J(l.timestamp):0,v=u?J(u.timestamp):0,f=c?J(c.updated_at||c.created_at):0,g=p?J(_e(p)??0):0,k=a.lastSeen?J(a.lastSeen):0,x=((P=a.currentTask)==null?void 0:P.trim())||(r>0?`${r} claimed tasks`:null);if(d===0&&v===0&&f===0&&g===0&&k===0)return{activeAssignedCount:r,lastActivityAt:null,lastActivityText:x};const A=[l?{timestamp:l.timestamp,ts:d,text:kn(l.content)}:null,c?{timestamp:c.updated_at||c.created_at,ts:f,text:`Post: ${kn(qc(c))}`}:null,p?{timestamp:_e(p),ts:g,text:Kc(p)}:null,u?{timestamp:new Date(u.timestamp).toISOString(),ts:v,text:kn(u.text)}:null].filter(S=>S!==null).sort((S,L)=>L.ts-S.ts)[0];return A&&A.ts>=k?{activeAssignedCount:r,lastActivityAt:A.timestamp,lastActivityText:A.text}:{activeAssignedCount:r,lastActivityAt:a.lastSeen??null,lastActivityText:x??"Presence heartbeat"}}let Hc=0;const Ft=m([]);function h(t,e="success",n=4e3){const s=++Hc;Ft.value=[...Ft.value,{id:s,message:t,type:e}],setTimeout(()=>{Ft.value=Ft.value.filter(a=>a.id!==s)},n)}function Uc(t){Ft.value=Ft.value.filter(e=>e.id!==t)}function Bc(){const t=Ft.value;return t.length===0?null:o`
     <div class="toast-container">
       ${t.map(e=>o`
-        <div key=${e.id} class="toast ${e.type}" onClick=${()=>Hc(e.id)}>
+        <div key=${e.id} class="toast ${e.type}" onClick=${()=>Uc(e.id)}>
           ${e.message}
         </div>
       `)}
     </div>
-  `}function Bc(t){switch(t){case"quiet_hours":return"quiet hours";case"min_gap":return"cooldown gate";case"no_recent_activity":return"waiting for activity";case"disabled":return"runtime disabled";case"startup":return"warming up";case"llm_error":return"llm error";case"graphql_error":return"graphql error";case"never_started":return"never started";default:return"unknown"}}function Wc(t){switch(t){case"manual_lodge_poke":return"Poke Lodge";case"probe":return"Probe";case"recover":return"Recover";default:return"Message"}}function Gc(t){switch(t.delivery){case"sending":return"sending";case"timeout":return"timeout";case"error":return"error";case"delivered":return"delivered";default:return t.role}}function $i(t){return t.delivery==="error"||t.delivery==="timeout"?"bad":t.delivery==="sending"?"warn":t.role==="assistant"?"assistant":t.role==="user"?"user":"warn"}function Fo(t){if(!t)return null;const e=new Date(t);return Number.isNaN(e.getTime())?null:e.toLocaleTimeString()}function Jc(t){return typeof t!="number"||!Number.isFinite(t)||t<=0?null:t<60?`${Math.round(t)}s`:`${Math.ceil(t/60)}m`}function zo(t){if(!t)return null;const e=yt.value[t.name];return(e==null?void 0:e.diagnostic)??t.diagnostic??null}function qo({keeper:t,showRawStatus:e=!1}){if(ft(()=>{t!=null&&t.name&&Lo(t.name)},[t==null?void 0:t.name]),!t)return o`<div class="control-status-copy">Select a keeper to inspect direct reply state.</div>`;const n=yt.value[t.name],s=zo(t),a=Xs.value[t.name];return o`
+  `}function Wc(t){switch(t){case"quiet_hours":return"quiet hours";case"min_gap":return"cooldown gate";case"no_recent_activity":return"waiting for activity";case"disabled":return"runtime disabled";case"startup":return"warming up";case"llm_error":return"llm error";case"graphql_error":return"graphql error";case"never_started":return"never started";default:return"unknown"}}function Gc(t){switch(t){case"manual_lodge_poke":return"Poke Lodge";case"probe":return"Probe";case"recover":return"Recover";default:return"Message"}}function Jc(t){switch(t.delivery){case"sending":return"sending";case"timeout":return"timeout";case"error":return"error";case"delivered":return"delivered";default:return t.role}}function $i(t){return t.delivery==="error"||t.delivery==="timeout"?"bad":t.delivery==="sending"?"warn":t.role==="assistant"?"assistant":t.role==="user"?"user":"warn"}function Fo(t){if(!t)return null;const e=new Date(t);return Number.isNaN(e.getTime())?null:e.toLocaleTimeString()}function Vc(t){return typeof t!="number"||!Number.isFinite(t)||t<=0?null:t<60?`${Math.round(t)}s`:`${Math.ceil(t/60)}m`}function zo(t){if(!t)return null;const e=yt.value[t.name];return(e==null?void 0:e.diagnostic)??t.diagnostic??null}function qo({keeper:t,showRawStatus:e=!1}){if(ft(()=>{t!=null&&t.name&&Lo(t.name)},[t==null?void 0:t.name]),!t)return o`<div class="control-status-copy">Select a keeper to inspect direct reply state.</div>`;const n=yt.value[t.name],s=zo(t),a=Xs.value[t.name];return o`
     <div class="control-result-box">
       <div class="control-inline-meta">
         <span class="pill">${(s==null?void 0:s.health_state)??"unknown"}</span>
-        <span class="pill">${Bc(s==null?void 0:s.quiet_reason)}</span>
-        <span class="pill">next ${Wc((s==null?void 0:s.next_action_path)??"direct_message")}</span>
+        <span class="pill">${Wc(s==null?void 0:s.quiet_reason)}</span>
+        <span class="pill">next ${Gc((s==null?void 0:s.next_action_path)??"direct_message")}</span>
         ${a?o`<span class="pill">refreshing</span>`:null}
       </div>
       <div class="control-status-copy">
@@ -45,19 +45,19 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       <div class="control-status-copy">
         Reply: ${(s==null?void 0:s.last_reply_status)??"unknown"}
         ${s!=null&&s.last_reply_at?o` · ${Fo(s.last_reply_at)}`:null}
-        ${s!=null&&s.next_eligible_at_s?o` · next eligible ${Jc(s.next_eligible_at_s)}`:null}
+        ${s!=null&&s.next_eligible_at_s?o` · next eligible ${Vc(s.next_eligible_at_s)}`:null}
       </div>
       ${s!=null&&s.last_error?o`<div class="control-status-copy control-error-copy">${s.last_error}</div>`:null}
       ${e?o`<pre class="keeper-status-console">${(n==null?void 0:n.rawText)??"No keeper status loaded yet."}</pre>`:null}
     </div>
-  `}function Ko({keeperName:t,placeholder:e}){const[n,s]=Dr("");ft(()=>{t&&Lo(t)},[t]);const a=W.value[t]??[],i=Zs.value[t]??!1,r=bt.value[t],l=async()=>{const u=n.trim();if(!(!t||!u)){s("");try{await yc(t,u)}catch(c){const p=c instanceof Error?c.message:`Failed to message ${t}`;h(p,"error")}}};return o`
+  `}function Ko({keeperName:t,placeholder:e}){const[n,s]=Dr("");ft(()=>{t&&Lo(t)},[t]);const a=W.value[t]??[],i=Zs.value[t]??!1,r=bt.value[t],l=async()=>{const u=n.trim();if(!(!t||!u)){s("");try{await bc(t,u)}catch(c){const p=c instanceof Error?c.message:`Failed to message ${t}`;h(p,"error")}}};return o`
     <div class="keeper-conversation-shell">
       <div class="keeper-conversation-list">
         ${a.length===0?o`<div class="control-status-copy">No direct keeper conversation yet.</div>`:a.map(u=>o`
               <div class="keeper-conversation-item" key=${u.id}>
                 <div class="keeper-conversation-meta">
                   <span class=${`keeper-role-chip ${$i(u)}`}>${u.label}</span>
-                  <span class=${`keeper-role-chip ${$i(u)}`}>${Gc(u)}</span>
+                  <span class=${`keeper-role-chip ${$i(u)}`}>${Jc(u)}</span>
                   ${u.timestamp?o`<span class="keeper-conversation-time">${Fo(u.timestamp)}</span>`:null}
                 </div>
                 <div class="keeper-conversation-text">${u.text}</div>
@@ -89,14 +89,14 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
     <div class="control-actions">
       <button
         class=${`control-btn ghost ${r==="probe"?"is-active":""}`}
-        onClick=${()=>{bc(e.name,t).catch(l=>{const u=l instanceof Error?l.message:`Failed to probe ${e.name}`;h(u,"error")})}}
+        onClick=${()=>{kc(e.name,t).catch(l=>{const u=l instanceof Error?l.message:`Failed to probe ${e.name}`;h(u,"error")})}}
         disabled=${a||!t.trim()}
       >
         ${a?"Probing...":"Probe"}
       </button>
       <button
         class=${`control-btn secondary ${r==="recover"?"is-active":""}`}
-        onClick=${()=>{kc(e.name,t).catch(l=>{const u=l instanceof Error?l.message:`Failed to recover ${e.name}`;h(u,"error")})}}
+        onClick=${()=>{xc(e.name,t).catch(l=>{const u=l instanceof Error?l.message:`Failed to recover ${e.name}`;h(u,"error")})}}
         disabled=${i||!(s!=null&&s.recoverable)||!t.trim()}
       >
         ${i?"Recovering...":"Recover"}
@@ -108,7 +108,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         Poke Lodge
       </button>
     </div>
-  `}const ja=m(null);function Fa(t){ja.value=t,yn(t.name)}function hi(){ja.value=null}const Yt=[{level:"L1_Reactive",label:"L1 Reactive",color:"#6b7280"},{level:"L2_Suggestive",label:"L2 Suggestive",color:"#3b82f6"},{level:"L3_Guided",label:"L3 Guided",color:"#f59e0b"},{level:"L4_Autonomous",label:"L4 Autonomous",color:"#f97316"},{level:"L5_Independent",label:"L5 Independent",color:"#ef4444"}];function Vc(t){if(!t)return 0;const e=Yt.findIndex(n=>n.level===t);return e>=0?e:0}function Yc({keeper:t}){const e=Vc(t.autonomy_level),n=Yt[e]??Yt[0];if(!n)return null;const s=(e+1)/Yt.length*100;return o`
+  `}const ja=m(null);function Fa(t){ja.value=t,yn(t.name)}function hi(){ja.value=null}const Yt=[{level:"L1_Reactive",label:"L1 Reactive",color:"#6b7280"},{level:"L2_Suggestive",label:"L2 Suggestive",color:"#3b82f6"},{level:"L3_Guided",label:"L3 Guided",color:"#f59e0b"},{level:"L4_Autonomous",label:"L4 Autonomous",color:"#f97316"},{level:"L5_Independent",label:"L5 Independent",color:"#ef4444"}];function Yc(t){if(!t)return 0;const e=Yt.findIndex(n=>n.level===t);return e>=0?e:0}function Qc({keeper:t}){const e=Yc(t.autonomy_level),n=Yt[e]??Yt[0];if(!n)return null;const s=(e+1)/Yt.length*100;return o`
     <div class="keeper-signal-list">
       <div style="margin-bottom:8px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -137,7 +137,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             <strong>${t.active_goal_ids.length}</strong>
           </div>`:null}
     </div>
-  `}function xn(t){return t?t>=1e6?`${(t/1e6).toFixed(1)}M`:t>=1e3?`${(t/1e3).toFixed(1)}K`:String(t):"—"}function Qc({keeper:t}){const e=t.metrics_series??[],n=e[e.length-1],s=(n==null?void 0:n.cost_usd)!=null?`$${n.cost_usd.toFixed(4)}`:"—",a=[{label:"Generation",value:t.generation??"-",hint:"Succession count"},{label:"Turns",value:t.turn_count??"-",hint:"Total loop turns"},{label:"Context",value:t.context_ratio!=null?`${Math.round(t.context_ratio*100)}%`:"-",hint:t.context_ratio!=null&&t.context_ratio>.8?"Near limit":void 0},{label:"Activity",value:t.activityLevel??"-",hint:"Level 0–5"}];return o`
+  `}function xn(t){return t?t>=1e6?`${(t/1e6).toFixed(1)}M`:t>=1e3?`${(t/1e3).toFixed(1)}K`:String(t):"—"}function Xc({keeper:t}){const e=t.metrics_series??[],n=e[e.length-1],s=(n==null?void 0:n.cost_usd)!=null?`$${n.cost_usd.toFixed(4)}`:"—",a=[{label:"Generation",value:t.generation??"-",hint:"Succession count"},{label:"Turns",value:t.turn_count??"-",hint:"Total loop turns"},{label:"Context",value:t.context_ratio!=null?`${Math.round(t.context_ratio*100)}%`:"-",hint:t.context_ratio!=null&&t.context_ratio>.8?"Near limit":void 0},{label:"Activity",value:t.activityLevel??"-",hint:"Level 0–5"}];return o`
     <div class="keeper-kpis">
       ${a.map(i=>o`
         <div class="keeper-kpi">
@@ -163,7 +163,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         <div class="kpi-label">Cost (USD)</div>
       </div>
     </div>
-  `}function Xc({keeper:t}){var p,d;const e=t.metrics_series??[];if(e.length<2){const v=(((p=t.context)==null?void 0:p.context_ratio)??0)*100,f=v>85?"#ef4444":v>70?"#f59e0b":"#22c55e";return o`
+  `}function Zc({keeper:t}){var p,d;const e=t.metrics_series??[];if(e.length<2){const v=(((p=t.context)==null?void 0:p.context_ratio)??0)*100,f=v>85?"#ef4444":v>70?"#f59e0b":"#22c55e";return o`
       <div class="context-chart">
         <div class="chart-bar-bg">
           <div class="chart-bar" style="width:${v.toFixed(1)}%;background:${f}"></div>
@@ -184,7 +184,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         `)}
       </svg>
       <span class="chart-pct">${u.toFixed(1)}%</span>
-    </div>`}const fs=m("");function Zc({keeper:t}){var a,i,r,l;const e=fs.value.toLowerCase(),n=[{title:"Name",key:"name",value:t.name},{title:"Emoji",key:"emoji",value:t.emoji??"-"},{title:"Korean",key:"koreanName",value:t.koreanName??"-"},{title:"Model",key:"model",value:t.model??"-"},{title:"Status",key:"status",value:t.status},{title:"Primary",key:"primaryValue",value:t.primaryValue??"-"},{title:"Activity",key:"activityLevel",value:String(t.activityLevel??"-")},{title:"Gen",key:"generation",value:String(t.generation??"-")},{title:"Turns",key:"turn_count",value:String(t.turn_count??"-")},{title:"Context",key:"context_ratio",value:t.context_ratio!=null?`${Math.round(t.context_ratio*100)}%`:"-"},{title:"Heartbeat",key:"last_heartbeat",value:t.last_heartbeat??"-"},{title:"Traits",key:"traits",value:((a=t.traits)==null?void 0:a.join(", "))||"-"},{title:"Interests",key:"interests",value:((i=t.interests)==null?void 0:i.join(", "))||"-"}],s=e?n.filter(u=>u.title.toLowerCase().includes(e)||u.key.includes(e)||u.value.toLowerCase().includes(e)):n;return o`
+    </div>`}const fs=m("");function tu({keeper:t}){var a,i,r,l;const e=fs.value.toLowerCase(),n=[{title:"Name",key:"name",value:t.name},{title:"Emoji",key:"emoji",value:t.emoji??"-"},{title:"Korean",key:"koreanName",value:t.koreanName??"-"},{title:"Model",key:"model",value:t.model??"-"},{title:"Status",key:"status",value:t.status},{title:"Primary",key:"primaryValue",value:t.primaryValue??"-"},{title:"Activity",key:"activityLevel",value:String(t.activityLevel??"-")},{title:"Gen",key:"generation",value:String(t.generation??"-")},{title:"Turns",key:"turn_count",value:String(t.turn_count??"-")},{title:"Context",key:"context_ratio",value:t.context_ratio!=null?`${Math.round(t.context_ratio*100)}%`:"-"},{title:"Heartbeat",key:"last_heartbeat",value:t.last_heartbeat??"-"},{title:"Traits",key:"traits",value:((a=t.traits)==null?void 0:a.join(", "))||"-"},{title:"Interests",key:"interests",value:((i=t.interests)==null?void 0:i.join(", "))||"-"}],s=e?n.filter(u=>u.title.toLowerCase().includes(e)||u.key.includes(e)||u.value.toLowerCase().includes(e)):n;return o`
     <div class="keeper-field-dict">
       <input
         class="keeper-field-search"
@@ -220,7 +220,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       ${((r=t.context)==null?void 0:r.message_count)!=null?o`<div class="keeper-field-row"><span class="keeper-field-title">Message Count</span><span style="flex:1; text-align:right; color:#ccc;">${t.context.message_count}</span></div>`:""}
       ${((l=t.context)==null?void 0:l.has_checkpoint)!=null?o`<div class="keeper-field-row"><span class="keeper-field-title">Has Checkpoint</span><span style="flex:1; text-align:right; color:#ccc;">${t.context.has_checkpoint?"Yes":"No"}</span></div>`:""}
     </div>
-  `}function tu({stats:t}){const e=t.max_hp>0?Math.round(t.hp/t.max_hp*100):0,n=t.max_mp>0?Math.round(t.mp/t.max_mp*100):0;return o`
+  `}function eu({stats:t}){const e=t.max_hp>0?Math.round(t.hp/t.max_hp*100):0,n=t.max_mp>0?Math.round(t.mp/t.max_mp*100):0;return o`
     <div>
       <div style="display: flex; gap: 12px; margin-bottom: 10px;">
         <div style="flex:1;">
@@ -248,7 +248,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         Level ${t.level} — XP ${t.xp}
       </div>
     </div>
-  `}function eu({items:t}){return t.length===0?o`<div class="empty-state" style="font-size:13px">No equipment</div>`:o`
+  `}function nu({items:t}){return t.length===0?o`<div class="empty-state" style="font-size:13px">No equipment</div>`:o`
     <div class="keeper-equipment-list">
       ${t.map((e,n)=>o`
         <div class="keeper-equipment-row">
@@ -257,7 +257,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       `)}
     </div>
-  `}function nu({rels:t}){const e=Object.entries(t);return e.length===0?o`<div class="empty-state" style="font-size:13px">No relationships</div>`:o`
+  `}function su({rels:t}){const e=Object.entries(t);return e.length===0?o`<div class="empty-state" style="font-size:13px">No relationships</div>`:o`
     <div class="keeper-k2k-list">
       ${e.map(([n,s])=>o`
         <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; background:rgba(255,255,255,0.03); border-radius:6px;">
@@ -273,7 +273,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         ${t.map(n=>o`<span class="keeper-mention-chip">${n}</span>`)}
       </div>
     </div>
-  `}function _s(t){return t==null||Number.isNaN(t)?"-":`${Math.round(t*100)}%`}function su({keeper:t}){const e=t.metrics_window,n=[{label:"Model fallback",value:_s(typeof(e==null?void 0:e.model_fallback_rate)=="number"?e.model_fallback_rate:void 0)},{label:"Proactive fallback",value:_s(typeof(e==null?void 0:e.proactive_fallback_rate)=="number"?e.proactive_fallback_rate:void 0)},{label:"Memory pass rate",value:_s(typeof(e==null?void 0:e.memory_pass_rate)=="number"?e.memory_pass_rate:void 0)},{label:"Handoffs",value:typeof(e==null?void 0:e.handoff_count)=="number"?e.handoff_count:t.handoff_count_total??"-"},{label:"Compactions",value:typeof(e==null?void 0:e.compaction_events)=="number"?e.compaction_events:t.compaction_count??"-"},{label:"Saved tokens",value:typeof(e==null?void 0:e.compaction_saved_tokens)=="number"?e.compaction_saved_tokens:t.last_compaction_saved_tokens??"-"},{label:"K2K events",value:t.k2k_count??"-"},{label:"Conversation tail",value:t.conversation_tail_count??"-"},{label:"Tool Calls",value:typeof(e==null?void 0:e.tool_call_count)=="number"?e.tool_call_count:"-"},{label:"Preview Similarity",value:typeof(e==null?void 0:e.proactive_preview_similarity_avg)=="number"?`${(e.proactive_preview_similarity_avg*100).toFixed(1)}%`:"-"},{label:"Memory Avg Score",value:typeof(e==null?void 0:e.memory_avg_score)=="number"?e.memory_avg_score.toFixed(3):"-"},{label:"Fallback Rate",value:typeof(e==null?void 0:e.fallback_rate)=="number"?`${(e.fallback_rate*100).toFixed(1)}%`:"-"}];return o`
+  `}function _s(t){return t==null||Number.isNaN(t)?"-":`${Math.round(t*100)}%`}function au({keeper:t}){const e=t.metrics_window,n=[{label:"Model fallback",value:_s(typeof(e==null?void 0:e.model_fallback_rate)=="number"?e.model_fallback_rate:void 0)},{label:"Proactive fallback",value:_s(typeof(e==null?void 0:e.proactive_fallback_rate)=="number"?e.proactive_fallback_rate:void 0)},{label:"Memory pass rate",value:_s(typeof(e==null?void 0:e.memory_pass_rate)=="number"?e.memory_pass_rate:void 0)},{label:"Handoffs",value:typeof(e==null?void 0:e.handoff_count)=="number"?e.handoff_count:t.handoff_count_total??"-"},{label:"Compactions",value:typeof(e==null?void 0:e.compaction_events)=="number"?e.compaction_events:t.compaction_count??"-"},{label:"Saved tokens",value:typeof(e==null?void 0:e.compaction_saved_tokens)=="number"?e.compaction_saved_tokens:t.last_compaction_saved_tokens??"-"},{label:"K2K events",value:t.k2k_count??"-"},{label:"Conversation tail",value:t.conversation_tail_count??"-"},{label:"Tool Calls",value:typeof(e==null?void 0:e.tool_call_count)=="number"?e.tool_call_count:"-"},{label:"Preview Similarity",value:typeof(e==null?void 0:e.proactive_preview_similarity_avg)=="number"?`${(e.proactive_preview_similarity_avg*100).toFixed(1)}%`:"-"},{label:"Memory Avg Score",value:typeof(e==null?void 0:e.memory_avg_score)=="number"?e.memory_avg_score.toFixed(3):"-"},{label:"Fallback Rate",value:typeof(e==null?void 0:e.fallback_rate)=="number"?`${(e.fallback_rate*100).toFixed(1)}%`:"-"}];return o`
     <div class="keeper-signal-list">
       ${n.map(s=>o`
         <div class="keeper-signal-row">
@@ -282,7 +282,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       `)}
     </div>
-  `}function Uo(){const t=new URLSearchParams(window.location.search),e=t.get("agent")??t.get("agent_name"),n=localStorage.getItem("masc_dashboard_agent_name");return(e??n??"dashboard").trim()||"dashboard"}async function au(){try{const t=await en({actor:Uo(),action_type:"lodge_tick",target_type:"room",payload:{}}),e=Ea(t.result);ce(),await Bt(),e!=null&&e.skipped_reason?h(e.skipped_reason,"warning"):h(e?`Poke finished: ${e.acted}/${e.checked} acted`:"Poke finished",e&&e.acted>0?"success":"warning")}catch(t){const e=t instanceof Error?t.message:"Failed to run Lodge poke";h(e,"error")}}function iu({keeper:t}){return o`
+  `}function Uo(){const t=new URLSearchParams(window.location.search),e=t.get("agent")??t.get("agent_name"),n=localStorage.getItem("masc_dashboard_agent_name");return(e??n??"dashboard").trim()||"dashboard"}async function iu(){try{const t=await en({actor:Uo(),action_type:"lodge_tick",target_type:"room",payload:{}}),e=Ea(t.result);ce(),await Bt(),e!=null&&e.skipped_reason?h(e.skipped_reason,"warning"):h(e?`Poke finished: ${e.acted}/${e.checked} acted`:"Poke finished",e&&e.acted>0?"success":"warning")}catch(t){const e=t instanceof Error?t.message:"Failed to run Lodge poke";h(e,"error")}}function ou({keeper:t}){return o`
     <div style="margin-top: 24px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 24px;">
       <h3 style="margin: 0 0 16px; color: var(--accent-cyan); font-family: var(--font-display);">Direct Comms & Runtime Diagnostics</h3>
 
@@ -292,7 +292,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           <${Ho}
             actor=${Uo()}
             keeper=${t}
-            onPokeLodge=${()=>{au()}}
+            onPokeLodge=${()=>{iu()}}
           />
         </div>
 
@@ -304,7 +304,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       </div>
     </div>
-  `}function ou(){var e,n,s;const t=ja.value;return t?o`
+  `}function ru(){var e,n,s;const t=ja.value;return t?o`
     <div
       class="keeper-detail-overlay"
       style="display:flex; align-items:center; justify-content:center; padding:20px;"
@@ -329,17 +329,17 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
 
         ${""}
-        <${Qc} keeper=${t} />
+        <${Xc} keeper=${t} />
 
         ${""}
-        <${Xc} keeper=${t} />
+        <${Zc} keeper=${t} />
 
         ${""}
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
 
           ${""}
           <${b} title="Field Dictionary">
-            <${Zc} keeper=${t} />
+            <${tu} keeper=${t} />
           <//>
 
           ${""}
@@ -359,33 +359,33 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           ${""}
           ${t.autonomy_level?o`
               <${b} title="Autonomy">
-                <${Yc} keeper=${t} />
+                <${Qc} keeper=${t} />
               <//>
             `:null}
 
           ${""}
           ${t.trpg_stats?o`
               <${b} title="TRPG Stats">
-                <${tu} stats=${t.trpg_stats} />
+                <${eu} stats=${t.trpg_stats} />
               <//>
             `:null}
 
           ${""}
           ${t.inventory&&t.inventory.length>0?o`
               <${b} title="Equipment (${t.inventory.length})">
-                <${eu} items=${t.inventory} />
+                <${nu} items=${t.inventory} />
               <//>
             `:null}
 
           ${""}
           ${t.relationships&&Object.keys(t.relationships).length>0?o`
               <${b} title="Relationships (${Object.keys(t.relationships).length})">
-                <${nu} rels=${t.relationships} />
+                <${su} rels=${t.relationships} />
               <//>
             `:null}
 
           <${b} title="Runtime Signals">
-            <${su} keeper=${t} />
+            <${au} keeper=${t} />
           <//>
 
           <${b} title="Memory & Context">
@@ -410,23 +410,23 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             </div>
           <//>
         </div>
-        <${iu} keeper=${t} />
+        <${ou} keeper=${t} />
       </div>
     </div>
-  `:null}const ru="masc_dashboard_agent_name",ve=m(null),En=m(!1),Ge=m(""),In=m([]),Je=m([]),ae=m(""),Te=m(!1);function za(t){ve.value=t,qa()}function bi(){ve.value=null,Ge.value="",In.value=[],Je.value=[],ae.value=""}function lu(){const t=ve.value;return t?Ht.value.find(e=>e.name===t)??null:null}function Bo(t){return t?St.value.filter(e=>e.assignee===t):[]}async function qa(){const t=ve.value;if(t){En.value=!0,Ge.value="",In.value=[],Je.value=[];try{const e=await Yl(80);In.value=e.filter(a=>a.includes(t)).slice(0,20);const n=Bo(t).slice(0,6);if(n.length===0)return;const s=await Promise.all(n.map(async a=>{try{const i=await Ql(a.id,25);return{taskId:a.id,text:i.trim()}}catch(i){const r=i instanceof Error?i.message:"history load failed";return{taskId:a.id,text:`Failed to load history: ${r}`}}}));Je.value=s}catch(e){Ge.value=e instanceof Error?e.message:"Failed to load agent detail"}finally{En.value=!1}}}async function ki(){var s;const t=ve.value,e=ae.value.trim();if(!t||!e)return;const n=((s=localStorage.getItem(ru))==null?void 0:s.trim())||"dashboard";Te.value=!0;try{await No(n,`@${t} ${e}`),ae.value="",h(`Mention sent to ${t}`,"success"),qa()}catch(a){const i=a instanceof Error?a.message:"Failed to send mention";h(i,"error")}finally{Te.value=!1}}function cu({task:t}){return o`
+  `:null}const lu="masc_dashboard_agent_name",ve=m(null),En=m(!1),Ge=m(""),In=m([]),Je=m([]),ae=m(""),Te=m(!1);function za(t){ve.value=t,qa()}function bi(){ve.value=null,Ge.value="",In.value=[],Je.value=[],ae.value=""}function cu(){const t=ve.value;return t?Ht.value.find(e=>e.name===t)??null:null}function Bo(t){return t?St.value.filter(e=>e.assignee===t):[]}async function qa(){const t=ve.value;if(t){En.value=!0,Ge.value="",In.value=[],Je.value=[];try{const e=await Yl(80);In.value=e.filter(a=>a.includes(t)).slice(0,20);const n=Bo(t).slice(0,6);if(n.length===0)return;const s=await Promise.all(n.map(async a=>{try{const i=await Ql(a.id,25);return{taskId:a.id,text:i.trim()}}catch(i){const r=i instanceof Error?i.message:"history load failed";return{taskId:a.id,text:`Failed to load history: ${r}`}}}));Je.value=s}catch(e){Ge.value=e instanceof Error?e.message:"Failed to load agent detail"}finally{En.value=!1}}}async function ki(){var s;const t=ve.value,e=ae.value.trim();if(!t||!e)return;const n=((s=localStorage.getItem(lu))==null?void 0:s.trim())||"dashboard";Te.value=!0;try{await No(n,`@${t} ${e}`),ae.value="",h(`Mention sent to ${t}`,"success"),qa()}catch(a){const i=a instanceof Error?a.message:"Failed to send mention";h(i,"error")}finally{Te.value=!1}}function uu({task:t}){return o`
     <div class="agent-detail-task">
       <span class="pill">${t.id}</span>
       <span class="agent-detail-task-title">${t.title}</span>
       <${ut} status=${t.status} />
     </div>
-  `}function uu({row:t}){return o`
+  `}function du({row:t}){return o`
     <div class="agent-history-row">
       <div class="agent-history-head">
         <span class="pill">${t.taskId}</span>
       </div>
       <pre class="agent-history-pre">${t.text||"No task history yet"}</pre>
     </div>
-  `}function du(){var a,i,r,l;const t=ve.value;if(!t)return null;const e=lu(),n=Bo(t),s=In.value;return o`
+  `}function pu(){var a,i,r,l;const t=ve.value;if(!t)return null;const e=cu(),n=Bo(t),s=In.value;return o`
     <div
       class="agent-detail-overlay"
       onClick=${u=>{u.target.classList.contains("agent-detail-overlay")&&bi()}}
@@ -488,7 +488,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
 
         <div class="agent-detail-grid">
           <${b} title="Assigned Tasks">
-            ${n.length===0?o`<div class="empty-state">No assigned tasks</div>`:o`<div class="agent-detail-task-list">${n.map(u=>o`<${cu} key=${u.id} task=${u} />`)}</div>`}
+            ${n.length===0?o`<div class="empty-state">No assigned tasks</div>`:o`<div class="agent-detail-task-list">${n.map(u=>o`<${uu} key=${u.id} task=${u} />`)}</div>`}
           <//>
 
           <${b} title="Recent Activity">
@@ -497,7 +497,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
 
         <${b} title="Task History">
-          ${Je.value.length===0?o`<div class="empty-state">No task history loaded</div>`:o`<div class="agent-history-list">${Je.value.map(u=>o`<${uu} key=${u.taskId} row=${u} />`)}</div>`}
+          ${Je.value.length===0?o`<div class="empty-state">No task history loaded</div>`:o`<div class="agent-history-list">${Je.value.map(u=>o`<${du} key=${u.taskId} row=${u} />`)}</div>`}
         <//>
 
         <${b} title="Direct Mention">
@@ -527,7 +527,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       <div class="stat-label">${t}</div>
       <div class="stat-value" style=${n?`color: ${n}`:""}>${e}</div>
     </div>
-  `}function pu({agent:t}){const e=Oa(t.name,St.value,nn.value,re.value,{currentTask:t.current_task,lastSeen:t.last_seen,boardPosts:Ut.value,keepers:ct.value});return o`
+  `}function vu({agent:t}){const e=Oa(t.name,St.value,nn.value,re.value,{currentTask:t.current_task,lastSeen:t.last_seen,boardPosts:Ut.value,keepers:ct.value});return o`
     <div class="agent" onClick=${()=>za(t.name)} style="cursor: pointer">
       <span class="agent-emoji">${t.emoji??""}</span>
       <span class="agent-status ${t.status}"></span>
@@ -542,7 +542,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             </span>
           `:null}
     </div>
-  `}function vu(t){return t==null?"—":t>=1e6?`${(t/1e6).toFixed(1)}M`:t>=1e3?`${(t/1e3).toFixed(1)}k`:String(t)}function xi(t){return t>.8?"ctx-bar-bad":t>.6?"ctx-bar-warn":"ctx-bar-ok"}function mu(t){switch(t){case"quiet_hours":return"quiet hours";case"min_gap":return"cooldown gate";case"no_recent_activity":return"waiting for activity";case"disabled":return"runtime disabled";case"startup":return"warming up";case"llm_error":return"llm error";case"graphql_error":return"graphql error";case"never_started":return"never started";default:return"unknown"}}function fu(t){switch(t){case"manual_lodge_poke":return"Poke Lodge";case"probe":return"Probe";case"recover":return"Recover";default:return"Message"}}function _u({keeper:t}){var l;const e=t.context_ratio,n=e!=null?Math.round(e*100):null,s=Mo.value.get(t.name),a=Oo.value.has(t.name),i=((l=t.agent)==null?void 0:l.current_task)??"No current task",r=t.diagnostic??null;return o`
+  `}function mu(t){return t==null?"—":t>=1e6?`${(t/1e6).toFixed(1)}M`:t>=1e3?`${(t/1e3).toFixed(1)}k`:String(t)}function xi(t){return t>.8?"ctx-bar-bad":t>.6?"ctx-bar-warn":"ctx-bar-ok"}function fu(t){switch(t){case"quiet_hours":return"quiet hours";case"min_gap":return"cooldown gate";case"no_recent_activity":return"waiting for activity";case"disabled":return"runtime disabled";case"startup":return"warming up";case"llm_error":return"llm error";case"graphql_error":return"graphql error";case"never_started":return"never started";default:return"unknown"}}function _u(t){switch(t){case"manual_lodge_poke":return"Poke Lodge";case"probe":return"Probe";case"recover":return"Recover";default:return"Message"}}function gu({keeper:t}){var l;const e=t.context_ratio,n=e!=null?Math.round(e*100):null,s=Mo.value.get(t.name),a=Oo.value.has(t.name),i=((l=t.agent)==null?void 0:l.current_task)??"No current task",r=t.diagnostic??null;return o`
     <div class="live-agent keeper-card ${a?"stale":""}" onClick=${()=>Fa(t)} style="cursor: pointer">
       <div class="live-agent-main">
         <!-- Row 1: Identity -->
@@ -564,7 +564,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             </div>
             <span class="keeper-ctx-label ${xi(e)}">
               ${n}%
-              ${t.context_tokens!=null?o` (${vu(t.context_tokens)})`:null}
+              ${t.context_tokens!=null?o` (${mu(t.context_tokens)})`:null}
             </span>
           </div>
         `:null}
@@ -583,8 +583,8 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         ${r?o`
               <div class="keeper-diagnostic-row">
                 <span class="pill">${r.health_state}</span>
-                <span class="pill">${mu(r.quiet_reason)}</span>
-                <span class="pill">next ${fu(r.next_action_path)}</span>
+                <span class="pill">${fu(r.quiet_reason)}</span>
+                <span class="pill">next ${_u(r.next_action_path)}</span>
                 <span class="keeper-diagnostic-copy">reply ${r.last_reply_status}</span>
               </div>
             `:null}
@@ -598,7 +598,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         `:null}
       </div>
     </div>
-  `}function Mn(t){return typeof t!="number"||!Number.isFinite(t)?"??:00":`${String(Math.max(0,t)).padStart(2,"0")}:00`}function ca(t){if(t==null||!Number.isFinite(t))return"unknown";if(t<60)return`${Math.round(t)}s`;const e=Math.round(t/60);if(e<60)return`${e}m`;const n=Math.floor(e/60),s=e%60;return s>0?`${n}h ${s}m`:`${n}h`}function gu(t){return t?t.enabled?t.quiet_active?`Quiet hours ${Mn(t.quiet_start)}-${Mn(t.quiet_end)} KST are active. Scheduled ticks may appear asleep until the window ends.`:t.last_tick_ago_s==null?`Lodge is enabled and scheduled every ${ca(t.interval_s)}, but no tick has run yet.`:`Lodge ticks every ${ca(t.interval_s)}. Planner is ${t.use_planner?"on":"off"} and delegated LLM is ${t.delegate_llm?"on":"off"}.`:"Lodge automation is disabled.":"Lodge runtime status is unavailable in the current dashboard payload."}function $u({lodge:t}){var s,a,i;const e=((a=(s=t==null?void 0:t.last_tick_result)==null?void 0:s.acted_names)==null?void 0:a.join(", "))||"none",n=((i=t==null?void 0:t.active_self_heartbeats)==null?void 0:i.length)??0;return o`
+  `}function Mn(t){return typeof t!="number"||!Number.isFinite(t)?"??:00":`${String(Math.max(0,t)).padStart(2,"0")}:00`}function ca(t){if(t==null||!Number.isFinite(t))return"unknown";if(t<60)return`${Math.round(t)}s`;const e=Math.round(t/60);if(e<60)return`${e}m`;const n=Math.floor(e/60),s=e%60;return s>0?`${n}h ${s}m`:`${n}h`}function $u(t){return t?t.enabled?t.quiet_active?`Quiet hours ${Mn(t.quiet_start)}-${Mn(t.quiet_end)} KST are active. Scheduled ticks may appear asleep until the window ends.`:t.last_tick_ago_s==null?`Lodge is enabled and scheduled every ${ca(t.interval_s)}, but no tick has run yet.`:`Lodge ticks every ${ca(t.interval_s)}. Planner is ${t.use_planner?"on":"off"} and delegated LLM is ${t.delegate_llm?"on":"off"}.`:"Lodge automation is disabled.":"Lodge runtime status is unavailable in the current dashboard payload."}function hu({lodge:t}){var s,a,i;const e=((a=(s=t==null?void 0:t.last_tick_result)==null?void 0:s.acted_names)==null?void 0:a.join(", "))||"none",n=((i=t==null?void 0:t.active_self_heartbeats)==null?void 0:i.length)??0;return o`
     <${b} title="Lodge Runtime" class="section">
       <div class=${`lodge-banner ${t!=null&&t.enabled?"is-enabled":"is-disabled"}`}>
         <div class="lodge-banner-meta">
@@ -611,7 +611,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           <span class="pill">${t!=null&&t.use_planner?"planner on":"planner off"}</span>
           <span class="pill">${t!=null&&t.delegate_llm?"delegate llm on":"delegate llm off"}</span>
         </div>
-        <div class="lodge-banner-copy">${gu(t)}</div>
+        <div class="lodge-banner-copy">${$u(t)}</div>
         <div class="lodge-banner-copy">
           Last tick: ${(t==null?void 0:t.last_tick_ago)??"never"} · Last acted: ${e} · Self-heartbeats: ${n}
         </div>
@@ -628,7 +628,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       <${Jt} label="Done" value=${s.done.length} color="#4ade80" />
     </div>
 
-    <${$u} lodge=${t==null?void 0:t.lodge} />
+    <${hu} lodge=${t==null?void 0:t.lodge} />
 
     ${a||i?o`
         <${b} title="Operations SLO" class="section">
@@ -668,13 +668,13 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
     <div class="grid-2col">
       <${b} title="Agents" class="section">
         <div class="agent-list">
-          ${e.length===0?o`<div class="empty-state">No agents connected</div>`:e.map(d=>o`<${pu} key=${d.name} agent=${d} />`)}
+          ${e.length===0?o`<div class="empty-state">No agents connected</div>`:e.map(d=>o`<${vu} key=${d.name} agent=${d} />`)}
         </div>
       <//>
 
       <${b} title="Keepers" class="section">
         <div class="live-agent-list">
-          ${n.length===0?o`<div class="empty-state">No keepers active</div>`:n.map(d=>o`<${_u} key=${d.name} keeper=${d} />`)}
+          ${n.length===0?o`<div class="empty-state">No keepers active</div>`:n.map(d=>o`<${gu} key=${d.name} keeper=${d} />`)}
         </div>
       <//>
     </div>
@@ -695,7 +695,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             ${t.cluster?o`<span>Cluster: ${t.cluster}</span>`:null}
             ${t.project?o`<span>Project: ${t.project}</span>`:null}
             ${t.version?o`<span>Version: ${t.version}</span>`:null}
-            <span>Uptime: ${hu(t.uptime_seconds??0)}</span>
+            <span>Uptime: ${yu(t.uptime_seconds??0)}</span>
             ${t.paused?o`<span class="pill pill-stale">Paused</span>`:null}
             ${t.tempo?o`<span>Tempo: ${t.tempo}</span>`:null}
             ${t.tempo_interval_s!=null?o`<span>Interval: ${t.tempo_interval_s}s</span>`:null}
@@ -705,7 +705,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           </div>
         <//>
       `:null}
-  `}function hu(t){if(!t)return"N/A";const e=Math.floor(t/3600),n=Math.floor(t%3600/60);return e>0?`${e}h ${n}m`:`${n}m`}function cn(t){if(t==null||!Number.isFinite(t))return"No data";if(t<60)return`${Math.max(0,Math.round(t))}s`;const e=Math.floor(t/60);if(e<60)return`${e}m`;const n=Math.floor(e/60),s=e%60;return s>0?`${n}h ${s}m`:`${n}h`}function Si(t){const e=(t??"").toLowerCase();return e==="ok"?"Healthy":e==="warn"?"Warning":e==="bad"?"Degraded":"Unknown"}function Ai(t){const e=(t??"").toLowerCase();return e==="ok"?"#4ade80":e==="warn"?"#fbbf24":e==="bad"?"#fb7185":"#94a3b8"}const sn=m(null),On=m(!1),Dt=m(null),O=m(!1),jn=m([]);let yu=1;function F(t){return typeof t=="object"&&t!==null&&!Array.isArray(t)}function T(t){return typeof t=="string"&&t.trim()!==""?t:void 0}function Y(t){return typeof t=="number"&&Number.isFinite(t)?t:void 0}function Wo(t){return typeof t=="boolean"?t:void 0}function bu(t){return Array.isArray(t)?t.map(e=>typeof e=="string"?e.trim():"").filter(Boolean):[]}function Qt(t,e=[]){if(Array.isArray(t))return t;if(!F(t))return[];for(const n of e){const s=t[n];if(Array.isArray(s))return s}return[]}function ku(t){return F(t)?{id:T(t.id),seq:Y(t.seq),from:T(t.from)??T(t.from_agent)??"system",content:T(t.content)??"",timestamp:T(t.timestamp)??new Date().toISOString(),type:T(t.type)}:null}function xu(t){return F(t)?{room_id:T(t.room_id),current_room:T(t.current_room)??T(t.room),project:T(t.project),cluster:T(t.cluster),paused:Wo(t.paused),pause_reason:T(t.pause_reason)??null,paused_by:T(t.paused_by)??null,paused_at:T(t.paused_at)??null}:{}}function Ti(t){if(!F(t))return;const e=Object.entries(t).map(([n,s])=>{const a=T(s);return a?[n,a]:null}).filter(n=>n!==null);return e.length>0?Object.fromEntries(e):void 0}function wu(t){if(!F(t))return null;const e=F(t.status)?t.status:void 0,n=F(t.summary)?t.summary:F(e==null?void 0:e.summary)?e.summary:void 0,s=F(t.session)?t.session:F(e==null?void 0:e.session)?e.session:void 0,a=T(t.session_id)??T(n==null?void 0:n.session_id)??T(s==null?void 0:s.session_id);if(!a)return null;const i=Ti(t.report_paths)??Ti(e==null?void 0:e.report_paths),r=Qt(t.recent_events,["events"]).filter(F);return{session_id:a,status:T(t.status)??T(n==null?void 0:n.status)??T(s==null?void 0:s.status),progress_pct:Y(t.progress_pct)??Y(n==null?void 0:n.progress_pct),elapsed_sec:Y(t.elapsed_sec)??Y(n==null?void 0:n.elapsed_sec),remaining_sec:Y(t.remaining_sec)??Y(n==null?void 0:n.remaining_sec),done_delta_total:Y(t.done_delta_total)??Y(n==null?void 0:n.done_delta_total),summary:n,team_health:F(t.team_health)?t.team_health:F(e==null?void 0:e.team_health)?e.team_health:void 0,communication_metrics:F(t.communication_metrics)?t.communication_metrics:F(e==null?void 0:e.communication_metrics)?e.communication_metrics:void 0,orchestration_state:F(t.orchestration_state)?t.orchestration_state:F(e==null?void 0:e.orchestration_state)?e.orchestration_state:void 0,cascade_metrics:F(t.cascade_metrics)?t.cascade_metrics:F(e==null?void 0:e.cascade_metrics)?e.cascade_metrics:void 0,report_paths:i,session:s,recent_events:r}}function Su(t){if(!F(t))return null;const e=T(t.name);if(!e)return null;const n=F(t.context)?t.context:void 0;return{name:e,agent_name:T(t.agent_name),status:T(t.status),autonomy_level:T(t.autonomy_level),context_ratio:Y(t.context_ratio)??Y(n==null?void 0:n.context_ratio),generation:Y(t.generation),active_goal_ids:bu(t.active_goal_ids),last_autonomous_action_at:T(t.last_autonomous_action_at)??null,last_turn_ago_s:Y(t.last_turn_ago_s),model:T(t.model)??T(t.active_model)??T(t.primary_model)}}function Au(t){if(!F(t))return null;const e=T(t.confirm_token)??T(t.token);return e?{confirm_token:e,actor:T(t.actor),action_type:T(t.action_type),target_type:T(t.target_type),target_id:T(t.target_id)??null,delegated_tool:T(t.delegated_tool),created_at:T(t.created_at),preview:t.preview}:null}function Tu(t){const e=F(t)?t:{};return{room:xu(e.room),sessions:Qt(e.sessions,["items","sessions"]).map(wu).filter(n=>n!==null),keepers:Qt(e.keepers,["items","keepers"]).map(Su).filter(n=>n!==null),recent_messages:Qt(e.recent_messages,["messages"]).map(ku).filter(n=>n!==null),pending_confirms:Qt(e.pending_confirms,["items","confirms"]).map(Au).filter(n=>n!==null),available_actions:Qt(e.available_actions,["actions"]).filter(F).map(n=>({action_type:T(n.action_type)??"unknown",target_type:T(n.target_type)??"unknown",description:T(n.description),confirm_required:Wo(n.confirm_required)}))}}function un(t){if(typeof t=="string")return t;if(t==null)return"";try{return JSON.stringify(t)}catch{return String(t)}}function Ci(t){return t.target_id?`${t.target_type}:${t.target_id}`:t.target_type}function Fn(t){jn.value=[{...t,id:yu++,at:new Date().toISOString()},...jn.value].slice(0,20)}function Go(t){return t.confirm_required?un(t.preview)||"Confirmation required":un(t.result)||un(t.executed_action)||un(t.delegated_tool_result)||t.status}async function ue(){On.value=!0,Dt.value=null;try{const t=await fl();sn.value=Tu(t)}catch(t){Dt.value=t instanceof Error?t.message:"Failed to load operator snapshot"}finally{On.value=!1}}async function Cu(t){O.value=!0,Dt.value=null;try{const e=await en(t);return Fn({actor:t.actor,action_type:t.action_type,target_label:Ci(t),outcome:e.confirm_required?"preview":"executed",message:Go(e),delegated_tool:e.delegated_tool}),await ue(),e}catch(e){const n=e instanceof Error?e.message:"Operator action failed";throw Dt.value=n,Fn({actor:t.actor,action_type:t.action_type,target_label:Ci(t),outcome:"error",message:n}),e}finally{O.value=!1}}async function Nu(t,e){O.value=!0,Dt.value=null;try{const n=await _l(t,e);return Fn({actor:t,action_type:"confirm",target_label:e,outcome:"confirmed",message:Go(n),delegated_tool:n.delegated_tool}),await ue(),n}catch(n){const s=n instanceof Error?n.message:"Operator confirmation failed";throw Dt.value=s,Fn({actor:t,action_type:"confirm",target_label:e,outcome:"error",message:s}),n}finally{O.value=!1}}const Jo="masc_dashboard_agent_name";function Ru(){var e,n,s;const t=new URLSearchParams(window.location.search);return((e=t.get("agent"))==null?void 0:e.trim())||((n=t.get("agent_name"))==null?void 0:n.trim())||((s=localStorage.getItem(Jo))==null?void 0:s.trim())||"dashboard"}const rs=m(Ru()),Ce=m(""),ua=m("Operator pause"),Ne=m(""),zn=m(""),da=m("2"),qn=m(""),ie=m("note"),Kn=m(""),Hn=m(""),Un=m(""),pa=m("2"),va=m("Operator stop request"),ma=m(""),Re=m("");function Lu(t){const e=t.trim()||"dashboard";rs.value=e,localStorage.setItem(Jo,e)}function Ni(t){if(t==null)return"";if(typeof t=="string")return t;try{return JSON.stringify(t,null,2)}catch{return String(t)}}function Du(t){return typeof t!="number"||!Number.isFinite(t)?"n/a":t<60?`${Math.round(t)}s ago`:t<3600?`${Math.round(t/60)}m ago`:`${Math.round(t/3600)}h ago`}async function Wt(t){const e=rs.value.trim()||"dashboard";try{const n=await Cu({actor:e,action_type:t.action_type,target_type:t.target_type,target_id:t.target_id,payload:t.payload});return n.confirm_required?h("Confirmation queued","warning"):h(t.successMessage,"success"),n}catch(n){const s=n instanceof Error?n.message:"Operator action failed";return h(s,"error"),null}}async function Ri(){const t=Ce.value.trim();if(!t)return;await Wt({action_type:"broadcast",target_type:"room",payload:{message:t},successMessage:"Broadcast sent"})&&(Ce.value="")}async function Pu(){await Wt({action_type:"room_pause",target_type:"room",payload:{reason:ua.value.trim()||"Operator pause"},successMessage:"Pause request sent"})}async function Eu(){await Wt({action_type:"room_resume",target_type:"room",payload:{},successMessage:"Room resumed"})}async function Iu(){const t=Ne.value.trim();if(!t)return;await Wt({action_type:"task_inject",target_type:"room",payload:{title:t,description:zn.value.trim()||"Injected from Ops tab",priority:Number.parseInt(da.value,10)||2},successMessage:"Task injection submitted"})&&(Ne.value="",zn.value="")}async function Mu(){var i;const t=sn.value,e=qn.value||((i=t==null?void 0:t.sessions[0])==null?void 0:i.session_id)||"";if(!e){h("Select a team session first","warning");return}const n={turn_kind:ie.value},s=Kn.value.trim();s&&(n.message=s),ie.value==="task"&&(n.task_title=Hn.value.trim()||"Operator injected task",n.task_description=Un.value.trim()||"Injected from Ops tab",n.task_priority=Number.parseInt(pa.value,10)||2),await Wt({action_type:"team_turn",target_type:"team_session",target_id:e,payload:n,successMessage:"Team session updated"})&&(Kn.value="",ie.value==="task"&&(Hn.value="",Un.value=""))}async function Ou(){var n;const t=sn.value,e=qn.value||((n=t==null?void 0:t.sessions[0])==null?void 0:n.session_id)||"";if(!e){h("Select a team session first","warning");return}await Wt({action_type:"team_stop",target_type:"team_session",target_id:e,payload:{reason:va.value.trim()||"Operator stop request"},successMessage:"Team stop requested"})}async function ju(){var a;const t=sn.value,e=ma.value||((a=t==null?void 0:t.keepers[0])==null?void 0:a.name)||"",n=Re.value.trim();if(!e){h("Select a keeper first","warning");return}if(!n)return;await Wt({action_type:"keeper_msg",target_type:"keeper",target_id:e,payload:{message:n},successMessage:`Message sent to ${e}`})&&(Re.value="")}async function Fu(t){const e=rs.value.trim()||"dashboard";try{await Nu(e,t),h("Confirmation executed","success")}catch(n){const s=n instanceof Error?n.message:"Confirmation failed";h(s,"error")}}function zu(){var u;ft(()=>{ue()},[]);const t=sn.value,e=(t==null?void 0:t.room)??{},n=(t==null?void 0:t.sessions)??[],s=(t==null?void 0:t.keepers)??[],a=(t==null?void 0:t.pending_confirms)??[],i=(t==null?void 0:t.recent_messages)??[],r=n.find(c=>c.session_id===qn.value)??n[0]??null,l=s.find(c=>c.name===ma.value)??s[0]??null;return o`
+  `}function yu(t){if(!t)return"N/A";const e=Math.floor(t/3600),n=Math.floor(t%3600/60);return e>0?`${e}h ${n}m`:`${n}m`}function cn(t){if(t==null||!Number.isFinite(t))return"No data";if(t<60)return`${Math.max(0,Math.round(t))}s`;const e=Math.floor(t/60);if(e<60)return`${e}m`;const n=Math.floor(e/60),s=e%60;return s>0?`${n}h ${s}m`:`${n}h`}function Si(t){const e=(t??"").toLowerCase();return e==="ok"?"Healthy":e==="warn"?"Warning":e==="bad"?"Degraded":"Unknown"}function Ai(t){const e=(t??"").toLowerCase();return e==="ok"?"#4ade80":e==="warn"?"#fbbf24":e==="bad"?"#fb7185":"#94a3b8"}const sn=m(null),On=m(!1),Dt=m(null),O=m(!1),jn=m([]);let bu=1;function F(t){return typeof t=="object"&&t!==null&&!Array.isArray(t)}function T(t){return typeof t=="string"&&t.trim()!==""?t:void 0}function Y(t){return typeof t=="number"&&Number.isFinite(t)?t:void 0}function Wo(t){return typeof t=="boolean"?t:void 0}function ku(t){return Array.isArray(t)?t.map(e=>typeof e=="string"?e.trim():"").filter(Boolean):[]}function Qt(t,e=[]){if(Array.isArray(t))return t;if(!F(t))return[];for(const n of e){const s=t[n];if(Array.isArray(s))return s}return[]}function xu(t){return F(t)?{id:T(t.id),seq:Y(t.seq),from:T(t.from)??T(t.from_agent)??"system",content:T(t.content)??"",timestamp:T(t.timestamp)??new Date().toISOString(),type:T(t.type)}:null}function wu(t){return F(t)?{room_id:T(t.room_id),current_room:T(t.current_room)??T(t.room),project:T(t.project),cluster:T(t.cluster),paused:Wo(t.paused),pause_reason:T(t.pause_reason)??null,paused_by:T(t.paused_by)??null,paused_at:T(t.paused_at)??null}:{}}function Ti(t){if(!F(t))return;const e=Object.entries(t).map(([n,s])=>{const a=T(s);return a?[n,a]:null}).filter(n=>n!==null);return e.length>0?Object.fromEntries(e):void 0}function Su(t){if(!F(t))return null;const e=F(t.status)?t.status:void 0,n=F(t.summary)?t.summary:F(e==null?void 0:e.summary)?e.summary:void 0,s=F(t.session)?t.session:F(e==null?void 0:e.session)?e.session:void 0,a=T(t.session_id)??T(n==null?void 0:n.session_id)??T(s==null?void 0:s.session_id);if(!a)return null;const i=Ti(t.report_paths)??Ti(e==null?void 0:e.report_paths),r=Qt(t.recent_events,["events"]).filter(F);return{session_id:a,status:T(t.status)??T(n==null?void 0:n.status)??T(s==null?void 0:s.status),progress_pct:Y(t.progress_pct)??Y(n==null?void 0:n.progress_pct),elapsed_sec:Y(t.elapsed_sec)??Y(n==null?void 0:n.elapsed_sec),remaining_sec:Y(t.remaining_sec)??Y(n==null?void 0:n.remaining_sec),done_delta_total:Y(t.done_delta_total)??Y(n==null?void 0:n.done_delta_total),summary:n,team_health:F(t.team_health)?t.team_health:F(e==null?void 0:e.team_health)?e.team_health:void 0,communication_metrics:F(t.communication_metrics)?t.communication_metrics:F(e==null?void 0:e.communication_metrics)?e.communication_metrics:void 0,orchestration_state:F(t.orchestration_state)?t.orchestration_state:F(e==null?void 0:e.orchestration_state)?e.orchestration_state:void 0,cascade_metrics:F(t.cascade_metrics)?t.cascade_metrics:F(e==null?void 0:e.cascade_metrics)?e.cascade_metrics:void 0,report_paths:i,session:s,recent_events:r}}function Au(t){if(!F(t))return null;const e=T(t.name);if(!e)return null;const n=F(t.context)?t.context:void 0;return{name:e,agent_name:T(t.agent_name),status:T(t.status),autonomy_level:T(t.autonomy_level),context_ratio:Y(t.context_ratio)??Y(n==null?void 0:n.context_ratio),generation:Y(t.generation),active_goal_ids:ku(t.active_goal_ids),last_autonomous_action_at:T(t.last_autonomous_action_at)??null,last_turn_ago_s:Y(t.last_turn_ago_s),model:T(t.model)??T(t.active_model)??T(t.primary_model)}}function Tu(t){if(!F(t))return null;const e=T(t.confirm_token)??T(t.token);return e?{confirm_token:e,actor:T(t.actor),action_type:T(t.action_type),target_type:T(t.target_type),target_id:T(t.target_id)??null,delegated_tool:T(t.delegated_tool),created_at:T(t.created_at),preview:t.preview}:null}function Cu(t){const e=F(t)?t:{};return{room:wu(e.room),sessions:Qt(e.sessions,["items","sessions"]).map(Su).filter(n=>n!==null),keepers:Qt(e.keepers,["items","keepers"]).map(Au).filter(n=>n!==null),recent_messages:Qt(e.recent_messages,["messages"]).map(xu).filter(n=>n!==null),pending_confirms:Qt(e.pending_confirms,["items","confirms"]).map(Tu).filter(n=>n!==null),available_actions:Qt(e.available_actions,["actions"]).filter(F).map(n=>({action_type:T(n.action_type)??"unknown",target_type:T(n.target_type)??"unknown",description:T(n.description),confirm_required:Wo(n.confirm_required)}))}}function un(t){if(typeof t=="string")return t;if(t==null)return"";try{return JSON.stringify(t)}catch{return String(t)}}function Ci(t){return t.target_id?`${t.target_type}:${t.target_id}`:t.target_type}function Fn(t){jn.value=[{...t,id:bu++,at:new Date().toISOString()},...jn.value].slice(0,20)}function Go(t){return t.confirm_required?un(t.preview)||"Confirmation required":un(t.result)||un(t.executed_action)||un(t.delegated_tool_result)||t.status}async function ue(){On.value=!0,Dt.value=null;try{const t=await fl();sn.value=Cu(t)}catch(t){Dt.value=t instanceof Error?t.message:"Failed to load operator snapshot"}finally{On.value=!1}}async function Nu(t){O.value=!0,Dt.value=null;try{const e=await en(t);return Fn({actor:t.actor,action_type:t.action_type,target_label:Ci(t),outcome:e.confirm_required?"preview":"executed",message:Go(e),delegated_tool:e.delegated_tool}),await ue(),e}catch(e){const n=e instanceof Error?e.message:"Operator action failed";throw Dt.value=n,Fn({actor:t.actor,action_type:t.action_type,target_label:Ci(t),outcome:"error",message:n}),e}finally{O.value=!1}}async function Ru(t,e){O.value=!0,Dt.value=null;try{const n=await _l(t,e);return Fn({actor:t,action_type:"confirm",target_label:e,outcome:"confirmed",message:Go(n),delegated_tool:n.delegated_tool}),await ue(),n}catch(n){const s=n instanceof Error?n.message:"Operator confirmation failed";throw Dt.value=s,Fn({actor:t,action_type:"confirm",target_label:e,outcome:"error",message:s}),n}finally{O.value=!1}}const Jo="masc_dashboard_agent_name";function Lu(){var e,n,s;const t=new URLSearchParams(window.location.search);return((e=t.get("agent"))==null?void 0:e.trim())||((n=t.get("agent_name"))==null?void 0:n.trim())||((s=localStorage.getItem(Jo))==null?void 0:s.trim())||"dashboard"}const rs=m(Lu()),Ce=m(""),ua=m("Operator pause"),Ne=m(""),zn=m(""),da=m("2"),qn=m(""),ie=m("note"),Kn=m(""),Hn=m(""),Un=m(""),pa=m("2"),va=m("Operator stop request"),ma=m(""),Re=m("");function Du(t){const e=t.trim()||"dashboard";rs.value=e,localStorage.setItem(Jo,e)}function Ni(t){if(t==null)return"";if(typeof t=="string")return t;try{return JSON.stringify(t,null,2)}catch{return String(t)}}function Pu(t){return typeof t!="number"||!Number.isFinite(t)?"n/a":t<60?`${Math.round(t)}s ago`:t<3600?`${Math.round(t/60)}m ago`:`${Math.round(t/3600)}h ago`}async function Wt(t){const e=rs.value.trim()||"dashboard";try{const n=await Nu({actor:e,action_type:t.action_type,target_type:t.target_type,target_id:t.target_id,payload:t.payload});return n.confirm_required?h("Confirmation queued","warning"):h(t.successMessage,"success"),n}catch(n){const s=n instanceof Error?n.message:"Operator action failed";return h(s,"error"),null}}async function Ri(){const t=Ce.value.trim();if(!t)return;await Wt({action_type:"broadcast",target_type:"room",payload:{message:t},successMessage:"Broadcast sent"})&&(Ce.value="")}async function Eu(){await Wt({action_type:"room_pause",target_type:"room",payload:{reason:ua.value.trim()||"Operator pause"},successMessage:"Pause request sent"})}async function Iu(){await Wt({action_type:"room_resume",target_type:"room",payload:{},successMessage:"Room resumed"})}async function Mu(){const t=Ne.value.trim();if(!t)return;await Wt({action_type:"task_inject",target_type:"room",payload:{title:t,description:zn.value.trim()||"Injected from Ops tab",priority:Number.parseInt(da.value,10)||2},successMessage:"Task injection submitted"})&&(Ne.value="",zn.value="")}async function Ou(){var i;const t=sn.value,e=qn.value||((i=t==null?void 0:t.sessions[0])==null?void 0:i.session_id)||"";if(!e){h("Select a team session first","warning");return}const n={turn_kind:ie.value},s=Kn.value.trim();s&&(n.message=s),ie.value==="task"&&(n.task_title=Hn.value.trim()||"Operator injected task",n.task_description=Un.value.trim()||"Injected from Ops tab",n.task_priority=Number.parseInt(pa.value,10)||2),await Wt({action_type:"team_turn",target_type:"team_session",target_id:e,payload:n,successMessage:"Team session updated"})&&(Kn.value="",ie.value==="task"&&(Hn.value="",Un.value=""))}async function ju(){var n;const t=sn.value,e=qn.value||((n=t==null?void 0:t.sessions[0])==null?void 0:n.session_id)||"";if(!e){h("Select a team session first","warning");return}await Wt({action_type:"team_stop",target_type:"team_session",target_id:e,payload:{reason:va.value.trim()||"Operator stop request"},successMessage:"Team stop requested"})}async function Fu(){var a;const t=sn.value,e=ma.value||((a=t==null?void 0:t.keepers[0])==null?void 0:a.name)||"",n=Re.value.trim();if(!e){h("Select a keeper first","warning");return}if(!n)return;await Wt({action_type:"keeper_msg",target_type:"keeper",target_id:e,payload:{message:n},successMessage:`Message sent to ${e}`})&&(Re.value="")}async function zu(t){const e=rs.value.trim()||"dashboard";try{await Ru(e,t),h("Confirmation executed","success")}catch(n){const s=n instanceof Error?n.message:"Confirmation failed";h(s,"error")}}function qu(){var u;ft(()=>{ue()},[]);const t=sn.value,e=(t==null?void 0:t.room)??{},n=(t==null?void 0:t.sessions)??[],s=(t==null?void 0:t.keepers)??[],a=(t==null?void 0:t.pending_confirms)??[],i=(t==null?void 0:t.recent_messages)??[],r=n.find(c=>c.session_id===qn.value)??n[0]??null,l=s.find(c=>c.name===ma.value)??s[0]??null;return o`
     <section class="ops-view">
       <div class="ops-header card">
         <div>
@@ -722,7 +722,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             class="control-input ops-actor-input"
             type="text"
             value=${rs.value}
-            onInput=${c=>Lu(c.target.value)}
+            onInput=${c=>Du(c.target.value)}
           />
           <button class="control-btn ghost" onClick=${()=>{ue()}} disabled=${On.value||O.value}>
             ${On.value?"Refreshing...":"Refresh"}
@@ -747,7 +747,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
                 </div>
                 ${c.preview?o`<pre class="ops-code-block">${Ni(c.preview)}</pre>`:null}
                 <div class="ops-confirmation-actions">
-                  <button class="control-btn" onClick=${()=>{Fu(c.confirm_token)}} disabled=${O.value}>
+                  <button class="control-btn" onClick=${()=>{zu(c.confirm_token)}} disabled=${O.value}>
                     Confirm
                   </button>
                   <span class="ops-token">${c.confirm_token}</span>
@@ -807,10 +807,10 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               onInput=${c=>{ua.value=c.target.value}}
               disabled=${O.value}
             />
-            <button class="control-btn ghost" onClick=${()=>{Pu()}} disabled=${O.value}>
+            <button class="control-btn ghost" onClick=${()=>{Eu()}} disabled=${O.value}>
               Pause
             </button>
-            <button class="control-btn ghost" onClick=${()=>{Eu()}} disabled=${O.value}>
+            <button class="control-btn ghost" onClick=${()=>{Iu()}} disabled=${O.value}>
               Resume
             </button>
           </div>
@@ -845,7 +845,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               <option value="4">P4</option>
               <option value="5">P5</option>
             </select>
-            <button class="control-btn" onClick=${()=>{Iu()}} disabled=${O.value||Ne.value.trim()===""}>
+            <button class="control-btn" onClick=${()=>{Mu()}} disabled=${O.value||Ne.value.trim()===""}>
               Inject
             </button>
           </div>
@@ -916,7 +916,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               <option value="task">Task</option>
               <option value="checkpoint">Checkpoint</option>
             </select>
-            <button class="control-btn" onClick=${()=>{Mu()}} disabled=${O.value||!r}>
+            <button class="control-btn" onClick=${()=>{Ou()}} disabled=${O.value||!r}>
               Apply
             </button>
           </div>
@@ -968,7 +968,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               onInput=${c=>{va.value=c.target.value}}
               disabled=${O.value||!r}
             />
-            <button class="control-btn ghost" onClick=${()=>{Ou()}} disabled=${O.value||!r}>
+            <button class="control-btn ghost" onClick=${()=>{ju()}} disabled=${O.value||!r}>
               Stop
             </button>
           </div>
@@ -990,7 +990,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
                 <div class="ops-entity-meta">
                   <span>${c.model??"model n/a"}</span>
                   <span>${typeof c.context_ratio=="number"?`${Math.round(c.context_ratio*100)}% ctx`:"ctx n/a"}</span>
-                  <span>${Du(c.last_turn_ago_s)}</span>
+                  <span>${Pu(c.last_turn_ago_s)}</span>
                 </div>
               </button>
             `)}
@@ -1018,7 +1018,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             disabled=${O.value||!l}
           ></textarea>
           <div class="control-row">
-            <button class="control-btn" onClick=${()=>{ju()}} disabled=${O.value||!l||Re.value.trim()===""}>
+            <button class="control-btn" onClick=${()=>{Fu()}} disabled=${O.value||!l||Re.value.trim()===""}>
               Send Keeper Message
             </button>
           </div>
@@ -1043,10 +1043,10 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       </section>
     </section>
-  `}const fa=m([]),_a=m([]),Le=m(""),Bn=m(!1),De=m(!1),Ve=m(""),Wn=m(null),it=m(null),ga=m(!1);async function $a(){Bn.value=!0,Ve.value="";try{const[t,e]=await Promise.all([Xl(),Zl()]);fa.value=t,_a.value=e}catch(t){Ve.value=t instanceof Error?t.message:"Failed to load council data"}finally{Bn.value=!1}}async function Li(){const t=Le.value.trim();if(t){De.value=!0;try{const e=await tc(t);Le.value="",h(e!=null&&e.id?`Debate started: ${e.id}`:"Debate started","success"),await $a()}catch(e){const n=e instanceof Error?e.message:"Failed to start debate";h(n,"error")}finally{De.value=!1}}}async function qu(t){Wn.value=t,ga.value=!0,it.value=null;try{it.value=await ec(t)}catch(e){Ve.value=e instanceof Error?e.message:"Failed to load debate status",it.value=null}finally{ga.value=!1}}function Ku({debate:t}){const e=Wn.value===t.id;return o`
+  `}const fa=m([]),_a=m([]),Le=m(""),Bn=m(!1),De=m(!1),Ve=m(""),Wn=m(null),it=m(null),ga=m(!1);async function $a(){Bn.value=!0,Ve.value="";try{const[t,e]=await Promise.all([Xl(),Zl()]);fa.value=t,_a.value=e}catch(t){Ve.value=t instanceof Error?t.message:"Failed to load council data"}finally{Bn.value=!1}}async function Li(){const t=Le.value.trim();if(t){De.value=!0;try{const e=await tc(t);Le.value="",h(e!=null&&e.id?`Debate started: ${e.id}`:"Debate started","success"),await $a()}catch(e){const n=e instanceof Error?e.message:"Failed to start debate";h(n,"error")}finally{De.value=!1}}}async function Ku(t){Wn.value=t,ga.value=!0,it.value=null;try{it.value=await ec(t)}catch(e){Ve.value=e instanceof Error?e.message:"Failed to load debate status",it.value=null}finally{ga.value=!1}}function Hu({debate:t}){const e=Wn.value===t.id;return o`
     <button
       class="council-row ${e?"selected":""}"
-      onClick=${()=>qu(t.id)}
+      onClick=${()=>Ku(t.id)}
     >
       <div class="council-row-main">
         <div class="council-topic">${t.topic}</div>
@@ -1057,7 +1057,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       </div>
       <span class="council-state ${t.status}">${t.status}</span>
     </button>
-  `}function Hu({session:t}){return o`
+  `}function Uu({session:t}){return o`
     <div class="council-row session">
       <div class="council-row-main">
         <div class="council-topic">${t.topic}</div>
@@ -1069,16 +1069,16 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       </div>
       <span class="council-state vote">${t.votes}/${t.quorum}</span>
     </div>
-  `}function Uu(){var e;const t=(e=Pt.value)==null?void 0:e.data_quality;return!t||t.council_feed_ok!==!1&&!t.last_sync_at?null:o`
+  `}function Bu(){var e;const t=(e=Pt.value)==null?void 0:e.data_quality;return!t||t.council_feed_ok!==!1&&!t.last_sync_at?null:o`
     <div class="feed-health-banner ${t.council_feed_ok===!1?"degraded":"ok"}">
       <span class="feed-health-title">
         ${t.council_feed_ok===!1?"Council feed degraded":"Council feed synced"}
       </span>
       ${t.last_sync_at?o`<span class="feed-health-meta">Last sync: <${j} timestamp=${t.last_sync_at} /></span>`:o`<span class="feed-health-meta">No sync timestamp</span>`}
     </div>
-  `}function Bu(){var e,n;ft(()=>{$a()},[]);const t=((n=(e=Pt.value)==null?void 0:e.data_quality)==null?void 0:n.council_feed_ok)===!1;return o`
+  `}function Wu(){var e,n;ft(()=>{$a()},[]);const t=((n=(e=Pt.value)==null?void 0:e.data_quality)==null?void 0:n.council_feed_ok)===!1;return o`
     <div>
-      <${Uu} />
+      <${Bu} />
       <${b} title="Council Command" class="section">
         <div class="council-create">
           <input
@@ -1111,7 +1111,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
                   <div class="empty-state">
                     ${t?"No debates loaded (council feed degraded).":"No debates yet"}
                   </div>
-                `:fa.value.map(s=>o`<${Ku} key=${s.id} debate=${s} />`)}
+                `:fa.value.map(s=>o`<${Hu} key=${s.id} debate=${s} />`)}
           </div>
         <//>
 
@@ -1121,7 +1121,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
                   <div class="empty-state">
                     ${t?"No sessions loaded (council feed degraded).":"No active sessions"}
                   </div>
-                `:_a.value.map(s=>o`<${Hu} key=${s.id} session=${s} />`)}
+                `:_a.value.map(s=>o`<${Uu} key=${s.id} session=${s} />`)}
           </div>
         <//>
       </div>
@@ -1141,7 +1141,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               `:o`<div class="empty-state">Select a debate to view summary</div>`}
       <//>
     </div>
-  `}function Wu({text:t}){if(!t)return null;const e=Gu(t);return o`<div class="markdown-content">${e}</div>`}function Gu(t){const e=t.split(`
+  `}function Gu({text:t}){if(!t)return null;const e=Ju(t);return o`<div class="markdown-content">${e}</div>`}function Ju(t){const e=t.split(`
 `),n=[];let s=0;for(;s<e.length;){const a=e[s];if(/^(`{3,}|~{3,})/.test(a)){const r=a.match(/^(`{3,}|~{3,})/)[0],l=a.slice(r.length).trim(),u=[];for(s++;s<e.length&&!e[s].startsWith(r);)u.push(e[s]),s++;s++,n.push(o`<pre><code class=${l?`language-${l}`:""}>${u.join(`
 `)}</code></pre>`);continue}if(a.trim()==="<think>"||a.trim().startsWith("<think>")){const r=[],l=a.trim().replace(/^<think>/,"").trim();for(l&&l!=="</think>"&&r.push(l),s++;s<e.length&&!e[s].includes("</think>");)r.push(e[s]),s++;if(s<e.length){const c=e[s].replace("</think>","").trim();c&&r.push(c),s++}const u=r.join(`
 `).trim();n.push(o`
@@ -1151,7 +1151,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </details>
       `);continue}if(a.startsWith("> ")){const r=[];for(;s<e.length&&e[s].startsWith("> ");)r.push(e[s].slice(2)),s++;n.push(o`<blockquote>${gs(r.join(`
 `))}</blockquote>`);continue}if(a.trim()===""){s++;continue}const i=[];for(;s<e.length;){const r=e[s];if(r.trim()===""||/^(`{3,}|~{3,})/.test(r)||r.startsWith("> ")||r.trim().startsWith("<think>"))break;i.push(r),s++}i.length>0&&n.push(o`<p>${gs(i.join(`
-`))}</p>`)}return n}function gs(t){const e=[],n=/(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|\[([^\]]+)\]\(([^)]+)\)/g;let s=0,a;for(;(a=n.exec(t))!==null;){if(a.index>s&&e.push(t.slice(s,a.index)),a[1]){const i=a[1].slice(1,-1);e.push(o`<code>${i}</code>`)}else if(a[2]){const i=a[2].slice(2,-2);e.push(o`<strong>${i}</strong>`)}else if(a[3]){const i=a[3].slice(1,-1);e.push(o`<em>${i}</em>`)}else a[4]&&a[5]&&e.push(o`<a href=${a[5]} target="_blank" rel="noopener">${a[4]}</a>`);s=a.index+a[0].length}return s<t.length&&e.push(t.slice(s)),e.length>0?e:[t]}const Vo=[{id:"hot",label:"Hot"},{id:"trending",label:"Trending"},{id:"recent",label:"Recent"},{id:"updated",label:"Updated"},{id:"discussed",label:"Discussed"}],wn=m(null),Pe=m([]),qt=m(!1),zt=m(null),Ee=m("");function Ju(){var e,n;const t=new URLSearchParams(window.location.search);return((e=t.get("agent"))==null?void 0:e.trim())||((n=t.get("agent_name"))==null?void 0:n.trim())||"dashboard-user"}const Vu=m(Ju()),Ie=m(!1);async function Ka(t){zt.value=t,wn.value=null,Pe.value=[],qt.value=!0;try{const e=await xl(t);if(zt.value!==t)return;wn.value={id:e.id,author:e.author,title:e.title,content:e.content,tags:e.tags,votes:e.votes,vote_balance:e.vote_balance,comment_count:e.comment_count,created_at:e.created_at,updated_at:e.updated_at,flair:e.flair,hearth_count:e.hearth_count},Pe.value=e.comments??[]}catch{zt.value===t&&(wn.value=null,Pe.value=[])}finally{zt.value===t&&(qt.value=!1)}}async function Di(t){const e=Ee.value.trim();if(e){Ie.value=!0;try{await wl(t,Vu.value,e),Ee.value="",h("Comment posted","success"),await Ka(t),mt()}catch{h("Failed to post comment","error")}finally{Ie.value=!1}}}function Yu(){const t=Ue.value;return o`
+`))}</p>`)}return n}function gs(t){const e=[],n=/(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|\[([^\]]+)\]\(([^)]+)\)/g;let s=0,a;for(;(a=n.exec(t))!==null;){if(a.index>s&&e.push(t.slice(s,a.index)),a[1]){const i=a[1].slice(1,-1);e.push(o`<code>${i}</code>`)}else if(a[2]){const i=a[2].slice(2,-2);e.push(o`<strong>${i}</strong>`)}else if(a[3]){const i=a[3].slice(1,-1);e.push(o`<em>${i}</em>`)}else a[4]&&a[5]&&e.push(o`<a href=${a[5]} target="_blank" rel="noopener">${a[4]}</a>`);s=a.index+a[0].length}return s<t.length&&e.push(t.slice(s)),e.length>0?e:[t]}const Vo=[{id:"hot",label:"Hot"},{id:"trending",label:"Trending"},{id:"recent",label:"Recent"},{id:"updated",label:"Updated"},{id:"discussed",label:"Discussed"}],wn=m(null),Pe=m([]),qt=m(!1),zt=m(null),Ee=m("");function Vu(){var e,n;const t=new URLSearchParams(window.location.search);return((e=t.get("agent"))==null?void 0:e.trim())||((n=t.get("agent_name"))==null?void 0:n.trim())||"dashboard-user"}const Yu=m(Vu()),Ie=m(!1);async function Ka(t){zt.value=t,wn.value=null,Pe.value=[],qt.value=!0;try{const e=await xl(t);if(zt.value!==t)return;wn.value={id:e.id,author:e.author,title:e.title,content:e.content,tags:e.tags,votes:e.votes,vote_balance:e.vote_balance,comment_count:e.comment_count,created_at:e.created_at,updated_at:e.updated_at,flair:e.flair,hearth_count:e.hearth_count},Pe.value=e.comments??[]}catch{zt.value===t&&(wn.value=null,Pe.value=[])}finally{zt.value===t&&(qt.value=!1)}}async function Di(t){const e=Ee.value.trim();if(e){Ie.value=!0;try{await wl(t,Yu.value,e),Ee.value="",h("Comment posted","success"),await Ka(t),mt()}catch{h("Failed to post comment","error")}finally{Ie.value=!1}}}function Qu(){const t=Ue.value;return o`
     <div class="board-toolbar">
       <div class="board-controls">
         ${Vo.map(e=>o`
@@ -1182,7 +1182,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       </span>
       ${t.last_sync_at?o`<span class="feed-health-meta">Last sync: <${j} timestamp=${t.last_sync_at} /></span>`:o`<span class="feed-health-meta">No sync timestamp</span>`}
     </div>
-  `}function Yo({flair:t}){return t?o`<span class="post-flair ${t}">${t}</span>`:null}function Qu(t){const e=t.replace(/!\[[^\]]*\]\([^)]+\)/g," ").replace(/\[[^\]]+\]\([^)]+\)/g,"$1").replace(/[`#>*_~-]/g," ").replace(/\s+/g," ").trim();return e?e.length>180?`${e.slice(0,177)}...`:e:"No preview available"}function Pi(t){return t.updated_at!==t.created_at}function hs(){var n;const t=((n=Vo.find(s=>s.id===Ue.value))==null?void 0:n.label)??Ue.value,e=Ut.value.length;return o`
+  `}function Yo({flair:t}){return t?o`<span class="post-flair ${t}">${t}</span>`:null}function Xu(t){const e=t.replace(/!\[[^\]]*\]\([^)]+\)/g," ").replace(/\[[^\]]+\]\([^)]+\)/g,"$1").replace(/[`#>*_~-]/g," ").replace(/\s+/g," ").trim();return e?e.length>180?`${e.slice(0,177)}...`:e:"No preview available"}function Pi(t){return t.updated_at!==t.created_at}function hs(){var n;const t=((n=Vo.find(s=>s.id===Ue.value))==null?void 0:n.label)??Ue.value,e=Ut.value.length;return o`
     <div class="board-summary-strip">
       <div class="board-summary-item">
         <span class="board-summary-label">Visible posts</span>
@@ -1201,7 +1201,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         <strong>${la.value?o`<${j} timestamp=${la.value} />`:"Not loaded"}</strong>
       </div>
     </div>
-  `}function Xu({post:t}){const e=async(n,s)=>{s.stopPropagation();try{await Co(t.id,n),mt()}catch{h("Failed to vote","error")}};return o`
+  `}function Zu({post:t}){const e=async(n,s)=>{s.stopPropagation();try{await Co(t.id,n),mt()}catch{h("Failed to vote","error")}};return o`
     <div class="board-post" onClick=${()=>Jr(t.id)}>
       <div class="vote-column">
         <button class="vote-btn upvote" onClick=${n=>e("up",n)}>▲</button>
@@ -1226,10 +1226,10 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             ${(t.hearth_count??0)>0?o`<span>♥ ${t.hearth_count}</span>`:null}
           </div>
         </div>
-        <div class="post-snippet">${Qu(t.content)}</div>
+        <div class="post-snippet">${Xu(t.content)}</div>
       </div>
     </div>
-  `}function Zu({comments:t}){return t.length===0?o`<div class="empty-state" style="font-size:13px">No comments yet</div>`:o`
+  `}function td({comments:t}){return t.length===0?o`<div class="empty-state" style="font-size:13px">No comments yet</div>`:o`
     <div class="comment-thread">
       ${t.map(e=>o`
         <div key=${e.id} class="board-comment">
@@ -1239,7 +1239,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       `)}
     </div>
-  `}function td({postId:t}){return o`
+  `}function ed({postId:t}){return o`
     <div class="comment-form" style="margin-top: 12px; display: flex; gap: 8px;">
       <input
         type="text"
@@ -1258,13 +1258,13 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         ${Ie.value?"...":"Post"}
       </button>
     </div>
-  `}function ed({post:t}){zt.value!==t.id&&!qt.value&&Ka(t.id);const e=async n=>{try{await Co(t.id,n),mt()}catch{h("Failed to vote","error")}};return o`
+  `}function nd({post:t}){zt.value!==t.id&&!qt.value&&Ka(t.id);const e=async n=>{try{await Co(t.id,n),mt()}catch{h("Failed to vote","error")}};return o`
     <div>
       <button class="back-btn" onClick=${()=>as("board")}>← Back to Board</button>
       <${b} title=${o`${t.title} <${Yo} flair=${t.flair} />`}>
         <div class="board-detail">
           <div class="post-body">
-            <${Wu} text=${t.content} />
+            <${Gu} text=${t.content} />
           </div>
           <div class="post-meta" style="margin-top: 12px;">
             <span>${t.author}</span>
@@ -1280,14 +1280,14 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       <//>
 
       <${b} title="Comments (${qt.value?"...":Pe.value.length})">
-        ${qt.value?o`<div class="loading-indicator">Loading comments...</div>`:o`<${Zu} comments=${Pe.value} />`}
-        <${td} postId=${t.id} />
+        ${qt.value?o`<div class="loading-indicator">Loading comments...</div>`:o`<${td} comments=${Pe.value} />`}
+        <${ed} postId=${t.id} />
       <//>
     </div>
-  `}function nd(){var a,i;const t=Ut.value,e=We.value,n=lt.value.postId,s=((i=(a=Pt.value)==null?void 0:a.data_quality)==null?void 0:i.board_contract_ok)===!1;if(n){const r=t.find(l=>l.id===n)??(zt.value===n?wn.value:null);return!r&&zt.value!==n&&!qt.value&&Ka(n),r?o`
+  `}function sd(){var a,i;const t=Ut.value,e=We.value,n=lt.value.postId,s=((i=(a=Pt.value)==null?void 0:a.data_quality)==null?void 0:i.board_contract_ok)===!1;if(n){const r=t.find(l=>l.id===n)??(zt.value===n?wn.value:null);return!r&&zt.value!==n&&!qt.value&&Ka(n),r?o`
           <${$s} />
           <${hs} />
-          <${ed} post=${r} />
+          <${nd} post=${r} />
         `:o`
           <div>
             <${$s} />
@@ -1302,27 +1302,27 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         `}return o`
     <${$s} />
     <${hs} />
-    <${Yu} />
+    <${Qu} />
     ${e?o`<div class="loading-indicator">Loading board...</div>`:t.length===0?o`
             <div class="empty-state">
               ${s?"No posts loaded (board feed degraded). Check board contract sync.":jt.value?"No visible posts right now. Automated reports may be hidden; toggle them back on if you need the raw feed.":"No posts yet"}
             </div>
           `:o`<div class="board-post-list">
-            ${t.map(r=>o`<${Xu} key=${r.id} post=${r} />`)}
+            ${t.map(r=>o`<${Zu} key=${r.id} post=${r} />`)}
           </div>`}
-  `}function sd(t){if(t.kind)return t.kind;switch(t.eventType){case"board_post":case"board_comment":return"board";case"task_update":return"tasks";case"keeper_heartbeat":case"keeper_handoff":case"keeper_compaction":case"keeper_guardrail":return"keepers";default:return"system"}}function ad(t){var e,n;return((e=t.author)==null?void 0:e.trim())||((n=t.agent)==null?void 0:n.trim())||"system"}function id(t){switch(t.eventType){case"board_post":return t.preview?`Post: ${t.preview}`:t.text||"New post";case"board_comment":return t.preview?`Comment: ${t.preview}`:t.text||"New comment";default:return t.text}}const Qo=120,od=12,rd=16,ld=12,ha=m("all"),cd={all:"All",messages:"Messages",board:"Board",tasks:"Tasks",keepers:"Keepers",system:"System"},ud={messages:"MSG",board:"BOARD",tasks:"TASK",keepers:"KEEPER",system:"SYS"};function dd(t,e){return{id:t.id??`msg-${t.seq??e}`,source:"message",kind:"messages",actor:t.from??"system",content:t.content,timestamp:t.timestamp}}function pd(t,e){return{id:t.postId?`evt-${t.eventType??"event"}-${t.postId}-${e}`:`evt-${t.timestamp}-${e}`,source:"event",kind:sd(t),actor:ad(t),content:id(t),timestamp:new Date(t.timestamp).toISOString()}}function vd(t,e){var a;const n=(a=t.assignee)==null?void 0:a.trim(),s=t.updated_at??t.created_at;return!n||!s?null:{id:`task-${t.id}-${e}`,source:"snapshot",kind:"tasks",actor:n,content:`Task: ${t.title} (${t.status})`,timestamp:s}}function md(t,e){return{id:`board-${t.id}-${e}`,source:"snapshot",kind:"board",actor:t.author,content:`Post: ${t.title||t.content}`,timestamp:t.updated_at||t.created_at}}function dn(t){return typeof t!="number"||!Number.isFinite(t)||t<0?null:new Date(Date.now()-t*1e3).toISOString()}function ya(t){return t.last_heartbeat??dn(t.last_turn_ago_s)??dn(t.last_proactive_ago_s)??dn(t.last_handoff_ago_s)??dn(t.last_compaction_ago_s)}function fd(t,e){const n=ya(t);if(!n)return null;const s=typeof t.context_ratio=="number"&&Number.isFinite(t.context_ratio)?`${Math.round(t.context_ratio*100)}%`:"?";return{id:`keeper-${t.name}-${e}`,source:"snapshot",kind:"keepers",actor:t.name,content:t.last_heartbeat?`Heartbeat gen=${t.generation??"?"} ctx=${s}`:`Keeper snapshot gen=${t.generation??"?"} ctx=${s}`,timestamp:n}}function dt(t){const e=typeof t=="number"?t:Date.parse(t);return Number.isNaN(e)?0:e}const ba=X(()=>{const t=nn.value.map(dd),e=re.value.map(pd),n=[...St.value].sort((i,r)=>dt(r.updated_at??r.created_at??0)-dt(i.updated_at??i.created_at??0)).slice(0,od).map(vd).filter(i=>i!==null),s=[...Ut.value].sort((i,r)=>dt(r.updated_at||r.created_at)-dt(i.updated_at||i.created_at)).slice(0,rd).map(md),a=[...ct.value].sort((i,r)=>dt(ya(r)??0)-dt(ya(i)??0)).slice(0,ld).map(fd).filter(i=>i!==null);return[...t,...e,...n,...s,...a].sort((i,r)=>dt(r.timestamp)-dt(i.timestamp))}),_d=X(()=>{const t=ba.value;return{total:t.length,messages:t.filter(e=>e.kind==="messages").length,board:t.filter(e=>e.kind==="board").length,tasks:t.filter(e=>e.kind==="tasks").length,keepers:t.filter(e=>e.kind==="keepers").length,system:t.filter(e=>e.kind==="system").length}}),gd=X(()=>{const t=ha.value;return(t==="all"?ba.value:ba.value.filter(n=>n.kind===t)).slice(0,Qo)}),$d=X(()=>Ht.value.map(t=>({agent:t,motion:Oa(t.name,St.value,nn.value,re.value,{currentTask:t.current_task,lastSeen:t.last_seen,boardPosts:Ut.value,keepers:ct.value})})).sort((t,e)=>{const n=e.motion.activeAssignedCount-t.motion.activeAssignedCount;return n!==0?n:dt(e.motion.lastActivityAt??0)-dt(t.motion.lastActivityAt??0)}));function hd(t){const e=new Date(t);return Number.isNaN(e.getTime())?"00:00:00":e.toLocaleTimeString("en-US",{hour12:!1})}function ge({label:t,value:e,color:n}){return o`
+  `}function ad(t){if(t.kind)return t.kind;switch(t.eventType){case"board_post":case"board_comment":return"board";case"task_update":return"tasks";case"keeper_heartbeat":case"keeper_handoff":case"keeper_compaction":case"keeper_guardrail":return"keepers";default:return"system"}}function id(t){var e,n;return((e=t.author)==null?void 0:e.trim())||((n=t.agent)==null?void 0:n.trim())||"system"}function od(t){switch(t.eventType){case"board_post":return t.preview?`Post: ${t.preview}`:t.text||"New post";case"board_comment":return t.preview?`Comment: ${t.preview}`:t.text||"New comment";default:return t.text}}const Qo=120,rd=12,ld=16,cd=12,ha=m("all"),ud={all:"All",messages:"Messages",board:"Board",tasks:"Tasks",keepers:"Keepers",system:"System"},dd={messages:"MSG",board:"BOARD",tasks:"TASK",keepers:"KEEPER",system:"SYS"};function pd(t,e){return{id:t.id??`msg-${t.seq??e}`,source:"message",kind:"messages",actor:t.from??"system",content:t.content,timestamp:t.timestamp}}function vd(t,e){return{id:t.postId?`evt-${t.eventType??"event"}-${t.postId}-${e}`:`evt-${t.timestamp}-${e}`,source:"event",kind:ad(t),actor:id(t),content:od(t),timestamp:new Date(t.timestamp).toISOString()}}function md(t,e){var a;const n=(a=t.assignee)==null?void 0:a.trim(),s=t.updated_at??t.created_at;return!n||!s?null:{id:`task-${t.id}-${e}`,source:"snapshot",kind:"tasks",actor:n,content:`Task: ${t.title} (${t.status})`,timestamp:s}}function fd(t,e){return{id:`board-${t.id}-${e}`,source:"snapshot",kind:"board",actor:t.author,content:`Post: ${t.title||t.content}`,timestamp:t.updated_at||t.created_at}}function dn(t){return typeof t!="number"||!Number.isFinite(t)||t<0?null:new Date(Date.now()-t*1e3).toISOString()}function ya(t){return t.last_heartbeat??dn(t.last_turn_ago_s)??dn(t.last_proactive_ago_s)??dn(t.last_handoff_ago_s)??dn(t.last_compaction_ago_s)}function _d(t,e){const n=ya(t);if(!n)return null;const s=typeof t.context_ratio=="number"&&Number.isFinite(t.context_ratio)?`${Math.round(t.context_ratio*100)}%`:"?";return{id:`keeper-${t.name}-${e}`,source:"snapshot",kind:"keepers",actor:t.name,content:t.last_heartbeat?`Heartbeat gen=${t.generation??"?"} ctx=${s}`:`Keeper snapshot gen=${t.generation??"?"} ctx=${s}`,timestamp:n}}function dt(t){const e=typeof t=="number"?t:Date.parse(t);return Number.isNaN(e)?0:e}const ba=X(()=>{const t=nn.value.map(pd),e=re.value.map(vd),n=[...St.value].sort((i,r)=>dt(r.updated_at??r.created_at??0)-dt(i.updated_at??i.created_at??0)).slice(0,rd).map(md).filter(i=>i!==null),s=[...Ut.value].sort((i,r)=>dt(r.updated_at||r.created_at)-dt(i.updated_at||i.created_at)).slice(0,ld).map(fd),a=[...ct.value].sort((i,r)=>dt(ya(r)??0)-dt(ya(i)??0)).slice(0,cd).map(_d).filter(i=>i!==null);return[...t,...e,...n,...s,...a].sort((i,r)=>dt(r.timestamp)-dt(i.timestamp))}),gd=X(()=>{const t=ba.value;return{total:t.length,messages:t.filter(e=>e.kind==="messages").length,board:t.filter(e=>e.kind==="board").length,tasks:t.filter(e=>e.kind==="tasks").length,keepers:t.filter(e=>e.kind==="keepers").length,system:t.filter(e=>e.kind==="system").length}}),$d=X(()=>{const t=ha.value;return(t==="all"?ba.value:ba.value.filter(n=>n.kind===t)).slice(0,Qo)}),hd=X(()=>Ht.value.map(t=>({agent:t,motion:Oa(t.name,St.value,nn.value,re.value,{currentTask:t.current_task,lastSeen:t.last_seen,boardPosts:Ut.value,keepers:ct.value})})).sort((t,e)=>{const n=e.motion.activeAssignedCount-t.motion.activeAssignedCount;return n!==0?n:dt(e.motion.lastActivityAt??0)-dt(t.motion.lastActivityAt??0)}));function yd(t){const e=new Date(t);return Number.isNaN(e.getTime())?"00:00:00":e.toLocaleTimeString("en-US",{hour12:!1})}function ge({label:t,value:e,color:n}){return o`
     <div class="stat-card">
       <div class="stat-label">${t}</div>
       <div class="stat-value" style=${n?`color:${n}`:""}>${e}</div>
     </div>
-  `}function yd({row:t}){return o`
+  `}function bd({row:t}){return o`
     <div class="term-row activity-row ${t.kind}">
-      <span class="term-time">${hd(t.timestamp)}</span>
-      <span class="activity-kind-badge ${t.kind}">${ud[t.kind]}</span>
+      <span class="term-time">${yd(t.timestamp)}</span>
+      <span class="activity-kind-badge ${t.kind}">${dd[t.kind]}</span>
       <span class="term-actor">${t.actor}</span>
       <span class="term-text">${t.content}</span>
     </div>
-  `}function bd(){const t=_d.value,e=gd.value,n=e[0],s=$d.value;return o`
+  `}function kd(){const t=gd.value,e=$d.value,n=e[0],s=hd.value;return o`
     <div class="stats-grid">
       <${ge} label="Visible rows" value=${e.length} />
       <${ge} label="Tracked messages" value=${t.messages} color="#47b8ff" />
@@ -1339,7 +1339,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               class="goal-filter-btn ${ha.value===a?"active":""}"
               onClick=${()=>{ha.value=a}}
             >
-              ${cd[a]}
+              ${ud[a]}
             </button>
           `)}
         </div>
@@ -1354,7 +1354,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       </div>
 
       <div class="terminal-feed">
-        ${e.length===0?o`<div class="empty-state">Waiting for live or snapshot signals...</div>`:e.map(a=>o`<${yd} key=${a.id} row=${a} />`)}
+        ${e.length===0?o`<div class="empty-state">Waiting for live or snapshot signals...</div>`:e.map(a=>o`<${bd} key=${a.id} row=${a} />`)}
       </div>
     <//>
 
@@ -1388,13 +1388,13 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       </svg>
       <span class="mitosis-text ${l}">${Math.round(t*100)}%</span>
     </div>
-  `}const ys=600*1e3,kd=1200*1e3,Ei=.8;function At(t){if(t==null)return 0;const e=typeof t=="number"?t:Date.parse(t);return Number.isNaN(e)?0:e}function Vt(t){switch(t){case"bad":return 2;case"warn":return 1;default:return 0}}function xd(t){switch(t){case"working":return"Working";case"watching":return"Watching";case"quiet":return"Quiet";case"offline":return"Offline"}}function wd(t){switch(t){case"critical":return"Critical";case"warning":return"Watch";default:return"Healthy"}}function Sd(t){return typeof t!="number"||Number.isNaN(t)?"—":`${Math.round(t*100)}%`}function Ad(t){var e;return((e=t.agent)==null?void 0:e.current_task)??t.skill_primary??t.last_proactive_reason??t.memory_recent_note??"No active focus"}function Td(t){const e=[`Gen ${t.generation??"—"}`,`Turns ${t.turn_count??0}`,`Handoffs ${t.handoff_count_total??0}`];return(t.compaction_count??0)>0&&e.push(`Compactions ${t.compaction_count}`),e.join(" · ")}function Cd(t){var u,c;const e=Oa(t.name,St.value,nn.value,re.value,{currentTask:t.current_task,lastSeen:t.last_seen,boardPosts:Ut.value,keepers:ct.value}),n=e.lastActivityAt??t.last_seen??null,s=n?Math.max(0,Date.now()-At(n)):Number.POSITIVE_INFINITY,a=!!((u=t.current_task)!=null&&u.trim())||e.activeAssignedCount>0;let i="watching",r="ok",l="Healthy live signal";return t.status==="offline"||t.status==="inactive"?(i="offline",r="bad",l=n?"Offline or inactive":"No recent presence"):s>kd?(i="quiet",r="bad",l=a?"Working without a fresh signal":"No fresh agent signal"):a?(i="working",r=s>ys?"warn":"ok",l=s>ys?"Execution looks quiet for too long":"Task and live signal aligned"):s>ys?(i="quiet",r="warn",l="Quiet but still reachable"):t.status==="idle"&&(i="watching",r="ok",l="Standing by for the next task"),{agent:t,motion:e,lastSignalAt:n,activeTaskCount:e.activeAssignedCount,state:i,tone:r,focus:((c=t.current_task)==null?void 0:c.trim())||(e.activeAssignedCount>0?`${e.activeAssignedCount} claimed tasks waiting for explicit current_task`:e.lastActivityText??"Idle / waiting for assignment"),note:l}}function Nd(t){const e=Mo.value.get(t.name)??"idle",n=Oo.value.has(t.name),s=t.context_ratio??0;let a="healthy",i="ok",r="Heartbeat and context look healthy";return t.status==="offline"||n||e==="handoff-imminent"?(a="critical",i="bad",r=n?"Heartbeat stale":e==="handoff-imminent"?"Handoff imminent":"Keeper offline"):(e==="preparing"||e==="compacting"||s>=Ei)&&(a="warning",i="warn",r=s>=Ei?"High context pressure":e==="compacting"?"Compaction in progress":"Preparing for handoff"),{keeper:t,lifecycle:e,state:a,tone:i,focus:Ad(t),note:r}}function $e({label:t,value:e,color:n,caption:s}){return o`
+  `}const ys=600*1e3,xd=1200*1e3,Ei=.8;function At(t){if(t==null)return 0;const e=typeof t=="number"?t:Date.parse(t);return Number.isNaN(e)?0:e}function Vt(t){switch(t){case"bad":return 2;case"warn":return 1;default:return 0}}function wd(t){switch(t){case"working":return"Working";case"watching":return"Watching";case"quiet":return"Quiet";case"offline":return"Offline"}}function Sd(t){switch(t){case"critical":return"Critical";case"warning":return"Watch";default:return"Healthy"}}function Ad(t){return typeof t!="number"||Number.isNaN(t)?"—":`${Math.round(t*100)}%`}function Td(t){var e;return((e=t.agent)==null?void 0:e.current_task)??t.skill_primary??t.last_proactive_reason??t.memory_recent_note??"No active focus"}function Cd(t){const e=[`Gen ${t.generation??"—"}`,`Turns ${t.turn_count??0}`,`Handoffs ${t.handoff_count_total??0}`];return(t.compaction_count??0)>0&&e.push(`Compactions ${t.compaction_count}`),e.join(" · ")}function Nd(t){var u,c;const e=Oa(t.name,St.value,nn.value,re.value,{currentTask:t.current_task,lastSeen:t.last_seen,boardPosts:Ut.value,keepers:ct.value}),n=e.lastActivityAt??t.last_seen??null,s=n?Math.max(0,Date.now()-At(n)):Number.POSITIVE_INFINITY,a=!!((u=t.current_task)!=null&&u.trim())||e.activeAssignedCount>0;let i="watching",r="ok",l="Healthy live signal";return t.status==="offline"||t.status==="inactive"?(i="offline",r="bad",l=n?"Offline or inactive":"No recent presence"):s>xd?(i="quiet",r="bad",l=a?"Working without a fresh signal":"No fresh agent signal"):a?(i="working",r=s>ys?"warn":"ok",l=s>ys?"Execution looks quiet for too long":"Task and live signal aligned"):s>ys?(i="quiet",r="warn",l="Quiet but still reachable"):t.status==="idle"&&(i="watching",r="ok",l="Standing by for the next task"),{agent:t,motion:e,lastSignalAt:n,activeTaskCount:e.activeAssignedCount,state:i,tone:r,focus:((c=t.current_task)==null?void 0:c.trim())||(e.activeAssignedCount>0?`${e.activeAssignedCount} claimed tasks waiting for explicit current_task`:e.lastActivityText??"Idle / waiting for assignment"),note:l}}function Rd(t){const e=Mo.value.get(t.name)??"idle",n=Oo.value.has(t.name),s=t.context_ratio??0;let a="healthy",i="ok",r="Heartbeat and context look healthy";return t.status==="offline"||n||e==="handoff-imminent"?(a="critical",i="bad",r=n?"Heartbeat stale":e==="handoff-imminent"?"Handoff imminent":"Keeper offline"):(e==="preparing"||e==="compacting"||s>=Ei)&&(a="warning",i="warn",r=s>=Ei?"High context pressure":e==="compacting"?"Compaction in progress":"Preparing for handoff"),{keeper:t,lifecycle:e,state:a,tone:i,focus:Td(t),note:r}}function $e({label:t,value:e,color:n,caption:s}){return o`
     <div class="stat-card">
       <div class="stat-label">${t}</div>
       <div class="stat-value" style=${n?`color:${n}`:""}>${e}</div>
       ${s?o`<div class="monitor-stat-caption">${s}</div>`:null}
     </div>
-  `}function Rd({item:t}){const e=t.kind==="agent"?()=>za(t.agent.name):()=>Fa(t.keeper);return o`
+  `}function Ld({item:t}){const e=t.kind==="agent"?()=>za(t.agent.name):()=>Fa(t.keeper);return o`
     <button class="monitor-alert ${t.tone}" onClick=${e}>
       <div class="monitor-alert-main">
         <div class="monitor-alert-title">${t.title}</div>
@@ -1407,34 +1407,8 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         ${t.timestamp?o`<span><${j} timestamp=${t.timestamp} /></span>`:o`<span>No signal</span>`}
       </div>
     </button>
-  `}function Ld({row:t}){const{agent:e,motion:n}=t;return o`
+  `}function Dd({row:t}){const{agent:e,motion:n}=t;return o`
     <button class="monitor-row ${t.tone}" onClick=${()=>za(e.name)}>
-      <div class="monitor-row-header">
-        <span class="agent-emoji">${e.emoji??""}</span>
-        <div class="monitor-row-title">
-          <div class="monitor-name-line">
-            <span class="monitor-title">${e.name}</span>
-            ${e.koreanName?o`<span class="monitor-sub">${e.koreanName}</span>`:null}
-          </div>
-          <div class="monitor-note">${t.note}</div>
-        </div>
-        <${Xo} ratio=${e.context_ratio} size=${34} stroke=${4} />
-        <${ut} status=${e.status} />
-        <span class="monitor-pill ${t.tone}">${xd(t.state)}</span>
-      </div>
-
-      <div class="monitor-meta">
-        ${t.lastSignalAt?o`<span>Signal <${j} timestamp=${t.lastSignalAt} /></span>`:o`<span>No recent signal</span>`}
-        <span>${t.activeTaskCount>0?`${t.activeTaskCount} active tasks`:"No active tasks"}</span>
-        ${e.model?o`<span>${e.model}</span>`:null}
-        ${e.last_seen?o`<span>Seen <${j} timestamp=${e.last_seen} /></span>`:null}
-      </div>
-
-      <div class="monitor-focus">${t.focus}</div>
-      ${n.lastActivityText&&n.lastActivityText!==t.focus?o`<div class="monitor-footnote">Latest detail: ${n.lastActivityText}</div>`:null}
-    </button>
-  `}function Dd({row:t}){const{keeper:e}=t;return o`
-    <button class="monitor-row ${t.tone}" onClick=${()=>Fa(e)}>
       <div class="monitor-row-header">
         <span class="agent-emoji">${e.emoji??""}</span>
         <div class="monitor-row-title">
@@ -1450,17 +1424,43 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       </div>
 
       <div class="monitor-meta">
+        ${t.lastSignalAt?o`<span>Signal <${j} timestamp=${t.lastSignalAt} /></span>`:o`<span>No recent signal</span>`}
+        <span>${t.activeTaskCount>0?`${t.activeTaskCount} active tasks`:"No active tasks"}</span>
+        ${e.model?o`<span>${e.model}</span>`:null}
+        ${e.last_seen?o`<span>Seen <${j} timestamp=${e.last_seen} /></span>`:null}
+      </div>
+
+      <div class="monitor-focus">${t.focus}</div>
+      ${n.lastActivityText&&n.lastActivityText!==t.focus?o`<div class="monitor-footnote">Latest detail: ${n.lastActivityText}</div>`:null}
+    </button>
+  `}function Pd({row:t}){const{keeper:e}=t;return o`
+    <button class="monitor-row ${t.tone}" onClick=${()=>Fa(e)}>
+      <div class="monitor-row-header">
+        <span class="agent-emoji">${e.emoji??""}</span>
+        <div class="monitor-row-title">
+          <div class="monitor-name-line">
+            <span class="monitor-title">${e.name}</span>
+            ${e.koreanName?o`<span class="monitor-sub">${e.koreanName}</span>`:null}
+          </div>
+          <div class="monitor-note">${t.note}</div>
+        </div>
+        <${Xo} ratio=${e.context_ratio} size=${34} stroke=${4} />
+        <${ut} status=${e.status} />
+        <span class="monitor-pill ${t.tone}">${Sd(t.state)}</span>
+      </div>
+
+      <div class="monitor-meta">
         ${e.last_heartbeat?o`<span>Heartbeat <${j} timestamp=${e.last_heartbeat} /></span>`:o`<span>No heartbeat</span>`}
-        <span>${Td(e)}</span>
+        <span>${Cd(e)}</span>
         <span>Lifecycle ${t.lifecycle}</span>
-        <span>Context ${Sd(e.context_ratio)}</span>
+        <span>Context ${Ad(e.context_ratio)}</span>
         ${e.model?o`<span>${e.model}</span>`:null}
       </div>
 
       <div class="monitor-focus">${t.focus}</div>
       ${e.skill_reason?o`<div class="monitor-footnote">Skill route: ${e.skill_reason}</div>`:null}
     </button>
-  `}function Pd(){const t=[...Ht.value].map(Cd).sort((u,c)=>{const p=Vt(c.tone)-Vt(u.tone);if(p!==0)return p;const d=c.activeTaskCount-u.activeTaskCount;return d!==0?d:At(c.lastSignalAt)-At(u.lastSignalAt)}),e=[...ct.value].map(Nd).sort((u,c)=>{const p=Vt(c.tone)-Vt(u.tone);if(p!==0)return p;const d=(c.keeper.context_ratio??0)-(u.keeper.context_ratio??0);return d!==0?d:At(c.keeper.last_heartbeat)-At(u.keeper.last_heartbeat)}),n=t.filter(u=>u.state!=="offline").length,s=t.filter(u=>u.state==="working").length,a=t.filter(u=>u.lastSignalAt&&Date.now()-At(u.lastSignalAt)<=12e4).length,i=t.filter(u=>u.tone!=="ok"),r=e.filter(u=>u.tone!=="ok"),l=[...r.map(u=>({kind:"keeper",key:`keeper-${u.keeper.name}`,tone:u.tone,title:u.keeper.name,subtitle:`${u.note} · ${u.focus}`,timestamp:u.keeper.last_heartbeat??null,keeper:u.keeper})),...i.map(u=>({kind:"agent",key:`agent-${u.agent.name}`,tone:u.tone,title:u.agent.name,subtitle:`${u.note} · ${u.focus}`,timestamp:u.lastSignalAt,agent:u.agent}))].sort((u,c)=>{const p=Vt(c.tone)-Vt(u.tone);return p!==0?p:At(c.timestamp)-At(u.timestamp)}).slice(0,8);return o`
+  `}function Ed(){const t=[...Ht.value].map(Nd).sort((u,c)=>{const p=Vt(c.tone)-Vt(u.tone);if(p!==0)return p;const d=c.activeTaskCount-u.activeTaskCount;return d!==0?d:At(c.lastSignalAt)-At(u.lastSignalAt)}),e=[...ct.value].map(Rd).sort((u,c)=>{const p=Vt(c.tone)-Vt(u.tone);if(p!==0)return p;const d=(c.keeper.context_ratio??0)-(u.keeper.context_ratio??0);return d!==0?d:At(c.keeper.last_heartbeat)-At(u.keeper.last_heartbeat)}),n=t.filter(u=>u.state!=="offline").length,s=t.filter(u=>u.state==="working").length,a=t.filter(u=>u.lastSignalAt&&Date.now()-At(u.lastSignalAt)<=12e4).length,i=t.filter(u=>u.tone!=="ok"),r=e.filter(u=>u.tone!=="ok"),l=[...r.map(u=>({kind:"keeper",key:`keeper-${u.keeper.name}`,tone:u.tone,title:u.keeper.name,subtitle:`${u.note} · ${u.focus}`,timestamp:u.keeper.last_heartbeat??null,keeper:u.keeper})),...i.map(u=>({kind:"agent",key:`agent-${u.agent.name}`,tone:u.tone,title:u.agent.name,subtitle:`${u.note} · ${u.focus}`,timestamp:u.lastSignalAt,agent:u.agent}))].sort((u,c)=>{const p=Vt(c.tone)-Vt(u.tone);return p!==0?p:At(c.timestamp)-At(u.timestamp)}).slice(0,8);return o`
     <div class="agents-monitor">
       <div class="stats-grid">
         <${$e} label="Agents online" value=${n} color="#4ade80" caption="active + idle" />
@@ -1476,7 +1476,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           <p class="monitor-subheadline">Rows are sorted by severity first, then by the freshest signal we have.</p>
         </div>
         <div class="monitor-alert-list">
-          ${l.length===0?o`<div class="empty-state">No agent or keeper alerts right now</div>`:l.map(u=>o`<${Rd} key=${u.key} item=${u} />`)}
+          ${l.length===0?o`<div class="empty-state">No agent or keeper alerts right now</div>`:l.map(u=>o`<${Ld} key=${u.key} item=${u} />`)}
         </div>
       <//>
 
@@ -1487,7 +1487,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             <p class="monitor-subheadline">Heartbeat, context pressure, and continuity state in one list.</p>
           </div>
           <div class="monitor-list">
-            ${e.length===0?o`<div class="empty-state">No keepers active</div>`:e.map(u=>o`<${Dd} key=${u.keeper.name} row=${u} />`)}
+            ${e.length===0?o`<div class="empty-state">No keepers active</div>`:e.map(u=>o`<${Pd} key=${u.keeper.name} row=${u} />`)}
           </div>
         <//>
 
@@ -1497,7 +1497,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             <p class="monitor-subheadline">Current task, recent signal, and quiet drift are surfaced together.</p>
           </div>
           <div class="monitor-list">
-            ${t.length===0?o`<div class="empty-state">No agents registered</div>`:t.map(u=>o`<${Ld} key=${u.agent.name} row=${u} />`)}
+            ${t.length===0?o`<div class="empty-state">No agents registered</div>`:t.map(u=>o`<${Dd} key=${u.agent.name} row=${u} />`)}
           </div>
         <//>
       </div>
@@ -1510,7 +1510,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         ${t.assignee?o`<span class="kanban-assignee">${t.assignee}</span>`:null}
       </div>
     </div>
-  `}function Ed(){const{todo:t,inProgress:e,done:n}=Ma.value;return o`
+  `}function Id(){const{todo:t,inProgress:e,done:n}=Ma.value;return o`
     <div class="kanban-board">
       <!-- TODO Column -->
       <div class="kanban-column">
@@ -1540,19 +1540,19 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         ${n.length>20?o`<div class="empty-state" style="opacity: 0.5;">...and ${n.length-20} more</div>`:null}
       </div>
     </div>
-  `}function Id(t){return t==null?"P3":t<=1?"P1":t===2?"P2":t>=4?"P4+":"P3"}function ks({task:t}){return o`
+  `}function Md(t){return t==null?"P3":t<=1?"P1":t===2?"P2":t>=4?"P4+":"P3"}function ks({task:t}){return o`
     <div class="council-row session">
       <div class="council-row-main">
         <div class="council-topic">${t.title}</div>
         <div class="council-sub">
-          <span>${Id(t.priority)}</span>
+          <span>${Md(t.priority)}</span>
           ${t.assignee?o`<span>Assignee: ${t.assignee}</span>`:o`<span>Unassigned</span>`}
           ${t.created_at?o`<span><${j} timestamp=${t.created_at} /></span>`:null}
         </div>
       </div>
       <span class="council-state ${t.status}">${t.status}</span>
     </div>
-  `}function Md(){const t=Ma.value,e=t.inProgress,n=t.todo,s=t.done,a=Io.value,i=n.filter(l=>(l.priority??3)<=2),r=n.filter(l=>!l.assignee);return o`
+  `}function Od(){const t=Ma.value,e=t.inProgress,n=t.todo,s=t.done,a=Io.value,i=n.filter(l=>(l.priority??3)<=2),r=n.filter(l=>!l.assignee);return o`
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">In Progress</div>
@@ -1609,7 +1609,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       <//>
     </div>
-  `}const Gn=m("all"),Jn=m("all"),ka=X(()=>{let t=Be.value;return Gn.value!=="all"&&(t=t.filter(e=>e.horizon===Gn.value)),Jn.value!=="all"&&(t=t.filter(e=>e.status===Jn.value)),t}),Od=X(()=>{const t={short:[],mid:[],long:[]};for(const e of ka.value){const n=t[e.horizon];n&&n.push(e)}return t}),jd=X(()=>{const t=Array.from(rt.value.values());return t.sort((e,n)=>e.status==="running"&&n.status!=="running"?-1:n.status==="running"&&e.status!=="running"?1:n.elapsed_seconds-e.elapsed_seconds),t});function Fd(t){return"★".repeat(Math.min(t,5))+"☆".repeat(Math.max(0,5-t))}function Ha(t){switch(t){case"short":return"Short-term";case"mid":return"Mid-term";case"long":return"Long-term";default:return t}}function Sn(t){switch(t){case"short":return"#4ade80";case"mid":return"#f59e0b";case"long":return"#818cf8";default:return"#888"}}function zd(t){return t<60?`${Math.round(t)}s`:t<3600?`${Math.floor(t/60)}m ${Math.round(t%60)}s`:`${Math.floor(t/3600)}h ${Math.floor(t%3600/60)}m`}function Ii(t){return t.toFixed(4)}function Mi(t){const e=t.current_metric-t.baseline_metric;return`${e>=0?"+":""}${e.toFixed(4)}`}function qd({goal:t}){return o`
+  `}const Gn=m("all"),Jn=m("all"),ka=X(()=>{let t=Be.value;return Gn.value!=="all"&&(t=t.filter(e=>e.horizon===Gn.value)),Jn.value!=="all"&&(t=t.filter(e=>e.status===Jn.value)),t}),jd=X(()=>{const t={short:[],mid:[],long:[]};for(const e of ka.value){const n=t[e.horizon];n&&n.push(e)}return t}),Fd=X(()=>{const t=Array.from(rt.value.values());return t.sort((e,n)=>e.status==="running"&&n.status!=="running"?-1:n.status==="running"&&e.status!=="running"?1:n.elapsed_seconds-e.elapsed_seconds),t});function zd(t){return"★".repeat(Math.min(t,5))+"☆".repeat(Math.max(0,5-t))}function Ha(t){switch(t){case"short":return"Short-term";case"mid":return"Mid-term";case"long":return"Long-term";default:return t}}function Sn(t){switch(t){case"short":return"#4ade80";case"mid":return"#f59e0b";case"long":return"#818cf8";default:return"#888"}}function qd(t){return t<60?`${Math.round(t)}s`:t<3600?`${Math.floor(t/60)}m ${Math.round(t%60)}s`:`${Math.floor(t/3600)}h ${Math.floor(t%3600/60)}m`}function Ii(t){return t.toFixed(4)}function Mi(t){const e=t.current_metric-t.baseline_metric;return`${e>=0?"+":""}${e.toFixed(4)}`}function Kd({goal:t}){return o`
     <div class="goal-row">
       <div class="goal-row-main">
         <div style="display:flex; align-items:center; gap:8px;">
@@ -1619,7 +1619,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           <span class="goal-title">${t.title}</span>
         </div>
         <div class="goal-meta">
-          <span class="goal-priority" title="Priority ${t.priority}">${Fd(t.priority)}</span>
+          <span class="goal-priority" title="Priority ${t.priority}">${zd(t.priority)}</span>
           ${t.metric?o`<span class="goal-metric">${t.metric}${t.target_value?` → ${t.target_value}`:""}</span>`:null}
           ${t.due_date?o`<span class="goal-due">Due: <${j} timestamp=${t.due_date} /></span>`:null}
         </div>
@@ -1648,10 +1648,10 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
   `}function xs({horizon:t,items:e}){if(e.length===0)return null;const n=[...e].sort((s,a)=>a.priority-s.priority);return o`
     <${b} title="${Ha(t)} Goals (${e.length})" class="section">
       <div class="goal-list">
-        ${n.map(s=>o`<${qd} key=${s.id} goal=${s} />`)}
+        ${n.map(s=>o`<${Kd} key=${s.id} goal=${s} />`)}
       </div>
     <//>
-  `}function Kd(){return o`
+  `}function Hd(){return o`
     <div class="goal-filters">
       <div class="goal-filter-group">
         <label class="goal-filter-label">Horizon</label>
@@ -1676,7 +1676,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         `)}
       </div>
     </div>
-  `}function Hd(){const t=Be.value,e=t.filter(a=>a.status==="active").length,n=t.filter(a=>a.status==="completed").length,s={short:0,mid:0,long:0};for(const a of t)a.horizon in s&&s[a.horizon]++;return o`
+  `}function Ud(){const t=Be.value,e=t.filter(a=>a.status==="active").length,n=t.filter(a=>a.status==="completed").length,s={short:0,mid:0,long:0};for(const a of t)a.horizon in s&&s[a.horizon]++;return o`
     <div class="goal-summary">
       <div class="goal-summary-item">
         <div class="goal-summary-value">${t.length}</div>
@@ -1703,7 +1703,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         <div class="goal-summary-label">Long</div>
       </div>
     </div>
-  `}function Ud({loop:t}){const e=t.history[0];return o`
+  `}function Bd({loop:t}){const e=t.history[0];return o`
     <div class="planning-loop-row">
       <div class="planning-loop-main">
         <div class="planning-loop-head">
@@ -1723,7 +1723,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           <span class=${Mi(t).startsWith("+")?"planning-loop-good":"planning-loop-bad"}>
             Delta ${Mi(t)}
           </span>
-          <span>Elapsed ${zd(t.elapsed_seconds)}</span>
+          <span>Elapsed ${qd(t.elapsed_seconds)}</span>
         </div>
 
         <div class="planning-loop-target">${t.target||"No explicit target provided"}</div>
@@ -1734,7 +1734,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             `:o`<div class="planning-loop-footnote">No iteration history yet</div>`}
       </div>
     </div>
-  `}function Bd(){ft(()=>{we(),Se()},[]);const t=Od.value,e=jd.value,n=e.filter(r=>r.status==="running").length,s=Be.value.filter(r=>r.status==="active").length,a=bn.value,i=a==="idle"?"No loop running":a==="error"?ia.value??"MDAL snapshot unavailable":"Current loop snapshot";return o`
+  `}function Wd(){ft(()=>{we(),Se()},[]);const t=jd.value,e=Fd.value,n=e.filter(r=>r.status==="running").length,s=Be.value.filter(r=>r.status==="active").length,a=bn.value,i=a==="idle"?"No loop running":a==="error"?ia.value??"MDAL snapshot unavailable":"Current loop snapshot";return o`
     <div>
       <div class="stats-grid">
         <div class="stat-card">
@@ -1792,8 +1792,8 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       <//>
 
       <${b} title="Goal Pipeline" class="section">
+        <${Ud} />
         <${Hd} />
-        <${Kd} />
       <//>
 
       ${te.value&&Be.value.length===0?o`<div class="loading-indicator">Loading goals...</div>`:ka.value.length===0?o`<div class="empty-state">No goals match the current filters</div>`:o`
@@ -1817,27 +1817,27 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
                   </div>
                 `:o`
                 <div class="planning-loop-list">
-                  ${e.map(r=>o`<${Ud} key=${r.loop_id} loop=${r} />`)}
+                  ${e.map(r=>o`<${Bd} key=${r.loop_id} loop=${r} />`)}
                 </div>
               `}
       <//>
     </div>
-  `}const Xt=m(""),ws=m("ability_check"),Ss=m("10"),As=m("12"),pn=m(""),vn=m("idle"),Tt=m(""),mn=m("keeper-late"),Ts=m("player"),Cs=m(""),tt=m("idle"),Ns=m(null),fn=m(""),Rs=m(""),Ls=m("player"),Ds=m(""),Ps=m(""),Es=m(""),Me=m("20"),Is=m("20"),Ms=m(""),_n=m("idle"),xa=m(null),Zo=m("overview"),Os=m("all"),js=m("all"),Fs=m("all"),Wd=12e4,ls=m(null),ji=m(Date.now());function Gd(t,e){const n=e>0?t/e*100:0;return n>50?"hp-high":n>25?"hp-mid":"hp-low"}function Jd(t,e){return e>0?Math.round(t/e*100):0}const Vd={pragmatic:"리스크보다 확실한 이득을 우선합니다.",frugal:"자원 소모를 줄이고 효율을 챙깁니다.",impatient:"짧은 템포로 즉시 압박을 선호합니다.",stubborn:"한 번 정한 전술을 끝까지 밀어붙입니다.",protective:"아군 피해를 줄이는 선택을 우선합니다.","honor-bound":"약속과 규율을 지키는 행동에 보너스가 납니다.",intense:"집중 화력을 짧게 폭발시킵니다.",empathetic:"아군/약자 보호 쪽 선택 확률이 높아집니다.",fatalistic:"위험을 감수하는 고배수 선택을 탑니다.",suspicious:"함정/매복 경계 행동을 우선합니다.",precise:"단일 목표를 정확히 노리는 경향입니다.",vengeful:"직전 위협 대상에게 강하게 반응합니다.",aggressive:"공격적인 전진 행동을 우선합니다.",opportunistic:"빈틈이 열리면 즉시 추격합니다."},Yd={supply_scan:"전장/자원 상태를 스캔해 약한 지점을 찾습니다.",ration_shift:"소모를 줄이고 지속 전투 능력을 확보합니다.",logistics_patch:"무너진 운영 라인을 빠르게 복구합니다.",frontline_shield:"전열에서 아군 피해를 흡수합니다.",oath_intercept:"핵심 타깃을 가로막아 위협을 차단합니다.",morale_anchor:"아군 안정도를 높여 붕괴를 막습니다.",omen_trace:"다음 위험 신호를 먼저 감지합니다.",arc_flash:"짧은 순간 광역 압박을 넣습니다.",ward_bloom:"방어 장막을 펼쳐 생존률을 올립니다.",mark_prey:"우선 제거 대상을 지정합니다.",silent_route:"은밀한 진입 경로를 확보합니다.",finisher_strike:"약화된 적을 마무리하는 일격입니다.",shadow_claw:"근접 급습으로 출혈 피해를 노립니다.",lunge:"짧은 돌진으로 전열을 흔듭니다."};function gn(t){const e=t.trim();return e?e.split(/[_-]+/g).filter(n=>n.length>0).map(n=>n[0]?`${n[0].toUpperCase()}${n.slice(1)}`:n).join(" "):t}function Qd(t){const e=t.trim().toLowerCase();return Vd[e]??"행동 선택 가중치에 영향을 주는 성향입니다."}function Xd(t){const e=t.trim().toLowerCase();return Yd[e]??"상황에 따라 선택되는 전술 액션입니다."}function Rt(t){return typeof t=="object"&&t!==null}function V(t,e,n=""){const s=t[e];return typeof s=="string"?s:n}function pt(t,e,n=0){const s=t[e];return typeof s=="number"&&Number.isFinite(s)?s:n}function Ye(t,e,n=!1){const s=t[e];return typeof s=="boolean"?s:n}const Zd=new Set(["str","dex","con","int","wis","cha"]);function tp(t){const e=t.trim();if(!e)return{};let n;try{n=JSON.parse(e)}catch(a){throw new Error(`능력치 JSON 파싱 실패: ${a instanceof Error?a.message:"invalid json"}`)}if(!Rt(n))throw new Error('능력치 JSON은 object여야 합니다. 예: {"luck":7}');const s={};return Object.entries(n).forEach(([a,i])=>{const r=a.trim();if(r){if(typeof i=="number"&&Number.isFinite(i)){s[r]=Math.max(0,Math.trunc(i));return}if(typeof i=="string"){const l=Number.parseFloat(i.trim());if(Number.isFinite(l)){s[r]=Math.max(0,Math.trunc(l));return}}throw new Error(`능력치 '${r}' 값은 숫자여야 합니다.`)}}),s}function ep(t){const e=Number.parseInt(t.trim(),10);if(!Number.isFinite(e))return;const n=Math.max(1,e),s=Number.parseInt(Me.value.trim(),10);Number.isFinite(s)&&s>n&&(Me.value=String(n))}function wa(t){const n=(t.actor_name??t.actor??t.actor_id??"system").trim();return n===""?"system":n}function np(t){var n;return(((n=t.timestamp)==null?void 0:n.trim())??"")||"-"}function sp(t){Zo.value=t}function tr(t){const e=ls.value;return e==null||e<=t}function ap(t){const e=ls.value;return e==null||e<=t?0:Math.max(0,Math.ceil((e-t)/1e3))}function Vn(){ls.value=null}function er(t){return typeof window>"u"||typeof window.confirm!="function"?!0:window.confirm(t)}function ip(t,e){er(["관전 모드 잠금을 해제하시겠습니까?",`ROOM: ${t||"-"}`,`PHASE: ${e||"-"}`,"해제 시간: 120초 (시간 경과 또는 위험 액션 실행 후 자동 재잠금)"].join(`
-`))&&(ls.value=Date.now()+Wd,h("조작 잠금이 120초 동안 해제되었습니다.","warning"))}function An(t){return tr(t)?(h("관전 모드 잠금 상태입니다. 먼저 잠금을 해제하세요.","warning"),!1):!0}function Sa(t,e,n){return er([`[위험 액션 확인] ${t}`,`ROOM: ${e||"-"}`,`PHASE: ${n||"-"}`,"이 액션은 즉시 실행되며 되돌리기 어렵습니다.","계속 진행하시겠습니까?"].join(`
-`))}function op({hp:t,max:e}){const n=Jd(t,e),s=Gd(t,e);return o`
+  `}const Xt=m(""),ws=m("ability_check"),Ss=m("10"),As=m("12"),pn=m(""),vn=m("idle"),Tt=m(""),mn=m("keeper-late"),Ts=m("player"),Cs=m(""),tt=m("idle"),Ns=m(null),fn=m(""),Rs=m(""),Ls=m("player"),Ds=m(""),Ps=m(""),Es=m(""),Me=m("20"),Is=m("20"),Ms=m(""),_n=m("idle"),xa=m(null),Zo=m("overview"),Os=m("all"),js=m("all"),Fs=m("all"),Gd=12e4,ls=m(null),ji=m(Date.now());function Jd(t,e){const n=e>0?t/e*100:0;return n>50?"hp-high":n>25?"hp-mid":"hp-low"}function Vd(t,e){return e>0?Math.round(t/e*100):0}const Yd={pragmatic:"리스크보다 확실한 이득을 우선합니다.",frugal:"자원 소모를 줄이고 효율을 챙깁니다.",impatient:"짧은 템포로 즉시 압박을 선호합니다.",stubborn:"한 번 정한 전술을 끝까지 밀어붙입니다.",protective:"아군 피해를 줄이는 선택을 우선합니다.","honor-bound":"약속과 규율을 지키는 행동에 보너스가 납니다.",intense:"집중 화력을 짧게 폭발시킵니다.",empathetic:"아군/약자 보호 쪽 선택 확률이 높아집니다.",fatalistic:"위험을 감수하는 고배수 선택을 탑니다.",suspicious:"함정/매복 경계 행동을 우선합니다.",precise:"단일 목표를 정확히 노리는 경향입니다.",vengeful:"직전 위협 대상에게 강하게 반응합니다.",aggressive:"공격적인 전진 행동을 우선합니다.",opportunistic:"빈틈이 열리면 즉시 추격합니다."},Qd={supply_scan:"전장/자원 상태를 스캔해 약한 지점을 찾습니다.",ration_shift:"소모를 줄이고 지속 전투 능력을 확보합니다.",logistics_patch:"무너진 운영 라인을 빠르게 복구합니다.",frontline_shield:"전열에서 아군 피해를 흡수합니다.",oath_intercept:"핵심 타깃을 가로막아 위협을 차단합니다.",morale_anchor:"아군 안정도를 높여 붕괴를 막습니다.",omen_trace:"다음 위험 신호를 먼저 감지합니다.",arc_flash:"짧은 순간 광역 압박을 넣습니다.",ward_bloom:"방어 장막을 펼쳐 생존률을 올립니다.",mark_prey:"우선 제거 대상을 지정합니다.",silent_route:"은밀한 진입 경로를 확보합니다.",finisher_strike:"약화된 적을 마무리하는 일격입니다.",shadow_claw:"근접 급습으로 출혈 피해를 노립니다.",lunge:"짧은 돌진으로 전열을 흔듭니다."};function gn(t){const e=t.trim();return e?e.split(/[_-]+/g).filter(n=>n.length>0).map(n=>n[0]?`${n[0].toUpperCase()}${n.slice(1)}`:n).join(" "):t}function Xd(t){const e=t.trim().toLowerCase();return Yd[e]??"행동 선택 가중치에 영향을 주는 성향입니다."}function Zd(t){const e=t.trim().toLowerCase();return Qd[e]??"상황에 따라 선택되는 전술 액션입니다."}function Rt(t){return typeof t=="object"&&t!==null}function V(t,e,n=""){const s=t[e];return typeof s=="string"?s:n}function pt(t,e,n=0){const s=t[e];return typeof s=="number"&&Number.isFinite(s)?s:n}function Ye(t,e,n=!1){const s=t[e];return typeof s=="boolean"?s:n}const tp=new Set(["str","dex","con","int","wis","cha"]);function ep(t){const e=t.trim();if(!e)return{};let n;try{n=JSON.parse(e)}catch(a){throw new Error(`능력치 JSON 파싱 실패: ${a instanceof Error?a.message:"invalid json"}`)}if(!Rt(n))throw new Error('능력치 JSON은 object여야 합니다. 예: {"luck":7}');const s={};return Object.entries(n).forEach(([a,i])=>{const r=a.trim();if(r){if(typeof i=="number"&&Number.isFinite(i)){s[r]=Math.max(0,Math.trunc(i));return}if(typeof i=="string"){const l=Number.parseFloat(i.trim());if(Number.isFinite(l)){s[r]=Math.max(0,Math.trunc(l));return}}throw new Error(`능력치 '${r}' 값은 숫자여야 합니다.`)}}),s}function np(t){const e=Number.parseInt(t.trim(),10);if(!Number.isFinite(e))return;const n=Math.max(1,e),s=Number.parseInt(Me.value.trim(),10);Number.isFinite(s)&&s>n&&(Me.value=String(n))}function wa(t){const n=(t.actor_name??t.actor??t.actor_id??"system").trim();return n===""?"system":n}function sp(t){var n;return(((n=t.timestamp)==null?void 0:n.trim())??"")||"-"}function ap(t){Zo.value=t}function tr(t){const e=ls.value;return e==null||e<=t}function ip(t){const e=ls.value;return e==null||e<=t?0:Math.max(0,Math.ceil((e-t)/1e3))}function Vn(){ls.value=null}function er(t){return typeof window>"u"||typeof window.confirm!="function"?!0:window.confirm(t)}function op(t,e){er(["관전 모드 잠금을 해제하시겠습니까?",`ROOM: ${t||"-"}`,`PHASE: ${e||"-"}`,"해제 시간: 120초 (시간 경과 또는 위험 액션 실행 후 자동 재잠금)"].join(`
+`))&&(ls.value=Date.now()+Gd,h("조작 잠금이 120초 동안 해제되었습니다.","warning"))}function An(t){return tr(t)?(h("관전 모드 잠금 상태입니다. 먼저 잠금을 해제하세요.","warning"),!1):!0}function Sa(t,e,n){return er([`[위험 액션 확인] ${t}`,`ROOM: ${e||"-"}`,`PHASE: ${n||"-"}`,"이 액션은 즉시 실행되며 되돌리기 어렵습니다.","계속 진행하시겠습니까?"].join(`
+`))}function rp({hp:t,max:e}){const n=Vd(t,e),s=Jd(t,e);return o`
     <div class="trpg-hp-bar">
       <div class="hp-fill ${s}" style="width:${n}%" />
     </div>
-  `}function rp({stats:t}){const e=[{label:"STR",value:t.strength},{label:"DEX",value:t.dexterity},{label:"CON",value:t.constitution},{label:"INT",value:t.intelligence},{label:"WIS",value:t.wisdom},{label:"CHA",value:t.charisma}];return o`
+  `}function lp({stats:t}){const e=[{label:"STR",value:t.strength},{label:"DEX",value:t.dexterity},{label:"CON",value:t.constitution},{label:"INT",value:t.intelligence},{label:"WIS",value:t.wisdom},{label:"CHA",value:t.charisma}];return o`
     <div class="trpg-actor-stats">
       ${e.map(n=>o`<span>${n.label} ${n.value}</span>`)}
     </div>
-  `}function lp({keeper:t,role:e}){if(!t)return null;const n=e==="dm"?"dm":"player";return o`
+  `}function cp({keeper:t,role:e}){if(!t)return null;const n=e==="dm"?"dm":"player";return o`
     <span class="trpg-keeper-chip">
       <span class="trpg-keeper-tag ${n}">${n}</span>
       ${t}
     </span>
-  `}function nr({actor:t}){var u,c,p,d;const e=(u=t.archetype)==null?void 0:u.trim(),n=(c=t.persona)==null?void 0:c.trim(),s=(p=t.portrait)==null?void 0:p.trim(),a=(d=t.background)==null?void 0:d.trim(),i=t.traits??[],r=t.skills??[],l=Object.entries(t.stats_raw??{}).filter(([v,f])=>Number.isFinite(f)).filter(([v])=>!Zd.has(v.toLowerCase()));return o`
+  `}function nr({actor:t}){var u,c,p,d;const e=(u=t.archetype)==null?void 0:u.trim(),n=(c=t.persona)==null?void 0:c.trim(),s=(p=t.portrait)==null?void 0:p.trim(),a=(d=t.background)==null?void 0:d.trim(),i=t.traits??[],r=t.skills??[],l=Object.entries(t.stats_raw??{}).filter(([v,f])=>Number.isFinite(f)).filter(([v])=>!tp.has(v.toLowerCase()));return o`
     <div class="trpg-actor">
       ${s?o`
           <div class="trpg-actor-portrait-wrap">
@@ -1854,7 +1854,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         <span class="trpg-actor-name">${t.name}</span>
         <${ut} status=${t.status??"idle"} />
         <span class="pill trpg-role-pill trpg-role-${t.role}">${t.role}</span>
-        <${lp} keeper=${t.keeper} role=${t.role} />
+        <${cp} keeper=${t.keeper} role=${t.role} />
       </div>
       ${t.stats?o`
           <div style="margin-top:4px;">
@@ -1863,8 +1863,8 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               ${t.stats.max_mp>0?o`<span style="margin-left:8px;">MP ${t.stats.mp}/${t.stats.max_mp}</span>`:null}
               <span style="margin-left:auto; font-size:10px;">Lv ${t.stats.level}</span>
             </div>
-            <${op} hp=${t.stats.hp} max=${t.stats.max_hp} />
-            <${rp} stats=${t.stats} />
+            <${rp} hp=${t.stats.hp} max=${t.stats.max_hp} />
+            <${lp} stats=${t.stats} />
           </div>
         `:null}
       ${e?o`<div class="trpg-actor-meta">Archetype: ${gn(e)}</div>`:null}
@@ -1887,7 +1887,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               ${i.map(v=>o`
                 <span class="trpg-annot-chip trait">
                   <span class="trpg-annot-name">${gn(v)}</span>
-                  <span class="trpg-annot-desc">${Qd(v)}</span>
+                  <span class="trpg-annot-desc">${Xd(v)}</span>
                 </span>
               `)}
             </div>
@@ -1900,19 +1900,19 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               ${r.map(v=>o`
                 <span class="trpg-annot-chip skill">
                   <span class="trpg-annot-name">${gn(v)}</span>
-                  <span class="trpg-annot-desc">${Xd(v)}</span>
+                  <span class="trpg-annot-desc">${Zd(v)}</span>
                 </span>
               `)}
             </div>
           </div>
         `:null}
     </div>
-  `}function cp({mapStr:t}){return o`<pre class="trpg-map">${t}</pre>`}function sr({events:t,emptyLabel:e="아직 이벤트가 없습니다."}){return t.length===0?o`<div class="empty-state" style="font-size:13px">${e}</div>`:o`
+  `}function up({mapStr:t}){return o`<pre class="trpg-map">${t}</pre>`}function sr({events:t,emptyLabel:e="아직 이벤트가 없습니다."}){return t.length===0?o`<div class="empty-state" style="font-size:13px">${e}</div>`:o`
     <div class="trpg-story" role="list" aria-label="TRPG story events">
       ${t.map((n,s)=>{var a;return o`
         <div key=${s} class="trpg-event ${n.type??""}" role="listitem">
           <div class="trpg-event-meta-row">
-            <span class="trpg-event-meta">${np(n)}</span>
+            <span class="trpg-event-meta">${sp(n)}</span>
             <span class="trpg-event-meta">${n.phase??"phase:-"}</span>
             <span class="trpg-event-meta">${n.type??"type:-"}</span>
           </div>
@@ -1926,7 +1926,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       `})}
     </div>
-  `}function up({events:t}){const e="__none__",n=Os.value,s=js.value,a=Fs.value,i=Array.from(new Set(t.map(wa).map(d=>d.trim()).filter(d=>d!==""))).sort((d,v)=>d.localeCompare(v)),r=Array.from(new Set(t.map(d=>(d.type??"").trim()).filter(d=>d!==""))).sort((d,v)=>d.localeCompare(v)),l=t.some(d=>(d.type??"").trim()===""),u=Array.from(new Set(t.map(d=>(d.phase??"").trim()).filter(d=>d!==""))).sort((d,v)=>d.localeCompare(v)),c=t.some(d=>(d.phase??"").trim()===""),p=t.filter(d=>{if(n!=="all"&&wa(d)!==n)return!1;const v=(d.type??"").trim(),f=(d.phase??"").trim();if(s===e){if(v!=="")return!1}else if(s!=="all"&&v!==s)return!1;if(a===e){if(f!=="")return!1}else if(a!=="all"&&f!==a)return!1;return!0});return o`
+  `}function dp({events:t}){const e="__none__",n=Os.value,s=js.value,a=Fs.value,i=Array.from(new Set(t.map(wa).map(d=>d.trim()).filter(d=>d!==""))).sort((d,v)=>d.localeCompare(v)),r=Array.from(new Set(t.map(d=>(d.type??"").trim()).filter(d=>d!==""))).sort((d,v)=>d.localeCompare(v)),l=t.some(d=>(d.type??"").trim()===""),u=Array.from(new Set(t.map(d=>(d.phase??"").trim()).filter(d=>d!==""))).sort((d,v)=>d.localeCompare(v)),c=t.some(d=>(d.phase??"").trim()===""),p=t.filter(d=>{if(n!=="all"&&wa(d)!==n)return!1;const v=(d.type??"").trim(),f=(d.phase??"").trim();if(s===e){if(v!=="")return!1}else if(s!=="all"&&v!==s)return!1;if(a===e){if(f!=="")return!1}else if(a!=="all"&&f!==a)return!1;return!0});return o`
     <div class="trpg-story-toolbar">
       <div class="trpg-story-filter">
         <label>Actor</label>
@@ -1963,7 +1963,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       </span>
     </div>
     <${sr} events=${p.slice(-120)} emptyLabel="필터 조건에 맞는 이벤트가 없습니다." />
-  `}function dp({outcome:t}){if(!t)return null;const e=i=>{const r=i.trim();return r&&(/[A-Z]/.test(r)&&!r.includes(" ")?r.replace(/([a-z0-9])([A-Z])/g,"$1 $2").replace(/[_\.]/g," ").replace(/\s+/g," ").trim():r.replace(/[_\.]/g," ").replace(/\s+/g," ").trim())},n=t.result==="victory"?"승리":t.result==="defeat"?"패배":t.result==="draw"?"무승부":"종료",s=t.result==="victory"?"#34d399":t.result==="defeat"?"#f87171":"#9ca3af",a=[t.reason?`원인: ${e(t.reason)}`:null,t.phase?`페이즈: ${e(t.phase)}`:null,typeof t.turn=="number"?`턴: ${t.turn}`:null].filter(Boolean).join(" · ");return o`
+  `}function pp({outcome:t}){if(!t)return null;const e=i=>{const r=i.trim();return r&&(/[A-Z]/.test(r)&&!r.includes(" ")?r.replace(/([a-z0-9])([A-Z])/g,"$1 $2").replace(/[_\.]/g," ").replace(/\s+/g," ").trim():r.replace(/[_\.]/g," ").replace(/\s+/g," ").trim())},n=t.result==="victory"?"승리":t.result==="defeat"?"패배":t.result==="draw"?"무승부":"종료",s=t.result==="victory"?"#34d399":t.result==="defeat"?"#f87171":"#9ca3af",a=[t.reason?`원인: ${e(t.reason)}`:null,t.phase?`페이즈: ${e(t.phase)}`:null,typeof t.turn=="number"?`턴: ${t.turn}`:null].filter(Boolean).join(" · ");return o`
     <div style="margin-bottom:16px; padding:10px 12px; border:1px solid rgba(255,255,255,0.12); border-radius:10px; background:rgba(255,255,255,0.03);">
       <div style="font-size:12px; color:#9ca3af; text-transform:uppercase; letter-spacing:0.08em;">Session Outcome</div>
       <div style="font-size:18px; font-weight:700; color:${s}; margin-top:4px;">${n}</div>
@@ -1981,7 +1981,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       `)}
     </div>
-  `}function pp({state:t,nowMs:e}){var c;const n=$t.value||((c=t.session)==null?void 0:c.room)||"",s=vn.value,a=t.party??[];if(!a.find(p=>p.id===Xt.value)&&a.length>0){const p=a[0];p&&(Xt.value=p.id)}const r=async()=>{var d,v;if(!n){h("Room ID가 비어 있습니다.","error");return}if(!An(e))return;const p=((d=t.current_round)==null?void 0:d.phase)??((v=t.session)==null?void 0:v.status)??"unknown";if(Sa("라운드 실행",n,p)){vn.value="running";try{const f=await Fl(n);xa.value=f,vn.value="ok";const g=Rt(f.summary)?f.summary:null,k=g?Ye(g,"advanced",!1):!1,x=g?V(g,"progress_reason",""):"";h(k?"라운드가 정상 진행되었습니다.":`라운드가 정체되었습니다${x?`: ${x}`:""}`,k?"success":"warning"),ht()}catch(f){xa.value=null,vn.value="error";const g=f instanceof Error?f.message:"라운드 실행에 실패했습니다.";h(g,"error")}finally{Vn()}}},l=async()=>{var d,v;if(!n||!An(e))return;const p=((d=t.current_round)==null?void 0:d.phase)??((v=t.session)==null?void 0:v.status)??"unknown";if(Sa("턴 강제 진행",n,p))try{await Kl(n),h("턴을 다음 단계로 이동했습니다.","success"),ht()}catch{h("턴 이동에 실패했습니다.","error")}finally{Vn()}},u=async()=>{if(!n||!An(e))return;const p=Xt.value.trim();if(!p){h("먼저 Actor를 선택하세요.","warning");return}const d=Number.parseInt(Ss.value,10),v=Number.parseInt(As.value,10);if(Number.isNaN(d)||Number.isNaN(v)){h("stat/dc는 숫자여야 합니다.","warning");return}const f=Number.parseInt(pn.value,10),g=pn.value.trim()===""||Number.isNaN(f)?void 0:f;try{await ql({roomId:n,actorId:p,action:ws.value.trim()||"ability_check",statValue:d,dc:v,rawD20:g}),h("주사위 판정을 기록했습니다.","success"),ht()}catch{h("주사위 판정 기록에 실패했습니다.","error")}};return o`
+  `}function vp({state:t,nowMs:e}){var c;const n=$t.value||((c=t.session)==null?void 0:c.room)||"",s=vn.value,a=t.party??[];if(!a.find(p=>p.id===Xt.value)&&a.length>0){const p=a[0];p&&(Xt.value=p.id)}const r=async()=>{var d,v;if(!n){h("Room ID가 비어 있습니다.","error");return}if(!An(e))return;const p=((d=t.current_round)==null?void 0:d.phase)??((v=t.session)==null?void 0:v.status)??"unknown";if(Sa("라운드 실행",n,p)){vn.value="running";try{const f=await Fl(n);xa.value=f,vn.value="ok";const g=Rt(f.summary)?f.summary:null,k=g?Ye(g,"advanced",!1):!1,x=g?V(g,"progress_reason",""):"";h(k?"라운드가 정상 진행되었습니다.":`라운드가 정체되었습니다${x?`: ${x}`:""}`,k?"success":"warning"),ht()}catch(f){xa.value=null,vn.value="error";const g=f instanceof Error?f.message:"라운드 실행에 실패했습니다.";h(g,"error")}finally{Vn()}}},l=async()=>{var d,v;if(!n||!An(e))return;const p=((d=t.current_round)==null?void 0:d.phase)??((v=t.session)==null?void 0:v.status)??"unknown";if(Sa("턴 강제 진행",n,p))try{await Kl(n),h("턴을 다음 단계로 이동했습니다.","success"),ht()}catch{h("턴 이동에 실패했습니다.","error")}finally{Vn()}},u=async()=>{if(!n||!An(e))return;const p=Xt.value.trim();if(!p){h("먼저 Actor를 선택하세요.","warning");return}const d=Number.parseInt(Ss.value,10),v=Number.parseInt(As.value,10);if(Number.isNaN(d)||Number.isNaN(v)){h("stat/dc는 숫자여야 합니다.","warning");return}const f=Number.parseInt(pn.value,10),g=pn.value.trim()===""||Number.isNaN(f)?void 0:f;try{await ql({roomId:n,actorId:p,action:ws.value.trim()||"ability_check",statValue:d,dc:v,rawD20:g}),h("주사위 판정을 기록했습니다.","success"),ht()}catch{h("주사위 판정 기록에 실패했습니다.","error")}};return o`
     <div class="trpg-control-box">
       <div class="trpg-control-grid">
         <div class="trpg-control-field">
@@ -2066,7 +2066,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
 
       ${s!=="idle"?o`<div class="trpg-run-status ${s}">${s==="running"?"처리 중...":s==="ok"?"완료":"실패"}</div>`:null}
     </div>
-  `}function vp({state:t}){var a;const e=$t.value||((a=t.session)==null?void 0:a.room)||"",n=_n.value,s=async()=>{if(!e){h("Room ID가 비어 있습니다.","warning");return}const i=fn.value.trim(),r=Rs.value.trim();if(!r&&!i){h("이름 또는 Actor ID를 입력하세요.","warning");return}const l=Number.parseInt(Me.value.trim(),10),u=Number.parseInt(Is.value.trim(),10),c=Number.isFinite(u)?Math.max(1,u):20,p=Number.isFinite(l)?Math.max(0,Math.min(c,l)):c;let d={};try{d=tp(Ms.value)}catch(v){h(v instanceof Error?v.message:"능력치 JSON 오류","error");return}_n.value="spawning";try{const v=typeof crypto<"u"&&typeof crypto.randomUUID=="function"?`trpg_spawn_${crypto.randomUUID()}`:`trpg_spawn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`,f=await Hl(e,{actor_id:i||void 0,name:r||void 0,role:Ls.value,idempotencyKey:v,portrait:Ps.value.trim()||void 0,background:Es.value.trim()||void 0,hp:p,max_hp:c,alive:p>0,stats:Object.keys(d).length>0?d:void 0}),g=typeof f.actor_id=="string"?f.actor_id.trim():"";if(!g)throw new Error("생성 응답에 actor_id가 없습니다.");const k=Ds.value.trim();k&&await Ul(e,g,k),Xt.value=g,Tt.value=g,i||(fn.value=""),_n.value="ok",h(`Actor 생성 완료: ${g}`,"success"),await ht()}catch(v){_n.value="error",h(v instanceof Error?v.message:"Actor 생성에 실패했습니다.","error")}};return o`
+  `}function mp({state:t}){var a;const e=$t.value||((a=t.session)==null?void 0:a.room)||"",n=_n.value,s=async()=>{if(!e){h("Room ID가 비어 있습니다.","warning");return}const i=fn.value.trim(),r=Rs.value.trim();if(!r&&!i){h("이름 또는 Actor ID를 입력하세요.","warning");return}const l=Number.parseInt(Me.value.trim(),10),u=Number.parseInt(Is.value.trim(),10),c=Number.isFinite(u)?Math.max(1,u):20,p=Number.isFinite(l)?Math.max(0,Math.min(c,l)):c;let d={};try{d=ep(Ms.value)}catch(v){h(v instanceof Error?v.message:"능력치 JSON 오류","error");return}_n.value="spawning";try{const v=typeof crypto<"u"&&typeof crypto.randomUUID=="function"?`trpg_spawn_${crypto.randomUUID()}`:`trpg_spawn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`,f=await Hl(e,{actor_id:i||void 0,name:r||void 0,role:Ls.value,idempotencyKey:v,portrait:Ps.value.trim()||void 0,background:Es.value.trim()||void 0,hp:p,max_hp:c,alive:p>0,stats:Object.keys(d).length>0?d:void 0}),g=typeof f.actor_id=="string"?f.actor_id.trim():"";if(!g)throw new Error("생성 응답에 actor_id가 없습니다.");const k=Ds.value.trim();k&&await Ul(e,g,k),Xt.value=g,Tt.value=g,i||(fn.value=""),_n.value="ok",h(`Actor 생성 완료: ${g}`,"success"),await ht()}catch(v){_n.value="error",h(v instanceof Error?v.message:"Actor 생성에 실패했습니다.","error")}};return o`
     <div class="trpg-control-box">
       <div class="trpg-control-grid">
         <div class="trpg-control-field">
@@ -2157,7 +2157,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
               type="number"
               min="1"
               value=${Is.value}
-              onInput=${i=>{const r=i.target.value;Is.value=r,ep(r)}}
+              onInput=${i=>{const r=i.target.value;Is.value=r,np(r)}}
               placeholder="20"
             />
           </div>
@@ -2188,7 +2188,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
 
       ${n!=="idle"?o`<div class="trpg-run-status ${n==="spawning"?"running":n}">${n==="spawning"?"생성 중...":n==="ok"?"생성 완료":"생성 실패"}</div>`:null}
     </div>
-  `}function mp({state:t,nowMs:e}){var v;const n=$t.value||((v=t.session)==null?void 0:v.room)||"",s=t.join_gate,a=Ns.value,i=Rt(a)?a:null,r=(t.party??[]).filter(f=>f.role!=="dm"),l=Tt.value.trim(),u=r.some(f=>f.id===l),c=u?l:l?"__manual__":"",p=async()=>{const f=Tt.value.trim(),g=mn.value.trim();if(!n||!f){h("Room/Actor가 필요합니다.","warning");return}tt.value="checking";try{const k=await Bl(n,f,g||void 0);Ns.value=k,tt.value="ok",h("참가 가능 여부를 갱신했습니다.","success")}catch(k){tt.value="error";const x=k instanceof Error?k.message:"참가 가능 여부 확인에 실패했습니다.";h(x,"error")}},d=async()=>{var R,A;const f=Tt.value.trim(),g=mn.value.trim(),k=Cs.value.trim();if(!n||!f||!g){h("Room/Actor/Keeper가 필요합니다.","warning");return}if(!An(e))return;const x=((R=t.current_round)==null?void 0:R.phase)??((A=t.session)==null?void 0:A.status)??"unknown";if(Sa("Mid-Join 승인 요청",n,x)){tt.value="requesting";try{const P=await Wl({room_id:n,actor_id:f,keeper_name:g,role:Ts.value,...k?{name:k}:{}});Ns.value=P;const S=Rt(P)?Ye(P,"granted",!1):!1,L=Rt(P)?V(P,"reason_code",""):"";S?h("Mid-Join이 승인되었습니다.","success"):h(`Mid-Join이 거절되었습니다${L?`: ${L}`:""}`,"warning"),tt.value=S?"ok":"error",ht()}catch(P){tt.value="error";const S=P instanceof Error?P.message:"Mid-Join 요청에 실패했습니다.";h(S,"error")}finally{Vn()}}};return o`
+  `}function fp({state:t,nowMs:e}){var v;const n=$t.value||((v=t.session)==null?void 0:v.room)||"",s=t.join_gate,a=Ns.value,i=Rt(a)?a:null,r=(t.party??[]).filter(f=>f.role!=="dm"),l=Tt.value.trim(),u=r.some(f=>f.id===l),c=u?l:l?"__manual__":"",p=async()=>{const f=Tt.value.trim(),g=mn.value.trim();if(!n||!f){h("Room/Actor가 필요합니다.","warning");return}tt.value="checking";try{const k=await Bl(n,f,g||void 0);Ns.value=k,tt.value="ok",h("참가 가능 여부를 갱신했습니다.","success")}catch(k){tt.value="error";const x=k instanceof Error?k.message:"참가 가능 여부 확인에 실패했습니다.";h(x,"error")}},d=async()=>{var R,A;const f=Tt.value.trim(),g=mn.value.trim(),k=Cs.value.trim();if(!n||!f||!g){h("Room/Actor/Keeper가 필요합니다.","warning");return}if(!An(e))return;const x=((R=t.current_round)==null?void 0:R.phase)??((A=t.session)==null?void 0:A.status)??"unknown";if(Sa("Mid-Join 승인 요청",n,x)){tt.value="requesting";try{const P=await Wl({room_id:n,actor_id:f,keeper_name:g,role:Ts.value,...k?{name:k}:{}});Ns.value=P;const S=Rt(P)?Ye(P,"granted",!1):!1,L=Rt(P)?V(P,"reason_code",""):"";S?h("Mid-Join이 승인되었습니다.","success"):h(`Mid-Join이 거절되었습니다${L?`: ${L}`:""}`,"warning"),tt.value=S?"ok":"error",ht()}catch(P){tt.value="error";const S=P instanceof Error?P.message:"Mid-Join 요청에 실패했습니다.";h(S,"error")}finally{Vn()}}};return o`
     <div class="trpg-control-box">
       <div style="font-size:12px; color:#9ca3af; margin-bottom:8px;">
         Window: <strong>${s!=null&&s.phase_open?"OPEN":"CLOSED"}</strong>
@@ -2345,7 +2345,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           </div>
         `:null}
     </div>
-  `}function fp({state:t,nowMs:e}){var r,l,u;const n=$t.value||((r=t.session)==null?void 0:r.room)||"",s=((l=t.current_round)==null?void 0:l.phase)??((u=t.session)==null?void 0:u.status)??"unknown",a=tr(e),i=ap(e);return o`
+  `}function _p({state:t,nowMs:e}){var r,l,u;const n=$t.value||((r=t.session)==null?void 0:r.room)||"",s=((l=t.current_round)==null?void 0:l.phase)??((u=t.session)==null?void 0:u.status)??"unknown",a=tr(e),i=ip(e);return o`
     <${b} title="조작 안전 잠금" style="margin-bottom:16px;">
       <div class="trpg-control-lock ${a?"locked":"unlocked"}">
         <div class="trpg-control-lock-title">
@@ -2356,25 +2356,25 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
         <div class="trpg-control-lock-meta">room: ${n||"-"} · phase: ${s||"-"}</div>
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-          ${a?o`<button class="trpg-run-btn recommend" onClick=${()=>ip(n,s)}>잠금 해제 (120초)</button>`:o`<button class="trpg-run-btn secondary" onClick=${()=>{Vn(),h("조작 잠금으로 전환했습니다.","success")}}>즉시 다시 잠금</button>`}
+          ${a?o`<button class="trpg-run-btn recommend" onClick=${()=>op(n,s)}>잠금 해제 (120초)</button>`:o`<button class="trpg-run-btn secondary" onClick=${()=>{Vn(),h("조작 잠금으로 전환했습니다.","success")}}>즉시 다시 잠금</button>`}
         </div>
       </div>
     <//>
-  `}function _p({active:t}){return o`
+  `}function gp({active:t}){return o`
     <div class="trpg-screen-tabs" role="tablist" aria-label="TRPG 화면 선택">
       ${[{id:"overview",label:"Overview",desc:"관전 요약"},{id:"timeline",label:"Timeline",desc:"이벤트 흐름"},{id:"control",label:"Control",desc:"운영/개입"}].map(n=>o`
         <button
           class="trpg-screen-tab ${t===n.id?"active":""}"
           role="tab"
           aria-selected=${t===n.id}
-          onClick=${()=>sp(n.id)}
+          onClick=${()=>ap(n.id)}
         >
           <span class="trpg-screen-tab-label">${n.label}</span>
           <span class="trpg-screen-tab-desc">${n.desc}</span>
         </button>
       `)}
     </div>
-  `}function gp({state:t}){const e=t.party??[],n=t.story_log??[];return o`
+  `}function $p({state:t}){const e=t.party??[],n=t.story_log??[];return o`
     <div class="trpg-layout">
       <div>
         <${b} title="관전 가이드">
@@ -2391,7 +2391,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
 
         ${t.map?o`
             <${b} title="맵" style="margin-top:16px;">
-              <${cp} mapStr=${t.map} />
+              <${up} mapStr=${t.map} />
             <//>
           `:null}
       </div>
@@ -2419,11 +2419,11 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           `:null}
       </div>
     </div>
-  `}function $p({state:t}){const e=t.story_log??[];return o`
+  `}function hp({state:t}){const e=t.story_log??[];return o`
     <div class="trpg-layout">
       <div>
         <${b} title=${`이벤트 타임라인 (${e.length})`}>
-          <${up} events=${e} />
+          <${dp} events=${e} />
         <//>
       </div>
 
@@ -2437,21 +2437,21 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         <//>
       </div>
     </div>
-  `}function hp({state:t,nowMs:e}){const n=t.party??[];return o`
+  `}function yp({state:t,nowMs:e}){const n=t.party??[];return o`
     <div>
-      <${fp} state=${t} nowMs=${e} />
+      <${_p} state=${t} nowMs=${e} />
       <div class="trpg-layout">
         <div>
           <${b} title="조작 패널">
-            <${pp} state=${t} nowMs=${e} />
+            <${vp} state=${t} nowMs=${e} />
           <//>
 
           <${b} title="Actor Spawn" style="margin-top:16px;">
-            <${vp} state=${t} />
+            <${mp} state=${t} />
           <//>
 
           <${b} title="Mid-Join Gate" style="margin-top:16px;">
-            <${mp} state=${t} nowMs=${e} />
+            <${fp} state=${t} nowMs=${e} />
           <//>
 
           <${b} title="최근 라운드 결과" style="margin-top:16px;">
@@ -2479,7 +2479,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       </div>
     </div>
-  `}function yp(){var l,u,c,p,d;const t=Do.value,e=ra.value;if(ft(()=>{if(typeof window>"u"||typeof window.setInterval!="function")return;const v=window.setInterval(()=>{ji.value=Date.now()},1e3);return()=>{window.clearInterval(v)}},[]),e&&!t)return o`<div class="loading-indicator">Loading TRPG state...</div>`;if(!t)return o`
+  `}function bp(){var l,u,c,p,d;const t=Do.value,e=ra.value;if(ft(()=>{if(typeof window>"u"||typeof window.setInterval!="function")return;const v=window.setInterval(()=>{ji.value=Date.now()},1e3);return()=>{window.clearInterval(v)}},[]),e&&!t)return o`<div class="loading-indicator">Loading TRPG state...</div>`;if(!t)return o`
       <div class="section">
         <h2>TRPG</h2>
         <div class="empty-state">No active TRPG session</div>
@@ -2494,7 +2494,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         <button class="trpg-run-btn secondary" onClick=${()=>ht()}>새로고침</button>
       </div>
 
-      <${dp} outcome=${a} />
+      <${pp} outcome=${a} />
 
       <div class="stats-grid" style="margin-bottom:16px;">
         <div class="stat-card">
@@ -2515,12 +2515,12 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </div>
       </div>
 
-      <${_p} active=${i} />
+      <${gp} active=${i} />
 
-      ${i==="overview"?o`<${gp} state=${t} />`:i==="timeline"?o`<${$p} state=${t} />`:o`<${hp} state=${t} nowMs=${r} />`}
+      ${i==="overview"?o`<${$p} state=${t} />`:i==="timeline"?o`<${hp} state=${t} />`:o`<${yp} state=${t} nowMs=${r} />`}
     </div>
-  `}const Ua="masc_dashboard_agent_name";function bp(){const t=new URLSearchParams(window.location.search),e=t.get("agent")??t.get("agent_name"),n=localStorage.getItem(Ua);return e??n??"dashboard"}const Q=m(bp()),Oe=m(""),je=m(""),Yn=m(""),lr=m(null),Qn=m(null),Fe=m(!1),ne=m(!1),ze=m(!1),qe=m(!1),Xn=m(!1),Zn=m(!1),cs=m(!1);function ts(t){return typeof t!="number"||!Number.isFinite(t)?"??:00":`${String(Math.max(0,t)).padStart(2,"0")}:00`}function Tn(t){if(typeof t!="number"||!Number.isFinite(t)||t<=0)return"unknown";if(t<60)return`${Math.round(t)}s`;if(t<3600)return`${Math.round(t/60)}m`;const e=Math.floor(t/3600),n=Math.round(t%3600/60);return n>0?`${e}h ${n}m`:`${e}h`}function cr(t){return!t||t.length===0?"none":t.join(", ")}function kp(t){return t?t.enabled?t.quiet_active?`Quiet hours ${ts(t.quiet_start)}-${ts(t.quiet_end)} KST are active. Scheduled ticks may look asleep until the window ends; Poke Now bypasses only that quiet-hours gate.`:t.last_tick_ago_s==null?`Lodge is enabled and scheduled every ${Tn(t.interval_s)}, but no tick has run yet in this runtime.`:t.last_skip_reason?`Lodge last skipped work because ${t.last_skip_reason}. Scheduled ticks still run every ${Tn(t.interval_s)}.`:`Lodge ticks every ${Tn(t.interval_s)}. Planner is ${t.use_planner?"on":"off"} and delegated LLM is ${t.delegate_llm?"on":"off"}.`:"Lodge automation is disabled. Manual poke will report the disabled state but will not revive a stopped runtime.":"Lodge runtime status is unavailable. Refresh the dashboard to inspect scheduling state."}async function me(){ce();try{await Bt()}catch(t){console.warn("[control-dock] dashboard refresh failed",t)}}function Ba(t){const e=t.trim();Q.value=e,e&&localStorage.setItem(Ua,e)}function xp(t){const n=(t.split(`
-`).find(s=>s.includes(" joined"))??t).match(/✅\s+(\S+)\s+joined/i);return(n==null?void 0:n[1])??null}async function Aa(){const t=Q.value.trim();if(t){ze.value=!0;try{const e=await Jl(t),n=xp(e);n&&Ba(n),cs.value=!0,await me(),h(`Joined as ${n??t}`,"success")}catch(e){const n=e instanceof Error?e.message:"Failed to join room";h(n,"error")}finally{ze.value=!1}}}async function wp(){const t=Q.value.trim();if(t){qe.value=!0;try{await Ro(t),cs.value=!1,await me(),h(`Left room (${t})`,"success")}catch(e){const n=e instanceof Error?e.message:"Failed to leave room";h(n,"error")}finally{qe.value=!1}}}async function Sp(){const t=Q.value.trim();if(t)try{await Ro(t)}catch{}localStorage.removeItem(Ua),Ba("dashboard"),cs.value=!1,await Aa()}async function Ap(){const t=Q.value.trim();if(t){Xn.value=!0;try{await Vl(t),await me(),h("Heartbeat sent","success")}catch(e){const n=e instanceof Error?e.message:"Failed to send heartbeat";h(n,"error")}finally{Xn.value=!1}}}async function Fi(){const t=Q.value.trim(),e=Oe.value.trim();if(!(!t||!e)){Fe.value=!0;try{await No(t,e),Oe.value="",await me(),h("Broadcast sent","success")}catch(n){const s=n instanceof Error?n.message:"Failed to send broadcast";h(s,"error")}finally{Fe.value=!1}}}async function Tp(){const t=je.value.trim(),e=Yn.value.trim()||"Created from dashboard";if(t){ne.value=!0;try{await Gl(t,e,1),je.value="",Yn.value="",await me(),h("Task created","success")}catch(n){const s=n instanceof Error?n.message:"Failed to create task";h(s,"error")}finally{ne.value=!1}}}async function zi(){const t=Q.value.trim()||"dashboard";Zn.value=!0,Qn.value=null;try{const e=await en({actor:t,action_type:"lodge_tick",target_type:"room",payload:{}}),n=Ea(e.result);lr.value=n,await me(),n!=null&&n.skipped_reason?h(n.skipped_reason,"warning"):h(n?`Poke finished: ${n.acted}/${n.checked} acted`:"Poke finished",n&&n.acted>0?"success":"warning")}catch(e){const n=e instanceof Error?e.message:"Failed to run Lodge poke";Qn.value=n,h(n,"error")}finally{Zn.value=!1}}function Cp({runtime:t}){var a,i;const e=lr.value??(t==null?void 0:t.last_tick_result)??null;if(Qn.value)return o`<div class="control-result-box is-error">${Qn.value}</div>`;if(!e)return o`<div class="control-status-copy">No poke result yet. The latest scheduled tick will appear here after the first run.</div>`;const n=((a=e.skipped_rows)==null?void 0:a.slice(0,3))??[],s=((i=e.passed_rows)==null?void 0:i.slice(0,3))??[];return o`
+  `}const Ua="masc_dashboard_agent_name";function kp(){const t=new URLSearchParams(window.location.search),e=t.get("agent")??t.get("agent_name"),n=localStorage.getItem(Ua);return e??n??"dashboard"}const Q=m(kp()),Oe=m(""),je=m(""),Yn=m(""),lr=m(null),Qn=m(null),Fe=m(!1),ne=m(!1),ze=m(!1),qe=m(!1),Xn=m(!1),Zn=m(!1),cs=m(!1);function ts(t){return typeof t!="number"||!Number.isFinite(t)?"??:00":`${String(Math.max(0,t)).padStart(2,"0")}:00`}function Tn(t){if(typeof t!="number"||!Number.isFinite(t)||t<=0)return"unknown";if(t<60)return`${Math.round(t)}s`;if(t<3600)return`${Math.round(t/60)}m`;const e=Math.floor(t/3600),n=Math.round(t%3600/60);return n>0?`${e}h ${n}m`:`${e}h`}function cr(t){return!t||t.length===0?"none":t.join(", ")}function xp(t){return t?t.enabled?t.quiet_active?`Quiet hours ${ts(t.quiet_start)}-${ts(t.quiet_end)} KST are active. Scheduled ticks may look asleep until the window ends; Poke Now bypasses only that quiet-hours gate.`:t.last_tick_ago_s==null?`Lodge is enabled and scheduled every ${Tn(t.interval_s)}, but no tick has run yet in this runtime.`:t.last_skip_reason?`Lodge last skipped work because ${t.last_skip_reason}. Scheduled ticks still run every ${Tn(t.interval_s)}.`:`Lodge ticks every ${Tn(t.interval_s)}. Planner is ${t.use_planner?"on":"off"} and delegated LLM is ${t.delegate_llm?"on":"off"}.`:"Lodge automation is disabled. Manual poke will report the disabled state but will not revive a stopped runtime.":"Lodge runtime status is unavailable. Refresh the dashboard to inspect scheduling state."}async function me(){ce();try{await Bt()}catch(t){console.warn("[control-dock] dashboard refresh failed",t)}}function Ba(t){const e=t.trim();Q.value=e,e&&localStorage.setItem(Ua,e)}function wp(t){const n=(t.split(`
+`).find(s=>s.includes(" joined"))??t).match(/✅\s+(\S+)\s+joined/i);return(n==null?void 0:n[1])??null}async function Aa(){const t=Q.value.trim();if(t){ze.value=!0;try{const e=await Jl(t),n=wp(e);n&&Ba(n),cs.value=!0,await me(),h(`Joined as ${n??t}`,"success")}catch(e){const n=e instanceof Error?e.message:"Failed to join room";h(n,"error")}finally{ze.value=!1}}}async function Sp(){const t=Q.value.trim();if(t){qe.value=!0;try{await Ro(t),cs.value=!1,await me(),h(`Left room (${t})`,"success")}catch(e){const n=e instanceof Error?e.message:"Failed to leave room";h(n,"error")}finally{qe.value=!1}}}async function Ap(){const t=Q.value.trim();if(t)try{await Ro(t)}catch{}localStorage.removeItem(Ua),Ba("dashboard"),cs.value=!1,await Aa()}async function Tp(){const t=Q.value.trim();if(t){Xn.value=!0;try{await Vl(t),await me(),h("Heartbeat sent","success")}catch(e){const n=e instanceof Error?e.message:"Failed to send heartbeat";h(n,"error")}finally{Xn.value=!1}}}async function Fi(){const t=Q.value.trim(),e=Oe.value.trim();if(!(!t||!e)){Fe.value=!0;try{await No(t,e),Oe.value="",await me(),h("Broadcast sent","success")}catch(n){const s=n instanceof Error?n.message:"Failed to send broadcast";h(s,"error")}finally{Fe.value=!1}}}async function Cp(){const t=je.value.trim(),e=Yn.value.trim()||"Created from dashboard";if(t){ne.value=!0;try{await Gl(t,e,1),je.value="",Yn.value="",await me(),h("Task created","success")}catch(n){const s=n instanceof Error?n.message:"Failed to create task";h(s,"error")}finally{ne.value=!1}}}async function zi(){const t=Q.value.trim()||"dashboard";Zn.value=!0,Qn.value=null;try{const e=await en({actor:t,action_type:"lodge_tick",target_type:"room",payload:{}}),n=Ea(e.result);lr.value=n,await me(),n!=null&&n.skipped_reason?h(n.skipped_reason,"warning"):h(n?`Poke finished: ${n.acted}/${n.checked} acted`:"Poke finished",n&&n.acted>0?"success":"warning")}catch(e){const n=e instanceof Error?e.message:"Failed to run Lodge poke";Qn.value=n,h(n,"error")}finally{Zn.value=!1}}function Np({runtime:t}){var a,i;const e=lr.value??(t==null?void 0:t.last_tick_result)??null;if(Qn.value)return o`<div class="control-result-box is-error">${Qn.value}</div>`;if(!e)return o`<div class="control-status-copy">No poke result yet. The latest scheduled tick will appear here after the first run.</div>`;const n=((a=e.skipped_rows)==null?void 0:a.slice(0,3))??[],s=((i=e.passed_rows)==null?void 0:i.slice(0,3))??[];return o`
     <div class="control-result-box">
       <div class="control-inline-meta">
         <span class="pill">${e.checked} checked</span>
@@ -2541,7 +2541,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
             </div>
           `:null}
     </div>
-  `}function Np(t){return t.find(n=>n.name===ke.value)??t[0]??null}function Rp(){var s,a;const t=ct.value,e=((s=Pt.value)==null?void 0:s.lodge)??null,n=Np(t);return ft(()=>{Aa()},[]),ft(()=>{var r;const i=((r=t[0])==null?void 0:r.name)??"";if(!ke.value&&i){yn(i);return}ke.value&&!t.some(l=>l.name===ke.value)&&yn(i)},[t.map(i=>i.name).join("|")]),o`
+  `}function Rp(t){return t.find(n=>n.name===ke.value)??t[0]??null}function Lp(){var s,a;const t=ct.value,e=((s=Pt.value)==null?void 0:s.lodge)??null,n=Rp(t);return ft(()=>{Aa()},[]),ft(()=>{var r;const i=((r=t[0])==null?void 0:r.name)??"";if(!ke.value&&i){yn(i);return}ke.value&&!t.some(l=>l.name===ke.value)&&yn(i)},[t.map(i=>i.name).join("|")]),o`
     <section class="rail-card control-dock">
       <h3>Control Dock</h3>
 
@@ -2570,21 +2570,21 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           </button>
           <button
             class="control-btn ghost"
-            onClick=${()=>{wp()}}
+            onClick=${()=>{Sp()}}
             disabled=${qe.value||Q.value.trim()===""}
           >
             ${qe.value?"Leaving...":"Leave"}
           </button>
           <button
             class="control-btn ghost"
-            onClick=${()=>{Sp()}}
+            onClick=${()=>{Ap()}}
             disabled=${ze.value||qe.value}
           >
             Reset ID
           </button>
           <button
             class="control-btn ghost"
-            onClick=${()=>{Ap()}}
+            onClick=${()=>{Tp()}}
             disabled=${Xn.value||Q.value.trim()===""}
           >
             ${Xn.value?"Pinging...":"Heartbeat"}
@@ -2652,7 +2652,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
       <div class="control-section">
         <div class="control-section-head">
           <h4>Lodge Status</h4>
-          <p class="control-help">${kp(e)}</p>
+          <p class="control-help">${xp(e)}</p>
         </div>
 
         <div class="control-inline-meta">
@@ -2679,7 +2679,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           </button>
         </div>
 
-        <${Cp} runtime=${e} />
+        <${Np} runtime=${e} />
       </div>
 
       <div class="control-section">
@@ -2706,20 +2706,20 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         ></textarea>
         <button
           class="control-btn secondary"
-          onClick=${()=>{Tp()}}
+          onClick=${()=>{Cp()}}
           disabled=${ne.value||je.value.trim()===""}
         >
           ${ne.value?"Creating...":"Create Task"}
         </button>
       </div>
     </section>
-  `}const ur={overview:"Room health, keeper pressure, and top-line execution status",board:"Human and agent discussion feed with system noise filtered by default",activity:"Unified live stream for messages, task changes, board events, and keeper events",council:"Debates, quorum status, and decision flow",goals:"Goals and MDAL loops in one planning surface with freshness signals",execution:"Queue readiness and assignee coverage",tasks:"Kanban-style task distribution",agents:"Live monitor for agent status, keeper pressure, and current execution focus",ops:"Guided operator controls for room, sessions, and keepers",trpg:"Narrative room control and state visibility"};function Lp(){const t=Lt.value;return o`
+  `}const ur={overview:"Room health, keeper pressure, and top-line execution status",board:"Human and agent discussion feed with system noise filtered by default",activity:"Unified live stream for messages, task changes, board events, and keeper events",council:"Debates, quorum status, and decision flow",goals:"Goals and MDAL loops in one planning surface with freshness signals",execution:"Queue readiness and assignee coverage",tasks:"Kanban-style task distribution",agents:"Live monitor for agent status, keeper pressure, and current execution focus",ops:"Guided operator controls for room, sessions, and keepers",trpg:"Narrative room control and state visibility"};function Dp(){const t=Lt.value;return o`
     <div class="connection-status ${t?"connected":"disconnected"}">
       <span class="status-dot ${t?"connected":"disconnected"}"></span>
       <span class="status-text">${t?"Live":"Reconnecting..."}</span>
       <span class="event-count">${is.value} events</span>
     </div>
-  `}function Dp(){const t=lt.value.tab,e=Lt.value,n=Js.find(s=>s.id===t);return o`
+  `}function Pp(){const t=lt.value.tab,e=Lt.value,n=Js.find(s=>s.id===t);return o`
     <aside class="dashboard-rail">
       <section class="rail-card">
         <h3>Views</h3>
@@ -2772,9 +2772,9 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
         </button>
       </section>
 
-      <${Rp} />
+      <${Lp} />
     </aside>
-  `}function Pp(){switch(lt.value.tab){case"overview":return o`<${wi} />`;case"ops":return o`<${zu} />`;case"council":return o`<${Bu} />`;case"board":return o`<${nd} />`;case"execution":return o`<${Md} />`;case"activity":return o`<${bd} />`;case"agents":return o`<${Pd} />`;case"tasks":return o`<${Ed} />`;case"goals":return o`<${Bd} />`;case"trpg":return o`<${yp} />`;default:return o`<${wi} />`}}function Ep(){ft(()=>{Vr(),ko(),Bt(),mt();const e=Mc();return Oc(),()=>{al(),e(),jc()}},[]),ft(()=>{const e=lt.value.tab;e==="ops"&&ue(),e==="board"&&mt(),e==="trpg"&&ht(),e==="goals"&&(we(),Se())},[lt.value.tab]);const t=lt.value.tab;return o`
+  `}function Ep(){switch(lt.value.tab){case"overview":return o`<${wi} />`;case"ops":return o`<${qu} />`;case"council":return o`<${Wu} />`;case"board":return o`<${sd} />`;case"execution":return o`<${Od} />`;case"activity":return o`<${kd} />`;case"agents":return o`<${Ed} />`;case"tasks":return o`<${Id} />`;case"goals":return o`<${Wd} />`;case"trpg":return o`<${bp} />`;default:return o`<${wi} />`}}function Ip(){ft(()=>{Vr(),ko(),Bt(),mt();const e=Oc();return jc(),()=>{al(),e(),Fc()}},[]),ft(()=>{const e=lt.value.tab;e==="ops"&&ue(),e==="board"&&mt(),e==="trpg"&&ht(),e==="goals"&&(we(),Se())},[lt.value.tab]);const t=lt.value.tab;return o`
     <div class="app-shell">
       <header class="dashboard-header">
         <div class="header-title-wrap">
@@ -2785,7 +2785,7 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
           <p class="header-subtitle">${ur[t]??"Decision and execution operations console"}</p>
         </div>
         <div class="header-right">
-          <${Lp} />
+          <${Dp} />
         </div>
       </header>
 
@@ -2795,13 +2795,13 @@ var xr=Object.defineProperty;var wr=(t,e,n)=>e in t?xr(t,e,{enumerable:!0,config
 
       <div class="dashboard-layout">
         <main class="dashboard-main">
-          ${oa.value&&!Lt.value?o`<div class="loading-indicator">Loading dashboard...</div>`:o`<${Pp} />`}
+          ${oa.value&&!Lt.value?o`<div class="loading-indicator">Loading dashboard...</div>`:o`<${Ep} />`}
         </main>
-        <${Dp} />
+        <${Pp} />
       </div>
 
-      <${ou} />
-      <${du} />
-      <${Uc} />
+      <${ru} />
+      <${pu} />
+      <${Bc} />
     </div>
-  `}const qi=document.getElementById("app");qi&&Rr(o`<${Ep} />`,qi);
+  `}const qi=document.getElementById("app");qi&&Rr(o`<${Ip} />`,qi);

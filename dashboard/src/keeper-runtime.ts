@@ -345,10 +345,25 @@ function appendThreadEntry(name: string, entry: KeeperConversationEntry): void {
   }
 }
 
+function sameConversationEntry(
+  left: KeeperConversationEntry,
+  right: KeeperConversationEntry,
+): boolean {
+  if (left.role !== right.role || left.text !== right.text) return false
+  if (left.timestamp && right.timestamp) return left.timestamp === right.timestamp
+  return true
+}
+
 function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
+  const existing = keeperThreads.value[name] ?? []
+  const localEntries = existing.filter(
+    entry =>
+      entry.delivery !== 'history'
+      && !entries.some(historyEntry => sameConversationEntry(entry, historyEntry)),
+  )
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: entries.slice(-50),
+    [name]: [...entries, ...localEntries].slice(-50),
   }
 }
 

@@ -2408,6 +2408,12 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
       Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
         let len = in_channel_length ic in
         let start = max 0 (len - max_bytes) in
+        let starts_mid_line =
+          if start <= 0 then false
+          else (
+            seek_in ic (start - 1);
+            input_char ic <> '\n')
+        in
         seek_in ic start;
         let remaining = len - start in
         let buf = Bytes.create remaining in
@@ -2417,6 +2423,11 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
           chunk
           |> String.split_on_char '\n'
           |> List.filter (fun s -> String.trim s <> "")
+        in
+        let lines =
+          match starts_mid_line, lines with
+          | true, _ :: rest -> rest
+          | _ -> lines
         in
         let n = List.length lines in
         let drop = max 0 (n - max_lines) in

@@ -2849,11 +2849,6 @@ let auth_token_from_request request =
   | Some v -> bearer_token_from_header v
   | None -> query_param request "token"
 
-let string_starts_with s prefix =
-  let len_s = String.length s in
-  let len_p = String.length prefix in
-  len_s >= len_p && String.sub s 0 len_p = prefix
-
 let env_flag_enabled name =
   match Sys.getenv_opt name with
   | None -> false
@@ -3040,9 +3035,9 @@ let is_public_read_path path =
   || String.equal path "/dashboard/"
   || String.equal path "/favicon.ico"
   || String.equal path "/favicon.svg"
-  || string_starts_with path "/dashboard/"
-  || string_starts_with path "/static/"
-  || string_starts_with path "/graphiql/"
+  || String.starts_with ~prefix:"/dashboard/" path
+  || String.starts_with ~prefix:"/static/" path
+  || String.starts_with ~prefix:"/graphiql/" path
 
 let resolve_agent_name_for_auth ~base_path request ~token :
     (string option, Types.masc_error) result =
@@ -10387,7 +10382,7 @@ let run_server ~sw ~env ~port ~base_path =
       if
         http_auth_strict_enabled ()
         && httpun_meth <> `OPTIONS
-        && string_starts_with path "/api/v1/trpg/"
+        && String.starts_with ~prefix:"/api/v1/trpg/" path
       then
         match authorize_read_request ~base_path httpun_request with
         | Ok () -> dispatch_h2_route ()

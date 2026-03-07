@@ -24,10 +24,6 @@ let string_contains ~needle haystack =
     in
     check 0
 
-(** Check if str starts with prefix *)
-let string_starts_with ~prefix str =
-  let prefix_len = String.length prefix in
-  String.length str >= prefix_len && String.sub str 0 prefix_len = prefix
 
 (** {1 Types} *)
 
@@ -230,7 +226,7 @@ let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_
   |> List.mapi (fun i path ->
     let preview = read_preview path in
     let rel_path = 
-      if string_starts_with ~prefix:work_dir path 
+      if String.starts_with ~prefix:work_dir path
       then String.sub path (String.length work_dir + 1) (String.length path - String.length work_dir - 1)
       else path
     in

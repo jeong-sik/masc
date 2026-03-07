@@ -40,15 +40,11 @@ let env_int ?(default=0) name =
   | Some value -> (match int_of_string_opt value with Some v -> v | None -> default)
   | None -> default
 
-let string_starts_with ~prefix s =
-  let prefix_len = String.length prefix in
-  String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
-
 let parse_query_param query key =
   let parts = String.split_on_char '&' query in
   let prefix = key ^ "=" in
   List.find_map (fun part ->
-    if string_starts_with ~prefix part then
+    if String.starts_with ~prefix part then
       Some (String.sub part (String.length prefix) (String.length part - String.length prefix))
     else
       None
@@ -68,9 +64,9 @@ let parse_host_port ~default_port host_port =
 let parse_turn_url url =
   let url = String.trim url in
   let scheme, rest =
-    if string_starts_with ~prefix:"turns:" url then
+    if String.starts_with ~prefix:"turns:" url then
       ("turns", String.sub url 6 (String.length url - 6))
-    else if string_starts_with ~prefix:"turn:" url then
+    else if String.starts_with ~prefix:"turn:" url then
       ("turn", String.sub url 5 (String.length url - 5))
     else
       ("", "")

@@ -162,34 +162,28 @@ let operator_action_log_path config =
 let swarm_path config =
   Filename.concat config.Room.base_path ".masc/swarm.json"
 
-let string_starts_with s prefix =
-  let len_s = String.length s in
-  let len_p = String.length prefix in
-  len_s >= len_p && String.sub s 0 len_p = prefix
-
-let trim s = String.trim s
+module StringSet = Set.Make (String)
 
 let nonempty_string = function
   | Some raw ->
-      let value = trim raw in
+      let value = String.trim raw in
       if value = "" then None else Some value
   | None -> None
 
 let dedup_strings xs =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | x :: rest ->
-        if List.mem x seen then
-          loop seen acc rest
-        else
-          loop (x :: seen) (x :: acc) rest
+  let _, acc =
+    List.fold_left
+      (fun (seen, acc) x ->
+        if StringSet.mem x seen then (seen, acc)
+        else (StringSet.add x seen, x :: acc))
+      (StringSet.empty, []) xs
   in
-  loop [] [] xs
+  List.rev acc
 
 let filter_nonempty_strings xs =
   xs
   |> List.filter_map (fun raw ->
-         let value = trim raw in
+         let value = String.trim raw in
          if value = "" then None else Some value)
   |> dedup_strings
 
@@ -217,7 +211,7 @@ let safe_slug raw =
     lowered |> String.to_seq |> List.of_seq |> collapse_dash [] |> List.rev
     |> List.to_seq |> String.of_seq
   in
-  let normalized = trim collapsed in
+  let normalized = String.trim collapsed in
   if normalized = "" then "auto" else normalized
 
 let json_list_of_strings xs =
@@ -774,7 +768,7 @@ let read_events config =
         let rec loop acc =
           match input_line ic with
           | line ->
-              let trimmed = trim line in
+              let trimmed = String.trim line in
               let acc' =
                 if trimmed = "" then
                   acc
@@ -2066,7 +2060,7 @@ let recent_operator_trace_events config ?trace_id limit =
         let rec loop acc =
           match input_line ic with
           | line ->
-              let trimmed = trim line in
+              let trimmed = String.trim line in
               let acc' =
                 if trimmed = "" then
                   acc

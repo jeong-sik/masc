@@ -5396,6 +5396,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
       sw;
       clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
       mcp_session_id = None;
     }
   in
@@ -5424,6 +5425,7 @@ let operator_action_http_json ~state ~sw ~clock request ~args =
       agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
       sw;
       clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
       mcp_session_id = None;
     }
   in
@@ -5436,6 +5438,7 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
       agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
       sw;
       clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
       mcp_session_id = None;
     }
   in

@@ -177,6 +177,7 @@ async function post<T>(
   path: string,
   body: unknown,
   extraHeaders?: Record<string, string>,
+  timeoutMs = DEFAULT_POST_TIMEOUT_MS,
 ): Promise<T> {
   const res = await fetchWithTimeout(path, {
     method: 'POST',
@@ -185,7 +186,7 @@ async function post<T>(
       ...(extraHeaders ?? {}),
     },
     body: JSON.stringify(body),
-  }, DEFAULT_POST_TIMEOUT_MS)
+  }, timeoutMs)
   if (!res.ok) {
     throw new ApiRequestError({
       method: 'POST',
@@ -287,8 +288,20 @@ export function runCommandPlaneAction(
   return post(path, body)
 }
 
+function operatorActionTimeoutMs(body: OperatorActionRequest): number {
+  switch (body.action_type) {
+    case 'keeper_msg':
+    case 'keeper_message':
+    case 'keeper_recover':
+      return 90_000
+    case 'lodge_tick':
+      return 45_000
+    default:
+      return DEFAULT_POST_TIMEOUT_MS
+  }
+}
 export function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {
-  return post('/api/v1/operator/action', body)
+  return post('/api/v1/operator/action', body, undefined, operatorActionTimeoutMs(body))
 }
 
 export function confirmOperatorAction(actor: string, confirmToken: string): Promise<OperatorActionResult> {

@@ -291,17 +291,34 @@ function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null {
   const nextActionPath = asString(raw.next_action_path)
   const lastReplyStatus = asString(raw.last_reply_status)
   if (!healthState || !nextActionPath || !lastReplyStatus) return null
+  const quietReason = (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason']
+  const summary =
+    asString(raw.summary)
+    ?? (
+      healthState === 'offline' || healthState === 'degraded' || healthState === 'stale'
+        ? 'Keeper is not in a healthy reply state. Probe or recover before relying on automation.'
+        : quietReason === 'quiet_hours'
+          ? 'Lodge quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep.'
+          : quietReason === 'min_gap'
+            ? 'Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait.'
+            : quietReason === 'never_started'
+              ? 'Keeper metadata exists but no reply turn has been recorded yet.'
+              : 'Keeper is reachable. Send a direct message for an immediate response.'
+    )
   return {
     health_state: healthState as KeeperDiagnostic['health_state'],
-    quiet_reason: (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason'],
+    quiet_reason: quietReason,
     next_action_path: nextActionPath as KeeperDiagnostic['next_action_path'],
     last_reply_status: lastReplyStatus as KeeperDiagnostic['last_reply_status'],
     last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? asString(raw.last_reply_at) ?? null,
     last_reply_preview: asString(raw.last_reply_preview) ?? null,
     last_error: asString(raw.last_error) ?? null,
     next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,
-    recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
-    summary: asString(raw.summary),
+    recoverable:
+      typeof raw.recoverable === 'boolean'
+        ? raw.recoverable
+        : nextActionPath === 'recover',
+    summary,
     keepalive_running:
       typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
   }

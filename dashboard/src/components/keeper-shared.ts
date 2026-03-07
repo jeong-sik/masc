@@ -226,6 +226,7 @@ export function KeeperRuntimeActions({
   const probing = keeperProbing.value[keeper.name] ?? false
   const recovering = keeperRecovering.value[keeper.name] ?? false
   const recommended = diagnostic?.next_action_path ?? 'direct_message'
+  const canRecover = diagnostic?.recoverable ?? recommended === 'recover'
 
   return html`
     <div class="control-actions">
@@ -249,7 +250,7 @@ export function KeeperRuntimeActions({
             showToast(message, 'error')
           })
         }}
-        disabled=${recovering || !diagnostic?.recoverable || !actor.trim()}
+        disabled=${recovering || !canRecover || !actor.trim()}
       >
         ${recovering ? 'Recovering...' : 'Recover'}
       </button>

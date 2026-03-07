@@ -37,6 +37,11 @@ let dispatch_team_exn ctx ~name ~args =
   | Some result -> result
   | None -> failwith ("team session dispatch missing: " ^ name)
 
+let dispatch_keeper_exn ctx ~name ~args =
+  match Tool_keeper.dispatch ctx ~name ~args with
+  | Some result -> result
+  | None -> failwith ("keeper dispatch missing: " ^ name)
+
 let start_session_exn ctx =
   let ok, body =
     dispatch_team_exn ctx ~name:"masc_team_session_start"
@@ -462,6 +467,62 @@ let test_select_checkin_agents_manual_override_quiet_hours () =
   Alcotest.(check int) "manual override selects one agent" 1
     (List.length overridden)
 
+let test_keeper_status_exposes_summary_and_recoverable () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let keeper_name = "probe-keeper" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Probe keeper runtime");
+                ("models", `List [ `String "ollama:glm-4.7-flash" ]);
+                ("presence_keepalive", `Bool false);
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "keeper down ok" true ok;
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("fast", `Bool false);
+                ("include_context", `Bool false);
+                ("include_metrics_overview", `Bool false);
+                ("include_memory_bank", `Bool false);
+                ("include_history_tail", `Bool false);
+                ("include_compaction_history", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper status ok" true ok;
+      let diagnostic = parse_json_exn body |> Yojson.Safe.Util.member "diagnostic" in
+      Alcotest.(check string) "health_state" "offline"
+        Yojson.Safe.Util.(diagnostic |> member "health_state" |> to_string);
+      Alcotest.(check string) "next action recover" "recover"
+        Yojson.Safe.Util.(diagnostic |> member "next_action_path" |> to_string);
+      Alcotest.(check bool) "recoverable true" true
+        Yojson.Safe.Util.(diagnostic |> member "recoverable" |> to_bool);
+      Alcotest.(check bool) "summary present" true
+        (String.length Yojson.Safe.Util.(diagnostic |> member "summary" |> to_string) > 0))
+
 let () =
   Alcotest.run "Operator_control"
     [
@@ -483,6 +544,8 @@ let () =
             test_snapshot_exposes_keeper_and_lodge_actions;
           Alcotest.test_case "manual selection overrides quiet hours" `Quick
             test_select_checkin_agents_manual_override_quiet_hours;
+          Alcotest.test_case "keeper status exposes summary and recoverable" `Quick
+            test_keeper_status_exposes_summary_and_recoverable;
           Alcotest.test_case "expired confirmation rejected" `Quick
             test_confirm_rejects_expired_token;
         ] );

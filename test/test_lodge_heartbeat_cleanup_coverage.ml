@@ -51,6 +51,20 @@ let test_lodge_heartbeat_uses_tom_context () =
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_tom.predict_top_k")
 
+let test_lodge_heartbeat_post_fallback_policy () =
+  check bool "scheduled trigger can fallback to post"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "| Scheduled | ManualTrigger -> true");
+  check bool "content alerts do not fallback to post"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "| ContentAlert _ | Mentioned _ -> false");
+  check bool "unparsed batch reactions default to pass"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|reason = Some "unparsed"|});
+  check bool "no viable social candidate falls back to maybe_post_action"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "| _ -> maybe_post_action ()")
+
 let test_lodge_heartbeat_public_memory_helpers_removed () =
   check bool "load_agent_memories removed from mli"
     false
@@ -75,6 +89,7 @@ let () =
           test_case "reaction prompt mainline" `Quick test_lodge_heartbeat_uses_reaction_prompt;
           test_case "reflection updates self summary" `Quick test_lodge_heartbeat_updates_self_summary;
           test_case "ToM context used" `Quick test_lodge_heartbeat_uses_tom_context;
+          test_case "post fallback policy locked" `Quick test_lodge_heartbeat_post_fallback_policy;
           test_case "legacy public surface removed" `Quick test_lodge_heartbeat_public_memory_helpers_removed;
         ]);
     ]

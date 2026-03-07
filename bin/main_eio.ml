@@ -5248,7 +5248,6 @@ let mdal_loops_json (request : Httpun.Request.t) : (Yojson.Safe.t, string) resul
 
 let mdal_loops_error_json (msg : string) : Yojson.Safe.t =
   `Assoc [ ("error", `String msg) ]
-
 let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
@@ -5357,9 +5356,9 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ("last_seen", `String a.last_seen);
         ("emoji", `String emoji);
         ("koreanName", `String korean_name);
-        ("generation", `Int 0);
-        ("context_ratio", `Float 0.0);
-        ("turn_count", `Int 0);
+        ("generation", `Null);
+        ("context_ratio", `Null);
+        ("turn_count", `Null);
       ]
     ) agents
   in
@@ -8570,7 +8569,6 @@ let make_routes ~port ~host ~sw ~clock =
                (Yojson.Safe.to_string (operator_error_json ("invalid json: " ^ e)))
          )
        ) request reqd)
-
   |> Http.Router.get "/api/v1/council/debates" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in
@@ -9478,7 +9476,6 @@ let run_server ~sw ~env ~port ~base_path =
           else
             let json = operator_snapshot_http_json ~state ~sw ~clock httpun_request in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
       | `GET, "/api/v1/status" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in

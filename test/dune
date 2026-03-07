@@ -71,6 +71,22 @@
  (modules test_agent_swarm_runner)
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
 
+(test
+ (name test_tool_mdal)
+ (modules test_tool_mdal)
+ (libraries masc_mcp alcotest str yojson unix eio eio_main
+            mirage-crypto-rng mirage-crypto-rng.unix))
+
+(test
+ (name test_tool_mdal_pg)
+ (modules test_tool_mdal_pg)
+ (libraries masc_mcp alcotest yojson unix eio eio_main
+            mirage-crypto-rng mirage-crypto-rng.unix))
+
+(test
+ (name test_mdal_store)
+ (modules test_mdal_store)
+ (libraries masc_mcp alcotest yojson unix))
 ; ============================================================
 ; Eio module tests (Pure sync - Cache_eio, Metrics_store_eio, Hebbian_eio)
 ; ============================================================

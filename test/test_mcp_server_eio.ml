@@ -60,6 +60,60 @@ let extract_json_from_text text =
   with Not_found ->
     Alcotest.failf "expected JSON payload in text: %s" text
 
+let tools_list_response ~clock ~sw ?profile ?names state =
+  let params =
+    match names with
+    | Some items ->
+        `Assoc [ ("names", `List (List.map (fun name -> `String name) items)) ]
+    | None -> `Assoc []
+  in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 2);
+          ("method", `String "tools/list");
+          ("params", params);
+        ])
+  in
+  match profile with
+  | Some profile -> Mcp_eio.handle_request ~clock ~sw ~profile state request
+  | None -> Mcp_eio.handle_request ~clock ~sw state request
+
+let tools_from_response response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "result" fields with
+      | Some (`Assoc result_fields) -> (
+          match List.assoc_opt "tools" result_fields with
+          | Some (`List tools) -> tools
+          | _ -> Alcotest.fail "tools not a list")
+      | _ -> Alcotest.fail "result not an object")
+  | _ -> Alcotest.fail "response not an object"
+
+let find_tool_exn tools name =
+  match
+    List.find_map
+      (function
+        | `Assoc fields as tool -> (
+            match List.assoc_opt "name" fields with
+            | Some (`String n) when String.equal n name -> Some tool
+            | _ -> None)
+        | _ -> None)
+      tools
+  with
+  | Some tool -> tool
+  | None -> Alcotest.failf "tool missing: %s" name
+
+let tool_description_exn tool =
+  match tool with
+  | `Assoc fields -> (
+      match List.assoc_opt "description" fields with
+      | Some (`String value) -> value
+      | _ -> Alcotest.fail "tool description missing")
+  | _ -> Alcotest.fail "tool is not an object"
+
 (* ===== Unit Tests for Type Re-exports ===== *)
 
 let test_create_state () =
@@ -199,14 +253,7 @@ let test_handle_request_tools_list () =
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
 
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 2);
-    ("method", `String "tools/list");
-    ("params", `Assoc []);
-  ]) in
-
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = tools_list_response ~clock ~sw state in
 
   (match response with
    | `Assoc fields ->
@@ -255,6 +302,43 @@ let test_handle_request_tools_list () =
              | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
+
+  cleanup_dir base_path
+
+let test_handle_request_tools_list_mdal_descriptions () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let response =
+    tools_list_response ~clock ~sw
+      ~names:[ "masc_mdal_start"; "masc_mdal_iterate" ]
+      state
+  in
+  let tools = tools_from_response response in
+  Alcotest.(check int) "exactly two mdal tools" 2 (List.length tools);
+
+  let start_description =
+    find_tool_exn tools "masc_mdal_start" |> tool_description_exn
+  in
+  Alcotest.(check bool) "start mentions deterministic numeric goal" true
+    (contains_substring start_description "deterministic numeric goal");
+  Alcotest.(check bool) "start warns against qualitative work" true
+    (contains_substring start_description "qualitative work");
+  Alcotest.(check bool) "start description stays concise" true
+    (String.length start_description <= 220);
+
+  let iterate_description =
+    find_tool_exn tools "masc_mdal_iterate" |> tool_description_exn
+  in
+  Alcotest.(check bool) "iterate mentions re-measuring" true
+    (contains_substring iterate_description "re-measures the metric");
+  Alcotest.(check bool) "iterate mentions auditable tool use" true
+    (contains_substring iterate_description "auditable tool");
+  Alcotest.(check bool) "iterate description stays concise" true
+    (String.length iterate_description <= 220);
 
   cleanup_dir base_path
 
@@ -938,6 +1022,8 @@ let eio_tests = [
   "handle initialize operator profile", `Quick,
     test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;
+  "handle tools/list mdal descriptions", `Quick,
+    test_handle_request_tools_list_mdal_descriptions;
   "handle tools/list with names filter", `Quick,
     test_handle_request_tools_list_with_names_filter;
   "handle tools/list operator profile", `Quick,

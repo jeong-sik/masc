@@ -277,7 +277,7 @@ export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<Dashboa
 export interface FetchMdalLoopsOptions {
   limit?: number
   historyLimit?: number
-  status?: 'running' | 'completed' | 'stopped' | 'error'
+  status?: 'running' | 'interrupted' | 'completed' | 'stopped' | 'error'
 }
 
 export interface MdalLoopsResponse {
@@ -1568,12 +1568,13 @@ export function sendKeeperMessage(name: string, message: string, models?: string
 function normalizeMdalStatus(raw: unknown): MdalLoop['status'] {
   const text = asString(raw, '').trim().toLowerCase()
   if (text.startsWith('error')) return 'error'
-  if (text === 'running' || text === 'completed' || text === 'stopped') return text
+  if (text === 'running' || text === 'interrupted' || text === 'completed' || text === 'stopped') return text
   return 'running'
 }
 
 function normalizeMdalIteration(raw: unknown): MdalIterationRecord | null {
   if (!isRecord(raw)) return null
+  const evidenceRaw = isRecord(raw.evidence) ? raw.evidence : null
   return {
     iteration: asInt(raw.iteration) ?? 0,
     metric_before: asNumber(raw.metric_before, 0),
@@ -1584,6 +1585,21 @@ function normalizeMdalIteration(raw: unknown): MdalIterationRecord | null {
     next_suggestion: asString(raw.next_suggestion, ''),
     elapsed_ms: asInt(raw.elapsed_ms) ?? 0,
     cost_usd: typeof raw.cost_usd === 'number' && Number.isFinite(raw.cost_usd) ? raw.cost_usd : null,
+    evidence: evidenceRaw
+      ? {
+          worker_engine: evidenceRaw.worker_engine === 'api_tool_loop' ? 'api_tool_loop' : 'api_tool_loop',
+          worker_model: asString(evidenceRaw.worker_model, ''),
+          tool_call_count: asInt(evidenceRaw.tool_call_count) ?? 0,
+          tool_names: Array.isArray(evidenceRaw.tool_names)
+            ? evidenceRaw.tool_names.filter((item): item is string => typeof item === 'string')
+            : [],
+          session_id: asString(evidenceRaw.session_id, ''),
+          evidence_status:
+            evidenceRaw.evidence_status === 'legacy_unverified'
+              ? 'legacy_unverified'
+              : 'verified',
+        }
+      : null,
   }
 }
 
@@ -1601,6 +1617,9 @@ function normalizeMdalLoop(raw: unknown): MdalLoop | null {
     loop_id: loopId,
     profile: asString(raw.profile, 'custom'),
     status: normalizeMdalStatus(raw.status),
+    strict_mode: typeof raw.strict_mode === 'boolean' ? raw.strict_mode : undefined,
+    error_message: asString(raw.error_message) ?? asString(raw.error_reason) ?? null,
+    stop_reason: asString(raw.stop_reason) ?? asString(raw.reason) ?? null,
     current_iteration: asInt(raw.iteration) ?? asInt(raw.current_iteration) ?? 0,
     max_iterations: asInt(raw.max_iterations) ?? 0,
     baseline_metric: asNumber(raw.baseline_metric, 0),
@@ -1609,6 +1628,37 @@ function normalizeMdalLoop(raw: unknown): MdalLoop | null {
     stagnation_streak: asInt(raw.stagnation_streak) ?? 0,
     stagnation_limit: asInt(raw.stagnation_limit) ?? 0,
     elapsed_seconds: asNumber(raw.elapsed_seconds, 0),
+    updated_at: raw.updated_at !== undefined ? toIsoTimestamp(raw.updated_at) : null,
+    stopped_at: raw.stopped_at == null ? null : toIsoTimestamp(raw.stopped_at),
+    execution_mode: raw.execution_mode === 'worker_spawn' ? 'worker_spawn' : undefined,
+    worker_engine: raw.worker_engine === 'api_tool_loop' ? 'api_tool_loop' : null,
+    worker_model: asString(raw.worker_model) ?? null,
+    evidence_policy:
+      raw.evidence_policy === 'legacy' || raw.evidence_policy === 'hard'
+        ? raw.evidence_policy
+        : undefined,
+    latest_tool_call_count: asInt(raw.latest_tool_call_count) ?? 0,
+    latest_tool_names: Array.isArray(raw.latest_tool_names)
+      ? raw.latest_tool_names.filter((item): item is string => typeof item === 'string')
+      : [],
+    session_id: asString(raw.session_id) ?? null,
+    evidence_status:
+      raw.evidence_status === 'legacy_unverified'
+        ? 'legacy_unverified'
+        : raw.evidence_status === 'verified'
+          ? 'verified'
+          : null,
+    durability:
+      raw.durability === 'persistent_backend' || raw.durability === 'memory_only'
+        ? raw.durability
+        : undefined,
+    persistence_backend:
+      raw.persistence_backend === 'filesystem'
+      || raw.persistence_backend === 'postgres'
+      || raw.persistence_backend === 'memory'
+        ? raw.persistence_backend
+        : undefined,
+    recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
     history,
   }
 }

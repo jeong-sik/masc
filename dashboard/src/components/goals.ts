@@ -55,6 +55,8 @@ const loopsList = computed(() => {
   loops.sort((a, b) => {
     if (a.status === 'running' && b.status !== 'running') return -1
     if (b.status === 'running' && a.status !== 'running') return 1
+    if (a.status === 'interrupted' && b.status !== 'interrupted') return -1
+    if (b.status === 'interrupted' && a.status !== 'interrupted') return 1
     return b.elapsed_seconds - a.elapsed_seconds
   })
   return loops
@@ -240,6 +242,10 @@ function GoalsSummary() {
 
 function LoopRow({ loop }: { loop: MdalLoop }) {
   const latest = loop.history[0]
+  const latestToolSummary =
+    loop.latest_tool_names && loop.latest_tool_names.length > 0
+      ? `${loop.latest_tool_call_count ?? loop.latest_tool_names.length} tool${(loop.latest_tool_call_count ?? loop.latest_tool_names.length) === 1 ? '' : 's'}: ${loop.latest_tool_names.join(', ')}`
+      : 'No evidence yet'
 
   return html`
     <div class="planning-loop-row">
@@ -265,6 +271,16 @@ function LoopRow({ loop }: { loop: MdalLoop }) {
         </div>
 
         <div class="planning-loop-target">${loop.target || 'No explicit target provided'}</div>
+        ${(loop.stop_reason || loop.error_message)
+          ? html`
+              <div class="planning-loop-footnote">
+                ${loop.error_message ?? loop.stop_reason}
+              </div>
+            `
+          : null}
+        <div class="planning-loop-footnote">
+          ${loop.strict_mode ? 'Strict hard evidence' : 'Legacy'} · ${loop.worker_engine ?? 'unknown engine'} · ${latestToolSummary}
+        </div>
         ${latest
           ? html`
               <div class="planning-loop-footnote">
@@ -288,6 +304,7 @@ export function Goals() {
   const grouped = groupedByHorizon.value
   const loops = loopsList.value
   const runningLoops = loops.filter(loop => loop.status === 'running').length
+  const recoverableLoops = loops.filter(loop => loop.recoverable).length
   const activeGoals = goals.value.filter(goal => goal.status === 'active').length
   const mdalState = mdalSnapshotState.value
   const mdalNote =
@@ -311,6 +328,10 @@ export function Goals() {
         <div class="stat-card">
           <div class="stat-label">Running loops</div>
           <div class="stat-value" style="color:#fbbf24">${runningLoops}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Recoverable loops</div>
+          <div class="stat-value" style="color:#38bdf8">${recoverableLoops}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Known loops</div>

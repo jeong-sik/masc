@@ -5,6 +5,7 @@ type 'a context = {
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
+  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   mcp_session_id : string option;
 }
 
@@ -33,6 +34,7 @@ let strict_action_enums =
     `String "team_note";
     `String "team_broadcast";
     `String "team_task_inject";
+    `String "team_worker_spawn_batch";
     `String "team_stop";
     `String "keeper_message";
     `String "keeper_probe";
@@ -167,6 +169,7 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
       agent_name = ctx.agent_name;
       sw = ctx.sw;
       clock = ctx.clock;
+      proc_mgr = ctx.proc_mgr;
       mcp_session_id = ctx.mcp_session_id;
     }
   in

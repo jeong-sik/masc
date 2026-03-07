@@ -27,7 +27,14 @@ let result_field json =
   Yojson.Safe.Util.member "result" json
 
 let operator_ctx ?mcp_session_id env sw config agent_name : _ Operator_control.context =
-  { config; agent_name; sw; clock = Eio.Stdenv.clock env; mcp_session_id }
+  {
+    config;
+    agent_name;
+    sw;
+    clock = Eio.Stdenv.clock env;
+    proc_mgr = Some (Eio.Stdenv.process_mgr env);
+    mcp_session_id;
+  }
 
 let team_ctx env sw config agent_name : _ Tool_team_session.context =
   { config; agent_name; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
@@ -414,6 +421,147 @@ let test_team_task_inject_requires_confirm_then_executes () =
       in
       Alcotest.(check int) "pending confirm cleared" 0 (List.length pending_confirms))
 
+let test_team_worker_spawn_batch_requires_confirm_then_executes () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let ctx = operator_ctx env sw config "dashboard" in
+      let action_json =
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "dashboard");
+              ("action_type", `String "team_worker_spawn_batch");
+              ("target_id", `String session_id);
+              ( "payload",
+                `Assoc
+                  [
+                    ( "spawn_batch",
+                      `List
+                        [
+                          `Assoc
+                            [
+                              ("spawn_agent", `String "not-a-real-agent");
+                              ("spawn_prompt", `String "record one worker turn");
+                              ("spawn_role", `String "replacement");
+                              ("spawn_timeout_seconds", `Int 1);
+                            ];
+                        ] );
+                  ] );
+            ])
+      in
+      let action_json =
+        match action_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check bool) "confirm required" true
+        (action_json |> Yojson.Safe.Util.member "confirm_required"
+         |> Yojson.Safe.Util.to_bool);
+      Alcotest.(check string) "delegated tool" "masc_team_session_step"
+        Yojson.Safe.Util.(action_json |> member "delegated_tool" |> to_string);
+      let confirm_token =
+        action_json |> Yojson.Safe.Util.member "confirm_token"
+        |> Yojson.Safe.Util.to_string
+      in
+      let confirm_json =
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [
+              ("actor", `String "dashboard");
+              ("confirm_token", `String confirm_token);
+            ])
+      in
+      let confirm_json =
+        match confirm_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let delegated_result =
+        Yojson.Safe.Util.member "delegated_tool_result" confirm_json
+      in
+      Alcotest.(check string) "delegated tool result" "masc_team_session_step"
+        Yojson.Safe.Util.(delegated_result |> member "delegated_tool" |> to_string);
+      let events = Team_session_store.read_events ~max_events:20 config session_id in
+      Alcotest.(check bool) "team_step_spawn recorded" true
+        (List.exists
+           (fun json ->
+             Yojson.Safe.Util.(json |> member "event_type" |> to_string)
+             = "team_step_spawn")
+           events))
+
+let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let now = Unix.gettimeofday () in
+      let update_result =
+        Team_session_store.update_session config session_id (fun session ->
+            {
+              session with
+              started_at = now -. 240.0;
+              planned_workers =
+                [
+                  {
+                    Team_session_types.spawn_agent = "llama";
+                    runtime_actor = Some "llama-local-deadbeef";
+                    spawn_role = Some "implementer-a";
+                    spawn_model = Some "qwen3.5";
+                  };
+                ];
+              updated_at_iso = Types.now_iso ();
+            })
+      in
+      (match update_result with Ok _ -> () | Error err -> Alcotest.fail err);
+      let ctx = operator_ctx env sw config "dashboard" in
+      let digest =
+        match
+          Operator_control.digest_json ~actor:"dashboard"
+            ~target_type:"team_session" ~target_id:session_id ctx
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let recommendations =
+        Yojson.Safe.Util.(digest |> member "recommended_actions" |> to_list)
+      in
+      let recommendation =
+        match
+          List.find_opt
+            (fun item ->
+              Yojson.Safe.Util.(item |> member "action_type" |> to_string)
+              = "team_worker_spawn_batch")
+            recommendations
+        with
+        | Some item -> item
+        | None -> Alcotest.fail "expected team_worker_spawn_batch recommendation"
+      in
+      let spawn_batch =
+        Yojson.Safe.Util.(
+          recommendation |> member "suggested_payload" |> member "spawn_batch"
+          |> to_list)
+      in
+      Alcotest.(check int) "single worker stub" 1 (List.length spawn_batch);
+      let worker = List.hd spawn_batch in
+      Alcotest.(check string) "spawn_agent" "llama"
+        Yojson.Safe.Util.(worker |> member "spawn_agent" |> to_string);
+      Alcotest.(check string) "spawn_role" "implementer-a"
+        Yojson.Safe.Util.(worker |> member "spawn_role" |> to_string))
+
 let test_confirm_rejects_expired_token () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -623,6 +771,10 @@ let () =
             test_team_broadcast_records_event;
           Alcotest.test_case "team task inject confirm flow" `Quick
             test_team_task_inject_requires_confirm_then_executes;
+          Alcotest.test_case "team worker spawn batch confirm flow" `Quick
+            test_team_worker_spawn_batch_requires_confirm_then_executes;
+          Alcotest.test_case "digest recommends worker spawn batch" `Quick
+            test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn;
           Alcotest.test_case "snapshot exposes keeper and lodge actions" `Quick
             test_snapshot_exposes_keeper_and_lodge_actions;
           Alcotest.test_case "manual selection overrides quiet hours" `Quick

@@ -4169,6 +4169,91 @@ button.council-row.selected {
   gap: 12px;
 }
 
+.command-guide-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 16px;
+}
+
+.command-guide-readiness,
+.command-guide-paths,
+.command-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.command-guide-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.command-guide-card.highlight {
+  border-color: rgba(34,211,238,0.32);
+  background: linear-gradient(180deg, rgba(34,211,238,0.12), rgba(255,255,255,0.03));
+}
+
+.command-guide-card.ok {
+  border-color: rgba(74,222,128,0.24);
+}
+
+.command-guide-card.warn {
+  border-color: rgba(251,191,36,0.24);
+}
+
+.command-guide-card.bad {
+  border-color: rgba(248,113,113,0.24);
+}
+
+.command-guide-card p {
+  margin: 10px 0 0;
+  color: rgba(255,255,255,0.82);
+  line-height: 1.5;
+}
+
+.command-guide-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.command-guide-inline {
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(9,12,20,0.5);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.command-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.command-step-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.command-step-tool {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #67e8f9;
+  font-size: 12px;
+}
+
+.command-doc-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .command-surface-tabs {
   display: flex;
   gap: 10px;
@@ -4370,6 +4455,7 @@ button.council-row.selected {
 }
 
 @media (max-width: 1100px) {
+  .command-guide-grid,
   .command-summary-grid,
   .command-surface-grid,
   .command-grid,

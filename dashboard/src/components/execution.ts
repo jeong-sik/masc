@@ -59,8 +59,6 @@ type InterventionItem =
       agentRow: DispatchRow
     }
 
-// trimText is an alias for limitText from common/monitor
-const trimText = limitText
 
 function taskStatusLabel(status: Task['status']): string {
   switch (status) {
@@ -112,8 +110,8 @@ function buildTaskRow(
   const motion = assigneeAgent ? (motionByName.get(assigneeKey) ?? null) : null
   const lastSignalAt = motion?.lastActivityAt ?? assigneeAgent?.last_seen ?? null
   const signalAgeMs = lastSignalAt ? Math.max(0, Date.now() - toEpoch(lastSignalAt)) : Number.POSITIVE_INFINITY
-  const description = trimText(task.description)
-  const ownerFocus = trimText(assigneeAgent?.current_task) ?? motion?.lastActivityText ?? null
+  const description = limitText(task.description)
+  const ownerFocus = limitText(assigneeAgent?.current_task) ?? motion?.lastActivityText ?? null
   const activeTask = task.status === 'claimed' || task.status === 'in_progress'
 
   let tone: MonitorTone = 'ok'
@@ -220,7 +218,7 @@ function buildDispatchRow(
   let state: DispatchState = 'loaded'
   let tone: MonitorTone = 'ok'
   let note = 'Healthy active load'
-  let focus = trimText(agent.current_task) ?? motion.lastActivityText ?? 'Ready for assignment'
+  let focus = limitText(agent.current_task) ?? motion.lastActivityText ?? 'Ready for assignment'
 
   if (agent.status === 'offline' || agent.status === 'inactive') {
     state = 'offline'
@@ -239,7 +237,7 @@ function buildDispatchRow(
     state = 'drift'
     tone = 'warn'
     note = 'current_task has no matching claimed work'
-    focus = trimText(agent.current_task) ?? 'Task metadata and operator state drifted.'
+    focus = limitText(agent.current_task) ?? 'Task metadata and operator state drifted.'
   } else if (!hasLoad && signalAgeMs <= QUIET_EXECUTION_MS) {
     state = 'dispatchable'
     tone = 'ok'
@@ -254,7 +252,7 @@ function buildDispatchRow(
     state = 'loaded'
     tone = 'warn'
     note = 'Execution load is healthy but slightly quiet'
-    focus = trimText(agent.current_task) ?? `${activeTaskCount} active tasks in flight.`
+    focus = limitText(agent.current_task) ?? `${activeTaskCount} active tasks in flight.`
   }
 
   return {
@@ -333,8 +331,8 @@ function TaskWatchRow({ row }: { row: TaskExecutionRow }) {
 
       <div class="monitor-focus">${row.focus}</div>
       ${row.assigneeAgent?.current_task
-        && trimText(row.assigneeAgent.current_task) !== row.focus
-        ? html`<div class="monitor-footnote">Owner focus: ${trimText(row.assigneeAgent.current_task)}</div>`
+        && limitText(row.assigneeAgent.current_task) !== row.focus
+        ? html`<div class="monitor-footnote">Owner focus: ${limitText(row.assigneeAgent.current_task)}</div>`
         : null}
     </div>
   `

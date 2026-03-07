@@ -3025,13 +3025,17 @@ let tool_annotations_for_profile profile tool_name =
       Some (`Assoc [ ("readOnlyHint", `Bool false) ])
   | _ -> None
 
-let tool_json_for_profile profile (schema : Types.tool_schema) =
+let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
   let base =
     [
       ("name", `String schema.name);
       ("description", `String schema.description);
       ("inputSchema", schema.input_schema);
     ]
+    @
+    (match usage_summary with
+    | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
+    | None -> [])
     @ Tool_catalog.metadata_to_fields schema.name
   in
   match tool_annotations_for_profile profile schema.name with
@@ -3042,6 +3046,7 @@ type tools_list_params = {
   names : string list option;
   include_hidden : bool;
   include_deprecated : bool;
+  include_usage : bool;
 }
 
 let bool_param payload key =
@@ -3054,7 +3059,13 @@ let bool_param payload key =
 let requested_tool_list_params params =
   let open Yojson.Safe.Util in
   match params with
-  | None -> Ok { names = None; include_hidden = false; include_deprecated = false }
+  | None ->
+      Ok {
+        names = None;
+        include_hidden = false;
+        include_deprecated = false;
+        include_usage = false;
+      }
   | Some (`Assoc _ as payload) -> (
       let names_result =
         match payload |> member "names" with
@@ -3080,8 +3091,16 @@ let requested_tool_list_params params =
           | Ok include_hidden -> (
               match bool_param payload "include_deprecated" with
               | Error _ as err -> err
-              | Ok include_deprecated ->
-                  Ok { names; include_hidden; include_deprecated })))
+              | Ok include_deprecated -> (
+                  match bool_param payload "include_usage" with
+                  | Error _ as err -> err
+                  | Ok include_usage ->
+                      Ok {
+                        names;
+                        include_hidden;
+                        include_deprecated;
+                        include_usage;
+                      }))))
   | Some _ -> Error "Invalid params: expected object"
 
 let handle_initialize_eio ?(profile = Full) id params =
@@ -3099,7 +3118,13 @@ let handle_initialize_eio ?(profile = Full) id params =
       ])
 
 let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
-    ?(include_deprecated = false) state id =
+    ?(include_deprecated = false) ?(include_usage = false) state id =
+  let usage_summary =
+    if include_usage then
+      Some (Telemetry_eio.summarize_tool_usage ?fs:state.Mcp_server.fs state.Mcp_server.room_config)
+    else
+      None
+  in
   let tools =
     tool_schemas_for_profile ~include_hidden ~include_deprecated state profile
     |> (match names with
@@ -3107,9 +3132,21 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
        | Some wanted ->
            List.filter (fun (schema : Types.tool_schema) ->
              List.mem schema.name wanted))
-    |> List.map (tool_json_for_profile profile)
+    |> List.map (tool_json_for_profile ?usage_summary profile)
   in
-  make_response ~id (`Assoc [("tools", `List tools)])
+  let result_fields =
+    [ ("tools", `List tools) ]
+    @
+    match usage_summary with
+    | Some summary ->
+        [
+          ("usageTelemetryAvailable", `Bool summary.telemetry_available);
+          ("usageTelemetryPath", `String summary.telemetry_path);
+          ("usageTotalCalls", `Int summary.total_calls);
+        ]
+    | None -> []
+  in
+  make_response ~id (`Assoc result_fields)
 
 let handle_list_resources_eio id =
   let resources_json = List.map Mcp_server.resource_to_json Mcp_server.resources in
@@ -3166,9 +3203,9 @@ let handle_request ~clock ~sw ?(profile = Full) ?mcp_session_id ?auth_token stat
                    | "tools/list" -> (
                        match requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { names; include_hidden; include_deprecated } ->
+                       | Ok { names; include_hidden; include_deprecated; include_usage } ->
                            handle_list_tools_eio ~profile ?names ~include_hidden
-                             ~include_deprecated state id)
+                             ~include_deprecated ~include_usage state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

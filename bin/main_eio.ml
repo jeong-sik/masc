@@ -5497,13 +5497,14 @@ let assoc_add key value = function
 
 let command_plane_snapshot_http_json ~state =
   let config = state.Mcp_server.room_config in
+  let snapshot = Command_plane_v2.snapshot_json config in
   let swarm_status =
     if Room.is_initialized config then
-      Masc_mcp.Swarm_status.build_json config
+      Masc_mcp.Swarm_status.build_json_from_snapshot config snapshot
     else
       Masc_mcp.Swarm_status.empty_json
   in
-  Command_plane_v2.snapshot_json config
+  snapshot
   |> assoc_add "swarm_status" swarm_status
 
 let command_plane_topology_http_json ~state =

@@ -760,6 +760,42 @@ let read_trace_infos config =
 let read_session_infos config =
   Team_session_store.list_sessions config |> List.map session_info_of_session
 
+let operation_infos_of_snapshot snapshot =
+  snapshot
+  |> U.member "operations"
+  |> fun json -> list_member json "operations"
+  |> List.map operation_of_json
+  |> List.filter (fun (operation : operation_info) -> operation.operation_id <> "")
+
+let detachment_infos_of_snapshot snapshot =
+  snapshot
+  |> U.member "detachments"
+  |> fun json -> list_member json "detachments"
+  |> List.map detachment_of_json
+  |> List.filter (fun (detachment : detachment_info) ->
+         detachment.detachment_id <> "")
+
+let alert_infos_of_snapshot snapshot =
+  snapshot
+  |> U.member "alerts"
+  |> fun json -> list_member json "alerts"
+  |> List.map alert_of_json
+  |> List.filter (fun (alert : alert_info) -> alert.alert_id <> "")
+
+let decision_infos_of_snapshot snapshot =
+  snapshot
+  |> U.member "decisions"
+  |> fun json -> list_member json "decisions"
+  |> List.map decision_of_json
+  |> List.filter (fun (decision : decision_info) -> decision.decision_id <> "")
+
+let trace_infos_of_snapshot snapshot =
+  snapshot
+  |> U.member "traces"
+  |> fun json -> list_member json "events"
+  |> List.map trace_of_json
+  |> List.filter (fun (trace : trace_info) -> trace.event_id <> "")
+
 let slice_by_kind kind classify rows =
   List.filter (fun row -> classify row = kind) rows
 
@@ -935,25 +971,19 @@ let choose_recommendation lanes =
                         lane_id = None;
                       }))))
 
-let build_json (config : Room_utils.config) =
-  let now = Time_compat.now () in
-  let operations = read_operation_infos config in
+let build_json_from_inputs ~now ~operations ~detachments ~alerts ~decisions
+    ~traces ~sessions =
   let operation_kinds =
     operations
     |> List.map (fun (operation : operation_info) ->
            (operation.operation_id, classify_operation operation))
   in
-  let detachments = read_detachment_infos config in
   let detachment_kinds =
     detachments
     |> List.map (fun (detachment : detachment_info) ->
            ( detachment.detachment_id,
              classify_detachment operation_kinds detachment ))
   in
-  let alerts = read_alert_infos config in
-  let decisions = read_decision_infos config in
-  let traces = read_trace_infos config in
-  let sessions = read_session_infos config in
   let mixed_runtime_sources =
     let has_managed =
       List.exists (fun (operation : operation_info) -> classify_operation operation = Managed) operations
@@ -1128,6 +1158,26 @@ let build_json (config : Room_utils.config) =
           ] );
       ("recommended_next_action", recommendation_to_json recommendation);
     ]
+
+let build_json_from_snapshot (config : Room_utils.config) snapshot =
+  build_json_from_inputs
+    ~now:(Time_compat.now ())
+    ~operations:(operation_infos_of_snapshot snapshot)
+    ~detachments:(detachment_infos_of_snapshot snapshot)
+    ~alerts:(alert_infos_of_snapshot snapshot)
+    ~decisions:(decision_infos_of_snapshot snapshot)
+    ~traces:(trace_infos_of_snapshot snapshot)
+    ~sessions:(read_session_infos config)
+
+let build_json (config : Room_utils.config) =
+  build_json_from_inputs
+    ~now:(Time_compat.now ())
+    ~operations:(read_operation_infos config)
+    ~detachments:(read_detachment_infos config)
+    ~alerts:(read_alert_infos config)
+    ~decisions:(read_decision_infos config)
+    ~traces:(read_trace_infos config)
+    ~sessions:(read_session_infos config)
 
 let empty_json =
   let lane kind =

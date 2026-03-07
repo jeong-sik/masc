@@ -1296,6 +1296,15 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       ]
     else []
   in
+  let command_plane_json =
+    if initialized then Command_plane_v2.snapshot_json config else `Assoc []
+  in
+  let swarm_status_json =
+    if initialized then
+      Swarm_status.build_json_from_snapshot config command_plane_json
+    else
+      Swarm_status.empty_json
+  in
   `Assoc
     ([
        ("trace_id", `String trace_id);
@@ -1307,9 +1316,8 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
        ( "keepers",
          if initialized && include_keepers then keepers_json config
          else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
-       ("command_plane", if initialized then Command_plane_v2.snapshot_json config else `Assoc []);
-       ( "swarm_status",
-         if initialized then Swarm_status.build_json config else Swarm_status.empty_json );
+       ("command_plane", command_plane_json);
+       ("swarm_status", swarm_status_json);
        ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
        ("pending_confirms", pending_confirms_json ?actor config);
        ("available_actions", available_actions_json);
@@ -1338,6 +1346,10 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
     let now = Time_compat.now () in
+    let command_plane_json = Command_plane_v2.snapshot_json config in
+    let swarm_status_json =
+      Swarm_status.build_json_from_snapshot config command_plane_json
+    in
     match target_type with
     | "room" ->
         let sessions =
@@ -1366,7 +1378,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
               ("target_type", `String "room");
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
-              ("swarm_status", Swarm_status.build_json config);
+              ("swarm_status", swarm_status_json);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ( "recommended_actions",
                 `List
@@ -1402,7 +1414,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
                       ("target_type", `String "team_session");
                       ("target_id", `String session_id);
                       ("health", `String digest.health);
-                      ("swarm_status", Swarm_status.build_json config);
+                      ("swarm_status", swarm_status_json);
                       ( "attention_items",
                         `List
                           (List.map attention_item_to_yojson digest.attention_items)

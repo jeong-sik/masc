@@ -348,6 +348,8 @@ spawn_result="$(printf '%s' "$spawn_batch_raw" | extract_tool_result)"
 require_json_condition "$spawn_result" '.spawn.mode == "batch" and .spawn.count == 2 and (.spawn.results | length) == 2' "spawn batch result shape is wrong"
 require_json_condition "$spawn_result" '.spawn.results | all(.success == false)' "spawn batch unexpectedly succeeded"
 require_json_condition "$spawn_result" '.spawn.results | all(.runtime_actor != null)' "spawn batch results are missing runtime_actor"
+FAILED_RUNTIME_ACTOR_1="$(printf '%s' "$spawn_result" | jq -r '.spawn.results[0].runtime_actor')"
+FAILED_RUNTIME_ACTOR_2="$(printf '%s' "$spawn_result" | jq -r '.spawn.results[1].runtime_actor')"
 
 printf '[5/8] verify detach + participant accounting\n'
 spawn_events_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_team_session_events" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,event_types:["team_step_spawn"],limit:100}')")"
@@ -407,6 +409,8 @@ require_tool_success "$prove_raw"
 prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
 require_json_condition "$prove_result" '.proof.evidence.spawn_failure_count == 2' "proof evidence is missing spawn_failure_count=2"
 require_json_condition "$prove_result" '.proof.evidence.detached_agent_count == 2' "proof evidence is missing detached_agent_count=2"
+require_json_condition "$prove_result" '.proof.evidence.failed_spawn_roster | length == 2' "proof evidence is missing failed spawn roster"
+require_json_condition "$prove_result" '.proof.evidence.detached_actor_roster | length == 2' "proof evidence is missing detached actor roster"
 proof_md_path="$(printf '%s' "$prove_result" | jq -r '.proof_md_path')"
 proof_json_path="$(printf '%s' "$prove_result" | jq -r '.proof_json_path')"
 
@@ -418,6 +422,16 @@ if ! jq -e '.summary.active_agents | length == 1' "$report_json_path" >/dev/null
 fi
 if ! jq -e '.summary.planned_workers | length == 2' "$report_json_path" >/dev/null; then
   echo "FAIL: report json planned_workers accounting is wrong"
+  cat "$report_json_path"
+  exit 1
+fi
+if ! jq -e '.incidents.failed_spawn_roster | length == 2' "$report_json_path" >/dev/null; then
+  echo "FAIL: report json missing failed_spawn_roster"
+  cat "$report_json_path"
+  exit 1
+fi
+if ! jq -e '.incidents.detached_actor_roster | length == 2' "$report_json_path" >/dev/null; then
+  echo "FAIL: report json missing detached_actor_roster"
   cat "$report_json_path"
   exit 1
 fi
@@ -434,6 +448,21 @@ fi
 if ! jq -e '.agent_turn_metrics != null' "$report_json_path" >/dev/null; then
   echo "FAIL: report json missing agent_turn_metrics"
   cat "$report_json_path"
+  exit 1
+fi
+if ! rg -q "$FAILED_RUNTIME_ACTOR_1" "$proof_md_path"; then
+  echo "FAIL: proof markdown missing failed runtime actor $FAILED_RUNTIME_ACTOR_1"
+  cat "$proof_md_path"
+  exit 1
+fi
+if ! rg -q "spawn_failed_without_turn" "$proof_md_path"; then
+  echo "FAIL: proof markdown missing detached reason"
+  cat "$proof_md_path"
+  exit 1
+fi
+if ! rg -q "$FAILED_RUNTIME_ACTOR_2" "$report_md_path"; then
+  echo "FAIL: report markdown missing failed runtime actor $FAILED_RUNTIME_ACTOR_2"
+  cat "$report_md_path"
   exit 1
 fi
 

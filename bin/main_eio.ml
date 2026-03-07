@@ -8652,7 +8652,7 @@ let run_server ~sw ~env ~port ~base_path =
     "   GET  /mcp/operator → Remote operator MCP stream (bearer token required)\n\
      %!";
   Printf.printf
-    "   POST /mcp/operator → Remote operator JSON-RPC (3 curated tools only)\n\
+    "   POST /mcp/operator → Remote operator JSON-RPC (4 curated tools only)\n\
      %!";
   Printf.printf
     "   DELETE /mcp/operator → Remote operator session termination\n%!";

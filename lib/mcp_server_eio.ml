@@ -782,7 +782,7 @@ let read_only_tools =
    "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
    "masc_team_session_list"; "masc_team_session_compare";
    "masc_team_session_events"; "masc_team_session_prove";
-   "masc_operator_snapshot"]
+   "masc_operator_snapshot"; "masc_operator_digest"]
 
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
@@ -2972,9 +2972,9 @@ in
 
 (** Eio-native handlers for simple methods *)
 let operator_remote_instructions =
-  "MASC remote operator profile exposes only three control-plane tools: \
-masc_operator_snapshot, masc_operator_action, and masc_operator_confirm. \
-Read state with masc_operator_snapshot first. \
+  "MASC remote operator profile exposes only four control-plane tools: \
+masc_operator_snapshot, masc_operator_digest, masc_operator_action, and masc_operator_confirm. \
+Read raw state with masc_operator_snapshot first when needed, and prefer masc_operator_digest for intervention-oriented supervision. \
 Use masc_operator_action for guided actions only. \
 When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
 Do not assume access to any other MASC tool from this endpoint."
@@ -3005,6 +3005,8 @@ let tool_allowed_in_profile profile tool_name =
 let tool_annotations_for_profile profile tool_name =
   match profile with
   | Operator_remote when String.equal tool_name "masc_operator_snapshot" ->
+      Some (`Assoc [ ("readOnlyHint", `Bool true) ])
+  | Operator_remote when String.equal tool_name "masc_operator_digest" ->
       Some (`Assoc [ ("readOnlyHint", `Bool true) ])
   | Operator_remote when List.mem tool_name [ "masc_operator_action"; "masc_operator_confirm" ] ->
       Some (`Assoc [ ("readOnlyHint", `Bool false) ])

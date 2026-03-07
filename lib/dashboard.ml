@@ -52,6 +52,16 @@ type room_snapshot = {
   locks: int;
 }
 
+type swarm_lane_summary = {
+  label: string;
+  present: bool;
+  phase: string;
+  motion_state: string;
+  age: string;
+  current_step: string;
+  hard_flags: string list;
+}
+
 (** Format a section *)
 let format_section (s : section) : string =
   let header = Printf.sprintf "== %s ==" s.title in
@@ -267,6 +277,108 @@ let room_snapshot (config : Room_utils.config) ~current_room room_id =
     locks = count_locks_for_room config room_id;
   }
 
+let swarm_json (config : Room_utils.config) =
+  if Room.is_initialized config then Swarm_status.build_json config
+  else Swarm_status.empty_json
+
+let swarm_lane_summaries now json =
+  let open Yojson.Safe.Util in
+  match json |> member "lanes" with
+  | `List lanes ->
+      lanes
+      |> List.filter_map (fun lane ->
+             match lane with
+             | `Assoc _ ->
+                 let label =
+                   lane |> member "label" |> to_string_option
+                   |> Option.value ~default:"Unknown lane"
+                 in
+                 let present = lane |> member "present" |> to_bool_option |> Option.value ~default:false in
+                 let phase =
+                   lane |> member "phase" |> to_string_option
+                   |> Option.value ~default:"forming"
+                 in
+                 let motion_state =
+                   lane |> member "motion_state" |> to_string_option
+                   |> Option.value ~default:"waiting"
+                 in
+                 let current_step =
+                   lane |> member "current_step" |> to_string_option
+                   |> Option.value ~default:"Observe lane"
+                 in
+                 let age =
+                   match lane |> member "last_movement_at" |> to_string_option with
+                   | Some timestamp -> format_elapsed now timestamp "n/a"
+                   | None -> "n/a"
+                 in
+                 let hard_flags =
+                   match lane |> member "hard_flags" with
+                   | `List flags ->
+                       flags
+                       |> List.filter_map (fun flag ->
+                              flag |> member "code" |> to_string_option)
+                   | _ -> []
+                 in
+                 Some { label; present; phase; motion_state; age; current_step; hard_flags }
+             | _ -> None)
+      |> List.filter (fun lane -> lane.present)
+  | _ -> []
+
+let swarm_section now (config : Room_utils.config) : section =
+  let open Yojson.Safe.Util in
+  let json = swarm_json config in
+  let overview = json |> member "overview" in
+  let active_lanes = overview |> member "active_lanes" |> to_int_option |> Option.value ~default:0 in
+  let moving_lanes = overview |> member "moving_lanes" |> to_int_option |> Option.value ~default:0 in
+  let stalled_lanes = overview |> member "stalled_lanes" |> to_int_option |> Option.value ~default:0 in
+  let projected_lanes = overview |> member "projected_lanes" |> to_int_option |> Option.value ~default:0 in
+  let last_movement =
+    match overview |> member "last_movement_at" |> to_string_option with
+    | Some timestamp -> format_elapsed now timestamp "n/a"
+    | None -> "n/a"
+  in
+  let next_action = json |> member "recommended_next_action" in
+  let next_label =
+    next_action |> member "label" |> to_string_option
+    |> Option.value ~default:"Observe operator state"
+  in
+  let next_tool =
+    next_action |> member "tool" |> to_string_option
+    |> Option.value ~default:"masc_operator_snapshot"
+  in
+  let gap_items =
+    match json |> member "gaps" |> member "items" with
+    | `List items ->
+        items
+        |> List.filter_map (fun item ->
+               let code = item |> member "code" |> to_string_option in
+               let count = item |> member "count" |> to_int_option |> Option.value ~default:0 in
+               Option.map (fun code -> Printf.sprintf "%s (%d)" code count) code)
+    | _ -> []
+  in
+  let lane_lines =
+    swarm_lane_summaries now json
+    |> List.map (fun lane ->
+           let flags =
+             match lane.hard_flags with
+             | [] -> "none"
+             | flags -> String.concat ", " flags
+           in
+           Printf.sprintf "%s: %s / %s / %s | step=%s | flags=%s"
+             lane.label lane.phase lane.motion_state lane.age lane.current_step flags)
+  in
+  let content =
+    [
+      Printf.sprintf "Overview: %d active | %d moving | %d stalled | %d projected | last movement %s"
+        active_lanes moving_lanes stalled_lanes projected_lanes last_movement;
+      Printf.sprintf "Next Action: %s (%s)" next_label next_tool;
+    ]
+    @ (if gap_items = [] then [ "Hard Flags: none" ]
+       else [ "Hard Flags: " ^ String.concat ", " gap_items ])
+    @ add_group "Lanes" lane_lines "(no active lanes)"
+  in
+  { title = "Swarm"; content; empty_msg = "(no swarm activity)" }
+
 let room_overview_section (snapshots : room_snapshot list) : section =
   let content =
     List.map (fun snapshot ->
@@ -346,6 +458,7 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
     | All ->
         [
           room_overview_section snapshots;
+          swarm_section now config;
           tempo_section config;
           worktrees_section config;
         ]
@@ -357,6 +470,7 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
           tasks_section snapshot.tasks;
           messages_section snapshot.messages;
           locks_section snapshot.locks;
+          swarm_section now config;
           tempo_section config;
           worktrees_section config;
         ]
@@ -367,6 +481,7 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
 let generate_compact ?(scope = All) (config : Room_utils.config) : string =
   let tempo = Tempo.get_tempo config in
   let (current_room, room_ids) = ordered_room_ids config in
+  let now = Time_compat.now () in
   let snapshots =
     match scope with
     | All -> List.map (room_snapshot config ~current_room) room_ids
@@ -381,8 +496,23 @@ let generate_compact ?(scope = All) (config : Room_utils.config) : string =
         locks_acc + snapshot.locks )
     ) (0, 0, 0, 0) snapshots
   in
+  let swarm = swarm_json config in
+  let open Yojson.Safe.Util in
+  let overview = swarm |> member "overview" in
+  let moving_lanes = overview |> member "moving_lanes" |> to_int_option |> Option.value ~default:0 in
+  let stalled_lanes = overview |> member "stalled_lanes" |> to_int_option |> Option.value ~default:0 in
+  let projected_lanes = overview |> member "projected_lanes" |> to_int_option |> Option.value ~default:0 in
+  let last_movement =
+    match overview |> member "last_movement_at" |> to_string_option with
+    | Some timestamp -> format_elapsed now timestamp "n/a"
+    | None -> "n/a"
+  in
+  let next_action =
+    swarm |> member "recommended_next_action" |> member "label" |> to_string_option
+    |> Option.value ~default:"Observe operator state"
+  in
   Printf.sprintf
-    "Scope: %s | Rooms: %d | Current: %s | Agents: %d | Tasks: %d active, %d pending | Locks: %d | Tempo: %.0fs"
+    "Scope: %s | Rooms: %d | Current: %s | Agents: %d | Tasks: %d active, %d pending | Locks: %d | Swarm: %d moving, %d stalled, %d projected, last %s | Next: %s | Tempo: %.0fs"
     (match scope with All -> "all" | Current -> "current")
     (List.length snapshots)
     current_room
@@ -390,4 +520,9 @@ let generate_compact ?(scope = All) (config : Room_utils.config) : string =
     active_count
     pending_count
     locks_count
+    moving_lanes
+    stalled_lanes
+    projected_lanes
+    last_movement
+    next_action
     tempo.Tempo.current_interval_s

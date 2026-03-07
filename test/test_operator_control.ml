@@ -102,7 +102,9 @@ let test_snapshot_has_expected_sections () =
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with
          | `List _ -> true
-         | _ -> false))
+         | _ -> false);
+      Alcotest.(check bool) "swarm_status present" true
+        (Yojson.Safe.Util.member "swarm_status" json <> `Null))
 
 let test_digest_room_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
@@ -140,6 +142,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
+      Alcotest.(check bool) "swarm_status present" true
+        (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
       let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
       Alcotest.(check bool) "pending confirm attention present" true
         (List.exists
@@ -172,6 +176,8 @@ let test_digest_team_session_shape () =
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "target_id" session_id
         Yojson.Safe.Util.(digest |> member "target_id" |> to_string);
+      Alcotest.(check bool) "swarm_status present" true
+        (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
       Alcotest.(check int) "single session card" 1
         Yojson.Safe.Util.(digest |> member "session_cards" |> to_list |> List.length);
       Alcotest.(check bool) "worker_cards list" true

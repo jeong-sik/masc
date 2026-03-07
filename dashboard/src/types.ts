@@ -708,6 +708,7 @@ export interface OperatorSnapshot {
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
   command_plane?: CommandPlaneSnapshot
+  swarm_status?: CommandPlaneSwarmStatus
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]
   available_actions: OperatorActionDescriptor[]
@@ -995,6 +996,78 @@ export interface CommandPlaneTracesResponse {
   events: CommandPlaneTraceEvent[]
 }
 
+export interface CommandPlaneSwarmFlag {
+  code: string
+  severity: string
+  summary: string
+}
+
+export interface CommandPlaneSwarmLane {
+  lane_id: string
+  label: string
+  kind: 'managed' | 'projected' | 'supervised' | string
+  present: boolean
+  phase: string
+  motion_state: 'moving' | 'waiting' | 'stalled' | 'terminal' | string
+  source_of_truth: string
+  last_movement_at?: string | null
+  movement_reason: string
+  current_step: string
+  blockers: string[]
+  counts: {
+    operations?: number
+    detachments?: number
+    workers?: number
+    approvals?: number
+    alerts?: number
+  }
+  hard_flags: CommandPlaneSwarmFlag[]
+}
+
+export interface CommandPlaneSwarmTimelineEvent {
+  event_id: string
+  lane_id: string
+  kind: string
+  timestamp: string
+  title: string
+  detail: string
+  tone: string
+  source: string
+}
+
+export interface CommandPlaneSwarmGap {
+  code: string
+  severity: string
+  summary: string
+  lane_ids: string[]
+  count: number
+}
+
+export interface CommandPlaneSwarmRecommendation {
+  tool: string
+  label: string
+  reason: string
+  lane_id?: string | null
+}
+
+export interface CommandPlaneSwarmStatus {
+  generated_at?: string
+  overview: {
+    active_lanes?: number
+    moving_lanes?: number
+    stalled_lanes?: number
+    projected_lanes?: number
+    last_movement_at?: string | null
+  }
+  lanes: CommandPlaneSwarmLane[]
+  timeline: CommandPlaneSwarmTimelineEvent[]
+  gaps: {
+    count?: number
+    items: CommandPlaneSwarmGap[]
+  }
+  recommended_next_action?: CommandPlaneSwarmRecommendation
+}
+
 export interface CommandPlaneSnapshot {
   version?: string
   generated_at?: string
@@ -1005,6 +1078,7 @@ export interface CommandPlaneSnapshot {
   decisions: CommandPlaneDecisionsResponse
   capacity: CommandPlaneCapacityResponse
   traces: CommandPlaneTracesResponse
+  swarm_status?: CommandPlaneSwarmStatus
 }
 
 export interface CommandPlaneHelpDocLink {

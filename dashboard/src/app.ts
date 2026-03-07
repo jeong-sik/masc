@@ -199,7 +199,6 @@ export function App() {
     // Connect SSE and start data fetching
     connectSSE()
     refreshDashboard()
-    refreshBoard()
 
     // Setup SSE → store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()

@@ -5491,8 +5491,21 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
 let operator_error_json message =
   `Assoc [ ("status", `String "error"); ("message", `String message) ]
 
+let assoc_add key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | json -> `Assoc [ ("payload", json); (key, value) ]
+
 let command_plane_snapshot_http_json ~state =
-  Command_plane_v2.snapshot_json state.Mcp_server.room_config
+  let config = state.Mcp_server.room_config in
+  let snapshot = Command_plane_v2.snapshot_json config in
+  let swarm_status =
+    if Room.is_initialized config then
+      Masc_mcp.Swarm_status.build_json_from_snapshot config snapshot
+    else
+      Masc_mcp.Swarm_status.empty_json
+  in
+  snapshot
+  |> assoc_add "swarm_status" swarm_status
 
 let command_plane_topology_http_json ~state =
   Command_plane_v2.topology_json state.Mcp_server.room_config

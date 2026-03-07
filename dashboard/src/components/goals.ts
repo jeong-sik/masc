@@ -1,7 +1,6 @@
 // Planning tab — goals plus MDAL loop visibility with freshness context
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
 import { signal, computed } from '@preact/signals'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
@@ -352,11 +351,6 @@ function TaskBacklog() {
 // ── Main export ───────────────────────────────────
 
 export function Goals() {
-  useEffect(() => {
-    refreshGoals()
-    refreshMdal()
-  }, [])
-
   const grouped = groupedByHorizon.value
   const loops = loopsList.value
   const runningLoops = loops.filter(loop => loop.status === 'running').length

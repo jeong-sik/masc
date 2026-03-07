@@ -575,7 +575,12 @@ let test_operator_mcp_supervises_team_session () =
     |> List.sort String.compare
   in
   check (list string) "operator tool names"
-    [ "masc_operator_action"; "masc_operator_confirm"; "masc_operator_snapshot" ]
+    [
+      "masc_operator_action";
+      "masc_operator_confirm";
+      "masc_operator_digest";
+      "masc_operator_snapshot";
+    ]
     tool_names;
 
   let snapshot_json =
@@ -587,6 +592,30 @@ let test_operator_mcp_supervises_team_session () =
   check bool "snapshot has sessions" true
     (snapshot_result |> U.member "sessions" |> U.member "items" |> U.to_list
    |> List.length > 0);
+  check bool "snapshot summary has attention summary" true
+    (snapshot_result |> U.member "attention_summary" <> `Null);
+  check bool "snapshot summary has recommendation summary" true
+    (snapshot_result |> U.member "recommendation_summary" <> `Null);
+
+  let digest_json =
+    call_tool ~token:supervisor_token ~path:"/mcp/operator"
+      ~session_id:"operator-supervisor" ~id:105 ~name:"masc_operator_digest"
+      (`Assoc
+        [
+          ("actor", `String supervisor_nickname);
+          ("target_type", `String "team_session");
+          ("target_id", `String session_id);
+        ])
+  in
+  let digest_result = extract_tool_payload_json "operator_digest" digest_json in
+  check string "digest target type" "team_session"
+    (digest_result |> U.member "target_type" |> U.to_string);
+  check string "digest target id" session_id
+    (digest_result |> U.member "target_id" |> U.to_string);
+  check bool "digest attention array" true
+    (match digest_result |> U.member "attention_items" with `List _ -> true | _ -> false);
+  check bool "digest recommendation array" true
+    (match digest_result |> U.member "recommended_actions" with `List _ -> true | _ -> false);
 
   let note_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"

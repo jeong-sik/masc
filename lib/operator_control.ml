@@ -118,8 +118,56 @@ let operator_server_profile_json =
       ("transport", `String "mcp_streamable_http");
       ("auth", `String "bearer_token");
       ("confirm_ttl_seconds", `Float remote_confirm_ttl_seconds);
-      ("curated_tool_count", `Int 3);
+      ("curated_tool_count", `Int 4);
     ]
+
+type attention_item = {
+  kind : string;
+  severity : string;
+  summary : string;
+  target_type : string;
+  target_id : string option;
+  actor : string option;
+  evidence : Yojson.Safe.t;
+}
+
+type recommended_action = {
+  action_type : string;
+  target_type : string;
+  target_id : string option;
+  severity : string;
+  reason : string;
+  suggested_payload : Yojson.Safe.t;
+}
+
+type worker_card = {
+  actor : string option;
+  spawn_agent : string option;
+  spawn_role : string option;
+  spawn_model : string option;
+  status : string;
+  turn_count : int;
+  empty_note_turn_count : int;
+  has_turn : bool;
+  last_turn_ts_iso : string option;
+}
+
+type session_digest = {
+  session_id : string;
+  goal : string;
+  status : string;
+  health : string;
+  planned_worker_count : int;
+  active_agent_count : int;
+  last_turn_age_sec : int option;
+  attention_items : attention_item list;
+  recommended_actions : recommended_action list;
+  worker_cards : worker_card list;
+}
+
+let stalled_session_threshold_sec = 300.0
+let planned_worker_turn_grace_sec = 180.0
+let room_digest_session_limit = 10
 
 let preview_of_pending_confirm (entry : pending_confirm) =
   `Assoc
@@ -494,6 +542,625 @@ let room_json config =
         ("message_seq", `Int state.message_seq);
       ]
 
+let severity_rank = function
+  | "bad" -> 2
+  | "warn" -> 1
+  | _ -> 0
+
+let compare_attention (a : attention_item) (b : attention_item) =
+  let by_severity = Int.compare (severity_rank b.severity) (severity_rank a.severity) in
+  if by_severity <> 0 then by_severity
+  else
+    match (a.target_id, b.target_id) with
+    | Some x, Some y ->
+        let by_target = String.compare x y in
+        if by_target <> 0 then by_target else String.compare a.kind b.kind
+    | Some _, None -> -1
+    | None, Some _ -> 1
+    | None, None -> String.compare a.kind b.kind
+
+let compare_recommendation (a : recommended_action) (b : recommended_action) =
+  let by_severity = Int.compare (severity_rank b.severity) (severity_rank a.severity) in
+  if by_severity <> 0 then by_severity
+  else
+    match (a.target_id, b.target_id) with
+    | Some x, Some y ->
+        let by_target = String.compare x y in
+        if by_target <> 0 then by_target else String.compare a.action_type b.action_type
+    | Some _, None -> -1
+    | None, Some _ -> 1
+    | None, None -> String.compare a.action_type b.action_type
+
+let compare_worker_card (a : worker_card) (b : worker_card) =
+  let by_status = String.compare a.status b.status in
+  if by_status <> 0 then by_status
+  else
+    let by_turns = Int.compare b.turn_count a.turn_count in
+    if by_turns <> 0 then by_turns
+    else
+      String.compare
+        (Option.value ~default:"" a.actor)
+        (Option.value ~default:"" b.actor)
+
+let compare_session_digest (a : session_digest) (b : session_digest) =
+  let by_health = Int.compare (severity_rank b.health) (severity_rank a.health) in
+  if by_health <> 0 then by_health
+  else
+    let by_status =
+      match (a.status, b.status) with
+      | "running", "running" -> 0
+      | "running", _ -> -1
+      | _, "running" -> 1
+      | _ -> String.compare a.status b.status
+    in
+    if by_status <> 0 then by_status else String.compare a.session_id b.session_id
+
+let attention_item_to_yojson (item : attention_item) =
+  `Assoc
+    [
+      ("kind", `String item.kind);
+      ("severity", `String item.severity);
+      ("summary", `String item.summary);
+      ("target_type", `String item.target_type);
+      ("target_id", string_option_to_json item.target_id);
+      ("actor", string_option_to_json item.actor);
+      ("evidence", item.evidence);
+    ]
+
+let recommended_confirm_required = function
+  | "room_pause" | "team_stop" | "task_inject" | "team_task_inject" -> true
+  | _ -> false
+
+let recommended_action_to_yojson ~actor (item : recommended_action) =
+  let preview =
+    `Assoc
+      [
+        ("actor", `String actor);
+        ("action_type", `String item.action_type);
+        ("target_type", `String item.target_type);
+        ("target_id", string_option_to_json item.target_id);
+        ("payload", item.suggested_payload);
+      ]
+  in
+  `Assoc
+    [
+      ("action_type", `String item.action_type);
+      ("target_type", `String item.target_type);
+      ("target_id", string_option_to_json item.target_id);
+      ("severity", `String item.severity);
+      ("reason", `String item.reason);
+      ("confirm_required", `Bool (recommended_confirm_required item.action_type));
+      ("suggested_payload", item.suggested_payload);
+      ("preview", preview);
+    ]
+
+let worker_card_to_yojson (card : worker_card) =
+  `Assoc
+    [
+      ("actor", string_option_to_json card.actor);
+      ("spawn_agent", string_option_to_json card.spawn_agent);
+      ("spawn_role", string_option_to_json card.spawn_role);
+      ("spawn_model", string_option_to_json card.spawn_model);
+      ("status", `String card.status);
+      ("turn_count", `Int card.turn_count);
+      ("empty_note_turn_count", `Int card.empty_note_turn_count);
+      ("has_turn", `Bool card.has_turn);
+      ("last_turn_ts_iso", string_option_to_json card.last_turn_ts_iso);
+    ]
+
+let session_card_to_yojson ~actor (digest : session_digest) =
+  let top_attention =
+    match digest.attention_items |> List.sort compare_attention with
+    | item :: _ -> Some item
+    | [] -> None
+  in
+  let top_recommendation =
+    match digest.recommended_actions |> List.sort compare_recommendation with
+    | item :: _ -> Some item
+    | [] -> None
+  in
+  `Assoc
+    [
+      ("session_id", `String digest.session_id);
+      ("goal", `String digest.goal);
+      ("status", `String digest.status);
+      ("health", `String digest.health);
+      ("planned_worker_count", `Int digest.planned_worker_count);
+      ("active_agent_count", `Int digest.active_agent_count);
+      ("last_turn_age_sec", option_to_json (fun v -> `Int v) digest.last_turn_age_sec);
+      ("attention_count", `Int (List.length digest.attention_items));
+      ("top_attention", option_to_json attention_item_to_yojson top_attention);
+      ("recommended_action_count", `Int (List.length digest.recommended_actions));
+      ( "top_recommendation",
+        option_to_json (recommended_action_to_yojson ~actor) top_recommendation );
+    ]
+
+let summary_of_attention_items (items : attention_item list) =
+  let sorted = List.sort compare_attention items in
+  let top_item : attention_item option =
+    match sorted with item :: _ -> Some item | [] -> None
+  in
+  let bad_count =
+    List.fold_left
+      (fun acc (item : attention_item) ->
+        if String.equal item.severity "bad" then acc + 1 else acc)
+      0 sorted
+  in
+  let warn_count =
+    List.fold_left
+      (fun acc (item : attention_item) ->
+        if String.equal item.severity "warn" then acc + 1 else acc)
+      0 sorted
+  in
+  `Assoc
+    [
+      ("count", `Int (List.length sorted));
+      ("bad_count", `Int bad_count);
+      ("warn_count", `Int warn_count);
+      ("top_item", option_to_json attention_item_to_yojson top_item);
+    ]
+
+let dedup_recommendations (items : recommended_action list) =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | item :: rest ->
+        let key =
+          String.concat "|"
+            [
+              item.action_type;
+              item.target_type;
+              Option.value ~default:"" item.target_id;
+            ]
+        in
+        if List.mem key seen then loop seen acc rest
+        else loop (key :: seen) (item :: acc) rest
+  in
+  items |> List.sort compare_recommendation |> loop [] []
+
+let summary_of_recommendations ~actor (items : recommended_action list) =
+  let sorted = dedup_recommendations items in
+  let top_item : recommended_action option =
+    match sorted with item :: _ -> Some item | [] -> None
+  in
+  `Assoc
+    [
+      ("count", `Int (List.length sorted));
+      ( "top_action",
+        option_to_json (recommended_action_to_yojson ~actor) top_item );
+    ]
+
+let event_ts_iso json =
+  match U.member "ts_iso" json with `String value -> Some value | _ -> None
+
+let event_type json =
+  match U.member "event_type" json with `String value -> Some value | _ -> None
+
+let event_detail_actor json =
+  match U.member "detail" json |> U.member "actor" with
+  | `String actor ->
+      let trimmed = String.trim actor in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let event_detail_kind json =
+  match U.member "detail" json |> U.member "kind" with
+  | `String kind ->
+      let trimmed = String.trim kind in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let event_detail_message json =
+  match U.member "detail" json |> U.member "message" with
+  | `String message ->
+      let trimmed = String.trim message in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let count_spawn_failures events =
+  List.fold_left
+    (fun acc json ->
+      match (event_type json, U.member "detail" json |> U.member "success") with
+      | Some "team_step_spawn", `Bool false -> acc + 1
+      | _ -> acc)
+    0 events
+
+let count_detached_actors events =
+  List.fold_left
+    (fun acc json ->
+      match event_type json with
+      | Some "session_agent_detached" -> acc + 1
+      | _ -> acc)
+    0 events
+
+let empty_note_turn_actors events =
+  events
+  |> List.filter_map (fun json ->
+         match (event_type json, event_detail_kind json, event_detail_actor json) with
+         | Some "team_turn", Some "note", Some actor -> (
+             match event_detail_message json with None -> Some actor | Some _ -> None)
+         | _ -> None)
+  |> Team_session_types.dedup_strings
+
+let turn_count_by_actor events actor_name =
+  List.fold_left
+    (fun acc json ->
+      match (event_type json, event_detail_actor json) with
+      | Some "team_turn", Some actor when String.equal actor actor_name -> acc + 1
+      | _ -> acc)
+    0 events
+
+let empty_note_turn_count_for_actor events actor_name =
+  List.fold_left
+    (fun acc json ->
+      match (event_type json, event_detail_kind json, event_detail_actor json) with
+      | Some "team_turn", Some "note", Some actor when String.equal actor actor_name -> (
+          match event_detail_message json with None -> acc + 1 | Some _ -> acc)
+      | _ -> acc)
+    0 events
+
+let last_turn_ts_iso_for_actor events actor_name =
+  events
+  |> List.filter_map (fun json ->
+         match (event_type json, event_detail_actor json) with
+         | Some "team_turn", Some actor when String.equal actor actor_name ->
+             event_ts_iso json
+         | _ -> None)
+  |> List.rev |> function value :: _ -> Some value | [] -> None
+
+let normalize_digest_target_type value =
+  match value with
+  | Some raw -> (
+      match String.trim raw |> String.lowercase_ascii with
+      | "room" -> Ok "room"
+      | "team_session" -> Ok "team_session"
+      | _ -> Error "target_type must be one of: room, team_session")
+  | None -> Ok "room"
+
+let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson.Safe.t list)
+    ~now =
+  let worker_keys =
+    if session.planned_workers <> [] then
+      session.planned_workers
+      |> List.map (fun (worker : Team_session_types.planned_worker) ->
+             ( worker.runtime_actor,
+               Some worker.spawn_agent,
+               worker.spawn_role,
+               worker.spawn_model ))
+    else
+      session.agent_names
+      |> List.map (fun actor -> (Some actor, None, None, None))
+  in
+  worker_keys
+  |> List.map (fun (actor, spawn_agent, spawn_role, spawn_model) ->
+         let turn_count =
+           match actor with
+           | Some value -> turn_count_by_actor events value
+           | None -> 0
+         in
+         let empty_note_turn_count =
+           match actor with
+           | Some value -> empty_note_turn_count_for_actor events value
+           | None -> 0
+         in
+         let has_turn = turn_count > 0 in
+         let last_turn_ts_iso =
+           match actor with
+           | Some value -> last_turn_ts_iso_for_actor events value
+           | None -> None
+        in
+        let status =
+          match actor with
+          | Some _ ->
+              let age_sec = now -. session.started_at in
+              if has_turn then "active"
+               else if age_sec >= planned_worker_turn_grace_sec then "planned_no_turn"
+               else "grace_period"
+           | None -> "planned"
+         in
+         {
+           actor;
+           spawn_agent;
+           spawn_role;
+           spawn_model;
+           status;
+           turn_count;
+           empty_note_turn_count;
+           has_turn;
+           last_turn_ts_iso;
+         })
+  |> List.sort compare_worker_card
+
+let session_attention_items ~(session : Team_session_types.session)
+    ~(events : Yojson.Safe.t list) ~(worker_cards : worker_card list) ~now =
+  let spawn_failure_count = count_spawn_failures events in
+  let detached_actor_count = count_detached_actors events in
+  let empty_note_actors = empty_note_turn_actors events in
+  let base = [] in
+  let base =
+    if spawn_failure_count > 0 then
+      {
+        kind = "spawn_failure_present";
+        severity = "bad";
+        summary =
+          Printf.sprintf "session has %d failed spawn event(s)" spawn_failure_count;
+        target_type = "team_session";
+        target_id = Some session.session_id;
+        actor = None;
+        evidence = `Assoc [ ("count", `Int spawn_failure_count) ];
+      }
+      :: base
+    else base
+  in
+  let base =
+    if detached_actor_count > 0 then
+      {
+        kind = "detached_actor_present";
+        severity = "warn";
+        summary =
+          Printf.sprintf "session detached %d runtime actor(s)"
+            detached_actor_count;
+        target_type = "team_session";
+        target_id = Some session.session_id;
+        actor = None;
+        evidence = `Assoc [ ("count", `Int detached_actor_count) ];
+      }
+      :: base
+    else base
+  in
+  let base =
+    if empty_note_actors <> [] then
+      {
+        kind = "empty_note_turn_present";
+        severity = "warn";
+        summary = "session contains historical empty note turn evidence";
+        target_type = "team_session";
+        target_id = Some session.session_id;
+        actor = None;
+        evidence =
+          `Assoc
+            [
+              ("count", `Int (List.length empty_note_actors));
+              ("actors", `List (List.map (fun actor -> `String actor) empty_note_actors));
+            ];
+      }
+      :: base
+    else base
+  in
+  let age_since_last_turn =
+    now -. Option.value ~default:session.started_at session.last_turn_at
+  in
+  let base =
+    if session.status = Team_session_types.Running
+       && session.planned_workers <> []
+       && age_since_last_turn >= stalled_session_threshold_sec
+    then
+      {
+        kind = "stalled_session";
+        severity = "bad";
+        summary =
+          Printf.sprintf "session has been idle for %d seconds"
+            (int_of_float age_since_last_turn);
+        target_type = "team_session";
+        target_id = Some session.session_id;
+        actor = None;
+        evidence =
+          `Assoc
+            [
+              ("last_turn_age_sec", `Int (int_of_float age_since_last_turn));
+              ( "last_turn_at",
+                option_to_json (fun value -> `Float value) session.last_turn_at );
+            ];
+      }
+      :: base
+    else base
+  in
+  let no_turn_workers =
+    if session.status = Team_session_types.Running
+       && now -. session.started_at >= planned_worker_turn_grace_sec
+    then
+      worker_cards
+      |> List.filter (fun (card : worker_card) ->
+             String.equal card.status "planned_no_turn"
+             && Option.value ~default:"" card.actor <> "")
+    else []
+  in
+  let base =
+    if no_turn_workers <> [] then
+      {
+        kind = "planned_worker_without_turn";
+        severity = "warn";
+        summary =
+          Printf.sprintf "%d planned worker(s) have not recorded a turn"
+            (List.length no_turn_workers);
+        target_type = "team_session";
+        target_id = Some session.session_id;
+        actor = None;
+        evidence =
+          `Assoc
+            [
+              ( "actors",
+                `List
+                  (List.filter_map
+                     (fun (card : worker_card) ->
+                       Option.map (fun actor -> `String actor) card.actor)
+                     no_turn_workers) );
+            ];
+      }
+      :: base
+    else base
+  in
+  List.sort compare_attention base
+
+let session_recommendations ~(session : Team_session_types.session)
+    ~(attentions : attention_item list) =
+  let suggestions =
+    attentions
+    |> List.filter_map (fun item ->
+           match item.kind with
+           | "spawn_failure_present" ->
+               Some
+                 {
+                   action_type = "team_task_inject";
+                   target_type = "team_session";
+                   target_id = Some session.session_id;
+                   severity = item.severity;
+                   reason = item.summary;
+                   suggested_payload =
+                     `Assoc
+                       [
+                         ("title", `String "Recover failed worker coverage");
+                         ( "description",
+                           `String
+                             "Spawn failure evidence is present. Add explicit recovery work or reassign the missing worker contribution." );
+                         ("priority", `Int 1);
+                       ];
+                 }
+           | "detached_actor_present" ->
+               Some
+                 {
+                   action_type = "team_note";
+                   target_type = "team_session";
+                   target_id = Some session.session_id;
+                   severity = item.severity;
+                   reason = item.summary;
+                   suggested_payload =
+                     `Assoc
+                       [
+                         ( "message",
+                           `String
+                             "[operator] A runtime actor detached. Reassign the missing work and record the replacement explicitly." );
+                       ];
+                 }
+           | "empty_note_turn_present" ->
+               Some
+                 {
+                   action_type = "team_note";
+                   target_type = "team_session";
+                   target_id = Some session.session_id;
+                   severity = item.severity;
+                   reason = item.summary;
+                   suggested_payload =
+                     `Assoc
+                       [
+                         ( "message",
+                           `String
+                             "[operator] Record explicit non-empty contribution notes for each worker turn." );
+                       ];
+                 }
+           | "stalled_session" ->
+               Some
+                 {
+                   action_type = "team_stop";
+                   target_type = "team_session";
+                   target_id = Some session.session_id;
+                   severity = item.severity;
+                   reason = item.summary;
+                   suggested_payload =
+                     `Assoc
+                       [
+                         ("reason", `String "stalled_session_detected");
+                         ("generate_report", `Bool true);
+                       ];
+                 }
+           | "planned_worker_without_turn" ->
+               Some
+                 {
+                   action_type = "team_note";
+                   target_type = "team_session";
+                   target_id = Some session.session_id;
+                   severity = item.severity;
+                   reason = item.summary;
+                   suggested_payload =
+                     `Assoc
+                       [
+                         ( "message",
+                           `String
+                             "[operator] Planned workers have not reported yet. Record a concrete progress note or detach and replace the missing worker." );
+                       ];
+                 }
+           | _ -> None)
+  in
+  dedup_recommendations suggestions
+
+let health_from_attention_items (items : attention_item list) =
+  if
+    List.exists
+      (fun (item : attention_item) -> String.equal item.severity "bad")
+      items
+  then "bad"
+  else if items <> [] then "warn"
+  else "ok"
+
+let normalize_team_health = function
+  | "healthy" -> "ok"
+  | "degraded" -> "warn"
+  | "critical" -> "bad"
+  | other -> other
+
+let build_session_digest config (session : Team_session_types.session) ~now =
+  let status_json = Team_session_engine_eio.session_status_json config session in
+  let summary = U.member "summary" status_json in
+  let team_health = U.member "team_health" status_json in
+  let events = Team_session_store.read_events ~max_events:2000 config session.session_id in
+  let worker_cards = build_worker_cards ~session ~events ~now in
+  let attention_items = session_attention_items ~session ~events ~worker_cards ~now in
+  let recommended_actions =
+    session_recommendations ~session ~attentions:attention_items
+  in
+  let active_agent_count =
+    match U.member "active_agents" summary with
+    | `List xs -> List.length xs
+    | _ -> 0
+  in
+  let last_turn_age_sec =
+    match session.last_turn_at with
+    | Some ts -> Some (max 0 (int_of_float (now -. ts)))
+    | None when session.status = Team_session_types.Running ->
+        Some (max 0 (int_of_float (now -. session.started_at)))
+    | None -> None
+  in
+  {
+    session_id = session.session_id;
+    goal = session.goal;
+    status =
+      (match U.member "session" status_json |> U.member "status" with
+      | `String status -> status
+      | _ -> Team_session_types.status_to_string session.status);
+    health =
+      (let attention_health = health_from_attention_items attention_items in
+       if not (String.equal attention_health "ok") then attention_health
+       else
+         match U.member "status" team_health with
+         | `String status -> normalize_team_health status
+         | _ -> attention_health);
+    planned_worker_count = List.length session.planned_workers;
+    active_agent_count;
+    last_turn_age_sec;
+    attention_items;
+    recommended_actions;
+    worker_cards;
+  }
+
+let build_room_attention_items config =
+  let pending_confirms = read_pending_confirms config in
+  if pending_confirms = [] then []
+  else
+    [
+      {
+        kind = "pending_confirm_waiting";
+        severity = "warn";
+        summary =
+          Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
+            (List.length pending_confirms);
+        target_type = "room";
+        target_id = None;
+        actor = None;
+        evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
+      };
+    ]
+
+let room_recommendations _config = []
+
 type snapshot_view =
   | Summary
   | Sessions
@@ -516,6 +1183,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   let config = ctx.config in
   let initialized = Room.is_initialized config in
   let trace_id = trace_id "ops" in
+  let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
   let view = parse_snapshot_view view in
   let include_sessions =
     include_sessions
@@ -538,23 +1206,143 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     | Summary | Messages | Full -> true
     | Sessions | Keepers -> false
   in
+  let summary_fields =
+    if initialized && (match view with Summary | Full -> true | _ -> false) then
+      let now = Time_compat.now () in
+      let session_digests =
+        Team_session_store.list_sessions config
+        |> List.map (fun session -> build_session_digest config session ~now)
+      in
+      let room_attention =
+        build_room_attention_items config
+        @ (session_digests |> List.concat_map (fun digest -> digest.attention_items))
+        |> List.sort compare_attention
+      in
+      let room_recommendation_items =
+        room_recommendations config
+        @ (session_digests |> List.concat_map (fun digest -> digest.recommended_actions))
+      in
+      [
+        ("attention_summary", summary_of_attention_items room_attention);
+        ( "recommendation_summary",
+          summary_of_recommendations ~actor:actor_name room_recommendation_items );
+      ]
+    else []
+  in
   `Assoc
-    [
-      ("trace_id", `String trace_id);
-      ("server_profile", operator_server_profile_json);
-      ("room", room_json config);
-      ( "sessions",
-        if initialized && include_sessions then sessions_json config
-        else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
-      ( "keepers",
-        if initialized && include_keepers then keepers_json config
-        else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
-      ("command_plane", if initialized then Command_plane_v2.snapshot_json config else `Assoc []);
-      ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
-      ("pending_confirms", pending_confirms_json ?actor config);
-      ("available_actions", available_actions_json);
-      ("recent_actions", recent_actions_json config);
-    ]
+    ([
+       ("trace_id", `String trace_id);
+       ("server_profile", operator_server_profile_json);
+       ("room", room_json config);
+       ( "sessions",
+         if initialized && include_sessions then sessions_json config
+         else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+       ( "keepers",
+         if initialized && include_keepers then keepers_json config
+         else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+       ("command_plane", if initialized then Command_plane_v2.snapshot_json config else `Assoc []);
+       ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
+       ("pending_confirms", pending_confirms_json ?actor config);
+       ("available_actions", available_actions_json);
+       ("recent_actions", recent_actions_json config);
+     ]
+    @ summary_fields)
+
+let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a context) :
+    (Yojson.Safe.t, string) result =
+  let config = ctx.config in
+  if not (Room.is_initialized config) then
+    Ok
+      (`Assoc
+        [
+          ("trace_id", `String (trace_id "opsd"));
+          ("target_type", `String "room");
+          ("target_id", `Null);
+          ("health", `String "ok");
+          ("attention_items", `List []);
+          ("recommended_actions", `List []);
+          ("session_cards", `List []);
+          ("worker_cards", `List []);
+        ])
+  else
+    let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
+    let* target_type = normalize_digest_target_type target_type in
+    let now = Time_compat.now () in
+    match target_type with
+    | "room" ->
+        let sessions =
+          Team_session_store.list_sessions config
+          |> List.map (fun session -> build_session_digest config session ~now)
+          |> List.sort compare_session_digest
+        in
+        let limited_sessions =
+          sessions |> List.to_seq |> Seq.take room_digest_session_limit |> List.of_seq
+        in
+        let attention_items =
+          build_room_attention_items config
+          @ (limited_sessions |> List.concat_map (fun digest -> digest.attention_items))
+          |> List.sort compare_attention
+        in
+        let recommended_actions =
+          dedup_recommendations
+            (room_recommendations config
+            @ (limited_sessions
+              |> List.concat_map (fun digest -> digest.recommended_actions)))
+        in
+        Ok
+          (`Assoc
+            [
+              ("trace_id", `String (trace_id "opsd"));
+              ("target_type", `String "room");
+              ("target_id", `Null);
+              ("health", `String (health_from_attention_items attention_items));
+              ("attention_items", `List (List.map attention_item_to_yojson attention_items));
+              ( "recommended_actions",
+                `List
+                  (List.map (recommended_action_to_yojson ~actor:actor_name)
+                     recommended_actions) );
+              ( "session_cards",
+                `List
+                  (List.map (session_card_to_yojson ~actor:actor_name) limited_sessions)
+              );
+              ("worker_cards", `List []);
+            ])
+    | "team_session" -> (
+        match target_id with
+        | None -> Error "target_id is required when target_type=team_session"
+        | Some session_id -> (
+            match Team_session_store.load_session config session_id with
+            | None ->
+                Error (Printf.sprintf "team session not found: %s" session_id)
+            | Some session ->
+                let digest = build_session_digest config session ~now in
+                let worker_cards =
+                  let should_include =
+                    match include_workers with
+                    | Some value -> value
+                    | None -> true
+                  in
+                  if should_include then digest.worker_cards else []
+                in
+                Ok
+                  (`Assoc
+                    [
+                      ("trace_id", `String (trace_id "opsd"));
+                      ("target_type", `String "team_session");
+                      ("target_id", `String session_id);
+                      ("health", `String digest.health);
+                      ( "attention_items",
+                        `List
+                          (List.map attention_item_to_yojson digest.attention_items)
+                      );
+                      ( "recommended_actions",
+                        `List
+                          (List.map (recommended_action_to_yojson ~actor:actor_name)
+                             digest.recommended_actions) );
+                      ("session_cards", `List [ session_card_to_yojson ~actor:actor_name digest ]);
+                      ("worker_cards", `List (List.map worker_card_to_yojson worker_cards));
+                    ])))
+    | _ -> Error "unsupported target_type"
 
 type action_request = {
   actor : string;

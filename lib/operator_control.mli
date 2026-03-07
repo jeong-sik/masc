@@ -15,6 +15,14 @@ val snapshot_json :
   'a context ->
   Yojson.Safe.t
 
+val digest_json :
+  ?actor:string ->
+  ?target_type:string ->
+  ?target_id:string ->
+  ?include_workers:bool ->
+  'a context ->
+  (Yojson.Safe.t, string) result
+
 val action_json :
   ?actor_hint:string ->
   'a context ->

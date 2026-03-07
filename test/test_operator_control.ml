@@ -88,8 +88,87 @@ let test_snapshot_has_expected_sections () =
         "operator_remote_v1"
         (json |> Yojson.Safe.Util.member "server_profile"
          |> Yojson.Safe.Util.member "name" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check bool) "attention summary present" true
+        (Yojson.Safe.Util.member "attention_summary" json <> `Null);
+      Alcotest.(check bool) "recommendation summary present" true
+        (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with
+         | `List _ -> true
+         | _ -> false))
+
+let test_digest_room_exposes_pending_confirm_attention () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let action_json =
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "operator");
+              ("action_type", `String "task_inject");
+              ("target_type", `String "room");
+              ( "payload",
+                `Assoc
+                  [
+                    ("title", `String "Injected task");
+                    ("description", `String "created by operator");
+                    ("priority", `Int 1);
+                  ] );
+            ])
+      in
+      (match action_json with Ok _ -> () | Error err -> Alcotest.fail err);
+      let digest =
+        match Operator_control.digest_json ~actor:"operator" ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "target_type" "room"
+        Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
+      Alcotest.(check string) "health" "warn"
+        Yojson.Safe.Util.(digest |> member "health" |> to_string);
+      let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
+      Alcotest.(check bool) "pending confirm attention present" true
+        (List.exists
+           (fun item ->
+             Yojson.Safe.Util.(item |> member "kind" |> to_string)
+             = "pending_confirm_waiting")
+           attention_items))
+
+let test_digest_team_session_shape () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let ctx = operator_ctx env sw config "dashboard" in
+      let digest =
+        match
+          Operator_control.digest_json ~actor:"dashboard"
+            ~target_type:"team_session" ~target_id:session_id ctx
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "target_type" "team_session"
+        Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
+      Alcotest.(check string) "target_id" session_id
+        Yojson.Safe.Util.(digest |> member "target_id" |> to_string);
+      Alcotest.(check int) "single session card" 1
+        Yojson.Safe.Util.(digest |> member "session_cards" |> to_list |> List.length);
+      Alcotest.(check bool) "worker_cards list" true
+        (match Yojson.Safe.Util.member "worker_cards" digest with
          | `List _ -> true
          | _ -> false))
 
@@ -530,6 +609,10 @@ let () =
         [
           Alcotest.test_case "snapshot sections" `Quick
             test_snapshot_has_expected_sections;
+          Alcotest.test_case "digest room pending confirm attention" `Quick
+            test_digest_room_exposes_pending_confirm_attention;
+          Alcotest.test_case "digest team session shape" `Quick
+            test_digest_team_session_shape;
           Alcotest.test_case "task inject confirm flow" `Quick
             test_task_inject_requires_confirm_then_executes;
           Alcotest.test_case "team turn fallback actor" `Quick

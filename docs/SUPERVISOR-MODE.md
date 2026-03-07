@@ -16,6 +16,7 @@ Supervisor Mode v1 is built on top of the existing operator surface.
 - Worker endpoint: `/mcp`
 - Supervisor tools:
   - `masc_operator_snapshot`
+  - `masc_operator_digest`
   - `masc_operator_action`
   - `masc_operator_confirm`
 - Worker substrate:
@@ -91,16 +92,16 @@ Default policy:
 Recommended loop for Codex or Claude Code in a TUI:
 
 1. Call `masc_operator_snapshot` with `view="summary"` for low-cost polling.
-2. Re-run with `view="full"` when intervention looks necessary.
+2. Call `masc_operator_digest` for the room or a specific team session.
 3. Diagnose using:
-   - active session state
-   - recent messages
-   - pending confirmations
-   - recent operator actions
+   - digest `health`
+   - prioritized `attention_items`
+   - advisory `recommended_actions`
+   - recent messages and pending confirmations from snapshot
 4. Call `masc_operator_action`.
 5. If `confirm_required=true`, inspect `preview` and wait for human approval.
 6. Call `masc_operator_confirm`.
-7. Re-check with `masc_operator_snapshot` and `masc_team_session_events`.
+7. Re-check with `masc_operator_snapshot`, `masc_operator_digest`, and `masc_team_session_events`.
 
 ## Human Confirm Gate
 
@@ -178,6 +179,7 @@ url = "https://your-host.example.com/mcp/operator"
 bearer_token_env_var = "MASC_OPERATOR_TOKEN"
 enabled_tools = [
   "masc_operator_snapshot",
+  "masc_operator_digest",
   "masc_operator_action",
   "masc_operator_confirm",
 ]
@@ -187,23 +189,25 @@ tool_timeout_sec = 60
 
 Typical flow:
 
-1. `masc_operator_snapshot(view="full")`
-2. `masc_operator_action(action_type="team_note", target_id="ts-...", payload={message:"..."})`
-3. `masc_operator_action(action_type="team_task_inject", target_id="ts-...", payload={title:"...", description:"...", priority:1})`
-4. inspect preview
-5. `masc_operator_confirm(confirm_token="...")`
-6. `masc_team_session_events(session_id="ts-...")` via `/mcp`
+1. `masc_operator_snapshot(view="summary")`
+2. `masc_operator_digest(target_type="team_session", target_id="ts-...")`
+3. `masc_operator_action(action_type="team_note", target_id="ts-...", payload={message:"..."})`
+4. `masc_operator_action(action_type="team_task_inject", target_id="ts-...", payload={title:"...", description:"...", priority:1})`
+5. inspect preview
+6. `masc_operator_confirm(confirm_token="...")`
+7. `masc_team_session_events(session_id="ts-...")` via `/mcp`
 
 ## Claude Code Example
 
-Register the same remote MCP server and restrict the exposed tool allowlist to the operator trio.
+Register the same remote MCP server and restrict the exposed tool allowlist to the operator quartet.
 
 Recommended pattern:
 
-1. read snapshot
-2. issue one structured action
-3. wait for confirm when required
-4. re-check team-session evidence through `/mcp`
+1. read summary snapshot
+2. read digest
+3. issue one structured action
+4. wait for confirm when required
+5. re-check team-session evidence through `/mcp`
 
 ## Harness
 

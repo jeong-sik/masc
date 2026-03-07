@@ -320,16 +320,21 @@ printf '[7/10] inspect remote operator surface\n'
 tools_raw="$(jsonrpc_call "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 4 "tools/list" '{}')"
 require_success_response "$tools_raw"
 tool_count="$(printf '%s' "$tools_raw" | jq -r '.result.tools | length')"
-if [ "$tool_count" -ne 3 ]; then
-  echo "FAIL: expected 3 operator tools, got $tool_count"
+if [ "$tool_count" -ne 4 ]; then
+  echo "FAIL: expected 4 operator tools, got $tool_count"
   printf '%s\n' "$tools_raw"
   exit 1
 fi
-printf '%s' "$tools_raw" | jq -e '.result.tools | map(.name) | sort == ["masc_operator_action","masc_operator_confirm","masc_operator_snapshot"]' >/dev/null
+printf '%s' "$tools_raw" | jq -e '.result.tools | map(.name) | sort == ["masc_operator_action","masc_operator_confirm","masc_operator_digest","masc_operator_snapshot"]' >/dev/null
 
 snapshot_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 5 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
 require_tool_success "$snapshot_raw"
 printf '%s' "$snapshot_raw" | extract_tool_result | jq -e '.sessions.items | length >= 1' >/dev/null
+printf '%s' "$snapshot_raw" | extract_tool_result | jq -e '.attention_summary.count >= 0 and .recommendation_summary.count >= 0' >/dev/null
+
+digest_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 55 "masc_operator_digest" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,target_type:"team_session",target_id:$s}')")"
+require_tool_success "$digest_raw"
+printf '%s' "$digest_raw" | extract_tool_result | jq -e '.target_type == "team_session" and .target_id == $session and (.health | type == "string") and (.attention_items | type == "array") and (.recommended_actions | type == "array")' --arg session "$TEAM_SESSION_ID" >/dev/null
 
 printf '[8/10] supervisor immediate correction via team_note\n'
 team_note_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_note",target_id:$s,payload:{message:"[supervisor] keep the proof focused on the MCP loop"}}')")"

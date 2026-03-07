@@ -12,8 +12,9 @@
 
 - Streamable HTTP / SSE endpoint: `GET|POST|DELETE /mcp/operator`
 - Authentication: bearer token only
-- Tool surface: exactly 3 tools
+- Tool surface: exactly 4 tools
   - `masc_operator_snapshot`
+  - `masc_operator_digest`
   - `masc_operator_action`
   - `masc_operator_confirm`
 
@@ -35,6 +36,15 @@ Read-only room control-plane view.
 
 - Returns room summary, sessions, keepers, recent messages, pending confirmations, available actions, `trace_id`, and server profile metadata.
 - Supports `view` values: `summary`, `sessions`, `keepers`, `messages`, `full`.
+- `view="summary"` and `view="full"` also include lightweight `attention_summary` and `recommendation_summary` counts.
+
+### `masc_operator_digest`
+
+Intervention-oriented read model.
+
+- Use this when raw snapshot data is too low-level and you need actionable supervision hints.
+- Returns `health`, prioritized `attention_items`, advisory `recommended_actions`, and session/worker cards.
+- Supports room-wide digests and session-targeted digests through `target_type` and `target_id`.
 
 ### `masc_operator_action`
 
@@ -89,6 +99,7 @@ url = "https://your-host.example.com/mcp/operator"
 bearer_token_env_var = "MASC_OPERATOR_TOKEN"
 enabled_tools = [
   "masc_operator_snapshot",
+  "masc_operator_digest",
   "masc_operator_action",
   "masc_operator_confirm",
 ]
@@ -100,13 +111,14 @@ Optional static or environment-backed headers can also be used when the client s
 
 ## Claude Code
 
-Claude Code can connect to remote MCP servers. Register the same `/mcp/operator` URL and bearer token in the client's MCP configuration, and keep the exposed tool allowlist restricted to the operator trio.
+Claude Code can connect to remote MCP servers. Register the same `/mcp/operator` URL and bearer token in the client's MCP configuration, and keep the exposed tool allowlist restricted to the operator quartet.
 
 Recommended usage pattern:
 
-1. Call `masc_operator_snapshot`.
-2. Call `masc_operator_action`.
-3. If `confirm_required=true`, inspect the preview and then call `masc_operator_confirm`.
+1. Call `masc_operator_snapshot(view="summary")`.
+2. Call `masc_operator_digest`.
+3. Call `masc_operator_action`.
+4. If `confirm_required=true`, inspect the preview and then call `masc_operator_confirm`.
 
 ## ChatGPT Developer Mode
 

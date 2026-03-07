@@ -69,6 +69,36 @@ let snapshot_schema ~remote =
         ];
   }
 
+let digest_target_type_enums = [ `String "room"; `String "team_session" ]
+
+let digest_schema ~remote =
+  {
+    name = "masc_operator_digest";
+    description =
+      if remote then
+        "Read an intervention-oriented operator digest. Use this when you need health, attention items, worker summaries, and recommended next actions before deciding how to intervene."
+      else
+        "Read a high-signal operator digest with intervention recommendations for the room or a specific team session. Use this when raw snapshot data is too low-level for fast supervision.";
+    input_schema =
+      `Assoc
+        [
+          ("type", `String "object");
+          ( "properties",
+            schema_properties
+              [
+                ("actor", `Assoc [ ("type", `String "string") ]);
+                ( "target_type",
+                  `Assoc
+                    [
+                      ("type", `String "string");
+                      ("enum", `List digest_target_type_enums);
+                    ] );
+                ("target_id", `Assoc [ ("type", `String "string") ]);
+                ("include_workers", `Assoc [ ("type", `String "boolean") ]);
+              ] );
+        ];
+  }
+
 let action_schema ~remote =
   let enum_values =
     if remote then strict_action_enums else strict_action_enums @ legacy_action_alias_enums
@@ -152,6 +182,15 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
           Yojson.Safe.to_string
             (Operator_control.snapshot_json ?actor ?view ~include_messages ~include_sessions
                ~include_keepers control_ctx) )
+  | "masc_operator_digest" ->
+      let actor = get_string_opt args "actor" in
+      let target_type = get_string_opt args "target_type" in
+      let target_id = get_string_opt args "target_id" in
+      let include_workers = get_bool args "include_workers" true in
+      Some
+        (json_string_of_result
+           (Operator_control.digest_json ?actor ?target_type ?target_id
+              ~include_workers control_ctx))
   | "masc_operator_action" ->
       Some (json_string_of_result (Operator_control.action_json control_ctx args))
   | "masc_operator_confirm" ->
@@ -159,10 +198,20 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
   | _ -> None
 
 let schemas : tool_schema list =
-  [ snapshot_schema ~remote:false; action_schema ~remote:false; confirm_schema ]
+  [
+    snapshot_schema ~remote:false;
+    digest_schema ~remote:false;
+    action_schema ~remote:false;
+    confirm_schema;
+  ]
 
 let remote_schemas : tool_schema list =
-  [ snapshot_schema ~remote:true; action_schema ~remote:true; confirm_schema ]
+  [
+    snapshot_schema ~remote:true;
+    digest_schema ~remote:true;
+    action_schema ~remote:true;
+    confirm_schema;
+  ]
 
 let remote_tool_names : string list =
   List.map (fun (schema : tool_schema) -> schema.name) remote_schemas

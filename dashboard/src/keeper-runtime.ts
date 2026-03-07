@@ -140,6 +140,15 @@ function quietReasonSummary(healthState: KeeperDiagnostic['health_state'], quiet
   return 'Keeper is reachable. Send a direct message for an immediate response.'
 }
 
+function diagnosticSummary(rawSummary: unknown, healthState: KeeperDiagnostic['health_state'], quietReason: KeeperDiagnostic['quiet_reason']): string {
+  return asString(rawSummary) ?? quietReasonSummary(healthState, quietReason)
+}
+
+function diagnosticRecoverable(rawRecoverable: unknown, nextActionPath: KeeperDiagnostic['next_action_path']): boolean {
+  if (typeof rawRecoverable === 'boolean') return rawRecoverable
+  return nextActionPath === 'recover'
+}
+
 export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null {
   if (!isRecord(raw)) return null
   const healthState = asString(raw.health_state)
@@ -155,8 +164,8 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     last_reply_preview: asString(raw.last_reply_preview) ?? null,
     last_error: asString(raw.last_error) ?? null,
     next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,
-    recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
-    summary: asString(raw.summary),
+    recoverable: diagnosticRecoverable(raw.recoverable, nextActionPath as KeeperDiagnostic['next_action_path']),
+    summary: diagnosticSummary(raw.summary, healthState as KeeperDiagnostic['health_state'], (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason']),
     keepalive_running: typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
   }
 }
@@ -298,8 +307,8 @@ export function deriveKeeperDiagnostic(
     last_reply_preview: null,
     last_error: lastError,
     next_eligible_at_s: nextEligibleAtS != null && nextEligibleAtS > 0 ? nextEligibleAtS : null,
-    recoverable: nextActionPath === 'recover',
-    summary: quietReasonSummary(healthState, quietReason),
+    recoverable: diagnosticRecoverable(undefined, nextActionPath),
+    summary: diagnosticSummary(undefined, healthState, quietReason),
     keepalive_running: keepaliveRunning,
   }
 }

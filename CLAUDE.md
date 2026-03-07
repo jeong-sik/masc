@@ -52,6 +52,24 @@ let cmd = Printf.sprintf
 } } } }
 ```
 
+## Usage SSOT
+
+MASC usage는 문서마다 흩어져 있지 않다. 아래 문서를 기준으로 본다.
+
+- `docs/COMMAND-PLANE-RUNBOOK.md`
+  - room/task hygiene
+  - CPv2 benchmark / swarm canonical path
+- `docs/BENCHMARK-RUNBOOK.md`
+  - single-agent vs swarm benchmark recipe
+- `docs/SUPERVISOR-MODE.md`
+  - supervised team-session/operator path
+
+주의:
+
+- benchmark/swarm canonical path는 `CPv2 direct`다.
+- `team_session` / `operator`는 supervisor path다.
+- `masc_swarm_*`는 더 이상 기본 공개 control path가 아니다.
+
 ## LLM Cascade
 
 Heartbeat의 LLM 호출 순서:

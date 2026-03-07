@@ -253,7 +253,7 @@ let schemas : tool_schema list =
     {
       name = "masc_unit_define";
       description =
-        "Create or update a Command Plane V2 unit. Use this to define company/platoon/squad/agent hierarchy, leaders, and budget envelopes for large-scale dispatch.";
+        "CPv2 benchmark step 1. Create or update a managed company/platoon/squad/agent unit before starting operations.";
       input_schema =
         object_schema ~required:[ "kind"; "label" ]
           [
@@ -318,7 +318,7 @@ let schemas : tool_schema list =
     {
       name = "masc_operation_start";
       description =
-        "Start a managed Command Plane V2 operation and assign it to a unit after guard checks for leadership, live roster, and operation capacity.";
+        "CPv2 benchmark step 2. Start a managed operation on a ready unit after leadership, live-roster, and capacity checks pass.";
       input_schema =
         object_schema ~required:[ "assigned_unit_id"; "objective" ]
           [
@@ -337,10 +337,10 @@ let schemas : tool_schema list =
     {
       name = "masc_operation_status";
       description =
-        "Read Command Plane V2 operations. Optionally filter by operation_id or trace_id.";
+        "Read Command Plane V2 operations. Use this after operation_start or later during CPv2 benchmark triage.";
       input_schema =
         object_schema
-          [ ("operation_id", string_prop "Operation id or trace id to filter."); ];
+          [ ("operation_id", string_prop "Operation id to filter."); ];
     };
     {
       name = "masc_operation_checkpoint";
@@ -466,7 +466,7 @@ let schemas : tool_schema list =
     {
       name = "masc_dispatch_tick";
       description =
-        "Run one deterministic Command Plane V2 reconcile tick. This syncs managed detachments, detects stalled leaders, promotes same-squad failover when possible, and creates company approvals when escalation is required.";
+        "CPv2 benchmark step 3. Run one deterministic reconcile tick to materialize or repair detachments, failover, approvals, alerts, and traces.";
       input_schema =
         object_schema
           [
@@ -477,7 +477,7 @@ let schemas : tool_schema list =
     {
       name = "masc_detachment_list";
       description =
-        "List Command Plane V2 detachments, including managed and projected rows, with optional filters for operation_id or detachment_id.";
+        "CPv2 benchmark observe step. List managed and projected detachments after dispatch/tick to confirm runtime materialization.";
       input_schema =
         object_schema
           [
@@ -488,7 +488,7 @@ let schemas : tool_schema list =
     {
       name = "masc_detachment_status";
       description =
-        "Inspect one Command Plane V2 detachment with runtime, heartbeat, failover, and approval context.";
+        "CPv2 benchmark observe step. Inspect one detachment with runtime, heartbeat, failover, and approval context.";
       input_schema =
         object_schema ~required:[ "detachment_id" ]
           [
@@ -498,7 +498,7 @@ let schemas : tool_schema list =
     {
       name = "masc_policy_status";
       description =
-        "Read CPv2 policy decisions, approval queue, capacity overlays, and topology state.";
+        "CPv2 benchmark approval step. Read policy decisions, approval queue, capacity overlays, and topology state before strict actions.";
       input_schema = object_schema [];
     };
     {
@@ -560,7 +560,7 @@ let schemas : tool_schema list =
     {
       name = "masc_observe_topology";
       description =
-        "Read the Command Plane V2 topology tree with company/platoon/squad/agent hierarchy, live roster health, and active operation counts.";
+        "CPv2 benchmark observe step. Read company/platoon/squad/agent topology with live roster health and active operation counts.";
       input_schema = object_schema [];
     };
     {
@@ -572,23 +572,23 @@ let schemas : tool_schema list =
     {
       name = "masc_observe_alerts";
       description =
-        "Read derived Command Plane V2 alerts such as leader loss, over-capacity units, quiet detachments, and orphaned operations.";
+        "CPv2 benchmark observe step. Read derived alerts such as leader loss, over-capacity units, quiet detachments, and orphaned operations.";
       input_schema = object_schema [];
     };
     {
       name = "masc_observe_capacity";
       description =
-        "Read per-unit capacity envelopes, live roster counts, and operation utilization.";
+        "CPv2 benchmark observe step. Read per-unit capacity envelopes, live roster counts, and operation utilization.";
       input_schema = object_schema [];
     };
     {
       name = "masc_observe_traces";
       description =
-        "Read recent Command Plane V2 trace events, optionally filtered to a single operation or trace id.";
+        "CPv2 benchmark observe step. Read recent trace events for a single operation or the whole command plane.";
       input_schema =
         object_schema
           [
-            ("operation_id", string_prop "Operation id or trace id.");
+            ("operation_id", string_prop "Operation id.");
             ("limit", integer_prop ~default:25 "Maximum events to return.");
           ];
     };

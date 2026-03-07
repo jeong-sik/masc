@@ -5,22 +5,30 @@ import type {
   CommandPlaneCapacityRow,
   CommandPlaneDecisionRecord,
   CommandPlaneDetachmentCard,
+  CommandPlaneHelpPath,
+  CommandPlaneHelpPitfall,
+  CommandPlaneHelpStep,
   CommandPlaneOperationCard,
   CommandPlaneSurface,
   CommandPlaneTraceEvent,
   CommandPlaneTreeNode,
+  Task,
 } from '../types'
 import {
   approveCommandPlaneDecision,
   commandPlaneActionBusy,
   commandPlaneActionError,
   commandPlaneError,
+  commandPlaneHelp,
+  commandPlaneHelpError,
+  commandPlaneHelpLoading,
   commandPlaneLoading,
   commandPlaneSnapshot,
   commandPlaneSurface,
   denyCommandPlaneDecision,
   pauseCommandPlaneOperation,
   recallCommandPlaneOperation,
+  refreshCommandPlaneHelp,
   refreshCommandPlaneSnapshot,
   runCommandPlaneDispatchTick,
   resumeCommandPlaneOperation,
@@ -28,6 +36,7 @@ import {
   toggleCommandPlaneFreeze,
   toggleCommandPlaneKillSwitch,
 } from '../command-store'
+import { agents, serverStatus, tasks } from '../store'
 
 function prettyJson(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -94,6 +103,47 @@ function actionDisabled(key: string): boolean {
   return commandPlaneActionBusy.value === key
 }
 
+function dashboardActorName(): string | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  const value = params.get('agent') ?? params.get('agent_name')
+  if (!value) return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+function lastSeenAgeSeconds(iso?: string | null): number | null {
+  if (!iso) return null
+  const ts = Date.parse(iso)
+  if (Number.isNaN(ts)) return null
+  return Math.max(0, Math.round((Date.now() - ts) / 1000))
+}
+
+function isActiveTask(task: Task): boolean {
+  return task.status === 'claimed' || task.status === 'in_progress'
+}
+
+function findHelpStep(toolName: string): CommandPlaneHelpStep | null {
+  const help = commandPlaneHelp.value
+  if (!help) return null
+  for (const path of help.golden_paths) {
+    const matched = path.steps.find(step => step.tool === toolName)
+    if (matched) return matched
+  }
+  return null
+}
+
+function findHelpPath(pathId: string): CommandPlaneHelpPath | null {
+  return commandPlaneHelp.value?.golden_paths.find(path => path.id === pathId) ?? null
+}
+
+function relevantPitfalls(ids: string[]): CommandPlaneHelpPitfall[] {
+  const help = commandPlaneHelp.value
+  if (!help) return []
+  const wanted = new Set(ids)
+  return help.pitfalls.filter(pitfall => wanted.has(pitfall.id))
+}
+
 async function fire(action: () => Promise<void>) {
   try {
     await action()
@@ -130,6 +180,257 @@ function SurfaceTabs() {
           ${surface}
         </button>
       `)}
+    </div>
+  `
+}
+
+function GuidedPanel() {
+  const snapshot = commandPlaneSnapshot.value
+  const status = serverStatus.value
+  const actorName = dashboardActorName()
+  const actor = actorName ? agents.value.find(item => item.name === actorName) ?? null : null
+  const actorTasks = actorName ? tasks.value.filter(task => task.assignee === actorName && isActiveTask(task)) : []
+  const activeOps = snapshot?.operations.summary?.active ?? 0
+  const detachments = snapshot?.detachments.summary?.total ?? 0
+  const pendingDecisions = snapshot?.decisions.summary?.pending ?? 0
+  const stalledDetachment = snapshot?.detachments.detachments.find(card => {
+    const heartbeatDeadline = card.detachment.heartbeat_deadline
+    const deadlineTs = heartbeatDeadline ? Date.parse(heartbeatDeadline) : Number.NaN
+    return card.detachment.status === 'stalled' || (!Number.isNaN(deadlineTs) && deadlineTs <= Date.now())
+  })
+  const badAlert = snapshot?.alerts.alerts.find(alert => alert.severity === 'bad')
+  const roomReady = Boolean(status?.room || status?.project)
+  const currentTask = actor?.current_task ?? null
+  const lastSeenAge = lastSeenAgeSeconds(actor?.last_seen)
+  const heartbeatFresh = lastSeenAge != null ? lastSeenAge <= 120 : null
+
+  const readiness = [
+    roomReady
+      ? {
+          title: 'Room readiness',
+          tone: 'ok',
+          detail: `${status?.room ?? status?.project ?? 'unknown'} · base ${status?.room_base_path ?? 'n/a'}`,
+          tool: 'masc_status',
+        }
+      : {
+          title: 'Room readiness',
+          tone: 'bad',
+          detail: 'No room snapshot yet. Set room to repo root before joining.',
+          tool: 'masc_set_room',
+        },
+    !actorName
+      ? {
+          title: 'Task readiness',
+          tone: 'warn',
+          detail: 'No ?agent= query param. Dashboard can show room health but not agent-specific next steps.',
+          tool: 'masc_join',
+        }
+      : !actor
+        ? {
+            title: 'Task readiness',
+            tone: 'bad',
+            detail: `${actorName} is not visible in the room roster.`,
+            tool: 'masc_join',
+          }
+        : actorTasks.length === 0
+          ? {
+              title: 'Task readiness',
+              tone: 'warn',
+              detail: `${actorName} has no claimed task. Claim one or create one first.`,
+              tool: tasks.value.length > 0 ? 'masc_claim' : 'masc_add_task',
+            }
+          : !currentTask
+            ? {
+                title: 'Task readiness',
+                tone: 'bad',
+                detail: `${actorName} has a claimed task but no session current_task binding.`,
+                tool: 'masc_plan_set_task',
+              }
+            : heartbeatFresh === false
+              ? {
+                  title: 'Task readiness',
+                  tone: 'warn',
+                  detail: `${actorName} current_task=${currentTask}, but heartbeat is stale (${lastSeenAge}s).`,
+                  tool: 'masc_heartbeat',
+                }
+              : {
+                  title: 'Task readiness',
+                  tone: 'ok',
+                  detail: `${actorName} current_task=${currentTask}${lastSeenAge != null ? ` · last seen ${lastSeenAge}s ago` : ''}`,
+                  tool: 'masc_plan_get_task',
+                },
+    !snapshot || (snapshot.topology.summary?.managed_unit_count ?? 0) === 0
+      ? {
+          title: 'Operation readiness',
+          tone: 'warn',
+          detail: 'No managed units defined yet. CPv2 benchmark cannot start before hierarchy exists.',
+          tool: 'masc_unit_define',
+        }
+      : activeOps === 0
+        ? {
+            title: 'Operation readiness',
+            tone: 'warn',
+            detail: `${snapshot.topology.summary?.managed_unit_count ?? 0} managed units are ready, but there is no active operation.`,
+            tool: 'masc_operation_start',
+          }
+        : {
+            title: 'Operation readiness',
+            tone: 'ok',
+            detail: `${activeOps} active operation(s) across ${snapshot.topology.summary?.managed_unit_count ?? 0} managed unit(s).`,
+            tool: 'masc_observe_operations',
+          },
+    pendingDecisions > 0
+      ? {
+          title: 'Dispatch readiness',
+          tone: 'warn',
+          detail: `${pendingDecisions} pending approval(s) are blocking strict actions.`,
+          tool: 'masc_policy_approve',
+        }
+      : activeOps > 0 && detachments === 0
+        ? {
+            title: 'Dispatch readiness',
+            tone: 'bad',
+            detail: 'Active operation exists but no detachment has been materialized yet.',
+            tool: 'masc_dispatch_tick',
+          }
+        : stalledDetachment || badAlert
+          ? {
+              title: 'Dispatch readiness',
+              tone: 'warn',
+              detail: `Dispatch needs reconciliation${stalledDetachment ? ` · detachment ${stalledDetachment.detachment.detachment_id} is stalled` : ''}${badAlert ? ` · alert ${badAlert.title ?? badAlert.alert_id}` : ''}.`,
+              tool: pendingDecisions > 0 ? 'masc_policy_approve' : 'masc_dispatch_tick',
+            }
+          : {
+              title: 'Dispatch readiness',
+              tone: 'ok',
+              detail: `${detachments} detachment(s) visible and no strict approval backlog.`,
+              tool: 'masc_detachment_list',
+            },
+  ]
+
+  const nextTool =
+    !roomReady
+      ? 'masc_set_room'
+      : !actorName || !actor
+        ? 'masc_join'
+        : actorTasks.length === 0
+          ? (tasks.value.length > 0 ? 'masc_claim' : 'masc_add_task')
+          : !currentTask
+            ? 'masc_plan_set_task'
+            : heartbeatFresh === false
+              ? 'masc_heartbeat'
+              : !snapshot || (snapshot.topology.summary?.managed_unit_count ?? 0) === 0
+                ? 'masc_unit_define'
+                : activeOps === 0
+                  ? 'masc_operation_start'
+                  : pendingDecisions > 0
+                    ? 'masc_policy_approve'
+                    : activeOps > 0 && detachments === 0
+                      ? 'masc_dispatch_tick'
+                      : stalledDetachment || badAlert
+                        ? 'masc_dispatch_tick'
+                        : 'masc_observe_traces'
+  const nextStep = findHelpStep(nextTool)
+  const pitfallIds =
+    nextTool === 'masc_set_room'
+      ? ['repo-root-room']
+      : nextTool === 'masc_plan_set_task'
+        ? ['claimed-not-current']
+        : nextTool === 'masc_heartbeat'
+          ? ['heartbeat-stale']
+          : nextTool === 'masc_dispatch_tick'
+            ? ['no-detachments']
+            : nextTool === 'masc_policy_approve'
+              ? ['pending-approval']
+              : ['repo-root-room', 'claimed-not-current', 'heartbeat-stale']
+  const pitfalls = relevantPitfalls(pitfallIds).slice(0, 2)
+  const roomPath = findHelpPath('room_task_hygiene')
+  const benchmarkPath = findHelpPath('cpv2_benchmark')
+  const supervisorPath = findHelpPath('supervisor_session')
+  const docs = commandPlaneHelp.value?.docs ?? []
+  const renderedPaths = [roomPath, benchmarkPath, supervisorPath].filter(
+    (item): item is CommandPlaneHelpPath => item !== null,
+  )
+
+  return html`
+    <div class="command-guide-grid">
+      <section class="card command-section">
+        <div class="card-title">Readiness</div>
+        <div class="command-guide-readiness">
+          ${readiness.map(item => html`
+            <article class="command-guide-card ${toneClass(item.tone)}">
+              <div class="command-guide-head">
+                <strong>${item.title}</strong>
+                <span class="command-chip ${toneClass(item.tone)}">${item.tone}</span>
+              </div>
+              <p>${item.detail}</p>
+              <div class="command-card-foot">Next tool: ${item.tool}</div>
+            </article>
+          `)}
+        </div>
+      </section>
+
+      <section class="card command-section">
+        <div class="card-title">Next Step</div>
+        <article class="command-guide-card highlight">
+          <div class="command-guide-head">
+            <strong>${nextStep?.title ?? nextTool}</strong>
+            <span class="command-chip ok">${nextTool}</span>
+          </div>
+          <p>${nextStep?.summary ?? 'Use the next tool in the canonical flow to remove the current blocker.'}</p>
+          ${nextStep?.success_signals?.length
+            ? html`<div class="command-tag-row">
+                ${nextStep.success_signals.map(signal => html`<span class="command-tag ok">${signal}</span>`)}
+              </div>`
+            : null}
+          ${pitfalls.length > 0
+            ? html`<div class="command-guide-list">
+                ${pitfalls.map(pitfall => html`
+                  <article class="command-guide-inline">
+                    <strong>${pitfall.title}</strong>
+                    <div>${pitfall.symptom}</div>
+                    <div class="command-card-sub">Fix with ${pitfall.fix_tool}: ${pitfall.fix_summary}</div>
+                  </article>
+                `)}
+              </div>`
+            : null}
+        </article>
+      </section>
+
+      <section class="card command-section">
+        <div class="card-title">How It Works</div>
+        ${commandPlaneHelpLoading.value
+          ? html`<div class="empty-state">Loading CPv2 runbook…</div>`
+          : commandPlaneHelpError.value
+            ? html`<div class="empty-state error">${commandPlaneHelpError.value}</div>`
+            : html`
+                <div class="command-guide-paths">
+                  ${renderedPaths.map(path => html`
+                    <article class="command-guide-card">
+                      <div class="command-guide-head">
+                        <strong>${path.title}</strong>
+                        <span class="command-chip">${path.id}</span>
+                      </div>
+                      <p>${path.summary}</p>
+                      <div class="command-card-sub">${path.when_to_use}</div>
+                      <div class="command-step-list">
+                        ${path.steps.map(step => html`
+                          <div class="command-step-row">
+                            <span class="command-step-tool">${step.tool}</span>
+                            <span>${step.title}</span>
+                          </div>
+                        `)}
+                      </div>
+                    </article>
+                  `)}
+                </div>
+                ${docs.length > 0
+                  ? html`<div class="command-doc-links">
+                      ${docs.map(doc => html`<span class="command-tag">${doc.title}: ${doc.path}</span>`)}
+                    </div>`
+                  : null}
+              `}
+      </section>
     </div>
   `
 }
@@ -472,6 +773,7 @@ function SurfaceBody() {
 export function Command() {
   useEffect(() => {
     void refreshCommandPlaneSnapshot()
+    void refreshCommandPlaneHelp()
   }, [])
 
   return html`
@@ -505,6 +807,7 @@ export function Command() {
         : null}
 
       <${SummaryCards} />
+      <${GuidedPanel} />
       <${SurfaceTabs} />
       <${SurfaceBody} />
     </section>

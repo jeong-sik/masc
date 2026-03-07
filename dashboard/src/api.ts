@@ -19,6 +19,7 @@ import type {
   OperatorActionRequest,
   OperatorActionResult,
   OperatorSnapshot,
+  CommandPlaneSnapshot,
 } from './types'
 
 // --- Auth ---
@@ -276,6 +277,17 @@ export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
   return get('/api/v1/operator')
 }
 
+export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {
+  return get('/api/v1/command-plane')
+}
+
+export function runCommandPlaneAction(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  return post(path, body)
+}
+
 function operatorActionTimeoutMs(body: OperatorActionRequest): number {
   switch (body.action_type) {
     case 'keeper_msg':
@@ -288,7 +300,6 @@ function operatorActionTimeoutMs(body: OperatorActionRequest): number {
       return DEFAULT_POST_TIMEOUT_MS
   }
 }
-
 export function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {
   return post('/api/v1/operator/action', body, undefined, operatorActionTimeoutMs(body))
 }

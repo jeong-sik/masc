@@ -194,7 +194,10 @@
  (name test_tool_keeper)
  (modules test_tool_keeper)
  (libraries masc_mcp alcotest unix))
-
+(test
+ (name test_tool_council)
+ (modules test_tool_council)
+ (libraries masc_mcp alcotest yojson unix))
 ; Dispatch chain evidence test
 (test
  (name test_dispatch_chain_evidence)

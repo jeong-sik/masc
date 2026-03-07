@@ -89,9 +89,13 @@ type detachment_record = {
   roster : string list;
   session_id : string option;
   checkpoint_ref : string option;
+  runtime_kind : string option;
+  runtime_ref : string option;
   source : string;
   status : string;
   last_event_at : string option;
+  last_progress_at : string option;
+  heartbeat_deadline : string option;
   created_at : string;
   updated_at : string;
 }
@@ -570,9 +574,14 @@ let detachment_to_json (detachment : detachment_record) =
       ("session_id", match detachment.session_id with Some value -> `String value | None -> `Null);
       ( "checkpoint_ref",
         match detachment.checkpoint_ref with Some value -> `String value | None -> `Null );
+      ("runtime_kind", match detachment.runtime_kind with Some value -> `String value | None -> `Null);
+      ("runtime_ref", match detachment.runtime_ref with Some value -> `String value | None -> `Null);
       ("source", `String detachment.source);
       ("status", `String detachment.status);
       ("last_event_at", match detachment.last_event_at with Some value -> `String value | None -> `Null);
+      ("last_progress_at", match detachment.last_progress_at with Some value -> `String value | None -> `Null);
+      ( "heartbeat_deadline",
+        match detachment.heartbeat_deadline with Some value -> `String value | None -> `Null );
       ("created_at", `String detachment.created_at);
       ("updated_at", `String detachment.updated_at);
     ]
@@ -589,9 +598,13 @@ let detachment_of_json json =
           roster = get_string_list json "roster";
           session_id = get_string_opt json "session_id";
           checkpoint_ref = get_string_opt json "checkpoint_ref";
+          runtime_kind = get_string_opt json "runtime_kind";
+          runtime_ref = get_string_opt json "runtime_ref";
           source = get_string_default json "source" "managed";
           status = get_string_default json "status" "active";
           last_event_at = get_string_opt json "last_event_at";
+          last_progress_at = get_string_opt json "last_progress_at";
+          heartbeat_deadline = get_string_opt json "heartbeat_deadline";
           created_at = get_string_default json "created_at" (Types.now_iso ());
           updated_at = get_string_default json "updated_at" (Types.now_iso ());
         }
@@ -1197,6 +1210,52 @@ let iso_of_unix unix_ts =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour
     tm.Unix.tm_min tm.Unix.tm_sec
 
+let days_from_civil year month day =
+  let year = if month <= 2 then year - 1 else year in
+  let era = if year >= 0 then year / 400 else (year - 399) / 400 in
+  let yoe = year - (era * 400) in
+  let month_prime = if month > 2 then month - 3 else month + 9 in
+  let doy = ((153 * month_prime) + 2) / 5 + day - 1 in
+  let doe = (yoe * 365) + (yoe / 4) - (yoe / 100) + doy in
+  (era * 146097) + doe - 719468
+
+let parse_iso_timestamp (s : string) : float option =
+  try
+    let open Scanf in
+    sscanf s "%04d-%02d-%02dT%02d:%02d:%02dZ" (fun y m d h min sec ->
+        let days = days_from_civil y m d in
+        let seconds =
+          (days * 86_400) + (h * 3_600) + (min * 60) + sec
+        in
+        Some (float_of_int seconds))
+  with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+
+let iso_after_seconds base seconds =
+  parse_iso_timestamp base
+  |> Option.map (fun ts -> iso_of_unix (ts +. float_of_int seconds))
+
+let iso_expired_at now deadline =
+  match parse_iso_timestamp deadline with
+  | Some ts -> ts <= now
+  | None -> false
+
+let rec descendant_units_of_kind units unit_id kind =
+  let direct_children =
+    units
+    |> List.filter (fun (unit : unit_record) ->
+           match unit.parent_unit_id with
+           | Some parent_id -> String.equal parent_id unit_id
+           | None -> false)
+  in
+  let direct_matches =
+    direct_children
+    |> List.filter (fun (unit : unit_record) -> unit.kind = kind)
+  in
+  direct_matches
+  @ List.concat_map
+      (fun (child : unit_record) -> descendant_units_of_kind units child.unit_id kind)
+      direct_children
+
 let projected_team_session_operations config units managed_operations =
   let managed_session_ids =
     managed_operations
@@ -1324,9 +1383,13 @@ let projected_team_session_detachments config operations =
                      roster = filter_nonempty_strings session.agent_names;
                      session_id = Some session_id;
                      checkpoint_ref = nonempty_string (Some session.artifacts_dir);
+                     runtime_kind = Some "team_session";
+                     runtime_ref = Some session_id;
                      source = "projected";
                      status = string_of_operation_status operation.status;
                      last_event_at = Option.map iso_of_unix session.last_event_at;
+                     last_progress_at = Option.map iso_of_unix session.last_event_at;
+                     heartbeat_deadline = None;
                      created_at = session.created_at_iso;
                      updated_at = session.updated_at_iso;
                    }))
@@ -1375,9 +1438,13 @@ let projected_swarm_detachments config operations =
               roster;
               session_id = None;
               checkpoint_ref = None;
+              runtime_kind = Some "swarm_projection";
+              runtime_ref = Some swarm_id;
               source = "projected";
               status = "active";
               last_event_at = last_evolution;
+              last_progress_at = last_evolution;
+              heartbeat_deadline = None;
               created_at = Option.value ~default:(Types.now_iso ()) last_evolution;
               updated_at = Option.value ~default:(Types.now_iso ()) last_evolution;
             };
@@ -1685,21 +1752,28 @@ let list_operations_json ?operation_id config =
       ("operations", `List (List.map (operation_card_json units) operations));
     ]
 
-let list_detachments_json ?operation_id config =
+let list_detachments_json ?operation_id ?detachment_id config =
   let _, _, units, _ = topology_units config in
   let operations = all_operations config units in
   let detachments =
     all_detachments config units operations
     |> List.filter (fun (detachment : detachment_record) ->
-           match operation_id with
-           | None -> true
-           | Some value ->
-               String.equal detachment.operation_id value
-               || String.equal detachment.detachment_id value
-               ||
-               match operation_by_id operations detachment.operation_id with
-               | Some operation -> String.equal operation.trace_id value
-               | None -> false)
+           let operation_match =
+             match operation_id with
+             | None -> true
+             | Some value ->
+                 String.equal detachment.operation_id value
+                 ||
+                 match operation_by_id operations detachment.operation_id with
+                 | Some operation -> String.equal operation.trace_id value
+                 | None -> false
+           in
+           let detachment_match =
+             match detachment_id with
+             | None -> true
+             | Some value -> String.equal detachment.detachment_id value
+           in
+           operation_match && detachment_match)
   in
   let rows =
     detachments
@@ -1714,12 +1788,12 @@ let list_detachments_json ?operation_id config =
              |> Option.map (fun (unit : unit_record) -> unit.label)
              |> Option.value ~default:detachment.assigned_unit_id
            in
-           `Assoc
-             [
-               ("detachment", detachment_to_json detachment);
-               ("assigned_unit_label", `String unit_label);
-               ("operation", operation);
-             ])
+            `Assoc
+              [
+                ("detachment", detachment_to_json detachment);
+                ("assigned_unit_label", `String unit_label);
+                ("operation", operation);
+              ])
   in
   let projected_count =
     List.length
@@ -1739,6 +1813,20 @@ let list_detachments_json ?operation_id config =
                    (List.filter
                       (fun (row : detachment_record) ->
                         String.equal row.status "active")
+                      detachments)) );
+            ( "awaiting_approval",
+              `Int
+                (List.length
+                   (List.filter
+                      (fun (row : detachment_record) ->
+                        String.equal row.status "awaiting_approval")
+                      detachments)) );
+            ( "stalled",
+              `Int
+                (List.length
+                   (List.filter
+                      (fun (row : detachment_record) ->
+                        String.equal row.status "stalled")
                       detachments)) );
             ("projected", `Int projected_count);
           ] );
@@ -1919,39 +2007,6 @@ let list_alerts_json config =
                (match decision.reason with
                | Some reason -> reason
                | None -> "Pending policy gate approval"));
-  if Room_utils.path_exists config (swarm_path config) then (
-    match Room_utils.read_json_opt config (swarm_path config) with
-    | Some (`Assoc _ as root) ->
-        let config_json =
-          match U.member "config" root with `Assoc _ as value -> value | _ -> `Assoc []
-        in
-        let swarm_name = get_string_default config_json "name" "Runtime Swarm" in
-        let max_agents = get_int_default config_json "max_agents" 0 in
-        let agent_count =
-          match U.member "agents" root with `List rows -> List.length rows | _ -> 0
-        in
-        let pending_proposals =
-          match U.member "proposals" root with
-          | `List rows ->
-              rows
-              |> List.filter (fun row ->
-                     String.equal (get_string_default row "status" "pending") "pending")
-              |> List.length
-          | _ -> 0
-        in
-        if max_agents > 0 && agent_count > max_agents then
-          push_alert ~severity:"bad" ~kind:"swarm_over_capacity" ~scope_type:"swarm"
-            ~scope_id:(get_string_default config_json "id" "swarm-runtime")
-            ~title:(swarm_name ^ " exceeded max_agents")
-            ~detail:(Printf.sprintf "%d agents vs cap %d" agent_count max_agents);
-        if pending_proposals > 0 then
-          push_alert ~severity:"warn" ~kind:"swarm_pending_proposals" ~scope_type:"swarm"
-            ~scope_id:(get_string_default config_json "id" "swarm-runtime")
-            ~title:(swarm_name ^ " has pending quorum proposals")
-            ~detail:(Printf.sprintf "%d proposal(s) still waiting" pending_proposals)
-    | _ -> ())
-  else
-    ();
   let ordered =
     List.rev !alerts
     |> List.sort (fun a b ->
@@ -2137,14 +2192,7 @@ let list_traces_json config ?operation_id ?(limit = 25) () =
     | Some operation_ref -> recent_operator_trace_events config ~trace_id:operation_ref limit
     | None -> recent_operator_trace_events config limit
   in
-  let swarm_events =
-    match operation_id with
-    | Some operation_ref when string_starts_with operation_ref "swarm-" || string_starts_with operation_ref "swarm-trace-" ->
-        recent_swarm_trace_events config limit
-    | Some _ -> []
-    | None -> recent_swarm_trace_events config limit
-  in
-  let merged = cp_events @ team_session_events @ operator_events @ swarm_events in
+  let merged = cp_events @ team_session_events @ operator_events in
   `Assoc
     [
       ("version", `String "cp-v2");
@@ -2243,60 +2291,208 @@ let append_cp_event config ~trace_id ~event_type ?operation_id ?unit_id ~actor d
       detail;
     }
 
-let default_detachment_for_operation units (operation : operation_record) =
-  let unit = lookup_unit units operation.assigned_unit_id in
-  let leader_id = Option.bind unit (fun (unit : unit_record) -> unit.leader_id) in
-  let roster =
-    match unit with
-    | Some unit -> unit.roster
-    | None -> []
+let detachment_targets_for_operation units (operation : operation_record) =
+  let dedup_by_unit_id rows =
+    rows
+    |> List.sort_uniq (fun (left : unit_record) (right : unit_record) ->
+           String.compare left.unit_id right.unit_id)
   in
-  {
-    detachment_id = "det-" ^ operation.operation_id;
-    operation_id = operation.operation_id;
-    assigned_unit_id = operation.assigned_unit_id;
-    leader_id;
-    roster;
-    session_id = operation.detachment_session_id;
-    checkpoint_ref = operation.checkpoint_ref;
-    source = "managed";
-    status = string_of_operation_status operation.status;
-    last_event_at = None;
-    created_at = operation.created_at;
-    updated_at = operation.updated_at;
-  }
+  match lookup_unit units operation.assigned_unit_id with
+  | Some ({ kind = Company | Platoon; _ } as unit) ->
+      let squads = descendant_units_of_kind units unit.unit_id Squad |> dedup_by_unit_id in
+      if squads = [] then [ unit ] else squads
+  | Some ({ kind = Squad; _ } as unit) -> [ unit ]
+  | Some ({ kind = Agent_unit; parent_unit_id = Some parent_id; _ } as unit) -> (
+      match lookup_unit units parent_id with
+      | Some ({ kind = Squad; _ } as squad) -> [ squad ]
+      | _ -> [ unit ])
+  | Some unit -> [ unit ]
+  | None -> []
 
-let sync_managed_detachment config units (operation : operation_record) =
-  let detachments = read_detachments config in
-  let base =
-    match
-      List.find_opt
-        (fun (detachment : detachment_record) ->
-          String.equal detachment.operation_id operation.operation_id
-          && String.equal detachment.source "managed")
-        detachments
-    with
-    | Some detachment -> detachment
-    | None -> default_detachment_for_operation units operation
+let detachment_id_for_operation (operation : operation_record) target_count
+    (target_unit : unit_record) =
+  if target_count <= 1 then
+    "det-" ^ operation.operation_id
+  else
+    Printf.sprintf "det-%s-%s" operation.operation_id (safe_slug target_unit.unit_id)
+
+let detachment_semantic_equal (left : detachment_record) (right : detachment_record) =
+  String.equal left.detachment_id right.detachment_id
+  && String.equal left.operation_id right.operation_id
+  && String.equal left.assigned_unit_id right.assigned_unit_id
+  && left.leader_id = right.leader_id
+  && left.roster = right.roster
+  && left.session_id = right.session_id
+  && left.checkpoint_ref = right.checkpoint_ref
+  && left.runtime_kind = right.runtime_kind
+  && left.runtime_ref = right.runtime_ref
+  && String.equal left.source right.source
+  && String.equal left.status right.status
+  && left.last_event_at = right.last_event_at
+  && left.last_progress_at = right.last_progress_at
+  && left.heartbeat_deadline = right.heartbeat_deadline
+  && String.equal left.created_at right.created_at
+
+let make_detachment_runtime config (target_unit : unit_record) (operation : operation_record)
+    ~target_count ~base =
+  let session_id =
+    if target_count = 1 then option_first_some operation.detachment_session_id base.session_id
+    else None
   in
-  let unit = lookup_unit units operation.assigned_unit_id in
-  let updated =
+  let session_last_event =
+    match session_id with
+    | Some value -> (
+        match Team_session_store.load_session config value with
+        | Some session -> Option.map iso_of_unix session.last_event_at
+        | None -> None)
+    | None -> None
+  in
+  let last_progress_at =
+    option_first_some session_last_event
+      (option_first_some base.last_progress_at (Some operation.updated_at))
+  in
+  let heartbeat_deadline =
+    if operation.status = Active || operation.status = Planned then
+      Option.bind last_progress_at (fun base_ts ->
+          iso_after_seconds base_ts target_unit.policy.escalation_timeout_sec)
+    else
+      None
+  in
+  let draft =
     {
-      base with
-      assigned_unit_id = operation.assigned_unit_id;
-      leader_id = option_first_some (Option.bind unit (fun (row : unit_record) -> row.leader_id)) base.leader_id;
-      roster =
-        (match unit with
-        | Some row when row.roster <> [] -> row.roster
-        | _ -> base.roster);
-      session_id = option_first_some operation.detachment_session_id base.session_id;
+      detachment_id = detachment_id_for_operation operation target_count target_unit;
+      operation_id = operation.operation_id;
+      assigned_unit_id = target_unit.unit_id;
+      leader_id = option_first_some target_unit.leader_id base.leader_id;
+      roster = if target_unit.roster <> [] then target_unit.roster else base.roster;
+      session_id;
       checkpoint_ref = option_first_some operation.checkpoint_ref base.checkpoint_ref;
+      runtime_kind =
+        (if target_count = 1 && session_id <> None then Some "team_session"
+         else Some "managed");
+      runtime_ref =
+        (if target_count = 1 then option_first_some session_id (Some target_unit.unit_id)
+         else Some target_unit.unit_id);
+      source = "managed";
       status = string_of_operation_status operation.status;
+      last_event_at = option_first_some session_last_event base.last_event_at;
+      last_progress_at;
+      heartbeat_deadline;
+      created_at = base.created_at;
       updated_at = Types.now_iso ();
     }
   in
-  write_detachments config (replace_detachment detachments updated);
-  updated
+  if detachment_semantic_equal draft base then
+    { draft with updated_at = base.updated_at }
+  else
+    draft
+
+let default_detachment_for_operation config units (operation : operation_record) =
+  let fallback_target =
+    match detachment_targets_for_operation units operation with
+    | target :: _ -> target
+    | [] ->
+        {
+          unit_id = operation.assigned_unit_id;
+          label = operation.assigned_unit_id;
+          kind = Squad;
+          parent_unit_id = None;
+          leader_id = None;
+          roster = [];
+          capability_profile = [];
+          policy = default_policy Squad;
+          budget = default_budget Squad;
+          source = "managed";
+          created_at = operation.created_at;
+          updated_at = operation.updated_at;
+        }
+  in
+  make_detachment_runtime config fallback_target operation ~target_count:1
+    ~base:
+      {
+        detachment_id = "det-" ^ operation.operation_id;
+        operation_id = operation.operation_id;
+        assigned_unit_id = fallback_target.unit_id;
+        leader_id = fallback_target.leader_id;
+        roster = fallback_target.roster;
+        session_id = operation.detachment_session_id;
+        checkpoint_ref = operation.checkpoint_ref;
+        runtime_kind = None;
+        runtime_ref = None;
+        source = "managed";
+        status = string_of_operation_status operation.status;
+        last_event_at = None;
+        last_progress_at = Some operation.updated_at;
+        heartbeat_deadline = None;
+        created_at = operation.created_at;
+        updated_at = operation.updated_at;
+      }
+
+let sync_managed_detachments config units (operation : operation_record) =
+  let detachments = read_detachments config in
+  let existing_for_operation =
+    detachments
+    |> List.filter (fun (detachment : detachment_record) ->
+           String.equal detachment.operation_id operation.operation_id
+           && String.equal detachment.source "managed")
+  in
+  let targets =
+    match detachment_targets_for_operation units operation with
+    | [] -> []
+    | rows -> rows
+  in
+  let target_count = max 1 (List.length targets) in
+  let updated_rows =
+    match targets with
+    | [] ->
+        [ default_detachment_for_operation config units operation ]
+    | rows ->
+        rows
+        |> List.map (fun (target_unit : unit_record) ->
+               let detachment_id =
+                 detachment_id_for_operation operation target_count target_unit
+               in
+               let base =
+                 existing_for_operation
+                 |> List.find_opt (fun (detachment : detachment_record) ->
+                        String.equal detachment.detachment_id detachment_id)
+                 |> Option.value
+                      ~default:
+                        {
+                          detachment_id;
+                          operation_id = operation.operation_id;
+                          assigned_unit_id = target_unit.unit_id;
+                          leader_id = target_unit.leader_id;
+                          roster = target_unit.roster;
+                          session_id = operation.detachment_session_id;
+                          checkpoint_ref = operation.checkpoint_ref;
+                          runtime_kind = None;
+                          runtime_ref = None;
+                          source = "managed";
+                          status = string_of_operation_status operation.status;
+                          last_event_at = None;
+                          last_progress_at = Some operation.updated_at;
+                          heartbeat_deadline = None;
+                          created_at = operation.created_at;
+                          updated_at = operation.updated_at;
+                        }
+               in
+               make_detachment_runtime config target_unit operation ~target_count ~base)
+  in
+  let remaining =
+    detachments
+    |> List.filter (fun (detachment : detachment_record) ->
+           not
+             (String.equal detachment.operation_id operation.operation_id
+              && String.equal detachment.source "managed"))
+  in
+  write_detachments config (updated_rows @ remaining);
+  updated_rows
+
+let sync_managed_detachment config units (operation : operation_record) =
+  match sync_managed_detachments config units operation with
+  | row :: _ -> row
+  | [] -> default_detachment_for_operation config units operation
 
 let with_operation config operation_id f =
   let operations = read_operations config in
@@ -2375,6 +2571,28 @@ let decision_requires_approval units source_unit_id target_unit_id =
         | Some source when String.equal source target_unit_id -> false
         | Some source -> not (same_platoon units source target_unit_id)
 
+let company_scope_id_for units source_unit_id target_unit_id =
+  option_first_some
+    (Option.bind target_unit_id (fun unit_id -> company_ancestor_id units unit_id))
+    (Option.bind source_unit_id (fun unit_id -> company_ancestor_id units unit_id))
+  |> Option.value ~default:"company-runtime"
+
+let find_pending_decision config ~requested_action ?operation_id ?target_unit_id () =
+  all_policy_decisions config
+  |> List.find_opt (fun (decision : policy_decision_record) ->
+         String.equal decision.status "pending"
+         && String.equal decision.requested_action requested_action
+         &&
+         match operation_id, decision.operation_id with
+         | None, _ -> true
+         | Some expected, Some actual -> String.equal expected actual
+         | Some _, None -> false
+         &&
+         match target_unit_id, decision.target_unit_id with
+         | None, _ -> true
+         | Some expected, Some actual -> String.equal expected actual
+         | Some _, None -> false)
+
 let create_policy_decision config ~(actor : string) ~requested_action ~scope_type
     ~scope_id ?operation_id ?target_unit_id ~reason ?(source = "managed") detail =
   let decision =
@@ -2428,7 +2646,7 @@ let apply_operation_assignment config ~(actor : string) (operation : operation_r
       let operations = read_operations config in
       write_operations config (replace_operation operations updated);
       let _, _, units, _ = topology_units config in
-      let _ = sync_managed_detachment config units updated in
+      let _ = sync_managed_detachments config units updated in
       append_cp_event config ~trace_id:updated.trace_id ~event_type
         ~operation_id:updated.operation_id ~unit_id:updated.assigned_unit_id ~actor
         (`Assoc
@@ -2453,7 +2671,7 @@ let update_operation_status config ~(actor : string) ~operation_id ~status ~note
       in
       write_operations config (replace_operation operations updated);
       let _, _, units, _ = topology_units config in
-      let _ = sync_managed_detachment config units updated in
+      let _ = sync_managed_detachments config units updated in
       append_cp_event config ~trace_id:updated.trace_id ~event_type
         ~operation_id:updated.operation_id ~unit_id:updated.assigned_unit_id ~actor
         (`Assoc [ ("status", `String (string_of_operation_status status)) ]);
@@ -2522,7 +2740,7 @@ let start_operation config ~(actor : string) json =
       let operations = read_operations config in
       write_operations config (operation :: operations);
       let _, _, units, _ = topology_units config in
-      let _ = sync_managed_detachment config units operation in
+      let _ = sync_managed_detachments config units operation in
       append_cp_event config ~trace_id:operation.trace_id ~event_type:"operation_started"
         ~operation_id:operation.operation_id ~unit_id:operation.assigned_unit_id ~actor
         (`Assoc
@@ -2569,7 +2787,7 @@ let checkpoint_operation config ~(actor : string) json =
       in
       write_operations config next_operations;
       let _, _, units, _ = topology_units config in
-      let _ = sync_managed_detachment config units updated in
+      let _ = sync_managed_detachments config units updated in
       append_cp_event config ~trace_id:updated.trace_id ~event_type:"operation_checkpointed"
         ~operation_id:updated.operation_id ~unit_id:updated.assigned_unit_id ~actor
         (`Assoc [ ("checkpoint_ref", `String checkpoint_ref) ]);
@@ -2649,17 +2867,42 @@ let request_or_apply_assignment config ~(actor : string) ~requested_action json 
       in
       if needs_approval then
         let decision =
-          create_policy_decision config ~actor ~requested_action ~scope_type:"operation"
-            ~scope_id:operation_id ~operation_id ~target_unit_id
-            ~reason:
-              (Some
-                 (Printf.sprintf "%s from %s to %s requires approval"
-                    requested_action current.assigned_unit_id target_unit_id))
-            (`Assoc
-              [
-                ("apply", `Assoc [ ("kind", `String "reassign_operation"); ("operation_id", `String operation_id); ("target_unit_id", `String target_unit_id) ]);
-                ("preview", `Assoc [ ("from_unit_id", `String current.assigned_unit_id); ("to_unit_id", `String target_unit_id) ]);
-              ])
+          match
+            find_pending_decision config ~requested_action ~operation_id
+              ~target_unit_id ()
+          with
+          | Some existing -> existing
+          | None ->
+              create_policy_decision config ~actor ~requested_action
+                ~scope_type:"company"
+                ~scope_id:
+                  (company_scope_id_for units (Some current.assigned_unit_id)
+                     (Some target_unit_id))
+                ~operation_id ~target_unit_id
+                ~reason:
+                  (Some
+                     (Printf.sprintf "%s from %s to %s requires company approval"
+                        requested_action current.assigned_unit_id target_unit_id))
+                (`Assoc
+                  [
+                    ( "apply",
+                      `Assoc
+                        [
+                          ("kind", `String "reassign_operation");
+                          ("operation_id", `String operation_id);
+                          ("target_unit_id", `String target_unit_id);
+                          ( "note",
+                            match get_string_opt json "note" with
+                            | Some value -> `String value
+                            | None -> `Null );
+                        ] );
+                    ( "preview",
+                      `Assoc
+                        [
+                          ("from_unit_id", `String current.assigned_unit_id);
+                          ("to_unit_id", `String target_unit_id);
+                        ] );
+                  ])
         in
         Ok
           (`Assoc
@@ -2842,12 +3085,110 @@ let policy_apply_unit_toggle config ~(actor : string) ~unit_id ~event_type ~fiel
 let policy_freeze_unit_json config ~(actor : string) json =
   match get_string_opt json "unit_id" with
   | None -> Error "unit_id is required"
-  | Some unit_id -> policy_apply_unit_toggle config ~actor ~unit_id ~event_type:"unit_freeze_toggled" ~field:"frozen" json
+  | Some unit_id -> (
+      let _, _, units, _ = topology_units config in
+      let enabled =
+        match U.member "enabled" json with
+        | `Bool value -> value
+        | `String raw -> String.equal (String.lowercase_ascii raw) "true"
+        | _ -> get_bool_default json "enabled" true
+      in
+      match
+        find_pending_decision config ~requested_action:"policy_freeze_unit"
+          ~target_unit_id:unit_id ()
+      with
+      | Some decision ->
+          Ok
+            (`Assoc
+              [
+                ("status", `String "pending_approval");
+                ("decision", policy_decision_to_json decision);
+                ("decisions", list_policy_decisions_json config);
+              ])
+      | None ->
+          let company_id = company_scope_id_for units None (Some unit_id) in
+          let decision =
+            create_policy_decision config ~actor
+              ~requested_action:"policy_freeze_unit" ~scope_type:"company"
+              ~scope_id:company_id ~target_unit_id:unit_id
+              ~reason:
+                (Some
+                   (Printf.sprintf "%s freeze toggle on %s requires company approval"
+                      (if enabled then "Enabling" else "Clearing")
+                      unit_id))
+              (`Assoc
+                [
+                  ( "apply",
+                    `Assoc
+                      [
+                        ("kind", `String "toggle_unit_policy");
+                        ("unit_id", `String unit_id);
+                        ("field", `String "frozen");
+                        ("enabled", `Bool enabled);
+                      ] );
+                ])
+          in
+          Ok
+            (`Assoc
+              [
+                ("status", `String "pending_approval");
+                ("decision", policy_decision_to_json decision);
+                ("decisions", list_policy_decisions_json config);
+              ]))
 
 let policy_kill_switch_json config ~(actor : string) json =
   match get_string_opt json "unit_id" with
   | None -> Error "unit_id is required"
-  | Some unit_id -> policy_apply_unit_toggle config ~actor ~unit_id ~event_type:"unit_kill_switch_toggled" ~field:"kill_switch" json
+  | Some unit_id -> (
+      let _, _, units, _ = topology_units config in
+      let enabled =
+        match U.member "enabled" json with
+        | `Bool value -> value
+        | `String raw -> String.equal (String.lowercase_ascii raw) "true"
+        | _ -> get_bool_default json "enabled" true
+      in
+      match
+        find_pending_decision config ~requested_action:"policy_kill_switch"
+          ~target_unit_id:unit_id ()
+      with
+      | Some decision ->
+          Ok
+            (`Assoc
+              [
+                ("status", `String "pending_approval");
+                ("decision", policy_decision_to_json decision);
+                ("decisions", list_policy_decisions_json config);
+              ])
+      | None ->
+          let company_id = company_scope_id_for units None (Some unit_id) in
+          let decision =
+            create_policy_decision config ~actor
+              ~requested_action:"policy_kill_switch" ~scope_type:"company"
+              ~scope_id:company_id ~target_unit_id:unit_id
+              ~reason:
+                (Some
+                   (Printf.sprintf "%s kill-switch on %s requires company approval"
+                      (if enabled then "Enabling" else "Clearing")
+                      unit_id))
+              (`Assoc
+                [
+                  ( "apply",
+                    `Assoc
+                      [
+                        ("kind", `String "toggle_unit_policy");
+                        ("unit_id", `String unit_id);
+                        ("field", `String "kill_switch");
+                        ("enabled", `Bool enabled);
+                      ] );
+                ])
+          in
+          Ok
+            (`Assoc
+              [
+                ("status", `String "pending_approval");
+                ("decision", policy_decision_to_json decision);
+                ("decisions", list_policy_decisions_json config);
+              ]))
 
 let policy_update_json config ~(actor : string) json =
   try
@@ -2895,6 +3236,17 @@ let apply_policy_decision config ~(actor : string) (decision : policy_decision_r
                 ~note:(get_string_opt apply "note") ~event_type:"policy_assignment_applied")
           |> Result.map operation_to_json
       | _ -> Error "decision apply payload missing operation_id or target_unit_id")
+  | Some "toggle_unit_policy" -> (
+      match get_string_opt apply "unit_id", get_string_opt apply "field" with
+      | Some unit_id, Some field ->
+          policy_apply_unit_toggle config ~actor ~unit_id
+            ~event_type:
+              (if String.equal field "kill_switch" then
+                 "unit_kill_switch_toggled"
+               else
+                 "unit_freeze_toggled")
+            ~field (`Assoc [ ("enabled", U.member "enabled" apply) ])
+      | _ -> Error "decision apply payload missing unit_id or field")
   | Some other -> Error (Printf.sprintf "unsupported decision apply kind: %s" other)
   | None -> Error "decision apply payload missing kind"
 
@@ -2974,6 +3326,263 @@ let policy_deny_json config ~(actor : string) json =
             ("decision", policy_decision_to_json updated);
             ("decisions", list_policy_decisions_json config);
           ])
+
+let detachment_status_detail_json _config units agents operations
+    (detachment : detachment_record) =
+  let now = Time_compat.now () in
+  let leader_status =
+    match detachment.leader_id with
+    | Some leader -> agent_status_for (agent_status_map agents) leader
+    | None -> "missing"
+  in
+  let heartbeat_expired =
+    match detachment.heartbeat_deadline with
+    | Some deadline -> iso_expired_at now deadline
+    | None -> false
+  in
+  let progress_age_sec =
+    Option.bind detachment.last_progress_at parse_iso_timestamp
+    |> Option.map (fun ts -> max 0 (int_of_float (now -. ts)))
+  in
+  let unit_label =
+    lookup_unit units detachment.assigned_unit_id
+    |> Option.map (fun (unit : unit_record) -> unit.label)
+    |> Option.value ~default:detachment.assigned_unit_id
+  in
+  let operation_json =
+    operation_by_id operations detachment.operation_id
+    |> Option.map operation_to_json |> Option.value ~default:`Null
+  in
+  `Assoc
+    [
+      ("detachment", detachment_to_json detachment);
+      ("assigned_unit_label", `String unit_label);
+      ("operation", operation_json);
+      ("leader_status", `String leader_status);
+      ("heartbeat_expired", `Bool heartbeat_expired);
+      ( "progress_age_sec",
+        match progress_age_sec with Some value -> `Int value | None -> `Null );
+      ( "needs_attention",
+        `Bool
+          (heartbeat_expired
+           || String.equal leader_status "offline"
+           || String.equal leader_status "missing"
+           || String.equal detachment.status "stalled"
+           || String.equal detachment.status "awaiting_approval") );
+    ]
+
+let detachment_status_json config json =
+  let operation_id = get_string_opt json "operation_id" in
+  let detachment_id = get_string_opt json "detachment_id" in
+  let agents, _, units, _ = topology_units config in
+  let operations = all_operations config units in
+  let detachments =
+    all_detachments config units operations
+    |> List.filter (fun (detachment : detachment_record) ->
+           (match operation_id with
+           | Some value -> String.equal detachment.operation_id value
+           | None -> true)
+           &&
+           match detachment_id with
+           | Some value -> String.equal detachment.detachment_id value
+           | None -> true)
+  in
+  match detachments with
+  | [] -> Error "detachment not found"
+  | detachment :: _ ->
+      Ok
+        (`Assoc
+          [
+            ("status", `String "ok");
+            ("result", detachment_status_detail_json config units agents operations detachment);
+          ])
+
+let stalled_or_quiet_detachment now (detachment : detachment_record) =
+  match detachment.heartbeat_deadline with
+  | Some deadline when iso_expired_at now deadline -> true
+  | _ ->
+      Option.bind detachment.last_progress_at parse_iso_timestamp
+      |> Option.map (fun ts -> now -. ts > 1800.0)
+      |> Option.value ~default:false
+
+let pick_failover_leader live_agents (detachment : detachment_record) =
+  detachment.roster
+  |> List.filter (fun agent_name -> List.mem agent_name live_agents)
+  |> List.find_opt (fun agent_name ->
+         match detachment.leader_id with
+         | Some current -> not (String.equal current agent_name)
+         | None -> true)
+
+let maybe_escalation_target units (detachment : detachment_record) =
+  match lookup_unit units detachment.assigned_unit_id with
+  | Some ({ kind = Squad; parent_unit_id = Some parent_id; _ } as _unit) -> Some parent_id
+  | Some unit when unit.kind = Platoon || unit.kind = Company -> unit.parent_unit_id
+  | Some ({ parent_unit_id = Some parent_id; _ } as _unit) -> Some parent_id
+  | _ -> None
+
+let dispatch_tick_json config ~(actor : string) json =
+  let filter_operation_id = get_string_opt json "operation_id" in
+  let filter_detachment_id = get_string_opt json "detachment_id" in
+  let agents, _, units, _ = topology_units config in
+  let live_agents = live_agent_names agents in
+  let managed_operations =
+    read_operations config
+    |> List.filter (fun (operation : operation_record) ->
+           match filter_operation_id with
+           | Some value -> String.equal operation.operation_id value
+           | None -> true)
+  in
+  let synced =
+    managed_operations
+    |> List.concat_map (fun (operation : operation_record) ->
+           sync_managed_detachments config units operation)
+    |> List.filter (fun (detachment : detachment_record) ->
+           match filter_detachment_id with
+           | Some value -> String.equal detachment.detachment_id value
+           | None -> true)
+  in
+  let now = Time_compat.now () in
+  let operations_by_id =
+    List.map (fun (operation : operation_record) -> (operation.operation_id, operation))
+      managed_operations
+  in
+  let decisions = ref [] in
+  let failovers = ref [] in
+  let escalations = ref [] in
+  let stale_count = ref 0 in
+  let upsert_detachment_row updated =
+    write_detachments config (replace_detachment (read_detachments config) updated)
+  in
+  List.iter
+    (fun (detachment : detachment_record) ->
+      let is_stalled = stalled_or_quiet_detachment now detachment in
+      let leader_status =
+        match detachment.leader_id with
+        | Some leader -> agent_status_for (agent_status_map agents) leader
+        | None -> "missing"
+      in
+      if is_stalled then incr stale_count;
+      if is_stalled || String.equal leader_status "offline" || String.equal leader_status "missing" then
+        match pick_failover_leader live_agents detachment with
+        | Some next_leader ->
+            let refreshed =
+              {
+                detachment with
+                leader_id = Some next_leader;
+                status = "active";
+                last_event_at = Some (Types.now_iso ());
+                heartbeat_deadline =
+                  (match lookup_unit units detachment.assigned_unit_id with
+                  | Some unit ->
+                      Option.bind
+                        (option_first_some detachment.last_progress_at
+                           (Some (Types.now_iso ())))
+                        (fun base_ts ->
+                          iso_after_seconds base_ts unit.policy.escalation_timeout_sec)
+                  | None -> detachment.heartbeat_deadline);
+                updated_at = Types.now_iso ();
+              }
+            in
+            upsert_detachment_row refreshed;
+            append_cp_event config
+              ~trace_id:
+                (match List.assoc_opt detachment.operation_id operations_by_id with
+                | Some operation -> operation.trace_id
+                | None -> next_trace_id ())
+              ~event_type:"detachment_failed_over"
+              ~operation_id:detachment.operation_id ~unit_id:detachment.assigned_unit_id
+              ~actor
+              (`Assoc
+                [
+                  ("detachment_id", `String detachment.detachment_id);
+                  ("from_leader", match detachment.leader_id with Some value -> `String value | None -> `Null);
+                  ("to_leader", `String next_leader);
+                ]);
+            failovers := refreshed.detachment_id :: !failovers
+        | None ->
+            (match
+               maybe_escalation_target units detachment,
+               List.assoc_opt detachment.operation_id operations_by_id
+             with
+            | Some target_unit_id, Some operation ->
+                let pending =
+                  find_pending_decision config ~requested_action:"dispatch_escalate"
+                    ~operation_id:operation.operation_id ~target_unit_id ()
+                in
+                let refreshed =
+                  {
+                    detachment with
+                    status =
+                      (match pending with
+                      | Some _ -> "awaiting_approval"
+                      | None -> "stalled");
+                    updated_at = Types.now_iso ();
+                  }
+                in
+                upsert_detachment_row refreshed;
+                let decision =
+                  match pending with
+                  | Some existing -> existing
+                  | None ->
+                      create_policy_decision config ~actor
+                        ~requested_action:"dispatch_escalate"
+                        ~scope_type:"company"
+                        ~scope_id:
+                          (company_scope_id_for units
+                             (Some detachment.assigned_unit_id)
+                             (Some target_unit_id))
+                        ~operation_id:operation.operation_id
+                        ~target_unit_id
+                        ~reason:
+                          (Some
+                             (Printf.sprintf
+                                "Detachment %s is stalled and needs escalation"
+                                detachment.detachment_id))
+                        (`Assoc
+                          [
+                            ( "apply",
+                              `Assoc
+                                [
+                                  ("kind", `String "reassign_operation");
+                                  ("operation_id", `String operation.operation_id);
+                                  ("target_unit_id", `String target_unit_id);
+                                ] );
+                            ("detachment_id", `String detachment.detachment_id);
+                          ])
+                in
+                decisions := decision.decision_id :: !decisions;
+                escalations := detachment.detachment_id :: !escalations
+            | _ -> ())
+      else
+        ())
+    synced;
+  let operations_json =
+    list_operations_json ?operation_id:filter_operation_id config
+  in
+  let detachments_json =
+    list_detachments_json ?operation_id:filter_operation_id ?detachment_id:filter_detachment_id
+      config
+  in
+  Ok
+    (`Assoc
+      [
+        ("status", `String "ok");
+        ( "summary",
+          `Assoc
+            [
+              ("operations_considered", `Int (List.length managed_operations));
+              ("detachments_considered", `Int (List.length synced));
+              ("stale_detachments", `Int !stale_count);
+              ("failovers_applied", `Int (List.length !failovers));
+              ("escalations_requested", `Int (List.length !escalations));
+              ("approvals_pending", `Int (List.length !decisions));
+            ] );
+        ("failovers", json_list_of_strings (List.rev !failovers));
+        ("escalations", json_list_of_strings (List.rev !escalations));
+        ("decisions", json_list_of_strings (List.rev !decisions));
+        ("operations", operations_json);
+        ("detachments", detachments_json);
+      ])
 
 let observe_operations_json config =
   `Assoc

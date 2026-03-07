@@ -126,16 +126,20 @@ let handle_walph ctx args : result =
   (true, Room_walph_eio.swarm_walph_control ctx.config ~from_agent:ctx.agent_name ~command ())
 
 (** Dispatch swarm tool by name. Returns None if not a swarm tool. *)
-let dispatch ctx ~name ~args : result option =
+let deprecated_message =
+  "Swarm public tools are deprecated. Use Command Plane V2 dispatch, detachment, and policy tools instead."
+
+let dispatch _ctx ~name ~args:_args : result option =
   match name with
-  | "masc_swarm_init" -> Some (handle_init ctx args)
-  | "masc_swarm_join" -> Some (handle_join ctx args)
-  | "masc_swarm_leave" -> Some (handle_leave ctx args)
-  | "masc_swarm_status" -> Some (handle_status ctx args)
-  | "masc_swarm_evolve" -> Some (handle_evolve ctx args)
-  | "masc_swarm_propose" -> Some (handle_propose ctx args)
-  | "masc_swarm_vote" -> Some (handle_vote ctx args)
-  | "masc_swarm_deposit" -> Some (handle_deposit ctx args)
-  | "masc_swarm_trails" -> Some (handle_trails ctx args)
-  | "masc_swarm_walph" -> Some (handle_walph ctx args)
+  | "masc_swarm_init"
+  | "masc_swarm_join"
+  | "masc_swarm_leave"
+  | "masc_swarm_status"
+  | "masc_swarm_evolve"
+  | "masc_swarm_propose"
+  | "masc_swarm_vote"
+  | "masc_swarm_deposit"
+  | "masc_swarm_trails"
+  | "masc_swarm_walph" ->
+      Some (false, deprecated_message)
   | _ -> None

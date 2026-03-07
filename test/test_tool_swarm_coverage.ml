@@ -85,36 +85,37 @@ let test_dispatch_swarm_init_no_fs () =
   let ctx = make_ctx () in
   match Tool_swarm.dispatch ctx ~name:"masc_swarm_init" ~args:(`Assoc []) with
   | Some (success, msg) ->
-      check bool "fails without fs" false success;
-      check bool "error message" true (String.length msg > 0)
+      check bool "deprecated" false success;
+      check bool "deprecation message" true (String.length msg > 20)
   | None -> fail "expected Some"
 
 let test_dispatch_swarm_join_no_fs () =
   let ctx = make_ctx () in
   match Tool_swarm.dispatch ctx ~name:"masc_swarm_join" ~args:(`Assoc []) with
-  | Some (success, _) ->
-      check bool "fails without fs" false success
+  | Some (success, msg) ->
+      check bool "deprecated" false success;
+      check bool "mentions replacement" true (String.length msg > 20)
   | None -> fail "expected Some"
 
 let test_dispatch_swarm_leave_no_fs () =
   let ctx = make_ctx () in
   match Tool_swarm.dispatch ctx ~name:"masc_swarm_leave" ~args:(`Assoc []) with
   | Some (success, _) ->
-      check bool "fails without fs" false success
+      check bool "deprecated" false success
   | None -> fail "expected Some"
 
 let test_dispatch_swarm_status_no_fs () =
   let ctx = make_ctx () in
   match Tool_swarm.dispatch ctx ~name:"masc_swarm_status" ~args:(`Assoc []) with
   | Some (success, _) ->
-      check bool "fails without fs" false success
+      check bool "deprecated" false success
   | None -> fail "expected Some"
 
 let test_dispatch_swarm_evolve_no_fs () =
   let ctx = make_ctx () in
   match Tool_swarm.dispatch ctx ~name:"masc_swarm_evolve" ~args:(`Assoc []) with
   | Some (success, _) ->
-      check bool "fails without fs" false success
+      check bool "deprecated" false success
   | None -> fail "expected Some"
 
 let test_dispatch_swarm_propose_no_fs () =
@@ -122,7 +123,7 @@ let test_dispatch_swarm_propose_no_fs () =
   let args = `Assoc [("description", `String "test proposal")] in
   match Tool_swarm.dispatch ctx ~name:"masc_swarm_propose" ~args with
   | Some (success, _) ->
-      check bool "fails without fs" false success
+      check bool "deprecated" false success
   | None -> fail "expected Some"
 
 let test_dispatch_swarm_vote_no_fs () =
@@ -130,7 +131,7 @@ let test_dispatch_swarm_vote_no_fs () =
   let args = `Assoc [("proposal_id", `String "prop-1"); ("vote_for", `Bool true)] in
   match Tool_swarm.dispatch ctx ~name:"masc_swarm_vote" ~args with
   | Some (success, _) ->
-      check bool "fails without fs" false success
+      check bool "deprecated" false success
   | None -> fail "expected Some"
 
 let test_dispatch_swarm_deposit_no_fs () =
@@ -138,28 +139,22 @@ let test_dispatch_swarm_deposit_no_fs () =
   let args = `Assoc [("path_id", `String "path-1"); ("strength", `Float 0.5)] in
   match Tool_swarm.dispatch ctx ~name:"masc_swarm_deposit" ~args with
   | Some (success, _) ->
-      check bool "fails without fs" false success
+      check bool "deprecated" false success
   | None -> fail "expected Some"
 
 let test_dispatch_swarm_trails_no_fs () =
   let ctx = make_ctx () in
   match Tool_swarm.dispatch ctx ~name:"masc_swarm_trails" ~args:(`Assoc []) with
   | Some (success, _) ->
-      check bool "fails without fs" false success
+      check bool "deprecated" false success
   | None -> fail "expected Some"
 
 let test_dispatch_swarm_walph () =
-  (* masc_swarm_walph requires Eio runtime - test dispatch routing only *)
   let ctx = make_ctx () in
   let args = `Assoc [("command", `String "STATUS")] in
-  try
-    match Tool_swarm.dispatch ctx ~name:"masc_swarm_walph" ~args with
-    | Some _ -> check bool "dispatch routes to walph" true true
-    | None -> fail "expected Some"
-  with
-  | Effect.Unhandled _ ->
-      (* Expected: Eio effects not handled outside Eio runtime *)
-      check bool "requires Eio runtime" true true
+  match Tool_swarm.dispatch ctx ~name:"masc_swarm_walph" ~args with
+  | Some (success, _) -> check bool "deprecated" false success
+  | None -> fail "expected Some"
 
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in

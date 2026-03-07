@@ -5339,7 +5339,21 @@ let command_plane_operations_http_json ~state request =
 
 let command_plane_detachments_http_json ~state request =
   let operation_id = query_param request "operation_id" in
+  let detachment_id = query_param request "detachment_id" in
   Command_plane_v2.list_detachments_json state.Mcp_server.room_config ?operation_id
+    ?detachment_id
+
+let command_plane_detachment_status_http_json ~state request =
+  let args =
+    `Assoc
+      [
+        ( "detachment_id",
+          match query_param request "detachment_id" with
+          | Some value -> `String value
+          | None -> `Null );
+      ]
+  in
+  Command_plane_v2.detachment_status_json state.Mcp_server.room_config args
 
 let command_plane_decisions_http_json ~state request =
   let decision_id = query_param request "decision_id" in
@@ -5438,6 +5452,10 @@ let command_plane_dispatch_escalate_http_json ~state request ~args =
 
 let command_plane_dispatch_recall_http_json ~state request ~args =
   Command_plane_v2.dispatch_recall_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_dispatch_tick_http_json ~state request ~args =
+  Command_plane_v2.dispatch_tick_json state.Mcp_server.room_config
     ~actor:(command_plane_actor request) args
 
 let command_plane_policy_status_http_json ~state =
@@ -7646,6 +7664,18 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/command-plane/detachment-status" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         match command_plane_detachment_status_http_json ~state req with
+         | Ok json ->
+             Http.Response.json ~compress:true ~request:req
+               (Yojson.Safe.to_string json) reqd
+         | Error message ->
+             Http.Response.json ~compress:true ~status:`Bad_request ~request:req
+               (Yojson.Safe.to_string (command_plane_error_json message))
+               reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/command-plane/decisions" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = command_plane_decisions_http_json ~state req in
@@ -7903,6 +7933,23 @@ let make_routes ~port ~host ~sw ~clock =
            try
              let args = Yojson.Safe.from_string body_str in
              match command_plane_dispatch_recall_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/dispatch/tick" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_dispatch_tick_http_json ~state req ~args with
              | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
              | Error message ->
                  respond_json_with_cors ~status:`Bad_request request reqd
@@ -8889,6 +8936,17 @@ let run_server ~sw ~env ~port ~base_path =
           let json = command_plane_detachments_http_json ~state httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/command-plane/detachment-status" ->
+          let state = get_server_state () in
+          (match command_plane_detachment_status_http_json ~state httpun_request with
+           | Ok json ->
+               h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                 ~extra_headers:cors
+           | Error message ->
+               h2_respond_json h2_reqd
+                 (Yojson.Safe.to_string (command_plane_error_json message))
+                 ~status:`Bad_request ~extra_headers:cors)
+
       | `GET, "/api/v1/command-plane/decisions" ->
           let state = get_server_state () in
           let json = command_plane_decisions_http_json ~state httpun_request in
@@ -9397,6 +9455,33 @@ let run_server ~sw ~env ~port ~base_path =
                  try
                    let args = Yojson.Safe.from_string body_str in
                    (match command_plane_dispatch_recall_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/dispatch/tick" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_dispatch_tick_http_json ~state httpun_request ~args with
                     | Ok json ->
                         h2_respond_json h2_reqd (Yojson.Safe.to_string json)
                           ~extra_headers:cors

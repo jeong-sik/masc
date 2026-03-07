@@ -13,9 +13,9 @@
 git clone https://github.com/jeong-sik/masc-mcp.git
 cd masc-mcp
 
-# 외부 의존성 pin (opam에 없음)
-opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git -y
-opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git -y
+# 외부 의존성 pin (fresh switch / CI와 동일)
+chmod +x scripts/opam-pin-external-deps.sh
+scripts/opam-pin-external-deps.sh
 
 # 의존성 설치
 opam install . --deps-only

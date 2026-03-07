@@ -36,10 +36,16 @@ let test_lodge_heartbeat_no_profile_shellout () =
     (file_contains_pattern "lib/lodge_heartbeat.ml"
        {|Process_eio.run_argv ~timeout_sec:30.0 [sb; "graphql"; "agent"; agent_name]|})
 
-let test_lodge_heartbeat_uses_reaction_prompt () =
-  check bool "reaction batch prompt used"
+let test_lodge_heartbeat_uses_decision_prompt () =
+  check bool "structured decision prompt used"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_reaction.batch_reaction_prompt")
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_decision.batch_decision_prompt");
+  check bool "decision phase traced"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|phase:"lodge_decision"|});
+  check bool "structured batch parser used"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_decision.parse_batch_outcome")
 
 let test_lodge_heartbeat_updates_self_summary () =
   check bool "reflection updates self summary"
@@ -51,44 +57,45 @@ let test_lodge_heartbeat_uses_tom_context () =
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_tom.predict_top_k")
 
-let test_lodge_heartbeat_post_fallback_policy () =
+let test_lodge_heartbeat_no_heuristic_fallback_policy () =
   check bool "scheduled trigger can fallback to post"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "| Scheduled | ManualTrigger -> true");
   check bool "content alerts do not fallback to post"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "| ContentAlert _ | Mentioned _ -> false");
-  check bool "unparsed reactions are recorded"
-    true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" {|reason = Some "unparsed"|});
-  check bool "batch parse failures become explicit reason"
+  check bool "decision errors are explicit"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml"
-       {|if parsed = [] then "unparsed_batch" else "below_threshold"|});
-  check bool "scheduled fallback still routes through maybe_post_action"
+       {|reason = "decision error: " ^ reason|});
+  check bool "post gating still enforced through allow_post"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "| _ -> maybe_post_action ~reason:no_candidate_reason")
-
-let test_lodge_heartbeat_hidden_fallbacks_removed () =
+    (file_contains_pattern "lib/lodge_heartbeat.ml"
+       "~allow_post:(trigger_allows_post trigger)");
+  check bool "unparsed fallback removed"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" {|reason = Some "unparsed"|});
+  check bool "heuristic maybe_post_action removed"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "maybe_post_action");
+  check bool "legacy NoAction fallback removed"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "NoAction");
+  check bool "reaction batch prompt removed"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_reaction.batch_reaction_prompt");
   check bool "comment generation no longer auto-upvotes"
     false
     (file_contains_pattern "lib/lodge_heartbeat.ml" {|None -> ActionUpvote|});
-  check bool "post rate limit no longer converts to comment"
-    false
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "converting to COMMENT");
-  check bool "tick no longer pre-gates on post rate limit"
-    false
-    (file_contains_pattern "lib/lodge_heartbeat.ml"
-       {|else if not (check_rate_limit ~agent_name:name `Post) then|});
   check bool "comment rate limit enforced explicitly"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" {|Skipped "comment_rate_limited"|});
   check bool "post rate limit enforced explicitly"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" {|Skipped "post_rate_limited"|});
-  check bool "comment generation failure stays explicit"
+  check bool "decision failure reason tracked"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" {|NoAction "comment_generation_failed"|})
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "decision_failure_reason")
 
 let test_lodge_heartbeat_public_memory_helpers_removed () =
   check bool "load_agent_memories removed from mli"
@@ -111,11 +118,10 @@ let () =
           test_case "agentActivities recall removed" `Quick test_lodge_memory_no_agent_activities_query;
           test_case "createLodgeActivity store removed" `Quick test_lodge_memory_no_create_lodge_activity_mutation;
           test_case "profile shellout removed" `Quick test_lodge_heartbeat_no_profile_shellout;
-          test_case "reaction prompt mainline" `Quick test_lodge_heartbeat_uses_reaction_prompt;
+          test_case "decision prompt mainline" `Quick test_lodge_heartbeat_uses_decision_prompt;
           test_case "reflection updates self summary" `Quick test_lodge_heartbeat_updates_self_summary;
           test_case "ToM context used" `Quick test_lodge_heartbeat_uses_tom_context;
-          test_case "post fallback policy locked" `Quick test_lodge_heartbeat_post_fallback_policy;
-          test_case "hidden fallbacks removed" `Quick test_lodge_heartbeat_hidden_fallbacks_removed;
+          test_case "no heuristic fallback policy locked" `Quick test_lodge_heartbeat_no_heuristic_fallback_policy;
           test_case "legacy public surface removed" `Quick test_lodge_heartbeat_public_memory_helpers_removed;
         ]);
     ]

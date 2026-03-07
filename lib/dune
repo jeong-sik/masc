@@ -71,6 +71,7 @@
    log
    lodge_cascade
    lodge_atmosphere
+   lodge_decision
    lodge_heartbeat
    lodge_memory
    lodge_memory_gc

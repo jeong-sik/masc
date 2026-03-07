@@ -409,6 +409,7 @@ require_tool_success "$prove_raw"
 prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
 require_json_condition "$prove_result" '.proof.evidence.spawn_failure_count == 2' "proof evidence is missing spawn_failure_count=2"
 require_json_condition "$prove_result" '.proof.evidence.detached_agent_count == 2' "proof evidence is missing detached_agent_count=2"
+require_json_condition "$prove_result" '.proof.evidence.empty_note_turn_count == 0' "proof evidence recorded unexpected empty note turns"
 require_json_condition "$prove_result" '.proof.evidence.failed_spawn_roster | length == 2' "proof evidence is missing failed spawn roster"
 require_json_condition "$prove_result" '.proof.evidence.detached_actor_roster | length == 2' "proof evidence is missing detached actor roster"
 proof_md_path="$(printf '%s' "$prove_result" | jq -r '.proof_md_path')"
@@ -432,6 +433,11 @@ if ! jq -e '.incidents.failed_spawn_roster | length == 2' "$report_json_path" >/
 fi
 if ! jq -e '.incidents.detached_actor_roster | length == 2' "$report_json_path" >/dev/null; then
   echo "FAIL: report json missing detached_actor_roster"
+  cat "$report_json_path"
+  exit 1
+fi
+if ! jq -e '.incidents.empty_note_turn_count == 0' "$report_json_path" >/dev/null; then
+  echo "FAIL: report json recorded unexpected empty note turns"
   cat "$report_json_path"
   exit 1
 fi

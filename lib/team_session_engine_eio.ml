@@ -941,35 +941,37 @@ let record_turn ~(config : Room.config) ~(session_id : string) ~(actor : string)
       let task_priority = clamp_int ~min_v:1 ~max_v:5 task_priority in
       let now = Time_compat.now () in
       match turn_kind with
-      | Team_session_types.Turn_note ->
-          let updated =
-            {
-              session with
-              turn_count = session.turn_count + 1;
-              last_turn_at = Some now;
-              last_event_at = Some now;
-              updated_at_iso = now_iso ();
-            }
-          in
-          Team_session_store.save_session config updated;
-          Team_session_store.append_event config session_id ~event_type:"team_turn"
-            ~detail:
-              (`Assoc
-                [
-                  ("turn_no", `Int updated.turn_count);
-                  ("kind", `String "note");
-                  ("actor", `String actor);
-                  ( "message",
-                    Option.fold ~none:`Null ~some:(fun s -> `String s) message );
-                  ("ts_iso", `String (now_iso ()));
-                ]);
-          Ok
-            (`Assoc
-              [
-                ("session_id", `String session_id);
-                ("turn_no", `Int updated.turn_count);
-                ("kind", `String "note");
-              ])
+      | Team_session_types.Turn_note -> (
+          match message with
+          | None -> Error "message is required for note turn"
+          | Some msg ->
+              let updated =
+                {
+                  session with
+                  turn_count = session.turn_count + 1;
+                  last_turn_at = Some now;
+                  last_event_at = Some now;
+                  updated_at_iso = now_iso ();
+                }
+              in
+              Team_session_store.save_session config updated;
+              Team_session_store.append_event config session_id ~event_type:"team_turn"
+                ~detail:
+                  (`Assoc
+                    [
+                      ("turn_no", `Int updated.turn_count);
+                      ("kind", `String "note");
+                      ("actor", `String actor);
+                      ("message", `String msg);
+                      ("ts_iso", `String (now_iso ()));
+                    ]);
+              Ok
+                (`Assoc
+                  [
+                    ("session_id", `String session_id);
+                    ("turn_no", `Int updated.turn_count);
+                    ("kind", `String "note");
+                  ]))
       | Team_session_types.Turn_broadcast -> (
           match message with
           | None -> Error "message is required for broadcast turn"

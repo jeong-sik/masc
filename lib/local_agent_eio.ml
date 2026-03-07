@@ -347,6 +347,8 @@ Keep responses concise and task-focused.
 If a tool schema includes agent_name and you omit it, the runtime will inject %s automatically.
 Do not invent tool names or arguments that are not in schema.
 If you are operating inside a team session, record your own work with masc_team_session_turn as the worker.
+Inside a team session, record at least one note turn with turn_kind="note" and a non-empty message that states your concrete contribution.
+A note turn without a message is invalid and will be rejected.
 When the task is complete, return a short final result summarizing what you changed or learned.|}
     worker_name model_id session_line role_line selection_line worker_name
 

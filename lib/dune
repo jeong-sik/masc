@@ -195,6 +195,7 @@
    gardener
    tool_gardener
    tool_library
+   tool_catalog
    library_bridge
    tool_council
    tool_code

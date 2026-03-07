@@ -60,13 +60,21 @@ let extract_json_from_text text =
   with Not_found ->
     Alcotest.failf "expected JSON payload in text: %s" text
 
-let tools_list_response ~clock ~sw ?profile ?names state =
-  let params =
-    match names with
-    | Some items ->
-        `Assoc [ ("names", `List (List.map (fun name -> `String name) items)) ]
-    | None -> `Assoc []
+let tools_list_response ~clock ~sw ?profile ?names ?(include_hidden = false)
+    ?(include_deprecated = false) state =
+  let fields =
+    []
+    |> (fun acc ->
+         match names with
+         | Some items ->
+             ("names", `List (List.map (fun name -> `String name) items)) :: acc
+         | None -> acc)
+    |> (fun acc ->
+         if include_hidden then ("include_hidden", `Bool true) :: acc else acc)
+    |> (fun acc ->
+         if include_deprecated then ("include_deprecated", `Bool true) :: acc else acc)
   in
+  let params = `Assoc (List.rev fields) in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -112,6 +120,14 @@ let tool_description_exn tool =
       match List.assoc_opt "description" fields with
       | Some (`String value) -> value
       | _ -> Alcotest.fail "tool description missing")
+  | _ -> Alcotest.fail "tool is not an object"
+
+let tool_string_field tool field =
+  match tool with
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`String value) -> value
+      | _ -> Alcotest.failf "tool field missing: %s" field)
   | _ -> Alcotest.fail "tool is not an object"
 
 (* ===== Unit Tests for Type Re-exports ===== *)
@@ -295,6 +311,18 @@ let test_handle_request_tools_list () =
                    "legacy masc_trpg_dice_roll hidden from list"
                    false
                    (List.mem "masc_trpg_dice_roll" names);
+                 Alcotest.(check bool)
+                   "legacy experiment_start hidden from list"
+                   false
+                   (List.mem "experiment_start" names);
+                 Alcotest.(check bool)
+                   "superseded masc_claim hidden from list"
+                   false
+                   (List.mem "masc_claim" names);
+                 Alcotest.(check bool)
+                   "superseded masc_dispatch_route hidden from list"
+                   false
+                   (List.mem "masc_dispatch_route" names);
                  Alcotest.(check bool)
                    "placeholder tool hidden by default"
                    false
@@ -571,6 +599,59 @@ let test_handle_request_tools_list_with_placeholder_flag () =
      | _ -> Alcotest.fail "response not an object");
 
     cleanup_dir base_path)
+
+let test_handle_request_tools_list_include_hidden_metadata () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let tools =
+    tools_list_response ~clock ~sw ~include_hidden:true
+      ~names:
+        [
+          "masc_claim";
+          "masc_transition";
+          "masc_archive_save";
+          "masc_trpg_dice_roll";
+          "experiment_start";
+        ]
+      state
+    |> tools_from_response
+  in
+
+  let masc_claim = find_tool_exn tools "masc_claim" in
+  Alcotest.(check string) "masc_claim hidden" "hidden"
+    (tool_string_field masc_claim "visibility");
+  Alcotest.(check string) "masc_claim deprecated" "deprecated"
+    (tool_string_field masc_claim "lifecycle");
+  Alcotest.(check string) "masc_claim canonical" "masc_transition"
+    (tool_string_field masc_claim "canonicalName");
+  Alcotest.(check string) "masc_claim replacement" "masc_transition"
+    (tool_string_field masc_claim "replacement");
+
+  let placeholder = find_tool_exn tools "masc_archive_save" in
+  Alcotest.(check string) "placeholder hidden" "hidden"
+    (tool_string_field placeholder "visibility");
+  Alcotest.(check string) "placeholder active" "active"
+    (tool_string_field placeholder "lifecycle");
+
+  let legacy_trpg = find_tool_exn tools "masc_trpg_dice_roll" in
+  Alcotest.(check string) "legacy trpg canonical" "trpg.dice.roll"
+    (tool_string_field legacy_trpg "canonicalName");
+
+  let legacy_experiment = find_tool_exn tools "experiment_start" in
+  Alcotest.(check string) "legacy experiment canonical" "experiment.start"
+    (tool_string_field legacy_experiment "canonicalName");
+
+  let canonical = find_tool_exn tools "masc_transition" in
+  Alcotest.(check string) "canonical visible" "default"
+    (tool_string_field canonical "visibility");
+  Alcotest.(check string) "canonical active" "active"
+    (tool_string_field canonical "lifecycle");
+
+  cleanup_dir base_path
 
 let test_execute_tool_trpg_flow () =
   Eio_main.run @@ fun env ->
@@ -1029,6 +1110,8 @@ let eio_tests = [
   "handle tools/list operator profile", `Quick,
     test_handle_request_tools_list_operator_profile;
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
+  "handle tools/list include hidden metadata", `Quick,
+    test_handle_request_tools_list_include_hidden_metadata;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
   "handle invalid json", `Quick, test_handle_request_invalid_json;

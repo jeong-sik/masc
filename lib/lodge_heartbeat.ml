@@ -830,6 +830,7 @@ type lodge_status = {
   ls_total_ticks: int;
   ls_total_checkins: int;
   ls_last_result: heartbeat_result option;
+  ls_manual_tick_running: bool;
   ls_active_self_heartbeats: string list;
 }
 
@@ -838,6 +839,44 @@ let _lodge_total_ticks = ref 0
 let _lodge_total_checkins = ref 0
 let _lodge_last_result : heartbeat_result option ref = ref None
 let _lodge_enabled = ref false
+let _lodge_manual_tick_running = ref false
+
+let with_manual_tick_state f =
+  lodge_init_lock ();
+  match !lodge_lock with
+  | Some mutex -> (
+      try Eio.Mutex.use_rw ~protect:true mutex f
+      with exn ->
+        let msg = Printexc.to_string exn in
+        if String.starts_with ~prefix:"Stdlib.Effect.Unhandled" msg
+           || String.starts_with ~prefix:"Eio__Eio_mutex.Poisoned" msg
+           || String.starts_with ~prefix:"Eio.Private.Mutex.Poisoned" msg
+        then
+          f ()
+        else
+          raise exn)
+  | None -> f ()
+
+let set_manual_tick_running value =
+  with_manual_tick_state (fun () -> _lodge_manual_tick_running := value)
+
+let manual_tick_running () =
+  with_manual_tick_state (fun () -> !_lodge_manual_tick_running)
+
+let try_begin_manual_tick () =
+  with_manual_tick_state (fun () ->
+    if !_lodge_manual_tick_running then
+      false
+    else begin
+      _lodge_manual_tick_running := true;
+      true
+    end)
+
+let record_tick_result (result : heartbeat_result) =
+  _lodge_last_tick := Time_compat.now ();
+  _lodge_total_ticks := !_lodge_total_ticks + 1;
+  _lodge_total_checkins := !_lodge_total_checkins + List.length result.checkins;
+  _lodge_last_result := Some result
 
 let lodge_status () : lodge_status =
   let agents = !agents_cache in
@@ -850,6 +889,7 @@ let lodge_status () : lodge_status =
     ls_total_ticks = !_lodge_total_ticks;
     ls_total_checkins = !_lodge_total_checkins;
     ls_last_result = !_lodge_last_result;
+    ls_manual_tick_running = manual_tick_running ();
     ls_active_self_heartbeats =
       Hashtbl.fold (fun name _state acc -> name :: acc) agent_states [];
   }
@@ -971,6 +1011,7 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
     ("total_ticks", `Int s.ls_total_ticks);
     ("total_checkins", `Int s.ls_total_checkins);
     ("last_tick_result", last_result_json);
+    ("manual_tick_running", `Bool s.ls_manual_tick_running);
     ( "last_skip_reason",
       match last_skip_reason with Some reason -> `String reason | None -> `Null );
     ("active_self_heartbeats", `List (List.map (fun n -> `String n) s.ls_active_self_heartbeats));
@@ -2628,10 +2669,7 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
         let result = tick ~ignore_quiet_hours:false ~config ~pending_triggers in
 
         (* Record observable state *)
-        _lodge_last_tick := Time_compat.now ();
-        _lodge_total_ticks := !_lodge_total_ticks + 1;
-        _lodge_total_checkins := !_lodge_total_checkins + List.length result.checkins;
-        _lodge_last_result := Some result;
+        record_tick_result result;
 
         (* Log result *)
         let n_acted = List.length (List.filter (fun (_, _, r) ->
@@ -2741,7 +2779,7 @@ let start ~sw ~clock room_config =
 
 (** {1 Manual Trigger (for MCP tool)} *)
 
-let trigger_heartbeat room_config =
+let run_manual_heartbeat room_config =
   let config = load_config () in
   let agents = get_agents () in
   (* Manual trigger: create ManualTrigger for all agents *)
@@ -2749,6 +2787,7 @@ let trigger_heartbeat room_config =
     (a.name, ManualTrigger)
   ) agents in
   let result = tick ~ignore_quiet_hours:true ~config ~pending_triggers in
+  record_tick_result result;
 
   List.iter (fun (name, _trigger, _checkin) ->
     Eio.traceln "🔔 %s checked in (manual trigger)" name
@@ -2756,6 +2795,29 @@ let trigger_heartbeat room_config =
 
   ignore room_config;
   result
+
+let trigger_heartbeat room_config =
+  if not (try_begin_manual_tick ()) then
+    invalid_arg "manual heartbeat already running";
+  Fun.protect
+    ~finally:(fun () -> set_manual_tick_running false)
+    (fun () -> run_manual_heartbeat room_config)
+
+let trigger_heartbeat_async ~sw room_config =
+  if not (try_begin_manual_tick ()) then
+    `Already_running
+  else begin
+    Eio.Fiber.fork ~sw (fun () ->
+      Fun.protect
+        ~finally:(fun () -> set_manual_tick_running false)
+        (fun () ->
+          try
+            ignore (run_manual_heartbeat room_config)
+          with exn ->
+            Eio.traceln "💀 Lodge manual trigger failed: %s"
+              (Printexc.to_string exn)));
+    `Started
+  end
 
 (** {1 Broadcast Content-Aware Routing}
 

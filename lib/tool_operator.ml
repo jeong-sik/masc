@@ -109,9 +109,9 @@ let action_schema ~remote =
     name = "masc_operator_action";
     description =
       if remote then
-        "Preview or run a structured operator action. Use this when you need to broadcast, steer a team session, pause a room, or message a keeper through the remote operator surface."
+        "Preview or run a structured operator action. Use this when you need to broadcast, steer a team session, pause a room, or message a keeper through the remote operator surface. For lodge_tick, the default is async accepted; set payload.wait=true to block for the full result."
       else
-        "Run a structured operator action against the room, a team session, or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions.";
+        "Run a structured operator action against the room, a team session, or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions. For lodge_tick, the default is async accepted; set payload.wait=true to block for the full result.";
     input_schema =
       `Assoc
         [

@@ -81,7 +81,15 @@ let test_lodge_graphql_defaults_and_guards () =
     (file_contains_pattern "lib/lodge_heartbeat.ml" "GraphQL agents is null");
   check bool "null agents guard present in tool_lodge"
     true
-    (file_contains_pattern "lib/tool_lodge.ml" "GraphQL agents is null")
+    (file_contains_pattern "lib/tool_lodge.ml" "GraphQL agents is null");
+  check bool "heartbeat has unix curl fallback"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml"
+       "trying Unix curl fallback");
+  check bool "tool_lodge has unix curl fallback"
+    true
+    (file_contains_pattern "lib/tool_lodge.ml"
+       "trying Unix curl fallback")
 
 let test_lodge_heartbeat_updates_self_summary () =
   check bool "reflection updates self summary"

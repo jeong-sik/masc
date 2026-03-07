@@ -1,0 +1,54 @@
+(** Structured LLM-native decision contract for Lodge actions. *)
+
+type action =
+  | Post
+  | Comment
+  | Upvote
+  | Skip
+
+type reaction = {
+  post_id : string;
+  reaction : Lodge_reaction.reaction_type;
+  confidence : float;
+  reason : string option;
+}
+
+type choice = {
+  action : action;
+  target_post_id : string option;
+  content : string option;
+  reason : string;
+  confidence : float;
+}
+
+type outcome = {
+  reactions : reaction list;
+  choice : choice;
+}
+
+val single_reaction_prompt :
+  agent_name:string ->
+  agent_prompt:string ->
+  interests:string list ->
+  post_id:string ->
+  content:string ->
+  language_instruction:string ->
+  string
+
+val batch_decision_prompt :
+  agent_name:string ->
+  identity_prompt:string ->
+  posts:(string * string * string) list ->
+  extra_context:string option ->
+  allow_post:bool ->
+  string
+
+val parse_single_choice : post_id:string -> string -> (choice, string) result
+
+val parse_batch_outcome :
+  allowed_post_ids:string list ->
+  allow_post:bool ->
+  string ->
+  (outcome, string) result
+
+val action_to_string : action -> string

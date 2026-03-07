@@ -1032,22 +1032,6 @@ let get_agent_prompt name =
     | None ->
       Printf.sprintf "You are %s. (Not found in Neo4j)" name
 
-(** Get interests for agent (from Neo4j cache) *)
-let get_agent_interests_cached name =
-  match get_cached_agent name with
-  | Some c -> c.interests
-  | None -> []
-
-(** Check if content matches agent's interests *)
-let matches_agent_interest agent_name content =
-  let keywords = get_agent_interests_cached agent_name in
-  let content_lower = String.lowercase_ascii content in
-  List.exists (fun kw ->
-    let kw_lower = String.lowercase_ascii kw in
-    try ignore (Str.search_forward (Str.regexp_string kw_lower) content_lower 0); true
-    with Not_found -> false
-  ) keywords
-
 (** Format agent name with emoji badge (from Neo4j cache) *)
 let format_agent_name_dynamic name =
   match get_cached_agent name with
@@ -1097,8 +1081,20 @@ let translate_to_korean ~net text =
     | Ok translated -> String.trim translated
     | Error _ -> text  (* fallback to original *)
 
+type lodge_reaction_outcome =
+  | Delegated
+  | Comment of string
+  | Upvote
+  | Skip of string
+
+let localize_decision_content ~net (choice : Lodge_decision.choice) =
+  match (choice.action, choice.content, lodge_language) with
+  | Lodge_decision.Comment, Some content, "ko" ->
+      { choice with content = Some (translate_to_korean ~net content) }
+  | _ -> choice
+
 (** React to content with a dynamic agent (from Neo4j cache) *)
-let react_to_content ~net ?agent_name:provided_name ?post_id content =
+let react_to_content ~net ?agent_name:provided_name ~post_id content =
   let agent_name = match provided_name with
     | Some n -> n
     | None -> random_agent_name ()
@@ -1108,38 +1104,40 @@ let react_to_content ~net ?agent_name:provided_name ?post_id content =
 
   (* Get agent's existing interests for context *)
   let existing_interests = get_agent_interests ~agent_name in
-  let interests_context = if existing_interests = [] then ""
-    else Printf.sprintf "\nYour interests: %s. Connect these to your response."
-      (String.concat ", " existing_interests)
+  let prompt =
+    Lodge_decision.single_reaction_prompt
+      ~agent_name
+      ~agent_prompt:agent_desc
+      ~interests:existing_interests
+      ~post_id
+      ~content
+      ~language_instruction:(language_instruction ())
   in
-
-  let system = Printf.sprintf "/no_think\n\
-    You are a Lodge participant. %s%s\n\
-    Share your unique perspective. Be thoughtful, specific, and add value. 2-4 sentences only."
-    agent_desc interests_context in
+  let system =
+    "/no_think\nReturn valid JSON only. Do not use markdown fences."
+  in
   (* A2A delegation: emit event for external worker instead of local LLM *)
   if Env_config.LodgeV2.delegate_llm then begin
-    let action_hint = match post_id with
-      | Some pid -> Some ("COMMENT:" ^ pid)
-      | None -> Some "POST"
-    in
     A2a_tools.emit_heartbeat_task ~agent:agent_name ~prompt:system
-      ~context:(Printf.sprintf "React to this Lodge post:\n%s" content)
-      ?action_hint ();
-    Ok ""  (* Empty = delegated; caller skips comment posting *)
+      ~context:prompt ();
+    Ok Delegated
   end else
-  match smart_generate ~net ~temperature:0.8 ~num_predict:250 ~system
-    (Printf.sprintf "React to this Lodge post:\n%s\n\nYour perspective:" content) with
+  match smart_generate ~net ~temperature:0.3 ~num_predict:350 ~system prompt with
   | Error e -> Error e
   | Ok response ->
-    let final_response = match lodge_language with
-      | "ko" -> translate_to_korean ~net response
-      | _ -> response
-    in
-    let new_interests = extract_interests ~net content in
-    let _ = save_interests_to_neo4j ~agent_name new_interests in
-    let display_name = format_agent_name_dynamic agent_name in
-    Ok (Printf.sprintf "%s\n%s" display_name final_response)
+      (match Lodge_decision.parse_single_choice ~post_id response with
+       | Error e -> Error (Printf.sprintf "❌ Lodge decision: %s" e)
+       | Ok choice ->
+           let choice = localize_decision_content ~net choice in
+           let new_interests = extract_interests ~net content in
+           let _ = save_interests_to_neo4j ~agent_name new_interests in
+           match choice.action with
+           | Lodge_decision.Comment ->
+               Ok (Comment (Option.value ~default:"" choice.content))
+           | Lodge_decision.Upvote -> Ok Upvote
+           | Lodge_decision.Skip -> Ok (Skip choice.reason)
+           | Lodge_decision.Post ->
+               Error "❌ Lodge decision: post action is not allowed for reactions")
 
 (** {1 Heartbeat: Full Read → Dig → Share cycle} *)
 
@@ -1187,11 +1185,17 @@ let heartbeat ~net (args : Yojson.Safe.t) =
             List.filter_map (fun agent ->
               match react_to_content ~net ~agent_name:agent ~post_id content with
               | Error _ -> None
-              | Ok "" -> Some (Printf.sprintf "🔮 %s (delegated)" agent)
-              | Ok reaction ->
-                let args = `Assoc [("post_id", `String post_id); ("content", `String reaction); ("author", `String agent)] in
+              | Ok Delegated -> Some (Printf.sprintf "🔮 %s (delegated)" agent)
+              | Ok (Comment reaction) ->
+                let display_name = format_agent_name_dynamic agent in
+                let args = `Assoc [("post_id", `String post_id); ("content", `String (Printf.sprintf "%s\n%s" display_name reaction)); ("author", `String agent)] in
                 let (ok, _) = Tool_board.handle_tool "masc_board_comment" args in
                 if ok then Some (Printf.sprintf "💬 %s" agent) else None
+              | Ok Upvote ->
+                let vote_args = `Assoc [("post_id", `String post_id); ("voter", `String agent); ("direction", `String "up")] in
+                let (ok, _) = Tool_board.handle_tool "masc_board_vote" vote_args in
+                if ok then Some (Printf.sprintf "👍 %s" agent) else None
+              | Ok (Skip _) -> Some (Printf.sprintf "⏭️ %s" agent)
             ) (let names = get_all_agent_names () in
                if List.length names >= 2 then [List.nth names 0; List.nth names 1]
                else names)
@@ -1222,7 +1226,7 @@ let classify ~net (args : Yojson.Safe.t) =
 
     When skip_classify=true, bypasses LLM classification and directly generates
     a reaction. This significantly speeds up the process by avoiding one LLM call. *)
-let react ~net (args : Yojson.Safe.t) =
+let rec react ~net (args : Yojson.Safe.t) =
   let post_id_arg = Safe_ops.json_string ~default:"" "post_id" args in
   let agent_str = Safe_ops.json_string ~default:"random" "agent" args in
   let skip_classify = Safe_ops.json_bool ~default:true "skip_classify" args in
@@ -1251,34 +1255,39 @@ let react ~net (args : Yojson.Safe.t) =
       if skip_classify then
       match react_to_content ~net ~agent_name ~post_id clean_content with
       | Error e -> (false, Printf.sprintf "❌ Lodge: React failed [agent=%s, error=%s]" agent_name e)
-      | Ok "" -> (true, Printf.sprintf "🔮 Lodge reaction delegated for %s [agent=%s]" post_id agent_name)
-      | Ok reaction ->
+      | Ok Delegated -> (true, Printf.sprintf "🔮 Lodge reaction delegated for %s [agent=%s]" post_id agent_name)
+      | Ok (Comment reaction) ->
+        let display_name = format_agent_name_dynamic agent_name in
         let comment_args = `Assoc [
           ("post_id", `String post_id);
-          ("content", `String reaction);
+          ("content", `String (Printf.sprintf "%s\n%s" display_name reaction));
           ("author", `String agent_name);
         ] in
         let (ok, msg) = Tool_board.handle_tool "masc_board_comment" comment_args in
-        if ok then (true, Printf.sprintf "💬 Lodge reaction posted on %s:\n%s" post_id reaction)
+        if ok then (true, Printf.sprintf "💬 Lodge comment posted on %s" post_id)
         else (false, Printf.sprintf "❌ Lodge: Comment failed [post=%s, error=%s]" post_id msg)
+      | Ok Upvote ->
+        let vote_args = `Assoc [
+          ("post_id", `String post_id);
+          ("voter", `String agent_name);
+          ("direction", `String "up");
+        ] in
+        let (ok, msg) = Tool_board.handle_tool "masc_board_vote" vote_args in
+        if ok then (true, Printf.sprintf "👍 Lodge upvoted %s [agent=%s]" post_id agent_name)
+        else (false, Printf.sprintf "❌ Lodge: Upvote failed [post=%s, error=%s]" post_id msg)
+      | Ok (Skip reason) ->
+        (true, Printf.sprintf "⏭️ %s skipped %s (%s)" agent_name post_id reason)
     else
       let cls = classify_content ~net clean_content in
       match cls.category with
       | Noise -> (true, Printf.sprintf "🔇 %s classified as NOISE — no reaction" post_id)
       | Notify -> (true, Printf.sprintf "⚠️ %s classified as NOTIFY — flagged for human" post_id)
       | Review ->
-        match react_to_content ~net ~agent_name ~post_id clean_content with
-        | Error e -> (false, Printf.sprintf "❌ Lodge: React failed [agent=%s, error=%s]" agent_name e)
-        | Ok "" -> (true, Printf.sprintf "🔮 Lodge reaction delegated for %s [agent=%s]" post_id agent_name)
-        | Ok reaction ->
-          let comment_args = `Assoc [
-            ("post_id", `String post_id);
-            ("content", `String reaction);
-            ("author", `String agent_name);
-          ] in
-          let (ok, msg) = Tool_board.handle_tool "masc_board_comment" comment_args in
-          if ok then (true, Printf.sprintf "💬 Lodge reaction posted on %s:\n%s" post_id reaction)
-          else (false, Printf.sprintf "❌ Lodge: Comment failed [post=%s, error=%s]" post_id msg)
+        react ~net (`Assoc [
+          ("post_id", `String post_id);
+          ("agent", `String agent_name);
+          ("skip_classify", `Bool true);
+        ])
 
 (** {1 Full cycle: heartbeat + ONE random agent reacts} *)
 
@@ -1959,25 +1968,12 @@ let agent_patrol ~net (args : Yojson.Safe.t) =
         else
           let target_post = List.hd unreacted in
 
-          let (got_post, post_content) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String target_post)]) in
-
-          let upvote_msg =
-            if got_post && matches_agent_interest agent_name post_content then begin
-              let (_vote_ok, vote_result) = Tool_board.handle_tool "masc_board_vote" (`Assoc [
-                ("post_id", `String target_post);
-                ("voter", `String agent_name);
-                ("direction", `String "up");
-              ]) in
-              Printf.sprintf "\n👍 Upvoted (matches %s's interests): %s" agent_name vote_result
-            end else ""
-          in
-
           let (react_ok, react_msg) = react ~net (`Assoc [
             ("post_id", `String target_post);
             ("agent", `String agent_name);
           ]) in
           if react_ok then
-            (true, Printf.sprintf "💬 %s patrolled and reacted to %s:\n%s%s" agent_name target_post react_msg upvote_msg)
+            (true, Printf.sprintf "💬 %s patrolled and reacted to %s:\n%s" agent_name target_post react_msg)
           else
             (false, Printf.sprintf "❌ Lodge: Patrol failed [agent=%s, post=%s, error=%s]" agent_name target_post react_msg)
 

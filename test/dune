@@ -45,6 +45,32 @@
  (modules test_notifications)
  (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
 
+; Agent SDK swarm integration tests (ported from former agent-swarm package)
+(test
+ (name test_agent_swarm_masc_tools)
+ (modules test_agent_swarm_masc_tools)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
+
+(test
+ (name test_agent_swarm_dev_tools)
+ (modules test_agent_swarm_dev_tools)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
+
+(test
+ (name test_agent_swarm_unit)
+ (modules test_agent_swarm_unit)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
+
+(test
+ (name test_agent_swarm_fleet)
+ (modules test_agent_swarm_fleet)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
+
+(test
+ (name test_agent_swarm_runner)
+ (modules test_agent_swarm_runner)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
+
 ; ============================================================
 ; Eio module tests (Pure sync - Cache_eio, Metrics_store_eio, Hebbian_eio)
 ; ============================================================

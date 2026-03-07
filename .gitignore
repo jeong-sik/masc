@@ -24,6 +24,9 @@ config/llm_cascade.json
 
 # Database files
 *.db
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 
 # Test artifacts
 *.log
@@ -48,3 +51,7 @@ logs/
 # Dashboard SPA (Vite)
 dashboard/node_modules/
 dashboard/dist/
+viewer/dist-build/
+
+# Local Claude session scratch
+.claude/

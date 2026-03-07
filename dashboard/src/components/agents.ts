@@ -5,20 +5,17 @@ import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { MitosisRing } from './common/mitosis-ring'
 import { TimeAgo } from './common/time-ago'
-import { buildAgentMotion, type AgentMotionSnapshot } from './common/agent-motion'
+import type { AgentMotionSnapshot } from './common/agent-motion'
 import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
 import {
   agents,
   keepers,
-  boardPosts,
-  tasks,
-  messages,
   keeperLifecycles,
   staleKeepers,
+  agentMotionMap,
 } from '../store'
 import type { Agent, Keeper, KeeperLifecycleState } from '../types'
-import { journal } from '../sse'
 
 const QUIET_AGENT_MS = 10 * 60 * 1000
 const STALE_AGENT_MS = 20 * 60 * 1000
@@ -125,12 +122,8 @@ function keeperContinuity(keeper: Keeper): string {
 }
 
 function buildAgentRow(agent: Agent): AgentMonitorRow {
-  const motion = buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
-    currentTask: agent.current_task,
-    lastSeen: agent.last_seen,
-    boardPosts: boardPosts.value,
-    keepers: keepers.value,
-  })
+  const motion = agentMotionMap.value.get(agent.name.trim().toLowerCase())
+    ?? { activeAssignedCount: 0, lastActivityAt: null, lastActivityText: null }
   const lastSignalAt = motion.lastActivityAt ?? agent.last_seen ?? null
   const signalAgeMs = lastSignalAt ? Math.max(0, Date.now() - toEpoch(lastSignalAt)) : Number.POSITIVE_INFINITY
   const hasWork = Boolean(agent.current_task?.trim()) || motion.activeAssignedCount > 0

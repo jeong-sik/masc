@@ -7,6 +7,13 @@ export default defineConfig({
   build: {
     outDir: '../assets/dashboard',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['preact', 'preact/hooks', 'htm', '@preact/signals'],
+        },
+      },
+    },
   },
   server: {
     proxy: {

@@ -60,7 +60,6 @@ let masc_mcp_tools = [
   "mcp__masc__masc_team_session_start";
   "mcp__masc__masc_team_session_step";
   "mcp__masc__masc_team_session_status";
-  "mcp__masc__masc_team_session_turn";
   "mcp__masc__masc_team_session_events";
   "mcp__masc__masc_team_session_finalize";
   "mcp__masc__masc_team_session_stop";

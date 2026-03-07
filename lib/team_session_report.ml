@@ -246,7 +246,7 @@ let mcp_improvements (session : Team_session_types.session) events checkpoints_c
   in
   let with_turns =
     if session.turn_count > 0 then
-      "Turn-level orchestration evidence exists via masc_team_session_turn events."
+      "Turn-level orchestration evidence exists via team_turn session events."
       :: with_fallback
     else with_fallback
   in

@@ -68,6 +68,15 @@ let metadata name =
         ~canonical_name:"masc_transition"
         ~replacement:"masc_transition"
         "Superseded by the unified masc_transition entrypoint."
+  | "masc_team_session_turn" ->
+      {
+        (deprecated
+           ~canonical_name:"masc_team_session_step"
+           ~replacement:"masc_team_session_step"
+           "Legacy compatibility entrypoint for plain team-session turn recording; use masc_team_session_step.")
+        with
+        allow_direct_call_when_hidden = true;
+      }
   | "masc_dispatch_route" ->
       deprecated
         ~canonical_name:"masc_dispatch_plan"

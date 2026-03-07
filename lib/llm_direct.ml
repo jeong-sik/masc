@@ -1,6 +1,7 @@
 (** Llm_direct — Direct LLM API calls without llm-mcp dependency.
 
-    Provides call_glm, call_claude_cli, call_ollama, and a unified dispatch.
+    Provides call_glm, call_claude_cli, call_ollama, call_llama,
+    and a unified dispatch.
     Removes the SPOF on llm-mcp (port 8932) for Lodge heartbeat. *)
 
 open Printf
@@ -133,6 +134,39 @@ let call_ollama ~model ~prompt ~timeout_sec ~max_chars () =
     then String.sub result 0 max_chars else result in
   strip_extra truncated
 
+(* ---------- Llama (llama.cpp / llama-server) ---------- *)
+
+(** Call llama-server via OpenAI-compatible API.
+    Endpoint: LLAMA_SERVER_URL/v1/chat/completions (default http://127.0.0.1:8085) *)
+let call_llama ~model ~prompt ~timeout_sec ~max_chars () =
+  let url = Env_config.Llama.server_url in
+  let body = Yojson.Safe.to_string (`Assoc [
+    ("model", `String model);
+    ("messages", `List [
+      `Assoc [("role", `String "user"); ("content", `String prompt)]
+    ]);
+    ("max_tokens", `Int max_chars);
+    ("temperature", `Float 0.7);
+  ]) in
+  let raw = Process_eio.run_argv_with_stdin
+    ~timeout_sec:(Float.of_int timeout_sec +. 5.0)
+    ~stdin_content:body
+    ["curl"; "-s"; "--max-time"; string_of_int timeout_sec;
+     "-X"; "POST"; url ^ "/v1/chat/completions";
+     "-H"; "Content-Type: application/json";
+     "-d"; "@-"] in
+  let result = try
+    let json = Yojson.Safe.from_string raw in
+    json |> Yojson.Safe.Util.member "choices"
+         |> Yojson.Safe.Util.index 0
+         |> Yojson.Safe.Util.member "message"
+         |> Yojson.Safe.Util.member "content"
+         |> Yojson.Safe.Util.to_string
+  with _ -> raw in
+  let truncated = if String.length result > max_chars
+    then String.sub result 0 max_chars else result in
+  strip_extra truncated
+
 (* ---------- Dispatch ---------- *)
 
 (** Unified dispatcher: routes by tool_name to the appropriate backend.
@@ -146,6 +180,8 @@ let dispatch ~tool_name ?(api_key="") ~model ~prompt ~timeout_sec ~max_chars () 
       call_claude_cli ~api_key ~model ~prompt ~timeout_sec ~max_chars ()
   | "ollama" ->
       call_ollama ~model ~prompt ~timeout_sec ~max_chars ()
+  | "llama" | "llama.cpp" | "llamacpp" ->
+      call_llama ~model ~prompt ~timeout_sec ~max_chars ()
   | other ->
       eprintf "[llm_direct] unknown tool_name: %s, trying GLM fallback\n%!" other;
       call_glm ~api_key ~model ~prompt ~timeout_sec ~max_chars ()

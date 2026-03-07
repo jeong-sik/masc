@@ -3514,6 +3514,165 @@ body.wasm-dom-fallback #bevy-canvas {
     min-height: 100%;
 }
 
+.trpg-surface-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px 0 14px;
+}
+
+.trpg-surface-tab {
+    border: 1px solid rgba(196, 162, 101, 0.22);
+    border-radius: 999px;
+    background: rgba(10, 16, 22, 0.72);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    padding: 6px 12px;
+    text-transform: uppercase;
+}
+
+.trpg-surface-tab[aria-pressed="true"] {
+    border-color: rgba(196, 162, 101, 0.62);
+    background: rgba(196, 162, 101, 0.16);
+    color: var(--accent-primary);
+}
+
+#trpg-surface-status {
+    margin-left: auto;
+}
+
+.trpg-surface-panels {
+    display: grid;
+    gap: 12px;
+    padding: 12px 14px 0 14px;
+}
+
+.trpg-surface-panel {
+    display: none;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid rgba(196, 162, 101, 0.16);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(7, 12, 17, 0.94), rgba(10, 16, 21, 0.82));
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+.trpg-surface-head {
+    display: grid;
+    gap: 4px;
+}
+
+.trpg-surface-head h3 {
+    margin: 0;
+    color: var(--text-bright);
+    font-family: var(--font-display);
+    font-size: 0.98rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.trpg-surface-head p {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.trpg-summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+}
+
+.trpg-summary-card {
+    display: grid;
+    gap: 6px;
+    padding: 12px;
+    border: 1px solid rgba(196, 162, 101, 0.12);
+    border-radius: 10px;
+    background: rgba(17, 24, 34, 0.72);
+}
+
+.trpg-summary-card-label {
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.trpg-summary-card-value {
+    color: var(--text-bright);
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.trpg-summary-card-meta {
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.trpg-summary-empty {
+    padding: 10px 12px;
+    border: 1px dashed rgba(196, 162, 101, 0.18);
+    border-radius: 10px;
+    color: var(--text-dim);
+    font-size: 0.76rem;
+}
+
+.trpg-alert-list,
+.trpg-action-list,
+.trpg-event-list {
+    display: grid;
+    gap: 8px;
+}
+
+.trpg-alert-item,
+.trpg-action-item,
+.trpg-event-item {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid rgba(196, 162, 101, 0.14);
+    border-radius: 10px;
+    background: rgba(14, 20, 29, 0.7);
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
+.trpg-alert-item[data-level="error"] {
+    border-color: rgba(214, 127, 127, 0.3);
+    background: rgba(74, 24, 24, 0.28);
+}
+
+.trpg-alert-item[data-level="warn"] {
+    border-color: rgba(196, 162, 101, 0.3);
+    background: rgba(79, 58, 22, 0.24);
+}
+
+.trpg-alert-code,
+.trpg-event-type {
+    color: var(--accent-primary);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.trpg-event-meta {
+    color: var(--text-dim);
+    font-size: 0.7rem;
+}
+
+#dashboard[data-trpg-surface="overview"] #trpg-overview-panel,
+#dashboard[data-trpg-surface="timeline"] #trpg-timeline-panel,
+#dashboard[data-trpg-surface="control"] #trpg-control-panel {
+    display: grid;
+}
+
 #new-game-panel {
     position: absolute;
     inset: var(--new-game-panel-top, 44px) 0 0 0;
@@ -3524,6 +3683,10 @@ body.wasm-dom-fallback #bevy-canvas {
     justify-content: center;
     padding: 28px 12px 12px 12px;
     overflow-y: auto;
+}
+
+#dashboard[data-trpg-surface="lobby"] #new-game-panel {
+    display: flex;
 }
 
 .new-game-card {

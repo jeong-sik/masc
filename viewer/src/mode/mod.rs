@@ -1461,6 +1461,7 @@ pub(super) fn set_current_room_id(doc: &web_sys::Document, room_id: &str) {
     }
     remember_recent_room(&room);
     sync_room_controls(doc, &room);
+    refresh_trpg_ops_snapshots(doc);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1481,6 +1482,30 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
     }
     if let Some(el) = doc.get_element_by_id("character-panel") {
         el.set_inner_html("");
+    }
+    if let Some(el) = doc.get_element_by_id("trpg-overview-summary") {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">개요를 불러오는 중입니다.</div>");
+    }
+    if let Some(el) = doc.get_element_by_id("trpg-overview-alarms") {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">알림을 불러오는 중입니다.</div>");
+    }
+    if let Some(el) = doc.get_element_by_id("trpg-overview-actions") {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">다음 액션을 계산 중입니다.</div>");
+    }
+    if let Some(el) = doc.get_element_by_id("trpg-control-summary") {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">제어 상태를 불러오는 중입니다.</div>");
+    }
+    if let Some(el) = doc.get_element_by_id("trpg-control-warnings") {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">운영 경고를 불러오는 중입니다.</div>");
+    }
+    if let Some(el) = doc.get_element_by_id("trpg-control-actions") {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">허용된 액션을 계산 중입니다.</div>");
+    }
+    if let Some(el) = doc.get_element_by_id("trpg-timeline-summary") {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">타임라인 요약을 불러오는 중입니다.</div>");
+    }
+    if let Some(el) = doc.get_element_by_id("trpg-timeline-events") {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">최근 이벤트를 불러오는 중입니다.</div>");
     }
     if let Some(el) = doc.get_element_by_id("turn-num") {
         el.set_text_content(Some("1"));
@@ -1746,7 +1771,8 @@ use room_hub::{
 mod trpg_controls;
 #[cfg(target_arch = "wasm32")]
 use trpg_controls::{
-    actor_admin_room_id, actor_admin_set_status, bind_new_game_controls, refresh_actor_admin_list,
+    actor_admin_room_id, actor_admin_set_status, bind_new_game_controls,
+    refresh_actor_admin_list, refresh_trpg_ops_snapshots,
 };
 
 /// Refresh TRPG widget status counters (narrative, party, history, dedup).

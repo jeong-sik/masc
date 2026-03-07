@@ -24,6 +24,14 @@ let test_explicit_graphql_url_takes_priority () =
         "http://127.0.0.1:8935/graphql"
         (Graphql_endpoint.graphql_url ()))
 
+let test_explicit_graphql_host_normalizes_for_local_dev () =
+  with_graphql_env ~graphql_url:"127.0.0.1:8935"
+    ~railway_url:"second-brain-graphql-production.up.railway.app" (fun () ->
+      Alcotest.(check string)
+        "graphql_url"
+        "http://127.0.0.1:8935/graphql"
+        (Graphql_endpoint.graphql_url ()))
+
 let test_railway_url_without_scheme_is_normalized () =
   with_graphql_env ?graphql_url:None
     ~railway_url:"second-brain-graphql-production.up.railway.app" (fun () ->
@@ -46,6 +54,8 @@ let () =
         [
           Alcotest.test_case "explicit GRAPHQL_URL wins" `Quick
             test_explicit_graphql_url_takes_priority;
+          Alcotest.test_case "explicit GRAPHQL_URL host normalizes" `Quick
+            test_explicit_graphql_host_normalizes_for_local_dev;
           Alcotest.test_case "RAILWAY_GRAPHQL_URL host normalizes" `Quick
             test_railway_url_without_scheme_is_normalized;
           Alcotest.test_case "default uses Railway production" `Quick

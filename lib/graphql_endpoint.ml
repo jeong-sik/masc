@@ -17,7 +17,7 @@ let ends_with s suffix =
   s_len >= suffix_len
   && String.sub s (s_len - suffix_len) suffix_len = suffix
 
-let normalize_railway_url raw =
+let normalize_graphql_url ~default_scheme raw =
   let trimmed = String.trim raw in
   if trimmed = "" then
     ""
@@ -26,7 +26,7 @@ let normalize_railway_url raw =
       if starts_with trimmed "http://" || starts_with trimmed "https://" then
         trimmed
       else
-        "https://" ^ trimmed
+        default_scheme ^ trimmed
     in
     let without_trailing = trim_trailing_slash with_scheme in
     if ends_with without_trailing "/graphql" then
@@ -40,11 +40,26 @@ let default_railway_url =
 let railway_graphql_url () =
   match Sys.getenv_opt "RAILWAY_GRAPHQL_URL" with
   | Some raw ->
-      let normalized = normalize_railway_url raw in
+      let normalized = normalize_graphql_url ~default_scheme:"https://" raw in
       if normalized = "" then default_railway_url else normalized
   | None -> default_railway_url
 
+let default_scheme_for_override raw =
+  let trimmed = String.trim raw in
+  if starts_with trimmed "localhost"
+     || starts_with trimmed "127.0.0.1"
+     || starts_with trimmed "0.0.0.0"
+     || starts_with trimmed "[::1]"
+  then
+    "http://"
+  else
+    "https://"
+
 let graphql_url () =
   match Sys.getenv_opt "GRAPHQL_URL" with
-  | Some raw when String.trim raw <> "" -> String.trim raw
+  | Some raw ->
+      let normalized =
+        normalize_graphql_url ~default_scheme:(default_scheme_for_override raw) raw
+      in
+      if normalized = "" then railway_graphql_url () else normalized
   | _ -> railway_graphql_url ()

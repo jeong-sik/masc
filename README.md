@@ -14,7 +14,12 @@ OCaml 5.x + Eio로 만든 개인용 MCP 서버입니다.
 ## 빠른 시작
 
 ```bash
+# external pins for fresh switches / CI parity
+chmod +x scripts/opam-pin-external-deps.sh
+scripts/opam-pin-external-deps.sh
+
 # 빌드
+opam install . --deps-only
 dune build
 
 # 실행

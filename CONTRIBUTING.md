@@ -9,16 +9,20 @@ MASC (Multi-Agent Streaming Coordination) — OCaml 5.x MCP server for AI agent 
 git clone https://github.com/jeong-sik/masc-mcp.git
 cd masc-mcp
 
-# 2. Install OCaml dependencies
+# 2. Pin external OCaml dependencies
+chmod +x scripts/opam-pin-external-deps.sh
+scripts/opam-pin-external-deps.sh
+
+# 3. Install OCaml dependencies
 opam install . --deps-only
 
-# 3. Build
+# 4. Build
 dune build
 
-# 4. Run tests
+# 5. Run tests
 make test
 
-# 5. Start server (HTTP mode)
+# 6. Start server (HTTP mode)
 ./start-masc-mcp.sh --http --port 8935
 ```
 

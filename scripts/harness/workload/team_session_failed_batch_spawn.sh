@@ -16,6 +16,8 @@ TEAM_GOAL="${TEAM_GOAL:-Replay a deterministic llama batch-spawn failure and ver
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 FAIL_LLAMA_SERVER_URL="${FAIL_LLAMA_SERVER_URL:-http://127.0.0.1:1}"
 PORT_WAS_EXPLICIT="false"
+BASE_PATH_WAS_EXPLICIT="false"
+LOG_FILE_WAS_EXPLICIT="false"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required"
@@ -63,10 +65,14 @@ fi
 
 if [ -z "$BASE_PATH" ]; then
   BASE_PATH="$(mktemp -d "${TMPDIR:-/tmp}/masc-failed-batch-spawn.XXXXXX")"
+else
+  BASE_PATH_WAS_EXPLICIT="true"
 fi
 
 if [ -z "$LOG_FILE" ]; then
   LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/masc-failed-batch-spawn.XXXXXX").log"
+else
+  LOG_FILE_WAS_EXPLICIT="true"
 fi
 
 MCP_URL="http://127.0.0.1:${PORT}/mcp"
@@ -179,6 +185,17 @@ require_tool_success() {
   fi
 }
 
+require_json_condition() {
+  local payload="$1"
+  local jq_expr="$2"
+  local failure_message="$3"
+  if ! printf '%s' "$payload" | jq -e "$jq_expr" >/dev/null; then
+    echo "FAIL: $failure_message"
+    printf '%s\n' "$payload"
+    exit 1
+  fi
+}
+
 parse_token_from_text() {
   local payload="$1"
   local token
@@ -218,6 +235,12 @@ cleanup() {
   if [ -n "$SERVER_PID" ]; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
     wait "$SERVER_PID" >/dev/null 2>&1 || true
+  fi
+  if [ "$BASE_PATH_WAS_EXPLICIT" != "true" ] && [ -n "$BASE_PATH" ]; then
+    rm -rf "$BASE_PATH" >/dev/null 2>&1 || true
+  fi
+  if [ "$LOG_FILE_WAS_EXPLICIT" != "true" ] && [ -n "$LOG_FILE" ]; then
+    rm -f "$LOG_FILE" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -322,27 +345,27 @@ spawn_batch_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 5 "mas
   ]}')")"
 require_tool_success "$spawn_batch_raw"
 spawn_result="$(printf '%s' "$spawn_batch_raw" | extract_tool_result)"
-printf '%s' "$spawn_result" | jq -e '.spawn.mode == "batch" and .spawn.count == 2 and (.spawn.results | length) == 2' >/dev/null
-printf '%s' "$spawn_result" | jq -e '.spawn.results | all(.success == false)' >/dev/null
-printf '%s' "$spawn_result" | jq -e '.spawn.results | all(.runtime_actor != null)' >/dev/null
+require_json_condition "$spawn_result" '.spawn.mode == "batch" and .spawn.count == 2 and (.spawn.results | length) == 2' "spawn batch result shape is wrong"
+require_json_condition "$spawn_result" '.spawn.results | all(.success == false)' "spawn batch unexpectedly succeeded"
+require_json_condition "$spawn_result" '.spawn.results | all(.runtime_actor != null)' "spawn batch results are missing runtime_actor"
 
 printf '[5/8] verify detach + participant accounting\n'
 spawn_events_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_team_session_events" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,event_types:["team_step_spawn"],limit:100}')")"
 require_tool_success "$spawn_events_raw"
 spawn_events_result="$(printf '%s' "$spawn_events_raw" | extract_tool_result)"
-printf '%s' "$spawn_events_result" | jq -e '.count == 2' >/dev/null
-printf '%s' "$spawn_events_result" | jq -e '[.events[] | .detail.success] | all(. == false)' >/dev/null
+require_json_condition "$spawn_events_result" '.count == 2' "unexpected number of team_step_spawn events"
+require_json_condition "$spawn_events_result" '[.events[] | .detail.success] | all(. == false)' "spawn events should all be failed"
 
 detached_events_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 7 "masc_team_session_events" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,event_types:["session_agent_detached"],limit:100}')")"
 require_tool_success "$detached_events_raw"
 detached_events_result="$(printf '%s' "$detached_events_raw" | extract_tool_result)"
-printf '%s' "$detached_events_result" | jq -e '.count == 2' >/dev/null
+require_json_condition "$detached_events_result" '.count == 2' "unexpected number of detached-agent events"
 
 status_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 8 "masc_team_session_status" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s}')")"
 require_tool_success "$status_raw"
 status_result="$(printf '%s' "$status_raw" | extract_tool_result)"
-printf '%s' "$status_result" | jq -e '.summary.active_agents | length == 1' >/dev/null
-printf '%s' "$status_result" | jq -e '.summary.planned_workers | length == 2' >/dev/null
+require_json_condition "$status_result" '.summary.active_agents | length == 1' "active_agents accounting is wrong after failed spawn replay"
+require_json_condition "$status_result" '.summary.planned_workers | length == 2' "planned_workers accounting is wrong after failed spawn replay"
 
 replay_note_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 9 "masc_team_session_turn" "$(jq -cn --arg s "$TEAM_SESSION_ID" --arg msg "[failure-replay] observed 2 failed spawns and 2 detached actors" '{session_id:$s,turn_kind:"note",message:$msg}')")"
 require_tool_success "$replay_note_raw"
@@ -382,8 +405,8 @@ fi
 prove_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_team_session_prove" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,generate_report_if_missing:true}')")"
 require_tool_success "$prove_raw"
 prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
-printf '%s' "$prove_result" | jq -e '.proof.evidence.spawn_failure_count == 2' >/dev/null
-printf '%s' "$prove_result" | jq -e '.proof.evidence.detached_agent_count == 2' >/dev/null
+require_json_condition "$prove_result" '.proof.evidence.spawn_failure_count == 2' "proof evidence is missing spawn_failure_count=2"
+require_json_condition "$prove_result" '.proof.evidence.detached_agent_count == 2' "proof evidence is missing detached_agent_count=2"
 proof_md_path="$(printf '%s' "$prove_result" | jq -r '.proof_md_path')"
 proof_json_path="$(printf '%s' "$prove_result" | jq -r '.proof_json_path')"
 

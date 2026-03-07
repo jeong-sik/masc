@@ -88,6 +88,19 @@ let test_file_read_path_traversal () =
    | Error _ -> ()  (* expected: path traversal blocked *)
    | Ok _ -> Alcotest.fail "should reject path traversal /tmp/../../etc/passwd")
 
+let test_file_read_rejects_prefix_sibling () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tool = find_tool "file_read" tools in
+  let home = Sys.getenv "HOME" in
+  let result = Tool.execute tool
+    (`Assoc [("path", `String (Filename.concat home "me-sibling/secret.txt"))]) in
+  match result with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "should reject sibling path that only shares a prefix"
+
 let test_file_read_truncation () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -150,6 +163,20 @@ let test_file_write_blocked_path () =
   (match result with
    | Error _ -> ()  (* expected *)
    | Ok _ -> Alcotest.fail "should reject /etc/ path")
+
+let test_file_write_rejects_prefix_sibling () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tool = find_tool "file_write" tools in
+  let home = Sys.getenv "HOME" in
+  let result = Tool.execute tool
+    (`Assoc [("path", `String (Filename.concat home "me-sibling/out.txt"));
+             ("content", `String "bad")]) in
+  match result with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "should reject sibling path that only shares a prefix"
 
 (* --- shell_exec tests --- *)
 
@@ -247,11 +274,14 @@ let () =
       Alcotest.test_case "read nonexistent file" `Quick test_file_read_nonexistent;
       Alcotest.test_case "read blocked path" `Quick test_file_read_blocked_path;
       Alcotest.test_case "path traversal blocked" `Quick test_file_read_path_traversal;
+      Alcotest.test_case "prefix sibling blocked" `Quick test_file_read_rejects_prefix_sibling;
       Alcotest.test_case "read truncation 100KB" `Quick test_file_read_truncation;
     ];
     "file_write", [
       Alcotest.test_case "write new file" `Quick test_file_write_new;
       Alcotest.test_case "write blocked path" `Quick test_file_write_blocked_path;
+      Alcotest.test_case "write prefix sibling blocked" `Quick
+        test_file_write_rejects_prefix_sibling;
     ];
     "shell_exec", [
       Alcotest.test_case "echo hello" `Quick test_shell_exec_echo;

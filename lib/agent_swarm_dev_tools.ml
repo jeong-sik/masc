@@ -25,6 +25,11 @@ let normalize_path path =
   ) [] parts in
   "/" ^ String.concat "/" (List.rev resolved)
 
+(** Check whether [path] is exactly [dir] or a descendant of [dir]. *)
+let is_within_dir ~dir path =
+  path = dir
+  || String.starts_with ~prefix:(dir ^ "/") path
+
 (** Path allowlist. When workdir is set, restrict to workdir + /tmp only.
     When unset, allow /tmp, cwd subtree, and ~/me subtree (backward compat). *)
 let validate_path ?workdir path =
@@ -32,13 +37,13 @@ let validate_path ?workdir path =
   match workdir with
   | Some wd ->
     let abs_wd = normalize_path wd in
-    String.starts_with ~prefix:"/tmp" abs
-    || String.starts_with ~prefix:abs_wd abs
+    is_within_dir ~dir:"/tmp" abs
+    || is_within_dir ~dir:abs_wd abs
   | None ->
-    String.starts_with ~prefix:"/tmp" abs
-    || String.starts_with ~prefix:(Sys.getcwd ()) abs
+    is_within_dir ~dir:"/tmp" abs
+    || is_within_dir ~dir:(normalize_path (Sys.getcwd ())) abs
     || (match Sys.getenv_opt "HOME" with
-        | Some home -> String.starts_with ~prefix:(Filename.concat home "me") abs
+        | Some home -> is_within_dir ~dir:(normalize_path (Filename.concat home "me")) abs
         | None -> false)
 
 (** Command blocklist: reject destructive patterns. *)

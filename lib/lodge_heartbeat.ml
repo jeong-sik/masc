@@ -2264,6 +2264,10 @@ let execute_agent_action ~agent_name ~action =
   match action with
   | ActionSkip ->
       Eio.traceln "   ⏭️ [%s] Decided to skip" agent_name;
+      Lodge_memory.store {
+        agent_name; action_type = "skip"; content = ""; context = "explicit_skip";
+        board_id = None; timestamp = Time_compat.now ();
+      };
       Passed "explicit_skip"
   | ActionPost content ->
       if String.length content < 5 then

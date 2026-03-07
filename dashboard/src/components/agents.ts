@@ -265,7 +265,7 @@ function AgentWatchRow({ row }: { row: AgentMonitorRow }) {
   const { agent, motion } = row
 
   return html`
-    <button class="monitor-row ${row.tone}" onClick=${() => openAgentDetail(agent.name)}>
+    <button class="monitor-row ${row.tone} state-${row.state}" onClick=${() => openAgentDetail(agent.name)}>
       <div class="monitor-row-header">
         <span class="agent-emoji">${agent.emoji ?? ''}</span>
         <div class="monitor-row-title">
@@ -277,7 +277,7 @@ function AgentWatchRow({ row }: { row: AgentMonitorRow }) {
         </div>
         <${MitosisRing} ratio=${agent.context_ratio} size=${34} stroke=${4} />
         <${StatusBadge} status=${agent.status} />
-        <span class="monitor-pill ${row.tone}">${agentStateLabel(row.state)}</span>
+        <span class="monitor-pill ${row.tone} state-${row.state}">${agentStateLabel(row.state)}</span>
       </div>
 
       <div class="monitor-meta">
@@ -299,7 +299,7 @@ function KeeperWatchRow({ row }: { row: KeeperMonitorRow }) {
   const { keeper } = row
 
   return html`
-    <button class="monitor-row ${row.tone}" onClick=${() => openKeeperDetail(keeper)}>
+    <button class="monitor-row ${row.tone} state-${row.state}" onClick=${() => openKeeperDetail(keeper)}>
       <div class="monitor-row-header">
         <span class="agent-emoji">${keeper.emoji ?? ''}</span>
         <div class="monitor-row-title">
@@ -349,7 +349,10 @@ export function Agents() {
       return toEpoch(b.keeper.last_heartbeat) - toEpoch(a.keeper.last_heartbeat)
     })
 
-  const onlineAgents = agentRows.filter(row => row.state !== 'offline').length
+  const aliveRows = agentRows.filter(r => r.state !== 'offline')
+  const offlineRows = agentRows.filter(r => r.state === 'offline')
+
+  const onlineAgents = aliveRows.length
   const workingAgents = agentRows.filter(row => row.state === 'working').length
   const freshSignals = agentRows.filter(row => row.lastSignalAt && (Date.now() - toEpoch(row.lastSignalAt)) <= 120_000).length
   const agentAlerts = agentRows.filter(row => row.tone !== 'ok')
@@ -425,7 +428,20 @@ export function Agents() {
           <div class="monitor-list">
             ${agentRows.length === 0
               ? html`<div class="empty-state">No agents registered</div>`
-              : agentRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
+              : html`
+                ${aliveRows.length > 0 ? html`
+                  <div class="agent-group-header">
+                    Active <span class="group-count">${aliveRows.length}</span>
+                  </div>
+                  ${aliveRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
+                ` : null}
+                ${offlineRows.length > 0 ? html`
+                  <div class="agent-group-header">
+                    Offline <span class="group-count">${offlineRows.length}</span>
+                  </div>
+                  ${offlineRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
+                ` : null}
+              `}
           </div>
         <//>
       </div>

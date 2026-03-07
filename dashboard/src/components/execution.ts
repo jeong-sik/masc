@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
+import { type MonitorTone, toEpoch, toneRank, normalizeKey, limitText, taskPriorityValue, taskPriorityLabel } from './common/monitor'
 import { buildAgentMotion, type AgentMotionSnapshot } from './common/agent-motion'
 import { openAgentDetail } from './agent-detail'
 import { agents, boardPosts, keepers, messages, tasks } from '../store'
@@ -12,8 +13,6 @@ import { journal } from '../sse'
 
 const QUIET_EXECUTION_MS = 10 * 60 * 1000
 const STALE_EXECUTION_MS = 20 * 60 * 1000
-
-type MonitorTone = 'ok' | 'warn' | 'bad'
 type DispatchState = 'dispatchable' | 'drift' | 'loaded' | 'quiet' | 'offline'
 
 interface TaskExecutionRow {
@@ -60,42 +59,6 @@ type InterventionItem =
       agentRow: DispatchRow
     }
 
-function normalizeKey(value: string | null | undefined): string {
-  return (value ?? '').trim().toLowerCase()
-}
-
-function toEpoch(value: string | number | null | undefined): number {
-  if (value == null) return 0
-  const parsed = typeof value === 'number' ? value : Date.parse(value)
-  return Number.isNaN(parsed) ? 0 : parsed
-}
-
-function trimText(value: string | null | undefined, max = 96): string | null {
-  const normalized = (value ?? '').replace(/\s+/g, ' ').trim()
-  if (!normalized) return null
-  return normalized.length > max ? `${normalized.slice(0, max - 3)}...` : normalized
-}
-
-function toneRank(tone: MonitorTone): number {
-  switch (tone) {
-    case 'bad': return 2
-    case 'warn': return 1
-    default: return 0
-  }
-}
-
-function taskPriorityValue(priority?: number | null): number {
-  if (typeof priority !== 'number' || Number.isNaN(priority)) return 3
-  return priority
-}
-
-function taskPriorityLabel(priority?: number | null): string {
-  const value = taskPriorityValue(priority)
-  if (value <= 1) return 'P1'
-  if (value === 2) return 'P2'
-  if (value >= 4) return 'P4+'
-  return 'P3'
-}
 
 function taskStatusLabel(status: Task['status']): string {
   switch (status) {
@@ -147,8 +110,8 @@ function buildTaskRow(
   const motion = assigneeAgent ? (motionByName.get(assigneeKey) ?? null) : null
   const lastSignalAt = motion?.lastActivityAt ?? assigneeAgent?.last_seen ?? null
   const signalAgeMs = lastSignalAt ? Math.max(0, Date.now() - toEpoch(lastSignalAt)) : Number.POSITIVE_INFINITY
-  const description = trimText(task.description)
-  const ownerFocus = trimText(assigneeAgent?.current_task) ?? motion?.lastActivityText ?? null
+  const description = limitText(task.description)
+  const ownerFocus = limitText(assigneeAgent?.current_task) ?? motion?.lastActivityText ?? null
   const activeTask = task.status === 'claimed' || task.status === 'in_progress'
 
   let tone: MonitorTone = 'ok'
@@ -255,7 +218,7 @@ function buildDispatchRow(
   let state: DispatchState = 'loaded'
   let tone: MonitorTone = 'ok'
   let note = 'Healthy active load'
-  let focus = trimText(agent.current_task) ?? motion.lastActivityText ?? 'Ready for assignment'
+  let focus = limitText(agent.current_task) ?? motion.lastActivityText ?? 'Ready for assignment'
 
   if (agent.status === 'offline' || agent.status === 'inactive') {
     state = 'offline'
@@ -274,7 +237,7 @@ function buildDispatchRow(
     state = 'drift'
     tone = 'warn'
     note = 'current_task has no matching claimed work'
-    focus = trimText(agent.current_task) ?? 'Task metadata and operator state drifted.'
+    focus = limitText(agent.current_task) ?? 'Task metadata and operator state drifted.'
   } else if (!hasLoad && signalAgeMs <= QUIET_EXECUTION_MS) {
     state = 'dispatchable'
     tone = 'ok'
@@ -289,7 +252,7 @@ function buildDispatchRow(
     state = 'loaded'
     tone = 'warn'
     note = 'Execution load is healthy but slightly quiet'
-    focus = trimText(agent.current_task) ?? `${activeTaskCount} active tasks in flight.`
+    focus = limitText(agent.current_task) ?? `${activeTaskCount} active tasks in flight.`
   }
 
   return {
@@ -368,8 +331,8 @@ function TaskWatchRow({ row }: { row: TaskExecutionRow }) {
 
       <div class="monitor-focus">${row.focus}</div>
       ${row.assigneeAgent?.current_task
-        && trimText(row.assigneeAgent.current_task) !== row.focus
-        ? html`<div class="monitor-footnote">Owner focus: ${trimText(row.assigneeAgent.current_task)}</div>`
+        && limitText(row.assigneeAgent.current_task) !== row.focus
+        ? html`<div class="monitor-footnote">Owner focus: ${limitText(row.assigneeAgent.current_task)}</div>`
         : null}
     </div>
   `

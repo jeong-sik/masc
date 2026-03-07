@@ -210,7 +210,93 @@ impl From<&str> for NewGameFlowStage {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrpgSurface {
+    Lobby,
+    Overview,
+    Timeline,
+    Control,
+}
+
+impl TrpgSurface {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Lobby => "lobby",
+            Self::Overview => "overview",
+            Self::Timeline => "timeline",
+            Self::Control => "control",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Lobby => "lobby",
+            Self::Overview => "overview",
+            Self::Timeline => "timeline",
+            Self::Control => "control",
+        }
+    }
+}
+
+impl From<&str> for TrpgSurface {
+    fn from(raw: &str) -> Self {
+        match raw.trim() {
+            "lobby" => Self::Lobby,
+            "timeline" => Self::Timeline,
+            "control" => Self::Control,
+            _ => Self::Overview,
+        }
+    }
+}
+
 // ─── Helpers (moved from mod.rs, only used here) ────────────────
+
+fn encode_query_component(raw: &str) -> String {
+    js_sys::encode_uri_component(raw)
+        .as_string()
+        .unwrap_or_else(|| raw.to_string())
+}
+
+fn append_query_param(url: &str, key: &str, value: &str) -> String {
+    let sep = if url.contains('?') { '&' } else { '?' };
+    format!(
+        "{url}{sep}{key}={value}",
+        value = encode_query_component(value.trim())
+    )
+}
+
+async fn fetch_trpg_http_json(path: &str, params: &[(&str, String)]) -> Result<Value, String> {
+    let mut url = crate::config::build_masc_url(path);
+    for (key, value) in params {
+        if value.trim().is_empty() {
+            continue;
+        }
+        url = append_query_param(&url, key, value);
+    }
+    let (status, body) = crate::mode::mcp_rpc::http_get_text(&url).await?;
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP {} 응답", status));
+    }
+    if body.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_str::<Value>(&body).map_err(|e| format!("JSON 파싱 실패: {}", e))
+}
+
+fn parse_string_list_field(payload: &Value, key: &str) -> Vec<String> {
+    payload
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .map(unique_non_empty)
+        .unwrap_or_default()
+}
 
 fn parse_keeper_models(raw: &str) -> Vec<String> {
     unique_non_empty(
@@ -469,6 +555,90 @@ async fn refresh_available_model_candidates(
         set_new_game_model_status(doc, &status_message, "ok");
     }
     Ok(rows)
+}
+
+fn apply_keeper_selectors(doc: &web_sys::Document, keepers: &[String]) -> Result<(), String> {
+    if keepers.is_empty() {
+        if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
+            dm_select.set_inner_html(r#"<option value="">(사용 가능한 keeper 없음)</option>"#);
+        }
+        if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
+            player_select
+                .set_inner_html(r#"<option value="" disabled>(사용 가능한 keeper 없음)</option>"#);
+        }
+        update_new_game_player_hint(doc);
+        return Ok(());
+    }
+
+    let keeper_actor_map = keeper_actor_map_from_actor_admin_dom(doc);
+
+    let option_label = |name: &str| -> String {
+        let suffix = keeper_actor_map
+            .get(name)
+            .map(|actor_id| format!(" · 점유 {}", actor_id))
+            .unwrap_or_default();
+        format!("{}{}", name, suffix)
+    };
+
+    let previous_dm = doc
+        .get_element_by_id("new-game-dm-select")
+        .and_then(|el| {
+            el.dyn_ref::<web_sys::HtmlSelectElement>()
+                .map(|s| s.value())
+        })
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let previous_players = selected_player_keepers(doc);
+    let dm_default = previous_dm
+        .filter(|prev| keepers.iter().any(|name| name == prev))
+        .or_else(|| keepers.iter().find(|name| name.starts_with("dm")).cloned())
+        .unwrap_or_else(|| keepers[0].clone());
+
+    if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
+        let html = keepers
+            .iter()
+            .map(|name| {
+                let safe = html_escape(name);
+                let label = html_escape(&option_label(name));
+                format!(r#"<option value="{}">{}</option>"#, safe, label)
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        dm_select.set_inner_html(&html);
+        if let Some(select) = dm_select.dyn_ref::<web_sys::HtmlSelectElement>() {
+            select.set_value(&dm_default);
+        }
+    }
+
+    if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
+        let preserve_existing_selection = !previous_players.is_empty();
+        let mut default_selected = 0_usize;
+        let mut html = String::new();
+        for name in keepers.iter().filter(|name| **name != dm_default) {
+            let safe = html_escape(name);
+            let label = html_escape(&option_label(name));
+            let selected_attr = if preserve_existing_selection
+                && previous_players.iter().any(|picked| picked == name)
+            {
+                " selected"
+            } else if !preserve_existing_selection && default_selected < 4 {
+                default_selected += 1;
+                " selected"
+            } else {
+                ""
+            };
+            html.push_str(&format!(
+                r#"<option value="{value}"{selected}>{label}</option>"#,
+                value = safe,
+                label = label,
+                selected = selected_attr
+            ));
+        }
+        player_select.set_inner_html(&html);
+    }
+
+    update_new_game_player_hint(doc);
+    Ok(())
 }
 
 fn selected_player_keepers(doc: &web_sys::Document) -> Vec<String> {
@@ -1032,6 +1202,87 @@ fn new_game_wizard_busy(doc: &web_sys::Document) -> bool {
     doc.get_element_by_id("new-game-panel")
         .and_then(|panel| panel.get_attribute("data-wizard-busy"))
         .is_some_and(|flag| flag == "1")
+}
+
+fn current_trpg_surface(doc: &web_sys::Document) -> TrpgSurface {
+    doc.get_element_by_id("dashboard")
+        .and_then(|dashboard| dashboard.get_attribute("data-trpg-surface"))
+        .map(|raw| TrpgSurface::from(raw.as_str()))
+        .unwrap_or(TrpgSurface::Overview)
+}
+
+fn sync_trpg_surface_ui(doc: &web_sys::Document) {
+    let surface = current_trpg_surface(doc);
+    set_element_display(doc, "trpg-surface-nav", "flex");
+    set_element_display(doc, "trpg-surface-panels", "grid");
+    set_element_display(
+        doc,
+        "new-game-panel",
+        if surface == TrpgSurface::Lobby { "flex" } else { "none" },
+    );
+    if surface == TrpgSurface::Lobby {
+        sync_new_game_panel_top_offset(doc);
+    }
+    if let Some(status) = doc.get_element_by_id("trpg-surface-status") {
+        status.set_text_content(Some(surface.label()));
+    }
+    if let Ok(nodes) = doc.query_selector_all(".trpg-surface-tab[data-trpg-surface]") {
+        for idx in 0..nodes.length() {
+            let Some(node) = nodes.item(idx) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let pressed = el
+                .get_attribute("data-trpg-surface")
+                .map(|value| value == surface.code())
+                .unwrap_or(false);
+            let _ = el.set_attribute("aria-pressed", if pressed { "true" } else { "false" });
+        }
+    }
+}
+
+fn set_trpg_surface(doc: &web_sys::Document, surface: TrpgSurface) {
+    if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+        let _ = dashboard.set_attribute("data-trpg-surface", surface.code());
+    }
+    sync_trpg_surface_ui(doc);
+    let trpg_mode_active = doc
+        .body()
+        .map(|body| body.class_name().contains("mode-trpg"))
+        .unwrap_or(false);
+    if trpg_mode_active && surface != TrpgSurface::Lobby {
+        refresh_trpg_ops_snapshots(doc);
+    }
+}
+
+fn bind_trpg_surface_tabs(doc: &web_sys::Document) {
+    let Ok(nodes) = doc.query_selector_all(".trpg-surface-tab[data-trpg-surface]") else {
+        return;
+    };
+    for idx in 0..nodes.length() {
+        let Some(node) = nodes.item(idx) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        if el.get_attribute("data-bound").as_deref() == Some("1") {
+            continue;
+        }
+        let _ = el.set_attribute("data-bound", "1");
+        let surface = el
+            .get_attribute("data-trpg-surface")
+            .map(|raw| TrpgSurface::from(raw.as_str()))
+            .unwrap_or(TrpgSurface::Overview);
+        let cb = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            set_trpg_surface(&doc, surface);
+        }) as Box<dyn FnMut(_)>);
+        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+        });
+        cb.forget();
+    }
 }
 
 fn set_step_state(doc: &web_sys::Document, id: &str, state: &str) {
@@ -1891,89 +2142,7 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         }
         keepers = unique_non_empty(fallback);
     }
-    if keepers.is_empty() {
-        if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
-            dm_select.set_inner_html(r#"<option value="">(사용 가능한 keeper 없음)</option>"#);
-        }
-        if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
-            player_select
-                .set_inner_html(r#"<option value="" disabled>(사용 가능한 keeper 없음)</option>"#);
-        }
-        update_new_game_player_hint(doc);
-        return Ok(Vec::new());
-    }
-
-    let keeper_actor_map = match fetch_room_state_payload(&read_new_game_room_id(doc)).await {
-        Ok(state_payload) => parse_keeper_actor_map(&state_payload),
-        Err(_) => HashMap::new(),
-    };
-
-    let option_label = |name: &str| -> String {
-        let suffix = keeper_actor_map
-            .get(name)
-            .map(|actor_id| format!(" · 점유 {}", actor_id))
-            .unwrap_or_default();
-        format!("{}{}", name, suffix)
-    };
-
-    let previous_dm = doc
-        .get_element_by_id("new-game-dm-select")
-        .and_then(|el| {
-            el.dyn_ref::<web_sys::HtmlSelectElement>()
-                .map(|s| s.value())
-        })
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-    let previous_players = selected_player_keepers(doc);
-    let dm_default = previous_dm
-        .filter(|prev| keepers.iter().any(|name| name == prev))
-        .or_else(|| keepers.iter().find(|name| name.starts_with("dm")).cloned())
-        .unwrap_or_else(|| keepers[0].clone());
-
-    if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
-        let html = keepers
-            .iter()
-            .map(|name| {
-                let safe = html_escape(name);
-                let label = html_escape(&option_label(name));
-                format!(r#"<option value="{}">{}</option>"#, safe, label)
-            })
-            .collect::<Vec<_>>()
-            .join("");
-        dm_select.set_inner_html(&html);
-        if let Some(select) = dm_select.dyn_ref::<web_sys::HtmlSelectElement>() {
-            select.set_value(&dm_default);
-        }
-    }
-
-    if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
-        let preserve_existing_selection = !previous_players.is_empty();
-        let mut default_selected = 0_usize;
-        let mut html = String::new();
-        for name in keepers.iter().filter(|name| **name != dm_default) {
-            let safe = html_escape(name);
-            let label = html_escape(&option_label(name));
-            let selected_attr = if preserve_existing_selection
-                && previous_players.iter().any(|picked| picked == name)
-            {
-                " selected"
-            } else if !preserve_existing_selection && default_selected < 4 {
-                default_selected += 1;
-                " selected"
-            } else {
-                ""
-            };
-            html.push_str(&format!(
-                r#"<option value="{value}"{selected}>{label}</option>"#,
-                value = safe,
-                label = label,
-                selected = selected_attr
-            ));
-        }
-        player_select.set_inner_html(&html);
-    }
-
-    update_new_game_player_hint(doc);
+    apply_keeper_selectors(doc, &keepers)?;
     Ok(keepers)
 }
 
@@ -2130,6 +2299,459 @@ async fn fetch_room_state_payload(room_id: &str) -> Result<Value, String> {
         return Ok(json!({}));
     }
     serde_json::from_str::<Value>(&body).map_err(|e| format!("state JSON 파싱 실패: {}", e))
+}
+
+fn truncate_text(raw: &str, limit: usize) -> String {
+    let text = raw.trim();
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    let mut out = text.chars().take(limit.saturating_sub(1)).collect::<String>();
+    out.push('…');
+    out
+}
+
+fn render_summary_cards(
+    doc: &web_sys::Document,
+    element_id: &str,
+    cards: &[(String, String, String)],
+) {
+    let Some(el) = doc.get_element_by_id(element_id) else {
+        return;
+    };
+    if cards.is_empty() {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">표시할 요약이 없습니다.</div>");
+        return;
+    }
+    let html = cards
+        .iter()
+        .map(|(label, value, meta)| {
+            format!(
+                concat!(
+                    "<div class=\"trpg-summary-card\">",
+                    "<div class=\"trpg-summary-card-label\">{label}</div>",
+                    "<div class=\"trpg-summary-card-value\">{value}</div>",
+                    "<div class=\"trpg-summary-card-meta\">{meta}</div>",
+                    "</div>"
+                ),
+                label = html_escape(label),
+                value = html_escape(value),
+                meta = html_escape(meta),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    el.set_inner_html(&html);
+}
+
+fn render_text_list(
+    doc: &web_sys::Document,
+    element_id: &str,
+    class_name: &str,
+    rows: &[String],
+) {
+    let Some(el) = doc.get_element_by_id(element_id) else {
+        return;
+    };
+    if rows.is_empty() {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">표시할 항목이 없습니다.</div>");
+        return;
+    }
+    let html = rows
+        .iter()
+        .map(|row| {
+            format!(
+                "<div class=\"{class_name}\">{}</div>",
+                html_escape(row)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    el.set_inner_html(&html);
+}
+
+fn render_alert_items(doc: &web_sys::Document, element_id: &str, alarms: &[Value]) {
+    let Some(el) = doc.get_element_by_id(element_id) else {
+        return;
+    };
+    if alarms.is_empty() {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">활성 알림이 없습니다.</div>");
+        return;
+    }
+    let html = alarms
+        .iter()
+        .map(|alarm| {
+            let level = alarm
+                .get("level")
+                .and_then(Value::as_str)
+                .unwrap_or("info")
+                .trim()
+                .to_string();
+            let code = alarm
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("info")
+                .trim()
+                .to_string();
+            let message = alarm
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("알림 세부 정보를 읽지 못했습니다.")
+                .trim()
+                .to_string();
+            format!(
+                concat!(
+                    "<div class=\"trpg-alert-item\" data-level=\"{level}\">",
+                    "<div class=\"trpg-alert-code\">{code}</div>",
+                    "<div>{message}</div>",
+                    "</div>"
+                ),
+                level = html_escape(&level),
+                code = html_escape(&code),
+                message = html_escape(&message),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    el.set_inner_html(&html);
+}
+
+fn render_event_items(doc: &web_sys::Document, element_id: &str, events: &[Value]) {
+    let Some(el) = doc.get_element_by_id(element_id) else {
+        return;
+    };
+    if events.is_empty() {
+        el.set_inner_html("<div class=\"trpg-summary-empty\">최근 이벤트가 없습니다.</div>");
+        return;
+    }
+    let html = events
+        .iter()
+        .map(|event| {
+            let event_type = event
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("event")
+                .trim()
+                .to_string();
+            let actor = event
+                .get("actor_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let seq = event.get("seq").and_then(Value::as_i64).unwrap_or_default();
+            let ts = event
+                .get("ts")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let payload_preview = event
+                .get("payload")
+                .map(|payload| truncate_text(&payload.to_string(), 120))
+                .unwrap_or_default();
+            let meta = if actor.is_empty() {
+                format!("#{} · {}", seq, ts)
+            } else {
+                format!("#{} · {} · actor {}", seq, ts, actor)
+            };
+            format!(
+                concat!(
+                    "<div class=\"trpg-event-item\">",
+                    "<div class=\"trpg-event-type\">{event_type}</div>",
+                    "<div class=\"trpg-event-meta\">{meta}</div>",
+                    "<div>{payload}</div>",
+                    "</div>"
+                ),
+                event_type = html_escape(&event_type),
+                meta = html_escape(&meta),
+                payload = html_escape(&payload_preview),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    el.set_inner_html(&html);
+}
+
+fn render_trpg_overview_panel(doc: &web_sys::Document, payload: &Value) {
+    let summary = payload.get("summary").unwrap_or(&Value::Null);
+    let cards = vec![
+        (
+            "Status".to_string(),
+            summary
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string(),
+            format!(
+                "turn {} · phase {}",
+                summary.get("turn").and_then(Value::as_i64).unwrap_or_default(),
+                summary
+                    .get("phase")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+            ),
+        ),
+        (
+            "Scenario".to_string(),
+            summary
+                .get("scenario")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("미지정")
+                .to_string(),
+            summary
+                .get("node")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("node 정보 없음")
+                .to_string(),
+        ),
+        (
+            "Players".to_string(),
+            summary
+                .get("player_count")
+                .and_then(Value::as_i64)
+                .unwrap_or_default()
+                .to_string(),
+            format!(
+                "alive {} · claimed {}",
+                summary
+                    .get("alive_players")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default(),
+                summary
+                    .get("claimed_players")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default()
+            ),
+        ),
+        (
+            "Keepers".to_string(),
+            summary
+                .get("active_keepers")
+                .and_then(Value::as_i64)
+                .unwrap_or_default()
+                .to_string(),
+            format!(
+                "unclaimed {}",
+                summary
+                    .get("unclaimed_players")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default()
+            ),
+        ),
+    ];
+    render_summary_cards(doc, "trpg-overview-summary", &cards);
+    let alarms = payload
+        .get("alarms")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    render_alert_items(doc, "trpg-overview-alarms", &alarms);
+    let next_actions = payload
+        .get("next_actions")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(Value::as_str)
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    render_text_list(doc, "trpg-overview-actions", "trpg-action-item", &next_actions);
+}
+
+fn render_trpg_control_panel(doc: &web_sys::Document, payload: &Value) {
+    let summary = payload.get("summary").unwrap_or(&Value::Null);
+    let actor_control = payload
+        .get("actor_control")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let cards = vec![
+        (
+            "State".to_string(),
+            summary
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string(),
+            format!(
+                "turn {} · phase {}",
+                summary.get("turn").and_then(Value::as_i64).unwrap_or_default(),
+                summary
+                    .get("phase")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+            ),
+        ),
+        (
+            "Claims".to_string(),
+            actor_control.len().to_string(),
+            "현재 점유 actor 수".to_string(),
+        ),
+        (
+            "Join Gate".to_string(),
+            if summary
+                .get("join_window_open")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                "open"
+            } else {
+                "closed"
+            }
+            .to_string(),
+            format!(
+                "min points {}",
+                summary
+                    .get("join_gate_min_points")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default()
+            ),
+        ),
+    ];
+    render_summary_cards(doc, "trpg-control-summary", &cards);
+    let warning_rows = payload
+        .get("warnings")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(Value::as_str)
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    render_text_list(doc, "trpg-control-warnings", "trpg-alert-item", &warning_rows);
+    let actions = payload
+        .get("allowed_actions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let action_rows = actions
+        .iter()
+        .map(|row| {
+            let label = row
+                .get("label")
+                .and_then(Value::as_str)
+                .unwrap_or("액션")
+                .trim()
+                .to_string();
+            let enabled = row.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            let reason = row
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if enabled {
+                format!("{} · 가능 · {}", label, reason)
+            } else {
+                format!("{} · 잠김 · {}", label, reason)
+            }
+        })
+        .collect::<Vec<_>>();
+    render_text_list(doc, "trpg-control-actions", "trpg-action-item", &action_rows);
+}
+
+fn render_trpg_timeline_panel(doc: &web_sys::Document, payload: &Value) {
+    let filters = payload.get("filters").unwrap_or(&Value::Null);
+    let cards = vec![
+        (
+            "Count".to_string(),
+            payload
+                .get("count")
+                .and_then(Value::as_i64)
+                .unwrap_or_default()
+                .to_string(),
+            format!(
+                "last seq {}",
+                payload
+                    .get("last_seq")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default()
+            ),
+        ),
+        (
+            "Actor Filter".to_string(),
+            filters
+                .get("actor")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("all")
+                .to_string(),
+            "timeline actor filter".to_string(),
+        ),
+        (
+            "Phase Filter".to_string(),
+            filters
+                .get("phase")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("all")
+                .to_string(),
+            "phase slice".to_string(),
+        ),
+    ];
+    render_summary_cards(doc, "trpg-timeline-summary", &cards);
+    let events = payload
+        .get("events")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    render_event_items(doc, "trpg-timeline-events", &events);
+}
+
+async fn refresh_trpg_ops_snapshots_inner(doc: &web_sys::Document) -> Result<(), String> {
+    let room_id = crate::config::current_room_id();
+    if room_id.trim().is_empty() {
+        return Ok(());
+    }
+    let overview = fetch_trpg_http_json(
+        "api/v1/trpg/overview",
+        &[("room_id", room_id.clone())],
+    )
+    .await?;
+    render_trpg_overview_panel(doc, &overview);
+
+    let control = fetch_trpg_http_json(
+        "api/v1/trpg/control/state",
+        &[("room_id", room_id.clone())],
+    )
+    .await?;
+    render_trpg_control_panel(doc, &control);
+
+    let timeline = fetch_trpg_http_json(
+        "api/v1/trpg/timeline",
+        &[("room_id", room_id), ("limit", "8".to_string())],
+    )
+    .await?;
+    render_trpg_timeline_panel(doc, &timeline);
+    Ok(())
+}
+
+pub(super) fn refresh_trpg_ops_snapshots(doc: &web_sys::Document) {
+    let doc = doc.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(err) = refresh_trpg_ops_snapshots_inner(&doc).await {
+            log::warn!("TRPG ops snapshot refresh failed: {}", err);
+            render_text_list(
+                &doc,
+                "trpg-overview-actions",
+                "trpg-action-item",
+                &[format!("개요 새로고침 실패: {}", err)],
+            );
+            render_text_list(
+                &doc,
+                "trpg-control-warnings",
+                "trpg-alert-item",
+                &[format!("control state 조회 실패: {}", err)],
+            );
+        }
+    });
 }
 
 fn summarize_preflight_items(items: &[String], limit: usize) -> String {
@@ -2493,7 +3115,71 @@ pub(super) async fn refresh_actor_admin_list(
     Ok(rows)
 }
 
+fn preset_options_from_payload_list(payload: &Value, key: &str) -> Vec<PresetOption> {
+    payload
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(preset_option_from_value)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 async fn refresh_new_game_bootstrap(doc: &web_sys::Document) -> Result<NewGameBootstrap, String> {
+    let room_id = read_new_game_room_id(doc);
+    if let Ok(payload) = fetch_trpg_http_json(
+        "api/v1/trpg/lobby/catalog",
+        &[("room_id", room_id.clone())],
+    )
+    .await
+    {
+        let keepers = parse_string_list_field(&payload, "keepers");
+        let world_presets = preset_options_from_payload_list(&payload, "world_presets");
+        let dm_presets = preset_options_from_payload_list(&payload, "dm_presets");
+        let _ = apply_keeper_selectors(doc, &keepers);
+        if !world_presets.is_empty() {
+            let _ = select_options_set(doc, "new-game-world-select", &world_presets);
+        }
+        if !dm_presets.is_empty() {
+            let _ = select_options_set(doc, "new-game-dm-preset-select", &dm_presets);
+        }
+        let model_payload = payload.get("model_catalog").cloned().unwrap_or_else(|| json!({}));
+        let model_candidates = parse_available_model_candidates(&model_payload);
+        if !model_candidates.is_empty() {
+            render_available_model_candidates(doc, &model_candidates);
+            bind_available_model_chip_clicks(doc);
+            sync_available_model_chip_selection(doc);
+            let effective = parse_effective_model_specs(&model_payload);
+            let warnings = parse_string_list_field(&model_payload, "warnings");
+            let mut status_message = if effective.is_empty() {
+                format!("가용 모델 {}개", model_candidates.len())
+            } else {
+                format!(
+                    "가용 모델 {}개 · runtime {}",
+                    model_candidates.len(),
+                    effective.join(", ")
+                )
+            };
+            if !warnings.is_empty() {
+                status_message.push_str(" · 일부 endpoint 조회 실패");
+                set_new_game_model_status(doc, &status_message, "warn");
+            } else {
+                set_new_game_model_status(doc, &status_message, "ok");
+            }
+        }
+        if let Err(err) = refresh_actor_admin_list(doc).await {
+            actor_admin_set_status(doc, &format!("액터 목록 로드 실패: {}", err), "status-warn");
+        }
+        return Ok(NewGameBootstrap {
+            keepers,
+            world_presets,
+            dm_presets,
+            model_candidates,
+        });
+    }
+
     let keepers = refresh_keeper_selectors(doc).await?;
     let (world_presets, dm_presets) = refresh_preset_selectors(doc).await?;
     let model_candidates = match refresh_available_model_candidates(doc).await {
@@ -2557,6 +3243,91 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
         );
         sync_new_game_wizard_ui(doc);
         return Err("MASC 서버 연결 실패".to_string());
+    }
+
+    let room_id = read_new_game_room_id(doc);
+    let dm_keeper = selected_dm_keeper(doc);
+    let player_keepers = selected_player_keepers(doc);
+    let models = read_new_game_model_specs(doc);
+    if let Ok(payload) = fetch_trpg_http_json(
+        "api/v1/trpg/lobby/preflight",
+        &[
+            ("room_id", room_id.clone()),
+            ("dm", dm_keeper),
+            ("players", player_keepers.join(",")),
+            ("models", models.join(",")),
+        ],
+    )
+    .await
+    {
+        let endpoint_rows = payload
+            .get("checks")
+            .and_then(Value::as_array)
+            .map(|checks| {
+                checks
+                    .iter()
+                    .map(|row| PreflightRow {
+                        ok: row.get("ok").and_then(Value::as_bool).unwrap_or(false),
+                        label: row
+                            .get("label")
+                            .and_then(Value::as_str)
+                            .unwrap_or("check")
+                            .to_string(),
+                        detail: row
+                            .get("detail")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                        hint: row
+                            .get("hint")
+                            .and_then(Value::as_str)
+                            .map(|value| value.to_string()),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !endpoint_rows.is_empty() {
+            set_new_game_preflight_rows(doc, &endpoint_rows);
+            let ready = payload.get("ready").and_then(Value::as_bool).unwrap_or(false);
+            let warnings = parse_string_list_field(&payload, "warnings");
+            let blocking = parse_string_list_field(&payload, "blocking");
+            let recommended = parse_string_list_field(&payload, "recommended_actions");
+            let status_parts = [
+                if ready {
+                    Some("사전 점검 통과".to_string())
+                } else {
+                    Some("차단 항목 존재".to_string())
+                },
+                (!warnings.is_empty())
+                    .then(|| format!("경고 {}", summarize_preflight_items(&warnings, 2))),
+                (!blocking.is_empty())
+                    .then(|| format!("차단 {}", summarize_preflight_items(&blocking, 2))),
+                (!recommended.is_empty()).then(|| {
+                    format!("추천 {}", summarize_preflight_items(&recommended, 2))
+                }),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+            set_new_game_preflight_status(doc, &status_parts);
+            set_new_game_preflight_state(doc, if ready { "ok" } else { "fail" });
+            if ready {
+                set_new_game_flow_stage(doc, NewGameFlowStage::Idle, Some("사전 점검 통과"));
+            } else {
+                set_new_game_flow_stage(
+                    doc,
+                    NewGameFlowStage::Failed,
+                    Some("사전 점검 실패 항목 존재"),
+                );
+            }
+            sync_new_game_wizard_ui(doc);
+            return if ready {
+                Ok(())
+            } else {
+                Err("사전 점검 실패 항목이 있습니다.".to_string())
+            };
+        }
     }
 
     let preset_row = match fetch_preset_catalog().await {
@@ -4013,7 +4784,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             return;
         };
         sync_new_game_panel_top_offset(&doc);
-        set_element_display(&doc, "new-game-panel", "flex");
+        set_trpg_surface(&doc, TrpgSurface::Lobby);
         if let Some(room_input) = doc
             .get_element_by_id("new-game-room-id")
             .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
@@ -4098,7 +4869,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             };
             set_new_game_wizard_busy(&doc, false);
             set_new_game_flow_stage(&doc, NewGameFlowStage::Idle, Some("패널 닫힘"));
-            set_element_display(&doc, "new-game-panel", "none");
+            set_trpg_surface(&doc, TrpgSurface::Overview);
         }) as Box<dyn FnMut()>);
         let _ = close_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
             target.add_event_listener_with_callback("click", close_cb.as_ref().unchecked_ref())
@@ -4376,7 +5147,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                             Some("빠른 시작 완료"),
                         );
                         set_new_game_status(&doc_for_start, &message);
-                        set_element_display(&doc_for_start, "new-game-panel", "none");
+                        set_trpg_surface(&doc_for_start, TrpgSurface::Overview);
                     }
                     Err(e) => {
                         set_new_game_flow_stage(&doc_for_start, NewGameFlowStage::Failed, Some(&e));
@@ -4430,7 +5201,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                             Some("세션 시작 완료"),
                         );
                         set_new_game_status(&doc_for_start, &message);
-                        set_element_display(&doc_for_start, "new-game-panel", "none");
+                        set_trpg_surface(&doc_for_start, TrpgSurface::Overview);
                     }
                     Err(e) => {
                         set_new_game_flow_stage(&doc_for_start, NewGameFlowStage::Failed, Some(&e));
@@ -4449,7 +5220,17 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
 
     bind_new_game_selection_watchers(doc);
     bind_new_game_model_watchers(doc);
+    bind_trpg_surface_tabs(doc);
     set_new_game_flow_stage(doc, NewGameFlowStage::Idle, Some("대기"));
+    if doc
+        .get_element_by_id("dashboard")
+        .and_then(|dashboard| dashboard.get_attribute("data-trpg-surface"))
+        .is_none()
+    {
+        set_trpg_surface(doc, TrpgSurface::Overview);
+    } else {
+        sync_trpg_surface_ui(doc);
+    }
     sync_new_game_wizard_ui(doc);
     bind_actor_admin_controls(doc);
 }

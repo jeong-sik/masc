@@ -2715,6 +2715,9 @@ async fn refresh_trpg_ops_snapshots_inner(doc: &web_sys::Document) -> Result<(),
         &[("room_id", room_id.clone())],
     )
     .await?;
+    if crate::config::current_room_id() != room_id {
+        return Ok(());
+    }
     render_trpg_overview_panel(doc, &overview);
 
     let control = fetch_trpg_http_json(
@@ -2722,13 +2725,19 @@ async fn refresh_trpg_ops_snapshots_inner(doc: &web_sys::Document) -> Result<(),
         &[("room_id", room_id.clone())],
     )
     .await?;
+    if crate::config::current_room_id() != room_id {
+        return Ok(());
+    }
     render_trpg_control_panel(doc, &control);
 
     let timeline = fetch_trpg_http_json(
         "api/v1/trpg/timeline",
-        &[("room_id", room_id), ("limit", "8".to_string())],
+        &[("room_id", room_id.clone()), ("limit", "8".to_string())],
     )
     .await?;
+    if crate::config::current_room_id() != room_id {
+        return Ok(());
+    }
     render_trpg_timeline_panel(doc, &timeline);
     Ok(())
 }

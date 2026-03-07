@@ -499,6 +499,49 @@ let ensure_session_actor config session_id actor_name =
       Ok ()
   | Error e -> Error e
 
+let detach_session_actor config session_id actor_name ~reason =
+  match Team_session_store.update_session config session_id (fun session ->
+            let agent_names =
+              List.filter
+                (fun existing -> not (String.equal existing actor_name))
+                session.agent_names
+            in
+            { session with agent_names; updated_at_iso = Types.now_iso () })
+  with
+  | Ok updated ->
+      Team_session_store.append_event config session_id
+        ~event_type:"session_agent_detached"
+        ~detail:
+          (`Assoc
+            [
+              ("actor", `String actor_name);
+              ("reason", `String reason);
+              ("agent_count", `Int (List.length updated.agent_names));
+              ("ts_iso", `String (Types.now_iso ()));
+            ]);
+      Ok ()
+  | Error e -> Error e
+
+let session_has_turn_for_actor config session_id actor_name =
+  Team_session_store.read_events config session_id
+  |> List.exists (fun json ->
+         match
+           ( Yojson.Safe.Util.member "event_type" json,
+             Yojson.Safe.Util.member "detail" json
+             |> Yojson.Safe.Util.member "actor" )
+         with
+         | `String "team_turn", `String recorded_actor ->
+             String.equal (String.trim recorded_actor) actor_name
+         | _ -> false)
+
+let reconcile_failed_spawn_actor config session_id actor_name =
+  if session_has_turn_for_actor config session_id actor_name then
+    Ok `Retained
+  else
+    detach_session_actor config session_id actor_name
+      ~reason:"spawn_failed_without_turn"
+    |> Result.map (fun () -> `Detached)
+
 let extract_vote_id (text : string) =
   let re = Str.regexp "vote-[0-9-]+-[0-9]+" in
   try
@@ -741,6 +784,15 @@ let handle_step ctx args : result =
                                           ~exit_code:spawn_result.exit_code
                                           ~elapsed_ms:spawn_result.elapsed_ms
                                           ~output_preview ();
+                                        (match
+                                           (spawn_result.success, prepared.runtime_actor_name)
+                                         with
+                                        | false, Some worker_actor ->
+                                            ignore
+                                              (reconcile_failed_spawn_actor
+                                                 ctx.config session_id
+                                                 worker_actor)
+                                        | _ -> ());
                                         results.(index) <-
                                           Some
                                             (`Assoc

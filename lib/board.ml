@@ -285,18 +285,36 @@ let maybe_sweep store =
 
 (** {1 Persistence Paths} *)
 
+let board_base_path () =
+  match Sys.getenv_opt "MASC_BASE_PATH" with
+  | Some p when String.trim p <> "" -> p
+  | _ ->
+      (match Sys.getenv_opt "ME_ROOT" with
+       | Some p -> p
+       | None -> Sys.getcwd ())
+
 let persist_path () =
-  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  let base = board_base_path () in
   Filename.concat base ".masc/board_posts.jsonl"
 
 let comments_path () =
-  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  let base = board_base_path () in
   Filename.concat base ".masc/board_comments.jsonl"
 
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else begin
+    ensure_dir (Filename.dirname path);
+    try Unix.mkdir path 0o755
+    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
 let ensure_masc_dir () =
-  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  let base = board_base_path () in
   let dir = Filename.concat base ".masc" in
-  if not (Sys.file_exists dir) then Unix.mkdir dir 0o755
+  ensure_dir base;
+  ensure_dir dir
 
 (** {1 JSONL File Rotation} *)
 
@@ -634,7 +652,7 @@ let list_comments store ?(limit=1000) () : comment list =
 let vote_direction_to_string = function Up -> "up" | Down -> "down"
 
 let vote_log_path () =
-  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  let base = board_base_path () in
   Filename.concat base ".masc/board_votes.jsonl"
 
 let append_vote_log ~target ~voter ~direction =

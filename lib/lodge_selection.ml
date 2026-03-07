@@ -129,6 +129,46 @@ let ticks_since_selection ~stats ~tick_interval_s =
   let elapsed = now -. stats.last_selected_at in
   int_of_float (elapsed /. tick_interval_s)
 
+let trigger_priority = function
+  | Mentioned _ -> 3
+  | ContentAlert _ -> 2
+  | Starved -> 1
+  | Scheduled | Thompson -> 0
+
+let trigger_bypasses_health = function
+  | Mentioned _ -> true
+  | ContentAlert _ | Scheduled | Starved | Thompson -> false
+
+let is_trigger_eligible ~agent_name trigger =
+  trigger_bypasses_health trigger || Agent_health.is_healthy ~agent_name
+
+let normalized_subscore value =
+  Float.max 0.0 (Float.min 0.999 value)
+
+let priority_score ~trigger ~signal =
+  float_of_int (trigger_priority trigger) +. normalized_subscore signal
+
+let best_pending_triggers pending_triggers =
+  let table : (string, int * selection_trigger) Hashtbl.t = Hashtbl.create 16 in
+  List.iteri (fun idx (name, trigger) ->
+    match Hashtbl.find_opt table name with
+    | Some (_, existing)
+      when trigger_priority existing >= trigger_priority trigger -> ()
+    | Some _ ->
+        Hashtbl.replace table name (idx, trigger)
+    | None ->
+        Hashtbl.add table name (idx, trigger)
+  ) pending_triggers;
+  Hashtbl.fold (fun name (first_idx, trigger) acc ->
+    (first_idx, name, trigger) :: acc
+  ) table []
+  |> List.sort (fun (idx1, _, trigger1) (idx2, _, trigger2) ->
+    match Int.compare (trigger_priority trigger2) (trigger_priority trigger1) with
+    | 0 -> Int.compare idx1 idx2
+    | n -> n
+  )
+  |> List.map (fun (_, name, trigger) -> (name, trigger))
+
 (** {1 Statistics Management} *)
 
 (** Create default stats for a new agent *)
@@ -329,50 +369,38 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
 
   let selected = ref [] in
   let selected_names = ref [] in
+  let add_selected result =
+    selected := !selected @ [result];
+    selected_names := result.agent_name :: !selected_names
+  in
+  let priority_triggers = best_pending_triggers pending_triggers in
 
-  (* 1. Priority triggers: Mentioned (highest) *)
+  (* 1. Priority triggers: Mentioned > ContentAlert *)
   List.iter (fun (name, trigger) ->
     match trigger with
-    | Mentioned _ when List.length !selected < max_n
-                    && not (List.mem name !selected_names) ->
+    | Mentioned _ | ContentAlert _
+      when List.length !selected < max_n
+           && not (List.mem name !selected_names)
+           && is_trigger_eligible ~agent_name:name trigger ->
         let s = get_stats name in
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
-        selected := {
+        let signal = starvation_bonus ~ticks in
+        add_selected {
           agent_name = name;
           trigger;
           thompson_score = 0.0;
-          starvation_bonus = 0.0;
-          final_score = 1.0;  (* Max priority *)
+          starvation_bonus = signal;
+          final_score = priority_score ~trigger ~signal;
           ticks_since_selection = ticks;
-        } :: !selected;
-        selected_names := name :: !selected_names
+        }
     | _ -> ()
-  ) pending_triggers;
+  ) priority_triggers;
 
-  (* 2. Priority triggers: ContentAlert *)
-  List.iter (fun (name, trigger) ->
-    match trigger with
-    | ContentAlert _ when List.length !selected < max_n
-                       && not (List.mem name !selected_names) ->
-        let s = get_stats name in
-        let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
-        selected := {
-          agent_name = name;
-          trigger;
-          thompson_score = 0.0;
-          starvation_bonus = 0.0;
-          final_score = 0.9;  (* High priority *)
-          ticks_since_selection = ticks;
-        } :: !selected;
-        selected_names := name :: !selected_names
-    | _ -> ()
-  ) pending_triggers;
-
-  (* 3. Starvation rescue: force include agents who haven't been selected too long *)
+  (* 2. Starvation rescue: force include agents who haven't been selected too long *)
   let max_starvation = Env_config.LodgeSelection.max_starvation_ticks in
   let starved = List.filter_map (fun name ->
     if List.mem name !selected_names then None
-    else if not (Agent_health.is_healthy ~agent_name:name) then None
+    else if not (is_trigger_eligible ~agent_name:name Starved) then None
     else begin
       let s = get_stats name in
       let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
@@ -386,26 +414,26 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
   let starved_sorted = List.sort (fun (_, t1) (_, t2) -> Int.compare t2 t1) starved in
   List.iter (fun (name, ticks) ->
     if List.length !selected < max_n && not (List.mem name !selected_names) then begin
-      selected := {
+      let signal = starvation_bonus ~ticks in
+      add_selected {
         agent_name = name;
         trigger = Starved;
         thompson_score = 0.0;
-        starvation_bonus = starvation_bonus ~ticks;
-        final_score = 0.85;  (* Below ContentAlert but guaranteed *)
+        starvation_bonus = signal;
+        final_score = priority_score ~trigger:Starved ~signal;
         ticks_since_selection = ticks;
-      } :: !selected;
-      selected_names := name :: !selected_names
+      }
     end
   ) starved_sorted;
 
-  (* 4. Thompson Sampling for remaining slots *)
+  (* 3. Thompson Sampling for remaining slots *)
   if List.length !selected < max_n then begin
     let thompson_weight = Env_config.LodgeSelection.thompson_weight in
     let starvation_weight = 1.0 -. thompson_weight in
 
     let candidates = List.filter_map (fun name ->
       if List.mem name !selected_names then None
-      else if not (Agent_health.is_healthy ~agent_name:name) then begin
+      else if not (is_trigger_eligible ~agent_name:name Thompson) then begin
         (* Unhealthy agents excluded from Thompson selection *)
         Printf.printf "[lodge_selection] Skipping %s (unhealthy) from Thompson pool\n%!" name;
         None
@@ -415,7 +443,8 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
         let ts = sample_beta ~alpha:s.alpha ~beta:s.beta in
         let sb = starvation_bonus ~ticks in
-        let final = thompson_weight *. ts +. starvation_weight *. sb in
+        let final = priority_score ~trigger:Thompson
+          ~signal:(thompson_weight *. ts +. starvation_weight *. sb) in
         Some {
           agent_name = name;
           trigger = Thompson;
@@ -446,7 +475,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
   end;
 
   (* Return sorted by final score *)
-  List.sort (fun r1 r2 -> Float.compare r2.final_score r1.final_score) !selected
+  List.stable_sort (fun r1 r2 -> Float.compare r2.final_score r1.final_score) !selected
 
 (** {1 Monitoring} *)
 

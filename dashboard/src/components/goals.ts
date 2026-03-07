@@ -17,8 +17,9 @@ import {
   lastMdalError,
   refreshGoals,
   refreshMdal,
+  tasksByStatus,
 } from '../store'
-import type { Goal, MdalLoop } from '../types'
+import type { Goal, MdalLoop, Task } from '../types'
 
 // ── Filter state ──────────────────────────────────
 
@@ -293,6 +294,61 @@ function LoopRow({ loop }: { loop: MdalLoop }) {
   `
 }
 
+// ── Kanban (absorbed from Tasks tab) ──────────────
+
+function KanbanCard({ task }: { task: Task }) {
+  const pClass = (task.priority ?? 4) <= 1 ? 'p1' : (task.priority ?? 4) === 2 ? 'p2' : (task.priority ?? 4) === 3 ? 'p3' : 'p4'
+  return html`
+    <div class="kanban-card ${pClass}">
+      <div class="kanban-card-title">${task.title}</div>
+      <div class="kanban-card-meta">
+        ${task.created_at ? html`<${TimeAgo} timestamp=${task.created_at} />` : html`<span>-</span>`}
+        ${task.assignee ? html`<span class="kanban-assignee">${task.assignee}</span>` : null}
+      </div>
+    </div>
+  `
+}
+
+function TaskBacklog() {
+  const { todo, inProgress, done } = tasksByStatus.value
+  return html`
+    <${Card} title="Task Backlog" class="section">
+      <div class="kanban-board">
+        <div class="kanban-column">
+          <div class="kanban-header todo">
+            <span>TO DO</span>
+            <span class="kanban-badge">${todo.length}</span>
+          </div>
+          ${todo.length === 0
+            ? html`<div class="empty-state" style="opacity: 0.5;">No pending tasks</div>`
+            : todo.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
+        </div>
+        <div class="kanban-column">
+          <div class="kanban-header inprogress">
+            <span>IN PROGRESS</span>
+            <span class="kanban-badge">${inProgress.length}</span>
+          </div>
+          ${inProgress.length === 0
+            ? html`<div class="empty-state" style="opacity: 0.5;">No active tasks</div>`
+            : inProgress.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
+        </div>
+        <div class="kanban-column">
+          <div class="kanban-header done">
+            <span>DONE</span>
+            <span class="kanban-badge">${done.length}</span>
+          </div>
+          ${done.length === 0
+            ? html`<div class="empty-state" style="opacity: 0.5;">No completed tasks</div>`
+            : done.slice(0, 20).map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
+          ${done.length > 20
+            ? html`<div class="empty-state" style="opacity: 0.5;">...and ${done.length - 20} more</div>`
+            : null}
+        </div>
+      </div>
+    <//>
+  `
+}
+
 // ── Main export ───────────────────────────────────
 
 export function Goals() {
@@ -420,6 +476,8 @@ export function Goals() {
                 </div>
               `}
       <//>
+
+      <${TaskBacklog} />
     </div>
   `
 }

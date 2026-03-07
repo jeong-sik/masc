@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { signal } from '@preact/signals'
 import { route, initRouter, navigate } from './router'
 import { connected, eventCount, connectSSE, disconnectSSE } from './sse'
 import {
@@ -22,12 +23,9 @@ import {
 import { Overview } from './components/overview'
 import { Command } from './components/command'
 import { Ops } from './components/ops'
-import { Council, refreshCouncil } from './components/council'
 import { Board } from './components/board'
 import { Activity } from './components/activity'
 import { Agents } from './components/agents'
-import { Tasks } from './components/tasks'
-import { Execution } from './components/execution'
 import { Goals } from './components/goals'
 import { Trpg } from './components/trpg'
 import { ControlDock } from './components/control-dock'
@@ -39,6 +37,7 @@ import { refreshOperatorSnapshot } from './operator-store'
 import { refreshCommandPlaneSnapshot } from './command-store'
 
 const QUICK_ACTIONS_OPEN_KEY = 'masc_dashboard_quick_actions_open'
+const activityPanelOpen = signal(false)
 
 function ConnectionStatus() {
   const isConnected = connected.value
@@ -138,7 +137,6 @@ function SideRail() {
               if (current === 'command') refreshCommandPlaneSnapshot()
               if (current === 'ops') refreshOperatorSnapshot()
               if (current === 'board') refreshBoard()
-              if (current === 'council') refreshCouncil()
               if (current === 'trpg') refreshTrpg()
               if (current === 'goals') {
                 refreshGoals()
@@ -181,18 +179,10 @@ function TabContent() {
       return html`<${Overview} />`
     case 'ops':
       return html`<${Ops} />`
-    case 'council':
-      return html`<${Council} />`
     case 'board':
       return html`<${Board} />`
-    case 'execution':
-      return html`<${Execution} />`
-    case 'activity':
-      return html`<${Activity} />`
     case 'agents':
       return html`<${Agents} />`
-    case 'tasks':
-      return html`<${Tasks} />`
     case 'goals':
       return html`<${Goals} />`
     case 'trpg':
@@ -231,7 +221,6 @@ export function App() {
     if (tab === 'command') refreshCommandPlaneSnapshot()
     if (tab === 'ops') refreshOperatorSnapshot()
     if (tab === 'board') refreshBoard()
-    if (tab === 'council') refreshCouncil()
     if (tab === 'trpg') refreshTrpg()
     if (tab === 'goals') {
       refreshGoals()
@@ -253,6 +242,13 @@ export function App() {
           <p class="header-subtitle">${currentView?.description ?? 'Decision and execution operations console'}</p>
         </div>
         <div class="header-right">
+          <button
+            class="activity-panel-toggle ${activityPanelOpen.value ? 'active' : ''}"
+            onClick=${() => { activityPanelOpen.value = !activityPanelOpen.value }}
+            title="Toggle Activity Panel"
+          >
+            Activity
+          </button>
           <${ConnectionStatus} />
         </div>
       </header>
@@ -265,6 +261,19 @@ export function App() {
             : html`<${TabContent} />`}
         </main>
       </div>
+
+      ${activityPanelOpen.value ? html`
+        <div class="activity-panel-backdrop" onClick=${() => { activityPanelOpen.value = false }} />
+        <aside class="activity-panel">
+          <div class="activity-panel-header">
+            <h3>Activity Feed</h3>
+            <button class="activity-panel-close" onClick=${() => { activityPanelOpen.value = false }}>Close</button>
+          </div>
+          <div class="activity-panel-body">
+            <${Activity} />
+          </div>
+        </aside>
+      ` : null}
 
       <${KeeperDetailOverlay} />
       <${AgentDetailOverlay} />

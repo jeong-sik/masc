@@ -51,25 +51,11 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     description: 'Room health, keeper pressure, and top-line execution status',
   },
   {
-    id: 'execution',
-    label: 'Execution',
-    icon: '\uD83D\uDEE0\uFE0F',
-    group: 'observe',
-    description: 'Intervention queue for stalled work, ownership gaps, and execution drift',
-  },
-  {
     id: 'agents',
     label: 'Agents',
     icon: '\uD83E\uDD16',
     group: 'observe',
     description: 'Live monitor for agent status, keeper pressure, and current execution focus',
-  },
-  {
-    id: 'activity',
-    label: 'Activity',
-    icon: '\uD83D\uDCCA',
-    group: 'observe',
-    description: 'Unified live stream for messages, task changes, board events, and keeper events',
   },
   {
     id: 'board',
@@ -79,25 +65,11 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     description: 'Human and agent discussion feed with system noise filtered by default',
   },
   {
-    id: 'council',
-    label: 'Council',
-    icon: '\uD83C\uDFDB\uFE0F',
-    group: 'coordinate',
-    description: 'Debates, quorum status, and decision flow',
-  },
-  {
     id: 'goals',
     label: 'Planning',
     icon: '\uD83C\uDFAF',
     group: 'coordinate',
-    description: 'Goals and MDAL loops in one planning surface with freshness signals',
-  },
-  {
-    id: 'tasks',
-    label: 'Tasks',
-    icon: '\uD83D\uDCCB',
-    group: 'coordinate',
-    description: 'Kanban-style task distribution',
+    description: 'Goals, MDAL loops, and task backlog in one planning surface',
   },
   {
     id: 'ops',

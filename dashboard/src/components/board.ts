@@ -1,6 +1,7 @@
-// Board tab — discussion feed with system-noise filter and clearer card structure
+// Board tab — discussion feed + debates/voting (merged from Council)
 
 import { html } from 'htm/preact'
+import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
@@ -14,10 +15,90 @@ import {
   lastBoardRefreshAt,
   refreshBoard,
   serverStatus,
+  registerCouncilRefresh,
 } from '../store'
-import { votePost, fetchBoardPost, commentPost } from '../api'
+import {
+  votePost,
+  fetchBoardPost,
+  commentPost,
+  fetchCouncilSessions,
+  fetchDebates,
+  fetchDebateStatus,
+  startDebate,
+} from '../api'
 import { navigate, navigateToPost, route } from '../router'
-import type { BoardPost, BoardComment, BoardSortMode } from '../types'
+import type { BoardPost, BoardComment, BoardSortMode, CouncilDebate, CouncilDebateSummary, CouncilSession } from '../types'
+
+// ── Sub-tab state ──────────────────────────────────────────
+type BoardSubView = 'posts' | 'debates' | 'voting'
+const boardSubView = signal<BoardSubView>('posts')
+
+// ── Council signals (merged from council.ts) ───────────────
+const councilDebates = signal<CouncilDebate[]>([])
+const councilSessions = signal<CouncilSession[]>([])
+const councilTopicInput = signal('')
+const councilLoading = signal(false)
+const councilStarting = signal(false)
+const councilErrorText = signal('')
+const selectedDebateId = signal<string | null>(null)
+const selectedDebateDetail = signal<CouncilDebateSummary | null>(null)
+const councilDetailLoading = signal(false)
+const councilFeedOk = signal<boolean | null>(null)
+const lastCouncilRefreshAt = signal<number | null>(null)
+
+export async function refreshCouncil() {
+  councilLoading.value = true
+  councilErrorText.value = ''
+  try {
+    const [d, s] = await Promise.all([
+      fetchDebates(),
+      fetchCouncilSessions(),
+    ])
+    councilDebates.value = d
+    councilSessions.value = s
+    councilFeedOk.value = true
+    lastCouncilRefreshAt.value = Date.now()
+  } catch (err) {
+    councilErrorText.value = err instanceof Error ? err.message : 'Failed to load council data'
+    councilFeedOk.value = false
+  } finally {
+    councilLoading.value = false
+  }
+}
+
+// Register for SSE-driven refresh (replaces council.ts registration)
+registerCouncilRefresh(refreshCouncil)
+
+async function submitDebate() {
+  const topic = councilTopicInput.value.trim()
+  if (!topic) return
+  councilStarting.value = true
+  try {
+    const created = await startDebate(topic)
+    councilTopicInput.value = ''
+    showToast(created?.id ? `Debate started: ${created.id}` : 'Debate started', 'success')
+    await refreshCouncil()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to start debate'
+    showToast(msg, 'error')
+  } finally {
+    councilStarting.value = false
+  }
+}
+
+async function loadDebateDetail(debateId: string) {
+  selectedDebateId.value = debateId
+  councilDetailLoading.value = true
+  selectedDebateDetail.value = null
+  try {
+    selectedDebateDetail.value = await fetchDebateStatus(debateId)
+  } catch (err) {
+    councilErrorText.value = err instanceof Error ? err.message : 'Failed to load debate status'
+    selectedDebateDetail.value = null
+  } finally {
+    councilDetailLoading.value = false
+  }
+}
 
 const SORT_MODES: { id: BoardSortMode; label: string }[] = [
   { id: 'hot', label: 'Hot' },
@@ -327,15 +408,199 @@ function PostDetail({ post }: { post: BoardPost }) {
   `
 }
 
+// ── Council sub-components ─────────────────────────────────
+
+function DebateRow({ debate }: { debate: CouncilDebate }) {
+  const selected = selectedDebateId.value === debate.id
+  return html`
+    <button
+      class="council-row ${selected ? 'selected' : ''}"
+      onClick=${() => loadDebateDetail(debate.id)}
+    >
+      <div class="council-row-main">
+        <div class="council-topic">${debate.topic}</div>
+        <div class="council-sub">
+          <span>ID: ${debate.id.slice(0, 10)}</span>
+          <span>Args: ${debate.argument_count}</span>
+        </div>
+      </div>
+      <span class="council-state ${debate.status}">${debate.status}</span>
+    </button>
+  `
+}
+
+function SessionRow({ session }: { session: CouncilSession }) {
+  return html`
+    <div class="council-row session">
+      <div class="council-row-main">
+        <div class="council-topic">${session.topic}</div>
+        <div class="council-sub">
+          <span>ID: ${session.id.slice(0, 10)}</span>
+          <span>Initiator: ${session.initiator}</span>
+          ${session.state ? html`<span>State: ${session.state}</span>` : null}
+        </div>
+      </div>
+      <span class="council-state vote">${session.votes}/${session.quorum}</span>
+    </div>
+  `
+}
+
+function CouncilFeedNotice() {
+  if (councilFeedOk.value === null) return null
+  if (councilFeedOk.value && !lastCouncilRefreshAt.value) return null
+
+  return html`
+    <div class="feed-health-banner ${councilFeedOk.value === false ? 'degraded' : 'ok'}">
+      <span class="feed-health-title">
+        ${councilFeedOk.value === false ? 'Council feed degraded' : 'Council feed synced'}
+      </span>
+      ${lastCouncilRefreshAt.value
+        ? html`<span class="feed-health-meta">Last sync: <${TimeAgo} timestamp=${lastCouncilRefreshAt.value} /></span>`
+        : html`<span class="feed-health-meta">No sync timestamp</span>`}
+    </div>
+  `
+}
+
+function DebatesView() {
+  const councilFeedDegraded = councilFeedOk.value === false
+
+  return html`
+    <div>
+      <${CouncilFeedNotice} />
+      <${Card} title="Start Debate" class="section">
+        <div class="council-create">
+          <input
+            class="control-input"
+            type="text"
+            placeholder="Start debate topic..."
+            value=${councilTopicInput.value}
+            onInput=${(e: Event) => { councilTopicInput.value = (e.target as HTMLInputElement).value }}
+            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') submitDebate() }}
+            disabled=${councilStarting.value}
+          />
+          <button
+            class="control-btn secondary"
+            onClick=${submitDebate}
+            disabled=${councilStarting.value || councilTopicInput.value.trim() === ''}
+          >
+            ${councilStarting.value ? 'Starting...' : 'Start Debate'}
+          </button>
+          <button class="control-btn ghost" onClick=${refreshCouncil} disabled=${councilLoading.value}>
+            ${councilLoading.value ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+        ${councilErrorText.value ? html`<div class="council-error">${councilErrorText.value}</div>` : null}
+      <//>
+
+      <${Card} title="Debates" class="section">
+        <div class="council-list">
+          ${councilDebates.value.length === 0
+            ? html`<div class="empty-state">${councilFeedDegraded ? 'No debates loaded (council feed degraded).' : 'No debates yet'}</div>`
+            : councilDebates.value.map(d => html`<${DebateRow} key=${d.id} debate=${d} />`)}
+        </div>
+      <//>
+
+      <${Card} title=${selectedDebateId.value ? `Debate Detail (${selectedDebateId.value})` : 'Debate Detail'} class="section">
+        ${councilDetailLoading.value
+          ? html`<div class="loading-indicator">Loading debate detail...</div>`
+          : selectedDebateDetail.value
+            ? html`
+                <div class="council-sub" style="margin-bottom: 8px;">
+                  <span>Status: ${selectedDebateDetail.value.status}</span>
+                  <span>Total arguments: ${selectedDebateDetail.value.total_arguments}</span>
+                </div>
+                <div class="council-sub" style="margin-bottom: 8px;">
+                  <span>Support: ${selectedDebateDetail.value.support_count}</span>
+                  <span>Oppose: ${selectedDebateDetail.value.oppose_count}</span>
+                  <span>Neutral: ${selectedDebateDetail.value.neutral_count}</span>
+                </div>
+                ${selectedDebateDetail.value.summary_text
+                  ? html`<pre class="council-detail">${selectedDebateDetail.value.summary_text}</pre>`
+                  : null}
+              `
+            : html`<div class="empty-state">Select a debate to view summary</div>`}
+      <//>
+    </div>
+  `
+}
+
+function VotingView() {
+  const councilFeedDegraded = councilFeedOk.value === false
+
+  return html`
+    <div>
+      <${CouncilFeedNotice} />
+      <${Card} title="Voting Sessions" class="section">
+        <div class="council-list">
+          ${councilSessions.value.length === 0
+            ? html`<div class="empty-state">${councilFeedDegraded ? 'No sessions loaded (council feed degraded).' : 'No active sessions'}</div>`
+            : councilSessions.value.map(s => html`<${SessionRow} key=${s.id} session=${s} />`)}
+        </div>
+      <//>
+    </div>
+  `
+}
+
+// ── Sub-tab bar ────────────────────────────────────────────
+
+function BoardSubTabs() {
+  const current = boardSubView.value
+  return html`
+    <div class="overview-sub-tabs" style="margin-bottom: 12px;">
+      <button class="sub-tab-btn ${current === 'posts' ? 'active' : ''}" onClick=${() => { boardSubView.value = 'posts' }}>Posts</button>
+      <button class="sub-tab-btn ${current === 'debates' ? 'active' : ''}" onClick=${() => { boardSubView.value = 'debates' }}>Debates</button>
+      <button class="sub-tab-btn ${current === 'voting' ? 'active' : ''}" onClick=${() => { boardSubView.value = 'voting' }}>Voting</button>
+    </div>
+  `
+}
+
+// ── Posts list view ────────────────────────────────────────
+
+function PostsView() {
+  const posts = boardPosts.value
+  const loading = boardLoading.value
+  const boardFeedDegraded = serverStatus.value?.data_quality?.board_contract_ok === false
+
+  return html`
+    <div>
+      <${BoardFeedNotice} />
+      <${BoardSummary} />
+      <${SortBar} />
+      ${loading
+        ? html`<div class="loading-indicator">Loading board...</div>`
+        : posts.length === 0
+            ? html`
+              <div class="empty-state">
+                ${boardFeedDegraded
+                  ? 'No posts loaded (board feed degraded). Check board contract sync.'
+                  : boardExcludeSystem.value
+                    ? 'No visible posts right now. Automated reports may be hidden; toggle them back on if you need the raw feed.'
+                    : 'No posts yet'}
+              </div>
+            `
+          : html`<div class="board-post-list">
+              ${posts.map(p => html`<${PostCard} key=${p.id} post=${p} />`)}
+            </div>`}
+    </div>
+  `
+}
+
 // ── Main Board component ───────────────────────────────────
 
 export function Board() {
   const posts = boardPosts.value
-  const loading = boardLoading.value
   const postId = route.value.postId
   const boardFeedDegraded = serverStatus.value?.data_quality?.board_contract_ok === false
+  const subView = boardSubView.value
 
-  // Detail view: single post
+  // Load council data when switching to debates/voting sub-tab
+  useEffect(() => {
+    if (subView === 'debates' || subView === 'voting') {
+      refreshCouncil()
+    }
+  }, [subView])
+
+  // Detail view: single post (overrides sub-tabs)
   if (postId) {
     const post = posts.find(p => p.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)
     if (!post && detailPostId.value !== postId && !detailLoading.value) {
@@ -363,25 +628,13 @@ export function Board() {
         `
   }
 
-  // List view
+  // List view with sub-tabs
   return html`
-    <${BoardFeedNotice} />
-    <${BoardSummary} />
-    <${SortBar} />
-    ${loading
-      ? html`<div class="loading-indicator">Loading board...</div>`
-      : posts.length === 0
-          ? html`
-            <div class="empty-state">
-              ${boardFeedDegraded
-                ? 'No posts loaded (board feed degraded). Check board contract sync.'
-                : boardExcludeSystem.value
-                  ? 'No visible posts right now. Automated reports may be hidden; toggle them back on if you need the raw feed.'
-                  : 'No posts yet'}
-            </div>
-          `
-        : html`<div class="board-post-list">
-            ${posts.map(p => html`<${PostCard} key=${p.id} post=${p} />`)}
-          </div>`}
+    <${BoardSubTabs} />
+    ${subView === 'debates'
+      ? html`<${DebatesView} />`
+      : subView === 'voting'
+        ? html`<${VotingView} />`
+        : html`<${PostsView} />`}
   `
 }

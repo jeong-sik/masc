@@ -1,9 +1,9 @@
 (** Tool_mdal — MCP tool schemas for the Metric-Driven Agent Loop.
 
     Provides 4 MCP tools:
-    - masc_mdal_start    — Start a metric-driven improvement loop
+    - masc_mdal_start    — Start a measured improvement loop
     - masc_mdal_status   — Get current loop state and iteration history
-    - masc_mdal_iterate  — Execute one improvement iteration manually
+    - masc_mdal_iterate  — Execute one improvement iteration
     - masc_mdal_stop     — Stop a running loop
 
     @since 2.70.0 *)
@@ -15,10 +15,7 @@
 let schemas : Types.tool_schema list = [
   {
     name = "masc_mdal_start";
-    description = "Start a metric-driven agent loop (MDAL). \
-The loop repeatedly measures a metric, spawns a worker to improve it, \
-and tracks progress until the goal is met or limits are reached. \
-Use a built-in profile (ssim, coverage, lint, review, docs) or provide custom settings.";
+    description = "Start a strict metric-driven loop for a deterministic numeric goal. MDAL requires auditable tool use plus re-measurement; do not use it for qualitative work.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -29,8 +26,8 @@ or 'custom' for a custom metric loop");
         ]);
         ("metric_fn", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shell command that outputs a single float (the metric value). \
-Required for custom profiles, optional override for built-in profiles.");
+          ("description", `String "Shell command that outputs a single float metric. \
+Required for custom profiles and for all built-in profiles in this build.");
         ]);
         ("goal", `Assoc [
           ("type", `String "string");
@@ -43,11 +40,16 @@ Operators: >=, <=, >, <, ==, !=. Required for custom profiles.");
         ]);
         ("reference", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional reference file or directory for comparison");
+          ("description", `String "Optional reference file or directory recorded in loop metadata and included in worker context. \
+MDAL itself does not read or score this path.");
         ]);
         ("agent", `Assoc [
           ("type", `String "string");
-          ("description", `String "Agent to spawn for each iteration (default: 'claude')");
+          ("description", `String "Worker alias or provider:model string for the strict worker runtime (default: 'claude')");
+        ]);
+        ("worker_model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional explicit provider:model worker runtime. Overrides agent alias resolution.");
         ]);
         ("max_iterations", `Assoc [
           ("type", `String "integer");
@@ -59,17 +61,17 @@ Operators: >=, <=, >, <, ==, !=. Required for custom profiles.");
         ]);
         ("heuristics", `Assoc [
           ("type", `String "string");
-          ("description", `String "Domain-specific hints for the worker agent");
+          ("description", `String "Worker guidance text only. Loop stop/continue decisions are based on measured metric results, not this hint.");
         ]);
         ("tools_allow", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Tools the worker may use (empty = all allowed)");
+          ("description", `String "Auditable MDAL tool allowlist. Unknown or unsupported tools are ignored before strict runtime validation.");
         ]);
         ("tools_deny", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Tools the worker must NOT use");
+          ("description", `String "Auditable MDAL tool denylist applied after tools_allow/default catalog selection.");
         ]);
       ]);
       ("required", `List [`String "profile"]);
@@ -78,8 +80,8 @@ Operators: >=, <=, >, <, ==, !=. Required for custom profiles.");
 
   {
     name = "masc_mdal_status";
-    description = "Get the current status of a running MDAL loop. \
-Returns: loop_id, status, iteration count, metric history, stagnation info.";
+    description = "Get the current MDAL loop state, metric history, and persistence metadata. \
+Persisted `running` loops hydrate as `interrupted` after restart.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -93,9 +95,7 @@ Returns: loop_id, status, iteration count, metric history, stagnation info.";
 
   {
     name = "masc_mdal_iterate";
-    description = "Execute one improvement iteration of an MDAL loop. \
-Measures the metric, reports the current value, and optionally applies changes. \
-Use this for manual step-by-step control instead of automatic looping.";
+    description = "Advance one strict MDAL iteration. The worker must use at least one auditable tool and then MDAL re-measures the metric. Only running or interrupted strict loops can iterate.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -103,26 +103,14 @@ Use this for manual step-by-step control instead of automatic looping.";
           ("type", `String "string");
           ("description", `String "Loop ID (optional, uses latest if omitted)");
         ]);
-        ("changes", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Description of changes made in this iteration");
-        ]);
-        ("failed_attempts", `Assoc [
-          ("type", `String "string");
-          ("description", `String "What was tried but didn't work");
-        ]);
-        ("next_suggestion", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Suggestion for the next iteration");
-        ]);
       ]);
     ];
   };
 
   {
     name = "masc_mdal_stop";
-    description = "Stop a running MDAL loop. \
-Records the final state and posts a summary to the board.";
+    description = "Stop an MDAL loop when the numeric goal is no longer worth continuing. \
+Persists the final state and stop reason.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -145,9 +133,13 @@ Records the final state and posts a summary to the board.";
 
 type context = {
   agent_name : string;
+  config : Room.config option;
+  sw : Eio.Switch.t option;
+  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
+  worker_runner : Mdal_worker.runner option;
 }
 
-(** Global registry of active MDAL loops. *)
+(** Write-through runtime cache of active/persisted MDAL loops. *)
 let active_loops : (string, Mdal.loop_state) Hashtbl.t =
   Hashtbl.create 4
 
@@ -166,13 +158,54 @@ let wrap_result json =
   in
   (not is_error, s)
 
-let resolve_loop_id args =
+let assoc_with_fields json fields =
+  match json with
+  | `Assoc base -> `Assoc (base @ fields)
+  | other -> other
+
+let config_persistence_backend config =
+  Mdal_store.persistence_backend config
+
+let config_durability config =
+  Mdal_store.durability config
+
+let remember_loop (state : Mdal.loop_state) =
+  Hashtbl.replace active_loops state.loop_id state;
+  latest_loop_id := Some state.loop_id
+
+let persist_loop config (state : Mdal.loop_state) =
+  state.updated_at <- Time_compat.now ();
+  Mdal_store.save_loop config state;
+  Mdal_store.save_latest_loop_id config state.loop_id;
+  remember_loop state
+
+let resolve_loop_id (ctx : context) args =
   let open Yojson.Safe.Util in
   match args |> member "loop_id" |> to_string_option with
   | Some id -> Some id
-  | None -> !latest_loop_id
+  | None -> (
+      match !latest_loop_id with
+      | Some id -> Some id
+      | None -> (
+          match ctx.config with
+          | Some config -> Mdal_store.load_latest_loop_id config
+          | None -> None))
 
 let iter_record_to_json (r : Mdal.iteration_record) : Yojson.Safe.t =
+  let evidence_json =
+    match r.evidence with
+    | None -> `Null
+    | Some evidence ->
+        `Assoc
+          [
+            ("worker_engine", `String (Mdal.worker_engine_to_string evidence.engine));
+            ("worker_model", `String evidence.model_used);
+            ("tool_call_count", `Int evidence.tool_call_count);
+            ("tool_names", `List (List.map (fun item -> `String item) evidence.tool_names));
+            ("session_id", `String evidence.session_id);
+            ("evidence_status", `String (Mdal.evidence_status_to_string evidence.status));
+          ]
+  in
   `Assoc [
     ("iteration", `Int r.iteration);
     ("metric_before", `Float r.metric_before);
@@ -183,326 +216,728 @@ let iter_record_to_json (r : Mdal.iteration_record) : Yojson.Safe.t =
     ("next_suggestion", `String r.next_suggestion);
     ("elapsed_ms", `Int r.elapsed_ms);
     ("cost_usd", match r.cost_usd with Some c -> `Float c | None -> `Null);
+    ("evidence", evidence_json);
   ]
+
+let runtime_worker_available (ctx : context) =
+  match ctx.worker_runner with
+  | Some _ -> true
+  | None -> Mdal_worker.runtime_available ~sw:ctx.sw ~config:ctx.config
+
+let truncate_preview ?(limit = 240) text =
+  let trimmed = String.trim text in
+  if String.length trimmed <= limit then
+    trimmed
+  else
+    String.sub trimmed 0 limit ^ "..."
+
+let missing_metric_message profile_name =
+  let profile_hint =
+    match profile_name with
+    | "ssim" ->
+        "Example: a script that compares a reference image and prints SSIM as a single float."
+    | "coverage" ->
+        "Example: a coverage command that prints one numeric percentage such as `make coverage-summary | ...`."
+    | "lint" ->
+        "Example: a lint command that prints one numeric error count."
+    | "review" ->
+        "Provide a deterministic review scoring command or evaluator that prints a single float."
+    | "docs" ->
+        "Provide a deterministic documentation coverage command or evaluator that prints a single float."
+    | other ->
+        Printf.sprintf "Provide metric_fn explicitly for profile `%s`." other
+  in
+  Printf.sprintf
+    "Profile `%s` has no trustworthy built-in metric command in this workspace. Pass `metric_fn` explicitly. %s"
+    profile_name profile_hint
+
+let resolve_metric_fn ~profile_name ~base_profile args =
+  let open Yojson.Safe.Util in
+  match args |> member "metric_fn" |> to_string_option |> Option.map String.trim with
+  | Some metric_fn when metric_fn <> "" -> Ok metric_fn
+  | _ ->
+      let inherited = String.trim base_profile.Mdal.metric_fn in
+      if inherited <> "" then Ok inherited
+      else Error (missing_metric_message profile_name)
+
+let resolve_worker_model_arg args =
+  match args |> Yojson.Safe.Util.member "worker_model"
+        |> Yojson.Safe.Util.to_string_option with
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let validate_strict_iterate_args args =
+  let open Yojson.Safe.Util in
+  let manual_fields =
+    [ "changes"; "failed_attempts"; "next_suggestion" ]
+    |> List.filter (fun field ->
+           match args |> member field with
+           | `Null -> false
+           | _ -> true)
+  in
+  match manual_fields with
+  | [] -> Ok ()
+  | fields ->
+      Error
+        (Printf.sprintf
+           "Strict MDAL does not accept manual iteration fields (%s). Start a new strict loop and let the worker produce auditable tool evidence."
+           (String.concat ", " fields))
+
+let current_metric_of_state (state : Mdal.loop_state) =
+  Mdal.current_metric state
+
+let total_delta_of_state (state : Mdal.loop_state) =
+  Mdal.total_delta state
+
+let hydrate_loaded_loop config (state : Mdal.loop_state) =
+  match state.status with
+  | `Running ->
+      state.status <- `Interrupted;
+      state.stop_reason <- Some "server_restart";
+      state.error_message <- None;
+      state.stopped_at <- None;
+      persist_loop config state;
+      state
+  | _ ->
+      remember_loop state;
+      state
+
+let find_loop ?config loop_id =
+  match Hashtbl.find_opt active_loops loop_id with
+  | Some state -> Some state
+  | None -> (
+      match config with
+      | Some cfg -> (
+          match Mdal_store.load_loop cfg loop_id with
+          | Some state -> Some (hydrate_loaded_loop cfg state)
+          | None -> None)
+      | None -> None)
+
+let list_loops ?config () =
+  match config with
+  | None ->
+      Hashtbl.fold (fun _ state acc -> state :: acc) active_loops []
+  | Some cfg ->
+      let ids =
+        Mdal_store.list_loop_ids cfg
+        @ Hashtbl.fold (fun id _ acc -> id :: acc) active_loops []
+        |> List.sort_uniq String.compare
+      in
+      List.filter_map (find_loop ~config:cfg) ids
+
+let state_to_json ?config (state : Mdal.loop_state) =
+  let persistence_backend, durability =
+    match config with
+    | Some cfg -> (config_persistence_backend cfg, config_durability cfg)
+    | None -> ("memory", "memory_only")
+  in
+  let latest_evidence = Mdal.latest_evidence state in
+  let latest_tool_call_count, latest_tool_names, latest_session_id, evidence_status =
+    match latest_evidence with
+    | Some evidence ->
+        ( evidence.tool_call_count,
+          evidence.tool_names,
+          Some evidence.session_id,
+          Some evidence.status )
+    | None ->
+        ( 0,
+          [],
+          None,
+          Mdal.current_evidence_status state )
+  in
+  let stopped_at =
+    match state.stopped_at with
+    | Some ts -> `Float ts
+    | None -> `Null
+  in
+  `Assoc
+    [
+      ("loop_id", `String state.loop_id);
+      ("status", `String (Mdal.status_to_string state.status));
+      ("strict_mode", `Bool state.strict_mode);
+      ("error_message", match state.error_message with Some msg -> `String msg | None -> `Null);
+      ("error_reason", match state.error_message with Some msg -> `String msg | None -> `Null);
+      ("stop_reason", match state.stop_reason with Some reason -> `String reason | None -> `Null);
+      ("profile", `String state.profile.name);
+      ("current_iteration", `Int state.current_iteration);
+      ("max_iterations", `Int state.profile.max_iterations);
+      ("baseline_metric", `Float state.baseline_metric);
+      ("current_metric", `Float (current_metric_of_state state));
+      ("target", `String state.profile.target);
+      ("stagnation_streak", `Int state.stagnation_streak);
+      ("stagnation_limit", `Int state.profile.stagnation_count);
+      ("elapsed_seconds", `Float (Time_compat.now () -. state.start_time));
+      ("start_time", `Float state.start_time);
+      ("updated_at", `Float state.updated_at);
+      ("stopped_at", stopped_at);
+      ("execution_mode", `String (Mdal.execution_mode_to_string state.execution_mode));
+      ("worker_engine",
+       match state.worker_engine with
+       | Some engine -> `String (Mdal.worker_engine_to_string engine)
+       | None -> `Null);
+      ("worker_model",
+       match state.worker_model with
+       | Some model -> `String model
+       | None -> `Null);
+      ("evidence_policy", if state.strict_mode then `String "hard" else `String "legacy");
+      ("latest_tool_call_count", `Int latest_tool_call_count);
+      ("latest_tool_names", `List (List.map (fun item -> `String item) latest_tool_names));
+      ("session_id",
+       match latest_session_id with
+       | Some value -> `String value
+       | None -> `Null);
+      ("evidence_status",
+       match evidence_status with
+       | Some status -> `String (Mdal.evidence_status_to_string status)
+       | None -> `Null);
+      ("durability", `String durability);
+      ("persistence_backend", `String persistence_backend);
+      ("recoverable", `Bool (Mdal.recoverable state));
+      ("history", `List (List.map iter_record_to_json state.history));
+    ]
+
+let post_final_summary (state : Mdal.loop_state) =
+  try
+    ignore
+      (Board_dispatch.create_post
+         ~author:"mdal"
+         ~content:(Mdal.format_final_post state)
+         ~hearth:(Mdal.state_hearth state.loop_id)
+         ())
+  with _ -> ()
+
+let terminal_response ?config (state : Mdal.loop_state) ~reason ~error_message =
+  assoc_with_fields (state_to_json ?config state)
+    [
+      ("error", `String error_message);
+      ("reason", `String reason);
+      ("total_iterations", `Int state.current_iteration);
+      ("final_metric", `Float (current_metric_of_state state));
+      ("total_delta", `Float (total_delta_of_state state));
+      ("final_state", `String (Mdal.format_final_post state));
+    ]
+
+let emit_stop_event (state : Mdal.loop_state) ~reason =
+  let final_metric = current_metric_of_state state in
+  try
+    Sse.broadcast
+      (`Assoc
+        [
+          ("type", `String "mdal_stopped");
+          ("loop_id", `String state.loop_id);
+          ("status", `String (Mdal.status_to_string state.status));
+          ("reason", `String reason);
+          ("final_metric", `Float final_metric);
+          ("iterations", `Int state.current_iteration);
+        ])
+  with _ -> ()
+
+let emit_completed_event ~loop_id ~final_metric ~iterations =
+  try
+    Sse.broadcast
+      (`Assoc
+        [
+          ("type", `String "mdal_completed");
+          ("loop_id", `String loop_id);
+          ("final_metric", `Float final_metric);
+          ("iterations", `Int iterations);
+        ])
+  with _ -> ()
+
+let run_worker_iteration (ctx : context) (config : Room.config)
+    (state : Mdal.loop_state) current_metric =
+  match ctx.worker_runner with
+  | Some runner -> runner ~config state ~current_metric
+  | None -> (
+      match ctx.sw with
+      | None ->
+          Error
+            (Mdal_worker.Worker_unavailable
+               "Strict MDAL worker runtime requires an active Eio switch.")
+      | Some sw -> Mdal_worker.run ~sw ~config state ~current_metric)
+
+let require_config ctx =
+  match ctx.config with
+  | Some config -> Ok config
+  | None -> Error "MDAL requires room config for backend-backed persistence"
+
+let set_non_terminal_state (state : Mdal.loop_state) status =
+  state.status <- status;
+  state.error_message <- None;
+  state.stop_reason <- None;
+  state.stopped_at <- None
+
+let set_interrupted_state (state : Mdal.loop_state) ~reason ~error_message =
+  let now = Time_compat.now () in
+  state.status <- `Interrupted;
+  state.stop_reason <- Some reason;
+  state.error_message <- error_message;
+  state.updated_at <- now;
+  state.stopped_at <- Some now
+
+let set_terminal_state (state : Mdal.loop_state) ~status ~reason ~error_message =
+  let now = Time_compat.now () in
+  state.status <- status;
+  state.stop_reason <- Some reason;
+  state.error_message <- error_message;
+  state.updated_at <- now;
+  state.stopped_at <- Some now
+
+let stop_for_reason config (state : Mdal.loop_state) ~reason ~message =
+  set_terminal_state state ~status:`Stopped ~reason ~error_message:None;
+  persist_loop config state;
+  post_final_summary state;
+  emit_stop_event state ~reason;
+  terminal_response ~config state ~reason ~error_message:message
+
+let fail_loop config (state : Mdal.loop_state) ~reason ~message =
+  set_terminal_state state ~status:`Error ~reason ~error_message:(Some message);
+  persist_loop config state;
+  post_final_summary state;
+  emit_stop_event state ~reason;
+  terminal_response ~config state ~reason ~error_message:message
+
+let interrupt_loop config (state : Mdal.loop_state) ~reason ~message =
+  set_interrupted_state state ~reason ~error_message:(Some message);
+  persist_loop config state;
+  post_final_summary state;
+  emit_stop_event state ~reason;
+  terminal_response ~config state ~reason ~error_message:message
+
+let reject_iteration ?config (state : Mdal.loop_state) ~message =
+  assoc_with_fields (state_to_json ?config state) [ ("error", `String message) ]
 
 (* ================================================================ *)
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_start (_ctx : context) args =
+let handle_start (ctx : context) args =
   let open Yojson.Safe.Util in
-  let profile_name = args |> member "profile" |> to_string in
+  try
+    let profile_name = args |> member "profile" |> to_string in
+    let worker_model_arg = resolve_worker_model_arg args in
+    (* Build profile: start from built-in or create custom *)
+    let base_profile =
+      if profile_name = "custom" then
+        let metric_fn = args |> member "metric_fn" |> to_string_option in
+        let goal_str = args |> member "goal" |> to_string_option in
+        match metric_fn, goal_str with
+        | Some mfn, Some gs ->
+          let goal = Mdal.parse_goal gs in
+          { Mdal.name = "custom";
+            metric_fn = mfn;
+            goal;
+            target = (args |> member "target" |> to_string_option
+                      |> Option.value ~default:gs);
+            reference = args |> member "reference" |> to_string_option;
+            agent = (args |> member "agent" |> to_string_option
+                     |> Option.value ~default:"claude");
+            max_iterations = (args |> member "max_iterations" |> to_int_option
+                              |> Option.value ~default:20);
+            max_time_seconds = args |> member "max_time_seconds" |> to_number_option;
+            stagnation_threshold = 0.005;
+            stagnation_count = 3;
+            heuristics = (args |> member "heuristics" |> to_string_option
+                          |> Option.value ~default:"");
+            tools_allow = (args |> member "tools_allow" |> to_option (fun j ->
+              to_list j |> List.map to_string) |> Option.value ~default:[]);
+            tools_deny = (args |> member "tools_deny" |> to_option (fun j ->
+              to_list j |> List.map to_string) |> Option.value ~default:[]);
+          }
+        | None, _ ->
+          invalid_arg "Custom profile requires 'metric_fn'"
+        | _, None ->
+          invalid_arg "Custom profile requires 'goal'"
+      else
+        Mdal.builtin_profile profile_name
+    in
 
-  (* Build profile: start from built-in or create custom *)
-  let base_profile =
-    if profile_name = "custom" then
-      let metric_fn = args |> member "metric_fn" |> to_string_option in
-      let goal_str = args |> member "goal" |> to_string_option in
-      match metric_fn, goal_str with
-      | Some mfn, Some gs ->
-        let goal = Mdal.parse_goal gs in
-        { Mdal.name = "custom";
-          metric_fn = mfn;
-          goal;
-          target = (args |> member "target" |> to_string_option
-                    |> Option.value ~default:gs);
-          reference = args |> member "reference" |> to_string_option;
-          agent = (args |> member "agent" |> to_string_option
-                   |> Option.value ~default:"claude");
-          max_iterations = (args |> member "max_iterations" |> to_int_option
-                            |> Option.value ~default:20);
-          max_time_seconds = args |> member "max_time_seconds" |> to_number_option;
-          stagnation_threshold = 0.005;
-          stagnation_count = 3;
-          heuristics = (args |> member "heuristics" |> to_string_option
-                        |> Option.value ~default:"");
-          tools_allow = (args |> member "tools_allow" |> to_option (fun j ->
-            to_list j |> List.map to_string) |> Option.value ~default:[]);
-          tools_deny = (args |> member "tools_deny" |> to_option (fun j ->
-            to_list j |> List.map to_string) |> Option.value ~default:[]);
-        }
-      | None, _ ->
-        invalid_arg "Custom profile requires 'metric_fn'"
-      | _, None ->
-        invalid_arg "Custom profile requires 'goal'"
-    else
-      Mdal.builtin_profile profile_name
-  in
+    if not (runtime_worker_available ctx) then
+      invalid_arg
+        "MDAL strict worker runtime is unavailable in this context. Start MDAL from the live MCP server or use a test worker runner."
+    else ();
 
-  (* Apply optional overrides *)
-  let profile = {
-    base_profile with
-    metric_fn = (args |> member "metric_fn" |> to_string_option
-                 |> Option.value ~default:base_profile.metric_fn);
-    agent = (args |> member "agent" |> to_string_option
-             |> Option.value ~default:base_profile.agent);
-    max_iterations = (args |> member "max_iterations" |> to_int_option
-                      |> Option.value ~default:base_profile.max_iterations);
-    max_time_seconds = (match args |> member "max_time_seconds" |> to_number_option with
-                        | Some t -> Some t
-                        | None -> base_profile.max_time_seconds);
-    heuristics = (args |> member "heuristics" |> to_string_option
-                  |> Option.value ~default:base_profile.heuristics);
-    reference = (match args |> member "reference" |> to_string_option with
-                 | Some r -> Some r
-                 | None -> base_profile.reference);
-  } in
+    let metric_fn =
+      match resolve_metric_fn ~profile_name ~base_profile args with
+      | Ok metric_fn -> metric_fn
+      | Error msg -> invalid_arg msg
+    in
 
-  (* Measure baseline metric *)
-  match Mdal.measure_metric profile.metric_fn with
-  | Error e ->
-    `Assoc [("error", `String (Printf.sprintf "Failed to measure baseline: %s" e))]
-  | Ok baseline ->
-    let loop_id = Mdal.generate_loop_id () in
-
-    let state : Mdal.loop_state = {
-      loop_id;
-      profile;
-      status = `Running;
-      current_iteration = 0;
-      history = [];
-      stagnation_streak = 0;
-      baseline_metric = baseline;
-      start_time = Time_compat.now ();
+    (* Apply optional overrides *)
+    let profile = {
+      base_profile with
+      metric_fn;
+      agent = (args |> member "agent" |> to_string_option
+               |> Option.value ~default:base_profile.agent);
+      max_iterations = (args |> member "max_iterations" |> to_int_option
+                        |> Option.value ~default:base_profile.max_iterations);
+      max_time_seconds = (match args |> member "max_time_seconds" |> to_number_option with
+                          | Some t -> Some t
+                          | None -> base_profile.max_time_seconds);
+      heuristics = (args |> member "heuristics" |> to_string_option
+                    |> Option.value ~default:base_profile.heuristics);
+      reference = (match args |> member "reference" |> to_string_option with
+                   | Some r -> Some r
+                   | None -> base_profile.reference);
     } in
-    Hashtbl.replace active_loops loop_id state;
-    latest_loop_id := Some loop_id;
+    let runtime_tools =
+      match
+        Mdal_worker.resolve_allowed_tools ~tools_allow:profile.tools_allow
+          ~tools_deny:profile.tools_deny
+      with
+      | Ok tools -> tools
+      | Error msg -> invalid_arg msg
+    in
+    let resolved_worker_model =
+      match
+        Mdal_worker.resolve_model_spec ~agent:profile.agent
+          ~worker_model:worker_model_arg
+      with
+      | Ok (_spec, label) -> label
+      | Error msg -> invalid_arg msg
+    in
+    let profile = { profile with tools_allow = runtime_tools } in
 
-    (* Broadcast via SSE *)
-    (try Sse.broadcast (`Assoc [
-       ("type", `String "mdal_started");
-       ("loop_id", `String loop_id);
-       ("profile", `String profile.name);
-       ("baseline", `Float baseline);
-       ("target", `String profile.target);
-     ]) with _ -> ());
+    (* Measure baseline metric *)
+    match Mdal.measure_metric profile.metric_fn with
+    | Error e ->
+      `Assoc [("error", `String (Printf.sprintf "Failed to measure baseline: %s" e))]
+    | Ok baseline -> (
+      match require_config ctx with
+      | Error msg -> `Assoc [ ("error", `String msg) ]
+      | Ok config ->
+      let loop_id = Mdal.generate_loop_id () in
 
-    `Assoc [
-      ("loop_id", `String loop_id);
-      ("status", `String "running");
-      ("profile", `String profile.name);
-      ("baseline_metric", `Float baseline);
-      ("target", `String profile.target);
-      ("max_iterations", `Int profile.max_iterations);
-      ("worker_prompt", `String (Mdal.render_worker_prompt profile [] baseline));
-    ]
+      (* Create initial board post *)
+      let state_post_id =
+        match Board_dispatch.create_post
+                ~author:ctx.agent_name
+                ~content:(Printf.sprintf "[MDAL_STATE] %s starting. Profile: %s, Baseline: %.4f, Target: %s"
+                            loop_id profile.name baseline profile.target)
+                ~hearth:(Mdal.state_hearth loop_id)
+                ()
+        with
+        | Ok post -> Board.Post_id.to_string post.Board.id
+        | Error _ -> "unknown"
+      in
 
-let handle_status args =
-  let loop_id = resolve_loop_id args in
+      let started_at = Time_compat.now () in
+      let state : Mdal.loop_state = {
+        loop_id;
+        profile;
+        strict_mode = true;
+        status = `Running;
+        error_message = None;
+        stop_reason = None;
+        current_iteration = 0;
+        history = [];
+        stagnation_streak = 0;
+        baseline_metric = baseline;
+        start_time = started_at;
+        updated_at = started_at;
+        stopped_at = None;
+        state_post_id;
+        execution_mode = `Worker_spawn;
+        worker_engine = Some `Api_tool_loop;
+        worker_model = Some resolved_worker_model;
+      } in
+      persist_loop config state;
+
+      (* Broadcast via SSE *)
+      (try Sse.broadcast (`Assoc [
+         ("type", `String "mdal_started");
+         ("loop_id", `String loop_id);
+         ("profile", `String profile.name);
+         ("baseline", `Float baseline);
+         ("target", `String profile.target);
+         ("strict_mode", `Bool true);
+         ("worker_engine", `String "api_tool_loop");
+         ("worker_model", `String resolved_worker_model);
+         ("evidence_policy", `String "hard");
+         ("execution_mode", `String (Mdal.execution_mode_to_string state.execution_mode));
+         ("persistence_backend", `String (config_persistence_backend config));
+       ]) with _ -> ());
+
+      assoc_with_fields (state_to_json ~config state)
+        [ ("worker_prompt", `String (Mdal.render_worker_prompt profile [] baseline)) ])
+  with
+  | Invalid_argument msg ->
+      `Assoc [("error", `String msg)]
+
+let handle_status (ctx : context) args =
+  let loop_id = resolve_loop_id ctx args in
   match loop_id with
   | None -> `Assoc [("error", `String "No MDAL loop running")]
   | Some id ->
-    match Hashtbl.find_opt active_loops id with
+    match find_loop ?config:ctx.config id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
-    | Some state ->
-      let status_str = match state.status with
-        | `Running -> "running"
-        | `Completed -> "completed"
-        | `Stopped -> "stopped"
-        | `Error e -> Printf.sprintf "error: %s" e
-      in
-      let elapsed = Time_compat.now () -. state.start_time in
-      let current_metric = match state.history with
-        | r :: _ -> r.Mdal.metric_after
-        | [] -> state.baseline_metric
-      in
-      `Assoc [
-        ("loop_id", `String state.loop_id);
-        ("status", `String status_str);
-        ("profile", `String state.profile.name);
-        ("iteration", `Int state.current_iteration);
-        ("max_iterations", `Int state.profile.max_iterations);
-        ("baseline_metric", `Float state.baseline_metric);
-        ("current_metric", `Float current_metric);
-        ("target", `String state.profile.target);
-        ("stagnation_streak", `Int state.stagnation_streak);
-        ("stagnation_limit", `Int state.profile.stagnation_count);
-        ("elapsed_seconds", `Float elapsed);
-        ("history", `List (List.map iter_record_to_json state.history));
-      ]
+    | Some state -> state_to_json ?config:ctx.config state
 
-let handle_iterate args =
-  let open Yojson.Safe.Util in
-  let loop_id = resolve_loop_id args in
-  match loop_id with
-  | None -> `Assoc [("error", `String "No MDAL loop running")]
-  | Some id ->
-    match Hashtbl.find_opt active_loops id with
-    | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
-    | Some state ->
-      (* Check if loop is still running *)
-      (match state.status with
-       | `Running -> ()
-       | `Completed -> ()  (* Allow iterate on completed for re-check *)
-       | `Stopped ->
-         state.status <- `Running  (* Resume *)
-       | `Error _ -> ());
-
-      (* Check limits *)
-      if state.current_iteration >= state.profile.max_iterations then begin
-        state.status <- `Completed;
-        `Assoc [("error", `String "Max iterations reached");
-                ("final_state", `String (Mdal.format_final_post state))]
-      end
-      else if Mdal.time_exceeded state state.profile then begin
-        state.status <- `Completed;
-        `Assoc [("error", `String "Time limit exceeded");
-                ("final_state", `String (Mdal.format_final_post state))]
-      end
-      else if Mdal.stagnation_exceeded state then begin
-        state.status <- `Completed;
-        `Assoc [("error", `String "Stagnation limit reached");
-                ("final_state", `String (Mdal.format_final_post state))]
-      end
-      else begin
+let handle_iterate (ctx : context) args =
+  try
+    (match validate_strict_iterate_args args with
+     | Ok () -> ()
+     | Error msg -> invalid_arg msg);
+    let loop_id = resolve_loop_id ctx args in
+    match loop_id with
+    | None -> `Assoc [("error", `String "No MDAL loop running")]
+    | Some id -> (
+      match require_config ctx with
+      | Error msg -> `Assoc [ ("error", `String msg) ]
+      | Ok config ->
+      match find_loop ~config id with
+      | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
+      | Some state ->
+        let () =
+          if not state.strict_mode then
+            let message =
+              Printf.sprintf
+                "Loop %s predates strict MDAL worker mode and cannot iterate. Start a new loop instead."
+                id
+            in
+            raise
+              (Invalid_argument
+                 (Yojson.Safe.to_string
+                    (reject_iteration ~config state ~message)))
+          else
+            match state.status with
+            | `Running -> ()
+            | `Interrupted -> set_non_terminal_state state `Running
+            | `Completed ->
+                let message =
+                  Printf.sprintf "Loop %s is already completed. Start a new loop to continue." id
+                in
+                raise
+                  (Invalid_argument
+                     (Yojson.Safe.to_string
+                        (reject_iteration ~config state ~message)))
+            | `Stopped ->
+                let message =
+                  Printf.sprintf "Loop %s is stopped and cannot resume. Start a new loop instead." id
+                in
+                raise
+                  (Invalid_argument
+                     (Yojson.Safe.to_string
+                        (reject_iteration ~config state ~message)))
+            | `Error ->
+                let message =
+                  Printf.sprintf "Loop %s is in error state and cannot iterate again." id
+                in
+                raise
+                  (Invalid_argument
+                     (Yojson.Safe.to_string
+                        (reject_iteration ~config state ~message)))
+        in
+        if state.current_iteration >= state.profile.max_iterations then
+          stop_for_reason config state ~reason:"max_iterations_reached"
+            ~message:"Max iterations reached"
+        else if Mdal.time_exceeded state state.profile then
+          stop_for_reason config state ~reason:"time_limit_exceeded"
+            ~message:"Time limit exceeded"
+        else if Mdal.stagnation_exceeded state then
+          stop_for_reason config state ~reason:"stagnation_limit_reached"
+            ~message:"Stagnation limit reached"
+        else begin
         let iter_start = Time_compat.now () in
 
         (* Measure current metric *)
         match Mdal.measure_metric state.profile.metric_fn with
         | Error e ->
-          `Assoc [("error", `String (Printf.sprintf "Metric measurement failed: %s" e))]
+          fail_loop config state ~reason:"metric_measurement_failed"
+            ~message:(Printf.sprintf "Metric measurement failed: %s" e)
         | Ok metric_before ->
-          let changes = args |> member "changes" |> to_string_option
-                        |> Option.value ~default:"" in
-          let failed_attempts = args |> member "failed_attempts" |> to_string_option
-                                |> Option.value ~default:"" in
-          let next_suggestion = args |> member "next_suggestion" |> to_string_option
-                                |> Option.value ~default:"" in
+          (match run_worker_iteration ctx config state metric_before with
+           | Error (Mdal_worker.Worker_unavailable msg) ->
+               fail_loop config state ~reason:"worker_unavailable" ~message:msg
+           | Error (Mdal_worker.Worker_failed msg) ->
+               fail_loop config state ~reason:"worker_execution_failed" ~message:msg
+           | Error (Mdal_worker.Output_unparseable msg) ->
+               fail_loop config state ~reason:"worker_output_unparseable"
+                 ~message:msg
+           | Error (Mdal_worker.Evidence_missing missing) ->
+               let message =
+                 Printf.sprintf
+                   "Strict MDAL worker produced no auditable tool evidence. Use at least one allowed tool before returning JSON."
+               in
+               let base_response =
+                 interrupt_loop config state ~reason:"worker_evidence_missing"
+                   ~message
+               in
+               assoc_with_fields base_response
+                 [
+                   ("worker_prompt_used", `String missing.prompt);
+                   ("worker_raw_output",
+                    `String (truncate_preview ~limit:320 missing.raw_output));
+                   ("worker_model", `String missing.model_used);
+                   ("tool_call_count", `Int missing.tool_call_count);
+                   ("tool_names",
+                    `List
+                      (List.map (fun item -> `String item) missing.tool_names));
+                   ("session_id", `String missing.session_id);
+                 ]
+           | Ok worker_run ->
+               match Mdal.measure_metric state.profile.metric_fn with
+               | Error e ->
+                   let msg =
+                     Printf.sprintf "Post-iteration measurement failed: %s" e
+                   in
+                   fail_loop config state ~reason:"post_measurement_failed"
+                     ~message:msg
+               | Ok metric_after ->
+                   let elapsed_ms =
+                     int_of_float ((Time_compat.now () -. iter_start) *. 1000.0)
+                   in
+                   let iter_num = state.current_iteration + 1 in
+                   let delta = metric_after -. metric_before in
 
-          (* Re-measure after changes (if any were reported) *)
-          let metric_after =
-            if changes <> "" then
-              match Mdal.measure_metric state.profile.metric_fn with
-              | Ok v -> v
-              | Error _ -> metric_before
-            else
-              metric_before
-          in
+                   let record : Mdal.iteration_record = {
+                     iteration = iter_num;
+                     metric_before;
+                     metric_after;
+                     delta;
+                     changes = worker_run.report.changes;
+                     failed_attempts = worker_run.report.failed_attempts;
+                     next_suggestion = worker_run.report.next_suggestion;
+                     elapsed_ms;
+                     cost_usd = worker_run.cost_usd;
+                     evidence = Some worker_run.evidence;
+                   } in
 
-          let elapsed_ms = int_of_float ((Time_compat.now () -. iter_start) *. 1000.0) in
-          let iter_num = state.current_iteration + 1 in
-          let delta = metric_after -. metric_before in
+                   (* Update state *)
+                   state.current_iteration <- iter_num;
+                   state.history <- record :: state.history;
+                   Mdal.update_stagnation state record;
 
-          let record : Mdal.iteration_record = {
-            iteration = iter_num;
-            metric_before;
-            metric_after;
-            delta;
-            changes;
-            failed_attempts;
-            next_suggestion;
-            elapsed_ms;
-            cost_usd = None;
-          } in
+                   (* Post iteration to board *)
+                   (try
+                      ignore (Board_dispatch.create_post
+                                ~author:"mdal"
+                                ~content:(Mdal.format_iter_post record)
+                                ~hearth:(Mdal.iter_hearth state.loop_id)
+                                ())
+                    with _ -> ());
 
-          (* Update state *)
-          state.current_iteration <- iter_num;
-          state.history <- record :: state.history;
-          Mdal.update_stagnation state record;
+                   (* Broadcast via SSE *)
+                   (try Sse.broadcast (`Assoc [
+                      ("type", `String "mdal_iteration");
+                      ("loop_id", `String state.loop_id);
+                      ("iteration", `Int iter_num);
+                      ("metric_before", `Float metric_before);
+                      ("metric_after", `Float metric_after);
+                      ("delta", `Float delta);
+                    ]) with _ -> ());
 
-          (* Broadcast iteration via SSE (no Board post — telemetry, not announcement) *)
-          (try Sse.broadcast (`Assoc [
-             ("type", `String "mdal_iteration");
-             ("loop_id", `String state.loop_id);
-             ("iteration", `Int iter_num);
-             ("metric_before", `Float metric_before);
-             ("metric_after", `Float metric_after);
-             ("delta", `Float delta);
-           ]) with _ -> ());
+                   (* Check if goal is met *)
+                   let evaluation = Mdal.evaluate_iteration record in
+                   let eval_str = match evaluation with
+                     | `Improved -> "improved"
+                     | `Flat -> "flat"
+                     | `Regressed -> "regressed"
+                   in
+                   let goal_met =
+                     let metric_fields =
+                       if state.profile.goal.path = "metric" then
+                         [("metric", `Float metric_after)]
+                       else
+                         [
+                           ("metric", `Float metric_after);
+                           (state.profile.goal.path, `Float metric_after);
+                         ]
+                     in
+                     let result = `Assoc metric_fields in
+                     Bounded.check_goal result state.profile.goal
+                   in
 
-          (* Check if goal is met *)
-          let goal_met =
-            let result = `Assoc [("metric", `Float metric_after)] in
-            Bounded.check_goal result state.profile.goal
-          in
+                   if goal_met then begin
+                     set_terminal_state state ~status:`Completed ~reason:"goal_met"
+                       ~error_message:None;
+                     persist_loop config state;
+                     post_final_summary state;
+                     emit_completed_event ~loop_id:state.loop_id
+                       ~final_metric:metric_after ~iterations:iter_num;
+                     assoc_with_fields (state_to_json ~config state)
+                       [
+                         ("goal_met", `Bool true);
+                         ("iteration", iter_record_to_json record);
+                         ("total_iterations", `Int iter_num);
+                         ("final_metric", `Float metric_after);
+                         ("assessment", `String eval_str);
+                         ("assessment_basis", `String "measured_delta");
+                         ("iteration_mode", `String "strict_worker");
+                         ("worker_engine",
+                          `String
+                            (Mdal.worker_engine_to_string worker_run.evidence.engine));
+                         ("worker_model", `String worker_run.evidence.model_used);
+                         ("tool_call_count", `Int worker_run.evidence.tool_call_count);
+                         ("tool_names",
+                          `List
+                            (List.map (fun item -> `String item)
+                               worker_run.evidence.tool_names));
+                         ("session_id", `String worker_run.evidence.session_id);
+                       ]
+                   end
+                   else begin
+                     set_non_terminal_state state `Running;
+                     persist_loop config state;
+                     let next_prompt = Mdal.render_worker_prompt
+                         state.profile state.history metric_after in
+                     assoc_with_fields (state_to_json ~config state)
+                       [
+                         ("goal_met", `Bool false);
+                         ("iteration", iter_record_to_json record);
+                         ("assessment", `String eval_str);
+                         ("assessment_basis", `String "measured_delta");
+                         ("remaining_iterations", `Int (state.profile.max_iterations - iter_num));
+                         ("iteration_mode", `String "strict_worker");
+                         ("worker_engine",
+                          `String
+                            (Mdal.worker_engine_to_string worker_run.evidence.engine));
+                         ("worker_model", `String worker_run.evidence.model_used);
+                         ("tool_call_count", `Int worker_run.evidence.tool_call_count);
+                         ("tool_names",
+                          `List
+                            (List.map (fun item -> `String item)
+                               worker_run.evidence.tool_names));
+                         ("session_id", `String worker_run.evidence.session_id);
+                         ("worker_prompt", `String next_prompt);
+                         ("worker_prompt_used", `String worker_run.prompt);
+                       ]
+                   end)
+        end)
+  with
+  | Invalid_argument body -> (
+      try Yojson.Safe.from_string body with _ -> `Assoc [ ("error", `String body) ])
 
-          if goal_met then begin
-            state.status <- `Completed;
-            (* Post concise final result to Board (signal, not telemetry) *)
-            (try
-               ignore (Board_dispatch.create_post
-                         ~author:"mdal"
-                         ~content:(Mdal.format_final_board state)
-                         ~hearth:(Mdal.state_hearth state.loop_id)
-                         ())
-             with _ -> ());
-            `Assoc [
-              ("loop_id", `String state.loop_id);
-              ("status", `String "completed");
-              ("goal_met", `Bool true);
-              ("iteration", iter_record_to_json record);
-              ("total_iterations", `Int iter_num);
-              ("final_metric", `Float metric_after);
-              ("baseline_metric", `Float state.baseline_metric);
-            ]
-          end
-          else begin
-            let evaluation = Mdal.evaluate_iteration record in
-            let eval_str = match evaluation with
-              | `Continue_same_strategy -> "continue_same_strategy"
-              | `Switch_area -> "switch_area"
-              | `Revert_and_switch -> "revert_and_switch"
-              | `Stagnation -> "stagnation"
-            in
-            let next_prompt = Mdal.render_worker_prompt
-                state.profile state.history metric_after in
-            `Assoc [
-              ("loop_id", `String state.loop_id);
-              ("status", `String "running");
-              ("goal_met", `Bool false);
-              ("iteration", iter_record_to_json record);
-              ("evaluation", `String eval_str);
-              ("stagnation_streak", `Int state.stagnation_streak);
-              ("remaining_iterations", `Int (state.profile.max_iterations - iter_num));
-              ("worker_prompt", `String next_prompt);
-            ]
-          end
-      end
-
-let handle_stop args =
-  let open Yojson.Safe.Util in
-  let loop_id = resolve_loop_id args in
-  let reason = args |> member "reason" |> to_string_option
+let handle_stop (ctx : context) args =
+  let loop_id = resolve_loop_id ctx args in
+  let reason = args |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string_option
                |> Option.value ~default:"manual stop" in
   match loop_id with
   | None -> `Assoc [("error", `String "No MDAL loop running")]
-  | Some id ->
-    match Hashtbl.find_opt active_loops id with
+  | Some id -> (
+    match require_config ctx with
+    | Error msg -> `Assoc [ ("error", `String msg) ]
+    | Ok config ->
+    match find_loop ~config id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->
-      state.status <- `Stopped;
-
-      (* Post concise final result to Board *)
-      (try
-         ignore (Board_dispatch.create_post
-                   ~author:"mdal"
-                   ~content:(Mdal.format_final_board state)
-                   ~hearth:(Mdal.state_hearth state.loop_id)
-                   ())
-       with _ -> ());
+      set_terminal_state state ~status:`Stopped ~reason ~error_message:None;
+      persist_loop config state;
+      post_final_summary state;
 
       (* Broadcast via SSE *)
-      (try Sse.broadcast (`Assoc [
-         ("type", `String "mdal_stopped");
-         ("loop_id", `String id);
-         ("reason", `String reason);
-       ]) with _ -> ());
+      emit_stop_event state ~reason;
 
-      let final_metric = match state.history with
-        | r :: _ -> r.Mdal.metric_after
-        | [] -> state.baseline_metric
-      in
-      `Assoc [
-        ("loop_id", `String id);
-        ("status", `String "stopped");
-        ("reason", `String reason);
-        ("total_iterations", `Int state.current_iteration);
-        ("baseline_metric", `Float state.baseline_metric);
-        ("final_metric", `Float final_metric);
-        ("total_delta", `Float (final_metric -. state.baseline_metric));
-        ("elapsed_seconds", `Float (Time_compat.now () -. state.start_time));
-        ("final_state", `String (Mdal.format_final_post state));
-      ]
+      assoc_with_fields (state_to_json ~config state)
+        [
+          ("reason", `String reason);
+          ("total_iterations", `Int state.current_iteration);
+          ("final_metric", `Float (current_metric_of_state state));
+          ("total_delta", `Float (total_delta_of_state state));
+          ("final_state", `String (Mdal.format_final_post state));
+        ])
 
 (* ================================================================ *)
 (* Dispatch                                                         *)
@@ -514,7 +949,7 @@ type result = bool * string
 let dispatch (ctx : context) ~name ~args : result option =
   match name with
   | "masc_mdal_start" -> Some (wrap_result (handle_start ctx args))
-  | "masc_mdal_status" -> Some (wrap_result (handle_status args))
-  | "masc_mdal_iterate" -> Some (wrap_result (handle_iterate args))
-  | "masc_mdal_stop" -> Some (wrap_result (handle_stop args))
+  | "masc_mdal_status" -> Some (wrap_result (handle_status ctx args))
+  | "masc_mdal_iterate" -> Some (wrap_result (handle_iterate ctx args))
+  | "masc_mdal_stop" -> Some (wrap_result (handle_stop ctx args))
   | _ -> None

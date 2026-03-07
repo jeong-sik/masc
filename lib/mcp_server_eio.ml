@@ -1268,6 +1268,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_library : Tool_library.context = { agent_name } in
   let simple_ctx_mdal : Tool_mdal.context = {
     agent_name;
+    config = Some config;
+    sw = Some sw;
+    proc_mgr = state.Mcp_server.proc_mgr;
+    worker_runner = None;
   } in
   let simple_ctx_perpetual : Tool_perpetual.context = {
     agent_name;

@@ -11,6 +11,32 @@
 open Alcotest
 
 module Room_utils = Masc_mcp.Room_utils
+module Backend = Masc_mcp.Backend
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
+let with_envs bindings f =
+  List.fold_right (fun (name, value) acc -> fun () -> with_env name value acc) bindings f ()
+
+let pg_env_bindings ?masc_storage_type ?masc_postgres_url ?database_url
+    ?supabase_db_url ?sb_pg_url () =
+  [
+    ("MASC_STORAGE_TYPE", masc_storage_type);
+    ("MASC_POSTGRES_URL", masc_postgres_url);
+    ("DATABASE_URL", database_url);
+    ("SUPABASE_DB_URL", supabase_db_url);
+    ("SB_PG_URL", sb_pg_url);
+  ]
 
 (* ============================================================
    parse_gitdir_to_main_root Tests
@@ -71,10 +97,10 @@ let test_env_opt_home () =
    ============================================================ *)
 
 let test_storage_type_default () =
-  (* Without MASC_STORAGE_TYPE set, should return "filesystem" *)
-  let storage_type = Room_utils.storage_type_from_env () in
-  check bool "valid type" true
-    (storage_type = "filesystem" || storage_type = "postgres" || storage_type = "memory" || storage_type = "auto")
+  with_envs (pg_env_bindings ()) (fun () ->
+    let storage_type = Room_utils.storage_type_from_env () in
+    check string "defaults to filesystem when no pg env exists" "filesystem"
+      storage_type)
 
 (* ============================================================
    storage_backend Type Tests
@@ -241,6 +267,47 @@ let test_auto_detect_backend_valid_value () =
   check bool "valid backend" true
     (backend = "filesystem" || backend = "postgres")
 
+let test_auto_detect_backend_supabase_url () =
+  let url = "postgresql://supabase.example/test_room_utils" in
+  with_envs
+    (pg_env_bindings ~supabase_db_url:url ())
+    (fun () ->
+      check string "supabase pg url triggers postgres" "postgres"
+        (Room_utils.auto_detect_backend ()))
+
+let test_auto_detect_backend_sb_pg_url () =
+  let url = "postgresql://sb.example/test_room_utils" in
+  with_envs
+    (pg_env_bindings ~sb_pg_url:url ())
+    (fun () ->
+      check string "sb pg url triggers postgres" "postgres"
+        (Room_utils.auto_detect_backend ()))
+
+let test_backend_config_for_uses_fallback_pg_url () =
+  let url = "postgresql://sb.example/test_backend_config" in
+  with_envs
+    (pg_env_bindings ~sb_pg_url:url ())
+    (fun () ->
+      let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
+      check bool "backend type is postgres native" true
+        (match cfg.backend_type with
+         | Backend.PostgresNative -> true
+         | _ -> false);
+      check (option string) "postgres url" (Some url) cfg.postgres_url)
+
+let test_postgres_url_from_env_normalizes_supabase_pooler () =
+  let raw_url =
+    "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
+  in
+  let expected_url =
+    "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+  in
+  with_envs
+    (pg_env_bindings ~sb_pg_url:raw_url ())
+    (fun () ->
+      check (option string) "session pooler url" (Some expected_url)
+        (Room_utils.postgres_url_from_env ()))
+
 (* ============================================================
    safe_filename Tests
    ============================================================ *)
@@ -318,8 +385,6 @@ let test_validate_file_path_angle_bracket_gt () =
 (* ============================================================
    Path Helper Tests
    ============================================================ *)
-
-module Backend = Masc_mcp.Backend
 
 let make_test_config ~base_path ~cluster_name : Room_utils.config =
   let backend_config : Backend.config = {
@@ -469,6 +534,13 @@ let () =
     "auto_detect_backend", [
       test_case "returns string" `Quick test_auto_detect_backend_returns_string;
       test_case "valid value" `Quick test_auto_detect_backend_valid_value;
+      test_case "supabase fallback url" `Quick test_auto_detect_backend_supabase_url;
+      test_case "sb pg fallback url" `Quick test_auto_detect_backend_sb_pg_url;
+    ];
+    "backend_config_for", [
+      test_case "uses fallback pg url" `Quick test_backend_config_for_uses_fallback_pg_url;
+      test_case "normalizes supabase pooler" `Quick
+        test_postgres_url_from_env_normalizes_supabase_pooler;
     ];
     "safe_filename", [
       test_case "normal" `Quick test_safe_filename_normal;

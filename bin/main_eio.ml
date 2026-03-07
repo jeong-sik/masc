@@ -5128,15 +5128,24 @@ let perpetual_dashboard_json () : Yojson.Safe.t =
     ("total", `Int (List.length items));
   ]
 
-let mdal_status_string (status : [ `Running | `Completed | `Stopped | `Error of string ])
-    : string =
-  match status with
-  | `Running -> "running"
-  | `Completed -> "completed"
-  | `Stopped -> "stopped"
-  | `Error _ -> "error"
+let mdal_status_string (status : Mdal.status) : string =
+  Mdal.status_to_string status
 
 let mdal_iteration_record_json (r : Mdal.iteration_record) : Yojson.Safe.t =
+  let evidence_json =
+    match r.evidence with
+    | None -> `Null
+    | Some evidence ->
+        `Assoc
+          [
+            ("worker_engine", `String (Mdal.worker_engine_to_string evidence.engine));
+            ("worker_model", `String evidence.model_used);
+            ("tool_call_count", `Int evidence.tool_call_count);
+            ("tool_names", `List (List.map (fun item -> `String item) evidence.tool_names));
+            ("session_id", `String evidence.session_id);
+            ("evidence_status", `String (Mdal.evidence_status_to_string evidence.status));
+          ]
+  in
   `Assoc
     [
       ("iteration", `Int r.iteration);
@@ -5148,39 +5157,75 @@ let mdal_iteration_record_json (r : Mdal.iteration_record) : Yojson.Safe.t =
       ("next_suggestion", `String r.next_suggestion);
       ("elapsed_ms", `Int r.elapsed_ms);
       ("cost_usd", match r.cost_usd with Some c -> `Float c | None -> `Null);
+      ("evidence", evidence_json);
     ]
 
-let mdal_loop_json ~(history_limit : int) (state : Mdal.loop_state) : Yojson.Safe.t =
-  let current_metric =
-    match state.history with
-    | r :: _ -> r.metric_after
-    | [] -> state.baseline_metric
-  in
+let mdal_loop_json ~(config : Room.config) ~(history_limit : int)
+    (state : Mdal.loop_state) : Yojson.Safe.t =
   let history =
     state.history
     |> take history_limit
     |> List.map mdal_iteration_record_json
   in
-  let error_reason =
-    match state.status with
-    | `Error reason -> `String reason
-    | _ -> `Null
-  in
+  let latest_evidence = Mdal.latest_evidence state in
   `Assoc
     [
       ("loop_id", `String state.loop_id);
       ("status", `String (mdal_status_string state.status));
-      ("error_reason", error_reason);
+      ("strict_mode", `Bool state.strict_mode);
+      ("error_message",
+       match state.error_message with Some msg -> `String msg | None -> `Null);
+      ("error_reason",
+       match state.error_message with Some msg -> `String msg | None -> `Null);
+      ("stop_reason",
+       match state.stop_reason with Some reason -> `String reason | None -> `Null);
       ("profile", `String state.profile.name);
       ("current_iteration", `Int state.current_iteration);
       ("max_iterations", `Int state.profile.max_iterations);
       ("baseline_metric", `Float state.baseline_metric);
-      ("current_metric", `Float current_metric);
+      ("current_metric", `Float (Mdal.current_metric state));
       ("target", `String state.profile.target);
       ("stagnation_streak", `Int state.stagnation_streak);
       ("stagnation_limit", `Int state.profile.stagnation_count);
       ("elapsed_seconds", `Float (Masc_mcp.Time_compat.now () -. state.start_time));
       ("start_time", `String (iso8601_of_unix state.start_time));
+      ("updated_at", `String (iso8601_of_unix state.updated_at));
+      ("stopped_at",
+       match state.stopped_at with
+       | Some ts -> `String (iso8601_of_unix ts)
+       | None -> `Null);
+      ("execution_mode",
+       `String (Mdal.execution_mode_to_string state.execution_mode));
+      ("worker_engine",
+       match state.worker_engine with
+       | Some engine -> `String (Mdal.worker_engine_to_string engine)
+       | None -> `Null);
+      ("worker_model",
+       match state.worker_model with
+       | Some model -> `String model
+       | None -> `Null);
+      ("evidence_policy", if state.strict_mode then `String "hard" else `String "legacy");
+      ("latest_tool_call_count",
+       `Int
+         (match latest_evidence with
+          | Some evidence -> evidence.tool_call_count
+          | None -> 0));
+      ("latest_tool_names",
+       `List
+         (match latest_evidence with
+          | Some evidence -> List.map (fun item -> `String item) evidence.tool_names
+          | None -> []));
+      ("session_id",
+       match latest_evidence with
+       | Some evidence -> `String evidence.session_id
+       | None -> `Null);
+      ("evidence_status",
+       match Mdal.current_evidence_status state with
+       | Some status -> `String (Mdal.evidence_status_to_string status)
+       | None -> `Null);
+      ("durability", `String (Masc_mcp.Mdal_store.durability config));
+      ("persistence_backend", `String (Masc_mcp.Mdal_store.persistence_backend config));
+      ("recoverable", `Bool (Mdal.recoverable state));
       ("history", `List history);
     ]
 
@@ -5191,6 +5236,7 @@ let parse_mdal_status_filter (raw_opt : string option) : (string option, string)
       let normalized = String.trim raw |> String.lowercase_ascii in
       if normalized = "" then Ok None
       else if normalized = "running"
+           || normalized = "interrupted"
            || normalized = "completed"
            || normalized = "stopped"
            || normalized = "error"
@@ -5198,10 +5244,11 @@ let parse_mdal_status_filter (raw_opt : string option) : (string option, string)
       else
         Error
           (Printf.sprintf
-             "invalid status filter: %s (expected running|completed|stopped|error)"
+             "invalid status filter: %s (expected running|interrupted|completed|stopped|error)"
              raw)
 
-let mdal_loops_json (request : Httpun.Request.t) : (Yojson.Safe.t, string) result =
+let mdal_loops_json ~(config : Room.config)
+    (request : Httpun.Request.t) : (Yojson.Safe.t, string) result =
   let limit = int_query_param request "limit" ~default:20 |> clamp ~min_v:1 ~max_v:100 in
   let history_limit =
     int_query_param request "history_limit" ~default:50 |> clamp ~min_v:0 ~max_v:500
@@ -5210,16 +5257,12 @@ let mdal_loops_json (request : Httpun.Request.t) : (Yojson.Safe.t, string) resul
   | Error _ as e -> e
   | Ok status_filter ->
       let loops =
-        Hashtbl.fold
-          (fun _ (state : Mdal.loop_state) acc ->
-            let status = mdal_status_string state.status in
-            let matches =
-              match status_filter with
-              | None -> true
-              | Some expected -> String.equal expected status
-            in
-            if matches then state :: acc else acc)
-          Tool_mdal.active_loops []
+        Tool_mdal.list_loops ~config ()
+        |> List.filter (fun (state : Mdal.loop_state) ->
+               let status = mdal_status_string state.status in
+               match status_filter with
+               | None -> true
+               | Some expected -> String.equal expected status)
       in
       let loops =
         loops
@@ -5227,7 +5270,8 @@ let mdal_loops_json (request : Httpun.Request.t) : (Yojson.Safe.t, string) resul
                let rank (s : Mdal.loop_state) =
                  match s.status with
                  | `Running -> 0
-                 | _ -> 1
+                 | `Interrupted -> 1
+                 | _ -> 2
                in
                let by_status = Int.compare (rank a) (rank b) in
                if by_status <> 0 then by_status
@@ -5238,7 +5282,7 @@ let mdal_loops_json (request : Httpun.Request.t) : (Yojson.Safe.t, string) resul
       Ok
         (`Assoc
           [
-            ("loops", `List (List.map (mdal_loop_json ~history_limit) loops));
+            ("loops", `List (List.map (mdal_loop_json ~config ~history_limit) loops));
             ("total", `Int total);
             ("returned", `Int (List.length loops));
             ("limit", `Int limit);
@@ -8111,8 +8155,8 @@ let make_routes ~port ~host ~sw ~clock =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/mdal/loops" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         match mdal_loops_json req with
+       with_public_read (fun state req reqd ->
+         match mdal_loops_json ~config:state.Mcp_server.room_config req with
          | Ok json -> Http.Response.json (Yojson.Safe.to_string json) reqd
          | Error msg ->
              Http.Response.json ~status:`Bad_request
@@ -9402,7 +9446,8 @@ let run_server ~sw ~env ~port ~base_path =
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/mdal/loops" ->
-          (match mdal_loops_json httpun_request with
+          let state = get_server_state () in
+          (match mdal_loops_json ~config:state.Mcp_server.room_config httpun_request with
           | Ok json ->
               h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
           | Error msg ->

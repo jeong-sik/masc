@@ -100,12 +100,37 @@ let env_opt name =
   | Some value when String.trim value <> "" -> Some value
   | _ -> None
 
+let normalize_postgres_url url =
+  let uri = Uri.of_string url in
+  match Uri.host uri, Uri.port uri with
+  | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
+      let normalized = Uri.to_string (Uri.with_port uri (Some 5432)) in
+      Log.Backend.info
+        "Supabase transaction pooler detected in PostgreSQL URL; using session pooler port 5432 for prepared-statement compatibility";
+      normalized
+  | _ -> url
+
+let postgres_url_from_env () =
+  let raw_url =
+    match env_opt "MASC_POSTGRES_URL" with
+  | Some _ as url -> url
+  | None -> (
+      match env_opt "DATABASE_URL" with
+      | Some _ as url -> url
+      | None -> (
+          match env_opt "SUPABASE_DB_URL" with
+          | Some _ as url -> url
+          | None -> env_opt "SB_PG_URL"))
+  in
+  Option.map normalize_postgres_url raw_url
+
 (** Auto-detect best backend based on environment variables
     Priority order:
-    1. MASC_POSTGRES_URL / DATABASE_URL - if available, use PostgreSQL for distributed coordination
+    1. MASC_POSTGRES_URL / DATABASE_URL / SUPABASE_DB_URL / SB_PG_URL
+       - if available, use PostgreSQL for distributed coordination
     2. FileSystem - zero-dependency default for personal/small use *)
 let auto_detect_backend () =
-  if env_opt "MASC_POSTGRES_URL" <> None || env_opt "DATABASE_URL" <> None then begin
+  if postgres_url_from_env () <> None then begin
     Log.Backend.info "Auto-detect: PostgreSQL URL found → PostgresNative backend";
     "postgres"
   end else begin
@@ -145,18 +170,7 @@ let backend_config_for base_path =
     if raw_storage_type = "auto" then auto_detect_backend ()
     else raw_storage_type
   in
-  let postgres_url =
-    match env_opt "MASC_POSTGRES_URL" with
-    | Some _ as url -> url
-    | None ->
-        (* Fallback chain: DATABASE_URL -> SUPABASE_DB_URL -> SB_PG_URL *)
-        match env_opt "DATABASE_URL" with
-        | Some _ as url -> url
-        | None ->
-            match env_opt "SUPABASE_DB_URL" with
-            | Some _ as url -> url
-            | None -> env_opt "SB_PG_URL"
-  in
+  let postgres_url = postgres_url_from_env () in
   let cluster_name =
     match env_opt "MASC_CLUSTER_NAME" with
     | Some name -> name

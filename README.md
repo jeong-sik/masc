@@ -251,6 +251,7 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 | `docs/INTERRUPT-DESIGN.md` | 승인/중단 패턴 |
 | `docs/MITOSIS.md` | 컨텍스트 한계 대응 |
 | `docs/TEAM-SESSION.md` | 1시간 팀플레이 세션 오케스트레이션/보고 |
+| `docs/MDAL.md` | MDAL 선택 기준: deterministic numeric metric + auditable tool evidence가 있을 때만 사용, strict worker 계약, 명시적 `metric_fn` 가이드 |
 | `docs/TRPG-MVP-BLUEPRINT.md` | TRPG 엔진/뷰어 분리 MVP 설계 |
 | `docs/TRPG-KEEPER-SPECTATOR-QUICKSTART.md` | keeper 자동 진행 관전 Quickstart |
 | `docs/TRPG-EXPERIMENT-PLAYBOOK.md` | 사회실험 템플릿 3종 실행 가이드 |

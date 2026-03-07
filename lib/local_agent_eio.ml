@@ -11,7 +11,9 @@ type run_result = {
   input_tokens : int option;
   output_tokens : int option;
   cost_usd : float option;
+  tool_call_count : int;
   tool_names : string list;
+  session_id : string;
 }
 
 let jsonrpc_id = ref 1000
@@ -296,6 +298,16 @@ let merge_usage a b =
       a.cache_read_input_tokens + b.cache_read_input_tokens;
   }
 
+let estimate_cost_usd (model : Llm_client.model_spec)
+    (usage : Llm_client.token_usage) : float option =
+  let input_cost =
+    (float_of_int usage.input_tokens /. 1000.0) *. model.cost_per_1k_input
+  in
+  let output_cost =
+    (float_of_int usage.output_tokens /. 1000.0) *. model.cost_per_1k_output
+  in
+  Some (input_cost +. output_cost)
+
 let join_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
   let args =
     `Assoc
@@ -337,12 +349,12 @@ let default_system_prompt ~worker_name ~model_id ?session_id ?role
     | _ -> ""
   in
   sprintf
-    {|You are a MASC-managed local worker backed by llama.cpp.
+    {|You are a MASC-managed tool-aware worker.
 Worker name: %s
 Model: %s
 %s%s%s
 Operate through the provided MASC tools.
-Use tools when state inspection, task coordination, or room updates are needed.
+Use tools when state inspection, task coordination, work delegation, or room updates are needed.
 Keep responses concise and task-focused.
 If a tool schema includes agent_name and you omit it, the runtime will inject %s automatically.
 Do not invent tool names or arguments that are not in schema.
@@ -444,8 +456,10 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
                         model_used = resp.model_used;
                         input_tokens = Some usage_acc.input_tokens;
                         output_tokens = Some usage_acc.output_tokens;
-                        cost_usd = Some 0.0;
+                        cost_usd = estimate_cost_usd model usage_acc;
+                        tool_call_count = List.length tools_used;
                         tool_names = unique_preserve_order tools_used;
+                        session_id = mcp_session_id;
                       }
                   else
                     let tool_outputs =
@@ -504,8 +518,10 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
                           model_used = resp.model_used;
                           input_tokens = Some usage_acc.input_tokens;
                           output_tokens = Some usage_acc.output_tokens;
-                          cost_usd = Some 0.0;
+                          cost_usd = estimate_cost_usd model usage_acc;
+                          tool_call_count = List.length tools_used;
                           tool_names = unique_preserve_order tools_used;
+                          session_id = mcp_session_id;
                         }
                     else
                       loop ~round:(round + 1) ~usage_acc ~tools_used

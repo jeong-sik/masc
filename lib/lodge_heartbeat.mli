@@ -127,11 +127,16 @@ type lodge_status = {
   ls_total_ticks: int;
   ls_total_checkins: int;
   ls_last_result: heartbeat_result option;
+  ls_manual_tick_running: bool;
   ls_active_self_heartbeats: string list;
 }
 
 val lodge_status : unit -> lodge_status
 val lodge_status_to_json : lodge_status -> Yojson.Safe.t
+val record_tick_result : heartbeat_result -> unit
+
+val trigger_heartbeat_async :
+  sw:Eio.Switch.t -> Room.config -> [ `Started | `Already_running ]
 
 [@@@warning "-32"]
 (** {1 REST API — Lodge Agent management} *)

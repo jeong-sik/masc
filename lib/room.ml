@@ -82,6 +82,27 @@ let read_backlog config =
 let write_backlog config backlog =
   write_json config (backlog_path config) (backlog_to_yojson backlog)
 
+let current_room_id config =
+  read_current_room config |> Option.value ~default:"default"
+
+let agents_dir_in_room config room_id =
+  Filename.concat (room_dir_for config room_id) "agents"
+
+let tasks_dir_in_room config room_id =
+  Filename.concat (room_dir_for config room_id) "tasks"
+
+let messages_dir_in_room config room_id =
+  Filename.concat (room_dir_for config room_id) "messages"
+
+let backlog_path_in_room config room_id =
+  Filename.concat (tasks_dir_in_room config room_id) "backlog.json"
+
+let read_backlog_in_room config room_id =
+  let json = read_json config (backlog_path_in_room config room_id) in
+  match backlog_of_yojson json with
+  | Ok backlog -> backlog
+  | Error _ -> { tasks = []; last_updated = now_iso (); version = 1 }
+
 (** Parse task id like "task-001" -> 1 *)
 let task_id_to_int id =
   let prefix = "task-" in
@@ -1616,13 +1637,18 @@ let update_priority config ~task_id ~priority =
 (** Get raw task list (for orchestrator) *)
 let get_tasks_raw config =
   ensure_initialized config;
-  let backlog = read_backlog config in
-  backlog.tasks
+  read_backlog_in_room config (current_room_id config) |> fun backlog -> backlog.tasks
+
+let get_tasks_raw_in_room config room_id =
+  if not (root_is_initialized config) then []
+  else
+    let backlog = read_backlog_in_room config room_id in
+    backlog.tasks
 
 (** Get raw agent list (for orchestrator) *)
 let get_agents_raw config =
   ensure_initialized config;
-  let agents_path = agents_dir config in
+  let agents_path = agents_dir_in_room config (current_room_id config) in
   if not (Sys.file_exists agents_path) then []
   else
     Sys.readdir agents_path
@@ -1635,6 +1661,23 @@ let get_agents_raw config =
         | Ok agent -> Some agent
         | Error _ -> None
       )
+
+let get_agents_raw_in_room config room_id =
+  if not (root_is_initialized config) then []
+  else
+    let agents_path = agents_dir_in_room config room_id in
+    if not (Sys.file_exists agents_path) then []
+    else
+      Sys.readdir agents_path
+      |> Array.to_list
+      |> List.filter (fun name -> Filename.check_suffix name ".json")
+      |> List.filter_map (fun name ->
+          let path = Filename.concat agents_path name in
+          let json = read_json config path in
+          match agent_of_yojson json with
+          | Ok agent -> Some agent
+          | Error _ -> None
+        )
 
 (** Check if an agent has joined the room *)
 let is_agent_joined config ~agent_name =
@@ -1680,7 +1723,7 @@ let extract_seq_from_filename name =
 (** Get raw message list (for dashboard) *)
 let get_messages_raw config ~since_seq ~limit =
   ensure_initialized config;
-  let msgs_path = messages_dir config in
+  let msgs_path = messages_dir_in_room config (current_room_id config) in
   if not (Sys.file_exists msgs_path) then []
   else
     Sys.readdir msgs_path
@@ -1699,6 +1742,29 @@ let get_messages_raw config ~since_seq ~limit =
           None
       )
     |> (fun msgs -> List.filteri (fun i _ -> i < limit) msgs)
+
+let get_messages_raw_in_room config ~room_id ~since_seq ~limit =
+  if not (root_is_initialized config) then []
+  else
+    let msgs_path = messages_dir_in_room config room_id in
+    if not (Sys.file_exists msgs_path) then []
+    else
+      Sys.readdir msgs_path
+      |> Array.to_list
+      |> List.filter is_valid_filename
+      |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a))
+      |> List.filter_map (fun name ->
+          let path = Filename.concat msgs_path name in
+          match read_json config path with
+          | json ->
+            (match message_of_yojson json with
+             | Ok msg when msg.seq > since_seq -> Some msg
+             | _ -> None)
+          | exception e ->
+            Eio.traceln "[WARN] Failed to read room message %s: %s" name (Printexc.to_string e);
+            None
+        )
+      |> (fun msgs -> List.filteri (fun i _ -> i < limit) msgs)
 
 (** List tasks *)
 let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status config =
@@ -2497,21 +2563,16 @@ let room_path config room_id = room_dir_for config room_id
 
 (** Count agents in a room *)
 let count_agents_in_room config room_id =
-  let rpath = room_path config room_id in
-  let agents_path = Filename.concat rpath "agents" in
-  if Sys.file_exists agents_path && Sys.is_directory agents_path then
-    Array.length (Sys.readdir agents_path)
-  else
-    0
+  List.length (get_agents_raw_in_room config room_id)
 
 (** Count tasks in a room *)
 let count_tasks_in_room config room_id =
-  let rpath = room_path config room_id in
-  let tasks_path = Filename.concat rpath "tasks" in
-  if Sys.file_exists tasks_path && Sys.is_directory tasks_path then
-    Array.length (Sys.readdir tasks_path)
-  else
-    0
+  get_tasks_raw_in_room config room_id
+  |> List.fold_left (fun acc (task : Types.task) ->
+         match task.task_status with
+         | Types.Todo | Types.Claimed _ | Types.InProgress _ -> acc + 1
+         | Types.Done _ | Types.Cancelled _ -> acc
+       ) 0
 
 (** Load room registry *)
 let load_registry config : Types.room_registry =

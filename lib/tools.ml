@@ -3266,13 +3266,18 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
   (* ===== Dashboard Tools (Phase 13) ===== *)
   {
     name = "masc_dashboard";
-    description = "Show full MASC dashboard with agents, tasks, locks, messages, tempo, and worktrees. Use with 'watch -n 1' for real-time updates.";
+    description = "Show the MASC dashboard. By default it summarizes all rooms, and you can filter to the current room with scope='current'. Use with 'watch -n 1' for real-time updates.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("compact", `Assoc [
           ("type", `String "boolean");
           ("description", `String "If true, show compact single-line summary instead of full dashboard");
+        ]);
+        ("scope", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Dashboard scope: 'all' (default) or 'current'");
+          ("default", `String "all");
         ]);
       ]);
     ];

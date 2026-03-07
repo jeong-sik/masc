@@ -23,15 +23,31 @@ let get_bool args key default =
   | `Bool b -> b
   | _ -> default
 
+let get_string args key default =
+  match args |> member key with
+  | `String s -> s
+  | _ -> default
+
 (* Handlers *)
 
 let handle_dashboard ctx args =
   let compact = get_bool args "compact" false in
-  let output =
-    if compact then Dashboard.generate_compact ctx.config
-    else Dashboard.generate ctx.config
+  let scope_arg = String.lowercase_ascii (get_string args "scope" "all") in
+  let scope =
+    match scope_arg with
+    | "all" -> Ok Dashboard.All
+    | "current" -> Ok Dashboard.Current
+    | other -> Error other
   in
-  (true, output)
+  match scope with
+  | Error other ->
+      (false, Printf.sprintf "❌ Invalid dashboard scope '%s' (expected: all | current)" other)
+  | Ok scope ->
+      let output =
+        if compact then Dashboard.generate_compact ~scope ctx.config
+        else Dashboard.generate ~scope ctx.config
+      in
+      (true, output)
 
 (* Note: verify_handoff requires tokenize/jaccard/cosine functions from mcp_server_eio.ml
    and is kept there for now. This is a stub. *)

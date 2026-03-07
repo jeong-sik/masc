@@ -234,11 +234,27 @@ LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
 ./scripts/harness_supervisor_team_session.sh
 ```
 
+Use the deterministic failure-replay harness when you want to validate the
+failed batch-spawn path itself instead of the happy path:
+
+```bash
+LLAMA_SWARM_MODEL=<explicit-model-id> \
+./scripts/harness_team_session_failed_batch_spawn.sh
+```
+
+It starts MASC with an intentionally unreachable `LLAMA_SERVER_URL`, replays a
+two-worker llama batch spawn, and verifies:
+
+1. both spawned workers fail deterministically
+2. failed runtime actors are detached from session participants
+3. report/proof artifacts expose failed spawn and detached actor counts
+
 ## Related Docs
 
 - `docs/REMOTE-MCP-OPERATOR.md`
 - `docs/TEAM-SESSION.md`
 - `scripts/harness_supervisor_team_session.sh`
+- `scripts/harness_team_session_failed_batch_spawn.sh`
 
 ## Design Notes
 

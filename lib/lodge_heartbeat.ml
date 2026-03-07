@@ -37,17 +37,7 @@ let lodge_init_lock () =
 (** Run [f] under lodge mutex. Falls back to unprotected if not yet initialized. *)
 let with_lodge_lock f =
   match !lodge_lock with
-  | Some mutex -> (
-      try Eio.Mutex.use_rw ~protect:true mutex f
-      with exn ->
-        let msg = Printexc.to_string exn in
-        if String.starts_with ~prefix:"Stdlib.Effect.Unhandled" msg
-           || String.starts_with ~prefix:"Eio__Eio_mutex.Poisoned" msg
-           || String.starts_with ~prefix:"Eio.Private.Mutex.Poisoned" msg
-        then
-          f ()
-        else
-          raise exn)
+  | Some mutex -> Eio.Mutex.use_rw ~protect:true mutex f
   | None -> f ()
 
 (** Active agents: name -> (uuid, started_at) *)
@@ -851,17 +841,30 @@ let _lodge_last_result : heartbeat_result option ref = ref None
 let _lodge_enabled = ref false
 let _lodge_manual_tick_running = ref false
 
-let set_manual_tick_running value =
+let with_manual_tick_state f =
   lodge_init_lock ();
-  with_lodge_lock (fun () -> _lodge_manual_tick_running := value)
+  match !lodge_lock with
+  | Some mutex -> (
+      try Eio.Mutex.use_rw ~protect:true mutex f
+      with exn ->
+        let msg = Printexc.to_string exn in
+        if String.starts_with ~prefix:"Stdlib.Effect.Unhandled" msg
+           || String.starts_with ~prefix:"Eio__Eio_mutex.Poisoned" msg
+           || String.starts_with ~prefix:"Eio.Private.Mutex.Poisoned" msg
+        then
+          f ()
+        else
+          raise exn)
+  | None -> f ()
+
+let set_manual_tick_running value =
+  with_manual_tick_state (fun () -> _lodge_manual_tick_running := value)
 
 let manual_tick_running () =
-  lodge_init_lock ();
-  with_lodge_lock (fun () -> !_lodge_manual_tick_running)
+  with_manual_tick_state (fun () -> !_lodge_manual_tick_running)
 
 let try_begin_manual_tick () =
-  lodge_init_lock ();
-  with_lodge_lock (fun () ->
+  with_manual_tick_state (fun () ->
     if !_lodge_manual_tick_running then
       false
     else begin

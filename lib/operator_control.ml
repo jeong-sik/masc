@@ -1542,13 +1542,13 @@ let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
       ("checkins", `List (List.map checkin_json result.checkins));
     ]
 
-let lodge_tick_ack_json ~mode ~status =
+let lodge_tick_ack_json ~mode ~status ~manual_tick_running =
   `Assoc
     [
       ("status", `String status);
       ("mode", `String mode);
       ("quiet_hours_overridden", `Bool true);
-      ("manual_tick_running", `Bool true);
+      ("manual_tick_running", `Bool manual_tick_running);
     ]
 
 let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
@@ -1690,7 +1690,9 @@ let execute_action (ctx : 'a context) (request : action_request) :
               (`Assoc
                 [
                   ("delegated_tool", `String "lodge_tick");
-                  ("result", lodge_tick_ack_json ~mode:"sync" ~status:"already_running");
+                  ( "result",
+                    lodge_tick_ack_json ~mode:"sync" ~status:"already_running"
+                      ~manual_tick_running:true );
                 ])
           else
             let result = Lodge_heartbeat.trigger_heartbeat ctx.config in
@@ -1710,7 +1712,9 @@ let execute_action (ctx : 'a context) (request : action_request) :
             (`Assoc
               [
                 ("delegated_tool", `String "lodge_tick");
-                ("result", lodge_tick_ack_json ~mode:"async" ~status);
+                ( "result",
+                  lodge_tick_ack_json ~mode:"async" ~status
+                    ~manual_tick_running:(status = "accepted" || status = "already_running") );
               ])
   | "team_turn" ->
       let* () = validate_target_type "team_session" request in

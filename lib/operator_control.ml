@@ -456,6 +456,8 @@ let sessions_json config =
         `Assoc
           [
             ("session_id", `String session.session_id);
+            ("command_plane_operation_id", `String ("detachment-" ^ session.session_id));
+            ("command_plane_detachment_id", `String ("detachment-" ^ session.session_id));
             ("status", Team_session_engine_eio.session_status_json config session);
             ("recent_events", `List recent_events);
           ])
@@ -547,6 +549,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       ( "keepers",
         if initialized && include_keepers then keepers_json config
         else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+      ("command_plane", if initialized then Command_plane_v2.snapshot_json config else `Assoc []);
       ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
       ("pending_confirms", pending_confirms_json ?actor config);
       ("available_actions", available_actions_json);

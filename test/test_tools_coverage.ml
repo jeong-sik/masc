@@ -648,40 +648,69 @@ let test_masc_handover_claim_schema () =
       | None -> Alcotest.fail "masc_handover_claim missing properties"
 
 (* ============================================================ *)
-(* 15. Swarm Tool Tests                                          *)
+(* 15. Swarm Cutover Tests                                       *)
 (* ============================================================ *)
 
-let test_masc_swarm_init_schema () =
+let test_masc_swarm_init_hidden () =
   match find_tool "masc_swarm_init" with
-  | None -> Alcotest.fail "masc_swarm_init not found"
-  | Some _ -> ()
+  | None -> ()
+  | Some _ -> Alcotest.fail "masc_swarm_init should be hidden from public schemas"
 
-let test_masc_swarm_join_schema () =
+let test_masc_swarm_join_hidden () =
   match find_tool "masc_swarm_join" with
-  | None -> Alcotest.fail "masc_swarm_join not found"
-  | Some _ -> ()
+  | None -> ()
+  | Some _ -> Alcotest.fail "masc_swarm_join should be hidden from public schemas"
 
-let test_masc_swarm_leave_schema () =
+let test_masc_swarm_leave_hidden () =
   match find_tool "masc_swarm_leave" with
-  | None -> Alcotest.fail "masc_swarm_leave not found"
-  | Some _ -> ()
+  | None -> ()
+  | Some _ -> Alcotest.fail "masc_swarm_leave should be hidden from public schemas"
 
-let test_masc_swarm_status_schema () =
+let test_masc_swarm_status_hidden () =
   match find_tool "masc_swarm_status" with
-  | None -> Alcotest.fail "masc_swarm_status not found"
-  | Some _ -> ()
+  | None -> ()
+  | Some _ -> Alcotest.fail "masc_swarm_status should be hidden from public schemas"
 
-let test_masc_swarm_propose_schema () =
+let test_masc_swarm_propose_hidden () =
   match find_tool "masc_swarm_propose" with
-  | None -> Alcotest.fail "masc_swarm_propose not found"
+  | None -> ()
+  | Some _ -> Alcotest.fail "masc_swarm_propose should be hidden from public schemas"
+
+(* ============================================================ *)
+(* 16. Command Plane V2 Tool Tests                               *)
+(* ============================================================ *)
+
+let test_masc_dispatch_tick_schema () =
+  match find_tool "masc_dispatch_tick" with
+  | None -> Alcotest.fail "masc_dispatch_tick not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "has description" true (List.mem_assoc "description" props)
-      | None -> Alcotest.fail "masc_swarm_propose missing properties"
+          Alcotest.(check bool) "has operation_id" true (List.mem_assoc "operation_id" props);
+          Alcotest.(check bool) "has detachment_id" true (List.mem_assoc "detachment_id" props)
+      | None -> Alcotest.fail "masc_dispatch_tick missing properties"
+
+let test_masc_detachment_list_schema () =
+  match find_tool "masc_detachment_list" with
+  | None -> Alcotest.fail "masc_detachment_list not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has operation_id" true (List.mem_assoc "operation_id" props);
+          Alcotest.(check bool) "has detachment_id" true (List.mem_assoc "detachment_id" props)
+      | None -> Alcotest.fail "masc_detachment_list missing properties"
+
+let test_masc_detachment_status_schema () =
+  match find_tool "masc_detachment_status" with
+  | None -> Alcotest.fail "masc_detachment_status not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has detachment_id" true (List.mem_assoc "detachment_id" props)
+      | None -> Alcotest.fail "masc_detachment_status missing properties"
 
 (* ============================================================ *)
-(* 16. Walph Tool Tests                                          *)
+(* 17. Walph Tool Tests                                          *)
 (* ============================================================ *)
 
 let test_masc_walph_loop_schema () =
@@ -724,7 +753,7 @@ let test_masc_walph_status_schema () =
       | None -> Alcotest.fail "masc_walph_status missing properties"
 
 (* ============================================================ *)
-(* 17. Hat Tool Tests                                            *)
+(* 18. Hat Tool Tests                                            *)
 (* ============================================================ *)
 
 let test_masc_hat_wear_schema () =
@@ -743,7 +772,7 @@ let test_masc_hat_status_schema () =
   | Some _ -> ()
 
 (* ============================================================ *)
-(* 18. Bounded Run Tool Tests                                    *)
+(* 19. Bounded Run Tool Tests                                    *)
 (* ============================================================ *)
 
 let test_masc_bounded_run_schema () =
@@ -759,7 +788,7 @@ let test_masc_bounded_run_schema () =
       | None -> Alcotest.fail "masc_bounded_run missing properties"
 
 (* ============================================================ *)
-(* 19. Dashboard Tool Tests                                      *)
+(* 20. Dashboard Tool Tests                                      *)
 (* ============================================================ *)
 
 let test_masc_dashboard_schema () =
@@ -778,7 +807,7 @@ let test_masc_get_metrics_schema () =
   | Some _ -> ()
 
 (* ============================================================ *)
-(* 20. Edge Case Tests                                           *)
+(* 21. Edge Case Tests                                           *)
 (* ============================================================ *)
 
 let test_description_not_too_short () =
@@ -919,12 +948,17 @@ let () =
       Alcotest.test_case "handover_list" `Quick test_masc_handover_list_schema;
       Alcotest.test_case "handover_claim" `Quick test_masc_handover_claim_schema;
     ];
-    "swarm_tools", [
-      Alcotest.test_case "swarm_init" `Quick test_masc_swarm_init_schema;
-      Alcotest.test_case "swarm_join" `Quick test_masc_swarm_join_schema;
-      Alcotest.test_case "swarm_leave" `Quick test_masc_swarm_leave_schema;
-      Alcotest.test_case "swarm_status" `Quick test_masc_swarm_status_schema;
-      Alcotest.test_case "swarm_propose" `Quick test_masc_swarm_propose_schema;
+    "swarm_cutover", [
+      Alcotest.test_case "swarm_init_hidden" `Quick test_masc_swarm_init_hidden;
+      Alcotest.test_case "swarm_join_hidden" `Quick test_masc_swarm_join_hidden;
+      Alcotest.test_case "swarm_leave_hidden" `Quick test_masc_swarm_leave_hidden;
+      Alcotest.test_case "swarm_status_hidden" `Quick test_masc_swarm_status_hidden;
+      Alcotest.test_case "swarm_propose_hidden" `Quick test_masc_swarm_propose_hidden;
+    ];
+    "command_plane_tools", [
+      Alcotest.test_case "dispatch_tick" `Quick test_masc_dispatch_tick_schema;
+      Alcotest.test_case "detachment_list" `Quick test_masc_detachment_list_schema;
+      Alcotest.test_case "detachment_status" `Quick test_masc_detachment_status_schema;
     ];
     "walph_tools", [
       Alcotest.test_case "walph_loop" `Quick test_masc_walph_loop_schema;

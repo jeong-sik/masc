@@ -171,6 +171,11 @@
  (libraries masc_mcp alcotest yojson unix))
 
 (test
+ (name test_command_plane_v2)
+ (modules test_command_plane_v2)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_tool_team_session)
  (modules test_tool_team_session)
  (libraries masc_mcp alcotest yojson unix eio eio_main))

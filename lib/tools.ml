@@ -3,7 +3,7 @@
 open Types
 
 (** All MASC tool schemas *)
-let all_schemas : tool_schema list = [
+let raw_schemas : tool_schema list = [
   {
     name = "masc_set_room";
     description = "Set the working directory for MASC operations. Use this to work with .masc/ in a different project.";
@@ -4464,6 +4464,26 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
     ];
   };
 ]
+
+let deprecated_public_tools =
+  [
+    "masc_swarm_init";
+    "masc_swarm_join";
+    "masc_swarm_leave";
+    "masc_swarm_status";
+    "masc_swarm_evolve";
+    "masc_swarm_propose";
+    "masc_swarm_vote";
+    "masc_swarm_deposit";
+    "masc_swarm_trails";
+    "masc_swarm_walph";
+  ]
+
+let all_schemas : tool_schema list =
+  List.filter
+    (fun (schema : tool_schema) ->
+      not (List.mem schema.name deprecated_public_tools))
+    raw_schemas
 
 (** All schemas including Perpetual Agent Runtime tools *)
 let all_schemas_with_perpetual =

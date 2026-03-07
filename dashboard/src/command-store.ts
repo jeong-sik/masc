@@ -227,9 +227,13 @@ function normalizeDetachmentRecord(raw: unknown): CommandPlaneDetachmentRecord |
     roster: asStringArray(raw.roster),
     session_id: asString(raw.session_id) ?? null,
     checkpoint_ref: asString(raw.checkpoint_ref) ?? null,
+    runtime_kind: asString(raw.runtime_kind) ?? null,
+    runtime_ref: asString(raw.runtime_ref) ?? null,
     source: asString(raw.source),
     status: asString(raw.status),
     last_event_at: asString(raw.last_event_at) ?? null,
+    last_progress_at: asString(raw.last_progress_at) ?? null,
+    heartbeat_deadline: asString(raw.heartbeat_deadline) ?? null,
     created_at: asString(raw.created_at),
     updated_at: asString(raw.updated_at),
   }
@@ -476,6 +480,15 @@ export function resumeCommandPlaneOperation(operationId: string): Promise<void> 
 export function recallCommandPlaneOperation(operationId: string): Promise<void> {
   return runAction(`recall:${operationId}`, '/api/v1/command-plane/dispatch/recall', {
     operation_id: operationId,
+  })
+}
+
+export function runCommandPlaneDispatchTick(
+  filters: { operationId?: string; detachmentId?: string } = {},
+): Promise<void> {
+  return runAction('dispatch:tick', '/api/v1/command-plane/dispatch/tick', {
+    ...(filters.operationId ? { operation_id: filters.operationId } : {}),
+    ...(filters.detachmentId ? { detachment_id: filters.detachmentId } : {}),
   })
 }
 

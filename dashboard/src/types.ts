@@ -613,6 +613,8 @@ export interface OperatorRoomSnapshot {
 
 export interface OperatorSessionSnapshot {
   session_id: string
+  command_plane_operation_id?: string
+  command_plane_detachment_id?: string
   status?: string
   progress_pct?: number
   elapsed_sec?: number
@@ -677,6 +679,7 @@ export interface OperatorSnapshot {
   room: OperatorRoomSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
+  command_plane?: CommandPlaneSnapshot
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]
   available_actions: OperatorActionDescriptor[]
@@ -850,9 +853,13 @@ export interface CommandPlaneDetachmentRecord {
   roster: string[]
   session_id?: string | null
   checkpoint_ref?: string | null
+  runtime_kind?: string | null
+  runtime_ref?: string | null
   source?: string
   status?: string
   last_event_at?: string | null
+  last_progress_at?: string | null
+  heartbeat_deadline?: string | null
   created_at?: string
   updated_at?: string
 }

@@ -19,6 +19,7 @@ import type {
   OperatorActionRequest,
   OperatorActionResult,
   OperatorSnapshot,
+  CommandPlaneHelpResponse,
   CommandPlaneSnapshot,
 } from './types'
 
@@ -305,6 +306,10 @@ export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
 
 export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {
   return get('/api/v1/command-plane')
+}
+
+export function fetchCommandPlaneHelp(): Promise<CommandPlaneHelpResponse> {
+  return get('/api/v1/command-plane/help')
 }
 
 export function runCommandPlaneAction(

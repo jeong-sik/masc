@@ -979,6 +979,71 @@ export interface CommandPlaneSnapshot {
   traces: CommandPlaneTracesResponse
 }
 
+export interface CommandPlaneHelpDocLink {
+  title: string
+  path: string
+}
+
+export interface CommandPlaneHelpConcept {
+  id: string
+  title: string
+  summary: string
+}
+
+export interface CommandPlaneHelpStep {
+  id: string
+  title: string
+  tool: string
+  summary: string
+  success_signals: string[]
+  pitfalls: string[]
+}
+
+export interface CommandPlaneHelpPath {
+  id: string
+  title: string
+  summary: string
+  when_to_use: string
+  steps: CommandPlaneHelpStep[]
+}
+
+export interface CommandPlaneHelpToolGroup {
+  id: string
+  title: string
+  description: string
+  tools: string[]
+}
+
+export interface CommandPlaneHelpPitfall {
+  id: string
+  title: string
+  symptom: string
+  why: string
+  fix_tool: string
+  fix_summary: string
+}
+
+export interface CommandPlaneHelpExample {
+  id: string
+  title: string
+  path_id: string
+  transport: string
+  request: unknown
+  response: unknown
+  notes: string[]
+}
+
+export interface CommandPlaneHelpResponse {
+  version?: string
+  generated_at?: string
+  docs: CommandPlaneHelpDocLink[]
+  concepts: CommandPlaneHelpConcept[]
+  golden_paths: CommandPlaneHelpPath[]
+  tool_groups: CommandPlaneHelpToolGroup[]
+  pitfalls: CommandPlaneHelpPitfall[]
+  examples: CommandPlaneHelpExample[]
+}
+
 export type CommandPlaneSurface =
   | 'operations'
   | 'topology'
@@ -988,6 +1053,7 @@ export type CommandPlaneSurface =
 
 export interface ServerStatus {
   room?: string
+  room_base_path?: string
   cluster?: string
   project?: string
   paused?: boolean

@@ -5299,6 +5299,8 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   in
   let status_json =
     `Assoc [
+      ("room", `String room_state.project);
+      ("room_base_path", `String config.base_path);
       ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
       ("project", `String room_state.project);
       ("tempo_interval_s", `Float tempo.current_interval_s);
@@ -5352,6 +5354,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ("name", `String a.name);
         ("status", `String (Types.string_of_agent_status a.status));
         ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+        ("last_seen", `String a.last_seen);
         ("emoji", `String emoji);
         ("koreanName", `String korean_name);
         ("generation", `Int 0);
@@ -5598,6 +5601,349 @@ let command_plane_policy_freeze_http_json ~state request ~args =
 let command_plane_policy_kill_switch_http_json ~state request ~args =
   Command_plane_v2.policy_kill_switch_json state.Mcp_server.room_config
     ~actor:(command_plane_actor request) args
+
+let command_plane_help_http_json () =
+  let str_list values = `List (List.map (fun value -> `String value) values) in
+  let concept ~id ~title ~summary =
+    `Assoc
+      [
+        ("id", `String id);
+        ("title", `String title);
+        ("summary", `String summary);
+      ]
+  in
+  let step ~id ~title ~tool ~summary ~success_signals ~pitfalls =
+    `Assoc
+      [
+        ("id", `String id);
+        ("title", `String title);
+        ("tool", `String tool);
+        ("summary", `String summary);
+        ("success_signals", str_list success_signals);
+        ("pitfalls", str_list pitfalls);
+      ]
+  in
+  let path ~id ~title ~summary ~when_to_use ~steps =
+    `Assoc
+      [
+        ("id", `String id);
+        ("title", `String title);
+        ("summary", `String summary);
+        ("when_to_use", `String when_to_use);
+        ("steps", `List steps);
+      ]
+  in
+  let tool_group ~id ~title ~description ~tools =
+    `Assoc
+      [
+        ("id", `String id);
+        ("title", `String title);
+        ("description", `String description);
+        ("tools", str_list tools);
+      ]
+  in
+  let pitfall ~id ~title ~symptom ~why ~fix_tool ~fix_summary =
+    `Assoc
+      [
+        ("id", `String id);
+        ("title", `String title);
+        ("symptom", `String symptom);
+        ("why", `String why);
+        ("fix_tool", `String fix_tool);
+        ("fix_summary", `String fix_summary);
+      ]
+  in
+  let example ~id ~title ~path_id ~transport ~request ~response ~notes =
+    `Assoc
+      [
+        ("id", `String id);
+        ("title", `String title);
+        ("path_id", `String path_id);
+        ("transport", `String transport);
+        ("request", request);
+        ("response", response);
+        ("notes", str_list notes);
+      ]
+  in
+  `Assoc
+    [
+      ("version", `String "1");
+      ("generated_at", `String (Types.now_iso ()));
+      ( "docs",
+        `List
+          [
+            `Assoc
+              [
+                ("title", `String "Command Plane Runbook");
+                ("path", `String "docs/COMMAND-PLANE-RUNBOOK.md");
+              ];
+            `Assoc
+              [
+                ("title", `String "Benchmark Runbook");
+                ("path", `String "docs/BENCHMARK-RUNBOOK.md");
+              ];
+            `Assoc
+              [
+                ("title", `String "Supervisor Mode");
+                ("path", `String "docs/SUPERVISOR-MODE.md");
+              ];
+          ] );
+      ( "concepts",
+        `List
+          [
+            concept ~id:"room" ~title:"Room"
+              ~summary:
+                "The coordination scope. In practice masc_set_room resolves to the repo-root room, not an arbitrary nested worktree.";
+            concept ~id:"task" ~title:"Task"
+              ~summary:
+                "Backlog work item. Claiming a task does not automatically set the session current_task pointer.";
+            concept ~id:"operation" ~title:"Operation"
+              ~summary:
+                "Managed CPv2 execution unit owned by company/platoon/squad hierarchy.";
+            concept ~id:"detachment" ~title:"Detachment"
+              ~summary:
+                "Scheduler/runtime view of active work under an operation. Use it to inspect progress, liveness, and runtime binding.";
+            concept ~id:"policy_decision" ~title:"Policy Decision"
+              ~summary:
+                "Pending approval item. Cross-platoon moves and disruptive actions stop here until approved or denied.";
+            concept ~id:"trace" ~title:"Trace"
+              ~summary:
+                "End-to-end lineage of operation, checkpoint, dispatch, and policy events.";
+          ] );
+      ( "golden_paths",
+        `List
+          [
+            path ~id:"room_task_hygiene" ~title:"Room / Task Hygiene"
+              ~summary:
+                "Minimal MCP sequence before doing any real work in a room."
+              ~when_to_use:
+                "Use this before benchmark runs, CPv2 experiments, or ordinary implementation work."
+              ~steps:
+                [
+                  step ~id:"join" ~title:"Join the room" ~tool:"masc_join"
+                    ~summary:
+                      "Register agent identity and capabilities in the repo-root room."
+                    ~success_signals:
+                      [ "agent visible in masc_status"; "room agent roster includes your agent" ]
+                    ~pitfalls:
+                      [ "masc_set_room points at repo root semantics"; "without join you are invisible to scheduling" ];
+                  step ~id:"claim" ~title:"Claim or create work" ~tool:"masc_claim"
+                    ~summary:
+                      "Claim an existing task or create one first with masc_add_task when the backlog is empty."
+                    ~success_signals:
+                      [ "task assignee is your agent"; "task status becomes claimed/in_progress" ]
+                    ~pitfalls:
+                      [ "claiming alone does not set current_task" ];
+                  step ~id:"set-task" ~title:"Bind current task" ~tool:"masc_plan_set_task"
+                    ~summary:
+                      "Set the current session task pointer so later planning and logs target the correct task."
+                    ~success_signals:
+                      [ "masc_plan_get_task returns the claimed task id" ]
+                    ~pitfalls:
+                      [ "dashboard can show claimed task and missing current_task at the same time" ];
+                  step ~id:"heartbeat" ~title:"Refresh presence" ~tool:"masc_heartbeat"
+                    ~summary:
+                      "Update liveness before or during long-running work."
+                    ~success_signals:
+                      [ "agent status stays active/busy"; "last_seen remains fresh" ]
+                    ~pitfalls:
+                      [ "without heartbeat an otherwise healthy agent looks zombie/stale" ];
+                ];
+            path ~id:"cpv2_benchmark" ~title:"CPv2 Benchmark / Swarm"
+              ~summary:
+                "Canonical benchmark path for company → platoon → squad → agent orchestration."
+              ~when_to_use:
+                "Use this for real swarm experiments, benchmarking, long-running command-plane work, and 4→16→64 agent rehearsals."
+              ~steps:
+                [
+                  step ~id:"define-units" ~title:"Define hierarchy" ~tool:"masc_unit_define"
+                    ~summary:
+                      "Create managed company/platoon/squad/agent units with policy and budget envelopes."
+                    ~success_signals:
+                      [ "masc_observe_topology shows managed units"; "capacity rows appear for units" ]
+                    ~pitfalls:
+                      [ "missing leaders or empty live rosters block operation start" ];
+                  step ~id:"start-operation" ~title:"Start operation" ~tool:"masc_operation_start"
+                    ~summary:
+                      "Create the managed benchmark operation and bind it to the target unit."
+                    ~success_signals:
+                      [ "operation appears in masc_observe_operations"; "trace_id is issued" ]
+                    ~pitfalls:
+                      [ "starting directly on a frozen or killed unit fails" ];
+                  step ~id:"dispatch" ~title:"Materialize detachments" ~tool:"masc_dispatch_tick"
+                    ~summary:
+                      "Run the scheduler/reconciler to create or update detachments."
+                    ~success_signals:
+                      [ "masc_detachment_list returns active detachments"; "operation moves from planned to active runtime" ]
+                    ~pitfalls:
+                      [ "active op with zero detachments usually means tick has not been run yet" ];
+                  step ~id:"observe" ~title:"Observe runtime" ~tool:"masc_detachment_status"
+                    ~summary:
+                      "Inspect detachments, topology, alerts, and trace events while the operation runs."
+                    ~success_signals:
+                      [ "heartbeat_deadline and last_progress_at advance"; "alerts/traces explain stalls or approvals" ]
+                    ~pitfalls:
+                      [ "pending approvals stop cross-platoon movement until policy action happens" ];
+                  step ~id:"approve" ~title:"Handle approval queue" ~tool:"masc_policy_approve"
+                    ~summary:
+                      "Approve or deny pending policy decisions for strict actions."
+                    ~success_signals:
+                      [ "decision leaves pending state"; "next tick applies the move or leaves a denial trace" ]
+                    ~pitfalls:
+                      [ "dispatch_rebalance can legitimately return pending_approval" ];
+                  step ~id:"checkpoint" ~title:"Checkpoint and finalize" ~tool:"masc_operation_checkpoint"
+                    ~summary:
+                      "Record durable state, then finish with masc_operation_finalize when done."
+                    ~success_signals:
+                      [ "checkpoint_ref stored on operation"; "finalized operation is completed in operations view" ]
+                    ~pitfalls:
+                      [ "stop/finalize without checkpoint loses resume breadcrumbs" ];
+                ];
+            path ~id:"supervisor_session" ~title:"Supervisor / Team Session"
+              ~summary:
+                "Guided intervention loop for supervised implementation sessions."
+              ~when_to_use:
+                "Use this when a human or supervisor agent steers a team session instead of running direct CPv2 benchmark orchestration."
+              ~steps:
+                [
+                  step ~id:"snapshot" ~title:"Read operator snapshot" ~tool:"masc_operator_snapshot"
+                    ~summary:"Read state first from the small operator surface."
+                    ~success_signals:[ "summary/full snapshot available" ]
+                    ~pitfalls:[ "this is not the benchmark canonical path" ];
+                  step ~id:"intervene" ~title:"Preview intervention" ~tool:"masc_operator_action"
+                    ~summary:"Prepare a small intervention such as team_note or team_task_inject."
+                    ~success_signals:[ "preview token or immediate action result returned" ]
+                    ~pitfalls:[ "disruptive actions require confirm" ];
+                  step ~id:"confirm" ~title:"Confirm disruptive action" ~tool:"masc_operator_confirm"
+                    ~summary:"Execute the previewed intervention once a human approves it."
+                    ~success_signals:[ "intervention trace appended"; "team-session reflects the change" ]
+                    ~pitfalls:[ "do not mix this path with CPv2 benchmark commands in the same explanation" ];
+                ];
+          ] );
+      ( "tool_groups",
+        `List
+          [
+            tool_group ~id:"room-task" ~title:"Room / Task Hygiene"
+              ~description:
+                "Core room/task tools every session should use before higher-level workflows."
+              ~tools:
+                [ "masc_set_room"; "masc_join"; "masc_status"; "masc_claim"; "masc_plan_set_task"; "masc_heartbeat" ];
+            tool_group ~id:"cpv2-core" ~title:"CPv2 Benchmark Core"
+              ~description:
+                "Canonical swarm/benchmark tool family."
+              ~tools:
+                [ "masc_unit_define"; "masc_operation_start"; "masc_dispatch_tick"; "masc_detachment_list"; "masc_detachment_status"; "masc_observe_topology"; "masc_observe_operations"; "masc_observe_alerts"; "masc_observe_traces"; "masc_policy_status"; "masc_policy_approve"; "masc_policy_deny"; "masc_operation_checkpoint"; "masc_operation_finalize" ];
+            tool_group ~id:"supervisor" ~title:"Supervisor Session"
+              ~description:
+                "Small operator loop for intervention-oriented sessions."
+              ~tools:
+                [ "masc_operator_snapshot"; "masc_operator_action"; "masc_operator_confirm"; "masc_team_session_events" ];
+          ] );
+      ( "pitfalls",
+        `List
+          [
+            pitfall ~id:"repo-root-room" ~title:"Room path resolves to repo root"
+              ~symptom:"You point masc_set_room at a worktree but the room still behaves like the repo root."
+              ~why:"Room semantics are repo-root scoped; worktrees share the same room substrate."
+              ~fix_tool:"masc_join"
+              ~fix_summary:"Treat worktrees as code-isolation only. Join the repo-root room and reason about shared room state.";
+            pitfall ~id:"claimed-not-current" ~title:"Claimed task is not current task"
+              ~symptom:"Task is claimed, but planning/log tools still act like no current task is selected."
+              ~why:"Claim mutates backlog ownership; it does not set the session current_task pointer."
+              ~fix_tool:"masc_plan_set_task"
+              ~fix_summary:"Call masc_plan_set_task immediately after claiming the task.";
+            pitfall ~id:"heartbeat-stale" ~title:"Agent looks stale"
+              ~symptom:"Your agent appears inactive/zombie during long work even though the process is alive."
+              ~why:"Heartbeat/liveness was not refreshed recently."
+              ~fix_tool:"masc_heartbeat"
+              ~fix_summary:"Call masc_heartbeat periodically during long operations or before observing state.";
+            pitfall ~id:"no-detachments" ~title:"Operation exists but no detachments"
+              ~symptom:"Operation is visible, but detachments list is empty."
+              ~why:"The scheduler has not reconciled yet, or the target unit is blocked."
+              ~fix_tool:"masc_dispatch_tick"
+              ~fix_summary:"Run masc_dispatch_tick, then inspect topology/capacity or policy queue if detachments still do not appear.";
+            pitfall ~id:"pending-approval" ~title:"Dispatch is blocked by approval"
+              ~symptom:"dispatch_rebalance or related control action returns pending_approval."
+              ~why:"Strict cross-platoon or disruptive action requires a policy decision."
+              ~fix_tool:"masc_policy_approve"
+              ~fix_summary:"Review the pending decision and approve/deny it before running tick again.";
+          ] );
+      ( "examples",
+        `List
+          [
+            example ~id:"join-room" ~title:"Join room for task hygiene"
+              ~path_id:"room_task_hygiene" ~transport:"mcp"
+              ~request:
+                (`Assoc
+                   [
+                     ("tool", `String "masc_join");
+                     ("arguments",
+                      `Assoc
+                        [
+                          ("agent_name", `String "codex");
+                          ("capabilities",
+                           `List [ `String "ocaml"; `String "dashboard"; `String "documentation" ]);
+                        ]);
+                   ])
+              ~response:
+                (`Assoc
+                   [
+                     ("agent", `String "codex-...");
+                     ("status", `String "joined");
+                     ("room", `String "repo-root room");
+                   ])
+              ~notes:
+                [ "Response is trimmed to canonical fields."; "Use masc_status next to confirm visibility." ];
+            example ~id:"start-op" ~title:"Start benchmark operation"
+              ~path_id:"cpv2_benchmark" ~transport:"http"
+              ~request:
+                (`Assoc
+                   [
+                     ("method", `String "POST");
+                     ("path", `String "/api/v1/command-plane/operations");
+                     ("body",
+                      `Assoc
+                        [
+                          ("assigned_unit_id", `String "squad-research-normalize");
+                          ("objective", `String "Normalize and verify latest AI research items");
+                          ("autonomy_level", `String "L4_Autonomous");
+                          ("policy_class", `String "guarded");
+                        ]);
+                   ])
+              ~response:
+                (`Assoc
+                   [
+                     ("status", `String "ok");
+                     ("result",
+                      `Assoc
+                        [
+                          ("operation_id", `String "op-...");
+                          ("trace_id", `String "trace-...");
+                          ("status", `String "active");
+                        ]);
+                   ])
+              ~notes:
+                [ "Run dispatch/tick after operation start to materialize detachments." ];
+            example ~id:"approval" ~title:"Approve strict action"
+              ~path_id:"cpv2_benchmark" ~transport:"mcp"
+              ~request:
+                (`Assoc
+                   [
+                     ("tool", `String "masc_policy_approve");
+                     ("arguments",
+                      `Assoc [ ("decision_id", `String "decision-...") ]);
+                   ])
+              ~response:
+                (`Assoc
+                   [
+                     ("status", `String "ok");
+                     ("decision_id", `String "decision-...");
+                     ("approval_state", `String "approved");
+                   ])
+              ~notes:
+                [ "Follow with masc_dispatch_tick to apply the approved move." ];
+          ] );
+    ]
 
 let command_plane_error_json message =
   `Assoc [ ("status", `String "error"); ("message", `String message) ]
@@ -7767,6 +8113,12 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/command-plane/help" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = command_plane_help_http_json () in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/command-plane/topology" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = command_plane_topology_http_json ~state in
@@ -9050,6 +9402,10 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/command-plane" ->
           let state = get_server_state () in
           let json = command_plane_snapshot_http_json ~state in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/help" ->
+          let json = command_plane_help_http_json () in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/command-plane/topology" ->

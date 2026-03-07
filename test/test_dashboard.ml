@@ -70,9 +70,10 @@ let test_generate_compact () =
   let config = Lib.Room_utils.default_config dir in
   setup_room config;
   let output = Lib.Dashboard.generate_compact config in
-  Alcotest.(check bool) "contains Agents" true (contains output "Agents:");
+  Alcotest.(check bool) "contains Scope" true (contains output "Scope: all");
+  Alcotest.(check bool) "contains Rooms" true (contains output "Rooms:");
   Alcotest.(check bool) "contains Tasks" true (contains output "Tasks:");
-  (* Locks section removed in 132708a - advisory lock deprecation *)
+  Alcotest.(check bool) "contains Current" true (contains output "Current:");
   Alcotest.(check bool) "contains Tempo" true (contains output "Tempo:");
   cleanup_dir dir
 
@@ -82,8 +83,9 @@ let test_generate_full () =
   setup_room config;
   let output = Lib.Dashboard.generate config in
   Alcotest.(check bool) "contains MASC Dashboard" true (contains output "MASC Dashboard");
-  Alcotest.(check bool) "contains Agents section" true (contains output "Agents");
-  Alcotest.(check bool) "contains Tasks section" true (contains output "Tasks");
+  Alcotest.(check bool) "contains Scope" true (contains output "Scope: all");
+  Alcotest.(check bool) "contains Rooms section" true (contains output "Rooms");
+  Alcotest.(check bool) "contains default room" true (contains output "Room: default");
   Alcotest.(check bool) "contains watch hint" true (contains output "watch");
   cleanup_dir dir
 
@@ -93,7 +95,7 @@ let test_agents_section_empty () =
   let dir = test_dir () in
   let config = Lib.Room_utils.default_config dir in
   setup_room config;
-  let section = Lib.Dashboard.agents_section config in
+  let section = Lib.Dashboard.agents_section (Unix.gettimeofday ()) [] in
   Alcotest.(check string) "title" "Agents" section.title;
   Alcotest.(check string) "empty_msg" "(no agents)" section.empty_msg;
   cleanup_dir dir
@@ -102,13 +104,7 @@ let test_tasks_section_empty () =
   let dir = test_dir () in
   let config = Lib.Room_utils.default_config dir in
   setup_room config;
-  let masc_dir = Filename.concat dir ".masc" in
-  let backlog_path = Filename.concat masc_dir "backlog.json" in
-  let backlog_json = `Assoc [("tasks", `List [])] in
-  let oc = open_out backlog_path in
-  output_string oc (Yojson.Safe.to_string backlog_json);
-  close_out oc;
-  let section = Lib.Dashboard.tasks_section config in
+  let section = Lib.Dashboard.tasks_section [] in
   Alcotest.(check string) "title" "Tasks" section.title;
   Alcotest.(check string) "empty_msg" "(no tasks)" section.empty_msg;
   cleanup_dir dir
@@ -117,7 +113,7 @@ let test_messages_section_empty () =
   let dir = test_dir () in
   let config = Lib.Room_utils.default_config dir in
   setup_room config;
-  let section = Lib.Dashboard.messages_section config in
+  let section = Lib.Dashboard.messages_section [] in
   Alcotest.(check string) "title" "Recent Messages" section.title;
   Alcotest.(check string) "empty_msg" "(no messages)" section.empty_msg;
   cleanup_dir dir

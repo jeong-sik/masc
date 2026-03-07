@@ -43,6 +43,22 @@ let extract_nickname result =
     String.sub result start_idx (end_idx - start_idx)
   with _ -> "unknown-agent"
 
+let extract_room_task_count json room_id =
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "rooms" fields with
+       | Some (`List rooms) ->
+           List.find_map (fun room ->
+             match room with
+             | `Assoc room_fields ->
+                 (match (List.assoc_opt "id" room_fields, List.assoc_opt "task_count" room_fields) with
+                  | Some (`String id), Some (`Int count) when id = room_id -> Some count
+                  | _ -> None)
+             | _ -> None
+           ) rooms
+       | _ -> None)
+  | _ -> None
+
 (* ============================================ *)
 (* Room Registry Tests                          *)
 (* ============================================ *)
@@ -226,6 +242,28 @@ let test_room_task_isolation () =
     check int "default room remains isolated" 1 (task_count config);
   )
 
+let test_rooms_list_task_count_active_only () =
+  let (config, test_dir) = setup_test_room () in
+  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
+    let init_result = Room.init config ~agent_name:(Some "codex") in
+    let nickname = extract_nickname init_result in
+
+    ignore (Room.add_task config ~title:"default-done" ~priority:2 ~description:"");
+    ignore (Room.add_task config ~title:"default-todo" ~priority:2 ~description:"");
+    ignore (Room.claim_task config ~agent_name:nickname ~task_id:"task-001");
+    ignore (Room.complete_task config ~agent_name:nickname ~task_id:"task-001" ~notes:"done");
+
+    ignore (Room.room_create config ~name:"Count Room" ~description:None);
+    ignore (Room.room_enter config ~room_id:"count-room" ~agent_type:"codex" ());
+    ignore (Room.add_task config ~title:"count-room-task" ~priority:3 ~description:"");
+
+    let result = Room.rooms_list config in
+    check (option int) "default counts only active tasks" (Some 1)
+      (extract_room_task_count result "default");
+    check (option int) "count-room active tasks" (Some 1)
+      (extract_room_task_count result "count-room");
+  )
+
 (* ============================================ *)
 (* Backward Compatibility Tests                 *)
 (* ============================================ *)
@@ -277,6 +315,7 @@ let () =
     "room_isolation", [
       test_case "agent moves between rooms" `Quick test_room_enter_moves_agent;
       test_case "tasks are isolated per room" `Quick test_room_task_isolation;
+      test_case "rooms_list task_count uses active tasks" `Quick test_rooms_list_task_count_active_only;
     ];
     "backward_compat", [
       test_case "legacy masc as default" `Quick test_legacy_masc_as_default_room;

@@ -34,6 +34,9 @@ type context = {
 
 type result = bool * string
 
+let ensure_consensus ctx =
+  Consensus.init ~base_path:ctx.base_path
+
 (** {1 SSE Event Broadcasting}
 
     Emits decision-model events to connected viewers via the SSE push pipeline.
@@ -195,6 +198,7 @@ let handle_debates ctx _args =
 (** {1 Consensus Handlers} *)
 
 let handle_consensus_start ctx args =
+  ensure_consensus ctx;
   let topic = get_string args "topic" "" in
   let quorum = get_int args "quorum" 2 in
   let threshold = get_float args "threshold" 0.5 in
@@ -228,6 +232,7 @@ let handle_consensus_start ctx args =
       (false, Printf.sprintf "Error: %s" msg)
 
 let handle_consensus_vote ctx args =
+  ensure_consensus ctx;
   let session_id = get_string args "session_id" "" in
   (* Accept both "decision" and "choice" for user convenience *)
   let decision_str = 
@@ -266,7 +271,8 @@ let handle_consensus_vote ctx args =
       in
       (false, Printf.sprintf "Error: %s" msg)
 
-let handle_consensus_close _ctx args =
+let handle_consensus_close ctx args =
+  ensure_consensus ctx;
   let session_id = get_string args "session_id" "" in
   if session_id = "" then
     (false, "Error: session_id is required")
@@ -304,7 +310,8 @@ let handle_consensus_close _ctx args =
       in
       (false, Printf.sprintf "Error: %s" msg)
 
-let handle_consensus_result _ctx args =
+let handle_consensus_result ctx args =
+  ensure_consensus ctx;
   let session_id = get_string args "session_id" "" in
   if session_id = "" then
     (false, "Error: session_id is required")
@@ -323,7 +330,8 @@ let handle_consensus_result _ctx args =
       in
       (false, Printf.sprintf "Error: %s" msg)
 
-let handle_sessions _ctx _args =
+let handle_sessions ctx _args =
+  ensure_consensus ctx;
   let sessions = ConsensusApi.list_active () in
   let items = List.map (fun (s : Consensus.session) ->
     `Assoc [

@@ -178,6 +178,7 @@ module Tool_audit = Tool_audit
 module Tool_suspend = Tool_suspend
 module Tool_shard = Tool_shard
 module Tool_social = Tool_social
+module Tool_council = Tool_council
 module Tool_experiment = Tool_experiment
 module Tool_rate_limit = Tool_rate_limit
 module Tool_cost = Tool_cost

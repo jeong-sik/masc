@@ -228,14 +228,29 @@ let permission_for_tool = function
   | "masc_agents" | "masc_portal_status" | "masc_pending_interrupts"
   | "masc_votes" | "masc_vote_status" | "masc_worktree_list"
   | "masc_cost_report" | "masc_task_history" | "masc_operator_snapshot"
-  | "masc_llama_models" -> Some CanReadState
+  | "masc_llama_models" | "masc_unit_list" | "masc_operation_status"
+  | "masc_policy_status" | "masc_dispatch_plan" | "masc_dispatch_route"
+  | "masc_observe_topology" | "masc_observe_operations"
+  | "masc_observe_capacity" | "masc_observe_alerts"
+  | "masc_observe_traces" ->
+      Some CanReadState
   | "masc_add_task" -> Some CanAddTask
   | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
   | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" -> Some CanCompleteTask
   | "masc_broadcast" | "masc_listen" | "masc_heartbeat"
   | "masc_register_capabilities" | "masc_find_by_capability"
   | "masc_agent_update" | "masc_operator_action"
-  | "masc_operator_confirm" -> Some CanBroadcast
+  | "masc_operator_confirm" | "masc_unit_define"
+  | "masc_unit_update" | "masc_unit_reparent"
+  | "masc_unit_reassign" | "masc_operation_start"
+  | "masc_operation_checkpoint" | "masc_operation_pause"
+  | "masc_operation_resume" | "masc_operation_stop"
+  | "masc_operation_finalize" | "masc_dispatch_assign"
+  | "masc_dispatch_rebalance" | "masc_dispatch_escalate"
+  | "masc_dispatch_recall" | "masc_policy_approve"
+  | "masc_policy_deny" | "masc_policy_update"
+  | "masc_policy_freeze_unit" | "masc_policy_kill_switch" ->
+      Some CanBroadcast
   | "masc_portal_open" | "masc_portal_close" -> Some CanOpenPortal
   | "masc_portal_send" -> Some CanSendPortal
   | "masc_worktree_create" -> Some CanCreateWorktree

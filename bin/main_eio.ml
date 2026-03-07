@@ -20,6 +20,7 @@ module Room_utils = Masc_mcp.Room_utils
 module Tool_keeper = Masc_mcp.Tool_keeper
 module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
+module Command_plane_v2 = Masc_mcp.Command_plane_v2
 module Tool_audit = Masc_mcp.Tool_audit
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
@@ -5322,6 +5323,148 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
 
 let operator_error_json message =
   `Assoc [ ("status", `String "error"); ("message", `String message) ]
+
+let command_plane_snapshot_http_json ~state =
+  Command_plane_v2.snapshot_json state.Mcp_server.room_config
+
+let command_plane_topology_http_json ~state =
+  Command_plane_v2.topology_json state.Mcp_server.room_config
+
+let command_plane_units_http_json ~state =
+  Command_plane_v2.list_units_json state.Mcp_server.room_config
+
+let command_plane_operations_http_json ~state request =
+  let operation_id = query_param request "operation_id" in
+  Command_plane_v2.operation_status_json state.Mcp_server.room_config ?operation_id ()
+
+let command_plane_detachments_http_json ~state request =
+  let operation_id = query_param request "operation_id" in
+  Command_plane_v2.list_detachments_json state.Mcp_server.room_config ?operation_id
+
+let command_plane_decisions_http_json ~state request =
+  let decision_id = query_param request "decision_id" in
+  Command_plane_v2.list_policy_decisions_json state.Mcp_server.room_config ?decision_id
+
+let command_plane_capacity_http_json ~state =
+  Command_plane_v2.capacity_json state.Mcp_server.room_config
+
+let command_plane_alerts_http_json ~state =
+  Command_plane_v2.list_alerts_json state.Mcp_server.room_config
+
+let command_plane_traces_http_json ~state request =
+  let operation_id = query_param request "operation_id" in
+  let limit = int_query_param request "limit" ~default:25 |> clamp ~min_v:1 ~max_v:200 in
+  Command_plane_v2.list_traces_json state.Mcp_server.room_config ?operation_id ~limit ()
+
+let command_plane_actor request =
+  Option.value ~default:"dashboard" (operator_actor_hint request)
+
+let command_plane_unit_define_http_json ~state request ~args =
+  Command_plane_v2.unit_update_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_operation_start_http_json ~state request ~args =
+  match
+    Command_plane_v2.start_operation state.Mcp_server.room_config
+      ~actor:(command_plane_actor request) args
+  with
+  | Ok operation ->
+      Ok
+        (`Assoc
+          [
+            ("status", `String "ok");
+            ("result", Command_plane_v2.operation_to_json operation);
+            ("operations", command_plane_operations_http_json ~state request);
+          ])
+  | Error message -> Error message
+  | exception Invalid_argument message -> Error message
+
+let command_plane_operation_checkpoint_http_json ~state request ~args =
+  match
+    Command_plane_v2.checkpoint_operation state.Mcp_server.room_config
+      ~actor:(command_plane_actor request) args
+  with
+  | Ok operation ->
+      Ok
+        (`Assoc
+          [
+            ("status", `String "ok");
+            ("result", Command_plane_v2.operation_to_json operation);
+            ( "traces",
+              Command_plane_v2.list_traces_json state.Mcp_server.room_config
+                ~operation_id:operation.operation_id () );
+          ])
+  | Error message -> Error message
+  | exception Invalid_argument message -> Error message
+
+let command_plane_unit_reparent_http_json ~state request ~args =
+  Command_plane_v2.unit_reparent_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_unit_reassign_http_json ~state request ~args =
+  Command_plane_v2.unit_reassign_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_operation_pause_http_json ~state request ~args =
+  Command_plane_v2.pause_operation_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_operation_resume_http_json ~state request ~args =
+  Command_plane_v2.resume_operation_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_operation_stop_http_json ~state request ~args =
+  Command_plane_v2.stop_operation_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_operation_finalize_http_json ~state request ~args =
+  Command_plane_v2.finalize_operation_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_dispatch_plan_http_json ~state _request ~args =
+  Ok (Command_plane_v2.dispatch_plan_json state.Mcp_server.room_config args)
+
+let command_plane_dispatch_assign_http_json ~state request ~args =
+  Command_plane_v2.dispatch_assign_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_dispatch_rebalance_http_json ~state request ~args =
+  Command_plane_v2.dispatch_rebalance_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_dispatch_escalate_http_json ~state request ~args =
+  Command_plane_v2.dispatch_escalate_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_dispatch_recall_http_json ~state request ~args =
+  Command_plane_v2.dispatch_recall_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_policy_status_http_json ~state =
+  Command_plane_v2.policy_status_json state.Mcp_server.room_config
+
+let command_plane_policy_approve_http_json ~state request ~args =
+  Command_plane_v2.policy_approve_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_policy_deny_http_json ~state request ~args =
+  Command_plane_v2.policy_deny_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_policy_update_http_json ~state request ~args =
+  Command_plane_v2.policy_update_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_policy_freeze_http_json ~state request ~args =
+  Command_plane_v2.policy_freeze_unit_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_policy_kill_switch_http_json ~state request ~args =
+  Command_plane_v2.policy_kill_switch_json state.Mcp_server.room_config
+    ~actor:(command_plane_actor request) args
+
+let command_plane_error_json message =
+  `Assoc [ ("status", `String "error"); ("message", `String message) ]
 let parse_host_port host_header default_host default_port =
   match host_header with
   | None -> (default_host, default_port)
@@ -7473,6 +7616,395 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/command-plane" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_snapshot_http_json ~state in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/topology" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_topology_http_json ~state in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/units" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_units_http_json ~state in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/operations" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_operations_http_json ~state req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/detachments" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_detachments_http_json ~state req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/decisions" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_decisions_http_json ~state req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/capacity" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_capacity_http_json ~state in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/alerts" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_alerts_http_json ~state in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/traces" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_traces_http_json ~state req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/units" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_unit_define_http_json ~state req ~args with
+             | Ok json ->
+                 respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+        )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/units/reparent" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_unit_reparent_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/units/reassign" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_unit_reassign_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/operations" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_operation_start_http_json ~state req ~args with
+             | Ok json ->
+                 respond_json_with_cors ~status:`Created request reqd
+                   (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+        )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/operations/pause" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_operation_pause_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/operations/resume" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_operation_resume_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/operations/stop" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_operation_stop_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/operations/finalize" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_operation_finalize_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/operations/checkpoint" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match
+               command_plane_operation_checkpoint_http_json ~state req ~args
+             with
+             | Ok json ->
+                 respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+        )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/dispatch/plan" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_dispatch_plan_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/dispatch/assign" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_dispatch_assign_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/dispatch/rebalance" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_dispatch_rebalance_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/dispatch/escalate" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_dispatch_escalate_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/dispatch/recall" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_dispatch_recall_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/policy" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_policy_status_http_json ~state in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/policy/approve" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_policy_approve_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/policy/deny" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_policy_deny_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/policy/update" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_policy_update_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/policy/freeze" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_policy_freeze_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/command-plane/policy/kill-switch" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match command_plane_policy_kill_switch_http_json ~state req ~args with
+             | Ok json -> respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (command_plane_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (command_plane_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = operator_snapshot_http_json ~state ~sw ~clock req in
@@ -8332,6 +8864,56 @@ let run_server ~sw ~env ~port ~base_path =
           let json = dashboard_batch_json ~compact config in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/command-plane" ->
+          let state = get_server_state () in
+          let json = command_plane_snapshot_http_json ~state in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/topology" ->
+          let state = get_server_state () in
+          let json = command_plane_topology_http_json ~state in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/units" ->
+          let state = get_server_state () in
+          let json = command_plane_units_http_json ~state in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/operations" ->
+          let state = get_server_state () in
+          let json = command_plane_operations_http_json ~state httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/detachments" ->
+          let state = get_server_state () in
+          let json = command_plane_detachments_http_json ~state httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/decisions" ->
+          let state = get_server_state () in
+          let json = command_plane_decisions_http_json ~state httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/capacity" ->
+          let state = get_server_state () in
+          let json = command_plane_capacity_http_json ~state in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/alerts" ->
+          let state = get_server_state () in
+          let json = command_plane_alerts_http_json ~state in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/traces" ->
+          let state = get_server_state () in
+          let json = command_plane_traces_http_json ~state httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/policy" ->
+          let state = get_server_state () in
+          let json = command_plane_policy_status_http_json ~state in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/operator" ->
           let state = get_server_state () in
           let path = Http.Request.path httpun_request in
@@ -8440,6 +9022,528 @@ let run_server ~sw ~env ~port ~base_path =
                    h2_respond_json h2_reqd
                      (Yojson.Safe.to_string
                         (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/units" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match
+                      command_plane_unit_define_http_json ~state httpun_request
+                        ~args
+                    with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/units/reparent" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_unit_reparent_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/units/reassign" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_unit_reassign_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/operations" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match
+                      command_plane_operation_start_http_json ~state httpun_request
+                        ~args
+                    with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~status:`Created ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/operations/checkpoint" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match
+                      command_plane_operation_checkpoint_http_json ~state
+                        httpun_request ~args
+                    with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/operations/pause" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_operation_pause_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/operations/resume" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_operation_resume_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/operations/stop" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_operation_stop_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/operations/finalize" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_operation_finalize_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/dispatch/plan" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_dispatch_plan_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/dispatch/assign" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_dispatch_assign_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/dispatch/rebalance" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_dispatch_rebalance_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/dispatch/escalate" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_dispatch_escalate_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/dispatch/recall" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_dispatch_recall_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/policy/approve" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_policy_approve_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/policy/deny" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_policy_deny_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/policy/update" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_policy_update_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/policy/freeze" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_policy_freeze_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/command-plane/policy/kill-switch" ->
+          let state = get_server_state () in
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match command_plane_policy_kill_switch_http_json ~state httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (command_plane_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (command_plane_error_json
+                           (Printf.sprintf "invalid json: %s" msg)))
                      ~status:`Bad_request ~extra_headers:cors))
 
       | `POST, "/api/v1/operator/confirm" ->

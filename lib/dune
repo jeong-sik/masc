@@ -27,6 +27,7 @@
    cancellation
    checkpoint_types
    common
+   command_plane_v2
    compression_dict
    config
    context_router
@@ -174,6 +175,7 @@
    tool_misc
    tool_llama
    tool_board
+   tool_command_plane
    tool_lodge
    tool_mdal
    lodge_daemon

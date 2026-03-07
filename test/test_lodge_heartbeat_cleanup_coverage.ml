@@ -54,18 +54,22 @@ let test_lodge_heartbeat_uses_tool_assignment_prompt () =
     (file_contains_pattern "lib/lodge_heartbeat.ml" "A2a_tools.emit_heartbeat_task")
 
 let test_lodge_graphql_defaults_and_guards () =
-  check bool "heartbeat GraphQL defaults to HTTP port"
+  check bool "heartbeat GraphQL uses shared endpoint helper"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" {|Sys.getenv_opt "MASC_HTTP_PORT"|});
-  check bool "heartbeat GraphQL no longer defaults to MCP port"
-    false
-    (file_contains_pattern "lib/lodge_heartbeat.ml" {|Sys.getenv_opt "MASC_MCP_PORT"|});
-  check bool "tool_lodge GraphQL defaults to HTTP port"
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Graphql_endpoint.graphql_url ()");
+  check bool "tool_lodge GraphQL uses shared endpoint helper"
     true
-    (file_contains_pattern "lib/tool_lodge.ml" {|Sys.getenv_opt "MASC_HTTP_PORT"|});
-  check bool "tool_lodge GraphQL no longer defaults to MCP port"
+    (file_contains_pattern "lib/tool_lodge.ml" "Graphql_endpoint.graphql_url ()");
+  check bool "shared helper normalizes Railway env"
     false
-    (file_contains_pattern "lib/tool_lodge.ml" {|Sys.getenv_opt "MASC_MCP_PORT"|});
+    (file_contains_pattern "lib/graphql_endpoint.ml" {|Sys.getenv_opt "MASC_HTTP_PORT"|});
+  check bool "shared helper supports Railway env"
+    true
+    (file_contains_pattern "lib/graphql_endpoint.ml" {|Sys.getenv_opt "RAILWAY_GRAPHQL_URL"|});
+  check bool "shared helper has production Railway fallback"
+    true
+    (file_contains_pattern "lib/graphql_endpoint.ml"
+       "https://second-brain-graphql-production.up.railway.app/graphql");
   check bool "HTML GraphQL guard present in heartbeat"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "endpoint returned HTML instead of JSON");

@@ -141,28 +141,9 @@ let http_get_json ~net:_ url =
 
 (* NOTE: http_get_local removed — using curl subprocess for all HTTP *)
 
-let trim_trailing_slash s =
-  let trimmed = String.trim s in
-  let len = String.length trimmed in
-  if len > 0 && trimmed.[len - 1] = '/' then
-    String.sub trimmed 0 (len - 1)
-  else
-    trimmed
-
-(** Use local GraphQL by default for local MCP runs.
-    Set GRAPHQL_URL explicitly to force remote endpoint. *)
-let default_graphql_url () =
-  match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
-  | Some raw when String.trim raw <> "" ->
-      trim_trailing_slash raw ^ "/graphql"
-  | _ ->
-      let port = Sys.getenv_opt "MASC_HTTP_PORT" |> Option.value ~default:"8935" in
-      Printf.sprintf "http://127.0.0.1:%s/graphql" port
-
-let graphql_url () =
-  match Sys.getenv_opt "GRAPHQL_URL" with
-  | Some raw when String.trim raw <> "" -> String.trim raw
-  | _ -> default_graphql_url ()
+(** Use Railway GraphQL by default.
+    Set GRAPHQL_URL explicitly for local dev or alternate endpoints. *)
+let graphql_url () = Graphql_endpoint.graphql_url ()
 
 let looks_like_html_response body =
   let trimmed = String.lowercase_ascii (String.trim body) in

@@ -3992,7 +3992,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
       | Error _ -> None
       | Ok None -> None
       | Ok (Some (m : Tool_keeper.keeper_meta)) ->
-          let keepalive_running = Hashtbl.mem Tool_keeper.keepalives m.name in
           let agent = Tool_keeper.parse_agent_status config ~agent_name:m.agent_name in
 
           let created_ts =
@@ -4878,10 +4877,18 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | `List xs -> List.length xs
             | _ -> 0
           in
+          let conversation_items =
+            match conversation_tail with
+            | `List xs -> xs
+            | _ -> []
+          in
           let k2k_count =
             match k2k_recent with
             | `List xs -> List.length xs
             | _ -> 0
+          in
+          let keepalive_running =
+            Tool_keeper.keeper_keepalive_running m.name
           in
 
           let context =
@@ -4932,6 +4939,14 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 	            let compact_ratio_gate = m.compaction_ratio_gate in
 	            let compact_message_gate = m.compaction_message_gate in
 	            let compact_token_gate = m.compaction_token_gate in
+              let diagnostic =
+                Tool_keeper.keeper_diagnostic_json
+                  ~meta:m
+                  ~agent_status:agent
+                  ~keepalive_running
+                  ~history_items:conversation_items
+                  ~now_ts
+              in
               let detail_fields =
                 if compact then []
                 else [
@@ -4986,6 +5001,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("auto_handoff", `Bool m.auto_handoff);
               ("handoff_threshold", `Float m.handoff_threshold);
               ("agent", agent);
+              ("diagnostic", diagnostic);
               ("keeper_age_s", `Float keeper_age_s);
               ("uptime_hours", `Float (keeper_age_s /. 3600.0));
               ("last_turn_ago_s", `Float last_turn_ago_s);

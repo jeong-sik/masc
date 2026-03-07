@@ -855,6 +855,40 @@ let lodge_status () : lodge_status =
       Hashtbl.fold (fun name _state acc -> name :: acc) agent_states [];
   }
 
+let string_of_trigger = function
+  | Scheduled -> "scheduled"
+  | ContentAlert _ -> "content_alert"
+  | Mentioned _ -> "mentioned"
+  | ManualTrigger -> "manual"
+
+let checkin_json (name, trigger, result) =
+  let outcome_fields =
+    match result with
+    | Acted { summary; _ } ->
+        [ ("outcome", `String "acted"); ("summary", `String summary) ]
+    | Passed reason ->
+        [ ("outcome", `String "passed"); ("reason", `String reason) ]
+    | Skipped reason ->
+        [ ("outcome", `String "skipped"); ("reason", `String reason) ]
+  in
+  `Assoc
+    ([
+       ("name", `String name);
+       ("trigger", `String (string_of_trigger trigger));
+     ]
+    @ outcome_fields)
+
+let heartbeat_last_skip_reason (result : heartbeat_result) =
+  if result.agents_checked = 0 then
+    Some "no agents selected for this tick"
+  else
+    let rec first_reason = function
+      | [] -> None
+      | (_, _, Passed reason) :: _ | (_, _, Skipped reason) :: _ -> Some reason
+      | _ :: tl -> first_reason tl
+    in
+    first_reason result.checkins
+
 let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
   let quiet_start = Env_config.LodgeV2.quiet_start in
   let quiet_end = Env_config.LodgeV2.quiet_end in
@@ -878,16 +912,50 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
   let last_result_json = match s.ls_last_result with
     | None -> `Null
     | Some r ->
-      let active = r.checkins |> List.filter (fun (_, _, res) ->
-        match res with Acted _ -> true | Passed _ | Skipped _ -> false
-      ) in
+      let acted =
+        r.checkins
+        |> List.filter_map (fun (name, _, result) ->
+               match result with
+               | Acted { summary; _ } ->
+                   Some (`Assoc [ ("name", `String name); ("summary", `String summary) ])
+               | Passed _ | Skipped _ -> None)
+      in
+      let passed =
+        r.checkins
+        |> List.filter_map (fun (name, _, result) ->
+               match result with
+               | Passed reason ->
+                   Some (`Assoc [ ("name", `String name); ("reason", `String reason) ])
+               | Acted _ | Skipped _ -> None)
+      in
+      let skipped =
+        r.checkins
+        |> List.filter_map (fun (name, _, result) ->
+               match result with
+               | Skipped reason ->
+                   Some (`Assoc [ ("name", `String name); ("reason", `String reason) ])
+               | Acted _ | Passed _ -> None)
+      in
       `Assoc [
         ("hour", `Int r.current_hour);
         ("checked", `Int r.agents_checked);
-        ("acted", `Int (List.length active));
-        ("acted_names", `List (List.map (fun (n, _, _) -> `String n) active));
+        ("acted", `Int (List.length acted));
+        ("acted_names", `List (List.map (fun row -> row |> Yojson.Safe.Util.member "name") acted));
         ("activity_report", `String r.activity_report);
+        ( "skipped_reason",
+          match heartbeat_last_skip_reason r with
+          | Some reason -> `String reason
+          | None -> `Null );
+        ("acted_rows", `List acted);
+        ("passed_rows", `List passed);
+        ("skipped_rows", `List skipped);
+        ("checkins", `List (List.map checkin_json r.checkins));
       ]
+  in
+  let last_skip_reason =
+    match s.ls_last_result with
+    | Some result -> heartbeat_last_skip_reason result
+    | None -> None
   in
   `Assoc [
     ("enabled", `Bool s.ls_enabled);
@@ -904,6 +972,8 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
     ("total_ticks", `Int s.ls_total_ticks);
     ("total_checkins", `Int s.ls_total_checkins);
     ("last_tick_result", last_result_json);
+    ( "last_skip_reason",
+      match last_skip_reason with Some reason -> `String reason | None -> `Null );
     ("active_self_heartbeats", `List (List.map (fun n -> `String n) s.ls_active_self_heartbeats));
   ]
 

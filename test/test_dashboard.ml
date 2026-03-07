@@ -146,6 +146,7 @@ let test_lodge_status_json_has_runtime_fields () =
   Alcotest.(check bool) "quiet_active present" true (has_key "quiet_active");
   Alcotest.(check bool) "last_tick_ago_s present" true (has_key "last_tick_ago_s");
   Alcotest.(check bool) "last_tick_result present" true (has_key "last_tick_result");
+  Alcotest.(check bool) "last_skip_reason present" true (has_key "last_skip_reason");
   Alcotest.(check bool) "last_tick_ago string" true (member "last_tick_ago" json <> `Null)
 
 (* ===== Test Suite ===== *)

@@ -2186,6 +2186,10 @@ button.monitor-row.bad {
   line-height: 1.5;
 }
 
+.control-error-copy {
+  color: #ffb4b4;
+}
+
 .control-input,
 .control-textarea {
   width: 100%;
@@ -2294,6 +2298,119 @@ button.monitor-row.bad {
   margin-top: 8px;
   color: #bed1ed;
   font-size: 12px;
+}
+
+.keeper-status-console {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  background: rgba(2, 10, 24, 0.82);
+  color: #9ad8b6;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Fira Code", monospace;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.keeper-conversation-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.keeper-conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 180px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(138, 163, 211, 0.22);
+  background: rgba(5, 14, 31, 0.55);
+}
+
+.keeper-conversation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(138, 163, 211, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.keeper-conversation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.keeper-role-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  color: #d8e8ff;
+  background: rgba(138, 163, 211, 0.08);
+}
+
+.keeper-role-chip.assistant {
+  border-color: rgba(74, 222, 128, 0.3);
+  background: rgba(74, 222, 128, 0.12);
+  color: #baf2c9;
+}
+
+.keeper-role-chip.user {
+  border-color: rgba(71, 184, 255, 0.35);
+  background: rgba(71, 184, 255, 0.14);
+  color: #c9ebff;
+}
+
+.keeper-role-chip.warn {
+  border-color: rgba(251, 191, 36, 0.32);
+  background: rgba(251, 191, 36, 0.12);
+  color: #f9dd8f;
+}
+
+.keeper-role-chip.bad {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  color: #ffb4b4;
+}
+
+.keeper-conversation-time {
+  color: #8ca8d5;
+  font-size: 11px;
+}
+
+.keeper-conversation-text {
+  color: #dbe8fb;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  font-size: 12px;
+}
+
+.keeper-conversation-error {
+  color: #ffb4b4;
+  font-size: 12px;
+}
+
+.keeper-conversation-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .control-btn.ghost {
@@ -3543,6 +3660,19 @@ button.council-row.selected {
   color: var(--text-body);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.keeper-diagnostic-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.keeper-diagnostic-copy {
+  color: #9fb8e1;
+  font-size: 11px;
 }
 
 .goal-row-main {

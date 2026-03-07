@@ -35,6 +35,8 @@ let strict_action_enums =
     `String "team_task_inject";
     `String "team_stop";
     `String "keeper_message";
+    `String "keeper_probe";
+    `String "keeper_recover";
   ]
 
 let legacy_action_alias_enums =

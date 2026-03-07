@@ -174,6 +174,76 @@ export interface KeeperAutonomyInfo {
 
 // --- Keeper / Lodge ---
 
+export type KeeperHealthState = 'healthy' | 'idle' | 'stale' | 'degraded' | 'offline'
+
+export type KeeperQuietReason =
+  | 'quiet_hours'
+  | 'min_gap'
+  | 'no_recent_activity'
+  | 'disabled'
+  | 'startup'
+  | 'llm_error'
+  | 'graphql_error'
+  | 'never_started'
+  | 'unknown'
+
+export type KeeperNextActionPath =
+  | 'direct_message'
+  | 'manual_lodge_poke'
+  | 'probe'
+  | 'recover'
+
+export type KeeperReplyStatus =
+  | 'never'
+  | 'awaiting_reply'
+  | 'delivered'
+  | 'fresh'
+  | 'stale'
+  | 'error'
+  | 'unknown'
+
+export interface KeeperDiagnostic {
+  health_state: KeeperHealthState
+  quiet_reason?: KeeperQuietReason | null
+  next_action_path: KeeperNextActionPath
+  last_reply_status: KeeperReplyStatus
+  last_reply_at?: string | null
+  last_reply_preview?: string | null
+  last_error?: string | null
+  next_eligible_at_s?: number | null
+  recoverable?: boolean
+  summary?: string
+  keepalive_running?: boolean
+}
+
+export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
+
+export type KeeperConversationDelivery =
+  | 'history'
+  | 'sending'
+  | 'delivered'
+  | 'timeout'
+  | 'error'
+
+export interface KeeperConversationEntry {
+  id: string
+  role: KeeperConversationRole
+  label: string
+  text: string
+  timestamp?: string | null
+  delivery: KeeperConversationDelivery
+  error?: string | null
+}
+
+export interface KeeperStatusDetail {
+  name: string
+  diagnostic?: KeeperDiagnostic | null
+  history: KeeperConversationEntry[]
+  rawText: string
+  rawStatus?: unknown
+  loadedAt: string
+}
+
 export interface Keeper {
   name: string
   emoji?: string
@@ -185,6 +255,12 @@ export interface Keeper {
   active_model?: string
   next_model_hint?: string | null
   status: string
+  presence_keepalive?: boolean
+  presence_keepalive_sec?: number
+  keepalive_running?: boolean
+  proactive_enabled?: boolean
+  proactive_idle_sec?: number
+  proactive_cooldown_sec?: number
   // Autonomy fields (Phase 2)
   autonomy_level?: AutonomyLevel
   active_goal_ids?: string[]
@@ -229,6 +305,7 @@ export interface Keeper {
   handoff_count_total?: number
   compaction_count?: number
   last_compaction_saved_tokens?: number
+  diagnostic?: KeeperDiagnostic | null
   skill_primary?: string | null
   skill_secondary?: string[]
   skill_reason?: string | null
@@ -247,9 +324,13 @@ export interface Keeper {
   }
   agent?: {
     name?: string
+    exists?: boolean
+    error?: string
     status?: string
     current_task?: string | null
     last_seen?: string
+    last_seen_ago_s?: number
+    is_zombie?: boolean
     [key: string]: unknown
   }
   // Metrics time-series (from backend metrics_series)
@@ -503,6 +584,7 @@ export interface LodgeRuntimeStatus {
   last_tick_ago?: string
   total_ticks?: number
   total_checkins?: number
+  last_skip_reason?: string | null
   last_tick_result?: LodgeTickResult | null
   active_self_heartbeats?: string[]
 }
@@ -577,6 +659,20 @@ export interface OperatorActionDescriptor {
   confirm_required?: boolean
 }
 
+export interface KeeperProbeResult {
+  status?: unknown
+  diagnostic?: KeeperDiagnostic | null
+}
+
+export interface KeeperRecoverResult {
+  recovered: boolean
+  skipped_reason?: string | null
+  before?: KeeperDiagnostic | null
+  after?: KeeperDiagnostic | null
+  down?: unknown
+  up?: unknown
+}
+
 export interface OperatorSnapshot {
   room: OperatorRoomSnapshot
   sessions: OperatorSessionSnapshot[]
@@ -592,8 +688,14 @@ export type OperatorActionType =
   | 'room_resume'
   | 'lodge_tick'
   | 'team_turn'
+  | 'team_note'
+  | 'team_broadcast'
+  | 'team_task_inject'
   | 'team_stop'
   | 'keeper_msg'
+  | 'keeper_message'
+  | 'keeper_probe'
+  | 'keeper_recover'
   | 'task_inject'
 
 export type OperatorTargetType = 'room' | 'team_session' | 'keeper'

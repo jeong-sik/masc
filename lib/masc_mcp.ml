@@ -192,6 +192,7 @@ module Tool_llama = Tool_llama
 module Tool_board = Tool_board
 module Tool_command_plane = Tool_command_plane
 module Tool_lodge = Tool_lodge
+module Tool_mdal = Tool_mdal
 module Tool_notifications = Tool_notifications
 
 (* Lodge subsystem *)

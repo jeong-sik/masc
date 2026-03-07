@@ -5,7 +5,7 @@
 
 export interface Agent {
   name: string
-  status: 'active' | 'idle' | 'inactive' | 'offline'
+  status: 'active' | 'busy' | 'listening' | 'idle' | 'inactive' | 'offline'
   current_task: string | null
   context_ratio?: number
   last_seen?: string

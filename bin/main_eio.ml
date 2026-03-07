@@ -38,8 +38,10 @@ module Safe_ops = Masc_mcp.Safe_ops
 module Context_manager = Masc_mcp.Context_manager
 module Llm_client = Masc_mcp.Llm_client
 module Tool_perpetual = Masc_mcp.Tool_perpetual
+module Tool_mdal = Masc_mcp.Tool_mdal
 module Tool_board = Masc_mcp.Tool_board
 module Process_eio = Masc_mcp.Process_eio
+module Mdal = Masc_mcp.Mdal
 
 (** MCP Protocol Versions *)
 (* ============================================ *)
@@ -5131,6 +5133,127 @@ let perpetual_dashboard_json () : Yojson.Safe.t =
     ("total", `Int (List.length items));
   ]
 
+let mdal_status_string (status : [ `Running | `Completed | `Stopped | `Error of string ])
+    : string =
+  match status with
+  | `Running -> "running"
+  | `Completed -> "completed"
+  | `Stopped -> "stopped"
+  | `Error _ -> "error"
+
+let mdal_iteration_record_json (r : Mdal.iteration_record) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("iteration", `Int r.iteration);
+      ("metric_before", `Float r.metric_before);
+      ("metric_after", `Float r.metric_after);
+      ("delta", `Float r.delta);
+      ("changes", `String r.changes);
+      ("failed_attempts", `String r.failed_attempts);
+      ("next_suggestion", `String r.next_suggestion);
+      ("elapsed_ms", `Int r.elapsed_ms);
+      ("cost_usd", match r.cost_usd with Some c -> `Float c | None -> `Null);
+    ]
+
+let mdal_loop_json ~(history_limit : int) (state : Mdal.loop_state) : Yojson.Safe.t =
+  let current_metric =
+    match state.history with
+    | r :: _ -> r.metric_after
+    | [] -> state.baseline_metric
+  in
+  let history =
+    state.history
+    |> take history_limit
+    |> List.map mdal_iteration_record_json
+  in
+  let error_reason =
+    match state.status with
+    | `Error reason -> `String reason
+    | _ -> `Null
+  in
+  `Assoc
+    [
+      ("loop_id", `String state.loop_id);
+      ("status", `String (mdal_status_string state.status));
+      ("error_reason", error_reason);
+      ("profile", `String state.profile.name);
+      ("current_iteration", `Int state.current_iteration);
+      ("max_iterations", `Int state.profile.max_iterations);
+      ("baseline_metric", `Float state.baseline_metric);
+      ("current_metric", `Float current_metric);
+      ("target", `String state.profile.target);
+      ("stagnation_streak", `Int state.stagnation_streak);
+      ("stagnation_limit", `Int state.profile.stagnation_count);
+      ("elapsed_seconds", `Float (Masc_mcp.Time_compat.now () -. state.start_time));
+      ("start_time", `String (iso8601_of_unix state.start_time));
+      ("history", `List history);
+    ]
+
+let parse_mdal_status_filter (raw_opt : string option) : (string option, string) result =
+  match raw_opt with
+  | None -> Ok None
+  | Some raw ->
+      let normalized = String.trim raw |> String.lowercase_ascii in
+      if normalized = "" then Ok None
+      else if normalized = "running"
+           || normalized = "completed"
+           || normalized = "stopped"
+           || normalized = "error"
+      then Ok (Some normalized)
+      else
+        Error
+          (Printf.sprintf
+             "invalid status filter: %s (expected running|completed|stopped|error)"
+             raw)
+
+let mdal_loops_json (request : Httpun.Request.t) : (Yojson.Safe.t, string) result =
+  let limit = int_query_param request "limit" ~default:20 |> clamp ~min_v:1 ~max_v:100 in
+  let history_limit =
+    int_query_param request "history_limit" ~default:50 |> clamp ~min_v:0 ~max_v:500
+  in
+  match parse_mdal_status_filter (query_param request "status") with
+  | Error _ as e -> e
+  | Ok status_filter ->
+      let loops =
+        Hashtbl.fold
+          (fun _ (state : Mdal.loop_state) acc ->
+            let status = mdal_status_string state.status in
+            let matches =
+              match status_filter with
+              | None -> true
+              | Some expected -> String.equal expected status
+            in
+            if matches then state :: acc else acc)
+          Tool_mdal.active_loops []
+      in
+      let loops =
+        loops
+        |> List.sort (fun (a : Mdal.loop_state) (b : Mdal.loop_state) ->
+               let rank (s : Mdal.loop_state) =
+                 match s.status with
+                 | `Running -> 0
+                 | _ -> 1
+               in
+               let by_status = Int.compare (rank a) (rank b) in
+               if by_status <> 0 then by_status
+               else Float.compare b.start_time a.start_time)
+      in
+      let total = List.length loops in
+      let loops = take limit loops in
+      Ok
+        (`Assoc
+          [
+            ("loops", `List (List.map (mdal_loop_json ~history_limit) loops));
+            ("total", `Int total);
+            ("returned", `Int (List.length loops));
+            ("limit", `Int limit);
+            ("history_limit", `Int history_limit);
+            ("status", match status_filter with Some s -> `String s | None -> `Null);
+          ])
+
+let mdal_loops_error_json (msg : string) : Yojson.Safe.t =
+  `Assoc [ ("error", `String msg) ]
+
 let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
@@ -7634,6 +7757,15 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/mdal/loops" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         match mdal_loops_json req with
+         | Ok json -> Http.Response.json (Yojson.Safe.to_string json) reqd
+         | Error msg ->
+             Http.Response.json ~status:`Bad_request
+               (Yojson.Safe.to_string (mdal_loops_error_json msg)) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/command-plane" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = command_plane_snapshot_http_json ~state in
@@ -8910,6 +9042,15 @@ let run_server ~sw ~env ~port ~base_path =
           let compact = dashboard_compact_mode httpun_request in
           let json = dashboard_batch_json ~compact config in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/mdal/loops" ->
+          (match mdal_loops_json httpun_request with
+          | Ok json ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          | Error msg ->
+              h2_respond_json h2_reqd
+                (Yojson.Safe.to_string (mdal_loops_error_json msg))
+                ~status:`Bad_request ~extra_headers:cors)
 
       | `GET, "/api/v1/command-plane" ->
           let state = get_server_state () in

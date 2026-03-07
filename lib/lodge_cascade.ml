@@ -15,7 +15,7 @@ open Printf
 (* ---------- Types ---------- *)
 
 type cascade_slot = {
-  tool_name : string;    (* "glm", "ollama", "claude-cli" *)
+  tool_name : string;    (* "glm", "ollama", "llama", "claude-cli" *)
   model : string;        (* "glm-4.7", "glm-4.7-flash", "claude-sonnet-4-20250514" *)
   key_env : string option; (* env var name for api_key, e.g. "CLAUDE_CODE_OAUTH_TOKEN_anyang" *)
 }
@@ -85,7 +85,7 @@ let parse_cost_tiers (json : Yojson.Safe.t) : (string * int) list =
     List.filter_map (fun (k, v) ->
       match v with `Int n -> Some (k, n) | _ -> None
     ) pairs
-  | _ -> [("ollama", 0); ("glm", 1); ("claude-cli", 3)]
+  | _ -> [("ollama", 0); ("llama", 0); ("glm", 1); ("claude-cli", 3)]
 
 (** Parse per-cascade strategy from config *)
 let parse_strategy (json : Yojson.Safe.t) ~cascade_name : strategy =

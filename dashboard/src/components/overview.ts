@@ -159,6 +159,42 @@ function formatTokens(n: number | undefined | null): string {
   return String(n)
 }
 
+function quietReasonLabel(reason?: string | null): string {
+  switch (reason) {
+    case 'quiet_hours':
+      return 'quiet hours'
+    case 'min_gap':
+      return 'cooldown gate'
+    case 'no_recent_activity':
+      return 'waiting for activity'
+    case 'disabled':
+      return 'runtime disabled'
+    case 'startup':
+      return 'warming up'
+    case 'llm_error':
+      return 'llm error'
+    case 'graphql_error':
+      return 'graphql error'
+    case 'never_started':
+      return 'never started'
+    default:
+      return 'unknown'
+  }
+}
+
+function nextActionLabel(path?: string | null): string {
+  switch (path) {
+    case 'manual_lodge_poke':
+      return 'Poke Lodge'
+    case 'probe':
+      return 'Probe'
+    case 'recover':
+      return 'Recover'
+    default:
+      return 'Message'
+  }
+}
+
 function lodgeSummary(lodge: LodgeRuntimeStatus | null | undefined): string {
   if (!lodge) return 'Lodge runtime status is unavailable in the current dashboard payload.'
   if (!lodge.enabled) return 'Lodge automation is disabled.'
@@ -331,15 +367,37 @@ export function Overview() {
       const lifecycle = keeperLifecycles.value.get(keeper.name) ?? 'idle'
       const isStale = staleKeepers.value.has(keeper.name)
       const ratio = keeper.context_ratio ?? 0
+      const diagnostic = keeper.diagnostic ?? null
 
       let tone: MonitorTone = 'ok'
       let note = 'Healthy keeper'
-      if (isStale || keeper.status === 'offline' || lifecycle === 'handoff-imminent') {
+      if (
+        isStale
+        || keeper.status === 'offline'
+        || lifecycle === 'handoff-imminent'
+        || diagnostic?.health_state === 'offline'
+        || diagnostic?.health_state === 'degraded'
+      ) {
         tone = 'bad'
-        note = isStale ? 'Heartbeat stale' : lifecycle === 'handoff-imminent' ? 'Handoff imminent' : 'Keeper offline'
-      } else if (ratio >= HOT_KEEPER_RATIO || lifecycle === 'preparing' || lifecycle === 'compacting') {
+        note =
+          limitText(diagnostic?.summary, 56)
+          ?? (isStale
+            ? 'Heartbeat stale'
+            : lifecycle === 'handoff-imminent'
+              ? 'Handoff imminent'
+              : diagnostic?.health_state === 'degraded'
+                ? 'Keeper degraded'
+                : 'Keeper offline')
+      } else if (
+        diagnostic?.health_state === 'stale'
+        || ratio >= HOT_KEEPER_RATIO
+        || lifecycle === 'preparing'
+        || lifecycle === 'compacting'
+      ) {
         tone = 'warn'
-        note = ratio >= HOT_KEEPER_RATIO ? 'High context pressure' : `Lifecycle ${lifecycle}`
+        note =
+          limitText(diagnostic?.summary, 56)
+          ?? (ratio >= HOT_KEEPER_RATIO ? 'High context pressure' : `Lifecycle ${lifecycle}`)
       }
 
       return {
@@ -347,7 +405,8 @@ export function Overview() {
         tone,
         note,
         focus:
-          limitText(keeper.agent?.current_task)
+          limitText(diagnostic?.summary, 120)
+          ?? limitText(keeper.agent?.current_task)
           ?? keeper.skill_primary
           ?? keeper.last_proactive_reason
           ?? keeper.memory_recent_note
@@ -606,6 +665,9 @@ export function Overview() {
           ${status?.tempo ? `Tempo ${status.tempo}` : 'Tempo unavailable'}${status?.tempo_interval_s != null ? ` · ${status.tempo_interval_s}s interval` : ''}
         </div>
         <div class="overview-inline-note">${lodgeSummary(status?.lodge)}</div>
+        ${status?.lodge?.last_skip_reason
+          ? html`<div class="overview-inline-note">Last Lodge skip: ${status.lodge.last_skip_reason}</div>`
+          : null}
       </div>
     <//>
 
@@ -689,11 +751,16 @@ export function Overview() {
                   key=${row.keeper.name}
                   tone=${row.tone}
                   title=${row.keeper.name}
-                  subtitle=${row.note}
+                  subtitle=${row.keeper.diagnostic?.health_state
+                    ? `${row.note} · ${row.keeper.diagnostic.health_state}`
+                    : row.note}
                   meta=${[
                     row.timestamp ? `Heartbeat ${new Date(row.timestamp).toLocaleTimeString()}` : 'No heartbeat',
                     `Context ${typeof row.keeper.context_ratio === 'number' ? Math.round(row.keeper.context_ratio * 100) : 0}%`,
-                    row.keeper.model ?? 'model n/a',
+                    row.keeper.model ? `Model ${row.keeper.model}` : 'model n/a',
+                    row.keeper.diagnostic
+                      ? `${quietReasonLabel(row.keeper.diagnostic.quiet_reason)} · next ${nextActionLabel(row.keeper.diagnostic.next_action_path)} · reply ${row.keeper.diagnostic.last_reply_status}`
+                      : 'Diagnostic unavailable',
                   ]}
                   focus=${row.focus}
                   onClick=${() => openKeeperDetail(row.keeper)}
@@ -754,7 +821,7 @@ export function Overview() {
               : 'Perpetual runtime unavailable'}
           </div>
           <div class="overview-inline-note">
-            Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}
+            Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}${status?.lodge?.last_skip_reason ? ` · Skip ${status.lodge.last_skip_reason}` : ''}
           </div>
           <div class="overview-inline-note">
             ${keeperList.length > 0

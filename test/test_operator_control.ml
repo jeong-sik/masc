@@ -378,7 +378,7 @@ let test_confirm_rejects_expired_token () =
           Alcotest.(check string) "expired error"
             "pending confirmation expired" err)
 
-let test_snapshot_exposes_lodge_tick_action () =
+let test_snapshot_exposes_keeper_and_lodge_actions () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -393,19 +393,37 @@ let test_snapshot_exposes_lodge_tick_action () =
         |> Yojson.Safe.Util.member "available_actions"
         |> Yojson.Safe.Util.to_list
       in
-      let lodge_tick =
+      let find_action action_type =
         List.find_opt
           (fun row ->
-            Yojson.Safe.Util.(row |> member "action_type" |> to_string = "lodge_tick"))
+            Yojson.Safe.Util.(row |> member "action_type" |> to_string = action_type))
           available_actions
       in
-      match lodge_tick with
+      match find_action "lodge_tick" with
       | None -> Alcotest.fail "expected lodge_tick in available_actions"
       | Some row ->
           Alcotest.(check string) "target_type" "room"
             Yojson.Safe.Util.(row |> member "target_type" |> to_string);
           Alcotest.(check bool) "confirm_required false" false
-            Yojson.Safe.Util.(row |> member "confirm_required" |> to_bool))
+            Yojson.Safe.Util.(row |> member "confirm_required" |> to_bool);
+          let keeper_probe =
+            match find_action "keeper_probe" with
+            | Some row -> row
+            | None -> Alcotest.fail "expected keeper_probe in available_actions"
+          in
+          Alcotest.(check string) "keeper_probe target_type" "keeper"
+            Yojson.Safe.Util.(keeper_probe |> member "target_type" |> to_string);
+          Alcotest.(check bool) "keeper_probe confirm false" false
+            Yojson.Safe.Util.(keeper_probe |> member "confirm_required" |> to_bool);
+          let keeper_recover =
+            match find_action "keeper_recover" with
+            | Some row -> row
+            | None -> Alcotest.fail "expected keeper_recover in available_actions"
+          in
+          Alcotest.(check string) "keeper_recover target_type" "keeper"
+            Yojson.Safe.Util.(keeper_recover |> member "target_type" |> to_string);
+          Alcotest.(check bool) "keeper_recover confirm false" false
+            Yojson.Safe.Util.(keeper_recover |> member "confirm_required" |> to_bool))
 
 let test_select_checkin_agents_manual_override_quiet_hours () =
   let current_hour = Lodge_heartbeat.current_hour_kst () in
@@ -461,8 +479,8 @@ let () =
             test_team_broadcast_records_event;
           Alcotest.test_case "team task inject confirm flow" `Quick
             test_team_task_inject_requires_confirm_then_executes;
-          Alcotest.test_case "snapshot exposes lodge tick action" `Quick
-            test_snapshot_exposes_lodge_tick_action;
+          Alcotest.test_case "snapshot exposes keeper and lodge actions" `Quick
+            test_snapshot_exposes_keeper_and_lodge_actions;
           Alcotest.test_case "manual selection overrides quiet hours" `Quick
             test_select_checkin_agents_manual_override_quiet_hours;
           Alcotest.test_case "expired confirmation rejected" `Quick

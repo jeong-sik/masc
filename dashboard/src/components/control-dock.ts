@@ -10,21 +10,22 @@ import {
   runOperatorAction,
   sendAgentHeartbeat,
   sendBroadcast,
-  sendKeeperMessage,
 } from '../api'
+import {
+  activeKeeperName,
+  normalizeLodgeTickResult,
+  selectKeeper,
+} from '../keeper-runtime'
 import { invalidateDashboardCache, keepers, refreshDashboard, serverStatus } from '../store'
-import type { LodgeCheckinResult, LodgeRuntimeStatus, LodgeTickResult } from '../types'
+import type { Keeper, LodgeRuntimeStatus, LodgeTickResult } from '../types'
 import { showToast } from './common/toast'
+import {
+  KeeperConversationPanel,
+  KeeperDiagnosticSummary,
+  KeeperRuntimeActions,
+} from './keeper-shared'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
-
-type KeeperTranscript = {
-  keeper: string
-  prompt: string
-  reply: string
-  isError: boolean
-  at: string
-}
 
 function defaultAgentName(): string {
   const q = new URLSearchParams(window.location.search)
@@ -37,9 +38,6 @@ const agentName = signal(defaultAgentName())
 const message = signal('')
 const taskTitle = signal('')
 const taskDesc = signal('')
-const selectedKeeperName = signal('')
-const keeperPrompt = signal('')
-const keeperTranscript = signal<KeeperTranscript | null>(null)
 const pokeResult = signal<LodgeTickResult | null>(null)
 const pokeError = signal<string | null>(null)
 const sending = signal(false)
@@ -47,78 +45,8 @@ const creatingTask = signal(false)
 const joining = signal(false)
 const leaving = signal(false)
 const pinging = signal(false)
-const keeperSending = signal(false)
 const poking = signal(false)
 const joined = signal(false)
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
-}
-
-function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map(item => asString(item))
-    .filter((item): item is string => Boolean(item))
-}
-
-function normalizeCheckin(raw: unknown): LodgeCheckinResult | null {
-  if (!isRecord(raw)) return null
-  const name = asString(raw.name)
-  if (!name) return null
-  return {
-    name,
-    trigger: asString(raw.trigger),
-    outcome: asString(raw.outcome),
-    summary: asString(raw.summary),
-    reason: asString(raw.reason),
-  }
-}
-
-function normalizeNameRows(raw: unknown, key: 'summary' | 'reason'): Array<{ name: string; summary?: string; reason?: string }> {
-  if (!Array.isArray(raw)) return []
-  const rows: Array<{ name: string; summary?: string; reason?: string }> = []
-  for (const item of raw) {
-    if (!isRecord(item)) continue
-    const name = asString(item.name)
-    if (!name) continue
-    const detail = asString(item[key])
-    if (key === 'summary') rows.push({ name, summary: detail })
-    else rows.push({ name, reason: detail })
-  }
-  return rows
-}
-
-function normalizeLodgeTickResult(raw: unknown): LodgeTickResult | null {
-  if (!isRecord(raw)) return null
-  return {
-    hour: asNumber(raw.hour),
-    checked: asNumber(raw.checked) ?? 0,
-    acted: asNumber(raw.acted) ?? 0,
-    acted_names: asStringArray(raw.acted_names),
-    activity_report: asString(raw.activity_report),
-    quiet_hours_overridden: asBoolean(raw.quiet_hours_overridden),
-    skipped_reason: asString(raw.skipped_reason),
-    acted_rows: normalizeNameRows(raw.acted_rows, 'summary').map(row => ({ name: row.name, summary: row.summary })),
-    passed_rows: normalizeNameRows(raw.passed_rows, 'reason').map(row => ({ name: row.name, reason: row.reason })),
-    skipped_rows: normalizeNameRows(raw.skipped_rows, 'reason').map(row => ({ name: row.name, reason: row.reason })),
-    checkins: Array.isArray(raw.checkins)
-      ? raw.checkins.map(normalizeCheckin).filter((row): row is LodgeCheckinResult => row !== null)
-      : [],
-  }
-}
 
 function formatHour(hour?: number | null): string {
   if (typeof hour !== 'number' || !Number.isFinite(hour)) return '??:00'
@@ -147,6 +75,9 @@ function describeLodgeStatus(lodge: LodgeRuntimeStatus | null | undefined): stri
   }
   if (lodge.last_tick_ago_s == null) {
     return `Lodge is enabled and scheduled every ${formatInterval(lodge.interval_s)}, but no tick has run yet in this runtime.`
+  }
+  if (lodge.last_skip_reason) {
+    return `Lodge last skipped work because ${lodge.last_skip_reason}. Scheduled ticks still run every ${formatInterval(lodge.interval_s)}.`
   }
   return `Lodge ticks every ${formatInterval(lodge.interval_s)}. Planner is ${lodge.use_planner ? 'on' : 'off'} and delegated LLM is ${lodge.delegate_llm ? 'on' : 'off'}.`
 }
@@ -277,43 +208,6 @@ async function submitTask() {
   }
 }
 
-async function submitKeeperDirectMessage() {
-  const keeper = selectedKeeperName.value.trim()
-  const prompt = keeperPrompt.value.trim()
-  if (!keeper) {
-    showToast('Select a keeper first', 'warning')
-    return
-  }
-  if (!prompt) return
-  keeperSending.value = true
-  try {
-    const reply = await sendKeeperMessage(keeper, prompt)
-    keeperTranscript.value = {
-      keeper,
-      prompt,
-      reply: reply.trim() || '(empty reply)',
-      isError: false,
-      at: new Date().toISOString(),
-    }
-    keeperPrompt.value = ''
-    await refreshDashboardState()
-    showToast(`Reply received from ${keeper}`, 'success')
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : `Failed to send direct message to ${keeper}`
-    keeperTranscript.value = {
-      keeper,
-      prompt,
-      reply: message,
-      isError: true,
-      at: new Date().toISOString(),
-    }
-    showToast(message, 'error')
-  } finally {
-    keeperSending.value = false
-  }
-}
-
 async function submitLodgePoke() {
   const actor = agentName.value.trim() || 'dashboard'
   poking.value = true
@@ -337,32 +231,12 @@ async function submitLodgePoke() {
       )
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to run Lodge poke'
-    pokeError.value = message
-    showToast(message, 'error')
+    const text = err instanceof Error ? err.message : 'Failed to run Lodge poke'
+    pokeError.value = text
+    showToast(text, 'error')
   } finally {
     poking.value = false
   }
-}
-
-function KeeperTranscriptBox() {
-  const transcript = keeperTranscript.value
-  if (!transcript) {
-    return html`<div class="control-status-copy">No direct keeper response yet.</div>`
-  }
-
-  return html`
-    <div class=${`control-transcript ${transcript.isError ? 'is-error' : 'is-success'}`}>
-      <div class="control-transcript-meta">
-        <span>Keeper: ${transcript.keeper}</span>
-        <span>${new Date(transcript.at).toLocaleTimeString()}</span>
-      </div>
-      <div class="control-transcript-label">Prompt</div>
-      <pre class="control-transcript-text">${transcript.prompt}</pre>
-      <div class="control-transcript-label">${transcript.isError ? 'Error' : 'Reply'}</div>
-      <pre class="control-transcript-text">${transcript.reply}</pre>
-    </div>
-  `
 }
 
 function LodgeResultBox({ runtime }: { runtime: LodgeRuntimeStatus | null | undefined }) {
@@ -384,15 +258,9 @@ function LodgeResultBox({ runtime }: { runtime: LodgeRuntimeStatus | null | unde
         <span class="pill">${result.acted} acted</span>
         ${result.quiet_hours_overridden ? html`<span class="pill">quiet hours bypassed</span>` : null}
       </div>
-      <div class="control-status-copy">
-        Last acted: ${formatActedNames(result.acted_names)}
-      </div>
-      ${result.skipped_reason
-        ? html`<div class="control-status-copy">${result.skipped_reason}</div>`
-        : null}
-      ${result.activity_report
-        ? html`<pre class="control-transcript-text">${result.activity_report}</pre>`
-        : null}
+      <div class="control-status-copy">Last acted: ${formatActedNames(result.acted_names)}</div>
+      ${result.skipped_reason ? html`<div class="control-status-copy">${result.skipped_reason}</div>` : null}
+      ${result.activity_report ? html`<pre class="control-transcript-text">${result.activity_report}</pre>` : null}
       ${topSkips.length > 0
         ? html`
             <div class="control-result-list">
@@ -411,24 +279,30 @@ function LodgeResultBox({ runtime }: { runtime: LodgeRuntimeStatus | null | unde
   `
 }
 
+function currentKeeperSelection(keeperOptions: Keeper[]): Keeper | null {
+  const byActive = keeperOptions.find(keeper => keeper.name === activeKeeperName.value)
+  return byActive ?? keeperOptions[0] ?? null
+}
+
 export function ControlDock() {
-  const keeperOptions = keepers.value.map(keeper => keeper.name)
+  const keeperOptions = keepers.value
   const lodge = serverStatus.value?.lodge ?? null
+  const selectedKeeper = currentKeeperSelection(keeperOptions)
 
   useEffect(() => {
     void joinRoom()
   }, [])
 
   useEffect(() => {
-    const firstKeeper = keeperOptions[0] ?? ''
-    if (!selectedKeeperName.value && firstKeeper) {
-      selectedKeeperName.value = firstKeeper
+    const firstKeeper = keeperOptions[0]?.name ?? ''
+    if (!activeKeeperName.value && firstKeeper) {
+      selectKeeper(firstKeeper)
       return
     }
-    if (selectedKeeperName.value && !keeperOptions.includes(selectedKeeperName.value)) {
-      selectedKeeperName.value = firstKeeper
+    if (activeKeeperName.value && !keeperOptions.some(keeper => keeper.name === activeKeeperName.value)) {
+      selectKeeper(firstKeeper)
     }
-  }, [keeperOptions.join('|')])
+  }, [keeperOptions.map(keeper => keeper.name).join('|')])
 
   return html`
     <section class="rail-card control-dock">
@@ -496,12 +370,12 @@ export function ControlDock() {
             placeholder="@agent or room-wide update"
             value=${message.value}
             onInput=${(e: Event) => { message.value = (e.target as HTMLInputElement).value }}
-            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') submitBroadcast() }}
+            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitBroadcast() }}
             disabled=${sending.value}
           />
           <button
             class="control-btn"
-            onClick=${submitBroadcast}
+            onClick=${() => { void submitBroadcast() }}
             disabled=${sending.value || message.value.trim() === '' || agentName.value.trim() === ''}
           >
             ${sending.value ? 'Sending...' : 'Send'}
@@ -512,41 +386,32 @@ export function ControlDock() {
       <div class="control-section">
         <div class="control-section-head">
           <h4>Keeper Direct Message</h4>
-          <p class="control-help">This sends a 1:1 message through <code>masc_keeper_msg</code> and keeps the actual reply in the dock so you can see whether the keeper answered.</p>
+          <p class="control-help">This sends a 1:1 message through <code>masc_keeper_msg</code> and keeps the actual reply thread in the dock so you can see whether the keeper answered.</p>
         </div>
 
         <label class="control-label" for="dock-keeper">Keeper</label>
         <select
           id="dock-keeper"
           class="control-input"
-          value=${selectedKeeperName.value}
-          onInput=${(e: Event) => { selectedKeeperName.value = (e.target as HTMLSelectElement).value }}
-          disabled=${keeperOptions.length === 0 || keeperSending.value}
+          value=${selectedKeeper?.name ?? ''}
+          onInput=${(e: Event) => { selectKeeper((e.target as HTMLSelectElement).value) }}
+          disabled=${keeperOptions.length === 0}
         >
           ${keeperOptions.length === 0
             ? html`<option value="">No keepers available</option>`
-            : keeperOptions.map(name => html`<option value=${name}>${name}</option>`)}
+            : keeperOptions.map(keeper => html`<option value=${keeper.name}>${keeper.name}</option>`)}
         </select>
 
-        <textarea
-          class="control-textarea"
+        <${KeeperDiagnosticSummary} keeper=${selectedKeeper} />
+        <${KeeperRuntimeActions}
+          actor=${agentName.value.trim() || 'dashboard'}
+          keeper=${selectedKeeper}
+          onPokeLodge=${() => { void submitLodgePoke() }}
+        />
+        <${KeeperConversationPanel}
+          keeperName=${selectedKeeper?.name ?? ''}
           placeholder=${keeperOptions.length === 0 ? 'No keeper is active yet' : 'Direct prompt for the selected keeper'}
-          value=${keeperPrompt.value}
-          onInput=${(e: Event) => { keeperPrompt.value = (e.target as HTMLTextAreaElement).value }}
-          disabled=${keeperOptions.length === 0 || keeperSending.value}
-        ></textarea>
-
-        <div class="control-actions">
-          <button
-            class="control-btn"
-            onClick=${() => { void submitKeeperDirectMessage() }}
-            disabled=${keeperSending.value || keeperPrompt.value.trim() === '' || selectedKeeperName.value.trim() === ''}
-          >
-            ${keeperSending.value ? 'Waiting...' : 'Send Direct Message'}
-          </button>
-        </div>
-
-        <${KeeperTranscriptBox} />
+        />
       </div>
 
       <div class="control-section">
@@ -567,6 +432,9 @@ export function ControlDock() {
         <div class="control-status-copy">
           Last tick: ${lodge?.last_tick_ago ?? 'never'} · Total ticks: ${lodge?.total_ticks ?? 0} · Last acted: ${formatActedNames(lodge?.last_tick_result?.acted_names)}
         </div>
+        ${lodge?.last_skip_reason
+          ? html`<div class="control-status-copy">Last skip reason: ${lodge.last_skip_reason}</div>`
+          : null}
 
         <div class="control-actions">
           <button
@@ -605,7 +473,7 @@ export function ControlDock() {
         ></textarea>
         <button
           class="control-btn secondary"
-          onClick=${submitTask}
+          onClick=${() => { void submitTask() }}
           disabled=${creatingTask.value || taskTitle.value.trim() === ''}
         >
           ${creatingTask.value ? 'Creating...' : 'Create Task'}

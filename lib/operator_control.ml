@@ -357,6 +357,20 @@ let available_actions_json =
           ("description", `String "Use this when you need to send a direct operator message to a keeper.");
           ("confirm_required", `Bool false);
         ];
+      `Assoc
+        [
+          ("action_type", `String "keeper_probe");
+          ("target_type", `String "keeper");
+          ("description", `String "Use this when you need an immediate keeper diagnostic snapshot with health, silence reason, and next suggested action.");
+          ("confirm_required", `Bool false);
+        ];
+      `Assoc
+        [
+          ("action_type", `String "keeper_recover");
+          ("target_type", `String "keeper");
+          ("description", `String "Use this when a keeper is stale, degraded, or offline and you need a safe down/up recovery with before-and-after diagnostics.");
+          ("confirm_required", `Bool false);
+        ];
     ]
 
 let recent_messages_json config =
@@ -557,13 +571,15 @@ let canonical_action_type action_type =
   | "team_task_inject" -> "team_task_inject"
   | "keeper_msg" -> "keeper_message"
   | "keeper_message" -> "keeper_message"
+  | "keeper_probe" -> "keeper_probe"
+  | "keeper_recover" -> "keeper_recover"
   | other -> other
 
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "room_pause" | "room_resume" | "task_inject" | "lodge_tick" -> "room"
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" | "team_stop" -> "team_session"
-  | "keeper_message" -> "keeper"
+  | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | _ -> ""
 
 let generate_confirm_token config =
@@ -613,6 +629,8 @@ let delegated_tool_for action_type =
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" -> "masc_team_session_turn"
   | "team_stop" -> "masc_team_session_stop"
   | "keeper_message" -> "masc_keeper_msg"
+  | "keeper_probe" -> "masc_keeper_status"
+  | "keeper_recover" -> "masc_keeper_recover"
   | "task_inject" -> "masc_add_task"
   | _ -> "unknown"
 
@@ -732,6 +750,37 @@ let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
       ("skipped_rows", `List skipped);
       ("checkins", `List (List.map checkin_json result.checkins));
     ]
+
+let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
+  { config = ctx.config; sw = ctx.sw; clock = ctx.clock }
+
+let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
+  match Tool_keeper.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
+  | Some (true, body) -> Ok (json_of_dispatch_output body)
+  | Some (false, err) -> Error err
+  | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
+
+let keeper_diagnostic_health_state json =
+  match U.member "health_state" json with
+  | `String value -> Some (String.lowercase_ascii value)
+  | _ -> None
+
+let keeper_diagnostic_recoverable json =
+  match U.member "recoverable" json with
+  | `Bool value -> value
+  | _ -> false
+
+let keeper_recovery_outcome after_diagnostic =
+  match keeper_diagnostic_health_state after_diagnostic with
+  | Some ("healthy" | "idle") when not (keeper_diagnostic_recoverable after_diagnostic) ->
+      (true, None)
+  | Some state ->
+      ( false,
+        Some
+          (Printf.sprintf
+             "keeper remained %s after recovery attempt"
+             state) )
+  | None -> (false, Some "keeper recovery did not return a health_state")
 
 let resolve_team_turn_actor config ~requested_actor ~session_id =
   match Team_session_store.load_session config session_id with
@@ -917,6 +966,119 @@ let execute_action (ctx : 'a context) (request : action_request) :
             ("delegated_tool", `String "masc_team_session_stop");
             ("result", result);
           ])
+  | "keeper_probe" ->
+      let* () = validate_target_type "keeper" request in
+      let* name = require_target_id request in
+      let status_args =
+        `Assoc
+          [
+            ("name", `String name);
+            ("fast", `Bool false);
+            ("include_context", `Bool false);
+            ("include_metrics_overview", `Bool true);
+            ("include_memory_bank", `Bool false);
+            ("include_history_tail", `Bool false);
+            ("include_compaction_history", `Bool false);
+          ]
+      in
+      let* status_json =
+        dispatch_keeper_json ctx ~tool_name:"masc_keeper_status" ~args:status_args
+      in
+      let diagnostic =
+        match U.member "diagnostic" status_json with
+        | `Assoc _ as json -> json
+        | _ -> `Null
+      in
+      Ok
+        (`Assoc
+          [
+            ("delegated_tool", `String "masc_keeper_status");
+            ( "result",
+              `Assoc
+                [
+                  ("status", status_json);
+                  ("diagnostic", diagnostic);
+                ] );
+          ])
+  | "keeper_recover" ->
+      let* () = validate_target_type "keeper" request in
+      let* name = require_target_id request in
+      let status_args =
+        `Assoc
+          [
+            ("name", `String name);
+            ("fast", `Bool false);
+            ("include_context", `Bool false);
+            ("include_metrics_overview", `Bool true);
+            ("include_memory_bank", `Bool false);
+            ("include_history_tail", `Bool false);
+            ("include_compaction_history", `Bool false);
+          ]
+      in
+      let* before_status =
+        dispatch_keeper_json ctx ~tool_name:"masc_keeper_status" ~args:status_args
+      in
+      let before_diagnostic =
+        match U.member "diagnostic" before_status with
+        | `Assoc _ as json -> json
+        | _ -> `Null
+      in
+      let recoverable =
+        match U.member "recoverable" before_diagnostic with
+        | `Bool value -> value
+        | _ -> false
+      in
+      if not recoverable then
+        Ok
+          (`Assoc
+            [
+              ("delegated_tool", `String "masc_keeper_recover");
+              ( "result",
+                `Assoc
+                  [
+                    ("recovered", `Bool false);
+                    ("skipped_reason", `String "keeper is already healthy enough; recovery not required");
+                    ("before", before_diagnostic);
+                  ] );
+            ])
+      else
+        let* down_result =
+          dispatch_keeper_json ctx ~tool_name:"masc_keeper_down"
+            ~args:(`Assoc [ ("name", `String name) ])
+        in
+        let* up_result =
+          dispatch_keeper_json ctx ~tool_name:"masc_keeper_up"
+            ~args:(`Assoc [ ("name", `String name) ])
+        in
+        let* after_status =
+          dispatch_keeper_json ctx ~tool_name:"masc_keeper_status" ~args:status_args
+        in
+        let after_diagnostic =
+          match U.member "diagnostic" after_status with
+          | `Assoc _ as json -> json
+          | _ -> `Null
+        in
+        let recovered, skipped_reason =
+          keeper_recovery_outcome after_diagnostic
+        in
+        Ok
+          (`Assoc
+            [
+              ("delegated_tool", `String "masc_keeper_recover");
+              ( "result",
+                `Assoc
+                  [
+                    ("recovered", `Bool recovered);
+                    ( "skipped_reason",
+                      match skipped_reason with
+                      | Some reason -> `String reason
+                      | None -> `Null );
+                    ("before", before_diagnostic);
+                    ("after", after_diagnostic);
+                    ("down", down_result);
+                    ("up", up_result);
+                  ] );
+            ])
   | "keeper_message" ->
       let* () = validate_target_type "keeper" request in
       let* name = require_target_id request in
@@ -976,7 +1138,7 @@ let validate_request request =
   | "broadcast" | "room_pause" | "room_resume" | "lodge_tick"
   | "team_turn" | "team_note"
   | "team_broadcast" | "team_task_inject" | "team_stop"
-  | "keeper_message" | "task_inject" ->
+  | "keeper_message" | "keeper_probe" | "keeper_recover" | "task_inject" ->
       Ok ()
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)

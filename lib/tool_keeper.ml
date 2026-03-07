@@ -4870,6 +4870,236 @@ let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Sa
            ("is_zombie", `Bool (Room.is_zombie_agent agent.last_seen));
          ])
 
+let json_string_opt key json =
+  match Yojson.Safe.Util.member key json with
+  | `String s ->
+      let trimmed = String.trim s in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let json_bool key json default =
+  match Yojson.Safe.Util.member key json with
+  | `Bool value -> value
+  | _ -> default
+
+let json_float_opt key json =
+  match Yojson.Safe.Util.member key json with
+  | `Float value -> Some value
+  | `Int value -> Some (float_of_int value)
+  | _ -> None
+
+let string_contains_ci haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  needle <> "" && contains_ci haystack needle
+
+let quiet_hours_active () =
+  let current_hour = Lodge_heartbeat.current_hour_kst () in
+  let quiet_start = Env_config.LodgeV2.quiet_start in
+  let quiet_end = Env_config.LodgeV2.quiet_end in
+  quiet_start < quiet_end
+  && current_hour >= quiet_start
+  && current_hour < quiet_end
+
+let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
+  let open Yojson.Safe.Util in
+  let normalize_content item =
+    match json_string_opt "content" item with
+    | Some value -> value
+    | None -> Option.value ~default:"" (json_string_opt "preview" item)
+  in
+  let update_last role ts content ((last_user, last_assistant) as acc) =
+    let role = String.lowercase_ascii role in
+    if role = "user" then
+      (Some (ts, content), last_assistant)
+    else if role = "assistant" then
+      (last_user, Some (ts, content))
+    else
+      acc
+  in
+  let (last_user, last_assistant) =
+    List.fold_left
+      (fun acc item ->
+        match item with
+        | `Assoc _ ->
+            let role = item |> member "role" |> to_string_option in
+            let ts_unix =
+              match json_float_opt "ts_unix" item with
+              | Some ts when ts > 0.0 -> Some ts
+              | _ -> json_float_opt "timestamp" item
+            in
+            let content = normalize_content item in
+            (match role, ts_unix with
+             | Some role, Some ts -> update_last role ts content acc
+             | _ -> acc)
+        | _ -> acc)
+      (None, None)
+      history_items
+  in
+  match last_user, last_assistant with
+  | None, None ->
+      (`String "never", `Null, `Null)
+  | Some (user_ts, _), Some (assistant_ts, preview) when assistant_ts >= user_ts ->
+      (`String "delivered", `Float assistant_ts, `String preview)
+  | Some _, Some (assistant_ts, preview) ->
+      (`String "delivered", `Float assistant_ts, `String preview)
+  | Some _, None ->
+      (`String "awaiting_reply", `Null, `Null)
+  | None, Some (assistant_ts, preview) ->
+      (`String "delivered", `Float assistant_ts, `String preview)
+
+let keeper_error_hint ~agent_status ~meta =
+  let agent_error = json_string_opt "error" agent_status in
+  let proactive_reason =
+    let reason = String.trim meta.last_proactive_reason in
+    if reason = "" then None else Some reason
+  in
+  let drift_reason =
+    let reason = String.trim meta.last_drift_reason in
+    if reason = "" then None else Some reason
+  in
+  let looks_error_like text =
+    List.exists (string_contains_ci text)
+      [ "error"; "failed"; "timeout"; "graphql"; "llm"; "model"; "ollama"; "gemini"; "openai" ]
+  in
+  match agent_error with
+  | Some _ as error -> error
+  | None ->
+      (match proactive_reason with
+       | Some reason when looks_error_like reason -> Some reason
+       | _ ->
+           match drift_reason with
+           | Some reason when looks_error_like reason -> Some reason
+           | _ -> None)
+
+let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts =
+  let quiet_active = quiet_hours_active () in
+  let agent_exists = json_bool "exists" agent_status false in
+  let agent_status_text =
+    json_string_opt "status" agent_status
+    |> Option.value ~default:"unknown"
+    |> String.lowercase_ascii
+  in
+  let error_hint = keeper_error_hint ~agent_status ~meta in
+  if not keepalive_running || not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive" then
+    Some "disabled"
+  else if meta.total_turns = 0 && meta.proactive_count_total = 0 then
+    let keeper_age_s =
+      match Resilience.Time.parse_iso8601_opt meta.created_at with
+      | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
+      | _ -> 0.0
+    in
+    if keeper_age_s <= 120.0 then Some "startup" else Some "never_started"
+  else if quiet_active then
+    Some "quiet_hours"
+  else
+    match error_hint with
+    | Some reason when string_contains_ci reason "graphql" -> Some "graphql_error"
+    | Some reason
+      when List.exists (string_contains_ci reason)
+             [ "llm"; "model"; "timeout"; "ollama"; "gemini"; "openai" ] ->
+        Some "llm_error"
+    | Some _ -> Some "unknown"
+    | None ->
+        let last_turn_ago_s =
+          if meta.last_turn_ts <= 0.0 then None else Some (max 0.0 (now_ts -. meta.last_turn_ts))
+        in
+        let last_proactive_ago_s =
+          if meta.last_proactive_ts <= 0.0 then None
+          else Some (max 0.0 (now_ts -. meta.last_proactive_ts))
+        in
+        if meta.proactive_enabled then
+          match last_proactive_ago_s with
+          | Some age when age < float_of_int meta.proactive_cooldown_sec -> Some "min_gap"
+          | _ ->
+              (match last_turn_ago_s with
+               | Some age when age < float_of_int meta.proactive_idle_sec -> Some "no_recent_activity"
+               | _ -> None)
+        else
+          None
+
+let keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts =
+  let agent_exists = json_bool "exists" agent_status false in
+  let agent_status_text =
+    json_string_opt "status" agent_status
+    |> Option.value ~default:"unknown"
+    |> String.lowercase_ascii
+  in
+  let last_seen_ago_s = json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float in
+  let is_zombie = json_bool "is_zombie" agent_status false in
+  let stale_threshold_s =
+    float_of_int (max 120 (meta.presence_keepalive_sec * 4))
+  in
+  let last_turn_ago_s =
+    if meta.last_turn_ts <= 0.0 then max_float else max 0.0 (now_ts -. meta.last_turn_ts)
+  in
+  if not keepalive_running || not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive" then
+    "offline"
+  else if is_zombie || last_seen_ago_s > stale_threshold_s then
+    "stale"
+  else
+    match quiet_reason with
+    | Some "graphql_error" | Some "llm_error" -> "degraded"
+    | _ ->
+        if meta.total_turns = 0 && meta.proactive_count_total = 0 then
+          "idle"
+        else if last_turn_ago_s > float_of_int (max meta.proactive_idle_sec 900) then
+          "idle"
+        else
+          "healthy"
+
+let keeper_next_action_path ~health_state ~quiet_reason =
+  match health_state with
+  | "offline" | "stale" | "degraded" -> "recover"
+  | _ ->
+      (match quiet_reason with
+       | Some "quiet_hours" -> "manual_lodge_poke"
+       | Some "graphql_error" | Some "llm_error" | Some "startup" | Some "unknown" -> "probe"
+       | Some "disabled" -> "recover"
+       | _ -> "direct_message")
+
+let keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts =
+  match quiet_reason with
+  | Some "min_gap" when meta.last_proactive_ts > 0.0 ->
+      let remaining =
+        float_of_int meta.proactive_cooldown_sec -. (now_ts -. meta.last_proactive_ts)
+      in
+      if remaining > 0.0 then `Float remaining else `Null
+  | _ -> `Null
+
+let keeper_diagnostic_json
+    ~(meta : keeper_meta)
+    ~(agent_status : Yojson.Safe.t)
+    ~(keepalive_running : bool)
+    ~(history_items : Yojson.Safe.t list)
+    ~(now_ts : float) : Yojson.Safe.t =
+  let quiet_reason = classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts in
+  let health_state =
+    keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts
+  in
+  let next_action_path = keeper_next_action_path ~health_state ~quiet_reason in
+  let (last_reply_status, last_reply_at, last_reply_preview) =
+    keeper_reply_snapshot_of_history history_items
+  in
+  let last_error =
+    match keeper_error_hint ~agent_status ~meta with
+    | Some reason -> `String reason
+    | None -> `Null
+  in
+  `Assoc
+    [
+      ("health_state", `String health_state);
+      ( "quiet_reason",
+        match quiet_reason with Some reason -> `String reason | None -> `Null );
+      ("next_action_path", `String next_action_path);
+      ("last_reply_status", last_reply_status);
+      ("last_reply_at", last_reply_at);
+      ("last_reply_preview", last_reply_preview);
+      ("last_error", last_error);
+      ("keepalive_running", `Bool keepalive_running);
+      ("next_eligible_at_s", keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts);
+    ]
+
 let keeper_constitution =
   "Continuity rules:\n\
    - This conversation may be compacted/summarized and handed off to a successor.\n\
@@ -6452,6 +6682,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
 (* Presence keepalive fibers keyed by keeper name. *)
 let keepalives : (string, bool ref) Hashtbl.t = Hashtbl.create 8
 let running_keepers () = Hashtbl.length keepalives
+let keeper_keepalive_running name = Hashtbl.mem keepalives name
 let keeper_spawn_slots_available () =
   let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
   max_keepers <= 0 || running_keepers () < max_keepers
@@ -7042,7 +7273,7 @@ let handle_keeper_status ctx args : tool_result =
                  ("message_count", `Int (List.length c.messages));
                ]
          in
-         let keepalive_running = `Bool (Hashtbl.mem keepalives m.name) in
+         let keepalive_running = keeper_keepalive_running m.name in
          let agent_status = parse_agent_status ctx.config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =
@@ -7241,6 +7472,19 @@ let handle_keeper_status ctx args : tool_result =
              in
              (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
          in
+         let history_items =
+           match history_tail with
+           | `List xs -> xs
+           | _ -> []
+         in
+         let diagnostic =
+           keeper_diagnostic_json
+             ~meta:m
+             ~agent_status
+             ~keepalive_running
+             ~history_items
+             ~now_ts
+         in
 
          let compaction_history_tail =
            if not include_compaction_history then
@@ -7344,8 +7588,9 @@ let handle_keeper_status ctx args : tool_result =
              ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
              ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
            ]);
-           ("keepalive_running", keepalive_running);
+           ("keepalive_running", `Bool keepalive_running);
            ("agent", agent_status);
+           ("diagnostic", diagnostic);
            ("keeper_age_s", `Float keeper_age_s);
            ("last_turn_ago_s", `Float last_turn_ago_s);
            ("last_handoff_ago_s", `Float last_handoff_ago_s);

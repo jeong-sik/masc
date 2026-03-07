@@ -250,6 +250,10 @@ let test_masc_operator_action_schema () =
                  | Some (`List enums) ->
                      Alcotest.(check bool) "has lodge_tick" true
                        (List.mem (`String "lodge_tick") enums);
+                     Alcotest.(check bool) "has keeper_probe" true
+                       (List.mem (`String "keeper_probe") enums);
+                     Alcotest.(check bool) "has keeper_recover" true
+                       (List.mem (`String "keeper_recover") enums);
                      Alcotest.(check bool) "has team_note" true
                        (List.mem (`String "team_note") enums);
                      Alcotest.(check bool) "has team_broadcast" true
@@ -292,6 +296,10 @@ let test_remote_operator_action_schema_is_strict () =
                   (List.mem (`String "team_note") enums);
                 Alcotest.(check bool) "remote includes lodge_tick" true
                   (List.mem (`String "lodge_tick") enums);
+                Alcotest.(check bool) "remote includes keeper_probe" true
+                  (List.mem (`String "keeper_probe") enums);
+                Alcotest.(check bool) "remote includes keeper_recover" true
+                  (List.mem (`String "keeper_recover") enums);
                 Alcotest.(check bool) "remote includes keeper_message" true
                   (List.mem (`String "keeper_message") enums)
             | _ -> Alcotest.fail "remote action_type missing enum")

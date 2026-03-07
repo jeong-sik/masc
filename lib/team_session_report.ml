@@ -631,6 +631,14 @@ let count_spawn_success events =
       | _ -> acc)
     0 events
 
+let count_spawn_failure events =
+  List.fold_left
+    (fun acc json ->
+      match team_step_spawn_success json with
+      | Some false -> acc + 1
+      | _ -> acc)
+    0 events
+
 let find_criterion criteria name =
   criteria
   |> List.find_opt (fun item ->
@@ -876,6 +884,7 @@ let proof_markdown ~(session : Team_session_types.session)
     ~(checkpoints_count : int) ~(events_count : int) ~(turn_events : int)
     ~(report_exists : bool) ~(unique_turn_actors_count : int)
     ~(required_turn_actors : int) ~(spawn_models : string list)
+    ~(spawn_failure_count : int) ~(detached_agent_count : int)
     ~(planned_workers : Team_session_types.planned_worker list)
     ~(unique_spawn_runtime_actors_count : int)
     ~(spawn_selection_note_summary : string option)
@@ -938,6 +947,8 @@ let proof_markdown ~(session : Team_session_types.session)
       Printf.sprintf "- Planned workers: %d" (List.length planned_workers);
       Printf.sprintf "- Unique spawned runtime actors: %d"
         unique_spawn_runtime_actors_count;
+      Printf.sprintf "- Failed spawn events: %d" spawn_failure_count;
+      Printf.sprintf "- Detached failed actors: %d" detached_agent_count;
       Printf.sprintf "- Spawn models: %s"
         (match spawn_models with
         | [] -> "(not recorded)"
@@ -1019,6 +1030,7 @@ let generate_proof ?(proof_level = default_proof_level) config
     let required_spawn_agents = required_spawn_agents_for_session session in
     let spawn_events = count_event_type events "team_step_spawn" in
     let spawn_success_count = count_spawn_success events in
+    let spawn_failure_count = count_spawn_failure events in
     let unique_spawn_agents =
       collect_spawn_agents events |> Team_session_types.dedup_strings
     in
@@ -1037,6 +1049,7 @@ let generate_proof ?(proof_level = default_proof_level) config
       | [] -> None
       | xs -> Some (String.concat " | " xs)
     in
+    let detached_agent_count = count_event_type events "session_agent_detached" in
     let min_turn_events = min_turn_events_for_session required_turn_actors in
     let min_communication = min_communication_for_session required_turn_actors in
     let vote_events =
@@ -1092,6 +1105,7 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ("required_turn_actors", `Int required_turn_actors);
                 ("spawn_events", `Int spawn_events);
                 ("spawn_success_count", `Int spawn_success_count);
+                ("spawn_failure_count", `Int spawn_failure_count);
                 ("unique_spawn_agents", `List (List.map (fun a -> `String a) unique_spawn_agents));
                 ("unique_spawn_agents_count", `Int unique_spawn_agents_count);
                 ( "unique_spawn_runtime_actors",
@@ -1111,6 +1125,7 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ( "spawn_selection_note_summary",
                   Option.fold ~none:`Null ~some:(fun note -> `String note)
                     spawn_selection_note_summary );
+                ("detached_agent_count", `Int detached_agent_count);
                 ("vote_events", `Int vote_events);
                 ("run_deliverables", `Int run_deliverables);
                 ("broadcast_count", `Int session.broadcast_count);
@@ -1127,6 +1142,7 @@ let generate_proof ?(proof_level = default_proof_level) config
         ~checkpoints_count ~events_count:(List.length events) ~turn_events
         ~report_exists:(report_json_exists && report_md_exists)
         ~unique_turn_actors_count ~required_turn_actors ~spawn_models
+        ~spawn_failure_count ~detached_agent_count
         ~planned_workers:session.planned_workers
         ~unique_spawn_runtime_actors_count
         ~spawn_selection_note_summary

@@ -1227,6 +1227,178 @@ let test_step_spawn_batch_records_planned_workers () =
     (List.length planned_events);
   cleanup_dir base_dir
 
+let test_reconcile_failed_spawn_actor_detaches_without_turn () =
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  let now = Time_compat.now () in
+  let session =
+    make_manual_session config ~goal:"detach-failed-spawn"
+      ~created_by:"owner" ~agent_names:[ "owner" ] ~min_agents:2
+      ~checkpoint_interval_sec:10 ~started_at:(now -. 10.0)
+      ~planned_end_at:(now +. 120.0)
+      ~fallback_policy:Team_session_types.Fallback_none ~model_cascade:[]
+  in
+  ignore (unwrap_ok (Tool_team_session.ensure_session_actor config session.session_id "llama-local-failed"));
+  let outcome =
+    unwrap_ok
+      (Tool_team_session.reconcile_failed_spawn_actor config session.session_id
+         "llama-local-failed")
+  in
+  Alcotest.(check string) "failed spawn actor detached" "detached"
+    (match outcome with `Detached -> "detached" | `Retained -> "retained");
+  let reloaded = Team_session_store.load_session config session.session_id |> Option.get in
+  Alcotest.(check bool) "actor removed from participants" false
+    (List.mem "llama-local-failed" reloaded.agent_names);
+  let detached_events =
+    Team_session_store.read_events config session.session_id
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "event_type" json
+           = `String "session_agent_detached")
+  in
+  Alcotest.(check int) "detached event recorded" 1 (List.length detached_events);
+  cleanup_dir base_dir
+
+let test_reconcile_failed_spawn_actor_retains_after_turn () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"retain-failed-spawn-after-turn" |> get_session_id in
+  ignore
+    (unwrap_ok
+       (Tool_team_session.ensure_session_actor config session_id
+          "llama-local-turned"));
+  ignore
+    (unwrap_ok
+       (Team_session_engine_eio.record_turn ~config ~session_id
+          ~actor:"llama-local-turned" ~turn_kind:Team_session_types.Turn_note
+          ~message:(Some "worker left one turn before failing")
+          ~target_agent:None ~task_title:None ~task_description:None
+          ~task_priority:3));
+  let outcome =
+    unwrap_ok
+      (Tool_team_session.reconcile_failed_spawn_actor config session_id
+         "llama-local-turned")
+  in
+  Alcotest.(check string) "actor retained after emitting a turn" "retained"
+    (match outcome with `Detached -> "detached" | `Retained -> "retained");
+  let reloaded = Team_session_store.load_session config session_id |> Option.get in
+  Alcotest.(check bool) "actor still authorized" true
+    (List.mem "llama-local-turned" reloaded.agent_names);
+  let detached_events =
+    Team_session_store.read_events config session_id
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "event_type" json
+           = `String "session_agent_detached")
+  in
+  Alcotest.(check int) "no detach event recorded" 0 (List.length detached_events);
+  cleanup_dir base_dir
+
+let test_proof_exposes_failed_spawn_and_detach_counts () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let start_json =
+    start_session_exn ctx ~goal:"prove failed spawn and detach visibility"
+  in
+  let session_id = get_session_id start_json in
+  Team_session_store.append_event config session_id ~event_type:"team_step_spawn"
+    ~detail:
+      (`Assoc
+        [
+          ("actor", `String "tester");
+          ("spawn_agent", `String "llama");
+          ("runtime_actor", `String "llama-local-failed");
+          ("spawn_role", `String "implementer-a");
+          ("spawn_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
+          ("success", `Bool false);
+          ("exit_code", `Int 1);
+          ("elapsed_ms", `Int 25);
+          ("error", `String "worker exited early");
+          ("ts_iso", `String (Types.now_iso ()));
+        ]);
+  Team_session_store.append_event config session_id
+    ~event_type:"session_agent_detached"
+    ~detail:
+      (`Assoc
+        [
+          ("actor", `String "llama-local-failed");
+          ("reason", `String "spawn_failed_without_turn");
+          ("agent_count", `Int 1);
+          ("ts_iso", `String (Types.now_iso ()));
+        ]);
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_turn"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("turn_kind", `String "note");
+             ("message", `String "tester turn for failure proof");
+           ]));
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "failed_spawn_done");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("generate_report_if_missing", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "prove ok" true prove_ok;
+  let prove_result = parse_json_exn prove_body |> result_field in
+  let evidence = prove_result |> Yojson.Safe.Util.member "proof" |> Yojson.Safe.Util.member "evidence" in
+  let spawn_failure_count =
+    evidence |> Yojson.Safe.Util.member "spawn_failure_count"
+    |> Yojson.Safe.Util.to_int
+  in
+  let detached_agent_count =
+    evidence |> Yojson.Safe.Util.member "detached_agent_count"
+    |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check int) "spawn failure count recorded" 1 spawn_failure_count;
+  Alcotest.(check int) "detached agent count recorded" 1 detached_agent_count;
+  let proof_md_path =
+    prove_result |> Yojson.Safe.Util.member "proof_md_path"
+    |> Yojson.Safe.Util.to_string
+  in
+  let proof_md = Stdlib.In_channel.with_open_bin proof_md_path Stdlib.In_channel.input_all in
+  Alcotest.(check bool) "markdown includes failed spawn count" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string "Failed spawn events: 1") proof_md 0 in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "markdown includes detached actor count" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "Detached failed actors: 1") proof_md 0
+       in
+       true
+     with Not_found -> false);
+  cleanup_dir base_dir
+
 let test_prove_strong_requires_additional_evidence () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1491,6 +1663,12 @@ let () =
             test_step_spawn_llama_requires_spawn_model;
           Alcotest.test_case "step-spawn-batch-records-planned-workers"
             `Quick test_step_spawn_batch_records_planned_workers;
+          Alcotest.test_case "reconcile-failed-spawn-actor-detaches-without-turn"
+            `Quick test_reconcile_failed_spawn_actor_detaches_without_turn;
+          Alcotest.test_case "reconcile-failed-spawn-actor-retains-after-turn"
+            `Quick test_reconcile_failed_spawn_actor_retains_after_turn;
+          Alcotest.test_case "proof-exposes-failed-spawn-and-detach-counts"
+            `Quick test_proof_exposes_failed_spawn_and_detach_counts;
           Alcotest.test_case "prove-strong-requires-additional-evidence" `Quick
             test_prove_strong_requires_additional_evidence;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;

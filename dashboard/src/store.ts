@@ -710,11 +710,18 @@ function scheduleMdalRefresh(): void {
 // Events that affect dashboard data (agents, tasks, messages, keepers, status).
 // Other events have their own handlers (board, council, mdal) or need no fetch (keeper_heartbeat).
 const DASHBOARD_REFRESH_EVENTS = new Set([
-  'task_update', 'task_claimed', 'task_done',
-  'agent_joined', 'agent_left',
+  'agent_joined',
+  'agent_left',
   'broadcast',
-  'keeper_handoff', 'keeper_compaction', 'keeper_guardrail',
+  'keeper_handoff',
+  'keeper_compaction',
+  'keeper_guardrail',
 ])
+
+function isDashboardRefreshEvent(eventType: string): boolean {
+  if (DASHBOARD_REFRESH_EVENTS.has(eventType)) return true
+  return eventType.startsWith('task_') || eventType.startsWith('masc/task_')
+}
 
 export function setupSSEReaction(): () => void {
   // Subscribe to SSE events and trigger selective refreshes
@@ -730,7 +737,7 @@ export function setupSSEReaction(): () => void {
     }
 
     // Dashboard data events — debounced full refresh
-    if (DASHBOARD_REFRESH_EVENTS.has(event.type)) {
+    if (isDashboardRefreshEvent(event.type)) {
       invalidateDashboardCache()
       if (!_fetchDebounce) {
         _fetchDebounce = setTimeout(() => {

@@ -37,6 +37,13 @@ export const DASHBOARD_NAV_SECTIONS: DashboardNavSection[] = [
 // Primary IA for the side rail navigation.
 export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
   {
+    id: 'command',
+    label: 'Command',
+    icon: '\uD83E\uDDED',
+    group: 'command',
+    description: 'Company, platoon, squad, and agent command plane with operation and trace visibility',
+  },
+  {
     id: 'overview',
     label: 'Overview',
     icon: '\uD83C\uDFE0',

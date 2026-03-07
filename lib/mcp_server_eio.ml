@@ -1198,6 +1198,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_operator =
     { Tool_operator.config; agent_name; sw; clock; mcp_session_id }
   in
+  let simple_ctx_command_plane : Tool_command_plane.context = { config; agent_name } in
   let simple_ctx_cache = { Tool_cache.config } in
   let simple_ctx_tempo = { Tool_tempo.config; agent_name } in
   let simple_ctx_mitosis =
@@ -1363,6 +1364,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_operator.dispatch simple_ctx_operator ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_command_plane.dispatch simple_ctx_command_plane ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_llama.dispatch simple_ctx_llama ~name ~args:arguments with

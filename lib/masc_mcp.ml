@@ -12,6 +12,7 @@ module Nickname = Nickname
 module Response = Response
 module Error = Error
 module Validation = Validation
+module Command_plane_v2 = Command_plane_v2
 module Config = Config
 module Env_config = Env_config
 module Resilience = Resilience
@@ -189,6 +190,7 @@ module Tool_verification = Tool_verification
 module Tool_misc = Tool_misc
 module Tool_llama = Tool_llama
 module Tool_board = Tool_board
+module Tool_command_plane = Tool_command_plane
 module Tool_lodge = Tool_lodge
 module Tool_notifications = Tool_notifications
 

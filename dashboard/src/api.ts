@@ -19,6 +19,7 @@ import type {
   OperatorActionRequest,
   OperatorActionResult,
   OperatorSnapshot,
+  CommandPlaneSnapshot,
 } from './types'
 
 // --- Auth ---
@@ -273,6 +274,17 @@ export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<Dashboa
 
 export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
   return get('/api/v1/operator')
+}
+
+export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {
+  return get('/api/v1/command-plane')
+}
+
+export function runCommandPlaneAction(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  return post(path, body)
 }
 
 export function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {

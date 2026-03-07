@@ -5353,6 +5353,9 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
         ("emoji", `String emoji);
         ("koreanName", `String korean_name);
+        ("generation", `Null);
+        ("context_ratio", `Null);
+        ("turn_count", `Null);
       ]
     ) agents
   in

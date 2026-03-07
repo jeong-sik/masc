@@ -676,7 +676,13 @@ export function setupSSEReaction(): () => void {
     }
   })
 
-  return unsubscribe
+  return () => {
+    unsubscribe()
+    if (_mdalDebounce) {
+      clearTimeout(_mdalDebounce)
+      _mdalDebounce = null
+    }
+  }
 }
 
 // --- Periodic refresh (for keeper presence heartbeats that don't emit SSE) ---

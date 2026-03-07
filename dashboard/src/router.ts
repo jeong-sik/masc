@@ -8,8 +8,12 @@ import { VALID_TABS } from './types'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 const LEGACY_TAB_ALIASES: Record<string, TabId> = {
-  journal: 'activity',
+  journal: 'overview',
   mdal: 'goals',
+  tasks: 'goals',
+  execution: 'overview',
+  council: 'board',
+  activity: 'overview',
 }
 
 function isTabId(v: string | null | undefined): v is TabId {

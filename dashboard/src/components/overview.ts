@@ -1,10 +1,13 @@
 // Overview tab — triage-first room health, intervention queue, and dispatch surface
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
+import { type MonitorTone, toEpoch, toneRank, normalizeKey, limitText, taskPriorityValue, taskPriorityLabel } from './common/monitor'
 import { buildAgentMotion } from './common/agent-motion'
+import { Execution } from './execution'
 import {
   agents,
   tasks,
@@ -23,12 +26,14 @@ import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
 import { navigate } from '../router'
 import { connected, eventCount, journal } from '../sse'
+import { openActivityPanel } from '../activity-panel'
 
 const QUIET_AGENT_MS = 10 * 60 * 1000
 const STALE_AGENT_MS = 20 * 60 * 1000
 const HOT_KEEPER_RATIO = 0.8
 
-type MonitorTone = 'ok' | 'warn' | 'bad'
+type OverviewSubView = 'triage' | 'dispatch'
+const overviewSubView = signal<OverviewSubView>('triage')
 
 interface OverviewAlertItem {
   key: string
@@ -66,43 +71,6 @@ interface TaskPulse {
   note: string
   focus: string
   ownerGap: boolean
-}
-
-function toEpoch(value: string | number | null | undefined): number {
-  if (value == null) return 0
-  const parsed = typeof value === 'number' ? value : Date.parse(value)
-  return Number.isNaN(parsed) ? 0 : parsed
-}
-
-function toneRank(tone: MonitorTone): number {
-  switch (tone) {
-    case 'bad': return 2
-    case 'warn': return 1
-    default: return 0
-  }
-}
-
-function normalizeKey(value: string | null | undefined): string {
-  return (value ?? '').trim().toLowerCase()
-}
-
-function limitText(value: string | null | undefined, max = 96): string | null {
-  const normalized = (value ?? '').replace(/\s+/g, ' ').trim()
-  if (!normalized) return null
-  return normalized.length > max ? `${normalized.slice(0, max - 3)}...` : normalized
-}
-
-function taskPriorityValue(priority?: number | null): number {
-  if (typeof priority !== 'number' || Number.isNaN(priority)) return 3
-  return priority
-}
-
-function taskPriorityLabel(priority?: number | null): string {
-  const value = taskPriorityValue(priority)
-  if (value <= 1) return 'P1'
-  if (value === 2) return 'P2'
-  if (value >= 4) return 'P4+'
-  return 'P3'
 }
 
 function monitorTone(level?: string): MonitorTone {
@@ -517,7 +485,7 @@ export function Overview() {
       title: 'Live feed is reconnecting',
       detail: 'Dashboard telemetry is stale until the SSE stream recovers.',
       timestamp: null,
-      action: () => navigate('activity'),
+      action: openActivityPanel,
     })
   }
   if (monitorTone(boardMonitor?.alert_level) !== 'ok') {
@@ -537,7 +505,7 @@ export function Overview() {
       title: 'Council quorum risk is elevated',
       detail: `${councilMonitor?.sessions_without_quorum ?? 0} sessions without quorum · freshness ${formatDuration(councilMonitor?.last_activity_age_s)}.`,
       timestamp: null,
-      action: () => navigate('council'),
+      action: () => navigate('board'),
     })
   }
   if (status?.data_quality?.board_contract_ok === false || status?.data_quality?.council_feed_ok === false) {
@@ -562,7 +530,7 @@ export function Overview() {
         title: row.task.title,
         detail: `${row.note} · ${row.focus}`,
         timestamp: row.lastSignalAt ?? row.task.updated_at ?? row.task.created_at ?? null,
-        action: () => navigate('execution'),
+        action: () => navigate('overview'),
       })),
     ...keeperAlerts.slice(0, 2).map(row => ({
       key: `keeper-${row.keeper.name}`,
@@ -588,8 +556,23 @@ export function Overview() {
     })
     .slice(0, 8)
 
+  const subView = overviewSubView.value
+
   return html`
-    <div class="stats-grid">
+    <div class="overview-sub-tabs">
+      <button
+        class="sub-tab-btn ${subView === 'triage' ? 'active' : ''}"
+        onClick=${() => { overviewSubView.value = 'triage' }}
+      >Triage</button>
+      <button
+        class="sub-tab-btn ${subView === 'dispatch' ? 'active' : ''}"
+        onClick=${() => { overviewSubView.value = 'dispatch' }}
+      >Dispatch</button>
+    </div>
+
+    ${subView === 'dispatch'
+      ? html`<${Execution} />`
+      : html`<div class="stats-grid">
       <${StatCard}
         label="Room State"
         value=${status?.paused ? 'Paused' : 'Running'}
@@ -732,7 +715,7 @@ export function Overview() {
                     row.task.updated_at ? `Touched ${new Date(row.task.updated_at).toLocaleTimeString()}` : 'No task timestamp',
                   ]}
                   focus=${row.focus}
-                  onClick=${() => navigate('execution')}
+                  onClick=${() => navigate('overview')}
                 />
               `)}
         </div>
@@ -830,6 +813,6 @@ export function Overview() {
           </div>
         </div>
       <//>
-    </div>
+    </div>`}
   `
 }

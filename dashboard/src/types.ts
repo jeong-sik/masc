@@ -1214,11 +1214,7 @@ export type TabId =
   | 'command'
   | 'overview'
   | 'board'
-  | 'activity'
-  | 'council'
   | 'goals'
-  | 'execution'
-  | 'tasks'
   | 'agents'
   | 'ops'
   | 'trpg'
@@ -1227,11 +1223,7 @@ export const VALID_TABS: TabId[] = [
   'command',
   'overview',
   'board',
-  'activity',
-  'council',
   'goals',
-  'execution',
-  'tasks',
   'agents',
   'ops',
   'trpg',

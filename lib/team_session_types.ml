@@ -239,6 +239,9 @@ let dedup_strings xs =
   in
   loop [] xs
 
+let participant_names (s : session) =
+  dedup_strings (s.created_by :: s.agent_names) |> List.sort String.compare
+
 let assoc_find_default key pairs default =
   match List.assoc_opt key pairs with Some v -> v | None -> default
 

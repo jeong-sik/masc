@@ -117,6 +117,59 @@ and start_session_custom_exn ctx ~goal ~min_agents ~agents =
   Alcotest.(check bool) "start ok" true start_ok;
   parse_json_exn start_body
 
+let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
+    ~checkpoint_interval_sec ~started_at ~planned_end_at ~fallback_policy
+    ~model_cascade =
+  let session_id = Team_session_store.make_session_id () in
+  Team_session_store.ensure_session_dirs config session_id;
+  let session : Team_session_types.session =
+    {
+      session_id;
+      goal;
+      created_by;
+      room_id = "default";
+      status = Team_session_types.Running;
+      duration_seconds = int_of_float (max 60.0 (planned_end_at -. started_at));
+      execution_scope = Team_session_types.Limited_code_change;
+      checkpoint_interval_sec;
+      min_agents;
+      orchestration_mode = Team_session_types.Assist;
+      communication_mode = Team_session_types.Comm_broadcast;
+      model_cascade;
+      fallback_policy;
+      instruction_profile = Team_session_types.Profile_strict;
+      alert_channel = Team_session_types.Alert_both;
+      auto_resume = true;
+      report_formats = [ Team_session_types.Markdown; Team_session_types.Json ];
+      turn_count = 0;
+      agent_names;
+      broadcast_count = 0;
+      portal_count = 0;
+      cascade_attempted = 0;
+      cascade_success = 0;
+      cascade_failed = 0;
+      fallback_task_created = 0;
+      min_agents_violation_streak = 0;
+      policy_violations = [];
+      baseline_done_counts = [];
+      final_done_delta_total = None;
+      final_done_delta_by_agent = None;
+      started_at;
+      planned_end_at;
+      stopped_at = None;
+      last_checkpoint_at = Some started_at;
+      last_event_at = Some started_at;
+      last_turn_at = None;
+      stop_reason = None;
+      generated_report = false;
+      artifacts_dir = Team_session_store.session_dir config session_id;
+      created_at_iso = Types.now_iso ();
+      updated_at_iso = Types.now_iso ();
+    }
+  in
+  Team_session_store.save_session config session;
+  session
+
 let test_start_status_report_stop () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -623,6 +676,138 @@ let test_proof_exposes_spawn_selection_rationale () =
   Alcotest.(check bool) "markdown includes rationale" true
     (try
        let _ = Str.search_forward (Str.regexp_string selection_note) proof_md 0 in
+       true
+     with Not_found -> false);
+  cleanup_dir base_dir
+
+let test_bootstrap_grace_suppresses_min_agents_violation () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  let now = Time_compat.now () in
+  let session =
+    make_manual_session config ~goal:"bootstrap-grace"
+      ~created_by:"owner" ~agent_names:[ "owner" ] ~min_agents:4
+      ~checkpoint_interval_sec:10 ~started_at:(now -. 5.0)
+      ~planned_end_at:(now +. 120.0)
+      ~fallback_policy:Team_session_types.Fallback_task_only ~model_cascade:[]
+  in
+  let updated = Team_session_engine_eio.apply_runtime_policy ~config session in
+  Alcotest.(check int) "violation streak suppressed" 0
+    updated.min_agents_violation_streak;
+  Alcotest.(check int) "fallback suppressed" 0 updated.fallback_task_created;
+  let events = Team_session_store.read_events config session.session_id in
+  let violation_events =
+    List.filter
+      (fun json ->
+        Yojson.Safe.Util.member "event_type" json = `String "min_agents_violation")
+      events
+  in
+  Alcotest.(check int) "no violation events during bootstrap" 0
+    (List.length violation_events);
+  cleanup_dir base_dir
+
+let test_min_agents_violation_after_bootstrap_grace () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  let now = Time_compat.now () in
+  let session =
+    make_manual_session config ~goal:"post-bootstrap-violation"
+      ~created_by:"owner" ~agent_names:[ "owner" ] ~min_agents:4
+      ~checkpoint_interval_sec:10 ~started_at:(now -. 120.0)
+      ~planned_end_at:(now +. 120.0)
+      ~fallback_policy:Team_session_types.Fallback_task_only ~model_cascade:[]
+  in
+  let session = { session with min_agents_violation_streak = 1 } in
+  let updated = Team_session_engine_eio.apply_runtime_policy ~config session in
+  Alcotest.(check int) "violation streak increments after grace" 2
+    updated.min_agents_violation_streak;
+  Alcotest.(check int) "fallback not emitted on non-alert tick" 0
+    updated.fallback_task_created;
+  let events = Team_session_store.read_events config session.session_id in
+  let violation_events =
+    List.filter
+      (fun json ->
+        Yojson.Safe.Util.member "event_type" json = `String "min_agents_violation")
+      events
+  in
+  Alcotest.(check int) "violation event recorded after grace" 1
+    (List.length violation_events);
+  cleanup_dir base_dir
+
+let test_report_uses_participant_and_turn_metrics () =
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  let now = Time_compat.now () in
+  let session =
+    make_manual_session config ~goal:"report-participants-turns"
+      ~created_by:"owner" ~agent_names:[ "owner"; "ally1"; "ally2" ]
+      ~min_agents:3 ~checkpoint_interval_sec:10 ~started_at:(now -. 30.0)
+      ~planned_end_at:(now +. 90.0)
+      ~fallback_policy:Team_session_types.Fallback_none
+      ~model_cascade:[ "llama:qwen3.5-35b-a3b-ud-q8-xl" ]
+  in
+  ignore
+    (unwrap_ok
+       (Team_session_engine_eio.record_turn ~config ~session_id:session.session_id
+          ~actor:"owner" ~turn_kind:Team_session_types.Turn_note
+          ~message:(Some "owner turn") ~target_agent:None ~task_title:None
+          ~task_description:None ~task_priority:3));
+  ignore
+    (unwrap_ok
+       (Team_session_engine_eio.record_turn ~config ~session_id:session.session_id
+          ~actor:"ally1" ~turn_kind:Team_session_types.Turn_note
+          ~message:(Some "ally1 turn") ~target_agent:None ~task_title:None
+          ~task_description:None ~task_priority:3));
+  ignore
+    (unwrap_ok
+       (Team_session_engine_eio.record_turn ~config ~session_id:session.session_id
+          ~actor:"ally2" ~turn_kind:Team_session_types.Turn_task ~message:None
+          ~target_agent:None ~task_title:(Some "task from ally2")
+          ~task_description:(Some "noop task") ~task_priority:2));
+  let reloaded =
+    Team_session_store.load_session config session.session_id
+    |> Option.get
+  in
+  let report_json, markdown =
+    unwrap_ok (Team_session_report.generate config reloaded)
+  in
+  let active_agents_count =
+    report_json |> Yojson.Safe.Util.member "team_health"
+    |> Yojson.Safe.Util.member "active_agents_count"
+    |> Yojson.Safe.Util.to_int
+  in
+  let room_active_agents =
+    report_json |> Yojson.Safe.Util.member "summary"
+    |> Yojson.Safe.Util.member "room_active_agents"
+    |> Yojson.Safe.Util.to_list
+  in
+  let turn_metrics =
+    report_json |> Yojson.Safe.Util.member "agent_turn_metrics"
+    |> Team_session_types.assoc_int_of_json
+  in
+  Alcotest.(check int) "participant count drives team health" 3 active_agents_count;
+  Alcotest.(check bool) "participant count exceeds room active count" true
+    (active_agents_count > List.length room_active_agents);
+  Alcotest.(check int) "owner turn metric" 1
+    (List.assoc "owner" turn_metrics);
+  Alcotest.(check int) "ally1 turn metric" 1
+    (List.assoc "ally1" turn_metrics);
+  Alcotest.(check int) "ally2 turn metric" 1
+    (List.assoc "ally2" turn_metrics);
+  Alcotest.(check bool) "markdown shows turn-based contribution" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "- ally2: turns=1, done_delta=0")
+           markdown 0
+       in
        true
      with Not_found -> false);
   cleanup_dir base_dir
@@ -1168,6 +1353,12 @@ let () =
             test_start_status_report_stop;
           Alcotest.test_case "proof-exposes-spawn-selection-rationale" `Quick
             test_proof_exposes_spawn_selection_rationale;
+          Alcotest.test_case "bootstrap-grace-suppresses-min-agents-violation"
+            `Quick test_bootstrap_grace_suppresses_min_agents_violation;
+          Alcotest.test_case "min-agents-violation-after-bootstrap-grace"
+            `Quick test_min_agents_violation_after_bootstrap_grace;
+          Alcotest.test_case "report-uses-participant-and-turn-metrics" `Quick
+            test_report_uses_participant_and_turn_metrics;
           Alcotest.test_case "duration-reached-path" `Quick
             test_duration_reached_path;
           Alcotest.test_case "recover-elapsed-session" `Quick

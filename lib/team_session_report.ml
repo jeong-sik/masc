@@ -85,7 +85,8 @@ let summary_metrics (session : Team_session_types.session) config =
       100.0
     else min 100.0 (100.0 *. (elapsed /. float_of_int session.duration_seconds))
   in
-  let active_agents =
+  let active_agents = Team_session_types.participant_names session in
+  let room_active_agents =
     Room.get_agents_raw config
     |> List.map (fun (a : Types.agent) -> a.name)
     |> Team_session_types.dedup_strings
@@ -102,6 +103,7 @@ let summary_metrics (session : Team_session_types.session) config =
         ("done_delta_total", `Int done_delta_total);
         ("done_delta_by_agent", Team_session_types.assoc_int_to_json delta_by_agent);
         ("active_agents", `List (List.map (fun a -> `String a) active_agents));
+        ("room_active_agents", `List (List.map (fun a -> `String a) room_active_agents));
       ],
     done_delta_total,
     delta_by_agent,
@@ -135,6 +137,24 @@ let recent_event_lines events limit =
          | `String ts_iso, `String event_type ->
              Some (Printf.sprintf "- %s | %s" ts_iso event_type)
          | _ -> None)
+
+let turn_counts_by_agent events =
+  let tbl = Hashtbl.create 16 in
+  List.iter
+    (fun json ->
+      let open Yojson.Safe.Util in
+      match (member "event_type" json, member "detail" json |> member "actor") with
+      | `String "team_turn", `String actor ->
+          let actor = String.trim actor in
+          if actor <> "" then
+            let count =
+              match Hashtbl.find_opt tbl actor with Some n -> n | None -> 0
+            in
+            Hashtbl.replace tbl actor (count + 1)
+      | _ -> ())
+    events;
+  Hashtbl.fold (fun agent count acc -> (agent, count) :: acc) tbl []
+  |> List.sort (fun (a, _) (b, _) -> compare a b)
 
 let mcp_improvements (session : Team_session_types.session) events checkpoints_count
     done_delta_total =
@@ -198,6 +218,7 @@ let mcp_improvements (session : Team_session_types.session) events checkpoints_c
 let markdown_of_report ~(session : Team_session_types.session)
     ~(summary_json : Yojson.Safe.t) ~(events : Yojson.Safe.t list)
     ~(checkpoints_count : int) ~(done_delta_by_agent : (string * int) list)
+    ~(turn_count_by_agent : (string * int) list)
     ~(team_health_json : Yojson.Safe.t)
     ~(communication_metrics_json : Yojson.Safe.t)
     ~(llm_cache_metrics_json : Yojson.Safe.t)
@@ -227,6 +248,11 @@ let markdown_of_report ~(session : Team_session_types.session)
   let health_active =
     team_health_json |> member "active_agents_count" |> to_int_option
     |> Option.value ~default:0
+  in
+  let room_active =
+    match summary_json |> member "room_active_agents" with
+    | `List xs -> List.length xs
+    | _ -> 0
   in
   let health_required =
     team_health_json |> member "required_agents" |> to_int_option
@@ -278,12 +304,23 @@ let markdown_of_report ~(session : Team_session_types.session)
     |> Option.value ~default:0
   in
   let event_lines = recent_event_lines events 12 in
+  let contribution_agents =
+    Team_session_types.dedup_strings
+      (List.map fst done_delta_by_agent @ List.map fst turn_count_by_agent)
+  in
   let contribution_lines =
-    if done_delta_by_agent = [] then [ "- (no tracked contributors)" ]
+    if contribution_agents = [] then [ "- (no tracked contributors)" ]
     else
       List.map
-        (fun (agent, delta) -> Printf.sprintf "- %s: %d" agent delta)
-        done_delta_by_agent
+        (fun agent ->
+          let done_delta =
+            Team_session_types.assoc_find_default agent done_delta_by_agent 0
+          in
+          let turns =
+            Team_session_types.assoc_find_default agent turn_count_by_agent 0
+          in
+          Printf.sprintf "- %s: turns=%d, done_delta=%d" agent turns done_delta)
+        contribution_agents
   in
   let policy_lines =
     [
@@ -332,7 +369,8 @@ let markdown_of_report ~(session : Team_session_types.session)
       "";
       "## Team Health";
       Printf.sprintf "- Health status: %s" health_status;
-      Printf.sprintf "- Active agents: %d" health_active;
+      Printf.sprintf "- Session participants: %d" health_active;
+      Printf.sprintf "- Room active agents: %d" room_active;
       Printf.sprintf "- Required agents(min_agents): %d" health_required;
       Printf.sprintf "- min_agents_violation events: %d" violation_count;
       "";
@@ -390,6 +428,7 @@ let generate config (session : Team_session_types.session) :
         team_health, communication_metrics, cascade_metrics =
       summary_metrics session config
     in
+    let turn_count_by_agent = turn_counts_by_agent events in
     let alert_count = event_count events "alert_emitted" in
     let violation_count = event_count events "min_agents_violation" in
     let mcp_notes =
@@ -427,6 +466,7 @@ let generate config (session : Team_session_types.session) :
               ] );
           ("outcomes", `Assoc [ ("completed_task_delta", `Int done_delta_total) ]);
           ("agent_metrics", Team_session_types.assoc_int_to_json done_delta_by_agent);
+          ("agent_turn_metrics", Team_session_types.assoc_int_to_json turn_count_by_agent);
           ( "goal_metrics",
             `Assoc
               [
@@ -455,7 +495,7 @@ let generate config (session : Team_session_types.session) :
     in
     let markdown =
       markdown_of_report ~session ~summary_json ~events ~checkpoints_count
-        ~done_delta_by_agent ~team_health_json:team_health
+        ~done_delta_by_agent ~turn_count_by_agent ~team_health_json:team_health
         ~communication_metrics_json:communication_metrics
         ~llm_cache_metrics_json:llm_cache_metrics
         ~cascade_metrics_json:cascade_metrics ~alert_count ~violation_count

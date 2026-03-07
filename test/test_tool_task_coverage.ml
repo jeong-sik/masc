@@ -26,6 +26,18 @@ let make_test_ctx () =
   let _ = Room.init config ~agent_name:(Some "test-agent") in
   { Tool_task.config; agent_name = "test-agent" }
 
+let str_contains s substring =
+  let len_s = String.length s in
+  let len_sub = String.length substring in
+  if len_sub > len_s then false
+  else
+    let rec loop i =
+      if i > len_s - len_sub then false
+      else if String.sub s i len_sub = substring then true
+      else loop (i + 1)
+    in
+    loop 0
+
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
@@ -69,6 +81,54 @@ let () = test "dispatch_claim_next" (fun () ->
   match Tool_task.dispatch ctx ~name:"masc_claim_next" ~args with
   | Some (_success, _result) -> ()
   | None -> failwith "dispatch returned None"
+)
+
+(* Test handle_done returns owner guidance when another agent owns the task *)
+let () = test "handle_done_owned_by_other_guidance" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Done test")]) in
+  let _ = Room.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let success, result =
+    Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+  in
+  assert (not success);
+  assert (str_contains result "currently owned by other-agent")
+)
+
+(* Test handle_done on todo task recommends claim/start first *)
+let () = test "handle_done_todo_guidance" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Todo test")]) in
+  let success, result =
+    Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+  in
+  assert (not success);
+  assert (str_contains result "Claim/start it first")
+)
+
+(* Test handle_done reports already-done guidance instead of generic not-claimed *)
+let () = test "handle_done_already_done_guidance" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Done test")]) in
+  let _ = Room.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Room.complete_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" ~notes:"done" in
+  let success, result =
+    Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+  in
+  assert (not success);
+  assert (str_contains result "already done by other-agent")
+)
+
+(* Test handle_done reports cancelled-task guidance instead of generic not-claimed *)
+let () = test "handle_done_cancelled_guidance" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Cancelled test")]) in
+  let _ = Room.cancel_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~reason:"stop" in
+  let success, result =
+    Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+  in
+  assert (not success);
+  assert (str_contains result "was cancelled by test-agent")
 )
 
 (* Test dispatch release *)

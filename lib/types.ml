@@ -784,8 +784,14 @@ let rec masc_error_to_string = function
   | AgentNotFound name -> Printf.sprintf "❌ Agent not found: %s" name
   | AgentAlreadyJoined name -> Printf.sprintf "⚠ %s is already in the room" name
   | TaskNotFound id -> Printf.sprintf "❌ Task not found: %s" id
-  | TaskAlreadyClaimed { task_id; by } -> Printf.sprintf "❌ Task %s already claimed by %s" task_id by
-  | TaskNotClaimed id -> Printf.sprintf "❌ Task %s is not claimed" id
+  | TaskAlreadyClaimed { task_id; by } ->
+      Printf.sprintf
+        "❌ Task %s is currently owned by %s. Ask that agent to finish it, or claim a different task."
+        task_id by
+  | TaskNotClaimed id ->
+      Printf.sprintf
+        "❌ Task %s is still todo. Claim/start it first, then mark it done."
+        id
   | TaskInvalidState msg -> Printf.sprintf "❌ Invalid task state: %s" msg
   | TaskRoleMismatch { task_id; required; actual } ->
       Printf.sprintf "❌ Role mismatch for %s: requires %s, agent has %s" task_id required actual

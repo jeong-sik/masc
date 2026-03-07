@@ -751,7 +751,9 @@ let test_masc_error_task_not_found () =
 
 let test_masc_error_task_already_claimed () =
   let s = Types.masc_error_to_string (Types.TaskAlreadyClaimed { task_id = "t1"; by = "agent" }) in
-  check bool "contains both" true (String.length s > 0)
+  check bool "contains owner guidance" true
+    (try let _ = Str.search_forward (Str.regexp "currently owned by agent") s 0 in true
+     with Not_found -> false)
 
 let test_masc_error_rate_limit () =
   let s = Types.masc_error_to_string
@@ -1026,7 +1028,9 @@ let test_masc_error_agent_already_joined () =
 
 let test_masc_error_task_not_claimed () =
   let s = Types.masc_error_to_string (Types.TaskNotClaimed "t1") in
-  check bool "nonempty" true (String.length s > 0)
+  check bool "contains claim guidance" true
+    (try let _ = Str.search_forward (Str.regexp "Claim/start it first") s 0 in true
+     with Not_found -> false)
 
 let test_masc_error_task_invalid_state () =
   let s = Types.masc_error_to_string (Types.TaskInvalidState "cancelled") in

@@ -7,6 +7,7 @@
 - CPv2 benchmark / swarm: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 - benchmark 비교 실험: [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)
 - supervised team-session: [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)
+- swarm-driven implementation delivery: [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)
 
 ## 1. 서버 시작
 
@@ -66,4 +67,5 @@ curl -s http://127.0.0.1:8935/api/v1/command-plane | jq '.operations.summary'
 - [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 - [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)
 - [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)
+- [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)
 - [README.md](../README.md)

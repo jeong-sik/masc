@@ -907,10 +907,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let mode_config = Config.load room_path in
 
   let mode_gate_error =
-    if not (Config.is_tool_visible name) then
+    if not (Tool_catalog.allow_direct_call name) then
       Some
         (Printf.sprintf
-           "Tool '%s' is hidden by default (placeholder). Set MASC_PLACEHOLDER_TOOLS_ENABLED=1 to expose it."
+           "Tool '%s' is hidden from the default tool surface and not callable directly."
            name)
     else if not (Mode.is_tool_enabled mode_config.enabled_categories name) then
       Some
@@ -3000,12 +3000,14 @@ WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isola
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work."
 
-let tool_schemas_for_profile state profile =
+let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = false)
+    state profile =
   match profile with
   | Full ->
       let room_path = Room.masc_dir state.Mcp_server.room_config in
       let config = Config.load room_path in
-      Config.enabled_tool_schemas config.enabled_categories
+      Config.enabled_tool_schemas ~include_hidden ~include_deprecated
+        config.enabled_categories
   | Operator_remote -> Tool_operator.remote_schemas
 
 let tool_allowed_in_profile profile tool_name =
@@ -3030,30 +3032,56 @@ let tool_json_for_profile profile (schema : Types.tool_schema) =
       ("description", `String schema.description);
       ("inputSchema", schema.input_schema);
     ]
+    @ Tool_catalog.metadata_to_fields schema.name
   in
   match tool_annotations_for_profile profile schema.name with
   | Some annotations -> `Assoc (base @ [ ("annotations", annotations) ])
   | None -> `Assoc base
 
-let requested_tool_names params =
+type tools_list_params = {
+  names : string list option;
+  include_hidden : bool;
+  include_deprecated : bool;
+}
+
+let bool_param payload key =
+  let open Yojson.Safe.Util in
+  match payload |> member key with
+  | `Null -> Ok false
+  | `Bool value -> Ok value
+  | _ -> Error (Printf.sprintf "Invalid params: %s must be a boolean" key)
+
+let requested_tool_list_params params =
   let open Yojson.Safe.Util in
   match params with
-  | None -> Ok None
+  | None -> Ok { names = None; include_hidden = false; include_deprecated = false }
   | Some (`Assoc _ as payload) -> (
-      match payload |> member "names" with
-      | `Null -> Ok None
-      | `List items ->
-          items
-          |> List.fold_left
-               (fun acc item ->
-                 match (acc, item) with
-                 | Error _ as err, _ -> err
-                 | Ok names, `String value -> Ok (value :: names)
-                 | Ok _, _ ->
-                     Error "Invalid params: names must be an array of strings")
-               (Ok [])
-          |> Result.map (fun names -> Some (List.rev names))
-      | _ -> Error "Invalid params: names must be an array of strings")
+      let names_result =
+        match payload |> member "names" with
+        | `Null -> Ok None
+        | `List items ->
+            items
+            |> List.fold_left
+                 (fun acc item ->
+                   match (acc, item) with
+                   | Error _ as err, _ -> err
+                   | Ok names, `String value -> Ok (value :: names)
+                   | Ok _, _ ->
+                       Error "Invalid params: names must be an array of strings")
+                 (Ok [])
+            |> Result.map (fun names -> Some (List.rev names))
+        | _ -> Error "Invalid params: names must be an array of strings"
+      in
+      match names_result with
+      | Error _ as err -> err
+      | Ok names -> (
+          match bool_param payload "include_hidden" with
+          | Error _ as err -> err
+          | Ok include_hidden -> (
+              match bool_param payload "include_deprecated" with
+              | Error _ as err -> err
+              | Ok include_deprecated ->
+                  Ok { names; include_hidden; include_deprecated })))
   | Some _ -> Error "Invalid params: expected object"
 
 let handle_initialize_eio ?(profile = Full) id params =
@@ -3070,9 +3098,10 @@ let handle_initialize_eio ?(profile = Full) id params =
         ("instructions", `String (match profile with Full -> default_instructions | Operator_remote -> operator_remote_instructions));
       ])
 
-let handle_list_tools_eio ?(profile = Full) ?names state id =
+let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
+    ?(include_deprecated = false) state id =
   let tools =
-    tool_schemas_for_profile state profile
+    tool_schemas_for_profile ~include_hidden ~include_deprecated state profile
     |> (match names with
        | None -> Fun.id
        | Some wanted ->
@@ -3135,10 +3164,11 @@ let handle_request ~clock ~sw ?(profile = Full) ?mcp_session_id ?auth_token stat
                    | "resources/templates/list" -> handle_list_resource_templates_eio id
                    | "prompts/list" -> handle_list_prompts_eio id
                    | "tools/list" -> (
-                       match requested_tool_names req.params with
+                       match requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok names ->
-                           handle_list_tools_eio ~profile ?names state id)
+                       | Ok { names; include_hidden; include_deprecated } ->
+                           handle_list_tools_eio ~profile ?names ~include_hidden
+                             ~include_deprecated state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

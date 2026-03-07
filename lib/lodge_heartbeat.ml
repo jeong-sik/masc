@@ -2126,6 +2126,10 @@ type social_candidate = {
   reaction : Lodge_reaction.batch_reaction;
 }
 
+type action_plan =
+  | PlannedAction of agent_action
+  | NoAction of string
+
 let trigger_allows_post = function
   | Scheduled | ManualTrigger -> true
   | ContentAlert _ | Mentioned _ -> false
@@ -2179,16 +2183,16 @@ let decide_agent_action ~agent_name ~trigger ~trigger_reason ~recent_posts =
   let extra_context =
     if String.trim tom_context = "" then None else Some tom_context
   in
-  let maybe_post_action () =
+  let maybe_post_action ~reason =
     if trigger_allows_post trigger then
       match generate_agent_content ~agent_name ~context:trigger_reason ~action_type:(`Post trigger_reason) with
-      | Some content -> ActionPost content
-      | None -> ActionSkip
+      | Some content -> PlannedAction (ActionPost content)
+      | None -> NoAction "post_generation_failed"
     else
-      ActionSkip
+      NoAction reason
   in
   if prompt_posts = [] then
-    maybe_post_action ()
+    maybe_post_action ~reason:"no_relevant_posts"
   else
     let prompt =
       Lodge_reaction.batch_reaction_prompt
@@ -2230,9 +2234,12 @@ let decide_agent_action ~agent_name ~trigger ~trigger_reason ~recent_posts =
                ();
              { post; reaction })
     in
+    let no_candidate_reason =
+      if parsed = [] then "unparsed_batch" else "below_threshold"
+    in
     match pick_social_candidate ~agent_name ~candidates with
     | Some { post; reaction = { reaction = Lodge_reaction.Upvote; _ } } ->
-        ActionUpvote (Board.Post_id.to_string post.id)
+        PlannedAction (ActionUpvote (Board.Post_id.to_string post.id))
     | Some { post; reaction = { reaction = Lodge_reaction.CommentIntent; _ } } ->
         (match
            generate_agent_content
@@ -2240,43 +2247,46 @@ let decide_agent_action ~agent_name ~trigger ~trigger_reason ~recent_posts =
              ~context:trigger_reason
              ~action_type:(`Comment post.content)
          with
-         | Some content -> ActionComment (Board.Post_id.to_string post.id, content)
-         | None -> ActionUpvote (Board.Post_id.to_string post.id))
-    | _ -> maybe_post_action ()
+         | Some content -> PlannedAction (ActionComment (Board.Post_id.to_string post.id, content))
+         | None -> NoAction "comment_generation_failed")
+    | _ -> maybe_post_action ~reason:no_candidate_reason
 
 (** Execute the decided action *)
-let rec execute_agent_action ~agent_name ~action =
+let action_summary = function
+  | ActionPost content -> Printf.sprintf "Posted: %s" (utf8_truncate content 40)
+  | ActionComment (post_id, content) ->
+      Printf.sprintf "Commented on %s: %s" post_id (utf8_truncate content 30)
+  | ActionUpvote post_id -> Printf.sprintf "Upvoted %s" post_id
+  | ActionSkip -> "Skipped"
+
+let execute_agent_action ~agent_name ~action =
   let store = Board.global () in
   match action with
   | ActionSkip ->
       Eio.traceln "   ⏭️ [%s] Decided to skip" agent_name;
       Lodge_memory.store {
-        agent_name; action_type = "skip"; content = ""; context = "no action";
+        agent_name; action_type = "skip"; content = ""; context = "explicit_skip";
         board_id = None; timestamp = Time_compat.now ();
-      }
+      };
+      Passed "explicit_skip"
   | ActionPost content ->
       if String.length content < 5 then
-        Eio.traceln "   ⚠️ [%s] Content too short, skipping" agent_name
-      else if not (check_rate_limit ~agent_name `Post) then begin
-        Eio.traceln "   ⏳ [%s] POST rate-limited (30min gap / %d/day max), converting to COMMENT" agent_name max_posts_per_day;
-        (* Fallback: convert POST → COMMENT on most recent post *)
-        let recent = Board.list_posts (Board.global ()) ~limit:3 () in
-        (match List.find_opt (fun (p : Board.post) -> Board.Agent_id.to_string p.author <> agent_name) recent with
-         | Some target ->
-           let pid = Board.Post_id.to_string target.id in
-           execute_agent_action ~agent_name ~action:(ActionComment (pid, content))
-         | None ->
-           Eio.traceln "   ⏭️ [%s] No suitable post to comment on, skipping" agent_name)
-      end
+        (Eio.traceln "   ⚠️ [%s] Content too short, skipping" agent_name;
+         Skipped "post_content_too_short")
+      else if not (check_rate_limit ~agent_name `Post) then
+        (Eio.traceln "   ⏳ [%s] POST rate-limited (30min gap / %d/day max)" agent_name max_posts_per_day;
+         Skipped "post_rate_limited")
       else if is_duplicate_post ~agent_name ~content then
-        Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name
+        (Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name;
+         Passed "duplicate_post")
       else begin
         let vr = Post_verifier.verify ~content in
         Lodge_selection.record_quality_signal ~agent_name ~verdict:vr.overall;
         if not (Post_verifier.is_acceptable vr) then begin
           let reason = Post_verifier.verdict_to_string vr.overall in
           Eio.traceln "   🚫 [%s] Post rejected by verifier: %s" agent_name reason;
-          Agent_health.record_failure ~agent_name ~reason
+          Agent_health.record_failure ~agent_name ~reason;
+          Skipped (Printf.sprintf "post_verifier_rejected:%s" reason)
         end else begin
           (match vr.overall with
            | Post_verifier.Warn reason ->
@@ -2292,23 +2302,32 @@ let rec execute_agent_action ~agent_name ~action =
               Lodge_memory.store {
                 agent_name; action_type = "post"; content; context = "LLM decision";
                 board_id = Some post_id; timestamp = Time_compat.now ();
-              }
+              };
+              Acted { action; summary = action_summary action }
           | Error e ->
-              Eio.traceln "   ❌ [%s] Post failed: %s" agent_name (Board.show_board_error e)
+              let err = Board.show_board_error e in
+              Eio.traceln "   ❌ [%s] Post failed: %s" agent_name err;
+              Skipped (Printf.sprintf "post_create_failed:%s" err)
         end
       end
   | ActionComment (post_id, content) ->
       if String.length content < 3 then
-        Eio.traceln "   ⚠️ [%s] Comment too short, skipping" agent_name
+        (Eio.traceln "   ⚠️ [%s] Comment too short, skipping" agent_name;
+         Skipped "comment_content_too_short")
+      else if not (check_rate_limit ~agent_name `Comment) then
+        (Eio.traceln "   ⏳ [%s] COMMENT rate-limited (20s gap / %d/day max)" agent_name max_comments_per_day;
+         Skipped "comment_rate_limited")
       else if not (can_agent_comment ~agent_name ~post_id) then
-        Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id
+        (Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id;
+         Skipped "comment_limit_reached")
       else begin
         let vr = Post_verifier.verify ~content in
         Lodge_selection.record_quality_signal ~agent_name ~verdict:vr.overall;
         if not (Post_verifier.is_acceptable vr) then begin
           let reason = Post_verifier.verdict_to_string vr.overall in
           Eio.traceln "   🚫 [%s] Comment rejected by verifier: %s" agent_name reason;
-          Agent_health.record_failure ~agent_name ~reason
+          Agent_health.record_failure ~agent_name ~reason;
+          Skipped (Printf.sprintf "comment_verifier_rejected:%s" reason)
         end else begin
           (match vr.overall with
            | Post_verifier.Warn reason ->
@@ -2325,9 +2344,12 @@ let rec execute_agent_action ~agent_name ~action =
               Lodge_memory.store {
                 agent_name; action_type = "comment"; content; context = post_id;
                 board_id = Some post_id; timestamp = Time_compat.now ();
-              }
+              };
+              Acted { action; summary = action_summary action }
           | Error e ->
-              Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
+              let err = Board.show_board_error e in
+              Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name err;
+              Skipped (Printf.sprintf "comment_create_failed:%s" err)
         end
       end
   | ActionUpvote post_id ->
@@ -2339,9 +2361,12 @@ let rec execute_agent_action ~agent_name ~action =
            Lodge_memory.store {
              agent_name; action_type = "upvote"; content = "upvote"; context = post_id;
              board_id = Some post_id; timestamp = Time_compat.now ();
-           }
+           };
+           Acted { action; summary = action_summary action }
        | Error e ->
-           Eio.traceln "   ❌ [%s] Upvote failed: %s" agent_name (Board.show_board_error e))
+           let err = Board.show_board_error e in
+           Eio.traceln "   ❌ [%s] Upvote failed: %s" agent_name err;
+           Skipped (Printf.sprintf "upvote_failed:%s" err))
       
 
 (** {1 LLM call helper for Planner/Reflection} *)
@@ -2573,40 +2598,38 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
     (* Health gate: skip agents with open circuit breakers *)
     if not (Agent_health.is_healthy ~agent_name:name) then
       (name, trigger, Skipped "agent unhealthy (circuit breaker open)")
-    (* Rate limit check *)
-    else if not (check_rate_limit ~agent_name:name `Post) then
-      (name, trigger, Skipped "rate limit: too many posts today")
     else begin
       let trigger_reason = string_of_trigger trigger in
-      let action = decide_agent_action ~agent_name:name ~trigger ~trigger_reason ~recent_posts in
-      (try
-        execute_agent_action ~agent_name:name ~action;
-        (* Record health outcome — skip is neutral, not a failure *)
-        (match action with
-         | ActionSkip -> ()
-         | _ -> Agent_health.record_success ~agent_name:name)
-      with exn ->
-        Agent_health.record_failure ~agent_name:name
-          ~reason:(Printexc.to_string exn);
-        Printf.printf "[lodge] Agent %s action failed: %s\n%!" name (Printexc.to_string exn));
-      record_checkin ~agent_name:name;
-      let summary = match action with
-        | ActionPost content -> Printf.sprintf "Posted: %s" (utf8_truncate content 40)
-        | ActionComment (post_id, content) ->
-            Printf.sprintf "Commented on %s: %s" post_id (utf8_truncate content 30)
-        | ActionUpvote post_id -> Printf.sprintf "Upvoted %s" post_id
-        | ActionSkip -> "Decided to skip"
+      let result =
+        match decide_agent_action ~agent_name:name ~trigger ~trigger_reason ~recent_posts with
+        | NoAction reason -> Passed reason
+        | PlannedAction action ->
+            (try
+               let outcome = execute_agent_action ~agent_name:name ~action in
+               (match outcome with
+                | Acted _ -> Agent_health.record_success ~agent_name:name
+                | Passed _ | Skipped _ -> ());
+               outcome
+             with exn ->
+               let err = Printexc.to_string exn in
+               Agent_health.record_failure ~agent_name:name ~reason:err;
+               Printf.printf "[lodge] Agent %s action failed: %s\n%!" name err;
+               Skipped (Printf.sprintf "action_failed:%s" err))
       in
+      record_checkin ~agent_name:name;
       (* Record action for Thompson Sampling *)
-      (match action with
-       | ActionPost _ -> Lodge_selection.record_action ~agent_name:name ~action:`Post
-       | ActionComment _ -> Lodge_selection.record_action ~agent_name:name ~action:`Comment
-       | ActionSkip -> Lodge_selection.record_action ~agent_name:name ~action:`Skip
-       | ActionUpvote _ -> ());  (* No tracking for votes *)
+      (match result with
+       | Acted { action = ActionPost _; _ } ->
+           Lodge_selection.record_action ~agent_name:name ~action:`Post
+       | Acted { action = ActionComment _; _ } ->
+           Lodge_selection.record_action ~agent_name:name ~action:`Comment
+       | Passed _
+       | Skipped _ ->
+           Lodge_selection.record_action ~agent_name:name ~action:`Skip
+       | Acted { action = ActionUpvote _; _ }
+       | Acted { action = ActionSkip; _ } -> ());
 
-      match action with
-      | ActionSkip -> (name, trigger, Passed "no valuable contribution")
-      | _ -> (name, trigger, Acted { action; summary })
+      (name, trigger, result)
     end
   ) selected in
 
@@ -2695,14 +2718,21 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
                 Printf.printf "[lodge] Skipping self-heartbeat for %s (unhealthy)\n%!" name
               else begin
                 let trigger_reason = "self-heartbeat continuation" in
-                let action =
+                let planned =
                   decide_agent_action ~agent_name:name ~trigger:Scheduled ~trigger_reason
                     ~recent_posts
                 in
                 (try
-                  execute_agent_action ~agent_name:name ~action;
-                  Agent_health.record_success ~agent_name:name;
-                  record_agent_activity ~name
+                  let outcome =
+                    match planned with
+                    | NoAction reason -> Passed reason
+                    | PlannedAction action ->
+                        execute_agent_action ~agent_name:name ~action
+                  in
+                  (match outcome with
+                   | Acted _ ->
+                       Agent_health.record_success ~agent_name:name
+                   | Passed _ | Skipped _ -> ())
                 with exn ->
                   Agent_health.record_failure ~agent_name:name
                     ~reason:(Printexc.to_string exn);

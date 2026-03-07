@@ -61,7 +61,7 @@ let extract_json_from_text text =
     Alcotest.failf "expected JSON payload in text: %s" text
 
 let tools_list_response ~clock ~sw ?profile ?names ?(include_hidden = false)
-    ?(include_deprecated = false) state =
+    ?(include_deprecated = false) ?(include_usage = false) state =
   let fields =
     []
     |> (fun acc ->
@@ -73,6 +73,8 @@ let tools_list_response ~clock ~sw ?profile ?names ?(include_hidden = false)
          if include_hidden then ("include_hidden", `Bool true) :: acc else acc)
     |> (fun acc ->
          if include_deprecated then ("include_deprecated", `Bool true) :: acc else acc)
+    |> (fun acc ->
+         if include_usage then ("include_usage", `Bool true) :: acc else acc)
   in
   let params = `Assoc (List.rev fields) in
   let request =
@@ -653,6 +655,45 @@ let test_handle_request_tools_list_include_hidden_metadata () =
 
   cleanup_dir base_path
 
+let test_handle_request_tools_list_include_usage_metadata () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let telemetry_dir = Filename.concat base_path ".masc" in
+      Unix.mkdir telemetry_dir 0o755;
+      let telemetry_path = Filename.concat telemetry_dir "telemetry.jsonl" in
+      write_text_file telemetry_path
+        {|{"timestamp":100.0,"event":["Tool_called",{"tool_name":"masc_status","success":true,"duration_ms":3,"agent_id":null}]}
+{"timestamp":125.0,"event":["Tool_called",{"tool_name":"masc_status","success":false,"duration_ms":4,"agent_id":null}]}
+{"timestamp":130.0,"event":["Tool_called",{"tool_name":"masc_goal_list","success":true,"duration_ms":5,"agent_id":null}]}
+|};
+      Eio_main.run @@ fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run @@ fun sw ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let response = tools_list_response ~clock ~sw ~include_usage:true state in
+      let open Yojson.Safe.Util in
+      Alcotest.(check bool) "telemetry available" true
+        (response |> member "result" |> member "usageTelemetryAvailable" |> to_bool);
+      Alcotest.(check string) "telemetry path" telemetry_path
+        (response |> member "result" |> member "usageTelemetryPath" |> to_string);
+      Alcotest.(check int) "usage total calls" 3
+        (response |> member "result" |> member "usageTotalCalls" |> to_int);
+      let tools = tools_from_response response in
+      let status_tool = find_tool_exn tools "masc_status" in
+      Alcotest.(check int) "masc_status usage count" 2
+        (status_tool |> member "usageCount" |> to_int);
+      Alcotest.(check int) "masc_status success count" 1
+        (status_tool |> member "usageSuccessCount" |> to_int);
+      Alcotest.(check int) "masc_status failure count" 1
+        (status_tool |> member "usageFailureCount" |> to_int);
+      Alcotest.(check (float 0.001)) "masc_status last used at" 125.0
+        (status_tool |> member "usageLastUsedAt" |> to_float);
+      let who_tool = find_tool_exn tools "masc_who" in
+      Alcotest.(check int) "unused tool usage count" 0
+        (who_tool |> member "usageCount" |> to_int))
+
 let test_execute_tool_trpg_flow () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1112,6 +1153,8 @@ let eio_tests = [
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
   "handle tools/list include hidden metadata", `Quick,
     test_handle_request_tools_list_include_hidden_metadata;
+  "handle tools/list include usage metadata", `Quick,
+    test_handle_request_tools_list_include_usage_metadata;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
   "handle invalid json", `Quick, test_handle_request_invalid_json;

@@ -12,7 +12,7 @@ import {
   fetchDebateStatus,
   startDebate,
 } from '../api'
-import { serverStatus } from '../store'
+import { registerCouncilRefresh } from '../store'
 import type { CouncilDebate, CouncilDebateSummary, CouncilSession } from '../types'
 
 const debates = signal<CouncilDebate[]>([])
@@ -24,8 +24,10 @@ const errorText = signal('')
 const selectedDebateId = signal<string | null>(null)
 const selectedDebateDetail = signal<CouncilDebateSummary | null>(null)
 const detailLoading = signal(false)
+const councilFeedOk = signal<boolean | null>(null)
+const lastRefreshAt = signal<number | null>(null)
 
-async function refreshCouncil() {
+export async function refreshCouncil() {
   loading.value = true
   errorText.value = ''
   try {
@@ -35,12 +37,18 @@ async function refreshCouncil() {
     ])
     debates.value = d
     sessions.value = s
+    councilFeedOk.value = true
+    lastRefreshAt.value = Date.now()
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : 'Failed to load council data'
+    councilFeedOk.value = false
   } finally {
     loading.value = false
   }
 }
+
+// Register for SSE-driven refresh
+registerCouncilRefresh(refreshCouncil)
 
 async function submitDebate() {
   const topic = topicInput.value.trim()
@@ -109,17 +117,16 @@ function SessionRow({ session }: { session: CouncilSession }) {
 }
 
 function CouncilFeedNotice() {
-  const quality = serverStatus.value?.data_quality
-  if (!quality) return null
-  if (quality.council_feed_ok !== false && !quality.last_sync_at) return null
+  if (councilFeedOk.value === null) return null
+  if (councilFeedOk.value && !lastRefreshAt.value) return null
 
   return html`
-    <div class="feed-health-banner ${quality.council_feed_ok === false ? 'degraded' : 'ok'}">
+    <div class="feed-health-banner ${councilFeedOk.value === false ? 'degraded' : 'ok'}">
       <span class="feed-health-title">
-        ${quality.council_feed_ok === false ? 'Council feed degraded' : 'Council feed synced'}
+        ${councilFeedOk.value === false ? 'Council feed degraded' : 'Council feed synced'}
       </span>
-      ${quality.last_sync_at
-        ? html`<span class="feed-health-meta">Last sync: <${TimeAgo} timestamp=${quality.last_sync_at} /></span>`
+      ${lastRefreshAt.value
+        ? html`<span class="feed-health-meta">Last sync: <${TimeAgo} timestamp=${lastRefreshAt.value} /></span>`
         : html`<span class="feed-health-meta">No sync timestamp</span>`}
     </div>
   `
@@ -129,7 +136,7 @@ export function Council() {
   useEffect(() => {
     refreshCouncil()
   }, [])
-  const councilFeedDegraded = serverStatus.value?.data_quality?.council_feed_ok === false
+  const councilFeedDegraded = councilFeedOk.value === false
 
   return html`
     <div>

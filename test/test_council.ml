@@ -302,6 +302,63 @@ let debate_tests = [
   "ping-pong reply", `Quick, test_debate_pingpong;
 ]
 
+let consensus_persist_path = "/tmp/masc-test-consensus-persist"
+
+let consensus_persist_setup () =
+  (try rm_rf consensus_persist_path with _ -> ());
+  mkdir_p consensus_persist_path;
+  Consensus.clear_sessions ();
+  Consensus.init ~base_path:consensus_persist_path
+
+let consensus_persist_teardown () =
+  Consensus.clear_sessions ();
+  (* Reset to no persistence *)
+  Consensus.init ~base_path:"/tmp/masc-test-consensus-noop";
+  (try rm_rf consensus_persist_path with _ -> ())
+
+let test_consensus_persist_roundtrip () =
+  consensus_persist_setup ();
+  match Consensus.start_voting ~topic:"Persist test" ~initiator:"alice" ~quorum:2 ~threshold:0.5 () with
+  | Error _ -> consensus_persist_teardown (); fail "start failed"
+  | Ok session ->
+    let sid = session.Consensus.id in
+    (* Cast a vote *)
+    (match Consensus.cast_vote ~session_id:sid ~agent:"bob" ~decision:Consensus.Approve ~reason:"looks good" () with
+     | Error _ -> consensus_persist_teardown (); fail "vote failed"
+     | Ok _ -> ());
+    (* Clear in-memory store and reload from disk *)
+    Consensus.clear_sessions ();
+    Consensus.init ~base_path:consensus_persist_path;
+    (* Session should be restored *)
+    (match Consensus.get_session ~session_id:sid with
+     | None -> consensus_persist_teardown (); fail "session not restored from disk"
+     | Some restored ->
+       check string "topic" restored.Consensus.topic "Persist test";
+       check string "initiator" restored.Consensus.initiator "alice";
+       check int "vote count" (List.length restored.Consensus.votes) 1;
+       let vote = List.hd restored.Consensus.votes in
+       check string "voter" vote.Consensus.agent "bob";
+       check bool "decision" (vote.Consensus.decision = Consensus.Approve) true);
+    consensus_persist_teardown ()
+
+let test_consensus_persist_closed () =
+  consensus_persist_setup ();
+  match Consensus.start_voting ~topic:"Close persist" ~initiator:"mod" ~quorum:1 ~threshold:0.5 () with
+  | Error _ -> consensus_persist_teardown (); fail "start failed"
+  | Ok session ->
+    let sid = session.Consensus.id in
+    (match Consensus.close_session ~session_id:sid with
+     | Error _ -> consensus_persist_teardown (); fail "close failed"
+     | Ok _ -> ());
+    Consensus.clear_sessions ();
+    Consensus.init ~base_path:consensus_persist_path;
+    (match Consensus.get_session ~session_id:sid with
+     | None -> consensus_persist_teardown (); fail "closed session not restored"
+     | Some restored ->
+       check bool "state closed" (restored.Consensus.state = Consensus.Closed) true;
+       check bool "has closed_at" (restored.Consensus.closed_at <> None) true);
+    consensus_persist_teardown ()
+
 let consensus_tests = [
   "start voting", `Quick, test_consensus_start;
   "cast vote", `Quick, test_consensus_vote;
@@ -309,6 +366,8 @@ let consensus_tests = [
   "majority result", `Quick, test_consensus_majority;
   "unanimous result", `Quick, test_consensus_unanimous;
   "deadlock result", `Quick, test_consensus_deadlock;
+  "persistence roundtrip", `Quick, test_consensus_persist_roundtrip;
+  "persistence closed session", `Quick, test_consensus_persist_closed;
 ]
 
 let router_tests = [

@@ -944,4 +944,11 @@ a:hover {
   .trpg-run-status.running {
     animation: none;
   }
+
+  button.monitor-row.state-working {
+    animation: none;
+  }
+  button.monitor-row.bad.state-quiet {
+    animation: none;
+  }
 }

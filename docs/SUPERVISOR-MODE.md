@@ -248,6 +248,7 @@ two-worker llama batch spawn, and verifies:
 1. both spawned workers fail deterministically
 2. failed runtime actors are detached from session participants
 3. report/proof artifacts expose failed spawn and detached actor counts
+4. report/proof artifacts expose failed runtime-actor roster and detach reasons
 
 ## Related Docs
 

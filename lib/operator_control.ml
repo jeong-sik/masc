@@ -1542,6 +1542,15 @@ let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
       ("checkins", `List (List.map checkin_json result.checkins));
     ]
 
+let lodge_tick_ack_json ~mode ~status =
+  `Assoc
+    [
+      ("status", `String status);
+      ("mode", `String mode);
+      ("quiet_hours_overridden", `Bool true);
+      ("manual_tick_running", `Bool true);
+    ]
+
 let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
   { config = ctx.config; sw = ctx.sw; clock = ctx.clock }
 
@@ -1674,13 +1683,35 @@ let execute_action (ctx : 'a context) (request : action_request) :
                   ] );
             ])
       else
-        let result = Lodge_heartbeat.trigger_heartbeat ctx.config in
-        Ok
-          (`Assoc
-            [
-              ("delegated_tool", `String "lodge_tick");
-              ("result", lodge_tick_result_json result);
-            ])
+        let wait_for_result = get_bool request.payload "wait" false in
+        if wait_for_result then
+          if (Lodge_heartbeat.lodge_status ()).ls_manual_tick_running then
+            Ok
+              (`Assoc
+                [
+                  ("delegated_tool", `String "lodge_tick");
+                  ("result", lodge_tick_ack_json ~mode:"sync" ~status:"already_running");
+                ])
+          else
+            let result = Lodge_heartbeat.trigger_heartbeat ctx.config in
+            Ok
+              (`Assoc
+                [
+                  ("delegated_tool", `String "lodge_tick");
+                  ("result", lodge_tick_result_json result);
+                ])
+        else
+          let status =
+            match Lodge_heartbeat.trigger_heartbeat_async ~sw:ctx.sw ctx.config with
+            | `Started -> "accepted"
+            | `Already_running -> "already_running"
+          in
+          Ok
+            (`Assoc
+              [
+                ("delegated_tool", `String "lodge_tick");
+                ("result", lodge_tick_ack_json ~mode:"async" ~status);
+              ])
   | "team_turn" ->
       let* () = validate_target_type "team_session" request in
       let* session_id = require_target_id request in

@@ -602,6 +602,40 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       Alcotest.(check bool) "summary present" true
         (String.length Yojson.Safe.Util.(diagnostic |> member "summary" |> to_string) > 0))
 
+let test_manual_lodge_tick_updates_observable_state () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let before = Lodge_heartbeat.lodge_status () in
+      let result : Lodge_heartbeat.heartbeat_result =
+        {
+          timestamp = Unix.gettimeofday ();
+          current_hour = 11;
+          agents_checked = 2;
+          checkins =
+            [
+              ( "historian",
+                Lodge_heartbeat.ManualTrigger,
+                Lodge_heartbeat.Passed "no valuable contribution" );
+            ];
+          agents_woken = [];
+          encounter_rolled = None;
+          activity_report = "manual test tick";
+        }
+      in
+      Lodge_heartbeat.record_tick_result result;
+      let after = Lodge_heartbeat.lodge_status () in
+      Alcotest.(check int) "manual tick increments total ticks"
+        (before.ls_total_ticks + 1) after.ls_total_ticks;
+      Alcotest.(check int) "manual tick increments total checkins"
+        (before.ls_total_checkins + List.length result.Lodge_heartbeat.checkins)
+        after.ls_total_checkins;
+      Alcotest.(check bool) "manual tick stores last result" true
+        (Option.is_some after.ls_last_result);
+      Alcotest.(check bool) "manual tick running cleared" false
+        after.ls_manual_tick_running)
+
 let () =
   Alcotest.run "Operator_control"
     [
@@ -629,6 +663,8 @@ let () =
             test_select_checkin_agents_manual_override_quiet_hours;
           Alcotest.test_case "keeper status exposes summary and recoverable" `Quick
             test_keeper_status_exposes_summary_and_recoverable;
+          Alcotest.test_case "manual lodge tick updates observable state" `Quick
+            test_manual_lodge_tick_updates_observable_state;
           Alcotest.test_case "expired confirmation rejected" `Quick
             test_confirm_rejects_expired_token;
         ] );

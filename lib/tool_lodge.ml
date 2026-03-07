@@ -141,11 +141,63 @@ let http_get_json ~net:_ url =
 
 (* NOTE: http_get_local removed — using curl subprocess for all HTTP *)
 
+let trim_trailing_slash s =
+  let trimmed = String.trim s in
+  let len = String.length trimmed in
+  if len > 0 && trimmed.[len - 1] = '/' then
+    String.sub trimmed 0 (len - 1)
+  else
+    trimmed
+
 (** Use local GraphQL by default for local MCP runs.
     Set GRAPHQL_URL explicitly to force remote endpoint. *)
 let default_graphql_url () =
-  let port = Sys.getenv_opt "MASC_MCP_PORT" |> Option.value ~default:"8935" in
-  Printf.sprintf "http://127.0.0.1:%s/graphql" port
+  match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
+  | Some raw when String.trim raw <> "" ->
+      trim_trailing_slash raw ^ "/graphql"
+  | _ ->
+      let port = Sys.getenv_opt "MASC_HTTP_PORT" |> Option.value ~default:"8935" in
+      Printf.sprintf "http://127.0.0.1:%s/graphql" port
+
+let graphql_url () =
+  match Sys.getenv_opt "GRAPHQL_URL" with
+  | Some raw when String.trim raw <> "" -> String.trim raw
+  | _ -> default_graphql_url ()
+
+let looks_like_html_response body =
+  let trimmed = String.lowercase_ascii (String.trim body) in
+  trimmed <> "" && trimmed.[0] = '<'
+
+let ensure_graphql_json_response body =
+  if String.length body = 0 then
+    Error "❌ GraphQL: empty response"
+  else if looks_like_html_response body then
+    Error "❌ GraphQL: endpoint returned HTML instead of JSON"
+  else
+    Ok body
+
+let graphql_error_message json =
+  match Yojson.Safe.Util.member "errors" json with
+  | `List (first :: _) ->
+      first |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option
+  | _ -> None
+
+let graphql_agents_edges json =
+  match graphql_error_message json with
+  | Some msg -> Error ("GraphQL error: " ^ msg)
+  | None ->
+      let data = Yojson.Safe.Util.member "data" json in
+      if data = `Null then
+        Error "GraphQL data is null"
+      else
+        let agents = Yojson.Safe.Util.member "agents" data in
+        if agents = `Null then
+          Error "GraphQL agents is null"
+        else
+          match Yojson.Safe.Util.member "edges" agents with
+          | `List edges -> Ok edges
+          | `Null -> Ok []
+          | _ -> Error "GraphQL agents.edges is not a list"
 
 (** Keep auth token out of argv so process errors don't leak secrets. *)
 let with_auth_header_file api_key f =
@@ -163,13 +215,14 @@ let with_auth_header_file api_key f =
 
 (** curl-based GraphQL request — reliable DNS resolution in Railway containers *)
 let graphql_request_curl body : (string, string) Stdlib.result =
-  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:(default_graphql_url ()) in
+  let url = graphql_url () in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   with_auth_header_file api_key (fun auth_header_file ->
       try
         let argv =
-          [ "curl"; "-s"; "-m"; "10"; "-f"; url;
+          [ "curl"; "-s"; "-m"; "10"; "-f"; "-X"; "POST"; url;
             "-H"; "Content-Type: application/json"
+            ; "-H"; "Accept: application/json"
           ]
           |> fun base ->
           match auth_header_file with
@@ -180,14 +233,14 @@ let graphql_request_curl body : (string, string) Stdlib.result =
           with_auth @ [ "-d"; "@-" ]
         in
         let output = Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv in
-        if String.length output = 0 then Error "❌ GraphQL curl: empty response" else Ok output
+        ensure_graphql_json_response output
       with exn -> Error (Printf.sprintf "❌ GraphQL curl: %s" (Printexc.to_string exn)))
 
 (** GraphQL request via Cohttp_eio with curl fallback.
     Falls back to curl if Cohttp fails (Railway DNS issues).
     URL configurable via GRAPHQL_URL env var for Railway internal networking. *)
 let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
-  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:(default_graphql_url ()) in
+  let url = graphql_url () in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let max_response_bytes = 1_000_000 in
   let cohttp_result = match Eio_context.get_net_opt () with
@@ -220,12 +273,10 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
           let body_str =
             Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
           in
-          if String.length body_str = 0 then
-            Error "❌ GraphQL: empty response"
-          else if Cohttp.Code.is_success status then
-            Ok body_str
-          else
+          if not (Cohttp.Code.is_success status) then
             Error (Printf.sprintf "❌ GraphQL: HTTP %d" status)
+          else
+            ensure_graphql_json_response body_str
         )
       in
       match Eio_context.get_clock_opt () with
@@ -637,6 +688,70 @@ type agent_config = {
   interests: string list;
 }
 
+let builtin_core_agent_configs () =
+  [
+    {
+      name = "dreamer";
+      primary_value = Some "imagination";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "🌙";
+      korean_name = "몽상가";
+      model = "glm-4.7-flash:latest";
+      interests = [ "vision"; "future"; "art"; "possibility" ];
+    };
+    {
+      name = "skeptic";
+      primary_value = Some "verification";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "🧐";
+      korean_name = "회의론자";
+      model = "glm-4.7-flash:latest";
+      interests = [ "evidence"; "risk"; "debugging"; "correctness" ];
+    };
+    {
+      name = "historian";
+      primary_value = Some "memory";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "📚";
+      korean_name = "역사가";
+      model = "glm-4.7-flash:latest";
+      interests = [ "context"; "history"; "continuity"; "archives" ];
+    };
+    {
+      name = "pragmatist";
+      primary_value = Some "utility";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "🔧";
+      korean_name = "실용주의자";
+      model = "glm-4.7-flash:latest";
+      interests = [ "operations"; "execution"; "delivery"; "practicality" ];
+    };
+    {
+      name = "connector";
+      primary_value = Some "synthesis";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "🕸️";
+      korean_name = "연결자";
+      model = "glm-4.7-flash:latest";
+      interests = [ "relationships"; "coordination"; "bridges"; "community" ];
+    };
+  ]
+
 (** In-memory cache for dynamic agents (protected by mutex for concurrent access) *)
 let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
 let agent_cache_mu = Mutex.create ()
@@ -781,54 +896,57 @@ let load_agents_config () =
           Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
           (* Parse JSON response *)
           let json = Yojson.Safe.from_string json_str in
-          let edges = json
-            |> Yojson.Safe.Util.member "data"
-            |> Yojson.Safe.Util.member "agents"
-            |> Yojson.Safe.Util.member "edges"
-            |> Yojson.Safe.Util.to_list
-          in
-          List.iter (fun edge ->
-            try
-              let node = Yojson.Safe.Util.member "node" edge in
-              let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-              let interests_json = Yojson.Safe.Util.(member "interests" node) in
-              let interests = match interests_json with
-                | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
-                | _ -> []
-              in
-              let config = {
-                name;
-                primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
-                value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
-                prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
-                generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
-                status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
-                emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
-                korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
-                model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
-                interests;
-              } in
-              Mutex.lock agent_cache_mu;
-              Hashtbl.replace agent_cache config.name config;
-              Mutex.unlock agent_cache_mu
-            with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
-          ) edges;
-          Mutex.lock agent_cache_mu;
-          let n = Hashtbl.length agent_cache in
-          Mutex.unlock agent_cache_mu;
-          if n > 0 then begin
-            graphql_success := true;
-            Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n;
-            (* Save to file cache for offline fallback *)
-            save_agents_to_file_cache ()
-          end
+          (match graphql_agents_edges json with
+           | Error msg ->
+               Printf.eprintf "[Lodge] GraphQL agent parse failed: %s\n%!" msg
+           | Ok edges ->
+               List.iter (fun edge ->
+                 try
+                   let node = Yojson.Safe.Util.member "node" edge in
+                   let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+                   let interests_json = Yojson.Safe.Util.(member "interests" node) in
+                   let interests = match interests_json with
+                     | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
+                     | _ -> []
+                   in
+                   let config = {
+                     name;
+                     primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
+                     value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
+                     prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
+                     generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
+                     status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
+                     emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
+                     korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
+                     model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
+                     interests;
+                   } in
+                   Mutex.lock agent_cache_mu;
+                   Hashtbl.replace agent_cache config.name config;
+                   Mutex.unlock agent_cache_mu
+                 with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
+               ) edges;
+               Mutex.lock agent_cache_mu;
+               let n = Hashtbl.length agent_cache in
+               Mutex.unlock agent_cache_mu;
+               if n > 0 then begin
+                 graphql_success := true;
+                 Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n;
+                 save_agents_to_file_cache ()
+               end)
     with e ->
       Printf.eprintf "[Lodge] ❌ GraphQL failed: %s\n%!" (Printexc.to_string e)
     end;
     (* Fallback to file cache if GraphQL failed *)
     if not !graphql_success then begin
       Printf.eprintf "[Lodge] Trying file cache fallback...\n%!";
-      if not (load_agents_from_file_cache ()) then
+      if not (load_agents_from_file_cache ()) then begin
+        Printf.eprintf "[Lodge] Falling back to builtin core identities\n%!";
+        Mutex.lock agent_cache_mu;
+        List.iter (fun cfg -> Hashtbl.replace agent_cache cfg.name cfg) (builtin_core_agent_configs ());
+        Mutex.unlock agent_cache_mu;
+      end;
+      if not (has_cached_agents_in_memory ()) then
         Printf.eprintf "[Lodge] ⚠ No agents available (GraphQL failed, no valid cache)\n%!"
     end
   end
@@ -996,7 +1114,7 @@ let random_agent_name () =
 
 (** Validate agent name exists in cache (replaces validate_agent_name) *)
 let validate_agent_name name =
-  if name = "random" || name = "랜덤" then Some (random_agent_name ())
+  if name = "random" || name = "랜덤" then None
   else match get_cached_agent name with
     | Some _ -> Some name
     | None ->
@@ -1082,62 +1200,113 @@ let translate_to_korean ~net text =
     | Error _ -> text  (* fallback to original *)
 
 type lodge_reaction_outcome =
-  | Delegated
-  | Comment of string
-  | Upvote
-  | Skip of string
+  | Delegated of string
+  | Completed of Lodge_worker.completion
 
-let localize_decision_content ~net (choice : Lodge_decision.choice) =
-  match (choice.action, choice.content, lodge_language) with
-  | Lodge_decision.Comment, Some content, "ko" ->
-      { choice with content = Some (translate_to_korean ~net content) }
-  | _ -> choice
+let default_reaction_goal ?target_post_id ~allow_post () =
+  match target_post_id, allow_post with
+  | Some post_id, _ ->
+      Printf.sprintf
+        "Inspect board post %s, decide whether to comment, upvote, or skip, and use MASC tools directly to carry out the decision. Do not create a new top-level post."
+        post_id
+  | None, true ->
+      "Inspect the provided board context and decide whether to write a new top-level post, comment on an existing post, upvote, or skip. Use MASC tools directly to carry out the decision."
+  | None, false ->
+      "Inspect the provided board context and decide whether to comment, upvote, or skip using MASC tools directly. Do not create a new top-level post."
+
+let reaction_context posts =
+  posts
+  |> List.map (fun (post_id, content) ->
+         Printf.sprintf "[target_post_id=%s]\n%s" post_id content)
+  |> String.concat "\n\n"
+
+let select_reaction_assignments ~net ~agent_name_opt ~posts ~max_agents ~allow_post
+    : (Lodge_decision.assignment list, string) Stdlib.result =
+  let candidate_post_ids = List.map fst posts in
+  let explicit_agent =
+    match agent_name_opt with
+    | Some name -> validate_agent_name name
+    | None -> None
+  in
+  match explicit_agent with
+  | Some agent_name ->
+      Ok
+        [
+          {
+            Lodge_decision.agent_name;
+            target_post_id =
+              (match posts with
+              | (post_id, _) :: _ -> Some post_id
+              | [] -> None);
+            goal =
+              default_reaction_goal
+                ?target_post_id:
+                  (match posts with
+                  | (post_id, _) :: _ -> Some post_id
+                  | [] -> None)
+                ~allow_post ();
+            reason = "explicitly requested agent";
+            confidence = 1.0;
+          };
+        ]
+  | None ->
+      let candidate_agents =
+        get_all_agent_names ()
+        |> List.map (fun name -> (name, get_agent_prompt name))
+      in
+      let prompt =
+        Lodge_decision.selection_prompt ~agent_name:"lodge-orchestrator"
+          ~candidate_agents
+          ~posts:(List.map (fun (post_id, content) -> (post_id, "unknown", content)) posts)
+          ~extra_context:
+            (Some
+               "Choose the best reacting agents for this board context. They should inspect the posts and use Lodge-safe MCP tools directly.")
+          ~max_agents ~allow_post
+      in
+      let system =
+        "/no_think\nReturn valid JSON only. Do not use markdown fences."
+      in
+      match smart_generate ~net ~temperature:0.2 ~num_predict:500 ~system prompt with
+      | Error e -> Error e
+      | Ok response -> (
+          match
+            Lodge_decision.parse_selection_plan
+              ~allowed_agents:(List.map fst candidate_agents)
+              ~allowed_post_ids:candidate_post_ids ~max_agents response
+          with
+          | Ok plan when plan.assignments <> [] -> Ok plan.assignments
+          | Ok _ -> Error "selection returned no assignments"
+          | Error e -> Error (Printf.sprintf "❌ Lodge selection: %s" e))
 
 (** React to content with a dynamic agent (from Neo4j cache) *)
-let react_to_content ~net ?agent_name:provided_name ~post_id content =
-  let agent_name = match provided_name with
-    | Some n -> n
-    | None -> random_agent_name ()
-  in
-  (* Get prompt from Neo4j cache *)
-  let agent_desc = get_agent_prompt agent_name in
-
-  (* Get agent's existing interests for context *)
-  let existing_interests = get_agent_interests ~agent_name in
-  let prompt =
-    Lodge_decision.single_reaction_prompt
-      ~agent_name
-      ~agent_prompt:agent_desc
-      ~interests:existing_interests
-      ~post_id
-      ~content
-      ~language_instruction:(language_instruction ())
-  in
-  let system =
-    "/no_think\nReturn valid JSON only. Do not use markdown fences."
-  in
-  (* A2A delegation: emit event for external worker instead of local LLM *)
-  if Env_config.LodgeV2.delegate_llm then begin
-    A2a_tools.emit_heartbeat_task ~agent:agent_name ~prompt:system
-      ~context:prompt ();
-    Ok Delegated
-  end else
-  match smart_generate ~net ~temperature:0.3 ~num_predict:350 ~system prompt with
+let react_to_content ~net ~agent_name_opt ~post_id content =
+  match
+    select_reaction_assignments ~net ~agent_name_opt
+      ~posts:[ (post_id, content) ] ~max_agents:1 ~allow_post:false
+  with
   | Error e -> Error e
-  | Ok response ->
-      (match Lodge_decision.parse_single_choice ~post_id response with
-       | Error e -> Error (Printf.sprintf "❌ Lodge decision: %s" e)
-       | Ok choice ->
-           let choice = localize_decision_content ~net choice in
-           let new_interests = extract_interests ~net content in
-           let _ = save_interests_to_neo4j ~agent_name new_interests in
-           match choice.action with
-           | Lodge_decision.Comment ->
-               Ok (Comment (Option.value ~default:"" choice.content))
-           | Lodge_decision.Upvote -> Ok Upvote
-           | Lodge_decision.Skip -> Ok (Skip choice.reason)
-           | Lodge_decision.Post ->
-               Error "❌ Lodge decision: post action is not allowed for reactions")
+  | Ok (assignment :: _) ->
+      let agent_name = assignment.agent_name in
+      let agent_desc = get_agent_prompt agent_name in
+      let reaction_context = reaction_context [ (post_id, content) ] in
+      let allowed_tools = Lodge_worker.allowed_tools ~allow_post:false () in
+      if Env_config.LodgeV2.delegate_llm then begin
+        A2a_tools.emit_heartbeat_task ~agent:agent_name ~goal:assignment.goal
+          ~context:reaction_context ~allowed_tools
+          ~decision_reason:assignment.reason
+          ~decision_confidence:assignment.confidence ();
+        Ok (Delegated agent_name)
+      end else (
+        match
+          Lodge_worker.run_local ~agent_name ~identity_prompt:agent_desc
+            ~goal:assignment.goal ~context:reaction_context ~allow_post:false ()
+        with
+        | Error e -> Error e
+        | Ok completion ->
+            let new_interests = extract_interests ~net content in
+            let _ = save_interests_to_neo4j ~agent_name new_interests in
+            Ok (Completed completion))
+  | Ok [] -> Error "reaction selection returned no assignments"
 
 (** {1 Heartbeat: Full Read → Dig → Share cycle} *)
 
@@ -1182,23 +1351,30 @@ let heartbeat ~net (args : Yojson.Safe.t) =
           with Not_found -> "" in
           (* Auto-trigger reactions from agents *)
           let reactions = if post_id <> "" then
-            List.filter_map (fun agent ->
-              match react_to_content ~net ~agent_name:agent ~post_id content with
-              | Error _ -> None
-              | Ok Delegated -> Some (Printf.sprintf "🔮 %s (delegated)" agent)
-              | Ok (Comment reaction) ->
-                let display_name = format_agent_name_dynamic agent in
-                let args = `Assoc [("post_id", `String post_id); ("content", `String (Printf.sprintf "%s\n%s" display_name reaction)); ("author", `String agent)] in
-                let (ok, _) = Tool_board.handle_tool "masc_board_comment" args in
-                if ok then Some (Printf.sprintf "💬 %s" agent) else None
-              | Ok Upvote ->
-                let vote_args = `Assoc [("post_id", `String post_id); ("voter", `String agent); ("direction", `String "up")] in
-                let (ok, _) = Tool_board.handle_tool "masc_board_vote" vote_args in
-                if ok then Some (Printf.sprintf "👍 %s" agent) else None
-              | Ok (Skip _) -> Some (Printf.sprintf "⏭️ %s" agent)
-            ) (let names = get_all_agent_names () in
-               if List.length names >= 2 then [List.nth names 0; List.nth names 1]
-               else names)
+            match
+              select_reaction_assignments ~net ~agent_name_opt:None
+                ~posts:[ (post_id, content) ] ~max_agents:2 ~allow_post:false
+            with
+            | Error _ -> []
+            | Ok assignments ->
+                List.filter_map
+                  (fun (assignment : Lodge_decision.assignment) ->
+                    match
+                      react_to_content ~net ~agent_name_opt:(Some assignment.agent_name)
+                        ~post_id content
+                    with
+                    | Error _ -> None
+                    | Ok (Delegated agent) ->
+                        Some (Printf.sprintf "🔮 %s (delegated)" agent)
+                    | Ok (Completed completion) ->
+                        Some
+                          (Printf.sprintf "%s %s"
+                             (match completion.status with
+                             | Lodge_worker.Acted -> "🛠️"
+                             | Lodge_worker.Skipped -> "⏭️"
+                             | Lodge_worker.Failed -> "❌")
+                             assignment.agent_name))
+                  assignments
           else [] in
           match reactions with [] -> "" | rs -> "\n🎭 " ^ String.concat ", " rs
         end else "" in
@@ -1230,10 +1406,7 @@ let rec react ~net (args : Yojson.Safe.t) =
   let post_id_arg = Safe_ops.json_string ~default:"" "post_id" args in
   let agent_str = Safe_ops.json_string ~default:"random" "agent" args in
   let skip_classify = Safe_ops.json_bool ~default:true "skip_classify" args in
-  let agent_name = match validate_agent_name agent_str with
-    | Some n -> n
-    | None -> random_agent_name ()
-  in
+  let agent_name = validate_agent_name agent_str in
   if post_id_arg = "" then (false, "❌ Lodge: post_id required")
   else
     let post_id =
@@ -1253,30 +1426,31 @@ let rec react ~net (args : Yojson.Safe.t) =
     else
       let clean_content = extract_post_content detail in
       if skip_classify then
-      match react_to_content ~net ~agent_name ~post_id clean_content with
-      | Error e -> (false, Printf.sprintf "❌ Lodge: React failed [agent=%s, error=%s]" agent_name e)
-      | Ok Delegated -> (true, Printf.sprintf "🔮 Lodge reaction delegated for %s [agent=%s]" post_id agent_name)
-      | Ok (Comment reaction) ->
-        let display_name = format_agent_name_dynamic agent_name in
-        let comment_args = `Assoc [
-          ("post_id", `String post_id);
-          ("content", `String (Printf.sprintf "%s\n%s" display_name reaction));
-          ("author", `String agent_name);
-        ] in
-        let (ok, msg) = Tool_board.handle_tool "masc_board_comment" comment_args in
-        if ok then (true, Printf.sprintf "💬 Lodge comment posted on %s" post_id)
-        else (false, Printf.sprintf "❌ Lodge: Comment failed [post=%s, error=%s]" post_id msg)
-      | Ok Upvote ->
-        let vote_args = `Assoc [
-          ("post_id", `String post_id);
-          ("voter", `String agent_name);
-          ("direction", `String "up");
-        ] in
-        let (ok, msg) = Tool_board.handle_tool "masc_board_vote" vote_args in
-        if ok then (true, Printf.sprintf "👍 Lodge upvoted %s [agent=%s]" post_id agent_name)
-        else (false, Printf.sprintf "❌ Lodge: Upvote failed [post=%s, error=%s]" post_id msg)
-      | Ok (Skip reason) ->
-        (true, Printf.sprintf "⏭️ %s skipped %s (%s)" agent_name post_id reason)
+      match react_to_content ~net ~agent_name_opt:agent_name ~post_id clean_content with
+      | Error e ->
+          (false,
+           Printf.sprintf "❌ Lodge: React failed [agent=%s, error=%s]"
+             (Option.value ~default:"auto" agent_name) e)
+      | Ok (Delegated agent) ->
+          (true, Printf.sprintf "🔮 Lodge reaction delegated for %s [agent=%s]" post_id agent)
+      | Ok (Completed completion) -> (
+          match completion.status with
+          | Lodge_worker.Acted ->
+              (true,
+               Printf.sprintf "🛠️ Lodge worker acted on %s [agent=%s, tools=%s]"
+                 post_id completion.worker_name
+                 (if completion.tool_names = [] then "none"
+                  else String.concat ", " completion.tool_names))
+          | Lodge_worker.Skipped ->
+              (true,
+               Printf.sprintf "⏭️ %s skipped %s (%s)"
+                 completion.worker_name post_id
+                 completion.decision_reason)
+          | Lodge_worker.Failed ->
+              (false,
+               Printf.sprintf "❌ Lodge worker failed [agent=%s, error=%s]"
+                 completion.worker_name
+                 (Option.value ~default:completion.summary completion.failure_reason)))
     else
       let cls = classify_content ~net clean_content in
       match cls.category with
@@ -1285,7 +1459,7 @@ let rec react ~net (args : Yojson.Safe.t) =
       | Review ->
         react ~net (`Assoc [
           ("post_id", `String post_id);
-          ("agent", `String agent_name);
+          ("agent", `String (Option.value ~default:"random" agent_name));
           ("skip_classify", `Bool true);
         ])
 
@@ -1306,21 +1480,16 @@ let full_cycle ~net (args : Yojson.Safe.t) =
     in
     if post_id = "" then (true, Printf.sprintf "%s\n(no post_id found for reaction)" msg)
     else
-      (* Step 2: ONE random agent reacts *)
-      let agent = random_agent_name () in
       let (ok2, result) = react ~net (`Assoc [
         ("post_id", `String post_id);
-        ("agent", `String agent);
+        ("agent", `String "random");
       ]) in
-      let model = get_agent_model agent in
-      (true, Printf.sprintf "%s\n\n💬 %s [%s] reacted:\n%s"
-        msg agent model (if ok2 then result else "❌ " ^ result))
+      (true, Printf.sprintf "%s\n\n💬 Lodge reacted:\n%s"
+        msg (if ok2 then result else "❌ " ^ result))
 
 (** {1 Discussion: agents read and react to EACH OTHER's posts} *)
 
 let lodge_discussion ~net (_args : Yojson.Safe.t) =
-  let agent = random_agent_name () in
-
   let (ok, posts_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("limit", `Int 10)]) in
   if not ok then (false, Printf.sprintf "❌ Lodge: Failed to list posts [%s]" posts_result)
   else
@@ -1335,16 +1504,36 @@ let lodge_discussion ~net (_args : Yojson.Safe.t) =
       find_all 0 []
     in
 
-    if post_ids = [] then (true, Printf.sprintf "📭 %s: 게시판이 비어있어요" agent)
+    if post_ids = [] then (true, "📭 게시판이 비어있어요")
     else
-      let target = List.nth post_ids (Random.int (List.length post_ids)) in
-      let (ok2, result) = react ~net (`Assoc [
-        ("post_id", `String target);
-        ("agent", `String agent);
-      ]) in
-      let model = get_agent_model agent in
-      (true, Printf.sprintf "💬 %s [%s] joined discussion on %s:\n%s"
-        agent model target (if ok2 then result else "❌ " ^ result))
+      let posts =
+        List.filter_map
+          (fun post_id ->
+            let (ok_post, detail) =
+              Tool_board.handle_tool "masc_board_get"
+                (`Assoc [ ("post_id", `String post_id) ])
+            in
+            if ok_post then Some (post_id, extract_post_content detail) else None)
+          post_ids
+      in
+      match
+        select_reaction_assignments ~net ~agent_name_opt:None ~posts ~max_agents:1
+          ~allow_post:false
+      with
+      | Error e -> (false, Printf.sprintf "❌ Lodge discussion selection failed [%s]" e)
+      | Ok [] -> (true, "⏭️ Lodge discussion skipped: no assignments")
+      | Ok ((assignment : Lodge_decision.assignment) :: _) -> (
+          match assignment.target_post_id with
+          | None ->
+              (true,
+               Printf.sprintf "⏭️ Lodge discussion skipped: %s" assignment.reason)
+          | Some target ->
+              let (ok2, result) = react ~net (`Assoc [
+                ("post_id", `String target);
+                ("agent", `String assignment.agent_name);
+              ]) in
+              (true, Printf.sprintf "💬 Lodge joined discussion on %s:\n%s"
+                 target (if ok2 then result else "❌ " ^ result)))
 
 (** {1 Tool Definitions} *)
 
@@ -1637,20 +1826,23 @@ let get_all_agents () =
     | Ok output ->
         try
           let json = Yojson.Safe.from_string output in
-          let edges = json |> member "data" |> member "agents" |> member "edges" |> to_list in
-          List.filter_map (fun edge ->
-            try
-              let node = edge |> member "node" in
-              let name = node |> member "name" |> to_string in
-              (* Trust GraphQL results — no cache filter (fixes chicken-egg bug) *)
-              let primary_value = (try node |> member "primaryValue" |> to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
-              let prompt = (try node |> member "promptTemplate" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
-              let status = (try node |> member "status" |> to_string with Yojson.Safe.Util.Type_error _ -> "active") in
-              if status = "active" then
-                Some (name, primary_value, prompt, "system", 0)
-              else None
-            with Yojson.Safe.Util.Type_error _ -> None
-          ) edges
+          (match graphql_agents_edges json with
+           | Error err ->
+               Printf.eprintf "[Lodge] GraphQL agent parse failed: %s\n%!" err;
+               []
+           | Ok edges ->
+               List.filter_map (fun edge ->
+                 try
+                   let node = edge |> member "node" in
+                   let name = node |> member "name" |> to_string in
+                   let primary_value = (try node |> member "primaryValue" |> to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
+                   let prompt = (try node |> member "promptTemplate" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
+                   let status = (try node |> member "status" |> to_string with Yojson.Safe.Util.Type_error _ -> "active") in
+                   if status = "active" then
+                     Some (name, primary_value, prompt, "system", 0)
+                   else None
+                 with Yojson.Safe.Util.Type_error _ -> None
+               ) edges)
         with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
   with Unix.Unix_error _ | Sys_error _ ->
     let cached = get_cached_agents_tuple () in
@@ -1715,8 +1907,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
     (false, Printf.sprintf "❌ Lodge: 에이전트 '%s'가 이미 존재합니다" agent_name)
   else
     (* Create via GraphQL mutation *)
-    let graphql_url = Sys.getenv_opt "GRAPHQL_URL"
-      |> Option.value ~default:(default_graphql_url ()) in
+    let graphql_url = graphql_url () in
     let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
     if api_key = "" then
       (false, "❌ Lodge: GRAPHQL_API_KEY not configured")

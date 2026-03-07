@@ -548,6 +548,24 @@ let test_masc_poll_events_schema () =
           Alcotest.(check bool) "has subscription_id" true (List.mem_assoc "subscription_id" props)
       | None -> Alcotest.fail "masc_poll_events missing properties"
 
+let test_masc_heartbeat_result_schema () =
+  match find_tool "masc_heartbeat_result" with
+  | None -> Alcotest.fail "masc_heartbeat_result not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has status" true (List.mem_assoc "status" props);
+          Alcotest.(check bool) "has summary" true (List.mem_assoc "summary" props);
+          Alcotest.(check bool) "has tool_call_count" true
+            (List.mem_assoc "tool_call_count" props);
+          Alcotest.(check bool) "has tool_names" true
+            (List.mem_assoc "tool_names" props);
+          Alcotest.(check bool) "has decision_reason" true
+            (List.mem_assoc "decision_reason" props);
+          Alcotest.(check bool) "has decision_confidence" true
+            (List.mem_assoc "decision_confidence" props)
+      | None -> Alcotest.fail "masc_heartbeat_result missing properties"
+
 (* ============================================================ *)
 (* 12. Mitosis Tool Tests                                        *)
 (* ============================================================ *)
@@ -948,6 +966,7 @@ let () =
       Alcotest.test_case "a2a_delegate" `Quick test_masc_a2a_delegate_schema;
       Alcotest.test_case "a2a_subscribe" `Quick test_masc_a2a_subscribe_schema;
       Alcotest.test_case "poll_events" `Quick test_masc_poll_events_schema;
+      Alcotest.test_case "heartbeat_result" `Quick test_masc_heartbeat_result_schema;
     ];
     "mitosis_tools", [
       Alcotest.test_case "mitosis_status" `Quick test_masc_mitosis_status_schema;

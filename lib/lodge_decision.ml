@@ -26,6 +26,19 @@ type outcome = {
   choice : choice;
 }
 
+type assignment = {
+  agent_name : string;
+  target_post_id : string option;
+  goal : string;
+  reason : string;
+  confidence : float;
+}
+
+type selection_plan = {
+  assignments : assignment list;
+  plan_reason : string option;
+}
+
 let ( let* ) value f = match value with Ok x -> f x | Error _ as err -> err
 
 let action_to_string = function
@@ -133,6 +146,39 @@ let parse_choice json =
   | _, Error err, _ -> Error err
   | _, _, Error err -> Error err
 
+let parse_assignment json =
+  let agent_name =
+    match json |> member "agent_name" with
+    | `String s ->
+        let trimmed = String.trim s in
+        if trimmed = "" then Error "assignment.agent_name must be non-empty"
+        else Ok trimmed
+    | _ -> Error "assignment.agent_name must be a string"
+  in
+  let goal =
+    match json |> member "goal" with
+    | `String s ->
+        let trimmed = String.trim s in
+        if trimmed = "" then Error "assignment.goal must be non-empty" else Ok trimmed
+    | _ -> Error "assignment.goal must be a string"
+  in
+  let reason = parse_reason (json |> member "reason") in
+  let confidence =
+    match parse_confidence (json |> member "confidence") with
+    | Ok value -> validate_confidence value
+    | Error _ as err -> err
+  in
+  let target_post_id =
+    json |> member "target_post_id" |> to_string_option |> trim_opt
+  in
+  match agent_name, goal, reason, confidence with
+  | Ok agent_name, Ok goal, Ok reason, Ok confidence ->
+      Ok { agent_name; target_post_id; goal; reason; confidence }
+  | Error err, _, _, _ -> Error err
+  | _, Error err, _, _ -> Error err
+  | _, _, Error err, _ -> Error err
+  | _, _, _, Error err -> Error err
+
 let validate_choice ~allowed_post_ids ~allow_post (choice : choice) =
   let post_id_allowed post_id =
     List.exists (String.equal post_id) allowed_post_ids
@@ -192,6 +238,37 @@ let validate_reactions ~allowed_post_ids (reactions : reaction list) =
         loop rest
   in
   loop reactions
+
+let validate_assignments ~allowed_agents ~allowed_post_ids ~max_agents assignments =
+  if List.length assignments > max_agents then
+    Error
+      (Printf.sprintf "selection exceeds max_agents (%d > %d)"
+         (List.length assignments) max_agents)
+  else
+    let seen = Hashtbl.create (List.length assignments) in
+    let validate_one assignment =
+      if not (List.mem assignment.agent_name allowed_agents) then
+        Error
+          (Printf.sprintf "assignment agent_name %s is not in the candidate set"
+             assignment.agent_name)
+      else if Hashtbl.mem seen assignment.agent_name then
+        Error (Printf.sprintf "duplicate assignment for %s" assignment.agent_name)
+      else
+        let () = Hashtbl.add seen assignment.agent_name () in
+        match assignment.target_post_id with
+        | Some post_id when not (List.mem post_id allowed_post_ids) ->
+            Error
+              (Printf.sprintf "assignment target_post_id %s is not in the candidate set"
+                 post_id)
+        | _ -> Ok ()
+    in
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | assignment :: rest ->
+          let* () = validate_one assignment in
+          loop (assignment :: acc) rest
+    in
+    loop [] assignments
 
 let single_reaction_prompt ~agent_name ~agent_prompt ~interests ~post_id ~content
     ~language_instruction =
@@ -295,6 +372,73 @@ Candidate posts:
 %s|}
     agent_name identity_prompt extra_context action_choices action_choices posts_section
 
+let selection_prompt ~agent_name ~candidate_agents ~posts ~extra_context ~max_agents
+    ~allow_post =
+  let agents_section =
+    match candidate_agents with
+    | [] -> "(no candidate agents)"
+    | items ->
+        items
+        |> List.map (fun (name, identity) ->
+               Printf.sprintf "agent=%s\nidentity=%s" name identity)
+        |> String.concat "\n\n"
+  in
+  let posts_section =
+    match posts with
+    | [] -> "(no candidate posts)"
+    | items ->
+        items
+        |> List.mapi (fun idx (post_id, author, content) ->
+               Printf.sprintf "[Post %d]\nid=%s\nauthor=%s\ncontent=%s" (idx + 1)
+                 post_id author content)
+        |> String.concat "\n\n"
+  in
+  let extra_context =
+    match trim_opt extra_context with
+    | Some text -> "\n\nAdditional context:\n" ^ text
+    | None -> ""
+  in
+  let post_rule =
+    if allow_post then
+      "If posting is warranted, you may omit target_post_id and set a goal that writes a new board post."
+    else
+      "Do not plan new top-level posts. Use existing posts or choose goals that lead to skipping."
+  in
+  Printf.sprintf
+    {|You are the Lodge orchestrator for %s.
+
+Select up to %d agents and assign each a concrete MCP tool-loop goal.
+Return JSON only. No markdown. No code fences.
+
+Required JSON shape:
+{
+  "assignments": [
+    {
+      "agent_name": "candidate agent name",
+      "target_post_id": "optional candidate post id",
+      "goal": "concrete MCP-worker goal",
+      "reason": "why this agent should act",
+      "confidence": 0.0
+    }
+  ],
+  "plan_reason": "optional room-level rationale"
+}
+
+Rules:
+- assignments length must be <= %d
+- agent_name must come from the listed candidate agents
+- If target_post_id is present, it must come from the listed candidate posts
+- goal and reason must be non-empty
+- %s
+
+Candidate agents:
+%s
+%s
+
+Candidate posts:
+%s|}
+    agent_name max_agents max_agents post_rule agents_section extra_context posts_section
+
 let parse_single_choice ~post_id response =
   let* json_text = extract_json_object response in
   let* json =
@@ -329,3 +473,28 @@ let parse_batch_outcome ~allowed_post_ids ~allow_post response =
     |> function Ok choice -> validate_choice ~allowed_post_ids ~allow_post choice | Error _ as err -> err
   in
   Ok { reactions; choice }
+
+let parse_selection_plan ~allowed_agents ~allowed_post_ids ~max_agents response =
+  let* json_text = extract_json_object response in
+  let* json =
+    try Ok (Yojson.Safe.from_string json_text)
+    with Yojson.Json_error msg -> Error (Printf.sprintf "invalid JSON: %s" msg)
+  in
+  let assignments =
+    match json |> member "assignments" with
+    | `List items ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | item :: rest ->
+              let* parsed = parse_assignment item in
+              loop (parsed :: acc) rest
+        in
+        loop [] items
+    | _ -> Error "assignments must be an array"
+  in
+  let* assignments = assignments in
+  let* assignments =
+    validate_assignments ~allowed_agents ~allowed_post_ids ~max_agents assignments
+  in
+  let plan_reason = json |> member "plan_reason" |> to_string_option |> trim_opt in
+  Ok { assignments; plan_reason }

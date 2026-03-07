@@ -128,6 +128,7 @@ module Dashboard = Dashboard
 module Tempo = Tempo
 module Federation = Federation
 module Lodge_decision = Lodge_decision
+module Lodge_worker = Lodge_worker
 module Level2_config = Level2_config
 module Level4_config = Level4_config
 module Local_agent_eio = Local_agent_eio

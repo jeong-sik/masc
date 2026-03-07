@@ -170,6 +170,40 @@ let turn_counts_by_agent events =
   Hashtbl.fold (fun agent count acc -> (agent, count) :: acc) tbl []
   |> List.sort (fun (a, _) (b, _) -> compare a b)
 
+let note_message_opt_for_report json =
+  let open Yojson.Safe.Util in
+  match (member "event_type" json, member "detail" json |> member "kind") with
+  | `String "team_turn", `String "note" -> (
+      match member "detail" json |> member "message" with
+      | `String message ->
+          let message = String.trim message in
+          if message = "" then None else Some message
+      | _ -> None)
+  | _ -> None
+
+let empty_note_turn_actor_for_report json =
+  let open Yojson.Safe.Util in
+  match (member "event_type" json, member "detail" json |> member "kind") with
+  | `String "team_turn", `String "note" -> (
+      match (member "detail" json |> member "actor", note_message_opt_for_report json) with
+      | `String actor, None ->
+          let actor = String.trim actor in
+          if actor = "" then None else Some actor
+      | _ -> None)
+  | _ -> None
+
+let count_empty_note_turns_for_report events =
+  List.fold_left
+    (fun acc json ->
+      match empty_note_turn_actor_for_report json with
+      | Some _ -> acc + 1
+      | None -> acc)
+    0 events
+
+let empty_note_turn_actors_for_report events =
+  events |> List.filter_map empty_note_turn_actor_for_report
+  |> Team_session_types.dedup_strings
+
 let mcp_improvements (session : Team_session_types.session) events checkpoints_count
     done_delta_total =
   let base =
@@ -279,6 +313,9 @@ let detached_actor_roster_for_report events =
                    ("ts_iso", member "ts_iso" json);
                  ])
          | _ -> None)
+
+let empty_note_turn_roster_for_report events =
+  empty_note_turn_actors_for_report events |> List.map (fun actor -> `String actor)
 
 let markdown_of_report ~(session : Team_session_types.session)
     ~(summary_json : Yojson.Safe.t) ~(events : Yojson.Safe.t list)
@@ -428,6 +465,21 @@ let markdown_of_report ~(session : Team_session_types.session)
         | _ -> [])
     | _ -> []
   in
+  let empty_note_turn_count =
+    match incidents_json with
+    | `Assoc _ ->
+        incidents_json |> member "empty_note_turn_count" |> to_int_option
+        |> Option.value ~default:0
+    | _ -> 0
+  in
+  let empty_note_turn_actors =
+    match incidents_json with
+    | `Assoc _ -> (
+        match incidents_json |> member "empty_note_turn_actors" with
+        | `List xs -> xs
+        | _ -> [])
+    | _ -> []
+  in
   let failed_spawn_lines =
     failed_spawn_roster
     |> List.map (fun item ->
@@ -458,6 +510,12 @@ let markdown_of_report ~(session : Team_session_types.session)
              |> Option.value ~default:"(not recorded)"
            in
            Printf.sprintf "- %s | reason=%s" actor reason)
+  in
+  let empty_note_turn_lines =
+    empty_note_turn_actors
+    |> List.map (fun item ->
+           item |> to_string_option |> Option.value ~default:"(unknown)")
+    |> List.map (fun actor -> Printf.sprintf "- %s" actor)
   in
   let policy_lines =
     [
@@ -521,6 +579,11 @@ let markdown_of_report ~(session : Team_session_types.session)
       (if detached_actor_lines = [] then "- Detached actor roster: (none)"
        else String.concat "\n" detached_actor_lines);
       "";
+      "## Low-Signal Turn Evidence";
+      Printf.sprintf "- Empty note turns: %d" empty_note_turn_count;
+      (if empty_note_turn_lines = [] then "- Empty note turn actors: (none)"
+       else String.concat "\n" empty_note_turn_lines);
+      "";
       "## Goal vs Outcome";
       Printf.sprintf "- Goal statement: %s" session.goal;
       Printf.sprintf "- Completed task delta: %d" done_total;
@@ -580,8 +643,10 @@ let generate config (session : Team_session_types.session) :
     let violation_count = event_count events "min_agents_violation" in
     let spawn_failure_count = spawn_failure_count_for_report events in
     let detached_agent_count = event_count events "session_agent_detached" in
+    let empty_note_turn_count = count_empty_note_turns_for_report events in
     let failed_spawn_roster = failed_spawn_roster_for_report events in
     let detached_actor_roster = detached_actor_roster_for_report events in
+    let empty_note_turn_actors = empty_note_turn_roster_for_report events in
     let mcp_notes =
       mcp_improvements session events checkpoints_count done_delta_total
     in
@@ -596,6 +661,8 @@ let generate config (session : Team_session_types.session) :
           ("detached_agent_count", `Int detached_agent_count);
           ("failed_spawn_roster", `List failed_spawn_roster);
           ("detached_actor_roster", `List detached_actor_roster);
+          ("empty_note_turn_count", `Int empty_note_turn_count);
+          ("empty_note_turn_actors", `List empty_note_turn_actors);
         ]
     in
     let report_json =
@@ -649,6 +716,7 @@ let generate config (session : Team_session_types.session) :
                 ("active_agents", `List (List.map (fun a -> `String a) active_agents));
                 ("spawn_failure_count", `Int spawn_failure_count);
                 ("detached_agent_count", `Int detached_agent_count);
+                ("empty_note_turn_count", `Int empty_note_turn_count);
               ] );
         ]
     in
@@ -711,6 +779,33 @@ let turn_kind_of_event (json : Yojson.Safe.t) =
     | _ -> None
   else
     None
+
+let turn_message_of_event (json : Yojson.Safe.t) =
+  if has_event_type json "team_turn" then
+    match
+      Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "message"
+    with
+    | `String message ->
+        let message = String.trim message in
+        if message = "" then None else Some message
+    | _ -> None
+  else
+    None
+
+let empty_note_turn_actor_of_event (json : Yojson.Safe.t) =
+  match (turn_kind_of_event json, turn_actor_of_event json, turn_message_of_event json) with
+  | Some "note", Some actor, None -> Some actor
+  | _ -> None
+
+let count_empty_note_turns events =
+  List.fold_left
+    (fun acc json ->
+      match empty_note_turn_actor_of_event json with Some _ -> acc + 1 | None -> acc)
+    0 events
+
+let empty_note_turn_actors_of_events events =
+  events |> List.filter_map empty_note_turn_actor_of_event
+  |> Team_session_types.dedup_strings
 
 let team_step_spawn_agent (json : Yojson.Safe.t) =
   if has_event_type json "team_step_spawn" then
@@ -821,7 +916,7 @@ let make_standard_criteria ~event_started ~checkpoints_count ~turn_events
 let make_strong_criteria ~required_spawn_agents ~spawn_events
     ~spawn_success_count ~unique_spawn_agents_count ~required_turn_actors
     ~min_turn_events ~turn_events ~min_communication ~communication_total
-    ~vote_events ~run_deliverables =
+    ~vote_events ~run_deliverables ~empty_note_turn_count =
   [
     criterion "spawn_evidence_present" (spawn_events >= required_spawn_agents)
       (Printf.sprintf "spawn_events=%d required_spawn_agents=%d" spawn_events
@@ -845,6 +940,8 @@ let make_strong_criteria ~required_spawn_agents ~spawn_events
       (Printf.sprintf "vote_events=%d required>=1" vote_events);
     criterion "deliverable_evidence_present" (run_deliverables >= 1)
       (Printf.sprintf "run_deliverables=%d required>=1" run_deliverables);
+    criterion "empty_note_turns_absent" (empty_note_turn_count = 0)
+      (Printf.sprintf "empty_note_turn_count=%d" empty_note_turn_count);
   ]
 
 let mandatory_ok_for_level ~proof_level criteria =
@@ -1096,7 +1193,9 @@ let proof_markdown ~(session : Team_session_types.session)
     ~(report_exists : bool) ~(unique_turn_actors_count : int)
     ~(required_turn_actors : int) ~(spawn_models : string list)
     ~(spawn_failure_count : int) ~(detached_agent_count : int)
+    ~(empty_note_turn_count : int)
     ~(failed_spawn_roster : Yojson.Safe.t list)
+    ~(empty_note_turn_actors : string list)
     ~(detached_actor_roster : Yojson.Safe.t list)
     ~(planned_workers : Team_session_types.planned_worker list)
     ~(unique_spawn_runtime_actors_count : int)
@@ -1186,6 +1285,9 @@ let proof_markdown ~(session : Team_session_types.session)
            in
            Printf.sprintf "- %s | reason=%s" actor reason)
   in
+  let empty_note_turn_lines =
+    empty_note_turn_actors |> List.map (fun actor -> Printf.sprintf "- %s" actor)
+  in
   String.concat "\n"
     [
       "# Team Session Proof";
@@ -1209,6 +1311,7 @@ let proof_markdown ~(session : Team_session_types.session)
         unique_spawn_runtime_actors_count;
       Printf.sprintf "- Failed spawn events: %d" spawn_failure_count;
       Printf.sprintf "- Detached failed actors: %d" detached_agent_count;
+      Printf.sprintf "- Empty note turns: %d" empty_note_turn_count;
       Printf.sprintf "- Spawn models: %s"
         (match spawn_models with
         | [] -> "(not recorded)"
@@ -1230,6 +1333,10 @@ let proof_markdown ~(session : Team_session_types.session)
       "## Detached Failed Actors";
       (if detached_actor_lines = [] then "- (none)"
        else String.concat "\n" detached_actor_lines);
+      "";
+      "## Low-Signal Note Turns";
+      (if empty_note_turn_lines = [] then "- (none)"
+       else String.concat "\n" empty_note_turn_lines);
       "";
       "## Criteria";
       (if criteria_lines = [] then "- (no criteria)"
@@ -1318,6 +1425,8 @@ let generate_proof ?(proof_level = default_proof_level) config
       | xs -> Some (String.concat " | " xs)
     in
     let failed_spawn_roster = failed_spawn_roster_of_events events in
+    let empty_note_turn_count = count_empty_note_turns events in
+    let empty_note_turn_actors = empty_note_turn_actors_of_events events in
     let detached_actor_roster = detached_actor_roster_of_events events in
     let detached_agent_count = count_event_type events "session_agent_detached" in
     let min_turn_events = min_turn_events_for_session required_turn_actors in
@@ -1338,7 +1447,7 @@ let generate_proof ?(proof_level = default_proof_level) config
                 (max unique_spawn_agents_count unique_spawn_runtime_actors_count)
               ~required_turn_actors ~min_turn_events ~turn_events
               ~min_communication ~communication_total ~vote_events
-              ~run_deliverables
+              ~run_deliverables ~empty_note_turn_count
     in
     let total = max 1 (List.length criteria) in
     let passed =
@@ -1377,6 +1486,8 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ("spawn_success_count", `Int spawn_success_count);
                 ("spawn_failure_count", `Int spawn_failure_count);
                 ("failed_spawn_roster", `List failed_spawn_roster);
+                ("empty_note_turn_count", `Int empty_note_turn_count);
+                ("empty_note_turn_actors", `List (List.map (fun actor -> `String actor) empty_note_turn_actors));
                 ("unique_spawn_agents", `List (List.map (fun a -> `String a) unique_spawn_agents));
                 ("unique_spawn_agents_count", `Int unique_spawn_agents_count);
                 ( "unique_spawn_runtime_actors",
@@ -1414,8 +1525,8 @@ let generate_proof ?(proof_level = default_proof_level) config
         ~checkpoints_count ~events_count:(List.length events) ~turn_events
         ~report_exists:(report_json_exists && report_md_exists)
         ~unique_turn_actors_count ~required_turn_actors ~spawn_models
-        ~spawn_failure_count ~detached_agent_count
-        ~failed_spawn_roster ~detached_actor_roster
+        ~spawn_failure_count ~detached_agent_count ~empty_note_turn_count
+        ~failed_spawn_roster ~empty_note_turn_actors ~detached_actor_roster
         ~planned_workers:session.planned_workers
         ~unique_spawn_runtime_actors_count
         ~spawn_selection_note_summary

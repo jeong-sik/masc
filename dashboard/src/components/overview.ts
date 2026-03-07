@@ -199,7 +199,7 @@ function lodgeSummary(lodge: LodgeRuntimeStatus | null | undefined): string {
   if (!lodge) return 'Lodge runtime status is unavailable in the current dashboard payload.'
   if (!lodge.enabled) return 'Lodge automation is disabled.'
   if (lodge.quiet_active) {
-    return `Quiet hours ${formatHour(lodge.quiet_start)}-${formatHour(lodge.quiet_end)} KST are active. Scheduled ticks may appear asleep until the window ends.`
+    return `Quiet hours ${formatHour(lodge.quiet_start)}-${formatHour(lodge.quiet_end)} KST are active.`
   }
   if (lodge.last_tick_ago_s == null) {
     return `Lodge is enabled and scheduled every ${formatInterval(lodge.interval_s)}, but no tick has run yet.`
@@ -665,6 +665,9 @@ export function Overview() {
           ${status?.tempo ? `Tempo ${status.tempo}` : 'Tempo unavailable'}${status?.tempo_interval_s != null ? ` · ${status.tempo_interval_s}s interval` : ''}
         </div>
         <div class="overview-inline-note">${lodgeSummary(status?.lodge)}</div>
+        ${status?.lodge?.last_skip_reason
+          ? html`<div class="overview-inline-note">Last Lodge skip: ${status.lodge.last_skip_reason}</div>`
+          : null}
       </div>
     <//>
 
@@ -818,7 +821,7 @@ export function Overview() {
               : 'Perpetual runtime unavailable'}
           </div>
           <div class="overview-inline-note">
-            Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}
+            Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}${status?.lodge?.last_skip_reason ? ` · Skip ${status.lodge.last_skip_reason}` : ''}
           </div>
           <div class="overview-inline-note">
             ${keeperList.length > 0

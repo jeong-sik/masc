@@ -290,7 +290,7 @@ let test_handle_request_initialize_operator_profile () =
               | _ -> ""
             in
             Alcotest.(check bool) "mentions operator profile" true
-              (contains_substring instructions "three control-plane tools");
+              (contains_substring instructions "four control-plane tools");
             Alcotest.(check bool) "mentions confirm workflow" true
               (contains_substring instructions "confirm_required=true")
         | _ -> Alcotest.fail "result not an object")
@@ -326,7 +326,12 @@ let test_handle_request_tools_list_operator_profile () =
                    |> List.filter_map (function `String s -> Some s | _ -> None)
                  in
                  Alcotest.(check (list string)) "operator-only tools"
-                   [ "masc_operator_snapshot"; "masc_operator_action"; "masc_operator_confirm" ]
+                   [
+                     "masc_operator_snapshot";
+                     "masc_operator_digest";
+                     "masc_operator_action";
+                     "masc_operator_confirm";
+                   ]
                    names;
                  let find_tool name =
                    List.find_map
@@ -348,10 +353,19 @@ let test_handle_request_tools_list_operator_profile () =
                    | Some tool -> tool
                    | None -> Alcotest.fail "action tool missing"
                  in
+                 let digest_tool =
+                   match find_tool "masc_operator_digest" with
+                   | Some tool -> tool
+                   | None -> Alcotest.fail "digest tool missing"
+                 in
                  Alcotest.(check bool) "snapshot has annotations" true
                    (Yojson.Safe.Util.member "annotations" snapshot_tool <> `Null);
                  Alcotest.(check bool) "snapshot readonly hint" true
                    (snapshot_tool |> Yojson.Safe.Util.member "annotations"
+                    |> Yojson.Safe.Util.member "readOnlyHint"
+                    |> Yojson.Safe.Util.to_bool);
+                 Alcotest.(check bool) "digest readonly hint" true
+                   (digest_tool |> Yojson.Safe.Util.member "annotations"
                     |> Yojson.Safe.Util.member "readOnlyHint"
                     |> Yojson.Safe.Util.to_bool);
                  Alcotest.(check bool) "action readonly hint" false

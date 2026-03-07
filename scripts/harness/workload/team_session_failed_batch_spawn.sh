@@ -7,6 +7,7 @@ PORT="${PORT:-}"
 BASE_PATH="${BASE_PATH:-}"
 LOG_FILE="${LOG_FILE:-}"
 MCP_URL=""
+OPERATOR_URL=""
 TEAM_SESSION_ID=""
 SUPERVISOR_SESSION_ID="failed-spawn-replay"
 SUPERVISOR_AGENT="failure-replay-supervisor"
@@ -76,6 +77,7 @@ else
 fi
 
 MCP_URL="http://127.0.0.1:${PORT}/mcp"
+OPERATOR_URL="http://127.0.0.1:${PORT}/mcp/operator"
 SERVER_PID=""
 
 read_file() {
@@ -88,10 +90,11 @@ jsonrpc_call() {
   local id="$3"
   local method="$4"
   local params="$5"
+  local endpoint="${6:-$MCP_URL}"
   local body_file
   body_file="$(mktemp "${TMPDIR:-/tmp}/masc-jsonrpc-body.XXXXXX.json")"
   printf '{"jsonrpc":"2.0","id":%s,"method":"%s","params":%s}' "$id" "$method" "$params" >"$body_file"
-  local cmd=(curl -sS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
+  local cmd=(curl -sS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$endpoint" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H "Mcp-Session-Id: $session_id" \
@@ -133,7 +136,8 @@ call_tool() {
   local id="$3"
   local tool_name="$4"
   local args_json="$5"
-  jsonrpc_call "$session_id" "$token" "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
+  local endpoint="${6:-$MCP_URL}"
+  jsonrpc_call "$session_id" "$token" "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}" "$endpoint"
 }
 
 extract_tool_text() {
@@ -304,7 +308,7 @@ if [ "$server_started" != "true" ]; then
   exit 1
 fi
 
-printf '[2/8] bootstrap room and auth\n'
+printf '[2/9] bootstrap room and auth\n'
 init_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "" 1 "masc_init" "$(jq -cn --arg a "$SUPERVISOR_AGENT" '{agent_name:$a}')")"
 require_tool_success "$init_raw"
 switch_mode_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "" 2 "masc_switch_mode" '{"mode":"full"}')"
@@ -316,7 +320,7 @@ enable_auth_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "" 12 "masc_auth_enable" '
 require_tool_success "$enable_auth_raw"
 join_with_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" "$SUPERVISOR_NICKNAME" '["supervisor","failure-replay"]'
 
-printf '[3/8] start team session\n'
+printf '[3/9] start team session\n'
 start_payload="$(jq -cn \
   --arg goal "$TEAM_GOAL" \
   --arg supervisor "$SUPERVISOR_NICKNAME" \
@@ -334,7 +338,7 @@ FAILURE_NOTE="[failure-replay] explicit model=${LLAMA_SWARM_MODEL}; llama endpoi
 note_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 4 "masc_team_session_turn" "$(jq -cn --arg s "$TEAM_SESSION_ID" --arg msg "$FAILURE_NOTE" '{session_id:$s,turn_kind:"note",message:$msg}')")"
 require_tool_success "$note_raw"
 
-printf '[4/8] replay deterministic failed batch spawn\n'
+printf '[4/9] replay deterministic failed batch spawn\n'
 spawn_batch_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 5 "masc_team_session_step" "$(jq -cn \
   --arg s "$TEAM_SESSION_ID" \
   --arg model "$LLAMA_SWARM_MODEL" \
@@ -351,7 +355,7 @@ require_json_condition "$spawn_result" '.spawn.results | all(.runtime_actor != n
 FAILED_RUNTIME_ACTOR_1="$(printf '%s' "$spawn_result" | jq -r '.spawn.results[0].runtime_actor')"
 FAILED_RUNTIME_ACTOR_2="$(printf '%s' "$spawn_result" | jq -r '.spawn.results[1].runtime_actor')"
 
-printf '[5/8] verify detach + participant accounting\n'
+printf '[5/9] verify detach + participant accounting\n'
 spawn_events_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_team_session_events" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,event_types:["team_step_spawn"],limit:100}')")"
 require_tool_success "$spawn_events_raw"
 spawn_events_result="$(printf '%s' "$spawn_events_raw" | extract_tool_result)"
@@ -372,7 +376,15 @@ require_json_condition "$status_result" '.summary.planned_workers | length == 2'
 replay_note_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 9 "masc_team_session_turn" "$(jq -cn --arg s "$TEAM_SESSION_ID" --arg msg "[failure-replay] observed 2 failed spawns and 2 detached actors" '{session_id:$s,turn_kind:"note",message:$msg}')")"
 require_tool_success "$replay_note_raw"
 
-printf '[6/8] stop session and generate artifacts\n'
+printf '[6/9] verify operator digest signals\n'
+digest_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 92 "masc_operator_digest" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,target_type:"team_session",target_id:$s}')")"
+require_tool_success "$digest_raw"
+digest_result="$(printf '%s' "$digest_raw" | extract_tool_result)"
+require_json_condition "$digest_result" '.target_type == "team_session"' "digest target_type mismatch"
+require_json_condition "$digest_result" '[.attention_items[]?.kind] | index("spawn_failure_present") != null' "digest missing spawn_failure_present"
+require_json_condition "$digest_result" '[.attention_items[]?.kind] | index("detached_actor_present") != null' "digest missing detached_actor_present"
+
+printf '[7/9] stop session and generate artifacts\n'
 stop_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 10 "masc_team_session_stop" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,reason:"failed_batch_spawn_replay_complete",generate_report:true}')")"
 require_tool_success "$stop_raw"
 
@@ -415,7 +427,7 @@ require_json_condition "$prove_result" '.proof.evidence.detached_actor_roster | 
 proof_md_path="$(printf '%s' "$prove_result" | jq -r '.proof_md_path')"
 proof_json_path="$(printf '%s' "$prove_result" | jq -r '.proof_json_path')"
 
-printf '[7/8] verify report/proof text\n'
+printf '[8/9] verify report/proof text\n'
 if ! jq -e '.summary.active_agents | length == 1' "$report_json_path" >/dev/null; then
   echo "FAIL: report json active_agents accounting is wrong"
   cat "$report_json_path"
@@ -472,7 +484,7 @@ if ! rg -q "$FAILED_RUNTIME_ACTOR_2" "$report_md_path"; then
   exit 1
 fi
 
-printf '[8/8] summary\n'
+printf '[9/9] summary\n'
 printf 'session_id=%s\n' "$TEAM_SESSION_ID"
 printf 'llama_swarm_model=%s\n' "$LLAMA_SWARM_MODEL"
 printf 'fail_llama_server_url=%s\n' "$FAIL_LLAMA_SERVER_URL"

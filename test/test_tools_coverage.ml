@@ -83,7 +83,7 @@ let test_find_tool_existing () =
                "masc_team_session_list"; "masc_team_session_compare";
                "masc_team_session_turn"; "masc_team_session_events";
                "masc_team_session_prove"; "masc_llama_models";
-               "masc_operator_snapshot";
+               "masc_operator_snapshot"; "masc_operator_digest";
                "masc_operator_action"; "masc_operator_confirm"] in
   List.iter (fun name ->
     match find_tool name with
@@ -235,6 +235,24 @@ let test_masc_operator_snapshot_schema () =
           Alcotest.(check bool) "has include_sessions" true
             (List.mem_assoc "include_sessions" props)
       | None -> Alcotest.fail "masc_operator_snapshot missing properties"
+
+let test_masc_operator_digest_schema () =
+  match find_tool "masc_operator_digest" with
+  | None -> Alcotest.fail "masc_operator_digest not found"
+  | Some schema ->
+      Alcotest.(check bool) "use-this description" true
+        (String.length schema.description > 20);
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has actor" true
+            (List.mem_assoc "actor" props);
+          Alcotest.(check bool) "has target_type" true
+            (List.mem_assoc "target_type" props);
+          Alcotest.(check bool) "has target_id" true
+            (List.mem_assoc "target_id" props);
+          Alcotest.(check bool) "has include_workers" true
+            (List.mem_assoc "include_workers" props)
+      | None -> Alcotest.fail "masc_operator_digest missing properties"
 
 let test_masc_operator_action_schema () =
   match find_tool "masc_operator_action" with
@@ -882,6 +900,7 @@ let () =
       Alcotest.test_case "masc_add_task" `Quick test_masc_add_task_schema;
       Alcotest.test_case "masc_done" `Quick test_masc_done_schema;
       Alcotest.test_case "masc_operator_snapshot" `Quick test_masc_operator_snapshot_schema;
+      Alcotest.test_case "masc_operator_digest" `Quick test_masc_operator_digest_schema;
       Alcotest.test_case "masc_operator_action" `Quick test_masc_operator_action_schema;
       Alcotest.test_case "remote_operator_action_strict" `Quick
         test_remote_operator_action_schema_is_strict;

@@ -36,6 +36,8 @@ import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
 import { refreshOperatorSnapshot } from './operator-store'
 
+const QUICK_ACTIONS_OPEN_KEY = 'masc_dashboard_quick_actions_open'
+
 function ConnectionStatus() {
   const isConnected = connected.value
   return html`
@@ -52,7 +54,16 @@ function SideRail() {
   const liveConnected = connected.value
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === current)
   const currentSection = DASHBOARD_NAV_SECTIONS.find(section => section.id === currentView?.group)
-  const [quickActionsOpen, setQuickActionsOpen] = useState(false)
+  const [quickActionsOpen, setQuickActionsOpen] = useState(() => {
+    const stored = localStorage.getItem(QUICK_ACTIONS_OPEN_KEY)
+    if (stored === '0') return false
+    if (stored === '1') return true
+    return true
+  })
+
+  useEffect(() => {
+    localStorage.setItem(QUICK_ACTIONS_OPEN_KEY, quickActionsOpen ? '1' : '0')
+  }, [quickActionsOpen])
 
   return html`
     <aside class="dashboard-rail">
@@ -144,7 +155,7 @@ function SideRail() {
           <h3>Quick Actions</h3>
           <span class="rail-section-chip">${quickActionsOpen ? 'Open' : 'Closed'}</span>
         </div>
-        <button class="fold-toggle" onClick=${() => setQuickActionsOpen(open => !open)}>
+        <button class="fold-toggle" onClick=${() => setQuickActionsOpen((open: boolean) => !open)}>
           <span>${quickActionsOpen ? 'Hide inline actions' : 'Show inline actions'}</span>
           <span class="fold-toggle-meta">Join, broadcast, keeper DM, lodge poke</span>
         </button>

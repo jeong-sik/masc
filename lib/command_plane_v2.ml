@@ -2621,9 +2621,11 @@ let swarm_live_json config ?run_id ?operation_id () =
     |> List.filteri (fun idx _ -> idx < 12)
     |> List.rev
   in
-  let message_contains needle =
+  let message_contains ~from_agent needle =
     List.exists
-      (fun (message : Types.message) -> string_contains ~needle message.content)
+      (fun (message : Types.message) ->
+        String.equal message.from_agent from_agent
+        && string_contains ~needle message.content)
       matching_messages
   in
   let task_by_id =
@@ -2683,9 +2685,15 @@ let swarm_live_json config ?run_id ?operation_id () =
              |> List.find_opt (fun (message : Types.message) ->
                     String.equal message.from_agent plan.name)
            in
-           let claim_marker_seen = message_contains plan.claim_marker in
-           let done_marker_seen = message_contains plan.done_marker in
-           let final_marker_seen = message_contains plan.final_marker in
+           let claim_marker_seen =
+             message_contains ~from_agent:plan.name plan.claim_marker
+           in
+           let done_marker_seen =
+             message_contains ~from_agent:plan.name plan.done_marker
+           in
+           let final_marker_seen =
+             message_contains ~from_agent:plan.name plan.final_marker
+           in
            let joined =
              Option.is_some agent
              || Option.is_some assigned_task

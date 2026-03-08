@@ -39,13 +39,24 @@ let extract_text (response : Types.api_response) =
   |> List.filter_map (function Types.Text text -> Some text | _ -> None)
   |> String.concat "\n"
 
-let final_marker_line text =
+let trimmed_nonempty_lines text =
   text
   |> String.split_on_char '\n'
   |> List.map String.trim
-  |> List.find_opt (fun line ->
-         String.length line >= 13
-         && String.sub line 0 13 = "FINAL_MARKER[")
+  |> List.filter (fun line -> not (String.equal line ""))
+
+let last_nonempty_line text =
+  match trimmed_nonempty_lines text |> List.rev with
+  | line :: _ -> Some line
+  | [] -> None
+
+let final_marker_line text =
+  match last_nonempty_line text with
+  | Some line
+    when String.length line >= 13
+         && String.sub line 0 13 = "FINAL_MARKER[" ->
+      Some line
+  | _ -> None
 
 let response_has_expected_final_marker (response : Types.api_response)
     ~(expected_final_marker : string option) =
@@ -56,9 +67,9 @@ let response_has_expected_final_marker (response : Types.api_response)
       if String.equal marker "" then
         true
       else
-        String.split_on_char '\n' text
-        |> List.map String.trim
-        |> List.exists (fun line -> String.equal line marker)
+        match last_nonempty_line text with
+        | Some line -> String.equal line marker
+        | None -> false
 
 let validate_expected_final_marker (response : Types.api_response)
     ~(expected_final_marker : string option) =
@@ -67,7 +78,10 @@ let validate_expected_final_marker (response : Types.api_response)
   else
     match expected_final_marker with
     | Some marker ->
-        Error (Printf.sprintf "Missing expected final marker: %s" marker)
+        Error
+          (Printf.sprintf
+             "Missing expected final marker as final non-empty line: %s"
+             marker)
     | None -> Ok response
 
 let contains_substring ~needle haystack =

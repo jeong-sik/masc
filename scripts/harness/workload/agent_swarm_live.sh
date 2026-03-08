@@ -37,6 +37,10 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
+urlencode() {
+  jq -rn --arg v "$1" '$v|@uri'
+}
+
 jsonrpc_call() {
   local id="$1"
   local method="$2"
@@ -59,7 +63,9 @@ jsonrpc_call() {
     if [ -n "$response_line" ]; then
       printf "%s" "$response_line"
     else
-      printf "%s\n" "$sse_data" | tail -n1
+      echo "missing matching JSON-RPC response id: $id" >&2
+      printf "%s\n" "$raw" >&2
+      exit 1
     fi
   else
     printf "%s" "$raw"
@@ -420,8 +426,9 @@ start_slot_sampler
 HARNESS_PID="$!"
 
 attempt=0
+RUN_ID_QUERY="$(urlencode "$RUN_ID")"
 while [ "$attempt" -lt 60 ]; do
-  SWARM_LIVE_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID}")"
+  SWARM_LIVE_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}")"
   LIVE_WORKERS="$(printf "%s" "$SWARM_LIVE_JSON" | jq -r '.summary.live_workers // 0')"
   if [ "$LIVE_WORKERS" -ge "$EXPECTED_WORKERS" ]; then
     break
@@ -446,7 +453,8 @@ echo "[10/10] checkpoint + finalize"
 SUCCESSFUL_WORKERS="$(printf "%s" "$HARNESS_RESULT" | jq -r '.summary.successful_workers')"
 call_tool_checked 90130 "masc_operation_checkpoint" "$(jq -cn --arg operation_id "$OPERATION_ID" --arg checkpoint_ref "live-harness-${RUN_ID}" --arg note "successful_workers=${SUCCESSFUL_WORKERS}/${EXPECTED_WORKERS}" '{operation_id:$operation_id,checkpoint_ref:$checkpoint_ref,note:$note}')" >/dev/null
 
-SWARM_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID}&operation_id=${OPERATION_ID}")"
+OPERATION_ID_QUERY="$(urlencode "$OPERATION_ID")"
+SWARM_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}&operation_id=${OPERATION_ID_QUERY}")"
 require_json "$SWARM_JSON"
 PASS="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.pass // false')"
 JOINED="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.joined_workers // 0')"

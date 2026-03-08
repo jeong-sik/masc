@@ -547,6 +547,124 @@ let test_swarm_live_json_ignores_stale_evidence_from_previous_run () =
         (swarm |> member "summary" |> member "final_markers_seen" |> to_int);
       Alcotest.(check bool) "end to end fail" false
         (swarm |> member "summary" |> member "pass_end_to_end" |> to_bool))
+
+let test_swarm_live_json_scopes_markers_to_sender () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let run_id = "swarm-live-replica-proof" in
+      let plans =
+        Agent_swarm_live_harness.build_worker_plans ~worker_count:13 run_id
+      in
+      let first_plan = List.hd plans in
+      let replica_plan = List.nth plans 12 in
+      let worker_names =
+        List.map
+          (fun (plan : Agent_swarm_live_harness.worker_plan) -> plan.name)
+          plans
+      in
+      let leader = List.hd worker_names in
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
+      List.iter
+        (fun worker -> ignore (Room.join config ~agent_name:worker ~capabilities:[] ()))
+        worker_names;
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "company-main");
+            ("kind", `String "company");
+            ("label", `String "Main Company");
+            ("leader_id", `String owner);
+            ("roster", `List (List.map (fun name -> `String name) (owner :: worker_names)));
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "platoon-alpha");
+            ("kind", `String "platoon");
+            ("label", `String "Alpha Platoon");
+            ("parent_unit_id", `String "company-main");
+            ("leader_id", `String leader);
+            ("roster", `List (List.map (fun name -> `String name) worker_names));
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "squad-alpha-1");
+            ("kind", `String "squad");
+            ("label", `String "Alpha Squad 1");
+            ("parent_unit_id", `String "platoon-alpha");
+            ("leader_id", `String leader);
+            ("roster", `List (List.map (fun name -> `String name) worker_names));
+          ]);
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "squad-alpha-1");
+              ("objective", `String (Printf.sprintf "Run %s live harness" run_id));
+              ("note", `String (Printf.sprintf "run_id=%s" run_id));
+              ("policy_class", `String "guarded");
+              ("budget_class", `String "standard");
+            ])
+      in
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.dispatch_tick_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String operation.operation_id) ])));
+      Room_utils.mkdir_p
+        (Filename.concat base_dir ".masc/control-plane/swarm-live/swarm-live-replica-proof");
+      Room_utils.write_json config
+        (Filename.concat base_dir
+           ".masc/control-plane/swarm-live/swarm-live-replica-proof/swarm-live-summary.json")
+        (`Assoc
+          [
+            ("run_id", `String run_id);
+            ("worker_count", `Int 13);
+            ("required_final_markers", `Int 13);
+            ("completed_workers", `Int 1);
+            ("final_markers_seen", `Int 1);
+            ("pass_hot_concurrency", `Bool false);
+            ("pass_end_to_end", `Bool false);
+            ("pass", `Bool false);
+            ("min_hot_slots", `Int 10);
+          ]);
+      ignore
+        (Room.broadcast config ~from_agent:first_plan.name
+           ~content:(Printf.sprintf "%s agent=%s"
+                       first_plan.claim_marker first_plan.name));
+      ignore
+        (Room.broadcast config ~from_agent:first_plan.name
+           ~content:(Printf.sprintf "%s agent=%s"
+                       first_plan.done_marker first_plan.name));
+      ignore
+        (Room.broadcast config ~from_agent:first_plan.name
+           ~content:(Printf.sprintf "%s agent=%s"
+                       first_plan.final_marker first_plan.name));
+      let swarm =
+        Command_plane_v2.swarm_live_json config ~run_id
+          ~operation_id:operation.operation_id ()
+      in
+      let open Yojson.Safe.Util in
+      let workers = swarm |> member "workers" |> to_list in
+      let find_worker name =
+        workers
+        |> List.find (fun row ->
+               String.equal (row |> member "name" |> to_string) name)
+      in
+      let first_row = find_worker first_plan.name in
+      let replica_row = find_worker replica_plan.name in
+      Alcotest.(check bool) "first worker marker seen" true
+        (first_row |> member "final_marker_seen" |> to_bool);
+      Alcotest.(check bool) "replica marker not inherited" false
+        (replica_row |> member "final_marker_seen" |> to_bool);
+      Alcotest.(check bool) "replica claim not inherited" false
+        (replica_row |> member "claim_marker_seen" |> to_bool))
+
 let () =
   Alcotest.run "Command_plane_v2"
     [
@@ -562,5 +680,7 @@ let () =
             test_swarm_live_json_restores_completed_workers_after_leave;
           Alcotest.test_case "swarm live ignores stale previous-run evidence" `Quick
             test_swarm_live_json_ignores_stale_evidence_from_previous_run;
+          Alcotest.test_case "swarm live scopes markers to sender" `Quick
+            test_swarm_live_json_scopes_markers_to_sender;
         ] );
     ]

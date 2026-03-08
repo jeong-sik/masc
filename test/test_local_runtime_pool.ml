@@ -13,6 +13,7 @@ let with_env name value f =
     f
 
 let test_parse_runtime_env () =
+  Local_runtime_pool.reset ();
   let json =
     {|[
       {"id":"local-a","base_url":"http://127.0.0.1:8085","model":"qwen-a","max_concurrency":12},
@@ -31,6 +32,7 @@ let test_parse_runtime_env () =
   Alcotest.(check bool) "contains local-b" true (List.mem "local-b" runtime_ids)
 
 let test_acquire_and_release () =
+  Local_runtime_pool.reset ();
   let json =
     {|[
       {"id":"local-a","base_url":"http://127.0.0.1:8085","model":"qwen-a","max_concurrency":2},
@@ -60,12 +62,14 @@ let test_acquire_and_release () =
   Alcotest.(check int) "success count recorded" 1 snapshot.total_success
 
 let test_record_measured_ceiling () =
+  Local_runtime_pool.reset ();
   Local_runtime_pool.record_measured_ceiling 12;
   Local_runtime_pool.record_measured_ceiling 8;
   Alcotest.(check (option int)) "ceiling is max" (Some 12)
     (Local_runtime_pool.measured_ceiling ())
 
 let test_failure_cooldown_from_env () =
+  Local_runtime_pool.reset ();
   let json =
     {|[
       {"id":"local-c","base_url":"http://127.0.0.1:9085","model":"qwen-c","max_concurrency":1}

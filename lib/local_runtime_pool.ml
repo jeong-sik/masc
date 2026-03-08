@@ -8,15 +8,15 @@ type runtime = {
   base_url : string;
   model : string option;
   max_concurrency : int;
-  mutable active_slots : int;
-  mutable queue_depth : int;
-  mutable latency_ema_ms : float option;
-  mutable failure_streak : int;
-  mutable cooldown_until : float option;
-  mutable last_error : string option;
-  mutable total_started : int;
-  mutable total_success : int;
-  mutable total_failure : int;
+  active_slots : int;
+  queue_depth : int;
+  latency_ema_ms : float option;
+  failure_streak : int;
+  cooldown_until : float option;
+  last_error : string option;
+  total_started : int;
+  total_success : int;
+  total_failure : int;
 }
 
 type runtime_snapshot = {
@@ -46,6 +46,13 @@ type assignment = {
   model_name : string;
   max_concurrency : int;
   lease : lease;
+}
+
+type pool_state = {
+  runtimes : runtime list;
+  fingerprint : string;
+  parse_errors : string list;
+  measured_ceiling : int option;
 }
 
 let default_pool_label = "local64"
@@ -80,10 +87,16 @@ let debug_log fmt =
   if debug_enabled () then Printf.ksprintf (fun msg -> Eio.traceln "[local_runtime_pool] %s" msg) fmt
   else Printf.ksprintf (fun _ -> ()) fmt
 
-let runtimes : runtime list ref = ref []
-let runtimes_fingerprint = ref ""
-let runtime_parse_errors : string list ref = ref []
-let measured_ceiling_ref : int option ref = ref None
+let empty_pool = {
+  runtimes = [];
+  fingerprint = "";
+  parse_errors = [];
+  measured_ceiling = None;
+}
+
+let pool : pool_state ref = ref empty_pool
+
+let reset () = pool := empty_pool
 
 let parse_int_opt raw =
   try Some (int_of_string (String.trim raw)) with _ -> None
@@ -125,12 +138,11 @@ let runtime_to_snapshot (runtime : runtime) =
   }
 
 let refresh_runtime_metrics (runtime : runtime) =
-  runtime.queue_depth <- max 0 (runtime.active_slots - runtime.max_concurrency);
+  let queue_depth = max 0 (runtime.active_slots - runtime.max_concurrency) in
   match runtime.cooldown_until with
   | Some until_ts when until_ts <= wall_now () ->
-      runtime.cooldown_until <- None;
-      runtime.failure_streak <- 0
-  | _ -> ()
+      { runtime with queue_depth; cooldown_until = None; failure_streak = 0 }
+  | _ -> { runtime with queue_depth }
 
 let normalize_runtime_json json =
   let base_url = json |> member "base_url" |> to_string_option |> trim_opt in
@@ -224,23 +236,29 @@ let load_runtimes_from_env () =
       with Yojson.Json_error err ->
         ([ default_runtime () ], [ "invalid MASC_LLAMA_RUNTIMES_JSON: " ^ err ]))
 
+(* ensure_loaded: the only function that may yield (debug_log calls Eio.traceln).
+   Yield happens AFTER the ref swap, so callers reading !pool after this
+   function returns see a consistent snapshot. *)
 let ensure_loaded () =
+  let state = !pool in
   let fingerprint = current_fingerprint () in
-  if not (String.equal fingerprint !runtimes_fingerprint) then (
+  if not (String.equal fingerprint state.fingerprint) then begin
     let loaded, errors = load_runtimes_from_env () in
-    runtimes := loaded;
-    runtime_parse_errors := errors;
-    runtimes_fingerprint := fingerprint;
-    debug_log "reload runtimes count=%d errors=%d" (List.length loaded) (List.length errors));
-  List.iter refresh_runtime_metrics !runtimes
+    let refreshed = List.map refresh_runtime_metrics loaded in
+    pool := { state with runtimes = refreshed; fingerprint; parse_errors = errors };
+    debug_log "reload runtimes count=%d errors=%d" (List.length loaded) (List.length errors)
+  end else begin
+    let refreshed = List.map refresh_runtime_metrics state.runtimes in
+    pool := { state with runtimes = refreshed }
+  end
 
 let parse_errors () =
   ensure_loaded ();
-  !runtime_parse_errors
+  (!pool).parse_errors
 
 let snapshots () =
   ensure_loaded ();
-  List.map runtime_to_snapshot !runtimes
+  List.map runtime_to_snapshot (!pool).runtimes
 
 let configured_capacity () =
   snapshots ()
@@ -263,14 +281,17 @@ let allocated_slots () =
        (fun acc (runtime : runtime_snapshot) -> acc + runtime.active_slots)
        0
 
-let measured_ceiling () = !measured_ceiling_ref
+let measured_ceiling () = (!pool).measured_ceiling
 
 let record_measured_ceiling value =
+  let state = !pool in
   let bounded = max 0 value in
-  measured_ceiling_ref :=
-    (match !measured_ceiling_ref with
-     | Some current -> Some (max current bounded)
-     | None -> Some bounded)
+  let new_ceiling =
+    match state.measured_ceiling with
+    | Some current -> Some (max current bounded)
+    | None -> Some bounded
+  in
+  pool := { state with measured_ceiling = new_ceiling }
 
 let model_name_for_runtime (runtime : runtime) requested_model =
   match trim_opt requested_model with
@@ -299,12 +320,13 @@ let runtime_sort_key (runtime : runtime) =
   in
   (overload, runtime.active_slots, latency, runtime.failure_streak, runtime.id)
 
-let select_runtime ?preferred_pool () =
-  ensure_loaded ();
+(* Pure selection — no side effects, no Eio calls. *)
+let select_runtime_from (runtimes : runtime list) ?preferred_pool () :
+    (runtime, string) result =
   let matching =
-    List.filter (fun runtime -> preference_matches runtime preferred_pool) !runtimes
+    List.filter (fun runtime -> preference_matches runtime preferred_pool) runtimes
   in
-  let matching = if matching = [] then !runtimes else matching in
+  let matching = if matching = [] then runtimes else matching in
   match matching with
   | [] -> Error "no local llama runtimes configured"
   | runtimes ->
@@ -317,18 +339,38 @@ let select_runtime ?preferred_pool () =
             | _ -> true)
           runtimes
       in
-      let pool = if healthy = [] then runtimes else healthy in
-      let sorted = List.sort (fun a b -> compare (runtime_sort_key a) (runtime_sort_key b)) pool in
+      let candidates = if healthy = [] then runtimes else healthy in
+      let sorted = List.sort (fun a b -> compare (runtime_sort_key a) (runtime_sort_key b)) candidates in
       match sorted with
       | runtime :: _ -> Ok runtime
       | [] -> Error "no local llama runtimes configured"
 
+(* Backward-compatible wrapper that loads from env first. *)
+let select_runtime ?preferred_pool () =
+  ensure_loaded ();
+  select_runtime_from (!pool).runtimes ?preferred_pool ()
+
+(* acquire: ensure_loaded may yield (Eio.traceln inside debug_log).
+   After that, reading !pool and swapping pool := are yield-free. *)
 let acquire ?preferred_pool ~model_name () =
-  let* runtime = select_runtime ?preferred_pool () in
+  ensure_loaded ();
+  (* --- yield-free critical section --- *)
+  let state : pool_state = !pool in
+  let* runtime = select_runtime_from state.runtimes ?preferred_pool () in
   let* model_name = model_name_for_runtime runtime model_name in
-  runtime.active_slots <- runtime.active_slots + 1;
-  refresh_runtime_metrics runtime;
-  runtime.total_started <- runtime.total_started + 1;
+  let updated = { runtime with
+    active_slots = runtime.active_slots + 1;
+    queue_depth = max 0 (runtime.active_slots + 1 - runtime.max_concurrency);
+    total_started = runtime.total_started + 1;
+  } in
+  let new_runtimes : runtime list =
+    List.map
+      (fun (r : runtime) ->
+        if String.equal r.id runtime.id then updated else r)
+      (state.runtimes : runtime list)
+  in
+  pool := { state with runtimes = new_runtimes };
+  (* --- end critical section --- *)
   Ok
     {
       runtime_id = runtime.id;
@@ -338,45 +380,63 @@ let acquire ?preferred_pool ~model_name () =
       lease = { runtime_id = runtime.id };
     }
 
+(* release: ensure_loaded may yield. After that, ref read+swap is yield-free.
+   debug_log (may yield) is placed AFTER the ref swap. *)
 let release (lease : lease) ~success ?error ?latency_ms () =
   ensure_loaded ();
+  (* --- yield-free critical section --- *)
+  let state : pool_state = !pool in
   match
     List.find_opt
       (fun (runtime : runtime) -> String.equal runtime.id lease.runtime_id)
-      !runtimes
+      state.runtimes
   with
   | None -> ()
   | Some runtime ->
       let before_failure_streak = runtime.failure_streak in
-      runtime.active_slots <- max 0 (runtime.active_slots - 1);
-      refresh_runtime_metrics runtime;
-      (match latency_ms with
-       | Some latency ->
-           let latency = float_of_int (max 0 latency) in
-           runtime.latency_ema_ms <-
-             Some
-               (match runtime.latency_ema_ms with
-                | None -> latency
-                | Some previous -> (previous *. 0.8) +. (latency *. 0.2))
-       | None -> ());
-      if success then (
-        runtime.failure_streak <- 0;
-        runtime.cooldown_until <- None;
-        runtime.last_error <- None;
-        runtime.total_success <- runtime.total_success + 1)
-      else (
-        runtime.failure_streak <- runtime.failure_streak + 1;
-        runtime.last_error <- trim_opt error;
-        runtime.total_failure <- runtime.total_failure + 1;
-        if runtime.failure_streak >= 3 then
-          runtime.cooldown_until <- Some (wall_now () +. cooldown_seconds ()));
+      let active_slots = max 0 (runtime.active_slots - 1) in
+      let latency_ema_ms =
+        match latency_ms with
+        | Some latency ->
+            let latency = float_of_int (max 0 latency) in
+            Some
+              (match runtime.latency_ema_ms with
+               | None -> latency
+               | Some previous -> (previous *. 0.8) +. (latency *. 0.2))
+        | None -> runtime.latency_ema_ms
+      in
+      let failure_streak, cooldown_until, last_error, total_success, total_failure =
+        if success then
+          (0, None, None, runtime.total_success + 1, runtime.total_failure)
+        else
+          let streak = runtime.failure_streak + 1 in
+          let cooldown =
+            if streak >= 3 then Some (wall_now () +. cooldown_seconds ())
+            else runtime.cooldown_until
+          in
+          (streak, cooldown, trim_opt error, runtime.total_success, runtime.total_failure + 1)
+      in
+      let queue_depth = max 0 (active_slots - runtime.max_concurrency) in
+      let updated = { runtime with
+        active_slots; queue_depth; latency_ema_ms;
+        failure_streak; cooldown_until; last_error;
+        total_success; total_failure;
+      } in
+      let new_runtimes : runtime list =
+        List.map
+          (fun (r : runtime) ->
+            if String.equal r.id runtime.id then updated else r)
+          (state.runtimes : runtime list)
+      in
+      pool := { state with runtimes = new_runtimes };
+      (* --- end critical section --- *)
       debug_log
         "release runtime=%s success=%b before_streak=%d after_streak=%d cooldown=%s total_success=%d total_failure=%d error=%s"
-        runtime.id success before_failure_streak runtime.failure_streak
-        (match runtime.cooldown_until with
+        runtime.id success before_failure_streak updated.failure_streak
+        (match updated.cooldown_until with
          | Some value -> Printf.sprintf "%.3f" value
          | None -> "null")
-        runtime.total_success runtime.total_failure
+        updated.total_success updated.total_failure
         (Option.value ~default:"" (trim_opt error))
 
 let model_spec_of_assignment (assignment : assignment) =

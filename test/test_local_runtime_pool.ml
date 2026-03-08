@@ -61,6 +61,28 @@ let test_acquire_and_release () =
   Alcotest.(check int) "active slots released" 0 snapshot.active_slots;
   Alcotest.(check int) "success count recorded" 1 snapshot.total_success
 
+let test_select_runtime_from_empty_returns_error () =
+  match Local_runtime_pool.select_runtime_from [] () with
+  | Ok _ -> Alcotest.fail "empty runtime list should be rejected"
+  | Error message ->
+      Alcotest.(check string) "empty runtime error"
+        "no local llama runtimes configured" message
+
+let test_acquire_requires_explicit_or_runtime_model () =
+  Local_runtime_pool.reset ();
+  let json =
+    {|[
+      {"id":"local-no-model","base_url":"http://127.0.0.1:7085","max_concurrency":1}
+    ]|}
+  in
+  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  match Local_runtime_pool.acquire ~preferred_pool:"local-no-model" ~model_name:None () with
+  | Ok _ -> Alcotest.fail "runtime without model should reject implicit acquire"
+  | Error message ->
+      Alcotest.(check string) "explicit model error"
+        "no explicit llama model provided for runtime local-no-model; set spawn_model or runtime.model"
+        message
+
 let test_record_measured_ceiling () =
   Local_runtime_pool.reset ();
   Local_runtime_pool.record_measured_ceiling 12;
@@ -106,6 +128,11 @@ let () =
         [
           Alcotest.test_case "parse runtime env" `Quick test_parse_runtime_env;
           Alcotest.test_case "acquire and release" `Quick test_acquire_and_release;
+          Alcotest.test_case "empty runtime set returns error" `Quick
+            test_select_runtime_from_empty_returns_error;
+          Alcotest.test_case "acquire requires explicit model when runtime omits it"
+            `Quick
+            test_acquire_requires_explicit_or_runtime_model;
           Alcotest.test_case "failure cooldown from env" `Quick
             test_failure_cooldown_from_env;
           Alcotest.test_case "record measured ceiling" `Quick

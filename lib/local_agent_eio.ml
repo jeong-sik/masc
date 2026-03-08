@@ -310,6 +310,26 @@ let local_worker_extra_schemas : Types.tool_schema list =
             ("required", `List [ `String "session_id"; `String "turn_kind" ]);
           ];
     };
+    {
+      Types.name = "masc_memento_mori";
+      description =
+        "Check context pressure and auto-handle prepare or handoff when thresholds are crossed.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("context_ratio", `Assoc [ ("type", `String "number") ]);
+                  ("full_context", `Assoc [ ("type", `String "string") ]);
+                  ("summary", `Assoc [ ("type", `String "string") ]);
+                  ("current_task", `Assoc [ ("type", `String "string") ]);
+                  ("target_agent", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "context_ratio" ]);
+          ];
+    };
   ]
 
 let list_masc_tools ~sw ~(auth_token : string option) ~session_id

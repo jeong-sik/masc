@@ -10,8 +10,24 @@ WAVE1_WORKER_COUNT="${WAVE1_WORKER_COUNT:-8}"
 WAVE2_WORKER_COUNT="${WAVE2_WORKER_COUNT:-12}"
 WAVE3_WORKER_COUNT="${WAVE3_WORKER_COUNT:-6}"
 SESSION_DURATION_SEC="${SESSION_DURATION_SEC:-2400}"
-SPAWN_TIMEOUT_SEC="${SPAWN_TIMEOUT_SEC:-900}"
-HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-$((SPAWN_TIMEOUT_SEC + 120))}"
+max_wave_workers="$WAVE1_WORKER_COUNT"
+if [ "$WAVE2_WORKER_COUNT" -gt "$max_wave_workers" ]; then
+  max_wave_workers="$WAVE2_WORKER_COUNT"
+fi
+if [ "$WAVE3_WORKER_COUNT" -gt "$max_wave_workers" ]; then
+  max_wave_workers="$WAVE3_WORKER_COUNT"
+fi
+default_spawn_timeout=$((max_wave_workers * 45))
+if [ "$default_spawn_timeout" -lt 300 ]; then
+  default_spawn_timeout=300
+fi
+SPAWN_TIMEOUT_SEC="${SPAWN_TIMEOUT_SEC:-$default_spawn_timeout}"
+default_http_timeout=$((SPAWN_TIMEOUT_SEC + 300))
+min_http_timeout=$((max_wave_workers * 50))
+if [ "$default_http_timeout" -lt "$min_http_timeout" ]; then
+  default_http_timeout="$min_http_timeout"
+fi
+HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-$default_http_timeout}"
 WAIT_AFTER_SPAWN_SEC="${WAIT_AFTER_SPAWN_SEC:-3}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 MCP_SESSION_ID="${MCP_SESSION_ID:-team-session-local64-chaos-$(date +%s)-$RANDOM}"
@@ -231,7 +247,7 @@ if [ -z "$VICTIM_RUNTIME_ID" ] || [ -z "$VICTIM_PORT" ]; then
 fi
 echo "victim_runtime=${VICTIM_RUNTIME_ID} port=${VICTIM_PORT}"
 
-echo "[4/10] wave1 baseline"
+echo "[4/10] wave1 baseline (spawn_timeout=${SPAWN_TIMEOUT_SEC}s http_timeout=${HTTP_TIMEOUT_SEC}s max_wave_workers=${max_wave_workers})"
 wave1_raw="$(run_spawn_wave 92905 "$WAVE1_WORKER_COUNT" "wave1")"
 require_tool_success "$wave1_raw"
 wave1_success="$(printf '%s' "$wave1_raw" | extract_result | jq -r '.spawn.results | map(select(.success == true)) | length')"

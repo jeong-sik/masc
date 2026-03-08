@@ -164,6 +164,12 @@
  (modules test_json_util)
  (libraries masc_mcp alcotest yojson))
 
+; Swarm_status regression tests (lane presence / recommendation logic)
+(test
+ (name test_swarm_status)
+ (modules test_swarm_status)
+ (libraries masc_mcp alcotest yojson))
+
 ; Resilience module tests (Time, Zombie, ZeroZombie pure functions)
 (test
  (name test_resilience)

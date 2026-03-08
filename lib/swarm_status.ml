@@ -620,7 +620,7 @@ let lane_flags kind ~present ~approvals ~workers ~trace_count ~last_movement_at
   in
   let flags =
     match parse_timestamp last_movement_at with
-    | Some ts when Time_compat.now () -. ts > stale_window_sec ->
+    | Some ts when present && Time_compat.now () -. ts > stale_window_sec ->
         append_flag flags "stale_data" "warn"
           "The most recent movement is older than the freshness window."
     | _ -> flags
@@ -799,6 +799,17 @@ let trace_infos_of_snapshot snapshot =
 let slice_by_kind kind classify rows =
   List.filter (fun row -> classify row = kind) rows
 
+let lane_present kind ~operations ~detachments ~alerts ~decisions ~traces ~sessions =
+  match kind with
+  | Supervised ->
+      (* Supervised traces are historical. Only live session/runtime artifacts should
+         make the lane present, otherwise stale operator/team-session traces create a
+         phantom supervised lane after the real session has already ended. *)
+      operations <> [] || detachments <> [] || decisions <> [] || sessions <> []
+  | Managed | Projected ->
+      operations <> [] || detachments <> [] || alerts <> [] || decisions <> [] || traces <> []
+      || sessions <> []
+
 let lane_for_kind kind ~now ~operations ~detachments ~alerts ~decisions ~traces
     ~sessions ~mixed_runtime_sources =
   let workers =
@@ -809,10 +820,7 @@ let lane_for_kind kind ~now ~operations ~detachments ~alerts ~decisions ~traces
     | Managed | Projected ->
         worker_names_from_detachments detachments |> List.length
   in
-  let present =
-    operations <> [] || detachments <> [] || alerts <> [] || decisions <> [] || traces <> []
-    || sessions <> []
-  in
+  let present = lane_present kind ~operations ~detachments ~alerts ~decisions ~traces ~sessions in
   let approvals =
     decisions
     |> List.filter (fun (decision : decision_info) -> String.equal decision.status "pending")

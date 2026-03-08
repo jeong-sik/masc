@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-WORKLOAD_SCRIPT="$ROOT_DIR/scripts/harness/workload/team_session_local64_smoke.sh"
+DEFAULT_WORKLOAD_SCRIPT="$ROOT_DIR/scripts/harness/workload/team_session_local64_smoke.sh"
+WORKLOAD_SCRIPT="${WORKLOAD_SCRIPT_OVERRIDE:-$DEFAULT_WORKLOAD_SCRIPT}"
 SERVER_EXE="${SERVER_EXE:-$ROOT_DIR/_build/default/bin/main_eio.exe}"
 PORT="${MASC_LOCAL64_PORT:-8945}"
 BASE_PATH="${MASC_LOCAL64_BASE_PATH:-$(mktemp -d "${TMPDIR:-/tmp}/masc-local64-smoke.XXXXXX")}"
@@ -40,6 +41,13 @@ wait_for_health() {
   return 1
 }
 
+port_in_use() {
+  if ! command -v lsof >/dev/null 2>&1; then
+    return 1
+  fi
+  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1
+}
+
 cleanup() {
   if [ -n "$SERVER_PID" ]; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
@@ -70,12 +78,18 @@ fi
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:${PORT}/mcp}"
 if [ "$MCP_URL" = "http://127.0.0.1:${PORT}/mcp" ]; then
+  if port_in_use; then
+    echo "local64 smoke refused to start: port ${PORT} is already listening; choose a fresh MASC_LOCAL64_PORT or set MCP_URL explicitly" >&2
+    exit 1
+  fi
   env -i \
     PATH="$PATH" \
     HOME="$HOME" \
     TMPDIR="${TMPDIR:-/tmp}" \
     LLAMA_SERVER_URL="${LLAMA_SERVER_URL:-http://127.0.0.1:${SEED_PORT}}" \
     MASC_LLAMA_RUNTIMES_JSON="${MASC_LLAMA_RUNTIMES_JSON:-}" \
+    MASC_LLAMA_RUNTIME_COOLDOWN_SEC="${MASC_LLAMA_RUNTIME_COOLDOWN_SEC:-}" \
+    MASC_LLAMA_RUNTIME_DEBUG="${MASC_LLAMA_RUNTIME_DEBUG:-}" \
     MASC_STORAGE_TYPE=filesystem \
     MASC_BASE_PATH="$BASE_PATH" \
     MASC_GUARDIAN_ENABLED=false \
@@ -94,4 +108,4 @@ if [ "$MCP_URL" = "http://127.0.0.1:${PORT}/mcp" ]; then
 fi
 
 export MCP_URL
-exec "$WORKLOAD_SCRIPT" "$@"
+exec bash "$WORKLOAD_SCRIPT" "$@"

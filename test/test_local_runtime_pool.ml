@@ -65,6 +65,36 @@ let test_record_measured_ceiling () =
   Alcotest.(check (option int)) "ceiling is max" (Some 12)
     (Local_runtime_pool.measured_ceiling ())
 
+let test_failure_cooldown_from_env () =
+  let json =
+    {|[
+      {"id":"local-c","base_url":"http://127.0.0.1:9085","model":"qwen-c","max_concurrency":1}
+    ]|}
+  in
+  with_env "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" (Some "120") @@ fun () ->
+  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  let fail_once () =
+    let assignment =
+      match Local_runtime_pool.acquire ~preferred_pool:"local-c" ~model_name:None () with
+      | Ok assignment -> assignment
+      | Error err -> failwith err
+    in
+    Local_runtime_pool.release assignment.lease ~success:false
+      ~error:"Connection refused" ()
+  in
+  fail_once ();
+  fail_once ();
+  fail_once ();
+  let snapshot =
+    Local_runtime_pool.snapshots ()
+    |> List.find (fun (runtime : Local_runtime_pool.runtime_snapshot) ->
+           String.equal runtime.id "local-c")
+  in
+  Alcotest.(check int) "failure streak recorded" 3 snapshot.failure_streak;
+  Alcotest.(check bool) "cooldown active" true
+    (Option.is_some snapshot.cooldown_until);
+  Alcotest.(check int) "failure count recorded" 3 snapshot.total_failure
+
 let () =
   Alcotest.run "test_local_runtime_pool"
     [
@@ -72,6 +102,8 @@ let () =
         [
           Alcotest.test_case "parse runtime env" `Quick test_parse_runtime_env;
           Alcotest.test_case "acquire and release" `Quick test_acquire_and_release;
+          Alcotest.test_case "failure cooldown from env" `Quick
+            test_failure_cooldown_from_env;
           Alcotest.test_case "record measured ceiling" `Quick
             test_record_measured_ceiling;
         ] );

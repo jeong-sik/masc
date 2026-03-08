@@ -50,18 +50,40 @@ type assignment = {
 
 let default_pool_label = "local64"
 let default_parallel_hint = 12
-let cooldown_seconds = 30.0
 
-let runtimes : runtime list ref = ref []
-let runtimes_fingerprint = ref ""
-let runtime_parse_errors : string list ref = ref []
-let measured_ceiling_ref : int option ref = ref None
+let wall_now () = Unix.gettimeofday ()
+
+let float_of_env_default name ~default =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw -> (
+      try
+        let value = float_of_string (String.trim raw) in
+        if value > 0.0 then value else default
+      with _ -> default)
+
+let cooldown_seconds () =
+  float_of_env_default "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" ~default:30.0
 
 let trim_opt = function
   | None -> None
   | Some raw ->
       let trimmed = String.trim raw in
       if trimmed = "" then None else Some trimmed
+
+let debug_enabled () =
+  match trim_opt (Sys.getenv_opt "MASC_LLAMA_RUNTIME_DEBUG") with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | _ -> false
+
+let debug_log fmt =
+  if debug_enabled () then Printf.ksprintf (fun msg -> Eio.traceln "[local_runtime_pool] %s" msg) fmt
+  else Printf.ksprintf (fun _ -> ()) fmt
+
+let runtimes : runtime list ref = ref []
+let runtimes_fingerprint = ref ""
+let runtime_parse_errors : string list ref = ref []
+let measured_ceiling_ref : int option ref = ref None
 
 let parse_int_opt raw =
   try Some (int_of_string (String.trim raw)) with _ -> None
@@ -105,7 +127,7 @@ let runtime_to_snapshot (runtime : runtime) =
 let refresh_runtime_metrics (runtime : runtime) =
   runtime.queue_depth <- max 0 (runtime.active_slots - runtime.max_concurrency);
   match runtime.cooldown_until with
-  | Some until_ts when until_ts <= Time_compat.now () ->
+  | Some until_ts when until_ts <= wall_now () ->
       runtime.cooldown_until <- None;
       runtime.failure_streak <- 0
   | _ -> ()
@@ -171,6 +193,8 @@ let current_fingerprint () =
       Option.value ~default:"" (Sys.getenv_opt "MASC_LLAMA_RUNTIMES_JSON");
       Env_config.Llama.server_url;
       Option.value ~default:"" (Sys.getenv_opt "LLAMA_SWARM_MODEL");
+      Option.value ~default:""
+        (Sys.getenv_opt "MASC_LLAMA_RUNTIME_COOLDOWN_SEC");
       string_of_int
         (int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
            ~default:default_parallel_hint);
@@ -206,7 +230,8 @@ let ensure_loaded () =
     let loaded, errors = load_runtimes_from_env () in
     runtimes := loaded;
     runtime_parse_errors := errors;
-    runtimes_fingerprint := fingerprint);
+    runtimes_fingerprint := fingerprint;
+    debug_log "reload runtimes count=%d errors=%d" (List.length loaded) (List.length errors));
   List.iter refresh_runtime_metrics !runtimes
 
 let parse_errors () =
@@ -322,6 +347,7 @@ let release (lease : lease) ~success ?error ?latency_ms () =
   with
   | None -> ()
   | Some runtime ->
+      let before_failure_streak = runtime.failure_streak in
       runtime.active_slots <- max 0 (runtime.active_slots - 1);
       refresh_runtime_metrics runtime;
       (match latency_ms with
@@ -343,7 +369,15 @@ let release (lease : lease) ~success ?error ?latency_ms () =
         runtime.last_error <- trim_opt error;
         runtime.total_failure <- runtime.total_failure + 1;
         if runtime.failure_streak >= 3 then
-          runtime.cooldown_until <- Some (Time_compat.now () +. cooldown_seconds))
+          runtime.cooldown_until <- Some (wall_now () +. cooldown_seconds ()));
+      debug_log
+        "release runtime=%s success=%b before_streak=%d after_streak=%d cooldown=%s total_success=%d total_failure=%d error=%s"
+        runtime.id success before_failure_streak runtime.failure_streak
+        (match runtime.cooldown_until with
+         | Some value -> Printf.sprintf "%.3f" value
+         | None -> "null")
+        runtime.total_success runtime.total_failure
+        (Option.value ~default:"" (trim_opt error))
 
 let model_spec_of_assignment (assignment : assignment) =
   {

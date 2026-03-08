@@ -689,7 +689,16 @@ export async function refreshMessages(): Promise<void> {
     const existingSeqs = new Set(
       current.map(m => m.seq).filter((s): s is number => s != null),
     )
-    const fresh = incoming.filter(m => m.seq == null || !existingSeqs.has(m.seq))
+    const existingKeys = new Set(
+      current.filter(m => m.seq == null).map(m => `${m.timestamp}|${m.from}`),
+    )
+    const fresh = incoming.filter(m => {
+      if (m.seq != null) return !existingSeqs.has(m.seq)
+      const key = `${m.timestamp}|${m.from}`
+      if (existingKeys.has(key)) return false
+      existingKeys.add(key)
+      return true
+    })
     if (fresh.length > 0) {
       const merged = [...current, ...fresh]
       // Cap at 500 messages to prevent unbounded growth in long sessions
@@ -783,7 +792,7 @@ const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 
 /** Schedule a debounced refresh for the given key. Coalesces rapid events. */
 function scheduleRefresh(key: string, fn: () => void, delayMs = 500): void {
-  if (_debounceTimers[key]) return
+  if (_debounceTimers[key]) clearTimeout(_debounceTimers[key])
   _debounceTimers[key] = setTimeout(() => {
     fn()
     delete _debounceTimers[key]

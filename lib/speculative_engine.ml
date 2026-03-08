@@ -146,6 +146,26 @@ let update_session (engine : t) (session : spec_session) : unit =
     if s.spec_id = session.spec_id then session else s
   ) engine.sessions
 
+let avg_reward_of_node (node : Mcts_tree.node) : float =
+  if node.visit_count = 0 then 0.0
+  else node.total_reward /. float_of_int node.visit_count
+
+let best_session_label (engine : t) (session : spec_session) : string option =
+  session.child_node_ids
+  |> List.filter_map (fun child_id ->
+         Mcts_tree.find_node engine.tree child_id
+         |> Option.map (fun node -> (node.Mcts_tree.label, avg_reward_of_node node)))
+  |> function
+  | [] -> None
+  | (label, reward) :: rest ->
+      let best_label, _ =
+        List.fold_left
+          (fun ((_, best_reward) as best) (label, reward) ->
+            if reward > best_reward then (label, reward) else best)
+          (label, reward) rest
+      in
+      Some best_label
+
 (* ================================================================ *)
 (* Semantic Guard                                                   *)
 (* ================================================================ *)
@@ -401,12 +421,10 @@ let select_best (engine : t) (spec_id : string)
   | Some session when session.state <> Verifying ->
     Error (sprintf "session %s not in Verifying state" spec_id)
   | Some session ->
-    (* Find best by MCTS best_path *)
-    let best = Mcts_tree.best_path engine.tree in
-    let best_label = match best with
-      | _ :: child :: _ -> Some child.Mcts_tree.label
-      | _ -> None
-    in
+    (* Choose only among this session's child nodes. The engine tree is
+       shared across sessions, so a global best-path lookup can leak a
+       previous session's label into the current selection. *)
+    let best_label = best_session_label engine session in
     (* Check if best exceeds min_confidence *)
     let best_outcome = match best_label with
       | Some lbl ->

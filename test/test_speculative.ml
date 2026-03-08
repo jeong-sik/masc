@@ -453,6 +453,87 @@ let () = run_test "select_best: wrong state" (fun () ->
   check "select_best on Branching state fails" (Result.is_error result);
 )
 
+let () = run_test "select_best: session-scoped MCTS choice" (fun () ->
+  let engine = make_engine ~min_confidence:0.4 () in
+  let global_session = Result.get_ok
+    (Speculative_engine.branch engine
+       ~goal:"g1" ~original_query:"q1"
+       ~candidates:(make_candidates ["global-best"; "global-bad"])) in
+  let global_outcomes = [
+    Speculative_engine.{
+      candidate_label = "global-best";
+      fast_response = "global";
+      verdict = Mcts_tree.Pass;
+      verdict_reason = "ok";
+      latency_ms = 1;
+      cost_estimate = 0.0;
+    };
+    {
+      candidate_label = "global-bad";
+      fast_response = "bad";
+      verdict = Mcts_tree.Fail;
+      verdict_reason = "bad";
+      latency_ms = 1;
+      cost_estimate = 0.0;
+    };
+  ] in
+  List.iter2 (fun child_id (outcome : Speculative_engine.simulation_outcome) ->
+    let sim : Mcts_tree.simulation_result = {
+      model_used = "test";
+      output = outcome.fast_response;
+      verdict = outcome.verdict;
+      latency_ms = float_of_int outcome.latency_ms;
+    } in
+    ignore (Mcts_tree.record_simulation engine.tree child_id sim);
+    Mcts_tree.backpropagate engine.tree child_id
+      (Mcts_tree.reward_of_verdict outcome.verdict)
+  ) global_session.child_node_ids global_outcomes;
+  Speculative_engine.update_session engine
+    { global_session with state = Verifying; outcomes = global_outcomes };
+  let local_session = Result.get_ok
+    (Speculative_engine.branch engine
+       ~goal:"g2" ~original_query:"q2"
+       ~candidates:(make_candidates ["local-best"; "local-bad"])) in
+  let local_outcomes = [
+    Speculative_engine.{
+      candidate_label = "local-best";
+      fast_response = "local";
+      verdict = Mcts_tree.Warn;
+      verdict_reason = "warn";
+      latency_ms = 1;
+      cost_estimate = 0.0;
+    };
+    {
+      candidate_label = "local-bad";
+      fast_response = "bad";
+      verdict = Mcts_tree.Fail;
+      verdict_reason = "bad";
+      latency_ms = 1;
+      cost_estimate = 0.0;
+    };
+  ] in
+  List.iter2 (fun child_id (outcome : Speculative_engine.simulation_outcome) ->
+    let sim : Mcts_tree.simulation_result = {
+      model_used = "test";
+      output = outcome.fast_response;
+      verdict = outcome.verdict;
+      latency_ms = float_of_int outcome.latency_ms;
+    } in
+    ignore (Mcts_tree.record_simulation engine.tree child_id sim);
+    Mcts_tree.backpropagate engine.tree child_id
+      (Mcts_tree.reward_of_verdict outcome.verdict)
+  ) local_session.child_node_ids local_outcomes;
+  Speculative_engine.update_session engine
+    { local_session with state = Verifying; outcomes = local_outcomes };
+  let selected =
+    Result.get_ok (Speculative_engine.select_best engine local_session.spec_id)
+  in
+  check "local session reaches Ready_to_commit"
+    (selected.state = Ready_to_commit);
+  check "best candidate stays local"
+    (selected.best_candidate = Some "local-best");
+)
+
 (* ================================================================ *)
 (* Tests: commit state check                                        *)
 (* ================================================================ *)

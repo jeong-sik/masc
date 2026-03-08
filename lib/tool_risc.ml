@@ -623,6 +623,20 @@ let handle_ooo_metrics _args : result =
 
 (** Start speculative execution: branch into N candidates for MCTS
     evaluation via fast LLM. *)
+let advance_spec_start
+    ~simulate
+    ~select
+    (engine : Speculative_engine.t)
+    (session : Speculative_engine.spec_session) : result =
+  match simulate engine session.spec_id with
+  | Error msg -> (false, msg)
+  | Ok _ -> (
+      match select engine session.spec_id with
+      | Error msg -> (false, msg)
+      | Ok final_session ->
+          (true, Yojson.Safe.pretty_to_string
+             (Speculative_engine.session_to_yojson final_session)) )
+
 let handle_spec_start args : result =
   let goal = get_string args "goal" "" in
   let query = get_string args "original_query" "" in
@@ -638,8 +652,10 @@ let handle_spec_start args : result =
     match Speculative_engine.branch global_spec_engine
       ~goal ~original_query:query ~candidates with
     | Ok session ->
-        (true, Yojson.Safe.pretty_to_string
-          (Speculative_engine.session_to_yojson session))
+        advance_spec_start
+          ~simulate:Speculative_engine.simulate_all
+          ~select:Speculative_engine.select_best
+          global_spec_engine session
     | Error msg -> (false, msg)
   end
 

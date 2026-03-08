@@ -15,6 +15,16 @@ open Masc_mcp
 let pass name = Printf.printf "  PASS %s\n%!" name
 let fail name msg = Printf.printf "  FAIL %s: %s\n%!" name msg; exit 1
 
+let dummy_model : Llm_client.model_spec = {
+  provider = Ollama;
+  model_id = "test-fast-model";
+  max_context = 4096;
+  api_url = "http://localhost:11434";
+  api_key_env = None;
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
+}
+
 (* ================================================================ *)
 (* risc_types.ml tests                                              *)
 (* ================================================================ *)
@@ -482,6 +492,73 @@ let test_tool_dispatch_unknown () =
   if ok then fail name "unknown tool should fail"
   else pass name
 
+let test_spec_start_advances_session () =
+  let name = "tool_spec_start_progression" in
+  let engine = Speculative_engine.create ~fast_model:dummy_model () in
+  let session = Result.get_ok
+    (Speculative_engine.branch engine
+       ~goal:"g" ~original_query:"q"
+       ~candidates:
+         [
+           Speculative_engine.{ label = "alpha"; prompt = "alpha"; metadata = `Null };
+           { label = "beta"; prompt = "beta"; metadata = `Null };
+         ]) in
+  let simulated = ref false in
+  let selected = ref false in
+  let ok, output =
+    Tool_risc.advance_spec_start
+      ~simulate:(fun engine spec_id ->
+        simulated := true;
+        match Speculative_engine.find_session engine spec_id with
+        | None -> Error "missing session"
+        | Some current ->
+          let outcomes = [
+            Speculative_engine.{
+              candidate_label = "alpha";
+              fast_response = "ok";
+              verdict = Mcts_tree.Pass;
+              verdict_reason = "ok";
+              latency_ms = 1;
+              cost_estimate = 0.0;
+            };
+            {
+              candidate_label = "beta";
+              fast_response = "no";
+              verdict = Mcts_tree.Fail;
+              verdict_reason = "bad";
+              latency_ms = 1;
+              cost_estimate = 0.0;
+            };
+          ] in
+          let updated = { current with state = Verifying; outcomes } in
+          Speculative_engine.update_session engine updated;
+          Ok updated)
+      ~select:(fun engine spec_id ->
+        selected := true;
+        match Speculative_engine.find_session engine spec_id with
+        | None -> Error "missing session"
+        | Some current ->
+          let updated =
+            { current with
+              state = Ready_to_commit;
+              best_candidate = Some "alpha";
+            }
+          in
+          Speculative_engine.update_session engine updated;
+          Ok updated)
+      engine session
+  in
+  if not ok then fail name ("advance_spec_start failed: " ^ output)
+  else if not !simulated then fail name "simulate stage not called"
+  else if not !selected then fail name "select stage not called"
+  else
+    let json = Yojson.Safe.from_string output in
+    let state = Yojson.Safe.Util.(json |> member "state" |> to_string) in
+    let best = Yojson.Safe.Util.(json |> member "best_candidate" |> to_string) in
+    if state <> "ready_to_commit" then fail name ("unexpected state: " ^ state)
+    else if best <> "alpha" then fail name ("unexpected best candidate: " ^ best)
+    else pass name
+
 let test_is_risc_tool () =
   let name = "is_risc_tool" in
   if not (Tool_risc.is_risc_tool "masc_risc_decode") then
@@ -600,6 +677,7 @@ let () =
   test_tool_dispatch_register ();
   test_tool_dispatch_decode ();
   test_tool_dispatch_unknown ();
+  test_spec_start_advances_session ();
   test_is_risc_tool ();
   test_tool_definitions_count ();
 
@@ -612,4 +690,4 @@ let () =
   test_hazard_to_string ();
   test_hazard_to_yojson ();
 
-  Printf.printf "\n=== All 35 SWARM-RISC tests passed ===\n"
+  Printf.printf "\n=== All 36 SWARM-RISC tests passed ===\n"

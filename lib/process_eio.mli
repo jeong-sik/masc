@@ -17,6 +17,10 @@ val is_initialized : unit -> bool
 val get_proc_mgr : unit -> Eio_unix.Process.mgr_ty Eio.Resource.t
 val get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t
 
+(** Return true when an Eio process-spawn exception should retry via the Unix
+    fallback path (e.g. bind-related subprocess transport errors on macOS). *)
+val should_retry_unix_fallback : exn -> bool
+
 (** {1 Eio-native process execution (global refs)} *)
 
 (** Run command with explicit argv (no shell). Safe from injection.

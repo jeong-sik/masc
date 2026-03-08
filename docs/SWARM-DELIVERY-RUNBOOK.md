@@ -100,6 +100,15 @@ LOCAL64_POOL_TARGET_SHARDS=6 \
 
 `scripts/llama-runtime-pool.sh print-env`는 `MASC_LLAMA_RUNTIMES_JSON`에 넣을 JSON을 출력한다.
 
+모델/양자화별 ceiling 비교는 matrix harness로 돌린다:
+
+```bash
+LOCAL64_MODEL_MATRIX_FILE=./scripts/harness/local64-model-matrix.example.json \
+./scripts/harness_local64_model_matrix.sh
+```
+
+각 run은 별도 seed port / MCP port / artifact 디렉토리를 사용하므로, 기존 `8085` seed를 건드리지 않고도 `q8`, `1bit`, 다른 GGUF를 순차 비교할 수 있다.
+
 기본 출력:
 
 - `session_id`

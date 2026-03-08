@@ -9,7 +9,7 @@ COORD_AGENT="${COORD_AGENT:-team-session-local64-context-chaos}"
 WORKER_COUNT="${WORKER_COUNT:-4}"
 PRESSURE_WORKER_COUNT="${PRESSURE_WORKER_COUNT:-2}"
 PRESSURE_CONTEXT_RATIO="${PRESSURE_CONTEXT_RATIO:-0.79}"
-PRESSURE_CONTEXT_LINES="${PRESSURE_CONTEXT_LINES:-16}"
+PRESSURE_CONTEXT_LINES="${PRESSURE_CONTEXT_LINES:-4}"
 SESSION_DURATION_SEC="${SESSION_DURATION_SEC:-2400}"
 default_spawn_timeout=$((WORKER_COUNT * 45))
 if [ "$default_spawn_timeout" -lt 240 ]; then
@@ -177,9 +177,10 @@ build_spawn_batch() {
         printf '%s\n' \
           "너의 에이전트 이름은 ${actor} 이다. 너는 local64 context pressure worker 이다." \
           "반드시 masc_memento_mori 를 먼저 호출하고, 바로 이어서 masc_team_session_turn 를 호출해라." \
-          "1) 아래 context 를 full_context 로 사용해서 mcp__masc__masc_memento_mori(context_ratio=${PRESSURE_CONTEXT_RATIO}, current_task=\"local64-context-chaos\", summary=\"${actor} pressure capsule\", full_context=\"...\") 를 호출해라." \
-          "2) 바로 mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] pressure memento-called context_ratio=${PRESSURE_CONTEXT_RATIO}\") 를 호출해라." \
-          "3) 마지막 답변은 한 줄로 done:${actor}:pressure:memento-called 만 출력해라." \
+          "1) 아래 context 블록 전체를 full_context 로 사용해서 mcp__masc__masc_memento_mori 를 호출해라." \
+          "2) masc_memento_mori 인자에는 context_ratio=${PRESSURE_CONTEXT_RATIO}, current_task=\"local64-context-chaos\", summary=\"${actor} pressure capsule\", full_context=\"[FULL_CONTEXT_BEGIN] 과 [FULL_CONTEXT_END] 사이 전체 문자열\" 네 개만 넣어라. target_agent 는 넣지 마라." \
+          "3) 바로 mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] pressure memento-called context_ratio=${PRESSURE_CONTEXT_RATIO}\") 를 호출해라." \
+          "4) 마지막 답변은 한 줄로 done:${actor}:pressure:memento-called 만 출력해라." \
           "" \
           "[FULL_CONTEXT_BEGIN]" \
           "${pressure_context}" \

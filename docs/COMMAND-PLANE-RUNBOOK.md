@@ -4,6 +4,8 @@
 
 이 문서는 `어떤 MCP tool을 어떤 순서로 써야 하는가`를 정리한다. 벤치마크/스웜/장기 지휘는 `CPv2 direct`가 기본 경로고, supervisor/team-session은 별도 경로다.
 
+merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md)를 본다.
+
 ## 개념 맵
 
 - `room`

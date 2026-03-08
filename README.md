@@ -74,6 +74,19 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - 레거시 `/sse`, `/messages` endpoint는 deprecated 상태이며 `/mcp`로 전환이 권장됩니다.
 - 원격 감독관 표면은 `/mcp/operator`를 사용하세요. 운영 루프와 confirm 정책은 `docs/REMOTE-MCP-OPERATOR.md`, `docs/SUPERVISOR-MODE.md`에, swarm-driven 구현 표준은 `docs/SWARM-DELIVERY-RUNBOOK.md`에 정리돼 있습니다.
 
+## Architecture Map
+
+merged 기준 아키텍처 한 장 요약은 [MERGED-ARCHITECTURE-SSOT.md](./docs/MERGED-ARCHITECTURE-SSOT.md)를 본다.
+
+- canonical swarm / benchmark path: `CPv2 direct`
+- canonical implementation path: `Team Session + Supervisor`
+- merged substrate:
+  - native chain plane
+  - local64 runtime pool
+  - optional `best_first_v1` search fabric
+- merged but not canonical public path:
+  - `SWARM-RISC` research modules
+
 ## 기본 사용 흐름
 
 ```text

@@ -95,7 +95,7 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_status" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains masc_claim" true
     (List.mem "mcp__masc__masc_claim" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains team_session_turn" true
+  Alcotest.(check bool) "omits team_session_turn" false
     (List.mem "mcp__masc__masc_team_session_turn" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains team_session_step" true
     (List.mem "mcp__masc__masc_team_session_step" Spawn.masc_mcp_tools);

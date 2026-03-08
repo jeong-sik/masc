@@ -8,7 +8,8 @@
 - 보고서 생성: `masc_team_session_report`
 - 세션 목록: `masc_team_session_list`
 - 세션 비교: `masc_team_session_compare`
-- 턴 기록/조작: `masc_team_session_turn`
+- canonical write entrypoint: `masc_team_session_step`
+- legacy compatibility turn writer: `masc_team_session_turn`
 - 이벤트 타임라인 조회: `masc_team_session_events`
 - 증명 산출: `masc_team_session_prove`
 
@@ -79,6 +80,32 @@
 - `markdown_path`
 - `json_path`
 
+### `masc_team_session_step`
+
+입력:
+
+- `session_id` (required)
+- `turn_kind` (`note` | `broadcast` | `portal` | `task` | `checkpoint`)
+- `actor` (optional explicit turn actor; default caller)
+- `message` (note/broadcast/portal에서 사용)
+- `target_agent` (portal에서 사용)
+- `task_title`/`task_description`/`task_priority` (task에서 사용)
+- `spawn_agent`/`spawn_prompt` 또는 `spawn_batch`
+- `vote_topic`/`vote_options`/`vote_choice`
+- `run_task_id`/`run_note`/`run_deliverable`
+
+출력:
+
+- plain turn 기록 시 `turn_no`, `kind`, 액션 결과
+- worker spawn 시 `spawn_result`
+- vote/run evidence가 있으면 해당 evidence payload
+
+운영 규칙:
+
+- `masc_team_session_step`가 모든 신규 team-session write의 canonical entrypoint입니다.
+- note-only logging도 `masc_team_session_step(turn_kind="note", message="...")`를 사용합니다.
+- `masc_team_session_turn`은 기존 호출자 호환용 plain turn subset만 제공합니다.
+
 ### `masc_team_session_turn`
 
 입력:
@@ -94,6 +121,11 @@
 - `turn_no`
 - `kind`
 - 액션 결과(`result`, `broadcast`, `target_agent` 등)
+
+호환성 메모:
+
+- legacy compatibility entrypoint입니다.
+- 신규 flow와 문서 예시는 `masc_team_session_step`를 사용합니다.
 
 ### `masc_team_session_events`
 
@@ -188,6 +220,7 @@
 - `status/report/list/compare`는 read-only 도구로 동작합니다.
 - `status/stop/report/compare`는 세션 참여자(`created_by` 또는 `agent_names`)만 접근할 수 있습니다.
 - `turn/events/prove`도 세션 참여자만 접근할 수 있습니다.
+- default `tools/list`에서는 `masc_team_session_turn`이 숨겨지고, `include_hidden=true`일 때 deprecation metadata와 함께 노출됩니다.
 - `list`는 호출자 기준 접근 가능한 세션만 반환합니다.
 - 종료 직후에도 `force_regenerate=true`로 보고서를 다시 생성할 수 있습니다.
 - `prove`는 보고서가 없을 때 자동 생성 옵션(`generate_report_if_missing`)으로 증명 산출의 일관성을 보장합니다.

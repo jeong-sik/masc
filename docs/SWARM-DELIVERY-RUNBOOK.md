@@ -64,8 +64,8 @@
    - `LLAMA_SWARM_MODEL=<exact-id>`
 5. `masc_team_session_start`
    - 목표와 orchestration policy를 가진 session을 시작한다.
-6. `masc_team_session_turn`
-   - model selection rationale을 note로 남긴다.
+6. `masc_team_session_step`
+   - `turn_kind="note"`로 model selection rationale을 남긴다.
 7. `masc_team_session_step(spawn_batch=...)`
    - planner / implementers를 한 번에 기동한다.
 8. `masc_operator_snapshot(view="summary")`
@@ -137,7 +137,7 @@ harness는 각 item에 다음을 자동으로 덧붙인다:
 
 이 경로를 성공으로 보는 최소 기준:
 
-- spawned worker가 own `team_turn`을 남긴다
+- spawned worker가 own `masc_team_session_step(turn_kind="note", message="...")`를 남긴다
 - `masc_operator_digest`가 session health를 읽는다
 - supervisor action이 기록되거나, no-intervention policy가 출력에 명시된다
 - `masc_team_session_report` / `masc_team_session_prove` artifact가 생성된다

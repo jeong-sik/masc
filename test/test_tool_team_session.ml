@@ -588,6 +588,83 @@ let test_turn_events_and_prove () =
     proof_schema_version;
   cleanup_dir base_dir
 
+let test_step_plain_turn_matches_legacy_turn () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let legacy_session_id =
+    start_session_exn ctx ~goal:"legacy-turn-parity" |> get_session_id
+  in
+  let legacy_ok, legacy_body =
+    dispatch_exn ctx ~name:"masc_team_session_turn"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String legacy_session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "legacy note");
+          ])
+  in
+  Alcotest.(check bool) "legacy turn ok" true legacy_ok;
+  let legacy_turn = parse_json_exn legacy_body |> result_field in
+  Alcotest.(check string) "legacy kind" "note"
+    Yojson.Safe.Util.(legacy_turn |> member "kind" |> to_string);
+
+  let step_session_id =
+    start_session_exn ctx ~goal:"step-turn-parity" |> get_session_id
+  in
+  let step_ok, step_body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String step_session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "step note");
+          ])
+  in
+  Alcotest.(check bool) "step turn ok" true step_ok;
+  let step_turn =
+    parse_json_exn step_body |> result_field |> Yojson.Safe.Util.member "turn"
+  in
+  Alcotest.(check string) "step kind" "note"
+    Yojson.Safe.Util.(step_turn |> member "kind" |> to_string);
+  Alcotest.(check bool) "step spawn null" true
+    (parse_json_exn step_body |> result_field |> Yojson.Safe.Util.member "spawn"
+    = `Null);
+
+  let team_turn_detail_exn session_id =
+    match
+      List.find_opt
+        (fun json ->
+          Yojson.Safe.Util.(json |> member "event_type" |> to_string = "team_turn"))
+        (Team_session_store.read_events ~max_events:20 config session_id)
+    with
+    | Some event -> Yojson.Safe.Util.member "detail" event
+    | None -> Alcotest.fail "expected team_turn event"
+  in
+  let legacy_detail = team_turn_detail_exn legacy_session_id in
+  let step_detail = team_turn_detail_exn step_session_id in
+  Alcotest.(check string) "legacy detail kind" "note"
+    Yojson.Safe.Util.(legacy_detail |> member "kind" |> to_string);
+  Alcotest.(check string) "step detail kind" "note"
+    Yojson.Safe.Util.(step_detail |> member "kind" |> to_string);
+  Alcotest.(check string) "legacy actor" "tester"
+    Yojson.Safe.Util.(legacy_detail |> member "actor" |> to_string);
+  Alcotest.(check string) "step actor" "tester"
+    Yojson.Safe.Util.(step_detail |> member "actor" |> to_string);
+  Alcotest.(check string) "legacy message" "legacy note"
+    Yojson.Safe.Util.(legacy_detail |> member "message" |> to_string);
+  Alcotest.(check string) "step message" "step note"
+    Yojson.Safe.Util.(step_detail |> member "message" |> to_string);
+  cleanup_dir base_dir
+
 let test_proof_exposes_spawn_selection_rationale () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1837,6 +1914,8 @@ let () =
           Alcotest.test_case "list-and-compare" `Quick test_list_and_compare;
           Alcotest.test_case "turn-events-prove" `Quick
             test_turn_events_and_prove;
+          Alcotest.test_case "step-plain-turn-matches-legacy-turn" `Quick
+            test_step_plain_turn_matches_legacy_turn;
           Alcotest.test_case "prove-requires-multi-actor-turn-coverage" `Quick
             test_prove_requires_multi_actor_turn_coverage;
           Alcotest.test_case "missing-required-args" `Quick

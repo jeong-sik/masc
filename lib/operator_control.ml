@@ -1505,7 +1505,7 @@ let delegated_tool_for action_type =
   | "room_resume" -> "masc_resume"
   | "lodge_tick" -> "lodge_tick"
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" ->
-      "masc_team_session_turn"
+      "masc_team_session_step"
   | "team_worker_spawn_batch" -> "masc_team_session_step"
   | "team_stop" -> "masc_team_session_stop"
   | "keeper_message" -> "masc_keeper_msg"
@@ -1554,13 +1554,15 @@ let require_payload_field payload key error_message =
   | None -> Error error_message
 
 let parse_turn_kind payload =
-  match get_string payload "turn_kind" "" |> String.trim |> String.lowercase_ascii with
-  | "note" -> Ok Team_session_types.Turn_note
-  | "broadcast" -> Ok Team_session_types.Turn_broadcast
-  | "task" -> Ok Team_session_types.Turn_task
-  | "checkpoint" -> Ok Team_session_types.Turn_checkpoint
-  | "" -> Error "payload.turn_kind is required"
-  | _ -> Error "payload.turn_kind must be one of: note, broadcast, task, checkpoint"
+  let raw =
+    get_string payload "turn_kind" "" |> String.trim |> String.lowercase_ascii
+  in
+  match Team_session_types.turn_kind_of_string raw with
+  | Some turn_kind -> Ok turn_kind
+  | None when raw = "" -> Error "payload.turn_kind is required"
+  | None ->
+      Error
+        "payload.turn_kind must be one of: note, broadcast, portal, task, checkpoint"
 
 let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
@@ -1724,15 +1726,46 @@ let execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agen
     else
       message
   in
+  let args =
+    let fields =
+      [
+        ("session_id", `String session_id);
+        ("actor", `String actor_for_session);
+        ( "turn_kind",
+          `String (Team_session_types.turn_kind_to_string turn_kind) );
+        ("task_priority", `Int task_priority);
+      ]
+    in
+    let fields =
+      match message with
+      | Some value -> ("message", `String value) :: fields
+      | None -> fields
+    in
+    let fields =
+      match target_agent with
+      | Some value -> ("target_agent", `String value) :: fields
+      | None -> fields
+    in
+    let fields =
+      match task_title with
+      | Some value -> ("task_title", `String value) :: fields
+      | None -> fields
+    in
+    let fields =
+      match task_description with
+      | Some value -> ("task_description", `String value) :: fields
+      | None -> fields
+    in
+    `Assoc fields
+  in
   let* result =
-    Team_session_engine_eio.record_turn ~config:ctx.config ~session_id
-      ~actor:actor_for_session ~turn_kind ~message ~target_agent ~task_title
-      ~task_description ~task_priority
+    dispatch_team_session_json_as ctx ~session_id ~requested_actor:request.actor
+      ~tool_name:"masc_team_session_step" ~args
   in
   Ok
     (`Assoc
       [
-        ("delegated_tool", `String "masc_team_session_turn");
+        ("delegated_tool", `String "masc_team_session_step");
         ("result", result);
         ("actor", `String actor_for_session);
         ("operator_override", `Bool operator_override);

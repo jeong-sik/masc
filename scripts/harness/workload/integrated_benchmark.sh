@@ -104,7 +104,7 @@ fi
 
 phase_index=0
 for raw_phase in "${REQUESTED_PHASES[@]}"; do
-  phase="$(printf '%s' "$raw_phase" | tr '[:upper:]' '[:lower:]' | xargs)"
+  phase="$(printf '%s' "$raw_phase" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
   if [ -z "$phase" ]; then
     continue
   fi
@@ -148,7 +148,20 @@ for raw_phase in "${REQUESTED_PHASES[@]}"; do
 
   case "$phase" in
     search)
-      search_json="$(sed -n '/^{/,$p' "$log_path")"
+      search_json="$(
+        awk '
+          /^\{/ { start = NR }
+          { lines[NR] = $0 }
+          END {
+            if (start == 0) {
+              exit 1
+            }
+            for (i = start; i <= NR; i++) {
+              print lines[i]
+            }
+          }
+        ' "$log_path" 2>/dev/null || true
+      )"
       if [ -n "$search_json" ] && printf '%s' "$search_json" | jq -e . >/dev/null 2>&1; then
         metrics_json="$(printf '%s' "$search_json" | jq -c .)"
       fi

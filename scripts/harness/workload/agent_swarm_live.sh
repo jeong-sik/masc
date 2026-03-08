@@ -85,6 +85,32 @@ extract_is_error() {
   jq -r 'try (.result.isError) catch "true"'
 }
 
+require_tool_success() {
+  local payload="$1"
+  require_json "$payload"
+  local is_error
+  is_error="$(printf "%s" "$payload" | extract_is_error)"
+  if [ "$is_error" = "true" ]; then
+    printf "%s\n" "$payload" >&2
+    echo "tool call failed" >&2
+    exit 1
+  fi
+}
+
+call_tool_checked() {
+  local payload
+  payload="$(call_tool "$@")"
+  require_tool_success "$payload"
+  printf "%s" "$payload"
+}
+
+extract_added_task_id() {
+  local payload="$1"
+  local text
+  text="$(printf "%s" "$payload" | extract_text)"
+  printf "%s\n" "$text" | sed -n 's/^✅ Added \(task-[0-9][0-9][0-9]\):.*$/\1/p' | head -n1
+}
+
 require_json() {
   local payload="$1"
   if ! printf "%s" "$payload" | jq -e . >/dev/null 2>&1; then
@@ -276,8 +302,8 @@ cleanup() {
     wait "$HARNESS_PID" >/dev/null 2>&1 || true
   fi
   if [ -n "$OPERATION_ID" ]; then
-    call_tool 99090 "masc_operation_finalize" \
-      "$(jq -cn --arg operation_id "$OPERATION_ID" --arg note "harness cleanup" '{operation_id:$operation_id,note:$note}')" \
+    call_tool 99090 "masc_operation_stop" \
+      "$(jq -cn --arg operation_id "$OPERATION_ID" --arg note "harness cleanup after failure" '{operation_id:$operation_id,note:$note}')" \
       >/dev/null 2>&1 || true
   fi
   call_tool 99091 "masc_leave" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')" >/dev/null 2>&1 || true
@@ -306,6 +332,7 @@ wait_for_http "${PROVIDER_BASE_URL}/health" 20 1
 
 if [ "$START_SERVER" = "1" ]; then
   echo "[3/10] start isolated masc-mcp on :$PORT"
+  rm -rf "$BASE_PATH"
   mkdir -p "$BASE_PATH"
   nohup "$REPO_ROOT/start-masc-mcp.sh" --http --port "$PORT" --base-path "$BASE_PATH" >/tmp/agent-swarm-live-${RUN_ID}.log 2>&1 &
   SERVER_PID="$!"
@@ -320,6 +347,7 @@ SLOT_SAMPLES_FILE="${RUN_ARTIFACT_DIR}/slot-samples.jsonl"
 SLOT_TELEMETRY_FILE="${RUN_ARTIFACT_DIR}/slot-telemetry.json"
 SWARM_SUMMARY_FILE="${RUN_ARTIFACT_DIR}/swarm-live-summary.json"
 HARNESS_ARTIFACT_FILE="${RUN_ARTIFACT_DIR}/harness-result.json"
+rm -rf "$RUN_ARTIFACT_DIR"
 mkdir -p "$RUN_ARTIFACT_DIR"
 
 echo "[4/10] describe deterministic 12-worker manifest"
@@ -339,30 +367,44 @@ EXPECTED_WORKERS="$(printf "%s" "$MANIFEST_JSON" | jq -r '.expected_worker_count
 SQUAD_ROSTER_JSON="$(printf "%s" "$MANIFEST_JSON" | jq -c '[.workers[].name]')"
 
 echo "[5/10] room/task hygiene"
-require_json "$(call_tool 90001 "masc_init" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')")"
-require_json "$(call_tool 90002 "masc_set_room" "$(jq -cn --arg path "$BASE_PATH" '{path:$path}')")"
-require_json "$(call_tool 90003 "masc_join" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a,capabilities:["agent-swarm","command-plane","benchmark"]}')")"
-HARNESS_TASK_RAW="$(call_tool 90004 "masc_add_task" "$(jq -cn --arg title "[${RUN_ID}] orchestrate live swarm" --arg desc "Prepare units, tasks, and live harness execution" '{title:$title,description:$desc,priority:1}')")"
-require_json "$HARNESS_TASK_RAW"
-HARNESS_TASK_ID="$(printf "%s" "$HARNESS_TASK_RAW" | extract_result | jq -r '.id // empty')"
-require_json "$(call_tool 90005 "masc_claim" "$(jq -cn --arg a "$HARNESS_AGENT" --arg task_id "$HARNESS_TASK_ID" '{agent_name:$a,task_id:$task_id}')")"
-require_json "$(call_tool 90006 "masc_plan_set_task" "$(jq -cn --arg task_id "$HARNESS_TASK_ID" '{task_id:$task_id}')")"
-require_json "$(call_tool 90007 "masc_heartbeat" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')")"
+call_tool_checked 90001 "masc_init" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')" >/dev/null
+call_tool_checked 90002 "masc_set_room" "$(jq -cn --arg path "$BASE_PATH" '{path:$path}')" >/dev/null
+call_tool_checked 90003 "masc_join" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a,capabilities:["agent-swarm","command-plane","benchmark"]}')" >/dev/null
+HARNESS_TASK_RAW="$(call_tool_checked 90004 "masc_add_task" "$(jq -cn --arg title "[${RUN_ID}] orchestrate live swarm" --arg desc "Prepare units, tasks, and live harness execution" '{title:$title,description:$desc,priority:1}')")"
+HARNESS_TASK_ID="$(extract_added_task_id "$HARNESS_TASK_RAW")"
+if [ -z "$HARNESS_TASK_ID" ]; then
+  printf "%s\n" "$HARNESS_TASK_RAW" >&2
+  echo "failed to extract coordinator task id" >&2
+  exit 1
+fi
+call_tool_checked 90005 "masc_claim" "$(jq -cn --arg a "$HARNESS_AGENT" --arg task_id "$HARNESS_TASK_ID" '{agent_name:$a,task_id:$task_id}')" >/dev/null
+call_tool_checked 90006 "masc_plan_set_task" "$(jq -cn --arg task_id "$HARNESS_TASK_ID" '{task_id:$task_id}')" >/dev/null
+call_tool_checked 90007 "masc_heartbeat" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')" >/dev/null
 
 echo "[6/10] define company/platoon/squad"
-require_json "$(call_tool 90010 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" '{unit_id:("company-" + $run_id),kind:"company",label:("Live Swarm Company " + $run_id),leader_id:"swarm-harness"}')")"
-require_json "$(call_tool 90011 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" '{unit_id:("platoon-" + $run_id),kind:"platoon",label:("Live Swarm Platoon " + $run_id),parent_unit_id:("company-" + $run_id),leader_id:"swarm-harness",policy:{autonomy_level:"L4_Autonomous",escalation_timeout_sec:180}}')")"
-require_json "$(call_tool 90012 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" --argjson roster "$SQUAD_ROSTER_JSON" '{unit_id:("squad-" + $run_id),kind:"squad",label:("Live Swarm Squad " + $run_id),parent_unit_id:("platoon-" + $run_id),leader_id:"swarm-harness",roster:$roster,policy:{autonomy_level:"L4_Autonomous",escalation_timeout_sec:180},budget:{headcount_cap:16,active_operation_cap:1}}')")"
+call_tool_checked 90010 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" '{unit_id:("company-" + $run_id),kind:"company",label:("Live Swarm Company " + $run_id),leader_id:"swarm-harness"}')" >/dev/null
+call_tool_checked 90011 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" '{unit_id:("platoon-" + $run_id),kind:"platoon",label:("Live Swarm Platoon " + $run_id),parent_unit_id:("company-" + $run_id),leader_id:"swarm-harness",policy:{autonomy_level:"L4_Autonomous",escalation_timeout_sec:180}}')" >/dev/null
+call_tool_checked 90012 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" --argjson roster "$SQUAD_ROSTER_JSON" '{unit_id:("squad-" + $run_id),kind:"squad",label:("Live Swarm Squad " + $run_id),parent_unit_id:("platoon-" + $run_id),leader_id:"swarm-harness",roster:$roster,policy:{autonomy_level:"L4_Autonomous",escalation_timeout_sec:180},budget:{headcount_cap:16,active_operation_cap:1}}')" >/dev/null
 
-echo "[7/10] seed per-worker tasks"
+echo "[7/10] start managed operation"
+OPERATION_RAW="$(call_tool_checked 90120 "masc_operation_start" "$(jq -cn --arg run_id "$RUN_ID" '{assigned_unit_id:("squad-" + $run_id),objective:("Run deterministic 12-worker live harness " + $run_id),autonomy_level:"L4_Autonomous",policy_class:"guarded",budget_class:"standard",note:("run_id=" + $run_id)}')")"
+OPERATION_ID="$(printf "%s" "$OPERATION_RAW" | extract_result | jq -r '.operation_id // empty')"
+if [ -z "$OPERATION_ID" ]; then
+  printf "%s\n" "$OPERATION_RAW" >&2
+  echo "operation_id missing" >&2
+  exit 1
+fi
+call_tool_checked 90121 "masc_dispatch_tick" "$(jq -cn --arg operation_id "$OPERATION_ID" '{operation_id:$operation_id}')" >/dev/null
+
+echo "[8/10] seed per-worker tasks"
 printf "%s" "$MANIFEST_JSON" \
   | jq -c '.workers[]' \
   | while IFS= read -r worker; do
       TITLE="$(printf "%s" "$worker" | jq -r '.task_title')"
       DESC="$(printf "%s" "$worker" | jq -r '.task_description')"
-      require_json "$(call_tool 90100 "masc_add_task" "$(jq -cn --arg title "$TITLE" --arg description "$DESC" '{title:$title,description:$description,priority:2}')")"
+      call_tool_checked 90100 "masc_add_task" "$(jq -cn --arg title "$TITLE" --arg description "$DESC" '{title:$title,description:$description,priority:2}')" >/dev/null
     done
-echo "[8/10] run live harness against local qwen"
+echo "[9/10] run live harness against local qwen"
 HARNESS_RESULT_FILE="$(mktemp -t agent-swarm-live-result)"
 start_slot_sampler
 "$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" \
@@ -391,20 +433,6 @@ while [ "$attempt" -lt 60 ]; do
   attempt=$((attempt + 1))
 done
 
-OPERATION_RAW="$(call_tool 90120 "masc_operation_start" "$(jq -cn --arg run_id "$RUN_ID" '{assigned_unit_id:("squad-" + $run_id),objective:("Run deterministic 12-worker live harness " + $run_id),autonomy_level:"L4_Autonomous",policy_class:"guarded",budget_class:"standard",note:("run_id=" + $run_id)}')")"
-require_json "$OPERATION_RAW"
-if [ "$(printf "%s" "$OPERATION_RAW" | extract_is_error)" = "true" ]; then
-  printf "%s\n" "$OPERATION_RAW" >&2
-  exit 1
-fi
-OPERATION_ID="$(printf "%s" "$OPERATION_RAW" | extract_result | jq -r '.operation_id // empty')"
-if [ -z "$OPERATION_ID" ]; then
-  printf "%s\n" "$OPERATION_RAW" >&2
-  echo "operation_id missing" >&2
-  exit 1
-fi
-require_json "$(call_tool 90121 "masc_dispatch_tick" "$(jq -cn --arg operation_id "$OPERATION_ID" '{operation_id:$operation_id}')")"
-
 wait "$HARNESS_PID"
 HARNESS_PID=""
 HARNESS_RESULT="$(cat "$HARNESS_RESULT_FILE")"
@@ -414,9 +442,9 @@ cp "$HARNESS_RESULT_FILE" "$HARNESS_ARTIFACT_FILE"
 write_slot_telemetry >/dev/null
 write_harness_summary >/dev/null
 
-echo "[9/10] checkpoint + finalize"
+echo "[10/10] checkpoint + finalize"
 SUCCESSFUL_WORKERS="$(printf "%s" "$HARNESS_RESULT" | jq -r '.summary.successful_workers')"
-require_json "$(call_tool 90130 "masc_operation_checkpoint" "$(jq -cn --arg operation_id "$OPERATION_ID" --arg checkpoint_ref "live-harness-${RUN_ID}" --arg note "successful_workers=${SUCCESSFUL_WORKERS}/${EXPECTED_WORKERS}" '{operation_id:$operation_id,checkpoint_ref:$checkpoint_ref,note:$note}')")"
+call_tool_checked 90130 "masc_operation_checkpoint" "$(jq -cn --arg operation_id "$OPERATION_ID" --arg checkpoint_ref "live-harness-${RUN_ID}" --arg note "successful_workers=${SUCCESSFUL_WORKERS}/${EXPECTED_WORKERS}" '{operation_id:$operation_id,checkpoint_ref:$checkpoint_ref,note:$note}')" >/dev/null
 
 SWARM_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID}&operation_id=${OPERATION_ID}")"
 require_json "$SWARM_JSON"
@@ -431,11 +459,11 @@ FINAL_MARKERS_SEEN="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.final_markers_
 PASS_HOT="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.pass_hot_concurrency // false')"
 PASS_E2E="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.pass_end_to_end // false')"
 if [ "$PASS" = "true" ]; then
-  require_json "$(call_tool 90131 "masc_operation_finalize" "$(jq -cn --arg operation_id "$OPERATION_ID" --arg note "12-worker live harness passed" '{operation_id:$operation_id,note:$note}')")"
+  call_tool_checked 90131 "masc_operation_finalize" "$(jq -cn --arg operation_id "$OPERATION_ID" --arg note "12-worker live harness passed" '{operation_id:$operation_id,note:$note}')" >/dev/null
   OPERATION_ID=""
 fi
 
-echo "[10/10] summary"
+echo "[11/11] summary"
 printf "%s\n" "$SWARM_JSON" | jq \
   --arg expected "$EXPECTED_WORKERS" \
   --arg joined "$JOINED" \

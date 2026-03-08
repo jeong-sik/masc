@@ -75,7 +75,6 @@ let test_validate_expected_final_marker_accepts_exact_line () =
         (Agent_swarm_swarm.extract_text validated)
   | Error message ->
       Alcotest.failf "expected marker should pass: %s" message
-
 let () =
   Alcotest.run "Swarm Unit" [
     "error_paths", [

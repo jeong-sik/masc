@@ -5847,6 +5847,218 @@ let command_plane_chain_events_http ~request reqd =
   | Masc_mcp.Tool_command_plane.Compat_llm_mcp ->
       proxy_chain_events_http ~request reqd
 
+let stream_native_chain_events_h2 ~request h2_reqd =
+  let origin = get_origin request in
+  let headers =
+    H2.Headers.of_list
+      ([
+         ("content-type", "text/event-stream");
+         ("cache-control", "no-cache");
+         ("x-accel-buffering", "no");
+       ]
+      @ cors_headers origin)
+  in
+  let response = H2.Response.create ~headers `OK in
+  let writer =
+    H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response
+  in
+  let mutex = Eio.Mutex.create () in
+  let closed = ref false in
+  let sub_ref : Masc_mcp.Chain_telemetry.subscription option ref = ref None in
+  let log_chain_sse message =
+    Printf.eprintf "[chain-sse/h2] %s\n%!" message
+  in
+  let close_stream ?reason () =
+    let sub_to_remove, should_close =
+      Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+          let sub = !sub_ref in
+          sub_ref := None;
+          if !closed then
+            (sub, false)
+          else (
+            closed := true;
+            (sub, true)))
+    in
+    Option.iter Masc_mcp.Chain_telemetry.unsubscribe sub_to_remove;
+    if should_close then (
+      Option.iter log_chain_sse reason;
+      try
+        if not (H2.Body.Writer.is_closed writer) then H2.Body.Writer.close writer
+      with Invalid_argument _ -> ())
+  in
+  let send_raw frame =
+    let write_result =
+      Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+          if !closed || H2.Body.Writer.is_closed writer then
+            `Closed
+          else
+            try
+              H2.Body.Writer.write_string writer frame;
+              H2.Body.Writer.flush writer (fun _ -> ());
+              `Sent
+            with exn -> `Error exn)
+    in
+    match write_result with
+    | `Sent -> true
+    | `Closed ->
+        close_stream ();
+        false
+    | `Error exn ->
+        close_stream
+          ~reason:
+            (Printf.sprintf "stream write failed: %s" (Printexc.to_string exn))
+          ();
+        false
+  in
+  (try
+     let sub =
+       Masc_mcp.Chain_telemetry.subscribe (fun event ->
+           let payload =
+             Masc_mcp.Chain_native_eio.chain_event_json event
+             |> Yojson.Safe.to_string
+           in
+           let frame =
+             Masc_mcp.Sse.format_event
+               ~event_type:(Masc_mcp.Chain_native_eio.chain_event_name event)
+               payload
+           in
+           ignore (send_raw frame))
+     in
+     Eio.Mutex.use_rw ~protect:true mutex (fun () -> sub_ref := Some sub);
+     if send_raw ": native chain stream\nretry: 3000\n\n" then
+       Eio.Fiber.fork ~sw:(get_switch ()) (fun () ->
+           try
+             while not !closed do
+               Eio.Time.sleep (get_clock ()) 30.0;
+               if not (send_raw ": keepalive\n\n") then close_stream ()
+             done
+           with exn ->
+             close_stream
+               ~reason:
+                 (Printf.sprintf "keepalive loop failed: %s"
+                    (Printexc.to_string exn))
+               ())
+     else
+       close_stream ~reason:"initial stream write failed" ()
+   with exn ->
+     close_stream
+       ~reason:
+         (Printf.sprintf "subscription setup failed: %s" (Printexc.to_string exn))
+       ())
+
+let proxy_chain_events_h2 ~request h2_reqd =
+  let endpoint = Masc_mcp.Llm_client_eio.resolve_endpoint () in
+  let path = Masc_mcp.Llm_client_eio.endpoint_path endpoint "/chain/events" in
+  let origin = get_origin request in
+  let headers =
+    H2.Headers.of_list
+      ([
+         ("content-type", "text/event-stream");
+         ("cache-control", "no-cache");
+         ("x-accel-buffering", "no");
+       ]
+      @ cors_headers origin)
+  in
+  let response = H2.Response.create ~headers `OK in
+  let writer =
+    H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response
+  in
+  let upstream_request =
+    let auth_header =
+      match endpoint.api_key with
+      | Some value -> [ Printf.sprintf "Authorization: Bearer %s" value ]
+      | None -> []
+    in
+    Printf.sprintf
+      "GET %s HTTP/1.1\r\nHost: %s:%d\r\nAccept: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n%s\r\n\r\n"
+      path endpoint.host endpoint.port
+      (String.concat "\r\n" auth_header)
+  in
+  Eio.Fiber.fork ~sw:(get_switch ()) (fun () ->
+      let safe_close () =
+        try H2.Body.Writer.close writer with Invalid_argument _ -> ()
+      in
+      let send_error message =
+        (try
+           let payload =
+             Printf.sprintf "event: error\ndata: {\"message\":%s}\n\n"
+               (Yojson.Safe.to_string (`String message))
+           in
+           H2.Body.Writer.write_string writer payload;
+           H2.Body.Writer.flush writer ignore
+         with _ -> ());
+        safe_close ()
+      in
+      try
+        Eio.Net.with_tcp_connect ~host:endpoint.host
+          ~service:(string_of_int endpoint.port) (get_net ())
+        @@ fun flow ->
+        Eio.Flow.copy_string upstream_request flow;
+        let header_buf = Buffer.create 4096 in
+        let rec read_headers () =
+          let chunk = Cstruct.create 2048 in
+          match Eio.Flow.single_read flow chunk with
+          | n ->
+              Buffer.add_string header_buf (Cstruct.to_string ~len:n chunk);
+              let current = Buffer.contents header_buf in
+              (try
+                 let idx = Str.search_forward (Str.regexp "\r\n\r\n") current 0 in
+                 let headers_part = String.sub current 0 idx in
+                 let body_start = idx + 4 in
+                 let body_rest =
+                   if body_start >= String.length current then ""
+                   else
+                     String.sub current body_start
+                       (String.length current - body_start)
+                 in
+                 Ok (headers_part, body_rest)
+               with Not_found -> read_headers ())
+          | exception End_of_file ->
+              Error "llm-mcp closed chain/events stream before headers were received"
+        in
+        match read_headers () with
+        | Error message -> send_error message
+        | Ok (headers_part, body_rest) ->
+            let status_line =
+              match String.split_on_char '\n' headers_part with
+              | line :: _ -> String.trim line
+              | [] -> "HTTP/1.1 502 Bad Gateway"
+            in
+            let status_code =
+              match String.split_on_char ' ' status_line with
+              | _http :: code :: _ -> (try int_of_string code with _ -> 502)
+              | _ -> 502
+            in
+            if status_code < 200 || status_code >= 300 then
+              send_error
+                (Printf.sprintf "llm-mcp /chain/events upstream returned %d"
+                   status_code)
+            else (
+              if String.length body_rest > 0 then (
+                H2.Body.Writer.write_string writer body_rest;
+                H2.Body.Writer.flush writer ignore);
+              let rec pump () =
+                let chunk = Cstruct.create 4096 in
+                match Eio.Flow.single_read flow chunk with
+                | n when n > 0 ->
+                    H2.Body.Writer.write_bigstring writer
+                      ~off:0 ~len:n
+                      (Cstruct.to_bigarray chunk);
+                    H2.Body.Writer.flush writer ignore;
+                    pump ()
+                | _ -> safe_close ()
+                | exception End_of_file -> safe_close ()
+                | exception exn -> send_error (Printexc.to_string exn)
+              in
+              pump ())
+      with exn -> send_error (Printexc.to_string exn))
+
+let command_plane_chain_events_h2 ~request h2_reqd =
+  match Masc_mcp.Tool_command_plane.chain_backend () with
+  | Masc_mcp.Tool_command_plane.Native -> stream_native_chain_events_h2 ~request h2_reqd
+  | Masc_mcp.Tool_command_plane.Compat_llm_mcp ->
+      proxy_chain_events_h2 ~request h2_reqd
+
 let command_plane_operation_checkpoint_http_json ~state request ~args =
   match
     Command_plane_v2.checkpoint_operation state.Mcp_server.room_config
@@ -9867,6 +10079,9 @@ let run_server ~sw ~env ~port ~base_path =
                h2_respond_json h2_reqd
                  (Yojson.Safe.to_string (command_plane_error_json message))
                  ~status:(chain_http_error_status message) ~extra_headers:cors)
+
+      | `GET, "/api/v1/chains/events" ->
+          command_plane_chain_events_h2 ~request:httpun_request h2_reqd
 
       | `GET, path when String.length path > String.length "/api/v1/chains/runs/"
                         && String.sub path 0 (String.length "/api/v1/chains/runs/")

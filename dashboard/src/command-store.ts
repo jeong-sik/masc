@@ -735,6 +735,7 @@ function normalizeChainOverlay(raw: unknown): CommandPlaneChainOverlay | null {
     runtime: normalizeChainRuntime(raw.runtime),
     history: normalizeChainHistoryEvent(raw.history),
     mermaid: asString(raw.mermaid) ?? null,
+    preview_run: normalizeChainRun(raw.preview_run),
   }
 }
 
@@ -793,9 +794,9 @@ function normalizeChainRun(raw: unknown): CommandPlaneChainRun | null {
   if (!isRecord(raw)) return null
   const runId = asString(raw.run_id)
   const chainId = asString(raw.chain_id)
-  if (!runId || !chainId) return null
+  if (!chainId) return null
   return {
-    run_id: runId,
+    run_id: runId ?? null,
     chain_id: chainId,
     duration_ms: asNumber(raw.duration_ms),
     success: asBoolean(raw.success),

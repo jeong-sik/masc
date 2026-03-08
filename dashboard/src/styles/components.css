@@ -3139,8 +3139,6 @@ button.council-row.selected {
   font-size: 0.85rem;
   border-bottom: 1px solid rgba(138, 163, 211, 0.14);
   line-height: 1.5;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 28px;
 }
 .term-row:hover {
   background: rgba(71, 184, 255, 0.08);

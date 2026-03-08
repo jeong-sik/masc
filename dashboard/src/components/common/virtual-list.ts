@@ -3,9 +3,13 @@
 // Only activates above ACTIVATION_THRESHOLD items. Below that, renders all
 // items directly (zero overhead). Uses requestAnimationFrame-throttled scroll
 // handler + ResizeObserver for efficient viewport tracking.
+//
+// Hooks are always called unconditionally to satisfy Rules of Hooks.
+// The threshold check only affects the returned markup.
 
 import { html } from 'htm/preact'
 import { useRef, useEffect, useState } from 'preact/hooks'
+import type { ComponentChildren } from 'preact'
 
 const ACTIVATION_THRESHOLD = 40
 
@@ -13,7 +17,7 @@ interface VirtualListProps<T> {
   items: T[]
   itemHeight: number
   overscan?: number
-  renderItem: (item: T, index: number) => unknown
+  renderItem: (item: T, index: number) => ComponentChildren
   getKey: (item: T) => string
   className?: string
 }
@@ -31,21 +35,17 @@ export function VirtualList<T>({
   getKey,
   className = '',
 }: VirtualListProps<T>) {
-  // Below threshold: render everything, no virtualization overhead
-  if (items.length <= ACTIVATION_THRESHOLD) {
-    return html`
-      <div class=${className}>
-        ${items.map((item, i) => renderItem(item, i))}
-      </div>
-    `
-  }
-
+  // Hooks must be called unconditionally (Rules of Hooks)
   const containerRef = useRef<HTMLDivElement>(null)
   const [range, setRange] = useState<VisibleRange>({ start: 0, end: 30 })
+  const virtualize = items.length > ACTIVATION_THRESHOLD
 
   useEffect(() => {
+    if (!virtualize) return
     const el = containerRef.current
     if (!el) return
+
+    let disposed = false
 
     const recompute = () => {
       const { scrollTop, clientHeight } = el
@@ -62,25 +62,37 @@ export function VirtualList<T>({
 
     let ticking = false
     const onScroll = () => {
-      if (ticking) return
+      if (ticking || disposed) return
       ticking = true
       requestAnimationFrame(() => {
-        recompute()
+        if (!disposed) recompute()
         ticking = false
       })
     }
 
-    const ro = new ResizeObserver(() => recompute())
+    const ro = new ResizeObserver(() => {
+      if (!disposed) recompute()
+    })
 
     recompute()
     el.addEventListener('scroll', onScroll, { passive: true })
     ro.observe(el)
 
     return () => {
+      disposed = true
       el.removeEventListener('scroll', onScroll)
       ro.disconnect()
     }
-  }, [items.length, itemHeight, overscan])
+  }, [virtualize, items.length, itemHeight, overscan])
+
+  // Below threshold: render all items directly, no virtualization
+  if (!virtualize) {
+    return html`
+      <div class=${className}>
+        ${items.map((item, i) => renderItem(item, i))}
+      </div>
+    `
+  }
 
   const totalHeight = items.length * itemHeight
   const offsetY = range.start * itemHeight
@@ -96,6 +108,7 @@ export function VirtualList<T>({
             top: 0,
             left: 0,
             right: 0,
+            willChange: 'transform',
             transform: `translateY(${offsetY}px)`,
           }}
         >

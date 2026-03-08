@@ -829,6 +829,94 @@ let test_summary_json_swarm_proof_fallback_and_missing () =
         (missing_proof |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string);
       Alcotest.(check bool) "missing reason present" true
         (missing_proof |> Yojson.Safe.Util.member "missing_reason" <> `Null))
+let test_swarm_live_json_reads_custom_worker_count_from_operation_note () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let run_id = "swarm-live-custom-count" in
+      let plans =
+        Agent_swarm_live_harness.build_worker_plans ~worker_count:13 run_id
+      in
+      let worker_names =
+        List.map
+          (fun (plan : Agent_swarm_live_harness.worker_plan) -> plan.name)
+          plans
+      in
+      let leader = List.hd worker_names in
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
+      List.iter
+        (fun worker ->
+          ignore (Room.join config ~agent_name:worker ~capabilities:[] ()))
+        worker_names;
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "company-main");
+            ("kind", `String "company");
+            ("label", `String "Main Company");
+            ("leader_id", `String owner);
+            ( "roster",
+              `List
+                (List.map (fun name -> `String name) (owner :: worker_names))
+            );
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "platoon-alpha");
+            ("kind", `String "platoon");
+            ("label", `String "Alpha Platoon");
+            ("parent_unit_id", `String "company-main");
+            ("leader_id", `String leader);
+            ("roster", `List (List.map (fun name -> `String name) worker_names));
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "squad-alpha-1");
+            ("kind", `String "squad");
+            ("label", `String "Alpha Squad 1");
+            ("parent_unit_id", `String "platoon-alpha");
+            ("leader_id", `String leader);
+            ("roster", `List (List.map (fun name -> `String name) worker_names));
+          ]);
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "squad-alpha-1");
+              ( "objective",
+                `String
+                  (Printf.sprintf "Run deterministic 13-worker live harness %s"
+                     run_id) );
+              ( "note",
+                `String
+                  (Printf.sprintf
+                     "run_id=%s worker_count=13 required_final_markers=13 min_hot_slots=11"
+                     run_id) );
+              ("policy_class", `String "guarded");
+              ("budget_class", `String "standard");
+            ])
+      in
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.dispatch_tick_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String operation.operation_id) ])));
+      let swarm =
+        Command_plane_v2.swarm_live_json config ~run_id
+          ~operation_id:operation.operation_id ()
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check int) "expected workers from note" 13
+        (swarm |> member "summary" |> member "expected_workers" |> to_int);
+      Alcotest.(check int) "worker rows from note" 13
+        (swarm |> member "workers" |> to_list |> List.length);
+      Alcotest.(check int) "live workers from joined roster" 13
+        (swarm |> member "summary" |> member "live_workers" |> to_int))
 let () =
   Alcotest.run "Command_plane_v2"
     [
@@ -846,18 +934,8 @@ let () =
             test_swarm_live_json_ignores_stale_evidence_from_previous_run;
           Alcotest.test_case "swarm live scopes markers to sender" `Quick
             test_swarm_live_json_scopes_markers_to_sender;
-          Alcotest.test_case "summary json omits heavy arrays" `Quick
-            test_summary_json_omits_heavy_arrays_and_keeps_summaries;
-          Alcotest.test_case "summary swarm proof prefers artifact" `Quick
-            test_summary_json_swarm_proof_prefers_artifact;
-          Alcotest.test_case "summary swarm proof fallback and missing" `Quick
-            test_summary_json_swarm_proof_fallback_and_missing;
-          Alcotest.test_case "swarm live restores completed workers" `Quick
-            test_swarm_live_json_restores_completed_workers_after_leave;
-          Alcotest.test_case "swarm live ignores stale previous-run evidence" `Quick
-            test_swarm_live_json_ignores_stale_evidence_from_previous_run;
-          Alcotest.test_case "swarm live scopes markers to sender" `Quick
-            test_swarm_live_json_scopes_markers_to_sender;
+          Alcotest.test_case "swarm live reads custom worker count from operation note" `Quick
+            test_swarm_live_json_reads_custom_worker_count_from_operation_note;
           Alcotest.test_case "summary json omits heavy arrays" `Quick
             test_summary_json_omits_heavy_arrays_and_keeps_summaries;
           Alcotest.test_case "summary swarm proof prefers artifact" `Quick

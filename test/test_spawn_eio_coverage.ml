@@ -132,8 +132,8 @@ let test_masc_mcp_tools_all_strings () =
   check bool "all strings" true
     (List.for_all (fun t -> String.length t > 0) Spawn_eio.masc_mcp_tools)
 
-let test_masc_mcp_tools_contains_team_session_turn () =
-  check bool "contains team_session_turn" true
+let test_masc_mcp_tools_omits_team_session_turn () =
+  check bool "omits team_session_turn" false
     (List.mem "mcp__masc__masc_team_session_turn" Spawn_eio.masc_mcp_tools)
 
 let test_masc_mcp_tools_contains_portal_send () =
@@ -164,7 +164,7 @@ let test_llama_mcp_tools_curated () =
   check (list string) "llama tools"
     [
       "mcp__masc__masc_team_session_status";
-      "mcp__masc__masc_team_session_turn";
+      "mcp__masc__masc_team_session_step";
     ]
     Spawn_eio.llama_mcp_tools
 
@@ -490,8 +490,8 @@ let () =
       test_case "not empty" `Quick test_masc_mcp_tools_not_empty;
       test_case "contains status" `Quick test_masc_mcp_tools_contains_status;
       test_case "all strings" `Quick test_masc_mcp_tools_all_strings;
-      test_case "contains team_session_turn" `Quick
-        test_masc_mcp_tools_contains_team_session_turn;
+      test_case "omits team_session_turn" `Quick
+        test_masc_mcp_tools_omits_team_session_turn;
       test_case "contains portal_send" `Quick
         test_masc_mcp_tools_contains_portal_send;
       test_case "contains team_session_step" `Quick

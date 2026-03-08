@@ -14,8 +14,8 @@ Enable verifiable multi-agent collaboration sessions where spawned agents can:
 ## Core APIs
 
 - `masc_team_session_start`
-- `masc_team_session_turn`
 - `masc_team_session_step`
+- `masc_team_session_turn` (legacy compatibility)
 - `masc_team_session_status`
 - `masc_team_session_finalize`
 - `masc_team_session_report`
@@ -37,10 +37,12 @@ Per session under `.masc/team-sessions/<session_id>/`:
 ## Orchestration Model
 
 1. `start`: creates session state and runtime loop.
-2. `step`: records one orchestration turn.
+2. `step`: canonical write entrypoint for one orchestration turn.
    - Optional spawned-agent execution (`spawn_agent` + `spawn_prompt`).
    - Optional vote evidence (`vote_topic`, `vote_options`, `vote_choice`).
    - Optional run evidence (`run_task_id`, `run_note`, `run_deliverable`).
+
+`masc_team_session_turn` remains callable for existing clients, but it is a legacy subset of `step` for plain turn recording only.
 3. `finalize`: requests stop, waits terminal state, generates report/proof.
 4. `prove`: emits formal proof artifacts with selectable proof level.
 

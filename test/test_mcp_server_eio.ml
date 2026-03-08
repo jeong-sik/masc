@@ -626,6 +626,8 @@ let test_handle_request_tools_list_include_hidden_metadata () =
           "masc_claim";
           "masc_transition";
           "masc_archive_save";
+          "masc_team_session_turn";
+          "masc_team_session_step";
           "masc_trpg_dice_roll";
           "experiment_start";
           "masc_post_create";
@@ -650,6 +652,22 @@ let test_handle_request_tools_list_include_hidden_metadata () =
     (tool_string_field placeholder "visibility");
   Alcotest.(check string) "placeholder active" "active"
     (tool_string_field placeholder "lifecycle");
+
+  let legacy_team_turn = find_tool_exn tools "masc_team_session_turn" in
+  Alcotest.(check string) "team turn hidden" "hidden"
+    (tool_string_field legacy_team_turn "visibility");
+  Alcotest.(check string) "team turn deprecated" "deprecated"
+    (tool_string_field legacy_team_turn "lifecycle");
+  Alcotest.(check string) "team turn canonical" "masc_team_session_step"
+    (tool_string_field legacy_team_turn "canonicalName");
+  Alcotest.(check string) "team turn replacement" "masc_team_session_step"
+    (tool_string_field legacy_team_turn "replacement");
+
+  let canonical_team_step = find_tool_exn tools "masc_team_session_step" in
+  Alcotest.(check string) "team step visible" "default"
+    (tool_string_field canonical_team_step "visibility");
+  Alcotest.(check string) "team step active" "active"
+    (tool_string_field canonical_team_step "lifecycle");
 
   let legacy_trpg = find_tool_exn tools "masc_trpg_dice_roll" in
   Alcotest.(check string) "legacy trpg canonical" "trpg.dice.roll"
@@ -677,6 +695,40 @@ let test_handle_request_tools_list_include_hidden_metadata () =
   Alcotest.(check string) "canonical active" "active"
     (tool_string_field canonical "lifecycle");
 
+  cleanup_dir base_path
+
+let test_handle_request_tools_list_hides_team_session_turn_by_default () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Full in
+  let tools =
+    tools_list_response ~clock ~sw
+      ~names:[ "masc_team_session_step"; "masc_team_session_turn" ]
+      state
+    |> tools_from_response
+  in
+  Alcotest.(check bool) "step still visible" true
+    (List.exists
+       (function
+         | `Assoc fields -> (
+             match List.assoc_opt "name" fields with
+             | Some (`String "masc_team_session_step") -> true
+             | _ -> false)
+         | _ -> false)
+       tools);
+  Alcotest.(check bool) "turn hidden by default" false
+    (List.exists
+       (function
+         | `Assoc fields -> (
+             match List.assoc_opt "name" fields with
+             | Some (`String "masc_team_session_turn") -> true
+             | _ -> false)
+         | _ -> false)
+       tools);
   cleanup_dir base_path
 
 let test_handle_request_tools_list_include_usage_metadata () =
@@ -854,6 +906,70 @@ let test_execute_tool_hidden_active_utility_direct_call () =
   Alcotest.(check bool) "hidden vote utility still callable" true ok_vote;
   Alcotest.(check bool) "vote utility returns vote id" true
     (contains_substring vote_msg "vote-");
+
+  cleanup_dir base_path
+
+let test_execute_tool_hidden_deprecated_team_session_turn_direct_call () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Full in
+  let sid = "hidden-deprecated-team-turn" in
+
+  let (ok_init, _init_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_init" ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "init success" true ok_init;
+
+  let (ok_join, _join_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_join"
+      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
+  in
+  Alcotest.(check bool) "join success" true ok_join;
+
+  let (ok_start, start_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_team_session_start"
+      ~arguments:
+        (`Assoc
+          [
+            ("goal", `String "hidden deprecated team turn smoke");
+            ("duration_seconds", `Int 90);
+            ("checkpoint_interval_sec", `Int 10);
+            ("min_agents", `Int 1);
+          ])
+  in
+  Alcotest.(check bool) "team session start success" true ok_start;
+  let start_json = extract_json_from_text start_msg in
+  let session_id =
+    start_json |> Yojson.Safe.Util.member "result"
+    |> Yojson.Safe.Util.member "session_id" |> Yojson.Safe.Util.to_string
+  in
+
+  let (ok_turn, turn_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_team_session_turn"
+      ~arguments:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "legacy direct-call still works");
+          ])
+  in
+  Alcotest.(check bool) "hidden deprecated turn still callable" true ok_turn;
+  let turn_json = extract_json_from_text turn_msg in
+  Alcotest.(check string) "legacy turn kind" "note"
+    Yojson.Safe.Util.(
+      turn_json |> member "result" |> member "kind" |> to_string);
 
   cleanup_dir base_path
 
@@ -1220,6 +1336,8 @@ let eio_tests = [
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
   "handle tools/list include hidden metadata", `Quick,
     test_handle_request_tools_list_include_hidden_metadata;
+  "handle tools/list hides team_session_turn by default", `Quick,
+    test_handle_request_tools_list_hides_team_session_turn_by_default;
   "handle tools/list include usage metadata", `Quick,
     test_handle_request_tools_list_include_usage_metadata;
   "reject non-operator tool on operator profile", `Quick,
@@ -1230,6 +1348,8 @@ let eio_tests = [
   "mode gate", `Quick, test_execute_tool_mode_gate;
   "hidden active utility direct call", `Quick,
     test_execute_tool_hidden_active_utility_direct_call;
+  "hidden deprecated team_session_turn direct call", `Quick,
+    test_execute_tool_hidden_deprecated_team_session_turn_direct_call;
   "execute trpg flow", `Quick, test_execute_tool_trpg_flow;
   "execute trpg validation", `Quick, test_execute_tool_trpg_validation;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;

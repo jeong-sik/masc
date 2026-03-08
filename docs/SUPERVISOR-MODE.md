@@ -68,7 +68,7 @@ Selection policy for this slice is explicit:
 
 1. call `masc_llama_models`
 2. the leader chooses one returned model id explicitly
-3. record that choice in the session with `masc_team_session_turn` before spawning workers
+3. record that choice in the session with `masc_team_session_step(turn_kind="note", message="...")` before spawning workers
 4. pass that exact id through `model=` or `spawn_model=`
 5. pass the same selection rationale through `spawn_selection_note=`
 6. there is no automatic fallback for spawned `llama` workers
@@ -233,7 +233,7 @@ What it does:
 6. spawns a full llama worker team (`planner`, `implementer-a`, `implementer-b`)
 7. records the explicit model-selection note in the session
 8. passes the same note into every spawned worker prompt
-9. requires every worker to leave a non-empty `team_turn` note
+9. requires every worker to leave a non-empty team-session note turn via `masc_team_session_step`
 10. performs supervisor interventions over `/mcp/operator`
 11. stops the session and generates proof artifacts
 

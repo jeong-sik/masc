@@ -201,6 +201,12 @@ let ensure_session_access ctx session_id =
       else
         Error "not authorized for this team session"
 
+let record_session_turn_json ~(config : Room.config) ~session_id ~actor
+    ~turn_kind ~message ~target_agent ~task_title ~task_description
+    ~task_priority =
+  Team_session_engine_eio.record_turn ~config ~session_id ~actor ~turn_kind
+    ~message ~target_agent ~task_title ~task_description ~task_priority
+
 let handle_start ctx args : result =
   let goal = get_string args "goal" "" in
   if String.trim goal = "" then
@@ -323,9 +329,9 @@ let handle_turn ctx args : result =
               let task_description = get_string_opt args "task_description" in
               let task_priority = get_int args "task_priority" 3 in
               (match
-                 Team_session_engine_eio.record_turn ~config:ctx.config
-                   ~session_id ~actor:ctx.agent_name ~turn_kind ~message
-                   ~target_agent ~task_title ~task_description ~task_priority
+                 record_session_turn_json ~config:ctx.config ~session_id
+                   ~actor:ctx.agent_name ~turn_kind ~message ~target_agent
+                   ~task_title ~task_description ~task_priority
                with
               | Ok json -> (true, json_ok [ ("result", json) ])
               | Error e -> (false, json_error e))))
@@ -867,8 +873,8 @@ let handle_step ctx args : result =
                     match turn_kind_opt with
                     | None -> Ok None
                     | Some turn_kind ->
-                        Team_session_engine_eio.record_turn ~config:ctx.config
-                          ~session_id ~actor ~turn_kind ~message:base_message
+                        record_session_turn_json ~config:ctx.config ~session_id
+                          ~actor ~turn_kind ~message:base_message
                           ~target_agent ~task_title ~task_description
                           ~task_priority
                         |> Result.map Option.some
@@ -1360,7 +1366,7 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_step";
       description =
-        "Execute one orchestrated team step: optionally spawn a worker, optionally record a supervisor turn, and optionally attach vote/run evidence.";
+        "Canonical team-session write entrypoint: record a note/broadcast/portal/task/checkpoint turn, optionally spawn workers, and optionally attach vote/run evidence.";
       input_schema =
         `Assoc
           [
@@ -1540,7 +1546,7 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_turn";
       description =
-        "Record a team orchestration turn and optionally execute broadcast/portal/task/checkpoint action.";
+        "Legacy compatibility entrypoint for plain team-session turn recording only; use masc_team_session_step for all new team-session writes.";
       input_schema =
         `Assoc
           [

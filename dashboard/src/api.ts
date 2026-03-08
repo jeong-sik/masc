@@ -22,6 +22,7 @@ import type {
   CommandPlaneHelpResponse,
   CommandPlaneSnapshot,
   CommandPlaneSwarmResponse,
+  CommandPlaneSummarySnapshot,
 } from './types'
 
 // --- Auth ---
@@ -350,6 +351,10 @@ export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
 
 export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {
   return get('/api/v1/command-plane')
+}
+
+export function fetchCommandPlaneSummary(): Promise<CommandPlaneSummarySnapshot> {
+  return get('/api/v1/command-plane/summary')
 }
 
 export function fetchCommandPlaneHelp(): Promise<CommandPlaneHelpResponse> {

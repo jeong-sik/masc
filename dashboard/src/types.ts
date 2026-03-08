@@ -1068,6 +1068,26 @@ export interface CommandPlaneSwarmStatus {
   recommended_next_action?: CommandPlaneSwarmRecommendation
 }
 
+export interface CommandPlaneSwarmProof {
+  status: 'present' | 'fallback' | 'missing' | string
+  source: 'artifact' | 'slot_samples' | 'none' | string
+  run_id?: string | null
+  captured_at?: string | null
+  pass?: boolean
+  peak_hot_slots?: number
+  ctx_per_slot?: number
+  workers: {
+    expected?: number
+    joined?: number
+    current_task_bound?: number
+    fresh_heartbeats?: number
+    done?: number
+    final?: number
+  }
+  artifact_ref?: string | null
+  missing_reason?: string | null
+}
+
 export interface CommandPlaneSnapshot {
   version?: string
   generated_at?: string
@@ -1079,6 +1099,39 @@ export interface CommandPlaneSnapshot {
   capacity: CommandPlaneCapacityResponse
   traces: CommandPlaneTracesResponse
   swarm_status?: CommandPlaneSwarmStatus
+}
+
+export interface CommandPlaneSummarySnapshot {
+  version?: string
+  generated_at?: string
+  topology: {
+    version?: string
+    generated_at?: string
+    source?: string
+    summary?: CommandPlaneTopologySummary
+  }
+  operations: {
+    version?: string
+    generated_at?: string
+    summary?: CommandPlaneOperationsResponse['summary']
+  }
+  detachments: {
+    version?: string
+    generated_at?: string
+    summary?: CommandPlaneDetachmentsResponse['summary']
+  }
+  alerts: {
+    version?: string
+    generated_at?: string
+    summary?: CommandPlaneAlertsResponse['summary']
+  }
+  decisions: {
+    version?: string
+    generated_at?: string
+    summary?: CommandPlaneDecisionsResponse['summary']
+  }
+  swarm_status?: CommandPlaneSwarmStatus
+  swarm_proof?: CommandPlaneSwarmProof
 }
 
 export interface CommandPlaneHelpDocLink {
@@ -1256,6 +1309,7 @@ export interface CommandPlaneSwarmResponse {
 }
 
 export type CommandPlaneSurface =
+  | 'summary'
   | 'swarm'
   | 'operations'
   | 'topology'

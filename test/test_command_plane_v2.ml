@@ -17,6 +17,25 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755
+
+let write_json_file path json =
+  ensure_dir (Filename.dirname path);
+  Yojson.Safe.to_file path json
+
+let write_text_file path content =
+  ensure_dir (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
 let unwrap_ok = function
   | Ok value -> value
   | Error message -> failwith message
@@ -26,6 +45,31 @@ let unit_update_exn config ~actor args =
 
 let start_operation_exn config ~actor args =
   unwrap_ok (Command_plane_v2.start_operation config ~actor args)
+
+let setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two =
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
+  ignore (Room.join config ~agent_name:alpha_lead ~capabilities:[] ());
+  ignore (Room.join config ~agent_name:alpha_two ~capabilities:[] ());
+  unit_update_exn config ~actor:"owner"
+    (`Assoc
+      [
+        ("unit_id", `String "company-main");
+        ("kind", `String "company");
+        ("label", `String "Main Company");
+        ("leader_id", `String owner);
+        ("roster", `List [ `String owner; `String alpha_lead; `String alpha_two ]);
+      ]);
+  unit_update_exn config ~actor:"owner"
+    (`Assoc
+      [
+        ("unit_id", `String "platoon-alpha");
+        ("kind", `String "platoon");
+        ("label", `String "Alpha Platoon");
+        ("parent_unit_id", `String "company-main");
+        ("leader_id", `String alpha_lead);
+        ("roster", `List [ `String alpha_lead; `String alpha_two ]);
+      ])
 
 let test_platoon_assignment_expands_detachments_and_tick_runs () =
   let base_dir = temp_dir () in
@@ -664,7 +708,127 @@ let test_swarm_live_json_scopes_markers_to_sender () =
         (replica_row |> member "final_marker_seen" |> to_bool);
       Alcotest.(check bool) "replica claim not inherited" false
         (replica_row |> member "claim_marker_seen" |> to_bool))
+let test_summary_json_omits_heavy_arrays_and_keeps_summaries () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      ignore
+        (start_operation_exn config ~actor:"owner"
+           (`Assoc
+             [
+               ("assigned_unit_id", `String "platoon-alpha");
+               ("objective", `String "Run summary drill");
+               ("policy_class", `String "guarded");
+               ("budget_class", `String "standard");
+             ]));
+      let summary = Command_plane_v2.summary_json config in
+      Alcotest.(check int) "summary topology active ops" 1
+        (summary |> Yojson.Safe.Util.member "topology"
+       |> Yojson.Safe.Util.member "summary"
+       |> Yojson.Safe.Util.member "active_operation_count"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "summary operations total" 1
+        (summary |> Yojson.Safe.Util.member "operations"
+       |> Yojson.Safe.Util.member "summary"
+       |> Yojson.Safe.Util.member "total"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check bool) "topology units omitted" true
+        (summary |> Yojson.Safe.Util.member "topology"
+       |> Yojson.Safe.Util.member "units" = `Null);
+      Alcotest.(check bool) "operations list omitted" true
+        (summary |> Yojson.Safe.Util.member "operations"
+       |> Yojson.Safe.Util.member "operations" = `Null);
+      Alcotest.(check bool) "detachments list omitted" true
+        (summary |> Yojson.Safe.Util.member "detachments"
+       |> Yojson.Safe.Util.member "detachments" = `Null);
+      Alcotest.(check bool) "traces omitted at root" true
+        (summary |> Yojson.Safe.Util.member "traces" = `Null);
+      Alcotest.(check bool) "swarm proof included" true
+        (summary |> Yojson.Safe.Util.member "swarm_proof" <> `Null))
 
+let test_summary_json_swarm_proof_prefers_artifact () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      let run_dir =
+        Filename.concat
+          (Filename.concat (Filename.concat (Room.masc_dir config) "control-plane") "swarm-live")
+          "run-artifact"
+      in
+      write_json_file (Filename.concat run_dir "swarm-live-summary.json")
+        (`Assoc
+          [
+            ("pass", `Bool true);
+            ("worker_count", `Int 4);
+            ("completed_workers", `Int 3);
+            ("final_markers_seen", `Int 2);
+          ]);
+      write_text_file (Filename.concat run_dir "slot-samples.jsonl")
+        "{\"timestamp\":\"2026-03-08T00:00:00Z\",\"active_slots\":5,\"ctx_per_slot\":1200}\n";
+      let summary = Command_plane_v2.summary_json config in
+      let proof = Yojson.Safe.Util.member "swarm_proof" summary in
+      Alcotest.(check string) "artifact status" "present"
+        (proof |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "artifact source" "artifact"
+        (proof |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "artifact run id" "run-artifact"
+        (proof |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check bool) "artifact pass" true
+        (proof |> Yojson.Safe.Util.member "pass" |> Yojson.Safe.Util.to_bool);
+      Alcotest.(check int) "artifact worker expected" 4
+        (proof |> Yojson.Safe.Util.member "workers"
+       |> Yojson.Safe.Util.member "expected"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "artifact peak hot slots" 5
+        (proof |> Yojson.Safe.Util.member "peak_hot_slots"
+       |> Yojson.Safe.Util.to_int))
+
+let test_summary_json_swarm_proof_fallback_and_missing () =
+  let fallback_dir = temp_dir () in
+  let missing_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir fallback_dir;
+      cleanup_dir missing_dir)
+    (fun () ->
+      let fallback_config = Room.default_config fallback_dir in
+      ignore (Room.init fallback_config ~agent_name:(Some "owner"));
+      let run_dir =
+        Filename.concat
+          (Filename.concat (Filename.concat (Room.masc_dir fallback_config) "control-plane") "swarm-live")
+          "run-fallback"
+      in
+      write_text_file (Filename.concat run_dir "slot-samples.jsonl")
+        "{\"timestamp\":\"2026-03-08T01:00:00Z\",\"active_slots\":2,\"ctx_per_slot\":800}\n";
+      let fallback_summary = Command_plane_v2.summary_json fallback_config in
+      let fallback_proof = Yojson.Safe.Util.member "swarm_proof" fallback_summary in
+      Alcotest.(check string) "fallback status" "fallback"
+        (fallback_proof |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "fallback source" "slot_samples"
+        (fallback_proof |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "fallback run id" "run-fallback"
+        (fallback_proof |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check bool) "fallback pass omitted" true
+        (fallback_proof |> Yojson.Safe.Util.member "pass" = `Null);
+      let missing_config = Room.default_config missing_dir in
+      ignore (Room.init missing_config ~agent_name:(Some "owner"));
+      let missing_summary = Command_plane_v2.summary_json missing_config in
+      let missing_proof = Yojson.Safe.Util.member "swarm_proof" missing_summary in
+      Alcotest.(check string) "missing status" "missing"
+        (missing_proof |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "missing source" "none"
+        (missing_proof |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check bool) "missing reason present" true
+        (missing_proof |> Yojson.Safe.Util.member "missing_reason" <> `Null))
 let () =
   Alcotest.run "Command_plane_v2"
     [
@@ -682,5 +846,23 @@ let () =
             test_swarm_live_json_ignores_stale_evidence_from_previous_run;
           Alcotest.test_case "swarm live scopes markers to sender" `Quick
             test_swarm_live_json_scopes_markers_to_sender;
+          Alcotest.test_case "summary json omits heavy arrays" `Quick
+            test_summary_json_omits_heavy_arrays_and_keeps_summaries;
+          Alcotest.test_case "summary swarm proof prefers artifact" `Quick
+            test_summary_json_swarm_proof_prefers_artifact;
+          Alcotest.test_case "summary swarm proof fallback and missing" `Quick
+            test_summary_json_swarm_proof_fallback_and_missing;
+          Alcotest.test_case "swarm live restores completed workers" `Quick
+            test_swarm_live_json_restores_completed_workers_after_leave;
+          Alcotest.test_case "swarm live ignores stale previous-run evidence" `Quick
+            test_swarm_live_json_ignores_stale_evidence_from_previous_run;
+          Alcotest.test_case "swarm live scopes markers to sender" `Quick
+            test_swarm_live_json_scopes_markers_to_sender;
+          Alcotest.test_case "summary json omits heavy arrays" `Quick
+            test_summary_json_omits_heavy_arrays_and_keeps_summaries;
+          Alcotest.test_case "summary swarm proof prefers artifact" `Quick
+            test_summary_json_swarm_proof_prefers_artifact;
+          Alcotest.test_case "summary swarm proof fallback and missing" `Quick
+            test_summary_json_swarm_proof_fallback_and_missing;
         ] );
     ]

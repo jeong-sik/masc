@@ -211,20 +211,6 @@ let find_swarm_live_artifact_json config run_id filename =
   | Some path -> Room_utils.read_json_opt config path
   | None -> None
 
-let read_jsonl_local path =
-  match Safe_ops.read_file_safe path with
-  | Error _ -> []
-  | Ok content ->
-      content
-      |> String.split_on_char '\n'
-      |> List.filter_map (fun line ->
-             let trimmed = String.trim line in
-             if trimmed = "" then None
-             else
-               match Safe_ops.parse_json_safe ~context:path trimmed with
-               | Ok json -> Some json
-               | Error _ -> None)
-
 module StringSet = Set.Make (String)
 
 let nonempty_string = function
@@ -2157,6 +2143,402 @@ let list_alerts_json_from_state config (state : snapshot_state) =
 
 let list_alerts_json config =
   list_alerts_json_from_state config (build_snapshot_state config)
+
+let iso_of_unix timestamp =
+  let tm = Unix.gmtime timestamp in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+    tm.tm_hour tm.tm_min tm.tm_sec
+
+let file_mtime path =
+  try Some (Unix.stat path).st_mtime with _ -> None
+
+let read_jsonl_local path =
+  match Safe_ops.read_file_safe path with
+  | Error _ -> []
+  | Ok content ->
+      content
+      |> String.split_on_char '\n'
+      |> List.filter_map (fun line ->
+             let trimmed = String.trim line in
+             if trimmed = "" then None
+             else
+               match Safe_ops.parse_json_safe ~context:path trimmed with
+               | Ok json -> Some json
+               | Error _ -> None)
+
+let swarm_live_dir config =
+  Filename.concat (control_plane_dir config) "swarm-live"
+
+type swarm_live_artifact = {
+  run_id : string;
+  run_dir : string;
+  path : string;
+  captured_at : float;
+}
+
+type slot_metrics = {
+  peak_hot_slots : int option;
+  ctx_per_slot : int option;
+  captured_at : string option;
+}
+
+let latest_swarm_live_artifact config filename =
+  let root = swarm_live_dir config in
+  match Safe_ops.list_dir_safe root with
+  | Error _ -> None
+  | Ok entries ->
+      entries
+      |> List.filter_map (fun run_id ->
+             let run_dir = Filename.concat root run_id in
+             if Sys.file_exists run_dir && Sys.is_directory run_dir then
+               let path = Filename.concat run_dir filename in
+               match file_mtime path with
+               | Some captured_at ->
+                   Some { run_id; run_dir; path; captured_at }
+               | None -> None
+             else None)
+      |> List.sort (fun (left : swarm_live_artifact) (right : swarm_live_artifact) ->
+             Float.compare right.captured_at left.captured_at)
+      |> list_hd_opt
+
+let read_slot_metrics_from_json path =
+  match Safe_ops.read_json_file_safe path with
+  | Error _ -> None
+  | Ok json ->
+      Some
+        {
+          peak_hot_slots =
+            (match U.member "peak_active_slots" json with
+            | `Int value -> Some value
+            | `Intlit value -> int_of_string_opt value
+            | _ -> None);
+          ctx_per_slot =
+            (match U.member "ctx_per_slot" json with
+            | `Int value -> Some value
+            | `Intlit value -> int_of_string_opt value
+            | _ -> None);
+          captured_at = get_string_opt json "last_sample_at";
+        }
+
+let read_slot_metrics_from_samples path =
+  let rows = read_jsonl_local path in
+  let peak_hot_slots =
+    rows
+    |> List.fold_left
+         (fun acc row ->
+           max acc
+             (match U.member "active_slots" row with
+             | `Int value -> value
+             | `Intlit value -> Option.value ~default:0 (int_of_string_opt value)
+             | _ -> 0))
+         0
+  in
+  let ctx_per_slot =
+    rows
+    |> List.find_map (fun row ->
+           match U.member "ctx_per_slot" row with
+           | `Int value -> Some value
+           | `Intlit value -> int_of_string_opt value
+           | _ -> None)
+  in
+  let captured_at =
+    rows
+    |> List.rev
+    |> List.find_map (fun row -> get_string_opt row "timestamp")
+  in
+  if rows = [] then None
+  else Some { peak_hot_slots = Some peak_hot_slots; ctx_per_slot; captured_at }
+
+let read_slot_metrics run_dir =
+  let telemetry_path = Filename.concat run_dir "slot-telemetry.json" in
+  if Sys.file_exists telemetry_path then
+    read_slot_metrics_from_json telemetry_path
+  else
+    let samples_path = Filename.concat run_dir "slot-samples.jsonl" in
+    if Sys.file_exists samples_path then read_slot_metrics_from_samples samples_path
+    else None
+
+let swarm_proof_json config =
+  let workers_json
+      ?expected ?joined ?current_task_bound ?fresh_heartbeats ?done_workers
+      ?final_markers () =
+    `Assoc
+      [
+        ("expected", Option.value ~default:`Null (Option.map (fun v -> `Int v) expected));
+        ("joined", Option.value ~default:`Null (Option.map (fun v -> `Int v) joined));
+        ( "current_task_bound",
+          Option.value ~default:`Null
+            (Option.map (fun v -> `Int v) current_task_bound) );
+        ( "fresh_heartbeats",
+          Option.value ~default:`Null
+            (Option.map (fun v -> `Int v) fresh_heartbeats) );
+        ("done", Option.value ~default:`Null (Option.map (fun v -> `Int v) done_workers));
+        ("final", Option.value ~default:`Null (Option.map (fun v -> `Int v) final_markers));
+      ]
+  in
+  match latest_swarm_live_artifact config "swarm-live-summary.json" with
+  | Some summary_artifact -> (
+      match Safe_ops.read_json_file_safe summary_artifact.path with
+      | Ok summary_json ->
+          let slot_metrics = read_slot_metrics summary_artifact.run_dir in
+          let captured_at =
+            Option.value
+              ~default:(iso_of_unix summary_artifact.captured_at)
+              (Option.bind slot_metrics (fun metrics -> metrics.captured_at))
+          in
+          `Assoc
+            [
+              ("status", `String "present");
+              ("source", `String "artifact");
+              ("run_id", `String summary_artifact.run_id);
+              ("captured_at", `String captured_at);
+              ( "pass",
+                match U.member "pass" summary_json with
+                | `Bool value -> `Bool value
+                | _ -> `Null );
+              ( "peak_hot_slots",
+                match Option.bind slot_metrics (fun metrics -> metrics.peak_hot_slots) with
+                | Some value -> `Int value
+                | None -> `Null );
+              ( "ctx_per_slot",
+                match Option.bind slot_metrics (fun metrics -> metrics.ctx_per_slot) with
+                | Some value -> `Int value
+                | None -> `Null );
+              ( "workers",
+                workers_json
+                  ?expected:
+                    (match U.member "worker_count" summary_json with
+                    | `Int value -> Some value
+                    | `Intlit value -> int_of_string_opt value
+                    | _ -> None)
+                  ?done_workers:
+                    (match U.member "completed_workers" summary_json with
+                    | `Int value -> Some value
+                    | `Intlit value -> int_of_string_opt value
+                    | _ -> None)
+                  ?final_markers:
+                    (match U.member "final_markers_seen" summary_json with
+                    | `Int value -> Some value
+                    | `Intlit value -> int_of_string_opt value
+                    | _ -> None)
+                  () );
+              ("artifact_ref", `String summary_artifact.path);
+              ("missing_reason", `Null);
+            ]
+      | Error _ -> `Assoc
+          [
+            ("status", `String "missing");
+            ("source", `String "none");
+            ("run_id", `Null);
+            ("captured_at", `Null);
+            ("pass", `Null);
+            ("peak_hot_slots", `Null);
+            ("ctx_per_slot", `Null);
+            ("workers", workers_json ());
+            ("artifact_ref", `Null);
+            ( "missing_reason",
+              `String
+                "Latest swarm-live summary artifact could not be read." );
+          ] )
+  | None -> (
+      match latest_swarm_live_artifact config "slot-samples.jsonl" with
+      | Some slot_artifact -> (
+          match read_slot_metrics_from_samples slot_artifact.path with
+          | Some metrics ->
+              `Assoc
+                [
+                  ("status", `String "fallback");
+                  ("source", `String "slot_samples");
+                  ("run_id", `String slot_artifact.run_id);
+                  ( "captured_at",
+                    match metrics.captured_at with
+                    | Some value -> `String value
+                    | None -> `String (iso_of_unix slot_artifact.captured_at) );
+                  ("pass", `Null);
+                  ( "peak_hot_slots",
+                    match metrics.peak_hot_slots with
+                    | Some value -> `Int value
+                    | None -> `Null );
+                  ( "ctx_per_slot",
+                    match metrics.ctx_per_slot with
+                    | Some value -> `Int value
+                    | None -> `Null );
+                  ("workers", workers_json ());
+                  ("artifact_ref", `String slot_artifact.path);
+                  ( "missing_reason",
+                    `String
+                      "Only slot samples were found; worker completion proof is unavailable." );
+                ]
+          | None ->
+              `Assoc
+                [
+                  ("status", `String "missing");
+                  ("source", `String "none");
+                  ("run_id", `Null);
+                  ("captured_at", `Null);
+                  ("pass", `Null);
+                  ("peak_hot_slots", `Null);
+                  ("ctx_per_slot", `Null);
+                  ("workers", workers_json ());
+                  ("artifact_ref", `Null);
+                  ( "missing_reason",
+                    `String
+                      "Latest slot sample artifact could not be read." );
+                ] )
+      | None ->
+          `Assoc
+            [
+              ("status", `String "missing");
+              ("source", `String "none");
+              ("run_id", `Null);
+              ("captured_at", `Null);
+              ("pass", `Null);
+              ("peak_hot_slots", `Null);
+              ("ctx_per_slot", `Null);
+              ("workers", workers_json ());
+              ("artifact_ref", `Null);
+              ( "missing_reason",
+                `String
+                  "No swarm-live proof artifacts were found under .masc/control-plane/swarm-live." );
+            ] )
+
+let topology_summary_json_from_state (state : snapshot_state) =
+  let summary =
+    {
+      total_units = List.length state.units;
+      company_count =
+        List.length
+          (List.filter
+             (fun (unit : unit_record) -> unit.kind = Company)
+             state.units);
+      platoon_count =
+        List.length
+          (List.filter
+             (fun (unit : unit_record) -> unit.kind = Platoon)
+             state.units);
+      squad_count =
+        List.length
+          (List.filter
+             (fun (unit : unit_record) -> unit.kind = Squad)
+             state.units);
+      leaf_agent_unit_count =
+        List.length
+          (List.filter
+             (fun (unit : unit_record) -> unit.kind = Agent_unit)
+             state.units);
+      live_agent_count = List.length state.live_agents;
+      managed_unit_count = List.length state.managed_units;
+      active_operation_count =
+        state.operations
+        |> List.filter (fun (operation : operation_record) ->
+               active_operation_status operation.status)
+        |> List.length;
+    }
+  in
+  `Assoc
+    [
+      ("version", `String "cp-v2");
+      ("generated_at", `String (Types.now_iso ()));
+      ("source", `String state.source);
+      ( "summary",
+        `Assoc
+          [
+            ("total_units", `Int summary.total_units);
+            ("company_count", `Int summary.company_count);
+            ("platoon_count", `Int summary.platoon_count);
+            ("squad_count", `Int summary.squad_count);
+            ("leaf_agent_unit_count", `Int summary.leaf_agent_unit_count);
+            ("live_agent_count", `Int summary.live_agent_count);
+            ("managed_unit_count", `Int summary.managed_unit_count);
+            ("active_operation_count", `Int summary.active_operation_count);
+          ] );
+    ]
+
+let operations_summary_json_from_state (state : snapshot_state) =
+  let managed_count =
+    List.length
+      (List.filter
+         (fun (operation : operation_record) -> operation.source = "managed")
+         state.operations)
+  in
+  let active_count =
+    List.length
+      (List.filter
+         (fun (operation : operation_record) -> operation.status = Active)
+         state.operations)
+  in
+  let paused_count =
+    List.length
+      (List.filter
+         (fun (operation : operation_record) -> operation.status = Paused)
+         state.operations)
+  in
+  `Assoc
+    [
+      ("version", `String "cp-v2");
+      ("generated_at", `String (Types.now_iso ()));
+      ( "summary",
+        `Assoc
+          [
+            ("total", `Int (List.length state.operations));
+            ("active", `Int active_count);
+            ("paused", `Int paused_count);
+            ("managed", `Int managed_count);
+            ("projected", `Int (List.length state.operations - managed_count));
+          ] );
+    ]
+
+let detachments_summary_json_from_state (state : snapshot_state) =
+  let projected_count =
+    List.length
+      (List.filter
+         (fun (detachment : detachment_record) -> detachment.source <> "managed")
+         state.detachments)
+  in
+  let count_status status =
+    List.length
+      (List.filter
+         (fun (detachment : detachment_record) ->
+           String.equal detachment.status status)
+         state.detachments)
+  in
+  `Assoc
+    [
+      ("version", `String "cp-v2");
+      ("generated_at", `String (Types.now_iso ()));
+      ( "summary",
+        `Assoc
+          [
+            ("total", `Int (List.length state.detachments));
+            ("active", `Int (count_status "active"));
+            ("awaiting_approval", `Int (count_status "awaiting_approval"));
+            ("stalled", `Int (count_status "stalled"));
+            ("projected", `Int projected_count);
+          ] );
+    ]
+
+let summary_json config =
+  let state = build_snapshot_state config in
+  let alerts =
+    list_alerts_json_from_state config state
+    |> U.member "summary"
+  in
+  let decisions =
+    list_policy_decisions_json_from_state state
+    |> U.member "summary"
+  in
+  `Assoc
+    [
+      ("version", `String "cp-v2");
+      ("generated_at", `String (Types.now_iso ()));
+      ("topology", topology_summary_json_from_state state);
+      ("operations", operations_summary_json_from_state state);
+      ("detachments", detachments_summary_json_from_state state);
+      ("alerts", `Assoc [ ("summary", alerts) ]);
+      ("decisions", `Assoc [ ("summary", decisions) ]);
+      ("swarm_proof", swarm_proof_json config);
+    ]
 
 let recent_team_session_trace_events config session_id limit =
   Team_session_store.read_events ~max_events:limit config session_id

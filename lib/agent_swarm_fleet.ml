@@ -54,7 +54,9 @@ let run ~sw ~net ~clock ~proc_mgr config ~goal =
     ~agent_name:config.leader_name ~net in
   let _joined = Agent_swarm_client.join ~sw leader in
   Fun.protect ~finally:(fun () ->
-    try ignore (Agent_swarm_client.leave ~sw leader) with _ -> ()
+    (try ignore (Agent_swarm_client.leave ~sw leader) with
+     | Eio.Cancel.Cancelled _ as ex -> raise ex
+     | _ -> ())
   ) (fun () ->
     let names = List.map (fun (m, _) -> member_name m) config.members in
     let _ = Agent_swarm_client.broadcast ~sw leader

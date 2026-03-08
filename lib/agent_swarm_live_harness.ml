@@ -165,10 +165,11 @@ let build_worker_plans ?(worker_count=12) run_id =
            worker_roles |> List.map (fun role -> (role, lane)))
   in
   let seed_count = List.length seeds in
+  let seeds_arr = Array.of_list seeds in
   let total = max 1 worker_count in
   let plans =
     List.init total (fun idx ->
-        let role, lane = List.nth seeds (idx mod seed_count) in
+        let role, lane = seeds_arr.(idx mod seed_count) in
         let replica = idx / seed_count in
         let name = worker_name ~replica run_id role lane in
         {
@@ -184,11 +185,12 @@ let build_worker_plans ?(worker_count=12) run_id =
           next_agent = None;
         })
   in
+  let plans_arr = Array.of_list plans in
   plans
   |> List.mapi (fun idx plan ->
          let next_agent =
-           if idx + 1 < List.length plans then
-             Some ((List.nth plans (idx + 1)).name)
+           if idx + 1 < Array.length plans_arr then
+             Some plans_arr.(idx + 1).name
            else
              None
          in
@@ -396,7 +398,9 @@ let run ~sw ~net ~clock cfg =
   `Assoc
     [
       ("run_id", `String cfg.run_id);
-      ("status", `String (if success_count = List.length rows then "ok" else "error"));
+      ("status", `String (if success_count = List.length rows
+                             && final_marker_count >= cfg.required_final_markers
+                         then "ok" else "error"));
       ( "summary",
         `Assoc
           [

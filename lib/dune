@@ -272,7 +272,16 @@
    trpg_actor_match
    json_util
    ;; Anti-Fake Test Quality Scoring (harness P2)
-   anti_fake)
+   anti_fake
+   ;; SWARM-RISC Agent ISA (Phase 1: types + pipeline + tools)
+   risc_types
+   risc_pipeline
+   tool_risc
+   ;; SWARM-RISC Phase 2: MESI cache coherence
+   cache_coherence
+   ;; SWARM-RISC Phase 3: OoO (Tomasulo) + Work-Stealing
+   reservation_station
+   work_stealing)
  (libraries
    yojson
    base64

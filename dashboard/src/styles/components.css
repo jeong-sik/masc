@@ -1996,6 +1996,8 @@ button.monitor-row.bad {
 
 .board-post {
   border-color: rgba(138, 163, 211, 0.2);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 
 .post-title {
@@ -2478,6 +2480,8 @@ button.monitor-row.bad {
   gap: 10px;
   align-items: center;
   text-align: left;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
 }
 
 button.council-row {

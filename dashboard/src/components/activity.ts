@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
+import { VirtualList } from './common/virtual-list'
 import { agents, tasks, messages, boardPosts, keepers, agentMotionMap } from '../store'
 import { connected, eventCount, journal } from '../sse'
 import { classifyJournalKind, journalActor, journalDisplayText } from '../journal-entry'
@@ -257,11 +258,16 @@ export function Activity() {
         </div>
       </div>
 
-      <div class="terminal-feed">
-        ${rows.length === 0
-          ? html`<div class="empty-state">Waiting for live or snapshot signals...</div>`
-          : rows.map(row => html`<${TerminalRow} key=${row.id} row=${row} />`)}
-      </div>
+      ${rows.length === 0
+        ? html`<div class="terminal-feed"><div class="empty-state">Waiting for live or snapshot signals...</div></div>`
+        : html`<${VirtualList}
+            items=${rows}
+            itemHeight=${28}
+            overscan=${8}
+            getKey=${(row: ActivityRowModel) => row.id}
+            renderItem=${(row: ActivityRowModel) => html`<${TerminalRow} row=${row} />`}
+            className="terminal-feed"
+          />`}
     <//>
 
     <${Card} title="Agent Motion" class="section">

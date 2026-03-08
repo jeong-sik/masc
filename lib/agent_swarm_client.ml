@@ -129,12 +129,28 @@ let add_task ~sw t ~title ~description =
       ("description", `String description);
     ]
 
+let batch_add_tasks ~sw t ~tasks =
+  let tasks_json =
+    `List
+      (List.map
+         (fun (title, description) ->
+           `Assoc
+             [ ("title", `String title); ("description", `String description) ])
+         tasks)
+  in
+  call_rpc ~sw t ~masc_method:"masc_batch_add_tasks"
+    ~arguments:[("tasks", tasks_json)]
+
 let claim ~sw t ~task_id =
   call_rpc ~sw t ~masc_method:"masc_claim"
     ~arguments:[
       ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
     ]
+
+let claim_next ~sw t =
+  call_rpc ~sw t ~masc_method:"masc_claim_next"
+    ~arguments:[("agent_name", `String t.agent_name)]
 
 let set_current_task ~sw t ~task_id =
   call_rpc ~sw t ~masc_method:"masc_plan_set_task"
@@ -147,6 +163,21 @@ let done_task ~sw t ~task_id =
     ~arguments:[
       ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
+    ]
+
+let release_task ~sw t ~task_id =
+  call_rpc ~sw t ~masc_method:"masc_release"
+    ~arguments:[
+      ("agent_name", `String t.agent_name);
+      ("task_id", `String task_id);
+    ]
+
+let cancel_task ~sw t ~task_id ~reason =
+  call_rpc ~sw t ~masc_method:"masc_cancel_task"
+    ~arguments:[
+      ("agent_name", `String t.agent_name);
+      ("task_id", `String task_id);
+      ("reason", `String reason);
     ]
 
 (* --- Communication --- *)

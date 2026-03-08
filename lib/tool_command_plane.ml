@@ -88,6 +88,21 @@ let chain_backend_to_string = function
   | Native -> "native"
   | Compat_llm_mcp -> "compat_llm_mcp"
 
+let is_valid_run_id_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
+  | _ -> false
+
+let validate_run_id run_id =
+  let trimmed = String.trim run_id in
+  if trimmed = "" then
+    Error "invalid chain run_id: empty"
+  else if String.length trimmed > 128 then
+    Error "invalid chain run_id: too long"
+  else if String.for_all is_valid_run_id_char trimmed then
+    Ok trimmed
+  else
+    Error "invalid chain run_id: only [A-Za-z0-9_-] are allowed"
+
 let compat_chain_error_message = function
   | Llm_client_eio.ConnectionError message -> "llm-mcp connection error: " ^ message
   | Llm_client_eio.ParseError message -> "llm-mcp parse error: " ^ message
@@ -1228,27 +1243,30 @@ let chain_summary_json (ctx : (_, _) context) =
           build_summary ~connection ~status_rows ~recent_history)
 
 let chain_run_get_json (ctx : (_, _) context) ~run_id =
-  match chain_backend () with
-  | Native -> (
-      match Chain_native_eio.run_json ~run_id with
-      | Some json ->
-          Ok
-            (`Assoc
-              [
-                ("schema_version", `Int 1);
-                ("version", `String "chain-run-v1");
-                ("backend", `String "native");
-                ("run", json);
-              ])
-      | None -> Error (Printf.sprintf "native chain run not found: %s" run_id))
-  | Compat_llm_mcp -> (
-      match ctx.clock, ctx.net with
-      | None, _ | _, None ->
-          Error "compat chain run lookup requires server Eio runtime context"
-      | Some clock, Some net -> (
-          match Llm_client_eio.fetch_chain_run_json ~net ~clock ~run_id () with
-          | Ok json -> Ok json
-          | Error err -> Error (compat_chain_error_message err)))
+  match validate_run_id run_id with
+  | Error _ as err -> err
+  | Ok run_id -> (
+      match chain_backend () with
+      | Native -> (
+          match Chain_native_eio.run_json ~run_id with
+          | Some json ->
+              Ok
+                (`Assoc
+                  [
+                    ("schema_version", `Int 1);
+                    ("version", `String "chain-run-v1");
+                    ("backend", `String "native");
+                    ("run", json);
+                  ])
+          | None -> Error (Printf.sprintf "chain run not found: %s" run_id))
+      | Compat_llm_mcp -> (
+          match ctx.clock, ctx.net with
+          | None, _ | _, None ->
+              Error "compat chain run lookup requires server Eio runtime context"
+          | Some clock, Some net -> (
+              match Llm_client_eio.fetch_chain_run_json ~net ~clock ~run_id () with
+              | Ok json -> Ok json
+              | Error err -> Error (compat_chain_error_message err))))
 
 let handle_chain_snapshot (ctx : (_, _) context) : result =
   json_result (chain_summary_json ctx)

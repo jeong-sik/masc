@@ -5631,6 +5631,19 @@ let command_plane_chain_run_http_json ~state request run_id =
   tool_command_plane_http_json ~state request ~name:"masc_chain_run_get"
     ~args:(`Assoc [ ("run_id", `String run_id) ])
 
+let chain_http_error_status message =
+  let starts_with ~prefix value =
+    let prefix_len = String.length prefix in
+    String.length value >= prefix_len
+    && String.equal (String.sub value 0 prefix_len) prefix
+  in
+  if starts_with ~prefix:"invalid chain run_id:" message then
+    `Bad_request
+  else if starts_with ~prefix:"chain run not found:" message then
+    `Not_found
+  else
+    `Bad_gateway
+
 let stream_native_chain_events_http ~request reqd =
   let origin = get_origin request in
   let headers =
@@ -5648,51 +5661,83 @@ let stream_native_chain_events_http ~request reqd =
   let mutex = Eio.Mutex.create () in
   let closed = ref false in
   let sub_ref : Masc_mcp.Chain_telemetry.subscription option ref = ref None in
-  let close_stream () =
-    if not !closed then closed := true;
-    (match !sub_ref with
-    | Some sub ->
-        Masc_mcp.Chain_telemetry.unsubscribe sub;
-        sub_ref := None
-    | None -> ());
-    try Httpun.Body.Writer.close writer with Invalid_argument _ -> ()
+  let log_chain_sse message =
+    Printf.eprintf "[chain-sse] %s\n%!" message
+  in
+  let close_stream ?reason () =
+    let sub_to_remove, should_close =
+      Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+          let sub = !sub_ref in
+          sub_ref := None;
+          if !closed then
+            (sub, false)
+          else (
+            closed := true;
+            (sub, true)))
+    in
+    Option.iter Masc_mcp.Chain_telemetry.unsubscribe sub_to_remove;
+    if should_close then (
+      Option.iter log_chain_sse reason;
+      try
+        if not (Httpun.Body.Writer.is_closed writer) then Httpun.Body.Writer.close writer
+      with Invalid_argument _ -> ())
   in
   let send_raw frame =
-    if !closed || Httpun.Body.Writer.is_closed writer then (
-      close_stream ();
-      false)
-    else
-      try
-        Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-            Httpun.Body.Writer.write_string writer frame;
-            Httpun.Body.Writer.flush writer (fun _ -> ()));
-        true
-      with _ ->
+    let write_result =
+      Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+          if !closed || Httpun.Body.Writer.is_closed writer then
+            `Closed
+          else
+            try
+              Httpun.Body.Writer.write_string writer frame;
+              Httpun.Body.Writer.flush writer (fun _ -> ());
+              `Sent
+            with exn -> `Error exn)
+    in
+    match write_result with
+    | `Sent -> true
+    | `Closed ->
         close_stream ();
         false
+    | `Error exn ->
+        close_stream ~reason:(Printf.sprintf "stream write failed: %s" (Printexc.to_string exn)) ();
+        false
   in
-  ignore (send_raw ": native chain stream\nretry: 3000\n\n");
-  let sub =
-    Masc_mcp.Chain_telemetry.subscribe (fun event ->
-        let payload =
-          Masc_mcp.Chain_native_eio.chain_event_json event
-          |> Yojson.Safe.to_string
-        in
-        let frame =
-          Masc_mcp.Sse.format_event
-            ~event_type:(Masc_mcp.Chain_native_eio.chain_event_name event)
-            payload
-        in
-        ignore (send_raw frame))
-  in
-  sub_ref := Some sub;
-  Eio.Fiber.fork ~sw:(get_switch ()) (fun () ->
-      try
-        while not !closed do
-          Eio.Time.sleep (get_clock ()) 30.0;
-          ignore (send_raw ": keepalive\n\n")
-        done
-      with _ -> close_stream ())
+  (try
+     let sub =
+       Masc_mcp.Chain_telemetry.subscribe (fun event ->
+           let payload =
+             Masc_mcp.Chain_native_eio.chain_event_json event
+             |> Yojson.Safe.to_string
+           in
+           let frame =
+             Masc_mcp.Sse.format_event
+               ~event_type:(Masc_mcp.Chain_native_eio.chain_event_name event)
+               payload
+           in
+           ignore (send_raw frame))
+     in
+     Eio.Mutex.use_rw ~protect:true mutex (fun () -> sub_ref := Some sub);
+     if send_raw ": native chain stream\nretry: 3000\n\n" then
+       Eio.Fiber.fork ~sw:(get_switch ()) (fun () ->
+           try
+             while not !closed do
+               Eio.Time.sleep (get_clock ()) 30.0;
+               if not (send_raw ": keepalive\n\n") then close_stream ()
+             done
+           with exn ->
+             close_stream
+               ~reason:
+                 (Printf.sprintf "keepalive loop failed: %s"
+                    (Printexc.to_string exn))
+               ())
+     else
+       close_stream ~reason:"initial stream write failed" ()
+   with exn ->
+     close_stream
+       ~reason:
+         (Printf.sprintf "subscription setup failed: %s" (Printexc.to_string exn))
+       ())
 
 let proxy_chain_events_http ~request reqd =
   let endpoint = Masc_mcp.Llm_client_eio.resolve_endpoint () in
@@ -8483,7 +8528,7 @@ let make_routes ~port ~host ~sw ~clock =
              Http.Response.json ~compress:true ~request:req
                (Yojson.Safe.to_string json) reqd
          | Error message ->
-             Http.Response.json ~status:`Bad_gateway ~request:req
+             Http.Response.json ~status:(chain_http_error_status message) ~request:req
                (Yojson.Safe.to_string (command_plane_error_json message))
                reqd
        ) request reqd)
@@ -8506,7 +8551,7 @@ let make_routes ~port ~host ~sw ~clock =
              Http.Response.json ~compress:true ~request:req
                (Yojson.Safe.to_string json) reqd
          | Error message ->
-             Http.Response.json ~status:`Bad_gateway ~request:req
+             Http.Response.json ~status:(chain_http_error_status message) ~request:req
                (Yojson.Safe.to_string (command_plane_error_json message))
                reqd
        ) request reqd)
@@ -9249,7 +9294,10 @@ let run_server ~sw ~env ~port ~base_path =
   let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~base_path in
   server_state := Some state;
   Masc_mcp.Chain_native_eio.configure_storage_paths state.room_config;
-  Masc_mcp.Tool_command_plane.backfill_chain_overlays state.room_config;
+  (try Masc_mcp.Tool_command_plane.backfill_chain_overlays state.room_config
+   with exn ->
+     Printf.eprintf "[chain-backfill] startup backfill failed: %s\n%!"
+       (Printexc.to_string exn));
   Mcp_server.set_sse_callback state Sse.broadcast;
 
   (* Keepers are meant to be long-lived. Start their keepalive fibers on startup
@@ -9818,7 +9866,7 @@ let run_server ~sw ~env ~port ~base_path =
            | Error message ->
                h2_respond_json h2_reqd
                  (Yojson.Safe.to_string (command_plane_error_json message))
-                 ~status:`Bad_gateway ~extra_headers:cors)
+                 ~status:(chain_http_error_status message) ~extra_headers:cors)
 
       | `GET, path when String.length path > String.length "/api/v1/chains/runs/"
                         && String.sub path 0 (String.length "/api/v1/chains/runs/")
@@ -9835,7 +9883,7 @@ let run_server ~sw ~env ~port ~base_path =
            | Error message ->
                h2_respond_json h2_reqd
                  (Yojson.Safe.to_string (command_plane_error_json message))
-                 ~status:`Bad_gateway ~extra_headers:cors)
+                 ~status:(chain_http_error_status message) ~extra_headers:cors)
       | `GET, "/api/v1/command-plane/policy" ->
           let state = get_server_state () in
           let json = command_plane_policy_status_http_json ~state in

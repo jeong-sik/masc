@@ -87,6 +87,15 @@ merged 기준 아키텍처 한 장 요약은 [MERGED-ARCHITECTURE-SSOT.md](./doc
 - merged but not canonical public path:
   - `SWARM-RISC` research modules
 
+## Benchmark Map
+
+merged 기준 benchmark 진입점은 [INTEGRATED-BENCHMARK-RUNBOOK.md](./docs/INTEGRATED-BENCHMARK-RUNBOOK.md)를 본다.
+
+- direct swarm proof: `./scripts/harness_agent_swarm_live.sh`
+- search policy proof: `./scripts/harness_cp_search_fabric.sh`
+- local64 runtime proof: `./scripts/harness_team_session_local64_smoke.sh`
+- one-shot wrapper: `./scripts/harness_integrated_benchmark.sh`
+
 ## 기본 사용 흐름
 
 ```text

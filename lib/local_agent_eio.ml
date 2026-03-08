@@ -434,6 +434,14 @@ let estimate_cost_usd (model : Llm_client.model_spec)
   in
   Some (input_cost +. output_cost)
 
+let local_worker_max_tokens () =
+  match Sys.getenv_opt "MASC_LOCAL_WORKER_MAX_TOKENS" with
+  | None -> 1024
+  | Some raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some value -> max 64 (min 2048 value)
+      | None -> 1024)
+
 let join_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
   let args =
     `Assoc
@@ -557,7 +565,7 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
                       Llm_client.user_msg current_prompt;
                     ];
                   temperature = 0.2;
-                  max_tokens = 1024;
+                  max_tokens = local_worker_max_tokens ();
                   tools = tool_defs;
                   response_format = `Text;
                 }

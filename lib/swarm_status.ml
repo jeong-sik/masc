@@ -381,6 +381,19 @@ let operation_active (operation : operation_info) =
 
 let operation_terminal (operation : operation_info) = not (operation_active operation)
 
+let detachment_active (detachment : detachment_info) =
+  match String.lowercase_ascii detachment.status with
+  | "completed" | "cancelled" | "failed" | "stopped" -> false
+  | _ -> true
+
+let decision_pending (decision : decision_info) =
+  String.equal (String.lowercase_ascii decision.status) "pending"
+
+let session_active (session : session_info) =
+  match String.lowercase_ascii session.status with
+  | "running" | "paused" -> true
+  | _ -> false
+
 let classify_operation (operation : operation_info) =
   if String.equal operation.source "managed" then
     Managed
@@ -1023,18 +1036,30 @@ let build_json_from_inputs ~now ~operations ~detachments ~alerts ~decisions
     |> List.map (fun kind ->
            let lane_operations =
              slice_by_kind kind classify_operation operations
+             |> (match kind with
+                | Supervised -> List.filter operation_active
+                | Managed | Projected -> Fun.id)
            in
            let lane_detachments =
              slice_by_kind kind (classify_detachment operation_kinds) detachments
+             |> (match kind with
+                | Supervised -> List.filter detachment_active
+                | Managed | Projected -> Fun.id)
+           in
+           let lane_decisions =
+             decisions_by_kind kind
+             |> (match kind with
+                | Supervised -> List.filter decision_pending
+                | Managed | Projected -> Fun.id)
            in
            let lane_sessions =
              match kind with
-             | Supervised -> sessions
+             | Supervised -> List.filter session_active sessions
              | Managed | Projected -> []
            in
            lane_for_kind kind ~now ~operations:lane_operations
              ~detachments:lane_detachments ~alerts:(alerts_by_kind kind)
-             ~decisions:(decisions_by_kind kind) ~traces:(traces_by_kind kind)
+             ~decisions:lane_decisions ~traces:(traces_by_kind kind)
              ~sessions:lane_sessions ~mixed_runtime_sources)
   in
   let timeline =

@@ -271,7 +271,11 @@
    trpg_actor_match
    json_util
    ;; Anti-Fake Test Quality Scoring (harness P2)
-   anti_fake)
+   anti_fake
+   ;; SWARM-RISC Agent ISA (Phase 1: types + pipeline + tools)
+   risc_types
+   risc_pipeline
+   tool_risc)
  (libraries
    yojson
    base64

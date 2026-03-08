@@ -640,3 +640,9 @@
  (name test_tool_experiment_coverage)
  (modules test_tool_experiment_coverage)
  (libraries masc_mcp alcotest yojson str unix))
+
+; SWARM-RISC Agent ISA Phase 1 tests (pipeline, hazards, tools)
+(test
+ (name test_risc)
+ (modules test_risc)
+ (libraries masc_mcp str yojson unix))

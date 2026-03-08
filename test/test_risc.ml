@@ -493,8 +493,8 @@ let test_is_risc_tool () =
 let test_tool_definitions_count () =
   let name = "tool_definitions_count" in
   let count = List.length Tool_risc.tool_definitions in
-  if count <> 6 then
-    fail name (Printf.sprintf "expected 6 tool definitions, got %d" count)
+  if count <> 10 then
+    fail name (Printf.sprintf "expected 10 tool definitions, got %d" count)
   else pass name
 
 (* ================================================================ *)

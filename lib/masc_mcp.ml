@@ -275,3 +275,6 @@ module Trpg_actor_match = Trpg_actor_match
 module Risc_types = Risc_types
 module Risc_pipeline = Risc_pipeline
 module Tool_risc = Tool_risc
+
+(* SWARM-RISC Phase 2: MESI cache coherence *)
+module Cache_coherence = Cache_coherence

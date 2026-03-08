@@ -646,3 +646,9 @@
  (name test_risc)
  (modules test_risc)
  (libraries masc_mcp str yojson unix))
+
+; SWARM-RISC Phase 2: MESI cache coherence tests
+(test
+ (name test_cache_coherence)
+ (modules test_cache_coherence)
+ (libraries masc_mcp yojson unix))

@@ -275,7 +275,9 @@
    ;; SWARM-RISC Agent ISA (Phase 1: types + pipeline + tools)
    risc_types
    risc_pipeline
-   tool_risc)
+   tool_risc
+   ;; SWARM-RISC Phase 2: MESI cache coherence
+   cache_coherence)
  (libraries
    yojson
    base64

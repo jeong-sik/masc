@@ -1,7 +1,8 @@
-(** Tool_risc -- MCP Tool Handlers for SWARM-RISC Pipeline
+(** Tool_risc -- MCP Tool Handlers for SWARM-RISC Pipeline + Cache Coherence
 
-    Exposes pipeline operations as MCP tools.
+    Exposes pipeline operations and cache coherence as MCP tools.
     Phase 1 tools: pipeline_status, decode, pipeline_flush.
+    Phase 2 tools: cache_status, cache_read, cache_write, cache_metrics.
 
     Tool dispatch follows the project convention: match-based routing,
     no dict/map lookup.
@@ -17,6 +18,13 @@ open Risc_pipeline
 
 (** Singleton pipeline registry shared across all tool calls. *)
 let global_registry = create_registry ()
+
+(* ================================================================ *)
+(* Global Coherence Controller (Phase 2)                            *)
+(* ================================================================ *)
+
+(** Singleton MESI coherence controller shared across all cache tools. *)
+let global_coherence = Cache_coherence.create_controller ()
 
 (* ================================================================ *)
 (* Argument Helpers (consistent with tool_cache.ml pattern)         *)
@@ -313,10 +321,134 @@ let handle_metrics _args : result =
   (true, Yojson.Safe.pretty_to_string json)
 
 (* ================================================================ *)
+(* Tool: masc_risc_cache_status (Phase 2)                          *)
+(* ================================================================ *)
+
+(** Query MESI cache coherence state.
+    - No args: aggregate metrics across all agents
+    - agent_id only: list all non-Invalid L1 lines for that agent
+    - agent_id + key: specific line MESI state *)
+let handle_cache_status args : result =
+  let agent_id = get_string_opt args "agent_id" in
+  let key = get_string_opt args "key" in
+  match agent_id, key with
+  | Some aid, Some k ->
+      (match Cache_coherence.get_line_state global_coherence ~agent_id:aid ~key:k with
+       | Some state ->
+           (true, Yojson.Safe.pretty_to_string (`Assoc [
+             ("agent_id", `String aid);
+             ("key", `String k);
+             ("state", Cache_coherence.mesi_to_yojson state);
+           ]))
+       | None ->
+           (false, Printf.sprintf "Agent %s not registered in coherence controller" aid))
+  | Some aid, None ->
+      let lines = Cache_coherence.list_lines global_coherence ~agent_id:aid in
+      let lines_json = List.map Cache_coherence.line_to_yojson lines in
+      (true, Yojson.Safe.pretty_to_string (`Assoc [
+        ("agent_id", `String aid);
+        ("line_count", `Int (List.length lines));
+        ("lines", `List lines_json);
+      ]))
+  | None, _ ->
+      let metrics = Cache_coherence.aggregate_metrics global_coherence in
+      (true, Yojson.Safe.pretty_to_string (`Assoc [
+        ("aggregate_metrics", Cache_coherence.metrics_to_yojson metrics);
+        ("registered_agents", `Int (Hashtbl.length global_coherence.Cache_coherence.agents));
+      ]))
+
+(* ================================================================ *)
+(* Tool: masc_risc_cache_read (Phase 2)                            *)
+(* ================================================================ *)
+
+(** Coherent read through MESI L1 cache.
+    L1 hit returns cached value; L1 miss probes L2 (stub for now). *)
+let handle_cache_read args : result =
+  let agent_id = get_string args "agent_id" "" in
+  let key = get_string args "key" "" in
+  if agent_id = "" then (false, "agent_id is required")
+  else if key = "" then (false, "key is required")
+  else begin
+    Cache_coherence.register_agent global_coherence agent_id;
+    (* L2 fetch stub — future: wire to cache_eio.ml file-based cache *)
+    let l2_fetch _k = None in
+    match Cache_coherence.coherent_read global_coherence ~agent_id ~key ~l2_fetch with
+    | Some value ->
+        (true, Yojson.Safe.pretty_to_string (`Assoc [
+          ("agent_id", `String agent_id);
+          ("key", `String key);
+          ("value", `String value);
+          ("source", `String "L1_hit");
+        ]))
+    | None ->
+        (true, Yojson.Safe.pretty_to_string (`Assoc [
+          ("agent_id", `String agent_id);
+          ("key", `String key);
+          ("value", `Null);
+          ("source", `String "miss");
+        ]))
+  end
+
+(* ================================================================ *)
+(* Tool: masc_risc_cache_write (Phase 2)                           *)
+(* ================================================================ *)
+
+(** Coherent write through MESI L1 cache.
+    Updates L1, broadcasts invalidation to other agents, write-through to L2. *)
+let handle_cache_write args : result =
+  let agent_id = get_string args "agent_id" "" in
+  let key = get_string args "key" "" in
+  let value = get_string args "value" "" in
+  if agent_id = "" then (false, "agent_id is required")
+  else if key = "" then (false, "key is required")
+  else begin
+    Cache_coherence.register_agent global_coherence agent_id;
+    (* L2 write stub — future: wire to cache_eio.ml *)
+    let l2_write _k _v = () in
+    Cache_coherence.coherent_write global_coherence ~agent_id ~key ~value ~l2_write;
+    let state = Cache_coherence.get_line_state global_coherence ~agent_id ~key in
+    let state_json = match state with
+      | Some s -> Cache_coherence.mesi_to_yojson s
+      | None -> `String "unknown"
+    in
+    (true, Yojson.Safe.pretty_to_string (`Assoc [
+      ("agent_id", `String agent_id);
+      ("key", `String key);
+      ("state", state_json);
+      ("written", `Bool true);
+    ]))
+  end
+
+(* ================================================================ *)
+(* Tool: masc_risc_cache_metrics (Phase 2)                         *)
+(* ================================================================ *)
+
+(** Get cache coherence metrics — per-agent or aggregate.
+    Returns hit rate, invalidation count, writeback count, bus traffic. *)
+let handle_cache_metrics args : result =
+  let agent_id = get_string_opt args "agent_id" in
+  match agent_id with
+  | Some aid ->
+      (match Cache_coherence.agent_metrics global_coherence aid with
+       | Some m ->
+           (true, Yojson.Safe.pretty_to_string (`Assoc [
+             ("agent_id", `String aid);
+             ("metrics", Cache_coherence.metrics_to_yojson m);
+           ]))
+       | None ->
+           (false, Printf.sprintf "Agent %s not registered in coherence controller" aid))
+  | None ->
+      let m = Cache_coherence.aggregate_metrics global_coherence in
+      (true, Yojson.Safe.pretty_to_string (`Assoc [
+        ("aggregate", Cache_coherence.metrics_to_yojson m);
+        ("registered_agents", `Int (Hashtbl.length global_coherence.Cache_coherence.agents));
+      ]))
+
+(* ================================================================ *)
 (* Tool Definitions (for MCP registration)                          *)
 (* ================================================================ *)
 
-(** MCP tool definitions for SWARM-RISC Phase 1.
+(** MCP tool definitions for SWARM-RISC Phase 1 + Phase 2.
     To be registered in mcp_server_eio.ml dispatch. *)
 let tool_definitions : (string * Yojson.Safe.t) list = [
   ("masc_risc_pipeline_status", `Assoc [
@@ -411,6 +543,82 @@ let tool_definitions : (string * Yojson.Safe.t) list = [
       ("properties", `Assoc []);
     ]);
   ]);
+
+  (* Phase 2: Cache Coherence tools *)
+
+  ("masc_risc_cache_status", `Assoc [
+    ("name", `String "masc_risc_cache_status");
+    ("description", `String "Query MESI cache coherence state. No args: aggregate. agent_id: list lines. agent_id+key: specific line state.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent whose L1 cache to query (optional)")
+        ]);
+        ("key", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Cache key to query MESI state (optional, requires agent_id)")
+        ]);
+      ]);
+    ]);
+  ]);
+
+  ("masc_risc_cache_read", `Assoc [
+    ("name", `String "masc_risc_cache_read");
+    ("description", `String "Coherent read through MESI L1 cache. L1 hit returns cached value, miss probes L2.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent performing the read")
+        ]);
+        ("key", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Cache key to read")
+        ]);
+      ]);
+      ("required", `List [`String "agent_id"; `String "key"]);
+    ]);
+  ]);
+
+  ("masc_risc_cache_write", `Assoc [
+    ("name", `String "masc_risc_cache_write");
+    ("description", `String "Coherent write through MESI L1 cache. Updates L1, invalidates other agents, write-through to L2.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent performing the write")
+        ]);
+        ("key", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Cache key to write")
+        ]);
+        ("value", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Value to store")
+        ]);
+      ]);
+      ("required", `List [`String "agent_id"; `String "key"; `String "value"]);
+    ]);
+  ]);
+
+  ("masc_risc_cache_metrics", `Assoc [
+    ("name", `String "masc_risc_cache_metrics");
+    ("description", `String "Get cache coherence metrics: hit rate, invalidation count, writeback count, bus traffic.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to query (optional, omit for aggregate)")
+        ]);
+      ]);
+    ]);
+  ]);
 ]
 
 (** Tool schemas in Types.tool_schema format for config.ml registration. *)
@@ -426,12 +634,18 @@ let schemas : Types.tool_schema list =
 (** Dispatch a RISC tool call by name. *)
 let dispatch tool_name args : result =
   match tool_name with
+  (* Phase 1: Pipeline *)
   | "masc_risc_pipeline_status" -> handle_pipeline_status args
   | "masc_risc_decode" -> handle_decode args
   | "masc_risc_pipeline_advance" -> handle_pipeline_advance args
   | "masc_risc_pipeline_flush" -> handle_pipeline_flush args
   | "masc_risc_register_agent" -> handle_register_agent args
   | "masc_risc_metrics" -> handle_metrics args
+  (* Phase 2: Cache Coherence *)
+  | "masc_risc_cache_status" -> handle_cache_status args
+  | "masc_risc_cache_read" -> handle_cache_read args
+  | "masc_risc_cache_write" -> handle_cache_write args
+  | "masc_risc_cache_metrics" -> handle_cache_metrics args
   | _ -> (false, Printf.sprintf "Unknown RISC tool: %s" tool_name)
 
 (** Check if a tool name is a RISC tool. *)

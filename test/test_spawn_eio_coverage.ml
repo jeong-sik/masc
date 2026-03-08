@@ -164,7 +164,8 @@ let test_llama_mcp_tools_curated () =
   check (list string) "llama tools"
     [
       "mcp__masc__masc_team_session_status";
-      "mcp__masc__masc_team_session_step";
+      "mcp__masc__masc_team_session_turn";
+      "mcp__masc__masc_memento_mori";
     ]
     Spawn_eio.llama_mcp_tools
 

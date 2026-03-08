@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 AGENT_NAME="${AGENT_NAME:-team-session-soak}"
 ROUNDS="${ROUNDS:-5}"
@@ -32,22 +35,7 @@ call_tool() {
     echo "{\"error\":\"curl_failed\"}"
     return 1
   fi
-  sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p')"
-  if [ -n "$sse_data" ]; then
-    local response_line
-    response_line="$(
-      printf "%s\n" "$sse_data" \
-        | rg "\"id\"[[:space:]]*:[[:space:]]*$id([[:space:]],|[[:space:]]*})" \
-        | tail -n1 || true
-    )"
-    if [ -n "$response_line" ]; then
-      printf "%s" "$response_line"
-    else
-      printf "%s\n" "$sse_data" | tail -n1
-    fi
-  else
-    printf "%s" "$raw"
-  fi
+  jsonrpc_normalize_response "$raw" "$id"
 }
 
 extract_result() {

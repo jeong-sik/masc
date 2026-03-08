@@ -245,6 +245,14 @@ LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
 ./scripts/harness_supervisor_team_session.sh
 ```
 
+For same-box shard-pool validation, precompute the runtime pool env and run the local64 smoke harness:
+
+```bash
+export MASC_LLAMA_RUNTIMES_JSON="$(./scripts/llama-runtime-pool.sh print-env --target-shards 6)"
+LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
+./scripts/harness_team_session_local64_smoke.sh
+```
+
 Use the deterministic failure-replay harness when you want to validate the
 failed batch-spawn path itself instead of the happy path:
 

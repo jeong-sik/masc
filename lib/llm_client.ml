@@ -47,7 +47,7 @@ let ollama_timeout_sec () =
     Default 2 matches OLLAMA_MAX_LOADED_MODELS on M3 Max 128GB.
     Prevents keeper stampede from overloading Ollama VRAM. *)
 let max_concurrent_llm =
-  int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:2 ~min_v:1 ~max_v:16
+  int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:2 ~min_v:1 ~max_v:128
 
 let llm_semaphore = Eio.Semaphore.make max_concurrent_llm
 
@@ -721,25 +721,43 @@ let curl_post ~url ~headers ~body ~timeout_sec : (string, string) result =
   ) headers in
   let argv = ["curl"; "-s"; "--max-time"; string_of_int timeout_sec;
               "-X"; "POST"; url] @ header_args @ ["-d"; "@-"] in
-  try
-    let (status, raw) = Process_eio.run_argv_with_stdin_and_status
+  let run_once () =
+    Process_eio.run_argv_with_stdin_and_status
       ~timeout_sec:(Float.of_int timeout_sec +. 5.0)
       ~stdin_content:body
-      argv in
-    match status with
-    | Unix.WEXITED 0 ->
-      if String.length raw = 0 then Error "Empty response from API"
-      else Ok raw
-    | Unix.WEXITED 28 ->
-      Error (sprintf "Request timed out after %ds (%s)" timeout_sec url)
-    | Unix.WEXITED 7 ->
-      Error (sprintf "Connection refused (%s)" url)
-    | Unix.WEXITED code ->
-      Error (sprintf "curl exit %d (%s)" code url)
-    | Unix.WSIGNALED sig_num ->
-      Error (sprintf "curl killed by signal %d after %ds (%s)" sig_num timeout_sec url)
-    | Unix.WSTOPPED _ ->
-      Error "curl stopped unexpectedly"
+      argv
+  in
+  let rec handle attempt =
+    let (status, raw) = run_once () in
+    let should_retry =
+      match status with
+      | Unix.WEXITED 0 when String.length raw = 0 -> true
+      | Unix.WEXITED 52 -> true
+      | _ -> false
+    in
+    if should_retry && attempt = 0 then (
+      Time_compat.sleep 0.2;
+      handle 1)
+    else
+      match status with
+      | Unix.WEXITED 0 ->
+        if String.length raw = 0 then Error "Empty response from API"
+        else Ok raw
+      | Unix.WEXITED 28 ->
+        Error (sprintf "Request timed out after %ds (%s)" timeout_sec url)
+      | Unix.WEXITED 7 ->
+        Error (sprintf "Connection refused (%s)" url)
+      | Unix.WEXITED 52 ->
+        Error (sprintf "Empty reply from server (%s)" url)
+      | Unix.WEXITED code ->
+        Error (sprintf "curl exit %d (%s)" code url)
+      | Unix.WSIGNALED sig_num ->
+        Error (sprintf "curl killed by signal %d after %ds (%s)" sig_num timeout_sec url)
+      | Unix.WSTOPPED _ ->
+        Error "curl stopped unexpectedly"
+  in
+  try
+    handle 0
   with exn ->
     Error (sprintf "HTTP error: %s" (Printexc.to_string exn))
 

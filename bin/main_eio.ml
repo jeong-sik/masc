@@ -9074,6 +9074,11 @@ let run_server ~sw ~env ~port ~base_path =
 
   let config = { Http.default_config with port; host = "0.0.0.0" } in
   Unix.putenv "MASC_HTTP_PORT" (string_of_int config.port);
+  (match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
+   | Some existing when String.trim existing <> "" -> ()
+   | _ ->
+       Unix.putenv "MASC_HTTP_BASE_URL"
+         (Printf.sprintf "http://127.0.0.1:%d" config.port));
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
   let request_handler = make_extended_handler routes in
 

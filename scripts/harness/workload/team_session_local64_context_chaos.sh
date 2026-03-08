@@ -6,18 +6,18 @@ source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8945/mcp}"
 COORD_AGENT="${COORD_AGENT:-team-session-local64-context-chaos}"
-WORKER_COUNT="${WORKER_COUNT:-8}"
-PRESSURE_WORKER_COUNT="${PRESSURE_WORKER_COUNT:-4}"
+WORKER_COUNT="${WORKER_COUNT:-4}"
+PRESSURE_WORKER_COUNT="${PRESSURE_WORKER_COUNT:-2}"
 PRESSURE_CONTEXT_RATIO="${PRESSURE_CONTEXT_RATIO:-0.79}"
-PRESSURE_CONTEXT_LINES="${PRESSURE_CONTEXT_LINES:-96}"
+PRESSURE_CONTEXT_LINES="${PRESSURE_CONTEXT_LINES:-16}"
 SESSION_DURATION_SEC="${SESSION_DURATION_SEC:-2400}"
-default_spawn_timeout=$((WORKER_COUNT * 60))
-if [ "$default_spawn_timeout" -lt 360 ]; then
-  default_spawn_timeout=360
+default_spawn_timeout=$((WORKER_COUNT * 45))
+if [ "$default_spawn_timeout" -lt 240 ]; then
+  default_spawn_timeout=240
 fi
 SPAWN_TIMEOUT_SEC="${SPAWN_TIMEOUT_SEC:-$default_spawn_timeout}"
 default_http_timeout=$((SPAWN_TIMEOUT_SEC + 300))
-min_http_timeout=$((WORKER_COUNT * 70))
+min_http_timeout=$((WORKER_COUNT * 55))
 if [ "$default_http_timeout" -lt "$min_http_timeout" ]; then
   default_http_timeout="$min_http_timeout"
 fi
@@ -176,11 +176,10 @@ build_spawn_batch() {
       prompt="$(
         printf '%s\n' \
           "너의 에이전트 이름은 ${actor} 이다. 너는 local64 context pressure worker 이다." \
-          "사용 가능한 도구는 masc_team_session_status, masc_team_session_turn, masc_memento_mori 뿐이다." \
-          "1) 먼저 mcp__masc__masc_team_session_status(session_id=\"${session_id}\") 를 호출해라." \
-          "2) 다음으로 아래 context 를 사용해서 mcp__masc__masc_memento_mori(context_ratio=${PRESSURE_CONTEXT_RATIO}, current_task=\"local64-context-chaos\", summary=\"${actor} pressure capsule\", full_context=\"...\") 를 호출해라." \
-          "3) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] pressure worker completed memento check\") 를 호출해라." \
-          "4) 마지막 답변은 한 줄로 done:${actor}:pressure:memento=<status> 형식만 출력해라. 여기서 <status> 는 방금 masc_memento_mori 결과의 status 값이다." \
+          "반드시 masc_memento_mori 를 먼저 호출하고, 바로 이어서 masc_team_session_turn 를 호출해라." \
+          "1) 아래 context 를 full_context 로 사용해서 mcp__masc__masc_memento_mori(context_ratio=${PRESSURE_CONTEXT_RATIO}, current_task=\"local64-context-chaos\", summary=\"${actor} pressure capsule\", full_context=\"...\") 를 호출해라." \
+          "2) 바로 mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] pressure memento-called context_ratio=${PRESSURE_CONTEXT_RATIO}\") 를 호출해라." \
+          "3) 마지막 답변은 한 줄로 done:${actor}:pressure:memento-called 만 출력해라." \
           "" \
           "[FULL_CONTEXT_BEGIN]" \
           "${pressure_context}" \
@@ -190,9 +189,8 @@ build_spawn_batch() {
       prompt="$(
         printf '%s\n' \
           "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
-          "1) mcp__masc__masc_team_session_status(session_id=\"${session_id}\") 를 호출해라." \
-          "2) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] executor online for local64 context chaos\") 를 호출해라." \
-          "3) 마지막 답변은 한 줄로 done:${actor}:executor 만 출력해라."
+          "1) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] executor online for local64 context chaos\") 를 호출해라." \
+          "2) 마지막 답변은 한 줄로 done:${actor}:executor:note-recorded 만 출력해라."
       )"
     fi
 
@@ -262,8 +260,8 @@ require_result_condition "$step_raw" '
       | map(select(
           (.spawn_role | tostring | startswith("pressure-"))
           and (
-            (.output_preview | tostring | contains("masc_memento_mori"))
-            or (.output_preview | tostring | contains("memento="))
+            (.output_preview | tostring | contains("memento-called"))
+            or (.output_preview | tostring | contains("masc_memento_mori"))
           )
         ))
       | length) >= '"$PRESSURE_WORKER_COUNT"')

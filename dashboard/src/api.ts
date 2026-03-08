@@ -275,6 +275,49 @@ export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<Dashboa
   return get(`/api/v1/dashboard?mode=${mode}`)
 }
 
+// --- Individual resource fetchers (selective SSE-driven refresh) ---
+
+export interface PaginatedAgentsResponse {
+  agents: unknown[]
+  limit: number
+  offset: number
+  total: number
+}
+
+export interface PaginatedTasksResponse {
+  tasks: unknown[]
+  limit: number
+  offset: number
+  total: number
+}
+
+export interface PaginatedMessagesResponse {
+  messages: unknown[]
+  limit: number
+  since_seq: number
+  total: number
+}
+
+export function fetchAgentsList(): Promise<PaginatedAgentsResponse> {
+  return get('/api/v1/agents?limit=100')
+}
+
+export function fetchTasksList(opts?: {
+  includeDone?: boolean
+  includeCancelled?: boolean
+}): Promise<PaginatedTasksResponse> {
+  const params = new URLSearchParams({ limit: '200' })
+  if (opts?.includeDone) params.set('include_done', 'true')
+  if (opts?.includeCancelled) params.set('include_cancelled', 'true')
+  return get(`/api/v1/tasks?${params}`)
+}
+
+export function fetchMessagesList(sinceSeq?: number): Promise<PaginatedMessagesResponse> {
+  const params = new URLSearchParams({ limit: '50' })
+  if (sinceSeq != null && sinceSeq > 0) params.set('since_seq', String(sinceSeq))
+  return get(`/api/v1/messages?${params}`)
+}
+
 export interface FetchMdalLoopsOptions {
   limit?: number
   historyLimit?: number

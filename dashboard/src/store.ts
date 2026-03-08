@@ -20,7 +20,11 @@ import type {
   MdalLoop,
   MdalIterationRecord,
 } from './types'
-import { fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, fetchMdalLoops, type DashboardMode } from './api'
+import {
+  fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, fetchMdalLoops,
+  fetchAgentsList, fetchTasksList, fetchMessagesList,
+  type DashboardMode,
+} from './api'
 import { lastEvent, connected, journal } from './sse'
 import { deriveKeeperDiagnostic, normalizeLodgeRuntimeStatus } from './keeper-runtime'
 import { buildAgentMotion, type AgentMotionSnapshot } from './components/common/agent-motion'
@@ -612,6 +616,74 @@ export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<vo
   }
 }
 
+// --- Selective refresh: individual resource fetchers with merge ---
+// Individual endpoints return simplified fields. Merge preserves rich data
+// from the initial full dashboard load (emoji, koreanName, model, etc.).
+
+export async function refreshAgents(): Promise<void> {
+  try {
+    const data = await fetchAgentsList()
+    const incoming = (Array.isArray(data.agents) ? data.agents : [])
+      .map(normalizeAgent)
+      .filter((a): a is Agent => a !== null)
+    const prev = agents.value
+    const prevMap = new Map(prev.map(a => [a.name, a]))
+    agents.value = incoming.map(a => {
+      const old = prevMap.get(a.name)
+      if (!old) return a
+      return { ...old, status: a.status, current_task: a.current_task }
+    })
+  } catch (err) {
+    console.error('Agents selective fetch error:', err)
+  }
+}
+
+export async function refreshTasks(): Promise<void> {
+  try {
+    const data = await fetchTasksList({ includeDone: true, includeCancelled: true })
+    const incoming = (Array.isArray(data.tasks) ? data.tasks : [])
+      .map(normalizeTask)
+      .filter((t): t is Task => t !== null)
+    const prev = tasks.value
+    const prevMap = new Map(prev.map(t => [t.id, t]))
+    tasks.value = incoming.map(t => {
+      const old = prevMap.get(t.id)
+      if (!old) return t
+      return {
+        ...old,
+        status: t.status,
+        priority: t.priority ?? old.priority,
+        assignee: t.assignee ?? old.assignee,
+      }
+    })
+  } catch (err) {
+    console.error('Tasks selective fetch error:', err)
+  }
+}
+
+export async function refreshMessages(): Promise<void> {
+  try {
+    const current = messages.value
+    const maxSeq = current.reduce((m, msg) => Math.max(m, msg.seq ?? 0), 0)
+    const data = await fetchMessagesList(maxSeq)
+    const incoming = (Array.isArray(data.messages) ? data.messages : [])
+      .map(normalizeMessage)
+      .filter((m): m is Message => m !== null)
+    if (incoming.length === 0) return
+    const existingSeqs = new Set(
+      current.map(m => m.seq).filter((s): s is number => s != null),
+    )
+    const fresh = incoming.filter(m => m.seq == null || !existingSeqs.has(m.seq))
+    if (fresh.length > 0) {
+      const merged = [...current, ...fresh]
+      // Cap at 500 messages to prevent unbounded growth in long sessions
+      messages.value = merged.length > 500 ? merged.slice(-500) : merged
+    }
+  } catch (err) {
+    console.error('Messages selective fetch error:', err)
+  }
+}
+
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
@@ -684,109 +756,90 @@ export function registerCouncilRefresh(fn: () => void): void {
   _refreshCouncilFn = fn
 }
 // --- SSE event reaction ---
-// When lastEvent changes, invalidate cache and re-fetch
+// When lastEvent changes, route to the minimal refresh needed.
 
-let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
-let _boardDebounce: ReturnType<typeof setTimeout> | null = null
-let _councilDebounce: ReturnType<typeof setTimeout> | null = null
-let _mdalDebounce: ReturnType<typeof setTimeout> | null = null
+const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 
-function scheduleCouncilRefresh(): void {
-  if (_councilDebounce) return
-  _councilDebounce = setTimeout(() => {
-    _refreshCouncilFn?.()
-    _councilDebounce = null
-  }, 500)
-}
-
-function scheduleMdalRefresh(): void {
-  if (_mdalDebounce) return
-  _mdalDebounce = setTimeout(() => {
-    refreshMdal()
-    _mdalDebounce = null
-  }, 350)
-}
-
-// Events that affect dashboard data (agents, tasks, messages, keepers, status).
-// Other events have their own handlers (board, council, mdal) or need no fetch (keeper_heartbeat).
-const DASHBOARD_REFRESH_EVENTS = new Set([
-  'agent_joined',
-  'agent_left',
-  'broadcast',
-  'keeper_handoff',
-  'keeper_compaction',
-  'keeper_guardrail',
-])
-
-function isDashboardRefreshEvent(eventType: string): boolean {
-  if (DASHBOARD_REFRESH_EVENTS.has(eventType)) return true
-  return eventType.startsWith('task_') || eventType.startsWith('masc/task_')
+/** Schedule a debounced refresh for the given key. Coalesces rapid events. */
+function scheduleRefresh(key: string, fn: () => void, delayMs = 500): void {
+  if (_debounceTimers[key]) return
+  _debounceTimers[key] = setTimeout(() => {
+    fn()
+    delete _debounceTimers[key]
+  }, delayMs)
 }
 
 export function setupSSEReaction(): () => void {
-  // Subscribe to SSE events and trigger selective refreshes
+  // Subscribe to SSE events and trigger per-resource refreshes
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
 
-    // Handle keeper heartbeat events — update heartbeat map without any fetch
+    // Keeper heartbeat — update signal directly, zero network calls
     if (event.type === 'keeper_heartbeat' && event.name) {
       const next = new Map(keeperHeartbeats.value)
       next.set(event.name, event.ts_unix ? event.ts_unix * 1000 : Date.now())
       keeperHeartbeats.value = next
-      return // No dashboard fetch needed
+      return
     }
 
-    // Dashboard data events — debounced full refresh
-    if (isDashboardRefreshEvent(event.type)) {
-      invalidateDashboardCache()
-      if (!_fetchDebounce) {
-        _fetchDebounce = setTimeout(() => {
-          refreshDashboard()
-          _fetchDebounce = null
-        }, 500)
-      }
+    // Agent events → fetch agents only
+    if (event.type === 'agent_joined' || event.type === 'agent_left') {
+      scheduleRefresh('agents', refreshAgents)
     }
 
-    // Board-specific events trigger board refresh only
+    // Task events → fetch tasks only
+    if (event.type.startsWith('task_') || event.type.startsWith('masc/task_')) {
+      scheduleRefresh('tasks', refreshTasks)
+    }
+
+    // Broadcast → fetch new messages only (append-only via since_seq)
+    if (event.type === 'broadcast') {
+      scheduleRefresh('messages', refreshMessages)
+    }
+
+    // Keeper lifecycle events → full dashboard (keeper data only in bundle)
+    if (
+      event.type === 'keeper_handoff'
+      || event.type === 'keeper_compaction'
+      || event.type === 'keeper_guardrail'
+    ) {
+      scheduleRefresh('dashboard', () => {
+        invalidateDashboardCache()
+        refreshDashboard()
+      })
+    }
+
+    // Board events → board refresh only
     if (
       event.type === 'board_post'
       || event.type === 'masc/board_post'
       || event.type === 'board_comment'
       || event.type === 'masc/board_comment'
     ) {
-      if (!_boardDebounce) {
-        _boardDebounce = setTimeout(() => {
-          refreshBoard()
-          _boardDebounce = null
-        }, 500)
-      }
+      scheduleRefresh('board', refreshBoard)
     }
 
-    // Council decision events trigger council refresh only
+    // Council events
     if (event.type.startsWith('decision_')) {
-      scheduleCouncilRefresh()
+      scheduleRefresh('council', () => _refreshCouncilFn?.())
     }
 
-    // MDAL events trigger mdal refresh only
+    // MDAL events
     if (
       event.type === 'mdal_started'
       || event.type === 'mdal_iteration'
       || event.type === 'mdal_completed'
       || event.type === 'mdal_stopped'
     ) {
-      scheduleMdalRefresh()
+      scheduleRefresh('mdal', refreshMdal, 350)
     }
   })
 
   return () => {
     unsubscribe()
-    if (_councilDebounce) {
-      clearTimeout(_councilDebounce)
-      _councilDebounce = null
-    }
-    if (_mdalDebounce) {
-      clearTimeout(_mdalDebounce)
-      _mdalDebounce = null
+    for (const key of Object.keys(_debounceTimers)) {
+      clearTimeout(_debounceTimers[key])
+      delete _debounceTimers[key]
     }
   }
 }

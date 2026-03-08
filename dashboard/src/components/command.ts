@@ -13,6 +13,7 @@ import type {
   CommandPlaneSwarmFlag,
   CommandPlaneSwarmGap,
   CommandPlaneSwarmLane,
+  CommandPlaneSwarmProof,
   CommandPlaneSwarmTimelineEvent,
   CommandPlaneSwarmBlocker,
   CommandPlaneSwarmChecklistItem,
@@ -26,10 +27,13 @@ import {
   commandPlaneActionBusy,
   commandPlaneActionError,
   commandPlaneError,
+  commandPlaneDetailError,
+  commandPlaneDetailLoading,
   commandPlaneHelp,
   commandPlaneHelpError,
   commandPlaneHelpLoading,
   commandPlaneLoading,
+  commandPlaneSummary,
   commandPlaneSnapshot,
   commandPlaneSwarm,
   commandPlaneSwarmError,
@@ -38,8 +42,8 @@ import {
   denyCommandPlaneDecision,
   pauseCommandPlaneOperation,
   recallCommandPlaneOperation,
+  refreshCommandPlaneCurrentSurface,
   refreshCommandPlaneHelp,
-  refreshCommandPlaneSnapshot,
   refreshCommandPlaneSwarm,
   runCommandPlaneDispatchTick,
   resumeCommandPlaneOperation,
@@ -114,6 +118,10 @@ function actionDisabled(key: string): boolean {
   return commandPlaneActionBusy.value === key
 }
 
+function currentCommandPlaneSummary() {
+  return commandPlaneSummary.value
+}
+
 function dashboardActorName(): string | null {
   if (typeof window === 'undefined') return null
   const params = new URLSearchParams(window.location.search)
@@ -173,15 +181,15 @@ async function fire(action: () => Promise<void>) {
 }
 
 function SummaryCards() {
-  const snapshot = commandPlaneSnapshot.value
-  const topology = snapshot?.topology.summary
-  const ops = snapshot?.operations.summary
-  const decisions = snapshot?.decisions.summary
-  const alerts = snapshot?.alerts.summary
+  const summary = currentCommandPlaneSummary()
+  const topology = summary?.topology.summary
+  const ops = summary?.operations.summary
+  const decisions = summary?.decisions.summary
+  const alerts = summary?.alerts.summary
   return html`
     <div class="command-summary-grid">
       <div class="monitor-stat-card"><span>Units</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0} managed</small></div>
-      <div class="monitor-stat-card"><span>Ops</span><strong>${ops?.active ?? 0}</strong><small>${snapshot?.detachments.summary?.active ?? 0} detachments</small></div>
+      <div class="monitor-stat-card"><span>Ops</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0} detachments</small></div>
       <div class="monitor-stat-card"><span>Approvals</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0} tracked</small></div>
       <div class="monitor-stat-card"><span>Alerts</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0} warn</small></div>
     </div>
@@ -261,8 +269,48 @@ function SwarmGapRow({ gap }: { gap: CommandPlaneSwarmGap }) {
   `
 }
 
+function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
+  const tone =
+    proof?.status === 'missing'
+      ? 'warn'
+      : proof?.pass === false
+        ? 'bad'
+        : proof?.pass === true
+          ? 'ok'
+          : 'warn'
+  return html`
+    <div class="command-guide-card ${toneClass(tone)}">
+      <div class="command-guide-head">
+        <strong>Hot Proof</strong>
+        <span class="command-chip ${toneClass(tone)}">${proof?.status ?? 'missing'}</span>
+      </div>
+      ${proof
+        ? html`
+            <div class="command-card-grid">
+              <span>Source</span><span>${proof.source}</span>
+              <span>Run</span><span>${proof.run_id ?? 'n/a'}</span>
+              <span>Captured</span><span>${relativeTime(proof.captured_at)}</span>
+              <span>Pass</span><span>${proof.pass == null ? 'n/a' : proof.pass ? 'yes' : 'no'}</span>
+              <span>Peak Hot Slots</span><span>${proof.peak_hot_slots ?? 'n/a'}</span>
+              <span>Ctx / Slot</span><span>${proof.ctx_per_slot ?? 'n/a'}</span>
+              <span>Workers</span><span>${proof.workers.expected ?? 'n/a'} expected · ${proof.workers.done ?? 'n/a'} done · ${proof.workers.final ?? 'n/a'} final</span>
+            </div>
+            ${proof.artifact_ref
+              ? html`<div class="command-card-foot">${proof.artifact_ref}</div>`
+              : null}
+            ${proof.missing_reason
+              ? html`<p>${proof.missing_reason}</p>`
+              : null}
+          `
+        : html`<p>No swarm proof is available yet.</p>`}
+    </div>
+  `
+}
+
 function SwarmPanel() {
-  const swarm = commandPlaneSnapshot.value?.swarm_status
+  const summary = currentCommandPlaneSummary()
+  const swarm = summary?.swarm_status
+  const proof = summary?.swarm_proof
   const lanes = swarm?.lanes.filter(lane => lane.present) ?? []
   const gaps = swarm?.gaps.items ?? []
   const timeline = swarm?.timeline.slice(0, 6) ?? []
@@ -298,6 +346,8 @@ function SwarmPanel() {
                   <div class="command-card-foot">${recommendation?.tool ?? 'masc_operator_snapshot'}</div>
                 </div>
 
+                <${SwarmProofPanel} proof=${proof} />
+
                 <div class="command-guide-card ${gaps.length > 0 ? 'warn' : 'ok'}">
                   <div class="command-guide-head">
                     <strong>Hard Gaps</strong>
@@ -326,7 +376,7 @@ function SwarmPanel() {
 }
 
 function SurfaceTabs() {
-  const surfaces: CommandPlaneSurface[] = ['swarm', 'operations', 'topology', 'alerts', 'trace', 'control']
+  const surfaces: CommandPlaneSurface[] = ['summary', 'swarm', 'operations', 'topology', 'alerts', 'trace', 'control']
   return html`
     <div class="command-surface-tabs">
       ${surfaces.map(surface => html`
@@ -342,14 +392,15 @@ function SurfaceTabs() {
 }
 
 function GuidedPanel() {
+  const summary = currentCommandPlaneSummary()
   const snapshot = commandPlaneSnapshot.value
   const status = serverStatus.value
   const actorName = dashboardActorName()
   const actor = actorName ? agents.value.find(item => item.name === actorName) ?? null : null
   const actorTasks = actorName ? tasks.value.filter(task => task.assignee === actorName && isActiveTask(task)) : []
-  const activeOps = snapshot?.operations.summary?.active ?? 0
-  const detachments = snapshot?.detachments.summary?.total ?? 0
-  const pendingDecisions = snapshot?.decisions.summary?.pending ?? 0
+  const activeOps = summary?.operations.summary?.active ?? 0
+  const detachments = summary?.detachments.summary?.total ?? 0
+  const pendingDecisions = summary?.decisions.summary?.pending ?? 0
   const stalledDetachment = snapshot?.detachments.detachments.find(card => {
     const heartbeatDeadline = card.detachment.heartbeat_deadline
     const deadlineTs = heartbeatDeadline ? Date.parse(heartbeatDeadline) : Number.NaN
@@ -416,7 +467,7 @@ function GuidedPanel() {
                   detail: `${actorName} current_task=${currentTask}${lastSeenAge != null ? ` · last seen ${lastSeenAge}s ago` : ''}`,
                   tool: 'masc_plan_get_task',
                 },
-    !snapshot || (snapshot.topology.summary?.managed_unit_count ?? 0) === 0
+    !summary || (summary.topology.summary?.managed_unit_count ?? 0) === 0
       ? {
           title: 'Operation readiness',
           tone: 'warn',
@@ -427,13 +478,13 @@ function GuidedPanel() {
         ? {
             title: 'Operation readiness',
             tone: 'warn',
-            detail: `${snapshot.topology.summary?.managed_unit_count ?? 0} managed units are ready, but there is no active operation.`,
+            detail: `${summary.topology.summary?.managed_unit_count ?? 0} managed units are ready, but there is no active operation.`,
             tool: 'masc_operation_start',
           }
         : {
             title: 'Operation readiness',
             tone: 'ok',
-            detail: `${activeOps} active operation(s) across ${snapshot.topology.summary?.managed_unit_count ?? 0} managed unit(s).`,
+            detail: `${activeOps} active operation(s) across ${summary.topology.summary?.managed_unit_count ?? 0} managed unit(s).`,
             tool: 'masc_observe_operations',
           },
     pendingDecisions > 0
@@ -454,13 +505,13 @@ function GuidedPanel() {
           ? {
               title: 'Dispatch readiness',
               tone: 'warn',
-              detail: `Dispatch needs reconciliation${stalledDetachment ? ` · detachment ${stalledDetachment.detachment.detachment_id} is stalled` : ''}${badAlert ? ` · alert ${badAlert.title ?? badAlert.alert_id}` : ''}.`,
+              detail: `Dispatch needs reconciliation${stalledDetachment ? ` · detachment ${stalledDetachment.detachment.detachment_id} is stalled` : ''}${badAlert ? ` · alert ${badAlert.title ?? badAlert.alert_id}` : ''}${!snapshot && !stalledDetachment && !badAlert ? ' · open a detail tab to inspect the exact source.' : ''}.`,
               tool: pendingDecisions > 0 ? 'masc_policy_approve' : 'masc_dispatch_tick',
             }
           : {
               title: 'Dispatch readiness',
               tone: 'ok',
-              detail: `${detachments} detachment(s) visible and no strict approval backlog.`,
+              detail: `${detachments} detachment(s) visible and no strict approval backlog${!snapshot ? ' · detail panes stay lazy until opened.' : ''}.`,
               tool: 'masc_detachment_list',
             },
   ]
@@ -476,7 +527,7 @@ function GuidedPanel() {
             ? 'masc_plan_set_task'
             : heartbeatFresh === false
               ? 'masc_heartbeat'
-              : !snapshot || (snapshot.topology.summary?.managed_unit_count ?? 0) === 0
+              : !summary || (summary.topology.summary?.managed_unit_count ?? 0) === 0
                 ? 'masc_unit_define'
                 : activeOps === 0
                   ? 'masc_operation_start'
@@ -590,6 +641,24 @@ function GuidedPanel() {
       </section>
     </div>
   `
+}
+
+function SummarySurface() {
+  return html`
+    <${SummaryCards} />
+    <${SwarmPanel} />
+    <${GuidedPanel} />
+  `
+}
+
+function DetailLoadingState() {
+  if (commandPlaneDetailLoading.value) {
+    return html`<div class="empty-state">Loading command-plane detail…</div>`
+  }
+  if (commandPlaneDetailError.value) {
+    return html`<div class="empty-state error">${commandPlaneDetailError.value}</div>`
+  }
+  return html`<div class="empty-state">Select a surface to load command-plane detail.</div>`
 }
 
 function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?: number }) {
@@ -1105,6 +1174,12 @@ function ControlSurface() {
 }
 
 function SurfaceBody() {
+  if (commandPlaneSurface.value === 'summary') {
+    return html`<${SummarySurface} />`
+  }
+  if (!commandPlaneSnapshot.value) {
+    return html`<${DetailLoadingState} />`
+  }
   switch (commandPlaneSurface.value) {
     case 'swarm':
       return html`<${SwarmSurface} />`
@@ -1145,7 +1220,7 @@ export function Command() {
           >
             ${actionDisabled('dispatch:tick') ? 'Reconciling…' : 'Run Tick'}
           </button>
-          <button class="control-btn ghost" onClick=${() => { void refreshCommandPlaneSnapshot() }} disabled=${commandPlaneLoading.value}>
+          <button class="control-btn ghost" onClick=${() => { void refreshCommandPlaneCurrentSurface() }} disabled=${commandPlaneLoading.value}>
             ${commandPlaneLoading.value ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
@@ -1157,10 +1232,6 @@ export function Command() {
       ${commandPlaneActionError.value
         ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
         : null}
-
-      <${SummaryCards} />
-      <${SwarmPanel} />
-      <${GuidedPanel} />
       <${SurfaceTabs} />
       <${SurfaceBody} />
     </section>

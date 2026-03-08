@@ -188,6 +188,22 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 
 const _dashboardCache: Partial<Record<DashboardMode, { data: unknown; time: number }>> = {}
 const DASHBOARD_CACHE_TTL = 5000
+let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
+
+function isDashboardRefreshEvent(eventType: string): boolean {
+  return (
+    eventType === 'dashboard_refresh'
+    || eventType === 'masc/dashboard_refresh'
+    || eventType.startsWith('goal_')
+    || eventType.startsWith('masc/goal_')
+    || eventType.startsWith('mdal_')
+    || eventType.startsWith('masc/mdal_')
+    || eventType.startsWith('operator_')
+    || eventType.startsWith('masc/operator_')
+    || eventType.startsWith('command_plane_')
+    || eventType.startsWith('masc/command_plane_')
+  )
+}
 
 export function invalidateDashboardCache(): void {
   delete _dashboardCache.compact
@@ -755,6 +771,11 @@ let _refreshCouncilFn: (() => void) | null = null
 export function registerCouncilRefresh(fn: () => void): void {
   _refreshCouncilFn = fn
 }
+
+let _refreshCommandPlaneFn: (() => void) | null = null
+export function registerCommandPlaneRefresh(fn: () => void): void {
+  _refreshCommandPlaneFn = fn
+}
 // --- SSE event reaction ---
 // When lastEvent changes, route to the minimal refresh needed.
 
@@ -785,6 +806,18 @@ export function setupSSEReaction(): () => void {
     // Agent events → fetch agents only
     if (event.type === 'agent_joined' || event.type === 'agent_left') {
       scheduleRefresh('agents', refreshAgents)
+    }
+
+    // Dashboard data events — debounced full refresh
+    if (isDashboardRefreshEvent(event.type)) {
+      invalidateDashboardCache()
+      if (!_fetchDebounce) {
+        _fetchDebounce = setTimeout(() => {
+          refreshDashboard()
+          _refreshCommandPlaneFn?.()
+          _fetchDebounce = null
+        }, 500)
+      }
     }
 
     // Task events → fetch tasks only

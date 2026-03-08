@@ -18,21 +18,25 @@ open Risc_pipeline
 (* Global Pipeline Registry                                         *)
 (* ================================================================ *)
 
-(** Singleton pipeline registry shared across all tool calls. *)
+(** Singleton pipeline registry shared across all tool calls.
+
+    Thread safety: MASC-MCP runs on a single Eio domain with cooperative
+    scheduling, so these module-level singletons are safe.  If migrating
+    to OCaml 5.x multicore (multiple domains), wrap with Eio.Mutex. *)
 let global_registry = create_registry ()
 
 (* ================================================================ *)
 (* Global Coherence Controller (Phase 2)                            *)
 (* ================================================================ *)
 
-(** Singleton MESI coherence controller shared across all cache tools. *)
+(** Singleton MESI coherence controller. Same thread-safety note above. *)
 let global_coherence = Cache_coherence.create_controller ()
 
 (* ================================================================ *)
 (* Global OoO Scheduler (Phase 3)                                   *)
 (* ================================================================ *)
 
-(** Singleton Tomasulo RS scheduler shared across all OoO tools. *)
+(** Singleton Tomasulo RS scheduler. Same thread-safety note above. *)
 let global_scheduler = Reservation_station.create_scheduler ()
 
 (* ================================================================ *)

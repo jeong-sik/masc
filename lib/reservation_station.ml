@@ -111,7 +111,13 @@ let add_entry rs ~op_id ~instruction ~parent_task_id ~operand_tags =
   end
 
 (** Broadcast a CDB result: resolve matching operand tags across all entries.
-    Returns the number of entries that became newly ready. *)
+    Returns the number of entries that became newly ready.
+
+    Design note: [result] is intentionally unused here.  Unlike hardware
+    Tomasulo where CDB carries tag+value simultaneously, our adaptation
+    stores results on the completed entry via [complete_entry].  Dependent
+    entries fetch values at execution time, not at CDB-snoop time.  This
+    avoids duplicating large JSON payloads across all watching RS entries. *)
 let cdb_broadcast rs ~completed_op_id ~result:_ =
   let newly_ready = ref 0 in
   rs.entries <- List.map (fun entry ->

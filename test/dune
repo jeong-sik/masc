@@ -188,6 +188,12 @@
  (modules test_common)
  (libraries masc_mcp alcotest))
 
+; Room raw message ordering/limit regression tests
+(test
+ (name test_room_messages_raw)
+ (modules test_room_messages_raw)
+ (libraries masc_mcp alcotest unix))
+
 ; TRPG engine state machine tests
 (test
  (name test_trpg_engine_state_machine)

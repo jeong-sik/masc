@@ -34,7 +34,11 @@ let test_fleet_member_variant () =
     };
     system_prompt = "test prompt";
     tools = [];
+    max_tokens = None;
     max_turns = 5;
+    include_masc_tools = true;
+    managed_task = None;
+    expected_final_marker = None;
   } in
   let sdk = Agent_swarm_fleet.Sdk_agent spec in
   let ext = Agent_swarm_fleet.Ext_agent (Agent_swarm_external_agent.claude_code ()) in

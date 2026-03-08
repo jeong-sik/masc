@@ -1146,7 +1146,117 @@ export interface CommandPlaneHelpResponse {
   examples: CommandPlaneHelpExample[]
 }
 
+export interface CommandPlaneSwarmChecklistItem {
+  id: string
+  title: string
+  status: 'pass' | 'fail' | 'warn'
+  detail: string
+  next_tool: string
+}
+
+export interface CommandPlaneSwarmBlocker {
+  code: string
+  severity: 'bad' | 'warn' | 'ok'
+  title: string
+  detail: string
+  next_tool: string
+}
+
+export interface CommandPlaneSwarmMessage {
+  seq: number
+  from: string
+  content: string
+  timestamp: string
+}
+
+export interface CommandPlaneSwarmWorker {
+  name: string
+  role: string
+  lane: string
+  joined: boolean
+  live_presence: boolean
+  completed: boolean
+  status: string
+  current_task: string | null
+  bound_task_id: string | null
+  bound_task_title: string | null
+  bound_task_status: string | null
+  current_task_matches_run: boolean
+  squad_member: boolean
+  detachment_member: boolean
+  last_seen: string | null
+  heartbeat_age_sec: number | null
+  heartbeat_fresh: boolean
+  claim_marker_seen: boolean
+  done_marker_seen: boolean
+  final_marker_seen: boolean
+  claim_marker: string
+  done_marker: string
+  final_marker: string
+  last_message: {
+    seq: number
+    content: string
+    timestamp: string
+  } | null
+}
+
+export interface CommandPlaneSwarmProviderSample {
+  timestamp: string
+  active_slots: number
+  active_slot_ids: number[]
+}
+
+export interface CommandPlaneSwarmProvider {
+  slot_url?: string | null
+  total_slots?: number
+  ctx_per_slot?: number
+  active_slots_now?: number
+  peak_active_slots?: number
+  sample_count?: number
+  last_sample_at?: string | null
+  timeline: CommandPlaneSwarmProviderSample[]
+}
+
+export interface CommandPlaneSwarmResponse {
+  version?: string
+  generated_at?: string
+  run_id?: string
+  room_id?: string
+  operation_id?: string | null
+  recommended_next_tool?: string
+  summary?: {
+    expected_workers?: number
+    joined_workers?: number
+    live_workers?: number
+    squad_roster_size?: number
+    detachment_roster_size?: number
+    current_task_bound?: number
+    fresh_heartbeats?: number
+    claim_markers_seen?: number
+    done_markers_seen?: number
+    final_markers_seen?: number
+    completed_workers?: number
+    peak_hot_slots?: number
+    hot_window_ok?: boolean
+    pass_hot_concurrency?: boolean
+    pass_end_to_end?: boolean
+    pending_decisions?: number
+    pass?: boolean
+  }
+  provider?: CommandPlaneSwarmProvider
+  operation?: CommandPlaneOperationRecord | null
+  squad?: CommandPlaneUnitRecord | null
+  detachment?: CommandPlaneDetachmentRecord | null
+  workers: CommandPlaneSwarmWorker[]
+  checklist: CommandPlaneSwarmChecklistItem[]
+  blockers: CommandPlaneSwarmBlocker[]
+  recent_messages: CommandPlaneSwarmMessage[]
+  recent_trace_events: CommandPlaneTraceEvent[]
+  truth_notes: string[]
+}
+
 export type CommandPlaneSurface =
+  | 'swarm'
   | 'operations'
   | 'topology'
   | 'alerts'

@@ -136,6 +136,12 @@ let claim ~sw t ~task_id =
       ("task_id", `String task_id);
     ]
 
+let set_current_task ~sw t ~task_id =
+  call_rpc ~sw t ~masc_method:"masc_plan_set_task"
+    ~arguments:[
+      ("task_id", `String task_id);
+    ]
+
 let done_task ~sw t ~task_id =
   call_rpc ~sw t ~masc_method:"masc_done"
     ~arguments:[

@@ -62,6 +62,7 @@
    agent_swarm_dev_tools
    agent_swarm_external_agent
    agent_swarm_fleet
+   agent_swarm_live_harness
    agent_swarm_prompts
    agent_swarm_runner
    agent_swarm_swarm

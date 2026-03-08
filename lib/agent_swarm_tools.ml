@@ -35,6 +35,24 @@ let make_tools (client : Agent_swarm_client.t) ~sw : Agent_sdk.Tool.t list =
          | Error e -> Error e)
   in
 
+  let masc_set_current_task = create
+    ~name:"masc_set_current_task"
+    ~description:"Bind the current planning task for this agent after claiming it. Use immediately after masc_claim_task."
+    ~parameters:[{
+      name = "task_id";
+      description = "The claimed task ID to bind as the current planning task";
+      param_type = Agent_sdk.Types.String;
+      required = true;
+    }]
+    (fun input ->
+       match Agent_swarm_tool_input.extract_string "task_id" input with
+       | Error e -> Error e
+       | Ok task_id ->
+         match Agent_swarm_client.set_current_task ~sw client ~task_id with
+         | Ok json -> Ok (Agent_swarm_tool_input.json_to_string json)
+         | Error e -> Error e)
+  in
+
   let masc_broadcast = create
     ~name:"masc_broadcast"
     ~description:"Broadcast a message to all agents in the room"
@@ -81,6 +99,16 @@ let make_tools (client : Agent_swarm_client.t) ~sw : Agent_sdk.Tool.t list =
        | Error e -> Error e)
   in
 
+  let masc_heartbeat = create
+    ~name:"masc_heartbeat"
+    ~description:"Send an immediate heartbeat to keep this agent fresh in MASC visibility."
+    ~parameters:[]
+    (fun _input ->
+       match Agent_swarm_client.heartbeat ~sw client with
+       | Ok json -> Ok (Agent_swarm_tool_input.json_to_string json)
+       | Error e -> Error e)
+  in
+
   let masc_add_task = create
     ~name:"masc_add_task"
     ~description:"Create a new task in the MASC room"
@@ -115,4 +143,14 @@ let make_tools (client : Agent_swarm_client.t) ~sw : Agent_sdk.Tool.t list =
          | Error e -> Error e)
   in
 
-  [masc_list_tasks; masc_claim_task; masc_add_task; masc_broadcast; masc_complete_task; masc_room_status; masc_send_direct]
+  [
+    masc_list_tasks;
+    masc_claim_task;
+    masc_set_current_task;
+    masc_add_task;
+    masc_broadcast;
+    masc_complete_task;
+    masc_room_status;
+    masc_send_direct;
+    masc_heartbeat;
+  ]

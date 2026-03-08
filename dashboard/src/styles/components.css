@@ -3804,10 +3804,17 @@ button.council-row.selected {
   color: #fecaca;
 }
 
-.ops-grid {
+.ops-workbench {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 0.9fr) minmax(0, 1.18fr);
   gap: 16px;
+}
+
+.ops-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 .ops-priority-grid {
@@ -3861,6 +3868,21 @@ button.council-row.selected {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+}
+
+.ops-studio-panel {
+  gap: 16px;
+}
+
+.ops-studio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ops-studio-group + .ops-studio-group {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 16px;
 }
 
 .ops-stat-grid {
@@ -4056,7 +4078,7 @@ button.council-row.selected {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .ops-grid {
+  .ops-workbench {
     grid-template-columns: 1fr;
   }
 }
@@ -4171,6 +4193,12 @@ button.council-row.selected {
   gap: 18px;
 }
 
+.command-primary-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: 16px;
+}
+
 .command-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -4188,9 +4216,9 @@ button.council-row.selected {
   margin-top: 16px;
 }
 
-.command-guide-grid {
+.command-guided-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
   gap: 16px;
 }
 
@@ -4232,6 +4260,56 @@ button.council-row.selected {
   line-height: 1.5;
 }
 
+.command-next-step-card {
+  margin-bottom: 12px;
+}
+
+.command-readiness-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.command-readiness-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+}
+
+.command-readiness-row.ok {
+  border-color: rgba(74,222,128,0.22);
+}
+
+.command-readiness-row.warn {
+  border-color: rgba(251,191,36,0.24);
+}
+
+.command-readiness-row.bad {
+  border-color: rgba(248,113,113,0.28);
+}
+
+.command-readiness-row p {
+  margin: 8px 0 0;
+  color: rgba(255,255,255,0.82);
+  line-height: 1.5;
+}
+
+.command-readiness-title-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.command-path-grid {
+  display: grid;
+  gap: 12px;
+}
+
 .command-guide-head {
   display: flex;
   justify-content: space-between;
@@ -4251,6 +4329,10 @@ button.council-row.selected {
   flex-direction: column;
   gap: 8px;
   margin-top: 12px;
+}
+
+.command-step-list.compact {
+  gap: 6px;
 }
 
 .command-step-row {
@@ -4302,6 +4384,8 @@ button.council-row.selected {
 }
 
 @media (max-width: 1100px) {
+  .command-primary-layout,
+  .command-guided-layout,
   .command-swarm-layout,
   .command-surface-grid,
   .command-grid,
@@ -4547,7 +4631,8 @@ button.council-row.selected {
 }
 
 @media (max-width: 1100px) {
-  .command-guide-grid,
+  .command-primary-layout,
+  .command-guided-layout,
   .command-summary-grid,
   .command-surface-grid,
   .command-grid,

@@ -116,6 +116,24 @@ let test_batch_add_requires_tasks () =
   | Ok _ ->
     Alcotest.fail "should fail without tasks"
 
+let test_batch_add_rejects_empty_tasks () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  Eio.Switch.run @@ fun sw ->
+  let client =
+    Agent_swarm_client.create ~net ~base_url:"http://127.0.0.1:9999" ~agent_name:"test"
+  in
+  let tools = Agent_swarm_tools.make_tools client ~sw in
+  let batch_tool =
+    List.find (fun (t : Tool.t) -> t.schema.name = "masc_batch_add_tasks") tools
+  in
+  let result = Tool.execute batch_tool (`Assoc [("tasks", `List [])]) in
+  match result with
+  | Error msg ->
+    Alcotest.(check bool) "mentions non-empty" true (has_sub msg "non-empty")
+  | Ok _ ->
+    Alcotest.fail "should fail with empty tasks"
+
 let test_claim_next_no_params () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
@@ -199,6 +217,7 @@ let () =
       Alcotest.test_case "claim requires task_id" `Quick test_claim_requires_task_id;
       Alcotest.test_case "add_task requires title" `Quick test_add_task_requires_title;
       Alcotest.test_case "batch_add requires tasks" `Quick test_batch_add_requires_tasks;
+      Alcotest.test_case "batch_add rejects empty tasks" `Quick test_batch_add_rejects_empty_tasks;
       Alcotest.test_case "claim_next no params" `Quick test_claim_next_no_params;
       Alcotest.test_case "set current task requires task_id" `Quick
         test_set_current_task_requires_task_id;

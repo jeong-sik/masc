@@ -25,6 +25,7 @@ let extract_tasks_array json =
   match json with
   | `Assoc pairs ->
     (match List.assoc_opt "tasks" pairs with
+     | Some (`List []) -> Error "tasks must be a non-empty JSON array"
      | Some (`List items) ->
        let parse_item item =
          match extract_string "title" item, extract_string "description" item with

@@ -124,6 +124,15 @@ let test_run_full_plan () =
        (fun spec -> spec.Agent_swarm_swarm.max_turns = 7)
        plan.worker_specs)
 
+let test_run_full_plan_rejects_zero_members () =
+  Alcotest.check_raises "zero members rejected"
+    (Invalid_argument "num_members must be positive")
+    (fun () ->
+       ignore
+         (Agent_swarm_fleet.build_run_full_plan ~provider:(Provider.local_qwen ())
+            ~goal:"Fix the bug" ~num_members:0 ~workdir:"/tmp/work"
+            ~max_turns:7))
+
 let () =
   Alcotest.run "Fleet Unit" [
     "external_agent", [
@@ -147,5 +156,7 @@ let () =
         test_fleet_worker_prompt;
       Alcotest.test_case "run_full plan" `Quick
         test_run_full_plan;
+      Alcotest.test_case "run_full plan rejects zero members" `Quick
+        test_run_full_plan_rejects_zero_members;
     ];
   ]

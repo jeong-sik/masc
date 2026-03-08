@@ -69,6 +69,7 @@ let worker_specs ~provider ~num_members ~workdir ~max_turns =
       })
 
 let build_run_full_plan ~provider ~goal ~num_members ~workdir ~max_turns =
+  if num_members <= 0 then invalid_arg "num_members must be positive";
   { planner_spec = planner_spec ~provider ~goal;
     worker_specs = worker_specs ~provider ~num_members ~workdir ~max_turns }
 
@@ -122,6 +123,7 @@ let run ~sw ~net ~clock ~proc_mgr config ~goal =
 
 let run_full ~sw ~net ~clock ~proc_mgr ~masc_url ~provider
     ~goal ~num_members ?workdir ~max_turns () =
+  if num_members <= 0 then invalid_arg "num_members must be positive";
   let coordinator =
     Agent_swarm_client.create ~net ~base_url:masc_url
       ~agent_name:"fleet-coordinator"
@@ -167,9 +169,16 @@ let run_full ~sw ~net ~clock ~proc_mgr ~masc_url ~provider
           (List.mapi
              (fun i spec () ->
                let result =
-                 Agent_swarm_swarm.run_agent ~sw ~net ~clock ~masc_url
-                   ~extra_tools:dev_tools spec
-                   ~goal:"Claim and complete available tasks"
+                 try
+                   Agent_swarm_swarm.run_agent ~sw ~net ~clock ~masc_url
+                     ~extra_tools:dev_tools spec
+                     ~goal:"Claim and complete available tasks"
+                 with exn ->
+                   { Agent_swarm_swarm.agent_name = spec.name;
+                     result =
+                       Error
+                         (Printf.sprintf "worker exception: %s"
+                            (Printexc.to_string exn)) }
                in
                results.(i) <- result)
              plan.worker_specs);

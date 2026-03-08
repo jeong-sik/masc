@@ -8,8 +8,17 @@ MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 COORD_AGENT="${COORD_AGENT:-team-session-local64-smoke}"
 WORKER_COUNT="${WORKER_COUNT:-8}"
 SESSION_DURATION_SEC="${SESSION_DURATION_SEC:-900}"
-SPAWN_TIMEOUT_SEC="${SPAWN_TIMEOUT_SEC:-240}"
-HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-$((SPAWN_TIMEOUT_SEC + 120))}"
+default_spawn_timeout=$((WORKER_COUNT * 45))
+if [ "$default_spawn_timeout" -lt 240 ]; then
+  default_spawn_timeout=240
+fi
+SPAWN_TIMEOUT_SEC="${SPAWN_TIMEOUT_SEC:-$default_spawn_timeout}"
+default_http_timeout=$((SPAWN_TIMEOUT_SEC + 300))
+min_http_timeout=$((WORKER_COUNT * 50))
+if [ "$default_http_timeout" -lt "$min_http_timeout" ]; then
+  default_http_timeout="$min_http_timeout"
+fi
+HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-$default_http_timeout}"
 WAIT_AFTER_SPAWN_SEC="${WAIT_AFTER_SPAWN_SEC:-3}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 MCP_SESSION_ID="${MCP_SESSION_ID:-team-session-local64-$(date +%s)-$RANDOM}"
@@ -202,7 +211,7 @@ runtime_raw="$(call_tool 91004 "masc_llama_runtime_status" '{"include_models":tr
 require_tool_success "$runtime_raw"
 require_result_condition "$runtime_raw" '.runtime_count >= 1 and .configured_capacity >= 1' "runtime status missing pool data"
 
-echo "[4/8] spawn local64 batch"
+echo "[4/8] spawn local64 batch (spawn_timeout=${SPAWN_TIMEOUT_SEC}s http_timeout=${HTTP_TIMEOUT_SEC}s workers=${WORKER_COUNT})"
 spawn_batch_json="$(build_spawn_batch "$SESSION_ID" "$WORKER_COUNT" "$LLAMA_SWARM_MODEL")"
 step_args="$(jq -cn --arg s "$SESSION_ID" --arg a "$COORD_AGENT" --argjson batch "$spawn_batch_json" --argjson timeout "$SPAWN_TIMEOUT_SEC" \
   '{session_id:$s,actor:$a,spawn_batch:$batch,spawn_timeout_seconds:$timeout}')"

@@ -11,7 +11,7 @@ OUTPUT_DIR="${LOCAL64_MATRIX_OUTPUT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/masc-local
 BASE_SEED_PORT="${LOCAL64_MATRIX_BASE_SEED_PORT:-8185}"
 BASE_MCP_PORT="${LOCAL64_MATRIX_BASE_MCP_PORT:-9045}"
 PORT_STRIDE="${LOCAL64_MATRIX_PORT_STRIDE:-10}"
-DEFAULT_SPAWN_TIMEOUT="${SPAWN_TIMEOUT_SEC:-600}"
+DEFAULT_SPAWN_TIMEOUT="${SPAWN_TIMEOUT_SEC:-}"
 DEFAULT_SESSION_DURATION="${SESSION_DURATION_SEC:-1800}"
 
 usage() {
@@ -106,24 +106,30 @@ while IFS= read -r item || [ -n "$item" ]; do
 
   mkdir -p "$run_dir"
 
+  env_args=(
+    MASC_LLAMA_RUNTIME_POOL_STATE_DIR="$pool_state_dir"
+    MASC_LOCAL64_BASE_PATH="$base_path"
+    MASC_LOCAL64_LOG_FILE="$server_log"
+    MASC_LOCAL64_PORT="$mcp_port"
+    LOCAL64_POOL_TARGET_SHARDS="$target_shards"
+    LOCAL64_POOL_FORCE_START=true
+    LLAMA_POOL_SEED_PORT="$seed_port"
+    LLAMA_MODEL_PATH="$model_path"
+    LLAMA_SWARM_MODEL="$alias_name"
+    LLAMA_POOL_PARALLEL="$parallel"
+    LLAMA_POOL_CTX="$ctx_size"
+    LLAMA_POOL_BATCH_SIZE="$batch_size"
+    LLAMA_POOL_UBATCH_SIZE="$ubatch_size"
+    WORKER_COUNT="$worker_count"
+    SESSION_DURATION_SEC="$DEFAULT_SESSION_DURATION"
+  )
+  if [ -n "$DEFAULT_SPAWN_TIMEOUT" ]; then
+    env_args+=(SPAWN_TIMEOUT_SEC="$DEFAULT_SPAWN_TIMEOUT")
+  fi
+
   set +e
   env \
-    MASC_LLAMA_RUNTIME_POOL_STATE_DIR="$pool_state_dir" \
-    MASC_LOCAL64_BASE_PATH="$base_path" \
-    MASC_LOCAL64_LOG_FILE="$server_log" \
-    MASC_LOCAL64_PORT="$mcp_port" \
-    LOCAL64_POOL_TARGET_SHARDS="$target_shards" \
-    LOCAL64_POOL_FORCE_START=true \
-    LLAMA_POOL_SEED_PORT="$seed_port" \
-    LLAMA_MODEL_PATH="$model_path" \
-    LLAMA_SWARM_MODEL="$alias_name" \
-    LLAMA_POOL_PARALLEL="$parallel" \
-    LLAMA_POOL_CTX="$ctx_size" \
-    LLAMA_POOL_BATCH_SIZE="$batch_size" \
-    LLAMA_POOL_UBATCH_SIZE="$ubatch_size" \
-    WORKER_COUNT="$worker_count" \
-    SPAWN_TIMEOUT_SEC="$DEFAULT_SPAWN_TIMEOUT" \
-    SESSION_DURATION_SEC="$DEFAULT_SESSION_DURATION" \
+    "${env_args[@]}" \
     "$WRAPPER_SCRIPT" >"$run_log" 2>&1
   exit_code=$?
   set -e

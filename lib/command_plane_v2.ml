@@ -57,6 +57,10 @@ type operation_record = {
   autonomy_level : string;
   policy_class : string;
   budget_class : string;
+  workload_profile : string;
+  stage : string option;
+  depends_on_operation_ids : string list;
+  search_strategy : string;
   detachment_session_id : string option;
   trace_id : string;
   checkpoint_ref : string option;
@@ -211,6 +215,8 @@ let find_swarm_live_artifact_json config run_id filename =
   | Some path -> Room_utils.read_json_opt config path
   | None -> None
 
+let search_stats_path config =
+  Filename.concat (control_plane_dir config) "search-stats.json"
 module StringSet = Set.Make (String)
 
 let nonempty_string = function
@@ -310,6 +316,24 @@ let get_string_list json key =
              | _ -> None)
       |> dedup_strings
   | _ -> []
+
+let operation_workload_profile operation =
+  let profile = String.trim operation.workload_profile in
+  if profile = "" then "generic" else profile
+
+let operation_search_strategy operation =
+  Cp_search_fabric.strategy_of_string (Some operation.search_strategy)
+
+let operation_stage_key operation =
+  Cp_search_fabric.normalized_stage operation.stage
+
+let validate_workload_profile = function
+  | "generic" | "research_pipeline" as value -> Ok value
+  | other -> Error (Printf.sprintf "unsupported workload_profile: %s" other)
+
+let validate_search_strategy = function
+  | "legacy" | "best_first_v1" as value -> Ok value
+  | other -> Error (Printf.sprintf "unsupported search_strategy: %s" other)
 
 let string_of_unit_kind = function
   | Company -> "company"
@@ -522,6 +546,10 @@ let operation_to_json (operation : operation_record) =
       ("autonomy_level", `String operation.autonomy_level);
       ("policy_class", `String operation.policy_class);
       ("budget_class", `String operation.budget_class);
+      ("workload_profile", `String (operation_workload_profile operation));
+      ("stage", match operation.stage with Some value -> `String value | None -> `Null);
+      ("depends_on_operation_ids", json_list_of_strings operation.depends_on_operation_ids);
+      ("search_strategy", `String operation.search_strategy);
       ( "detachment_session_id",
         match operation.detachment_session_id with
         | Some value -> `String value
@@ -561,6 +589,10 @@ let operation_of_json json =
             autonomy_level = get_string_default json "autonomy_level" "L4_Autonomous";
             policy_class = get_string_default json "policy_class" "strict";
             budget_class = get_string_default json "budget_class" "standard";
+            workload_profile = get_string_default json "workload_profile" "generic";
+            stage = get_string_opt json "stage";
+            depends_on_operation_ids = get_string_list json "depends_on_operation_ids";
+            search_strategy = get_string_default json "search_strategy" "legacy";
             detachment_session_id = get_string_opt json "detachment_session_id";
             trace_id;
             checkpoint_ref = get_string_opt json "checkpoint_ref";
@@ -770,6 +802,14 @@ let write_operations config operations =
         ("updated_at", `String (Types.now_iso ()));
         ("operations", `List (List.map operation_to_json operations));
       ])
+
+let read_search_stats config =
+  ensure_dirs config;
+  Cp_search_fabric.load_store (search_stats_path config)
+
+let write_search_stats config store =
+  ensure_dirs config;
+  Cp_search_fabric.save_store (search_stats_path config) store
 
 let read_detachments config =
   ensure_dirs config;
@@ -1336,6 +1376,10 @@ let projected_team_session_operations config units managed_operations =
              Team_session_types.execution_scope_to_string session.execution_scope;
            budget_class =
              Team_session_types.communication_mode_to_string session.communication_mode;
+           workload_profile = "generic";
+           stage = None;
+           depends_on_operation_ids = [];
+           search_strategy = "legacy";
            detachment_session_id = Some session.session_id;
            trace_id = session.session_id;
            checkpoint_ref = nonempty_string (Some session.artifacts_dir);
@@ -1391,6 +1435,10 @@ let projected_swarm_operations config units managed_operations =
             autonomy_level = "L5_Independent";
             policy_class = "swarm";
             budget_class = "adaptive";
+            workload_profile = "generic";
+            stage = None;
+            depends_on_operation_ids = [];
+            search_strategy = "legacy";
             detachment_session_id = None;
             trace_id = "swarm-trace-" ^ safe_slug swarm_id;
             checkpoint_ref = None;
@@ -1685,6 +1733,7 @@ let topology_units config =
   (agents, managed_units, normalized_units, source)
 
 type snapshot_state = {
+  config : Room.config;
   agents : Types.agent list;
   managed_units : unit_record list;
   units : unit_record list;
@@ -1708,6 +1757,7 @@ let build_snapshot_state config =
   let child_map = children_map units in
   let unit_lookup = unit_map units in
   {
+    config;
     agents;
     managed_units;
     units;
@@ -1792,63 +1842,6 @@ let list_units_json config =
       ("managed_units", `List (List.map unit_to_json managed_units));
       ("effective_units", `List (List.map unit_to_json normalized_units));
     ]
-
-let operation_card_json units (operation : operation_record) =
-  let unit_label =
-    lookup_unit units operation.assigned_unit_id
-    |> Option.map (fun (unit : unit_record) -> unit.label)
-    |> Option.value ~default:operation.assigned_unit_id
-  in
-  `Assoc
-    [
-      ("operation", operation_to_json operation);
-      ("assigned_unit_label", `String unit_label);
-    ]
-
-let list_operations_json_from_state ?operation_id (state : snapshot_state) =
-  let units = state.units in
-  let operations =
-    state.operations
-    |> List.filter (fun (operation : operation_record) ->
-           match operation_id with
-           | None -> true
-           | Some value ->
-               String.equal operation.operation_id value
-               || String.equal operation.trace_id value)
-  in
-  let managed_count =
-    List.length
-      (List.filter (fun (operation : operation_record) -> operation.source = "managed") operations)
-  in
-  let projected_count = List.length operations - managed_count in
-  `Assoc
-    [
-      ("version", `String "cp-v2");
-      ("generated_at", `String (Types.now_iso ()));
-      ( "summary",
-        `Assoc
-          [
-            ("total", `Int (List.length operations));
-            ( "active",
-              `Int
-                (List.length
-                   (List.filter
-                      (fun (op : operation_record) -> op.status = Active)
-                      operations)) );
-            ( "paused",
-              `Int
-                (List.length
-                   (List.filter
-                      (fun (op : operation_record) -> op.status = Paused)
-                      operations)) );
-            ("managed", `Int managed_count);
-            ("projected", `Int projected_count);
-          ] );
-      ("operations", `List (List.map (operation_card_json units) operations));
-    ]
-
-let list_operations_json ?operation_id config =
-  list_operations_json_from_state ?operation_id (build_snapshot_state config)
 
 let list_detachments_json_from_state ?operation_id ?detachment_id
     (state : snapshot_state) =
@@ -3573,31 +3566,6 @@ let swarm_live_json config ?run_id ?operation_id () =
           ] );
     ]
 
-let snapshot_json config =
-  let state = build_snapshot_state config in
-  let topology = topology_json_from_state state in
-  let operations = list_operations_json_from_state state in
-  let detachments = list_detachments_json_from_state state in
-  let alerts = list_alerts_json_from_state config state in
-  let decisions = list_policy_decisions_json_from_state state in
-  let capacity = capacity_json_from_state state in
-  let traces = list_traces_json config ~limit:10 () in
-  `Assoc
-    [
-      ("version", `String "cp-v2");
-      ("generated_at", `String (Types.now_iso ()));
-      ("topology", topology);
-      ("operations", operations);
-      ("detachments", detachments);
-      ("alerts", alerts);
-      ("decisions", decisions);
-      ("capacity", capacity);
-      ("traces", traces);
-    ]
-
-let operation_status_json config ?operation_id () =
-  list_operations_json ?operation_id config
-
 let unit_guard_json config unit_id =
   let agents, _, units, _ = topology_units config in
   match lookup_unit units unit_id with
@@ -3802,7 +3770,37 @@ let default_detachment_for_operation config units (operation : operation_record)
         updated_at = operation.updated_at;
       }
 
+let search_upstreams operations (operation : operation_record) =
+  operation.depends_on_operation_ids
+  |> List.map (fun upstream_id ->
+         match
+           List.find_opt
+             (fun (candidate : operation_record) ->
+               String.equal candidate.operation_id upstream_id)
+             operations
+         with
+         | Some upstream ->
+             {
+               Cp_search_fabric.operation_id = upstream.operation_id;
+               status = string_of_operation_status upstream.status;
+               checkpoint_ref = upstream.checkpoint_ref;
+             }
+         | None ->
+             {
+               Cp_search_fabric.operation_id = upstream_id;
+               status = "missing";
+               checkpoint_ref = None;
+             })
+
+let operation_readiness operations operation =
+  match operation_search_strategy operation with
+  | Cp_search_fabric.Legacy -> Cp_search_fabric.Ready
+  | Cp_search_fabric.Best_first_v1 ->
+      Cp_search_fabric.readiness_for_operation
+        ~upstreams:(search_upstreams operations operation)
+
 let sync_managed_detachments config units (operation : operation_record) =
+  let operations = read_operations config in
   let detachments = read_detachments config in
   let existing_for_operation =
     detachments
@@ -3810,17 +3808,22 @@ let sync_managed_detachments config units (operation : operation_record) =
            String.equal detachment.operation_id operation.operation_id
            && String.equal detachment.source "managed")
   in
+  let readiness = operation_readiness operations operation in
   let targets =
-    match detachment_targets_for_operation units operation with
-    | [] -> []
-    | rows -> rows
+    match operation_search_strategy operation, readiness with
+    | Cp_search_fabric.Best_first_v1, Cp_search_fabric.Blocked _ -> []
+    | _ -> (
+        match detachment_targets_for_operation units operation with
+        | [] -> []
+        | rows -> rows)
   in
   let target_count = max 1 (List.length targets) in
   let updated_rows =
-    match targets with
-    | [] ->
+    match operation_search_strategy operation, readiness, targets with
+    | Cp_search_fabric.Best_first_v1, Cp_search_fabric.Blocked _, _ -> []
+    | _, _, [] ->
         [ default_detachment_for_operation config units operation ]
-    | rows ->
+    | _, _, rows ->
         rows
         |> List.map (fun (target_unit : unit_record) ->
                let detachment_id =
@@ -3944,6 +3947,170 @@ let decision_requires_approval units source_unit_id target_unit_id =
         | None -> false
         | Some source when String.equal source target_unit_id -> false
         | Some source -> not (same_platoon units source target_unit_id)
+
+let search_operation_descriptor (operation : operation_record) =
+  {
+    Cp_search_fabric.operation_id = Some operation.operation_id;
+    objective = operation.objective;
+    assigned_unit_id = Some operation.assigned_unit_id;
+    workload_profile = operation_workload_profile operation;
+    stage = operation.stage;
+    depends_on_operation_ids = operation.depends_on_operation_ids;
+    created_at = operation.created_at;
+  }
+
+let operation_active_count operations unit_id =
+  operations
+  |> List.filter (fun (operation : operation_record) ->
+         active_operation_status operation.status
+         && String.equal operation.assigned_unit_id unit_id)
+  |> List.length
+
+let search_candidates_for_operation config units operations
+    (operation : operation_record) =
+  let current_unit_id = Some operation.assigned_unit_id in
+  candidate_units_for_operation units operations current_unit_id
+  |> List.filter_map (fun (unit : unit_record) ->
+         match unit_guard_json config unit.unit_id with
+         | Error _ -> None
+         | Ok _ ->
+             if decision_requires_approval units current_unit_id unit.unit_id then
+               None
+             else
+               Some
+                 {
+                   Cp_search_fabric.unit_id = unit.unit_id;
+                   label = unit.label;
+                   capability_profile = unit.capability_profile;
+                   active_operation_cap = unit.budget.active_operation_cap;
+                   active_operations = operation_active_count operations unit.unit_id;
+                   current_assignment = String.equal unit.unit_id operation.assigned_unit_id;
+                 })
+
+let operation_search_candidates config units operations
+    (operation : operation_record) =
+  let stats = read_search_stats config in
+  Cp_search_fabric.score_candidates ~store:stats
+    ~operation:(search_operation_descriptor operation)
+    ~candidates:(search_candidates_for_operation config units operations operation)
+
+let operation_search_json config units operations (operation : operation_record) =
+  let readiness = operation_readiness operations operation in
+  let candidates =
+    match operation_search_strategy operation with
+    | Cp_search_fabric.Legacy -> []
+    | Cp_search_fabric.Best_first_v1 ->
+        operation_search_candidates config units operations operation
+  in
+  let selected_unit_id =
+    match candidates with
+    | best :: _ -> Some best.Cp_search_fabric.unit_id
+    | [] -> Some operation.assigned_unit_id
+  in
+  Cp_search_fabric.summary_json
+    ~strategy:(operation_search_strategy operation)
+    ~readiness ~candidates ~selected_unit_id
+
+let update_search_stats_for_operation config operation ~outcome =
+  let stage = operation_stage_key operation in
+  let current = read_search_stats config in
+  let updated =
+    match outcome with
+    | `Success ->
+        Cp_search_fabric.record_success current ~unit_id:operation.assigned_unit_id
+          ~stage
+    | `Failure ->
+        Cp_search_fabric.record_failure current ~unit_id:operation.assigned_unit_id
+          ~stage
+  in
+  write_search_stats config updated
+
+let operation_card_json config units operations (operation : operation_record) =
+  let unit_label =
+    lookup_unit units operation.assigned_unit_id
+    |> Option.map (fun (unit : unit_record) -> unit.label)
+    |> Option.value ~default:operation.assigned_unit_id
+  in
+  `Assoc
+    [
+      ("operation", operation_to_json operation);
+      ("assigned_unit_label", `String unit_label);
+      ("search", operation_search_json config units operations operation);
+    ]
+
+let list_operations_json_from_state ?operation_id (state : snapshot_state) =
+  let units = state.units in
+  let operations =
+    state.operations
+    |> List.filter (fun (operation : operation_record) ->
+           match operation_id with
+           | None -> true
+           | Some value ->
+               String.equal operation.operation_id value
+               || String.equal operation.trace_id value)
+  in
+  let managed_count =
+    List.length
+      (List.filter (fun (operation : operation_record) -> operation.source = "managed") operations)
+  in
+  let projected_count = List.length operations - managed_count in
+  `Assoc
+    [
+      ("version", `String "cp-v2");
+      ("generated_at", `String (Types.now_iso ()));
+      ( "summary",
+        `Assoc
+          [
+            ("total", `Int (List.length operations));
+            ( "active",
+              `Int
+                (List.length
+                   (List.filter
+                      (fun (op : operation_record) -> op.status = Active)
+                      operations)) );
+            ( "paused",
+              `Int
+                (List.length
+                   (List.filter
+                      (fun (op : operation_record) -> op.status = Paused)
+                      operations)) );
+            ("managed", `Int managed_count);
+            ("projected", `Int projected_count);
+          ] );
+      ( "operations",
+        `List
+          (List.map
+             (operation_card_json state.config units state.operations)
+             operations) );
+    ]
+
+let list_operations_json ?operation_id config =
+  list_operations_json_from_state ?operation_id (build_snapshot_state config)
+
+let snapshot_json config =
+  let state = build_snapshot_state config in
+  let topology = topology_json_from_state state in
+  let operations = list_operations_json_from_state state in
+  let detachments = list_detachments_json_from_state state in
+  let alerts = list_alerts_json_from_state config state in
+  let decisions = list_policy_decisions_json_from_state state in
+  let capacity = capacity_json_from_state state in
+  let traces = list_traces_json config ~limit:10 () in
+  `Assoc
+    [
+      ("version", `String "cp-v2");
+      ("generated_at", `String (Types.now_iso ()));
+      ("topology", topology);
+      ("operations", operations);
+      ("detachments", detachments);
+      ("alerts", alerts);
+      ("decisions", decisions);
+      ("capacity", capacity);
+      ("traces", traces);
+    ]
+
+let operation_status_json config ?operation_id () =
+  list_operations_json ?operation_id config
 
 let company_scope_id_for units source_unit_id target_unit_id =
   option_first_some
@@ -4084,6 +4251,10 @@ let start_operation config ~(actor : string) json =
   match unit_guard_json config assigned_unit_id with
   | Error message -> Error message
   | Ok _ ->
+      let workload_profile_raw = get_string_default json "workload_profile" "generic" in
+      let search_strategy_raw = get_string_default json "search_strategy" "legacy" in
+      let* workload_profile = validate_workload_profile workload_profile_raw in
+      let* search_strategy = validate_search_strategy search_strategy_raw in
       let operation =
         {
           operation_id = next_operation_id ();
@@ -4092,6 +4263,10 @@ let start_operation config ~(actor : string) json =
           autonomy_level = get_string_default json "autonomy_level" "L4_Autonomous";
           policy_class = get_string_default json "policy_class" "strict";
           budget_class = get_string_default json "budget_class" "standard";
+          workload_profile;
+          stage = get_string_opt json "stage";
+          depends_on_operation_ids = get_string_list json "depends_on_operation_ids";
+          search_strategy;
           detachment_session_id = get_string_opt json "detachment_session_id";
           trace_id = next_trace_id ();
           checkpoint_ref = get_string_opt json "checkpoint_ref";
@@ -4114,7 +4289,11 @@ let start_operation config ~(actor : string) json =
       let operations = read_operations config in
       write_operations config (operation :: operations);
       let _, _, units, _ = topology_units config in
-      let _ = sync_managed_detachments config units operation in
+      let _ =
+        match operation_search_strategy operation with
+        | Cp_search_fabric.Legacy -> sync_managed_detachments config units operation
+        | Cp_search_fabric.Best_first_v1 -> []
+      in
       append_cp_event config ~trace_id:operation.trace_id ~event_type:"operation_started"
         ~operation_id:operation.operation_id ~unit_id:operation.assigned_unit_id ~actor
         (`Assoc
@@ -4122,6 +4301,9 @@ let start_operation config ~(actor : string) json =
             ("objective", `String operation.objective);
             ("autonomy_level", `String operation.autonomy_level);
             ("policy_class", `String operation.policy_class);
+            ("workload_profile", `String (operation_workload_profile operation));
+            ("stage", match operation.stage with Some value -> `String value | None -> `Null);
+            ("search_strategy", `String operation.search_strategy);
           ]);
       Ok operation
 
@@ -4162,6 +4344,8 @@ let checkpoint_operation config ~(actor : string) json =
       write_operations config next_operations;
       let _, _, units, _ = topology_units config in
       let _ = sync_managed_detachments config units updated in
+      if operation_search_strategy updated = Cp_search_fabric.Best_first_v1 then
+        update_search_stats_for_operation config updated ~outcome:`Success;
       append_cp_event config ~trace_id:updated.trace_id ~event_type:"operation_checkpointed"
         ~operation_id:updated.operation_id ~unit_id:updated.assigned_unit_id ~actor
         (`Assoc [ ("checkpoint_ref", `String checkpoint_ref) ]);
@@ -4195,7 +4379,11 @@ let finalize_operation_json config ~(actor : string) json =
   match get_string_opt json "operation_id" with
   | None -> Error "operation_id is required"
   | Some operation_id ->
-      Result.map operation_to_json
+      Result.map
+        (fun operation ->
+          if operation_search_strategy operation = Cp_search_fabric.Best_first_v1 then
+            update_search_stats_for_operation config operation ~outcome:`Success;
+          operation_to_json operation)
         (update_operation_status config ~actor ~operation_id ~status:Completed
            ~note:(get_string_opt json "note") ~event_type:"operation_finalized")
 
@@ -4203,23 +4391,81 @@ let dispatch_plan_json config json =
   let _, _, units, _ = topology_units config in
   let operations = all_operations config units in
   let operation_id = get_string_opt json "operation_id" in
-  let current_unit_id =
+  let operation =
     match operation_id with
-    | Some value -> operation_by_id operations value |> Option.map (fun (op : operation_record) -> op.assigned_unit_id)
-    | None -> get_string_opt json "assigned_unit_id"
+    | Some value -> operation_by_id operations value
+    | None -> None
   in
-  let candidates =
-    candidate_units_for_operation units operations current_unit_id
-    |> List.filter_map (fun (unit : unit_record) ->
-           match unit_guard_json config unit.unit_id with
-           | Ok guard ->
-               Some (`Assoc [ ("unit", unit_to_json unit); ("guard", guard) ])
-           | Error _ -> None)
+  let current_unit_id = Option.map (fun (op : operation_record) -> op.assigned_unit_id) operation in
+  let strategy =
+    match operation with
+    | Some op -> operation_search_strategy op
+    | None -> Cp_search_fabric.Legacy
+  in
+  let readiness =
+    match operation with
+    | Some op -> operation_readiness operations op
+    | None -> Cp_search_fabric.Ready
+  in
+  let scored_candidates =
+    match operation with
+    | Some op when strategy = Cp_search_fabric.Best_first_v1 ->
+        operation_search_candidates config units operations op
+    | Some op ->
+        let preview_op = { op with search_strategy = "best_first_v1" } in
+        operation_search_candidates config units operations preview_op
+    | None -> []
+  in
+  let recommended_units =
+    if scored_candidates <> [] then
+      scored_candidates
+      |> List.map (fun (candidate : Cp_search_fabric.scored_candidate) ->
+             `Assoc
+               [
+                 ( "unit",
+                   match lookup_unit units candidate.unit_id with
+                   | Some unit -> unit_to_json unit
+                   | None ->
+                       `Assoc
+                         [
+                           ("unit_id", `String candidate.unit_id);
+                           ("label", `String candidate.label);
+                         ] );
+                 ("score", `Float candidate.breakdown.total);
+                 ( "score_breakdown",
+                   Cp_search_fabric.breakdown_to_json candidate.breakdown );
+                 ("routing_reason", `String candidate.routing_reason);
+               ])
+    else
+      candidate_units_for_operation units operations current_unit_id
+      |> List.filter_map (fun (unit : unit_record) ->
+             match unit_guard_json config unit.unit_id with
+             | Ok guard ->
+                 Some
+                   (`Assoc
+                     [
+                       ("unit", unit_to_json unit);
+                       ("guard", guard);
+                       ("score", `Null);
+                       ("score_breakdown", `Null);
+                       ("routing_reason", `String "legacy candidate ordering");
+                     ])
+             | Error _ -> None)
   in
   `Assoc
     [
       ("status", `String "ok");
-      ("recommended_units", `List candidates);
+      ("strategy", `String (Cp_search_fabric.strategy_to_string strategy));
+      ( "readiness",
+        match readiness with
+        | Cp_search_fabric.Ready -> `String "ready"
+        | Cp_search_fabric.Blocked _ -> `String "blocked" );
+      ( "dependency_blockers",
+        match readiness with
+        | Cp_search_fabric.Ready -> `List []
+        | Cp_search_fabric.Blocked blockers ->
+            `List (List.map Cp_search_fabric.blocker_to_json blockers) );
+      ("recommended_units", `List recommended_units);
       ("current_unit_id", match current_unit_id with Some value -> `String value | None -> `Null);
     ]
 
@@ -4701,7 +4947,7 @@ let policy_deny_json config ~(actor : string) json =
             ("decisions", list_policy_decisions_json config);
           ])
 
-let detachment_status_detail_json _config units agents operations
+let detachment_status_detail_json config units agents operations
     (detachment : detachment_record) =
   let now = Time_compat.now () in
   let leader_status =
@@ -4727,11 +4973,17 @@ let detachment_status_detail_json _config units agents operations
     operation_by_id operations detachment.operation_id
     |> Option.map operation_to_json |> Option.value ~default:`Null
   in
+  let search_json =
+    operation_by_id operations detachment.operation_id
+    |> Option.map (operation_search_json config units operations)
+    |> Option.value ~default:`Null
+  in
   `Assoc
     [
       ("detachment", detachment_to_json detachment);
       ("assigned_unit_label", `String unit_label);
       ("operation", operation_json);
+      ("search", search_json);
       ("leader_status", `String leader_status);
       ("heartbeat_expired", `Bool heartbeat_expired);
       ( "progress_age_sec",
@@ -4794,20 +5046,83 @@ let maybe_escalation_target units (detachment : detachment_record) =
   | Some ({ parent_unit_id = Some parent_id; _ } as _unit) -> Some parent_id
   | _ -> None
 
+let maybe_apply_best_first_assignment config ~actor units operations
+    (operation : operation_record) =
+  match operation_search_strategy operation with
+  | Cp_search_fabric.Legacy -> operation
+  | Cp_search_fabric.Best_first_v1 -> (
+      match operation_readiness operations operation with
+      | Cp_search_fabric.Blocked _ -> operation
+      | Cp_search_fabric.Ready -> (
+          let candidates =
+            operation_search_candidates config units operations operation
+          in
+          match candidates with
+          | [] -> operation
+          | best :: _ ->
+              let current =
+                candidates
+                |> List.find_opt (fun (candidate : Cp_search_fabric.scored_candidate) ->
+                       String.equal candidate.unit_id operation.assigned_unit_id)
+              in
+              let should_move =
+                match current with
+                | Some current_candidate ->
+                    String.equal best.unit_id current_candidate.unit_id
+                    |> not
+                    && Cp_search_fabric.should_rebalance ~current:current_candidate
+                         ~best ~min_gain:15.0
+                | None -> not (String.equal best.unit_id operation.assigned_unit_id)
+              in
+              if not should_move then
+                operation
+              else
+                match
+                  apply_operation_assignment config ~actor operation
+                    ~target_unit_id:best.unit_id
+                    ~note:
+                      (Some
+                         (Printf.sprintf "best_first_v1 routed to %s (score=%.1f)"
+                            best.unit_id best.breakdown.total))
+                    ~event_type:"operation_search_routed"
+                with
+                | Ok updated ->
+                    append_cp_event config ~trace_id:updated.trace_id
+                      ~event_type:"operation_search_scored"
+                      ~operation_id:updated.operation_id
+                      ~unit_id:updated.assigned_unit_id ~actor
+                      (`Assoc
+                        [
+                          ("selected_unit_id", `String best.unit_id);
+                          ("score", `Float best.breakdown.total);
+                          ( "score_breakdown",
+                            Cp_search_fabric.breakdown_to_json best.breakdown );
+                          ("routing_reason", `String best.routing_reason);
+                        ]);
+                    updated
+                | Error _ -> operation))
+
 let dispatch_tick_json config ~(actor : string) json =
   let filter_operation_id = get_string_opt json "operation_id" in
   let filter_detachment_id = get_string_opt json "detachment_id" in
   let agents, _, units, _ = topology_units config in
   let live_agents = live_agent_names agents in
+  let all_managed_operations = read_operations config in
   let managed_operations =
-    read_operations config
+    all_managed_operations
     |> List.filter (fun (operation : operation_record) ->
            match filter_operation_id with
            | Some value -> String.equal operation.operation_id value
            | None -> true)
   in
-  let synced =
+  let planned_operations =
     managed_operations
+    |> List.map
+         (maybe_apply_best_first_assignment config ~actor units
+            all_managed_operations)
+  in
+  let synced =
+    planned_operations
     |> List.concat_map (fun (operation : operation_record) ->
            sync_managed_detachments config units operation)
     |> List.filter (fun (detachment : detachment_record) ->
@@ -4818,7 +5133,7 @@ let dispatch_tick_json config ~(actor : string) json =
   let now = Time_compat.now () in
   let operations_by_id =
     List.map (fun (operation : operation_record) -> (operation.operation_id, operation))
-      managed_operations
+      planned_operations
   in
   let decisions = ref [] in
   let failovers = ref [] in
@@ -4898,6 +5213,9 @@ let dispatch_tick_json config ~(actor : string) json =
                   match pending with
                   | Some existing -> existing
                   | None ->
+                      if operation_search_strategy operation = Cp_search_fabric.Best_first_v1 then
+                        update_search_stats_for_operation config operation
+                          ~outcome:`Failure;
                       create_policy_decision config ~actor
                         ~requested_action:"dispatch_escalate"
                         ~scope_type:"company"

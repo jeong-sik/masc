@@ -53,6 +53,33 @@ let inject_default_agent_name ~(worker_name : string)
       `Assoc (("agent_name", `String worker_name) :: fields)
   | _ -> args
 
+let extract_prompt_block ~start_marker ~end_marker (text : string) =
+  try
+    let start_idx =
+      Str.search_forward (Str.regexp_string start_marker) text 0
+      + String.length start_marker
+    in
+    let end_idx =
+      Str.search_forward (Str.regexp_string end_marker) text start_idx
+    in
+    let raw = String.sub text start_idx (end_idx - start_idx) |> String.trim in
+    if raw = "" then None else Some raw
+  with Not_found -> None
+
+let inject_prompt_full_context ~(prompt : string) ~(tool_name : string)
+    (args : Yojson.Safe.t) =
+  match (tool_name, args) with
+  | "masc_memento_mori", `Assoc fields
+    when not (List.mem_assoc "full_context" fields) -> (
+      match
+        extract_prompt_block ~start_marker:"[FULL_CONTEXT_BEGIN]"
+          ~end_marker:"[FULL_CONTEXT_END]" prompt
+      with
+      | Some full_context ->
+          `Assoc (("full_context", `String full_context) :: fields)
+      | None -> args)
+  | _ -> args
+
 let masc_http_base_url () =
   match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
   | Some raw when String.trim raw <> "" -> String.trim raw
@@ -492,8 +519,8 @@ Use tools when state inspection, task coordination, work delegation, or room upd
 Keep responses concise and task-focused.
 If a tool schema includes agent_name and you omit it, the runtime will inject %s automatically.
 Do not invent tool names or arguments that are not in schema.
-If you are operating inside a team session, record your own work with masc_team_session_step as the worker.
-Inside a team session, record at least one note turn with masc_team_session_step(turn_kind="note", message="...") and a non-empty message that states your concrete contribution.
+If you are operating inside a team session, record your own work with masc_team_session_turn as the worker.
+Inside a team session, record at least one note turn with masc_team_session_turn(turn_kind="note", message="...") and a non-empty message that states your concrete contribution.
 A note turn without a message is invalid and will be rejected.
 When the task is complete, return a short final result summarizing what you changed or learned.|}
     worker_name model_id session_line role_line selection_line worker_name
@@ -609,7 +636,9 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
                                 `Assoc [ ("error", `String ("invalid tool args: " ^ msg)) ]
                           in
                           let args =
-                            inject_default_agent_name ~worker_name ~schema parsed_args
+                            parsed_args
+                            |> inject_default_agent_name ~worker_name ~schema
+                            |> inject_prompt_full_context ~prompt ~tool_name:tc.call_name
                           in
                           let output =
                             match

@@ -1,0 +1,52 @@
+%% Login Screen Prototype - 3 Platform
+%% Usage: chain.run --file examples/login-screen.mermaid
+
+graph LR
+    %% === INPUT ===
+    Design["Tool:echo \"
+        Frame: LoginScreen
+        Size: 375x812 (iPhone 13)
+        Components:
+        - Logo (top, centered)
+        - Email input (text field)
+        - Password input (secure)
+        - Login button (primary, blue)
+        - Forgot password link
+        - Sign up link
+    \""]
+
+    %% === PARALLEL GENERATION ===
+    Design --> Web["LLM:claude \"
+        Generate React + Tailwind component.
+        Design: {{Design}}
+        Requirements:
+        - TypeScript
+        - Form validation
+        - Loading state
+        - Error handling
+    \""]
+
+    Design --> iOS["LLM:codex \"
+        Generate SwiftUI View.
+        Design: {{Design}}
+        Requirements:
+        - iOS 16+
+        - @FocusState for fields
+        - SecureField for password
+        - Button with loading
+    \""]
+
+    Design --> Android["LLM:gemini \"
+        Generate Jetpack Compose.
+        Design: {{Design}}
+        Requirements:
+        - Material3
+        - TextField with validation
+        - Remember state
+        - Navigation
+    \""]
+
+    %% === MERGE ===
+    Web --> Report{Merge:concat}
+    iOS --> Report
+    Android --> Report

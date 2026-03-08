@@ -1,0 +1,50 @@
+%% MCTS-MANTRA Code Review Pipeline
+%% Expansion → Simulation → Selection → Backpropagation
+
+graph TD
+    subgraph Expansion["🎲 MCTS Expansion (Developer)"]
+        input["Input: code + feedback"]
+        cand1["LLM:claude 'Refactor (best practices)'"]
+        cand2["LLM:gemini 'Refactor (performance)'"]
+        cand3["LLM:codex 'Refactor (minimal)'"]
+        input --> cand1
+        input --> cand2
+        input --> cand3
+    end
+
+    subgraph Simulation["📊 MCTS Simulation (Reviewer)"]
+        eval{Evaluator:anti_fake:Best:0.6}
+        cand1 --> eval
+        cand2 --> eval
+        cand3 --> eval
+    end
+
+    subgraph Selection["🎯 MCTS Selection"]
+        gate{Gate:score>=0.8}
+        eval --> gate
+    end
+
+    subgraph Backprop["🔄 MCTS Backprop (Repairer)"]
+        repair{GoalDriven:0.85:3}
+        gate -->|"< 0.8"| repair
+    end
+
+    subgraph Output["✅ Output"]
+        pass["Adapter: PASS"]
+        done["Adapter: REPAIRED"]
+        gate -->|">= 0.8"| pass
+        repair --> done
+    end
+
+    %% Styling
+    classDef expansion fill:#e1f5fe,stroke:#01579b
+    classDef simulation fill:#fff3e0,stroke:#e65100
+    classDef selection fill:#f3e5f5,stroke:#7b1fa2
+    classDef backprop fill:#e8f5e9,stroke:#2e7d32
+    classDef output fill:#fce4ec,stroke:#c2185b
+
+    class cand1,cand2,cand3,input expansion
+    class eval simulation
+    class gate selection
+    class repair backprop
+    class pass,done output

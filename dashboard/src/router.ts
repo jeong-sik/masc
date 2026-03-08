@@ -55,6 +55,14 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
+  if (segments[0] === 'chains') {
+    const nextParams: Record<string, string> = { ...params, surface: 'chains' }
+    if (segments[1] === 'operation' && segments[2]) {
+      nextParams.operation = decodeSafe(segments[2])
+    }
+    return { tab: 'command', params: nextParams, postId: null }
+  }
+
   const tabFromPath = normalizeTabAlias(segments[0])
   const tabFromQuery = normalizeTabAlias(params.tab)
   const tab: TabId = isTabId(tabFromPath)

@@ -1,0 +1,95 @@
+{
+  "id": "coverage-generator-batch",
+  "name": "Agent Autonomy Batch Coverage Generator",
+  "description": "Parallel test coverage generation for multiple modules using Fanout + MASC coordination",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "parse-modules",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Parse the module list and prepare parallel tasks.\n\nProject path: {{input.project_path}}\nModule paths:\n{{input.module_paths}}\n\nFor each module, output:\n{\n  \"modules\": [\n    {\n      \"path\": \"relative/path/to/module.ml\",\n      \"name\": \"module_name\",\n      \"priority\": 1-5,\n      \"estimated_functions\": number\n    }\n  ],\n  \"total_modules\": number,\n  \"parallelization_strategy\": \"by_priority|by_size|round_robin\"\n}"
+      },
+      "output_key": "module_plan"
+    },
+    {
+      "id": "broadcast-start",
+      "type": "masc_broadcast",
+      "message": "🚀 Starting batch coverage generation for {{module_plan.total_modules}} modules",
+      "room": "{{input.masc_room}}",
+      "depends_on": ["parse-modules"]
+    },
+    {
+      "id": "generate-coverage",
+      "type": "fanout",
+      "fanout_config": {
+        "items_path": "module_plan.modules",
+        "chain_ref": "coverage-generator",
+        "input_mapping": {
+          "module_path": "{{item.path}}",
+          "source_code": "{{read_file(item.path)}}",
+          "language": "{{input.language}}",
+          "test_framework": "{{input.test_framework}}"
+        },
+        "max_parallel": 5,
+        "timeout_per_item_sec": 300
+      },
+      "depends_on": ["broadcast-start"],
+      "output_key": "coverage_results"
+    },
+    {
+      "id": "aggregate-results",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Aggregate the coverage generation results.\n\nResults:\n{{coverage_results}}\n\nCreate a summary report:\n{\n  \"total_modules\": number,\n  \"successful\": number,\n  \"failed\": number,\n  \"total_tests_generated\": number,\n  \"average_quality_score\": 0.0-1.0,\n  \"modules\": [\n    {\n      \"path\": \"string\",\n      \"tests_generated\": number,\n      \"quality_score\": 0.0-1.0,\n      \"status\": \"success|failed|skipped\"\n    }\n  ],\n  \"recommendations\": [\"any modules that need manual attention\"]\n}"
+      },
+      "depends_on": ["generate-coverage"],
+      "output_key": "summary"
+    },
+    {
+      "id": "broadcast-complete",
+      "type": "masc_broadcast",
+      "message": "✅ Batch coverage complete: {{summary.successful}}/{{summary.total_modules}} modules, {{summary.total_tests_generated}} tests generated",
+      "room": "{{input.masc_room}}",
+      "depends_on": ["aggregate-results"]
+    }
+  ],
+  "output": "aggregate-results",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "project_path": {
+        "type": "string",
+        "description": "Root path of the project"
+      },
+      "module_paths": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "List of module paths to generate coverage for"
+      },
+      "language": {
+        "type": "string",
+        "default": "ocaml"
+      },
+      "test_framework": {
+        "type": "string",
+        "default": "alcotest"
+      },
+      "masc_room": {
+        "type": "string",
+        "description": "MASC room for coordination broadcasts",
+        "default": "coverage"
+      }
+    },
+    "required": ["project_path", "module_paths"]
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": ["coverage", "batch", "agent-autonomy", "masc", "fanout"],
+    "estimated_duration_sec": 600,
+    "estimated_cost_usd": 1.50,
+    "max_parallel_modules": 5
+  }
+}

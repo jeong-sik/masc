@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jeong-sik/llm-mcp/chain-v1.schema.json",
+  "title": "Chain JSON Schema",
+  "description": "Multi-LLM DAG Workflow Definition Protocol v1.0",
+  "type": "object",
+  "required": ["id", "name", "nodes"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Unique chain identifier (kebab-case)"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable chain name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Brief description of what this chain does"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "default": "1.0.0",
+      "description": "Semantic version"
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" },
+      "description": "DAG nodes (LLM or Tool)"
+    },
+    "input_schema": {
+      "$ref": "#/$defs/jsonSchema",
+      "description": "JSON Schema for chain input validation"
+    },
+    "output_schema": {
+      "$ref": "#/$defs/jsonSchema",
+      "description": "JSON Schema for chain output validation"
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "description": "Unique node identifier within chain"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["llm", "tool"],
+          "description": "Node type: LLM call or MCP tool call"
+        },
+        "llm": {
+          "$ref": "#/$defs/llmConfig",
+          "description": "LLM configuration (required if type=llm)"
+        },
+        "tool": {
+          "$ref": "#/$defs/toolConfig",
+          "description": "Tool configuration (required if type=tool)"
+        },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Node IDs this node depends on (DAG edges)"
+        },
+        "output_key": {
+          "type": "string",
+          "description": "Key name for this node's output in context"
+        },
+        "condition": {
+          "type": "string",
+          "description": "Optional condition expression for conditional execution"
+        },
+        "retry": {
+          "$ref": "#/$defs/retryConfig"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 600000,
+          "description": "Node timeout in milliseconds"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "llm" } } },
+          "then": { "required": ["llm"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool" } } },
+          "then": { "required": ["tool"] }
+        }
+      ]
+    },
+    "llmConfig": {
+      "type": "object",
+      "required": ["model", "prompt"],
+      "properties": {
+        "model": {
+          "type": "string",
+          "enum": ["codex", "claude-cli", "gemini", "ollama"],
+          "description": "LLM model to use"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Prompt template with {{variable}} placeholders"
+        },
+        "system_prompt": {
+          "type": "string",
+          "description": "Optional system prompt"
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum output tokens"
+        }
+      }
+    },
+    "toolConfig": {
+      "type": "object",
+      "required": ["server", "name"],
+      "properties": {
+        "server": {
+          "type": "string",
+          "description": "MCP server name"
+        },
+        "name": {
+          "type": "string",
+          "description": "Tool name"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Tool arguments with {{variable}} placeholders"
+        }
+      }
+    },
+    "retryConfig": {
+      "type": "object",
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "default": 1
+        },
+        "backoff_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "default": 1000
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "author": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "estimated_duration_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "estimated_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "jsonSchema": {
+      "type": "object",
+      "description": "JSON Schema for validation"
+    }
+  }
+}

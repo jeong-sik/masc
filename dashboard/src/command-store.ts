@@ -1,5 +1,7 @@
 import { signal } from '@preact/signals'
 import {
+  fetchChainRun,
+  fetchChainSummary,
   fetchCommandPlaneHelp,
   fetchCommandPlaneSnapshot,
   fetchCommandPlaneSummary,
@@ -7,9 +9,18 @@ import {
   runCommandPlaneAction,
 } from './api'
 import type {
+  ChainHistoryEventSummary,
+  ChainRuntimeStatus,
   CommandPlaneAlert,
   CommandPlaneAlertsResponse,
   CommandPlaneBudgetEnvelope,
+  CommandPlaneChainConnection,
+  CommandPlaneChainOverlay,
+  CommandPlaneChainRecord,
+  CommandPlaneChainRun,
+  CommandPlaneChainRunNode,
+  CommandPlaneChainRunResponse,
+  CommandPlaneChainSummary,
   CommandPlaneHelpConcept,
   CommandPlaneHelpDocLink,
   CommandPlaneHelpExample,
@@ -70,6 +81,14 @@ export const commandPlaneHelpError = signal<string | null>(null)
 export const commandPlaneSwarm = signal<CommandPlaneSwarmResponse | null>(null)
 export const commandPlaneSwarmLoading = signal(false)
 export const commandPlaneSwarmError = signal<string | null>(null)
+export const commandPlaneChainSummary = signal<CommandPlaneChainSummary | null>(null)
+export const commandPlaneChainLoading = signal(false)
+export const commandPlaneChainError = signal<string | null>(null)
+export const commandPlaneChainRun = signal<CommandPlaneChainRunResponse | null>(null)
+export const commandPlaneChainRunLoading = signal(false)
+export const commandPlaneChainRunError = signal<string | null>(null)
+export const commandPlaneChainFocusOperationId = signal<string | null>(null)
+let activeChainRunRequestId: string | null = null
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -197,6 +216,22 @@ function normalizeTopology(raw: unknown): CommandPlaneTopologyResponse {
   }
 }
 
+function normalizeChainRecord(raw: unknown): CommandPlaneChainRecord | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const status = asString(raw.status)
+  if (!kind || !status) return null
+  return {
+    kind,
+    chain_id: asString(raw.chain_id) ?? null,
+    goal: asString(raw.goal) ?? null,
+    run_id: asString(raw.run_id) ?? null,
+    status,
+    viewer_path: asString(raw.viewer_path) ?? null,
+    last_sync_at: asString(raw.last_sync_at) ?? null,
+  }
+}
+
 function normalizeOperationRecord(raw: unknown): CommandPlaneOperationRecord | null {
   if (!isRecord(raw)) return null
   const operationId = asString(raw.operation_id)
@@ -220,6 +255,7 @@ function normalizeOperationRecord(raw: unknown): CommandPlaneOperationRecord | n
     created_by: asString(raw.created_by),
     source: asString(raw.source),
     status,
+    chain: normalizeChainRecord(raw.chain),
     created_at: asString(raw.created_at),
     updated_at: asString(raw.updated_at),
   }
@@ -666,6 +702,120 @@ function normalizeSummarySnapshot(raw: unknown): CommandPlaneSummarySnapshot {
   }
 }
 
+function normalizeChainRuntime(raw: unknown): ChainRuntimeStatus | null {
+  if (!isRecord(raw)) return null
+  return {
+    chain_id: asString(raw.chain_id) ?? null,
+    started_at: asNumber(raw.started_at) ?? null,
+    progress: asNumber(raw.progress) ?? null,
+    elapsed_sec: asNumber(raw.elapsed_sec) ?? null,
+  }
+}
+
+function normalizeChainHistoryEvent(raw: unknown): ChainHistoryEventSummary | null {
+  if (!isRecord(raw)) return null
+  const event = asString(raw.event)
+  if (!event) return null
+  return {
+    event,
+    chain_id: asString(raw.chain_id) ?? null,
+    timestamp: asString(raw.timestamp) ?? null,
+    duration_ms: asNumber(raw.duration_ms) ?? null,
+    message: asString(raw.message) ?? null,
+    tokens: asNumber(raw.tokens) ?? null,
+  }
+}
+
+function normalizeChainOverlay(raw: unknown): CommandPlaneChainOverlay | null {
+  if (!isRecord(raw)) return null
+  const operation = normalizeOperationRecord(raw.operation)
+  if (!operation) return null
+  return {
+    operation,
+    runtime: normalizeChainRuntime(raw.runtime),
+    history: normalizeChainHistoryEvent(raw.history),
+    mermaid: asString(raw.mermaid) ?? null,
+    preview_run: normalizeChainRun(raw.preview_run),
+  }
+}
+
+function normalizeChainConnection(raw: unknown): CommandPlaneChainConnection {
+  const root = isRecord(raw) ? raw : {}
+  return {
+    status: asString(root.status) ?? 'disconnected',
+    base_url: asString(root.base_url) ?? null,
+    message: asString(root.message) ?? null,
+  }
+}
+
+function normalizeChainSummary(raw: unknown): CommandPlaneChainSummary {
+  const root = isRecord(raw) ? raw : {}
+  const summary = isRecord(root.summary) ? root.summary : undefined
+  return {
+    version: asString(root.version),
+    generated_at: asString(root.generated_at),
+    connection: normalizeChainConnection(root.connection),
+    summary: summary
+      ? {
+          linked_operations: asNumber(summary.linked_operations),
+          active_chains: asNumber(summary.active_chains),
+          running_operations: asNumber(summary.running_operations),
+          recent_failures: asNumber(summary.recent_failures),
+          last_history_event_at: asString(summary.last_history_event_at) ?? null,
+        }
+      : undefined,
+    operations: Array.isArray(root.operations)
+      ? root.operations
+          .map(normalizeChainOverlay)
+          .filter((item): item is CommandPlaneChainOverlay => item !== null)
+      : [],
+    recent_history: Array.isArray(root.recent_history)
+      ? root.recent_history
+          .map(normalizeChainHistoryEvent)
+          .filter((item): item is ChainHistoryEventSummary => item !== null)
+      : [],
+  }
+}
+
+function normalizeChainRunNode(raw: unknown): CommandPlaneChainRunNode | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  if (!id) return null
+  return {
+    id,
+    type: asString(raw.type),
+    status: asString(raw.status),
+    duration_ms: asNumber(raw.duration_ms) ?? null,
+    error: asString(raw.error) ?? null,
+  }
+}
+
+function normalizeChainRun(raw: unknown): CommandPlaneChainRun | null {
+  if (!isRecord(raw)) return null
+  const runId = asString(raw.run_id)
+  const chainId = asString(raw.chain_id)
+  if (!chainId) return null
+  return {
+    run_id: runId ?? null,
+    chain_id: chainId,
+    duration_ms: asNumber(raw.duration_ms),
+    success: asBoolean(raw.success),
+    mermaid: asString(raw.mermaid),
+    nodes: Array.isArray(raw.nodes)
+      ? raw.nodes
+          .map(normalizeChainRunNode)
+          .filter((item): item is CommandPlaneChainRunNode => item !== null)
+      : [],
+  }
+}
+
+function normalizeChainRunResponse(raw: unknown): CommandPlaneChainRunResponse {
+  const root = isRecord(raw) ? raw : {}
+  return {
+    run: normalizeChainRun(root.run),
+  }
+}
+
 function normalizeHelpDoc(raw: unknown): CommandPlaneHelpDocLink | null {
   if (!isRecord(raw)) return null
   const title = asString(raw.title)
@@ -1002,6 +1152,10 @@ export async function refreshCommandPlaneSummary(): Promise<void> {
   }
 }
 
+export function focusCommandPlaneChainOperation(operationId: string | null): void {
+  commandPlaneChainFocusOperationId.value = operationId
+}
+
 export async function refreshCommandPlaneSnapshot(): Promise<void> {
   commandPlaneDetailLoading.value = true
   commandPlaneDetailError.value = null
@@ -1025,6 +1179,54 @@ export async function refreshCommandPlaneCurrentSurface(): Promise<void> {
   await refreshCommandPlaneSummary()
   if (commandPlaneSurface.value !== 'summary') {
     await refreshCommandPlaneSnapshot()
+  }
+}
+
+export async function refreshCommandPlaneChainSummary(): Promise<void> {
+  commandPlaneChainLoading.value = true
+  commandPlaneChainError.value = null
+  try {
+    const raw = await fetchChainSummary()
+    const normalized = normalizeChainSummary(raw)
+    commandPlaneChainSummary.value = normalized
+    const focused = commandPlaneChainFocusOperationId.value
+    if (normalized.operations.length === 0) {
+      commandPlaneChainFocusOperationId.value = null
+    } else if (!focused || !normalized.operations.some(item => item.operation.operation_id === focused)) {
+      commandPlaneChainFocusOperationId.value = normalized.operations[0]?.operation.operation_id ?? null
+    }
+  } catch (err) {
+    commandPlaneChainError.value =
+      err instanceof Error ? err.message : 'Failed to load chain summary'
+  } finally {
+    commandPlaneChainLoading.value = false
+  }
+}
+
+export function clearCommandPlaneChainRun(): void {
+  activeChainRunRequestId = null
+  commandPlaneChainRun.value = null
+  commandPlaneChainRunLoading.value = false
+  commandPlaneChainRunError.value = null
+}
+
+export async function loadCommandPlaneChainRun(runId: string): Promise<void> {
+  activeChainRunRequestId = runId
+  commandPlaneChainRunLoading.value = true
+  commandPlaneChainRunError.value = null
+  try {
+    const raw = await fetchChainRun(runId)
+    if (activeChainRunRequestId !== runId) return
+    commandPlaneChainRun.value = normalizeChainRunResponse(raw)
+  } catch (err) {
+    if (activeChainRunRequestId !== runId) return
+    commandPlaneChainRun.value = null
+    commandPlaneChainRunError.value =
+      err instanceof Error ? err.message : 'Failed to load chain run'
+  } finally {
+    if (activeChainRunRequestId === runId) {
+      commandPlaneChainRunLoading.value = false
+    }
   }
 }
 
@@ -1066,6 +1268,7 @@ async function runAction(key: string, path: string, body: Record<string, unknown
       await refreshCommandPlaneSnapshot()
     }
     await refreshCommandPlaneSwarm()
+    await refreshCommandPlaneChainSummary()
   } catch (err) {
     commandPlaneActionError.value =
       err instanceof Error ? err.message : 'Failed to execute command-plane action'

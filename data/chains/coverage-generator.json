@@ -1,0 +1,118 @@
+{
+  "id": "coverage-generator",
+  "name": "Agent Autonomy Coverage Generator",
+  "description": "Autonomous test coverage generation using parallel LLM analysis + anti_fake quality gate",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "analyze-module",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Analyze this {{input.language}} module and list ALL public functions that need testing.\n\nModule path: {{input.module_path}}\nModule content:\n```{{input.language}}\n{{input.source_code}}\n```\n\nOutput JSON:\n{\n  \"module_name\": \"string\",\n  \"total_lines\": number,\n  \"functions\": [\n    {\n      \"name\": \"function_name\",\n      \"signature\": \"full signature\",\n      \"line_start\": number,\n      \"complexity\": \"low|medium|high\",\n      \"test_priority\": \"critical|high|medium|low\",\n      \"edge_cases\": [\"list of edge cases to test\"]\n    }\n  ],\n  \"dependencies\": [\"external modules needed for testing\"]\n}"
+      },
+      "output_key": "analysis"
+    },
+    {
+      "id": "generate-tests-gemini",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Generate comprehensive {{input.test_framework}} tests for the functions below.\n\nLanguage: {{input.language}}\nTest framework: {{input.test_framework}}\nModule: {{input.module_path}}\n\nFunction analysis:\n{{analysis}}\n\nSource code:\n```{{input.language}}\n{{input.source_code}}\n```\n\nRules:\n1. Test EVERY function listed in the analysis\n2. Include edge cases from the analysis\n3. Use REAL assertions (no `assert true`, no `let _ =`)\n4. Test both success and failure paths\n5. Include roundtrip tests where applicable\n6. Add descriptive test names\n\nOutput ONLY the test code, no explanations."
+      },
+      "depends_on": ["analyze-module"],
+      "output_key": "tests_gemini"
+    },
+    {
+      "id": "generate-tests-claude",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Generate comprehensive {{input.test_framework}} tests for the functions below.\n\nLanguage: {{input.language}}\nTest framework: {{input.test_framework}}\nModule: {{input.module_path}}\n\nFunction analysis:\n{{analysis}}\n\nSource code:\n```{{input.language}}\n{{input.source_code}}\n```\n\nRules:\n1. Test EVERY function listed in the analysis\n2. Include edge cases from the analysis\n3. Use REAL assertions (no `assert true`, no `let _ =`)\n4. Test both success and failure paths\n5. Include roundtrip tests where applicable\n6. Add descriptive test names\n\nOutput ONLY the test code, no explanations."
+      },
+      "depends_on": ["analyze-module"],
+      "output_key": "tests_claude"
+    },
+    {
+      "id": "evaluate-tests",
+      "type": "evaluator",
+      "evaluator_config": {
+        "scoring_func": "anti_fake",
+        "candidates": ["tests_gemini", "tests_claude"],
+        "select_strategy": "Best",
+        "min_threshold": 0.7
+      },
+      "depends_on": ["generate-tests-gemini", "generate-tests-claude"],
+      "output_key": "best_tests"
+    },
+    {
+      "id": "merge-and-dedupe",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Merge and deduplicate these test implementations, keeping the best tests from each.\n\nBest candidate (scored highest):\n```{{input.language}}\n{{best_tests}}\n```\n\nOther candidate (may have unique tests):\n```{{input.language}}\n{{tests_gemini}}\n{{tests_claude}}\n```\n\nRules:\n1. Keep ALL unique test cases\n2. Remove exact duplicates\n3. Prefer more thorough assertions\n4. Maintain consistent naming style\n5. Ensure proper imports/dependencies\n6. Output complete, runnable test file\n\nOutput ONLY the final test code."
+      },
+      "depends_on": ["evaluate-tests"],
+      "output_key": "merged_tests"
+    },
+    {
+      "id": "final-quality-check",
+      "type": "evaluator",
+      "evaluator_config": {
+        "scoring_func": "anti_fake",
+        "candidates": ["merged_tests"],
+        "select_strategy": "AboveThreshold",
+        "min_threshold": 0.8
+      },
+      "depends_on": ["merge-and-dedupe"],
+      "output_key": "final_tests"
+    }
+  ],
+  "output": "final-quality-check",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "module_path": {
+        "type": "string",
+        "description": "Path to the module to test"
+      },
+      "source_code": {
+        "type": "string",
+        "description": "Source code content of the module"
+      },
+      "language": {
+        "type": "string",
+        "description": "Programming language (ocaml, typescript, python, etc.)",
+        "default": "ocaml"
+      },
+      "test_framework": {
+        "type": "string",
+        "description": "Test framework to use (alcotest, jest, pytest, etc.)",
+        "default": "alcotest"
+      }
+    },
+    "required": ["module_path", "source_code"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "final_tests": {
+        "type": "string",
+        "description": "Generated test code that passed anti_fake quality gate"
+      },
+      "analysis": {
+        "type": "string",
+        "description": "Function analysis JSON"
+      },
+      "tests_gemini": { "type": "string" },
+      "tests_claude": { "type": "string" }
+    }
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": ["coverage", "testing", "agent-autonomy", "anti-fake", "multi-llm"],
+    "estimated_duration_sec": 180,
+    "estimated_cost_usd": 0.25,
+    "inspired_by": "Agent Autonomy pattern demonstrated 2026-01-27"
+  }
+}

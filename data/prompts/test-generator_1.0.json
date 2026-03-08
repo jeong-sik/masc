@@ -1,0 +1,13 @@
+{
+  "id": "test-generator",
+  "template": "Generate comprehensive unit tests for the following {{language}} code:\n\n```{{language}}\n{{source_code}}\n```\n\nTest Framework: {{test_framework}}\n\nRequirements:\n- Cover happy path scenarios\n- Include edge cases\n- Add error handling tests\n- Use descriptive test names\n\nGenerate the test code:",
+  "version": "1.0",
+  "variables": ["language", "source_code", "test_framework"],
+  "metrics": {
+    "usage_count": 23,
+    "avg_score": 0.78,
+    "last_used": 1737417600.0
+  },
+  "created_at": 1733011200.0,
+  "deprecated": false
+}

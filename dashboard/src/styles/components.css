@@ -4173,7 +4173,7 @@ button.council-row.selected {
 
 .command-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
 }
 
@@ -4321,6 +4321,14 @@ button.council-row.selected {
   gap: 12px;
 }
 
+.command-chain-list,
+.command-chain-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
 .command-card.compact {
   padding: 12px;
 }
@@ -4383,6 +4391,62 @@ button.council-row.selected {
   gap: 10px;
   flex-wrap: wrap;
   margin-top: 12px;
+}
+
+.command-chain-item {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.command-chain-item.selected {
+  border-color: rgba(34,211,238,0.38);
+  box-shadow: 0 0 0 1px rgba(34,211,238,0.2) inset;
+  background: linear-gradient(180deg, rgba(34,211,238,0.12), rgba(255,255,255,0.03));
+}
+
+.command-chain-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.command-chain-graph-shell {
+  margin-top: 12px;
+  min-height: 160px;
+}
+
+.command-chain-graph {
+  overflow: auto;
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(9,12,20,0.7);
+}
+
+.command-chain-graph svg {
+  display: block;
+  min-width: 100%;
+  height: auto;
+}
+
+.command-chain-history-row,
+.command-chain-node-row {
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(9,12,20,0.5);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.error-text {
+  color: #fca5a5;
 }
 
 .command-chip,

@@ -2,6 +2,7 @@ import { signal } from '@preact/signals'
 import {
   fetchCommandPlaneHelp,
   fetchCommandPlaneSnapshot,
+  fetchCommandPlaneSummary,
   fetchCommandPlaneSwarm,
   runCommandPlaneAction,
 } from './api'
@@ -29,9 +30,11 @@ import type {
   CommandPlaneOperationsResponse,
   CommandPlanePolicyEnvelope,
   CommandPlaneSnapshot,
+  CommandPlaneSummarySnapshot,
   CommandPlaneSwarmFlag,
   CommandPlaneSwarmGap,
   CommandPlaneSwarmLane,
+  CommandPlaneSwarmProof,
   CommandPlaneSwarmStatus,
   CommandPlaneSwarmTimelineEvent,
   CommandPlaneSwarmBlocker,
@@ -50,13 +53,17 @@ import type {
   CommandPlaneUnitRecord,
   CommandPlaneUnitKind,
 } from './types'
+import { registerCommandPlaneRefresh } from './store'
 
+export const commandPlaneSummary = signal<CommandPlaneSummarySnapshot | null>(null)
 export const commandPlaneSnapshot = signal<CommandPlaneSnapshot | null>(null)
 export const commandPlaneLoading = signal(false)
+export const commandPlaneDetailLoading = signal(false)
 export const commandPlaneError = signal<string | null>(null)
+export const commandPlaneDetailError = signal<string | null>(null)
 export const commandPlaneActionBusy = signal<string | null>(null)
 export const commandPlaneActionError = signal<string | null>(null)
-export const commandPlaneSurface = signal<CommandPlaneSurface>('operations')
+export const commandPlaneSurface = signal<CommandPlaneSurface>('summary')
 export const commandPlaneHelp = signal<CommandPlaneHelpResponse | null>(null)
 export const commandPlaneHelpLoading = signal(false)
 export const commandPlaneHelpError = signal<string | null>(null)
@@ -577,6 +584,31 @@ function normalizeSwarmStatus(raw: unknown): CommandPlaneSwarmStatus | undefined
   }
 }
 
+function normalizeSwarmProof(raw: unknown): CommandPlaneSwarmProof | undefined {
+  if (!isRecord(raw)) return undefined
+  const workers = isRecord(raw.workers) ? raw.workers : {}
+  const pass = asBoolean(raw.pass)
+  return {
+    status: asString(raw.status) ?? 'missing',
+    source: asString(raw.source) ?? 'none',
+    run_id: asString(raw.run_id) ?? null,
+    captured_at: asString(raw.captured_at) ?? null,
+    ...(pass !== undefined ? { pass } : {}),
+    ...(asNumber(raw.peak_hot_slots) != null ? { peak_hot_slots: asNumber(raw.peak_hot_slots) } : {}),
+    ...(asNumber(raw.ctx_per_slot) != null ? { ctx_per_slot: asNumber(raw.ctx_per_slot) } : {}),
+    workers: {
+      expected: asNumber(workers.expected),
+      joined: asNumber(workers.joined),
+      current_task_bound: asNumber(workers.current_task_bound),
+      fresh_heartbeats: asNumber(workers.fresh_heartbeats),
+      done: asNumber(workers.done),
+      final: asNumber(workers.final),
+    },
+    artifact_ref: asString(raw.artifact_ref) ?? null,
+    missing_reason: asString(raw.missing_reason) ?? null,
+  }
+}
+
 function normalizeSnapshot(raw: unknown): CommandPlaneSnapshot {
   const root = isRecord(raw) ? raw : {}
   return {
@@ -590,6 +622,47 @@ function normalizeSnapshot(raw: unknown): CommandPlaneSnapshot {
     capacity: normalizeCapacity(root.capacity),
     traces: normalizeTraces(root.traces),
     swarm_status: normalizeSwarmStatus(root.swarm_status),
+  }
+}
+
+function normalizeSummarySnapshot(raw: unknown): CommandPlaneSummarySnapshot {
+  const root = isRecord(raw) ? raw : {}
+  const topology = normalizeTopology(root.topology)
+  const operations = normalizeOperations(root.operations)
+  const detachments = normalizeDetachments(root.detachments)
+  const alerts = normalizeAlerts(root.alerts)
+  const decisions = normalizeDecisions(root.decisions)
+  return {
+    version: asString(root.version),
+    generated_at: asString(root.generated_at),
+    topology: {
+      version: topology.version,
+      generated_at: topology.generated_at,
+      source: topology.source,
+      summary: topology.summary,
+    },
+    operations: {
+      version: operations.version,
+      generated_at: operations.generated_at,
+      summary: operations.summary,
+    },
+    detachments: {
+      version: detachments.version,
+      generated_at: detachments.generated_at,
+      summary: detachments.summary,
+    },
+    alerts: {
+      version: alerts.version,
+      generated_at: alerts.generated_at,
+      summary: alerts.summary,
+    },
+    decisions: {
+      version: decisions.version,
+      generated_at: decisions.generated_at,
+      summary: decisions.summary,
+    },
+    swarm_status: normalizeSwarmStatus(root.swarm_status),
+    swarm_proof: normalizeSwarmProof(root.swarm_proof),
   }
 }
 
@@ -910,19 +983,48 @@ function normalizeSwarm(raw: unknown): CommandPlaneSwarmResponse {
 
 export function setCommandPlaneSurface(surface: CommandPlaneSurface): void {
   commandPlaneSurface.value = surface
+  if (surface !== 'summary') {
+    void ensureCommandPlaneDetail()
+  }
+}
+
+export async function refreshCommandPlaneSummary(): Promise<void> {
+  commandPlaneLoading.value = true
+  commandPlaneError.value = null
+  try {
+    const raw = await fetchCommandPlaneSummary()
+    commandPlaneSummary.value = normalizeSummarySnapshot(raw)
+  } catch (err) {
+    commandPlaneError.value =
+      err instanceof Error ? err.message : 'Failed to load command-plane summary'
+  } finally {
+    commandPlaneLoading.value = false
+  }
 }
 
 export async function refreshCommandPlaneSnapshot(): Promise<void> {
-  commandPlaneLoading.value = true
-  commandPlaneError.value = null
+  commandPlaneDetailLoading.value = true
+  commandPlaneDetailError.value = null
   try {
     const raw = await fetchCommandPlaneSnapshot()
     commandPlaneSnapshot.value = normalizeSnapshot(raw)
   } catch (err) {
-    commandPlaneError.value =
-      err instanceof Error ? err.message : 'Failed to load command plane snapshot'
+    commandPlaneDetailError.value =
+      err instanceof Error ? err.message : 'Failed to load command-plane snapshot'
   } finally {
-    commandPlaneLoading.value = false
+    commandPlaneDetailLoading.value = false
+  }
+}
+
+export async function ensureCommandPlaneDetail(): Promise<void> {
+  if (commandPlaneSnapshot.value || commandPlaneDetailLoading.value) return
+  await refreshCommandPlaneSnapshot()
+}
+
+export async function refreshCommandPlaneCurrentSurface(): Promise<void> {
+  await refreshCommandPlaneSummary()
+  if (commandPlaneSurface.value !== 'summary') {
+    await refreshCommandPlaneSnapshot()
   }
 }
 
@@ -959,7 +1061,10 @@ async function runAction(key: string, path: string, body: Record<string, unknown
   commandPlaneActionError.value = null
   try {
     await runCommandPlaneAction(path, body)
-    await refreshCommandPlaneSnapshot()
+    await refreshCommandPlaneSummary()
+    if (commandPlaneSnapshot.value || commandPlaneSurface.value !== 'summary') {
+      await refreshCommandPlaneSnapshot()
+    }
     await refreshCommandPlaneSwarm()
   } catch (err) {
     commandPlaneActionError.value =
@@ -1022,3 +1127,7 @@ export function toggleCommandPlaneKillSwitch(unitId: string, enabled: boolean): 
     enabled,
   })
 }
+
+registerCommandPlaneRefresh(() => {
+  void refreshCommandPlaneSummary()
+})

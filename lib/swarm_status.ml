@@ -751,8 +751,8 @@ let read_decision_infos config =
   |> List.map decision_of_json
   |> List.filter (fun (decision : decision_info) -> decision.decision_id <> "")
 
-let read_trace_infos config =
-  Command_plane_v2.list_traces_json config ~limit:timeline_limit ()
+let read_trace_infos ?(limit = timeline_limit) config =
+  Command_plane_v2.list_traces_json config ~limit ()
   |> fun json -> list_member json "events"
   |> List.map trace_of_json
   |> List.filter (fun (trace : trace_info) -> trace.event_id <> "")
@@ -979,8 +979,8 @@ let choose_recommendation lanes =
                         lane_id = None;
                       }))))
 
-let build_json_from_inputs ~now ~operations ~detachments ~alerts ~decisions
-    ~traces ~sessions =
+let build_json_from_inputs ~timeline_limit_override ~now
+    ~operations ~detachments ~alerts ~decisions ~traces ~sessions =
   let operation_kinds =
     operations
     |> List.map (fun (operation : operation_info) ->
@@ -1079,7 +1079,7 @@ let build_json_from_inputs ~now ~operations ~detachments ~alerts ~decisions
            | Some ts -> Some (ts, event)
            | None -> None)
     |> List.sort (fun (left, _) (right, _) -> Float.compare right left)
-    |> List.filteri (fun idx _ -> idx < timeline_limit)
+    |> List.filteri (fun idx _ -> idx < timeline_limit_override)
     |> List.map snd
   in
   let gap_groups =
@@ -1167,8 +1167,10 @@ let build_json_from_inputs ~now ~operations ~detachments ~alerts ~decisions
       ("recommended_next_action", recommendation_to_json recommendation);
     ]
 
-let build_json_from_snapshot (config : Room_utils.config) snapshot =
+let build_json_from_snapshot ?(timeline_limit_override = timeline_limit)
+    (config : Room_utils.config) snapshot =
   build_json_from_inputs
+    ~timeline_limit_override
     ~now:(Time_compat.now ())
     ~operations:(operation_infos_of_snapshot snapshot)
     ~detachments:(detachment_infos_of_snapshot snapshot)
@@ -1177,14 +1179,16 @@ let build_json_from_snapshot (config : Room_utils.config) snapshot =
     ~traces:(trace_infos_of_snapshot snapshot)
     ~sessions:(read_session_infos config)
 
-let build_json (config : Room_utils.config) =
+let build_json ?(timeline_limit_override = timeline_limit)
+    (config : Room_utils.config) =
   build_json_from_inputs
+    ~timeline_limit_override
     ~now:(Time_compat.now ())
     ~operations:(read_operation_infos config)
     ~detachments:(read_detachment_infos config)
     ~alerts:(read_alert_infos config)
     ~decisions:(read_decision_infos config)
-    ~traces:(read_trace_infos config)
+    ~traces:(read_trace_infos ~limit:timeline_limit_override config)
     ~sessions:(read_session_infos config)
 
 let empty_json =

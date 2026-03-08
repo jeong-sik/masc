@@ -5495,6 +5495,18 @@ let assoc_add key value = function
   | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
   | json -> `Assoc [ ("payload", json); (key, value) ]
 
+let command_plane_summary_http_json ~state =
+  let config = state.Mcp_server.room_config in
+  let summary = Command_plane_v2.summary_json config in
+  let swarm_status =
+    if Room.is_initialized config then
+      Masc_mcp.Swarm_status.build_json ~timeline_limit_override:6 config
+    else
+      Masc_mcp.Swarm_status.empty_json
+  in
+  summary
+  |> assoc_add "swarm_status" swarm_status
+
 let command_plane_snapshot_http_json ~state =
   let config = state.Mcp_server.room_config in
   let snapshot = Command_plane_v2.snapshot_json config in
@@ -8193,6 +8205,12 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/command-plane/summary" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_summary_http_json ~state in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/command-plane/help" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = command_plane_help_http_json () in
@@ -9488,6 +9506,11 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/command-plane" ->
           let state = get_server_state () in
           let json = command_plane_snapshot_http_json ~state in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/summary" ->
+          let state = get_server_state () in
+          let json = command_plane_summary_http_json ~state in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/command-plane/help" ->

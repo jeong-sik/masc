@@ -24,6 +24,10 @@ type communication_mode =
   | Comm_portal
   | Comm_hybrid
 
+type scale_profile =
+  | Scale_standard
+  | Scale_local64
+
 type fallback_policy =
   | Fallback_none
   | Fallback_cascade_then_task
@@ -53,11 +57,27 @@ type turn_kind =
   | Turn_task
   | Turn_checkpoint
 
+type worker_class =
+  | Worker_manager
+  | Worker_executor
+  | Worker_scout
+  | Worker_librarian
+  | Worker_metacog
+
+type capsule_mode =
+  | Capsule_fresh
+  | Capsule_inherit
+  | Capsule_capsule
+
 type planned_worker = {
   spawn_agent : string;
   runtime_actor : string option;
   spawn_role : string option;
   spawn_model : string option;
+  worker_class : worker_class option;
+  parent_actor : string option;
+  capsule_mode : capsule_mode option;
+  runtime_pool : string option;
 }
 
 type session = {
@@ -70,6 +90,7 @@ type session = {
   execution_scope : execution_scope;
   checkpoint_interval_sec : int;
   min_agents : int;
+  scale_profile : scale_profile;
   orchestration_mode : orchestration_mode;
   communication_mode : communication_mode;
   model_cascade : string list;
@@ -169,6 +190,14 @@ let communication_mode_of_string = function
   | "hybrid" -> Comm_hybrid
   | _ -> Comm_broadcast
 
+let scale_profile_to_string = function
+  | Scale_standard -> "standard"
+  | Scale_local64 -> "local64"
+
+let scale_profile_of_string = function
+  | "local64" -> Scale_local64
+  | _ -> Scale_standard
+
 let fallback_policy_to_string = function
   | Fallback_none -> "none"
   | Fallback_cascade_then_task -> "cascade_then_task"
@@ -239,6 +268,32 @@ let turn_kind_of_string = function
   | "note" -> Some Turn_note
   | _ -> None
 
+let worker_class_to_string = function
+  | Worker_manager -> "manager"
+  | Worker_executor -> "executor"
+  | Worker_scout -> "scout"
+  | Worker_librarian -> "librarian"
+  | Worker_metacog -> "metacog"
+
+let worker_class_of_string = function
+  | "manager" -> Some Worker_manager
+  | "executor" -> Some Worker_executor
+  | "scout" -> Some Worker_scout
+  | "librarian" -> Some Worker_librarian
+  | "metacog" -> Some Worker_metacog
+  | _ -> None
+
+let capsule_mode_to_string = function
+  | Capsule_fresh -> "fresh"
+  | Capsule_inherit -> "inherit"
+  | Capsule_capsule -> "capsule"
+
+let capsule_mode_of_string = function
+  | "fresh" -> Some Capsule_fresh
+  | "inherit" -> Some Capsule_inherit
+  | "capsule" -> Some Capsule_capsule
+  | _ -> None
+
 let dedup_strings xs =
   let rec loop acc = function
     | [] -> List.rev acc
@@ -258,6 +313,11 @@ let planned_worker_key (w : planned_worker) =
           ^ Option.value ~default:"" (Option.map String.trim w.spawn_role);
           "model:"
           ^ Option.value ~default:"" (Option.map String.trim w.spawn_model);
+          "class:"
+          ^ Option.value ~default:""
+              (Option.map worker_class_to_string w.worker_class);
+          "pool:"
+          ^ Option.value ~default:"" (Option.map String.trim w.runtime_pool);
         ]
 
 let dedup_planned_workers xs =
@@ -339,6 +399,38 @@ let assoc_int_of_json json =
         fields
   | _ -> []
 
+let counts_to_json counts =
+  `Assoc
+    (counts
+    |> List.map (fun (label, count) -> (label, `Int count))
+    |> List.sort (fun (a, _) (b, _) -> compare a b))
+
+let worker_class_counts workers =
+  let tbl = Hashtbl.create 8 in
+  List.iter
+    (fun (worker : planned_worker) ->
+      match worker.worker_class with
+      | None -> ()
+      | Some kind ->
+          let key = worker_class_to_string kind in
+          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
+          Hashtbl.replace tbl key (prev + 1))
+    workers;
+  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+
+let runtime_pool_counts workers =
+  let tbl = Hashtbl.create 8 in
+  List.iter
+    (fun (worker : planned_worker) ->
+      match worker.runtime_pool with
+      | Some pool when String.trim pool <> "" ->
+          let key = String.trim pool in
+          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
+          Hashtbl.replace tbl key (prev + 1)
+      | _ -> ())
+    workers;
+  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+
 let planned_worker_to_yojson (w : planned_worker) =
   `Assoc
     [
@@ -347,6 +439,16 @@ let planned_worker_to_yojson (w : planned_worker) =
         Option.fold ~none:`Null ~some:(fun s -> `String s) w.runtime_actor );
       ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) w.spawn_role);
       ("spawn_model", Option.fold ~none:`Null ~some:(fun s -> `String s) w.spawn_model);
+      ( "worker_class",
+        Option.fold ~none:`Null
+          ~some:(fun kind -> `String (worker_class_to_string kind))
+          w.worker_class );
+      ("parent_actor", Option.fold ~none:`Null ~some:(fun s -> `String s) w.parent_actor);
+      ( "capsule_mode",
+        Option.fold ~none:`Null
+          ~some:(fun mode -> `String (capsule_mode_to_string mode))
+          w.capsule_mode );
+      ("runtime_pool", Option.fold ~none:`Null ~some:(fun s -> `String s) w.runtime_pool);
     ]
 
 let planned_worker_of_yojson (json : Yojson.Safe.t) =
@@ -366,6 +468,20 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
             runtime_actor = member "runtime_actor" json |> to_string_option;
             spawn_role = member "spawn_role" json |> to_string_option;
             spawn_model = member "spawn_model" json |> to_string_option;
+            worker_class =
+              Option.bind
+                (member "worker_class" json |> to_string_option)
+                (fun value ->
+                  worker_class_of_string
+                    (String.lowercase_ascii (String.trim value)));
+            parent_actor = member "parent_actor" json |> to_string_option;
+            capsule_mode =
+              Option.bind
+                (member "capsule_mode" json |> to_string_option)
+                (fun value ->
+                  capsule_mode_of_string
+                    (String.lowercase_ascii (String.trim value)));
+            runtime_pool = member "runtime_pool" json |> to_string_option;
           })
         spawn_agent
   | _ -> None
@@ -382,6 +498,7 @@ let session_to_yojson (s : session) =
       ("execution_scope", `String (execution_scope_to_string s.execution_scope));
       ("checkpoint_interval_sec", `Int s.checkpoint_interval_sec);
       ("min_agents", `Int s.min_agents);
+      ("scale_profile", `String (scale_profile_to_string s.scale_profile));
       ("orchestration_mode", `String (orchestration_mode_to_string s.orchestration_mode));
       ("communication_mode", `String (communication_mode_to_string s.communication_mode));
       ("model_cascade", `List (List.map (fun m -> `String m) s.model_cascade));
@@ -448,6 +565,10 @@ let session_of_yojson json =
           |> execution_scope_of_string;
         checkpoint_interval_sec = get_int_default "checkpoint_interval_sec" 60;
         min_agents = get_int_default "min_agents" 2;
+        scale_profile =
+          json |> member "scale_profile" |> to_string_option
+          |> Option.value ~default:"standard"
+          |> scale_profile_of_string;
         orchestration_mode =
           json |> member "orchestration_mode" |> to_string_option
           |> Option.value ~default:"assist"

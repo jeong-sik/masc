@@ -90,6 +90,25 @@ HTTP_TIMEOUT_SEC=120 \
 ./scripts/harness_swarm_delivery.sh
 ```
 
+local64 shard-pool smoke:
+
+```bash
+LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
+LOCAL64_POOL_TARGET_SHARDS=6 \
+./scripts/harness_team_session_local64_smoke.sh
+```
+
+`scripts/llama-runtime-pool.sh print-env`는 `MASC_LLAMA_RUNTIMES_JSON`에 넣을 JSON을 출력한다.
+
+모델/양자화별 ceiling 비교는 matrix harness로 돌린다:
+
+```bash
+LOCAL64_MODEL_MATRIX_FILE=./scripts/harness/local64-model-matrix.example.json \
+./scripts/harness_local64_model_matrix.sh
+```
+
+각 run은 별도 seed port / MCP port / artifact 디렉토리를 사용하므로, 기존 `8085` seed를 건드리지 않고도 `q8`, `1bit`, 다른 GGUF를 순차 비교할 수 있다.
+
 기본 출력:
 
 - `session_id`
@@ -132,6 +151,12 @@ harness는 각 item에 다음을 자동으로 덧붙인다:
 - `spawn_agent="llama"`
 - `spawn_model=LLAMA_SWARM_MODEL`
 - `spawn_selection_note=<leader note>`
+
+local64 worker batch는 추가로 다음 메타데이터를 권장한다:
+
+- `worker_class`
+- `capsule_mode`
+- `runtime_pool="local64"`
 
 ## Acceptance
 

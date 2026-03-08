@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 AGENT_NAME="${AGENT_NAME:-team-session-harness}"
 DURATION_SEC="${DURATION_SEC:-120}"
@@ -31,26 +34,9 @@ call_tool() {
   local name="$2"
   local args_json="$3"
   local raw
-  local sse_data
 
   raw="$(curl_post_mcp "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"
-
-  sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p')"
-  if [ -n "$sse_data" ]; then
-    local response_line
-    response_line="$(
-      printf "%s\n" "$sse_data" \
-        | rg "\"id\"[[:space:]]*:[[:space:]]*$id([[:space:]],|[[:space:]]*})" \
-        | tail -n1 || true
-    )"
-    if [ -n "$response_line" ]; then
-      printf "%s" "$response_line"
-    else
-      printf "%s\n" "$sse_data" | tail -n1
-    fi
-  else
-    printf "%s" "$raw"
-  fi
+  jsonrpc_normalize_response "$raw" "$id"
 }
 
 extract_result() {

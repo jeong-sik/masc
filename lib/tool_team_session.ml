@@ -78,6 +78,11 @@ let parse_communication_mode args =
   | "hybrid" -> Team_session_types.Comm_hybrid
   | _ -> Team_session_types.Comm_broadcast
 
+let parse_scale_profile args =
+  match String.lowercase_ascii (get_string args "scale_profile" "standard") with
+  | "local64" -> Team_session_types.Scale_local64
+  | _ -> Team_session_types.Scale_standard
+
 let parse_fallback_policy args =
   match String.lowercase_ascii (get_string args "fallback_policy" "cascade_then_task") with
   | "none" -> Team_session_types.Fallback_none
@@ -222,6 +227,7 @@ let handle_start ctx args : result =
     in
     let checkpoint_interval_sec = get_int args "checkpoint_interval_sec" 60 in
     let min_agents = get_int args "min_agents" 2 in
+    let scale_profile = parse_scale_profile args in
     let auto_resume = get_bool args "auto_resume" true in
     let report_formats = parse_report_formats args in
     let execution_scope = parse_execution_scope args in
@@ -236,6 +242,7 @@ let handle_start ctx args : result =
       Team_session_engine_eio.start_session ~sw:ctx.sw ~clock:ctx.clock
         ~config:ctx.config ~created_by:ctx.agent_name ~goal ~duration_seconds
         ~execution_scope ~checkpoint_interval_sec ~min_agents
+        ~scale_profile
         ~orchestration_mode ~communication_mode ~model_cascade ~fallback_policy
         ~instruction_profile ~alert_channel ~auto_resume ~report_formats
         ~agent_names:agents
@@ -354,6 +361,10 @@ type spawn_spec = {
   spawn_prompt : string;
   spawn_model : string option;
   spawn_role : string option;
+  worker_class : Team_session_types.worker_class option;
+  parent_actor : string option;
+  capsule_mode : Team_session_types.capsule_mode option;
+  runtime_pool : string option;
   spawn_selection_note : string option;
   spawn_timeout_seconds : int;
 }
@@ -362,6 +373,8 @@ type prepared_spawn = {
   spec : spawn_spec;
   runtime_actor_name : string option;
   runtime_model : Llm_client.model_spec;
+  runtime_lease : Local_runtime_pool.lease option;
+  assigned_runtime : string option;
 }
 
 let parse_spawn_spec_from_object batch_index json =
@@ -386,6 +399,20 @@ let parse_spawn_spec_from_object batch_index json =
         if trimmed = "" then None else Some trimmed
     | _ -> None
   in
+  let get_optional_worker_class key =
+    Option.bind
+      (get_optional_string key)
+      (fun raw ->
+        Team_session_types.worker_class_of_string
+          (String.lowercase_ascii (String.trim raw)))
+  in
+  let get_optional_capsule_mode key =
+    Option.bind
+      (get_optional_string key)
+      (fun raw ->
+        Team_session_types.capsule_mode_of_string
+          (String.lowercase_ascii (String.trim raw)))
+  in
   let get_timeout key =
     match member key json with
     | `Int n -> max 1 n
@@ -400,6 +427,10 @@ let parse_spawn_spec_from_object batch_index json =
           spawn_prompt;
           spawn_model = get_optional_string "spawn_model";
           spawn_role = get_optional_string "spawn_role";
+          worker_class = get_optional_worker_class "worker_class";
+          parent_actor = get_optional_string "parent_actor";
+          capsule_mode = get_optional_capsule_mode "capsule_mode";
+          runtime_pool = get_optional_string "runtime_pool";
           spawn_selection_note = get_optional_string "spawn_selection_note";
           spawn_timeout_seconds = get_timeout "spawn_timeout_seconds";
         }
@@ -443,6 +474,20 @@ let parse_step_spawn_specs args =
                   spawn_prompt;
                   spawn_model = get_string_opt args "spawn_model";
                   spawn_role = get_string_opt args "spawn_role";
+                  worker_class =
+                    Option.bind
+                      (get_string_opt args "worker_class")
+                      (fun raw ->
+                        Team_session_types.worker_class_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  parent_actor = get_string_opt args "parent_actor";
+                  capsule_mode =
+                    Option.bind
+                      (get_string_opt args "capsule_mode")
+                      (fun raw ->
+                        Team_session_types.capsule_mode_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  runtime_pool = get_string_opt args "runtime_pool";
                   spawn_selection_note = get_string_opt args "spawn_selection_note";
                   spawn_timeout_seconds = get_int args "spawn_timeout_seconds" 300;
                 };
@@ -455,6 +500,10 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
     runtime_actor;
     spawn_role = spec.spawn_role;
     spawn_model = spec.spawn_model;
+    worker_class = spec.worker_class;
+    parent_actor = spec.parent_actor;
+    capsule_mode = spec.capsule_mode;
+    runtime_pool = spec.runtime_pool;
   }
 
 let register_planned_workers config session_id workers =
@@ -474,6 +523,12 @@ let register_planned_workers config session_id workers =
           (`Assoc
             [
               ("planned_worker_count", `Int (List.length updated.planned_workers));
+              ( "worker_class_counts",
+                Team_session_types.worker_class_counts updated.planned_workers
+                |> Team_session_types.counts_to_json );
+              ( "runtime_pool_counts",
+                Team_session_types.runtime_pool_counts updated.planned_workers
+                |> Team_session_types.counts_to_json );
               ( "runtime_actors",
                 `List
                   (workers
@@ -592,7 +647,8 @@ let handle_step ctx args : result =
               let task_description = get_string_opt args "task_description" in
               let task_priority = get_int args "task_priority" 3 in
               let append_spawn_event ?spawn_agent ?runtime_actor ?spawn_role
-                  ?spawn_model ?spawn_selection_note ~success ?exit_code
+                  ?spawn_model ?worker_class ?parent_actor ?capsule_mode
+                  ?runtime_pool ?assigned_runtime ?spawn_selection_note ~success ?exit_code
                   ?elapsed_ms ?output_preview ?error () =
                 let detail =
                   `Assoc
@@ -610,6 +666,27 @@ let handle_step ctx args : result =
                       ( "spawn_model",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           spawn_model );
+                      ( "worker_class",
+                        Option.fold ~none:`Null
+                          ~some:(fun kind ->
+                            `String
+                              (Team_session_types.worker_class_to_string kind))
+                          worker_class );
+                      ( "parent_actor",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          parent_actor );
+                      ( "capsule_mode",
+                        Option.fold ~none:`Null
+                          ~some:(fun mode ->
+                            `String
+                              (Team_session_types.capsule_mode_to_string mode))
+                          capsule_mode );
+                      ( "runtime_pool",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          runtime_pool );
+                      ( "assigned_runtime",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          assigned_runtime );
                       ( "spawn_selection_note",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           spawn_selection_note );
@@ -625,6 +702,19 @@ let handle_step ctx args : result =
                 in
                 Team_session_store.append_event ctx.config session_id
                   ~event_type:"team_step_spawn" ~detail
+              in
+              let release_prepared_runtime (prepared : prepared_spawn) ~success
+                  ?error ?latency_ms () =
+                match prepared.runtime_lease with
+                | Some lease ->
+                    Local_runtime_pool.release lease ~success ?error ?latency_ms ()
+                | None -> ()
+              in
+              let release_all_prepared prepareds ~error =
+                List.iter
+                  (fun prepared ->
+                    release_prepared_runtime prepared ~success:false ~error ())
+                  prepareds
               in
               let prepare_spawn (spec : spawn_spec) =
                 let runtime_actor_name =
@@ -643,18 +733,31 @@ let handle_step ctx args : result =
                           "spawn_model is required when spawn_agent=llama"
                     | Some model_name -> (
                         match
-                          Llm_client.model_spec_of_string
-                            ("llama:" ^ model_name)
+                          Local_runtime_pool.acquire
+                            ?preferred_pool:spec.runtime_pool
+                            ~model_name:(Some model_name) ()
                         with
-                        | Ok spec -> Ok spec
-                        | Error err -> Error ("invalid spawn_model: " ^ err))
+                        | Ok assignment ->
+                            Ok
+                              ( Local_runtime_pool.model_spec_of_assignment
+                                  assignment,
+                                Some assignment.lease,
+                                Some assignment.runtime_id )
+                        | Error err -> Error err)
                   else
-                    Ok Llm_client.ollama_glm
+                    Ok (Llm_client.ollama_glm, None, None)
                 in
                 match runtime_model with
                 | Error e -> Error (spec, runtime_actor_name, e)
-                | Ok runtime_model ->
-                    Ok { spec; runtime_actor_name; runtime_model }
+                | Ok (runtime_model, runtime_lease, assigned_runtime) ->
+                    Ok
+                      {
+                        spec;
+                        runtime_actor_name;
+                        runtime_model;
+                        runtime_lease;
+                        assigned_runtime;
+                      }
               in
               let prepared_spawns_result =
                 let rec loop acc = function
@@ -663,10 +766,15 @@ let handle_step ctx args : result =
                       match prepare_spawn spec with
                       | Ok prepared -> loop (prepared :: acc) rest
                       | Error (failed_spec, runtime_actor_name, msg) ->
+                          release_all_prepared (List.rev acc) ~error:msg;
                           append_spawn_event ~spawn_agent:failed_spec.spawn_agent
                             ?runtime_actor:runtime_actor_name
                             ?spawn_role:failed_spec.spawn_role
                             ?spawn_model:failed_spec.spawn_model
+                            ?worker_class:failed_spec.worker_class
+                            ?parent_actor:failed_spec.parent_actor
+                            ?capsule_mode:failed_spec.capsule_mode
+                            ?runtime_pool:failed_spec.runtime_pool
                             ?spawn_selection_note:failed_spec.spawn_selection_note
                             ~success:false ~error:msg ();
                           Error msg)
@@ -698,11 +806,18 @@ let handle_step ctx args : result =
                     | Some msg ->
                         List.iter
                           (fun prepared ->
+                            release_prepared_runtime prepared ~success:false
+                              ~error:msg ();
                             append_spawn_event
                               ~spawn_agent:prepared.spec.spawn_agent
                               ?runtime_actor:prepared.runtime_actor_name
                               ?spawn_role:prepared.spec.spawn_role
                               ?spawn_model:prepared.spec.spawn_model
+                              ?worker_class:prepared.spec.worker_class
+                              ?parent_actor:prepared.spec.parent_actor
+                              ?capsule_mode:prepared.spec.capsule_mode
+                              ?runtime_pool:prepared.spec.runtime_pool
+                              ?assigned_runtime:prepared.assigned_runtime
                               ?spawn_selection_note:
                                 prepared.spec.spawn_selection_note
                               ~success:false ~error:msg ())
@@ -716,11 +831,18 @@ let handle_step ctx args : result =
                             in
                             List.iter
                               (fun prepared ->
+                                release_prepared_runtime prepared ~success:false
+                                  ~error:msg ();
                                 append_spawn_event
                                   ~spawn_agent:prepared.spec.spawn_agent
                                   ?runtime_actor:prepared.runtime_actor_name
                                   ?spawn_role:prepared.spec.spawn_role
                                   ?spawn_model:prepared.spec.spawn_model
+                                  ?worker_class:prepared.spec.worker_class
+                                  ?parent_actor:prepared.spec.parent_actor
+                                  ?capsule_mode:prepared.spec.capsule_mode
+                                  ?runtime_pool:prepared.spec.runtime_pool
+                                  ?assigned_runtime:prepared.assigned_runtime
                                   ?spawn_selection_note:
                                     prepared.spec.spawn_selection_note
                                   ~success:false ~error:msg ())
@@ -744,11 +866,18 @@ let handle_step ctx args : result =
                              | Error msg ->
                                  List.iter
                                    (fun prepared ->
+                                     release_prepared_runtime prepared
+                                       ~success:false ~error:msg ();
                                      append_spawn_event
                                        ~spawn_agent:prepared.spec.spawn_agent
                                        ?runtime_actor:prepared.runtime_actor_name
                                        ?spawn_role:prepared.spec.spawn_role
                                        ?spawn_model:prepared.spec.spawn_model
+                                       ?worker_class:prepared.spec.worker_class
+                                       ?parent_actor:prepared.spec.parent_actor
+                                       ?capsule_mode:prepared.spec.capsule_mode
+                                       ?runtime_pool:prepared.spec.runtime_pool
+                                       ?assigned_runtime:prepared.assigned_runtime
                                        ?spawn_selection_note:
                                          prepared.spec.spawn_selection_note
                                        ~success:false ~error:msg ())
@@ -779,11 +908,26 @@ let handle_step ctx args : result =
                                         let output_preview =
                                           truncate_for_event spawn_result.output
                                         in
+                                        (match spawn_result.success with
+                                        | true ->
+                                            release_prepared_runtime prepared
+                                              ~success:true
+                                              ~latency_ms:spawn_result.elapsed_ms ()
+                                        | false ->
+                                            release_prepared_runtime prepared
+                                              ~success:false
+                                              ~error:spawn_result.output
+                                              ~latency_ms:spawn_result.elapsed_ms ());
                                         append_spawn_event
                                           ~spawn_agent:prepared.spec.spawn_agent
                                           ?runtime_actor:prepared.runtime_actor_name
                                           ?spawn_role:prepared.spec.spawn_role
                                           ?spawn_model:prepared.spec.spawn_model
+                                          ?worker_class:prepared.spec.worker_class
+                                          ?parent_actor:prepared.spec.parent_actor
+                                          ?capsule_mode:prepared.spec.capsule_mode
+                                          ?runtime_pool:prepared.spec.runtime_pool
+                                          ?assigned_runtime:prepared.assigned_runtime
                                           ?spawn_selection_note:
                                             prepared.spec.spawn_selection_note
                                           ~success:spawn_result.success
@@ -816,6 +960,32 @@ let handle_step ctx args : result =
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
                                                     prepared.spec.spawn_model );
+                                                ( "worker_class",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun kind ->
+                                                      `String
+                                                        (Team_session_types.worker_class_to_string
+                                                           kind))
+                                                    prepared.spec.worker_class );
+                                                ( "parent_actor",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun s -> `String s)
+                                                    prepared.spec.parent_actor );
+                                                ( "capsule_mode",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun mode ->
+                                                      `String
+                                                        (Team_session_types.capsule_mode_to_string
+                                                           mode))
+                                                    prepared.spec.capsule_mode );
+                                                ( "runtime_pool",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun s -> `String s)
+                                                    prepared.spec.runtime_pool );
+                                                ( "assigned_runtime",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun s -> `String s)
+                                                    prepared.assigned_runtime );
                                                 ( "spawn_selection_note",
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
@@ -1261,23 +1431,29 @@ let schemas : tool_schema list =
                               `String "auto";
                             ] );
                       ] );
-                  ( "communication_mode",
-                    `Assoc
-                      [
-                        ("type", `String "string");
+	                  ( "communication_mode",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
                         ( "enum",
                           `List
                             [
                               `String "off";
                               `String "broadcast";
                               `String "portal";
-                              `String "hybrid";
-                            ] );
-                      ] );
-                  ( "model_cascade",
-                    `Assoc
-                      [
-                        ("type", `String "array");
+	                              `String "hybrid";
+	                            ] );
+	                      ] );
+	                  ( "scale_profile",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ("enum", `List [ `String "standard"; `String "local64" ]);
+	                      ] );
+	                  ( "model_cascade",
+	                    `Assoc
+	                      [
+	                        ("type", `String "array");
                         ("items", `Assoc [ ("type", `String "string") ]);
                       ] );
                   ( "fallback_policy",
@@ -1395,12 +1571,40 @@ let schemas : tool_schema list =
                   ("task_title", `Assoc [ ("type", `String "string") ]);
                   ("task_description", `Assoc [ ("type", `String "string") ]);
                   ("task_priority", `Assoc [ ("type", `String "integer") ]);
-                  ("spawn_agent", `Assoc [ ("type", `String "string") ]);
-                  ("spawn_model", `Assoc [ ("type", `String "string") ]);
-                  ("spawn_role", `Assoc [ ("type", `String "string") ]);
-                  ("spawn_selection_note", `Assoc [ ("type", `String "string") ]);
-                  ("spawn_prompt", `Assoc [ ("type", `String "string") ]);
-                  ("spawn_timeout_seconds", `Assoc [ ("type", `String "integer") ]);
+	                  ("spawn_agent", `Assoc [ ("type", `String "string") ]);
+	                  ("spawn_model", `Assoc [ ("type", `String "string") ]);
+	                  ("spawn_role", `Assoc [ ("type", `String "string") ]);
+	                  ( "worker_class",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ( "enum",
+	                          `List
+	                            [
+	                              `String "manager";
+	                              `String "executor";
+	                              `String "scout";
+	                              `String "librarian";
+	                              `String "metacog";
+	                            ] );
+	                      ] );
+	                  ("parent_actor", `Assoc [ ("type", `String "string") ]);
+	                  ( "capsule_mode",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ( "enum",
+	                          `List
+	                            [
+	                              `String "fresh";
+	                              `String "inherit";
+	                              `String "capsule";
+	                            ] );
+	                      ] );
+	                  ("runtime_pool", `Assoc [ ("type", `String "string") ]);
+	                  ("spawn_selection_note", `Assoc [ ("type", `String "string") ]);
+	                  ("spawn_prompt", `Assoc [ ("type", `String "string") ]);
+	                  ("spawn_timeout_seconds", `Assoc [ ("type", `String "integer") ]);
                   ( "spawn_batch",
                     `Assoc
                       [
@@ -1411,13 +1615,41 @@ let schemas : tool_schema list =
                               ("type", `String "object");
                               ( "properties",
                                 `Assoc
-                                  [
-                                    ("spawn_agent", `Assoc [ ("type", `String "string") ]);
-                                    ("spawn_model", `Assoc [ ("type", `String "string") ]);
-                                    ("spawn_role", `Assoc [ ("type", `String "string") ]);
-                                    ( "spawn_selection_note",
-                                      `Assoc [ ("type", `String "string") ] );
-                                    ("spawn_prompt", `Assoc [ ("type", `String "string") ]);
+	                                  [
+	                                    ("spawn_agent", `Assoc [ ("type", `String "string") ]);
+	                                    ("spawn_model", `Assoc [ ("type", `String "string") ]);
+	                                    ("spawn_role", `Assoc [ ("type", `String "string") ]);
+	                                    ( "worker_class",
+	                                      `Assoc
+	                                        [
+	                                          ("type", `String "string");
+	                                          ( "enum",
+	                                            `List
+	                                              [
+	                                                `String "manager";
+	                                                `String "executor";
+	                                                `String "scout";
+	                                                `String "librarian";
+	                                                `String "metacog";
+	                                              ] );
+	                                        ] );
+	                                    ("parent_actor", `Assoc [ ("type", `String "string") ]);
+	                                    ( "capsule_mode",
+	                                      `Assoc
+	                                        [
+	                                          ("type", `String "string");
+	                                          ( "enum",
+	                                            `List
+	                                              [
+	                                                `String "fresh";
+	                                                `String "inherit";
+	                                                `String "capsule";
+	                                              ] );
+	                                        ] );
+	                                    ("runtime_pool", `Assoc [ ("type", `String "string") ]);
+	                                    ( "spawn_selection_note",
+	                                      `Assoc [ ("type", `String "string") ] );
+	                                    ("spawn_prompt", `Assoc [ ("type", `String "string") ]);
                                     ( "spawn_timeout_seconds",
                                       `Assoc [ ("type", `String "integer") ] );
                                   ] );

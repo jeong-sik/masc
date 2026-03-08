@@ -135,6 +135,7 @@ let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
       min_agents;
       orchestration_mode = Team_session_types.Assist;
       communication_mode = Team_session_types.Comm_broadcast;
+      scale_profile = Team_session_types.Scale_standard;
       model_cascade;
       fallback_policy;
       instruction_profile = Team_session_types.Profile_strict;
@@ -310,6 +311,7 @@ let test_recover_elapsed_session () =
       min_agents = 1;
       orchestration_mode = Team_session_types.Assist;
       communication_mode = Team_session_types.Comm_broadcast;
+      scale_profile = Team_session_types.Scale_standard;
       model_cascade = [ "glm:glm-5" ];
       fallback_policy = Team_session_types.Fallback_cascade_then_task;
       instruction_profile = Team_session_types.Profile_standard;
@@ -711,6 +713,10 @@ let test_proof_exposes_spawn_selection_rationale () =
                    runtime_actor = Some "llama-local-proof";
                    spawn_role = Some "planner";
                    spawn_model = Some spawn_model;
+                   worker_class = None;
+                   parent_actor = None;
+                   capsule_mode = None;
+                   runtime_pool = None;
                  };
                ];
            updated_at_iso = Types.now_iso ();

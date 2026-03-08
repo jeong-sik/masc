@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
 SERVER_EXE="${SERVER_EXE:-${ROOT_DIR}/_build/default/bin/main_eio.exe}"
 PORT="${PORT:-}"
 BASE_PATH="${BASE_PATH:-}"
@@ -84,13 +85,7 @@ jsonrpc_call() {
   local response
   response="$("${cmd[@]}")"
   rm -f "$body_file"
-  local sse_data
-  sse_data="$(printf '%s' "$response" | sed -n 's/^data: //p')"
-  if [ -n "$sse_data" ]; then
-    printf '%s\n' "$sse_data" | tail -n1
-  else
-    printf '%s' "$response"
-  fi
+  jsonrpc_normalize_response "$response" "$id"
 }
 
 call_tool() {

@@ -146,6 +146,10 @@ type worker_card = {
   spawn_agent : string option;
   spawn_role : string option;
   spawn_model : string option;
+  worker_class : string option;
+  parent_actor : string option;
+  capsule_mode : string option;
+  runtime_pool : string option;
   status : string;
   turn_count : int;
   empty_note_turn_count : int;
@@ -158,9 +162,13 @@ type session_digest = {
   goal : string;
   status : string;
   health : string;
+  scale_profile : string;
   planned_worker_count : int;
   active_agent_count : int;
   last_turn_age_sec : int option;
+  worker_class_counts : Yojson.Safe.t;
+  runtime_pool_counts : Yojson.Safe.t;
+  local_runtime : Yojson.Safe.t;
   attention_items : attention_item list;
   recommended_actions : recommended_action list;
   worker_cards : worker_card list;
@@ -651,6 +659,10 @@ let worker_card_to_yojson (card : worker_card) =
       ("spawn_agent", string_option_to_json card.spawn_agent);
       ("spawn_role", string_option_to_json card.spawn_role);
       ("spawn_model", string_option_to_json card.spawn_model);
+      ("worker_class", string_option_to_json card.worker_class);
+      ("parent_actor", string_option_to_json card.parent_actor);
+      ("capsule_mode", string_option_to_json card.capsule_mode);
+      ("runtime_pool", string_option_to_json card.runtime_pool);
       ("status", `String card.status);
       ("turn_count", `Int card.turn_count);
       ("empty_note_turn_count", `Int card.empty_note_turn_count);
@@ -693,9 +705,54 @@ let spawn_batch_stub_of_cards (cards : worker_card list) =
                      ("spawn_model", `String model) :: fields
                  | _ -> fields
                in
+               let fields =
+                 match card.worker_class with
+                 | Some worker_class when String.trim worker_class <> "" ->
+                     ("worker_class", `String worker_class) :: fields
+                 | _ -> fields
+               in
+               let fields =
+                 match card.parent_actor with
+                 | Some parent_actor when String.trim parent_actor <> "" ->
+                     ("parent_actor", `String parent_actor) :: fields
+                 | _ -> fields
+               in
+               let fields =
+                 match card.capsule_mode with
+                 | Some capsule_mode when String.trim capsule_mode <> "" ->
+                     ("capsule_mode", `String capsule_mode) :: fields
+                 | _ -> fields
+               in
+               let fields =
+                 match card.runtime_pool with
+                 | Some runtime_pool when String.trim runtime_pool <> "" ->
+                     ("runtime_pool", `String runtime_pool) :: fields
+                 | _ -> fields
+               in
                Some (`Assoc (List.rev fields)))
   in
   `Assoc [ ("spawn_batch", `List items) ]
+
+let aggregate_worker_class_counts (sessions : Team_session_types.session list) =
+  sessions
+  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
+  |> Team_session_types.worker_class_counts
+  |> Team_session_types.counts_to_json
+
+let aggregate_runtime_pool_counts (sessions : Team_session_types.session list) =
+  sessions
+  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
+  |> Team_session_types.runtime_pool_counts
+  |> Team_session_types.counts_to_json
+
+let aggregated_local_runtime_json (sessions : Team_session_types.session list) =
+  if
+    List.exists
+      (fun (session : Team_session_types.session) ->
+        session.scale_profile = Team_session_types.Scale_local64)
+      sessions
+  then Tool_llama.runtime_status_json ()
+  else `Null
 
 let session_card_to_yojson ~actor (digest : session_digest) =
   let top_attention =
@@ -714,9 +771,13 @@ let session_card_to_yojson ~actor (digest : session_digest) =
       ("goal", `String digest.goal);
       ("status", `String digest.status);
       ("health", `String digest.health);
+      ("scale_profile", `String digest.scale_profile);
       ("planned_worker_count", `Int digest.planned_worker_count);
       ("active_agent_count", `Int digest.active_agent_count);
       ("last_turn_age_sec", option_to_json (fun v -> `Int v) digest.last_turn_age_sec);
+      ("worker_class_counts", digest.worker_class_counts);
+      ("runtime_pool_counts", digest.runtime_pool_counts);
+      ("local_runtime", digest.local_runtime);
       ("attention_count", `Int (List.length digest.attention_items));
       ("top_attention", option_to_json attention_item_to_yojson top_attention);
       ("recommended_action_count", `Int (List.length digest.recommended_actions));
@@ -874,13 +935,20 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
              ( worker.runtime_actor,
                Some worker.spawn_agent,
                worker.spawn_role,
-               worker.spawn_model ))
+               worker.spawn_model,
+               Option.map Team_session_types.worker_class_to_string
+                 worker.worker_class,
+               worker.parent_actor,
+               Option.map Team_session_types.capsule_mode_to_string
+                 worker.capsule_mode,
+               worker.runtime_pool ))
     else
       session.agent_names
-      |> List.map (fun actor -> (Some actor, None, None, None))
+      |> List.map (fun actor -> (Some actor, None, None, None, None, None, None, None))
   in
   worker_keys
-  |> List.map (fun (actor, spawn_agent, spawn_role, spawn_model) ->
+  |> List.map (fun (actor, spawn_agent, spawn_role, spawn_model, worker_class,
+                    parent_actor, capsule_mode, runtime_pool) ->
          let turn_count =
            match actor with
            | Some value -> turn_count_by_actor events value
@@ -911,6 +979,10 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            spawn_agent;
            spawn_role;
            spawn_model;
+           worker_class;
+           parent_actor;
+           capsule_mode;
+           runtime_pool;
            status;
            turn_count;
            empty_note_turn_count;
@@ -924,6 +996,20 @@ let session_attention_items ~(session : Team_session_types.session)
   let spawn_failure_count = count_spawn_failures events in
   let detached_actor_count = count_detached_actors events in
   let empty_note_actors = empty_note_turn_actors events in
+  let local64_missing_roles =
+    if
+      session.scale_profile = Team_session_types.Scale_local64
+      && session.planned_workers <> []
+    then
+      let present_roles =
+        session.planned_workers
+        |> List.filter_map (fun (worker : Team_session_types.planned_worker) ->
+               Option.map Team_session_types.worker_class_to_string worker.worker_class)
+      in
+      [ "manager"; "metacog"; "librarian"; "scout" ]
+      |> List.filter (fun role -> not (List.mem role present_roles))
+    else []
+  in
   let base = [] in
   let base =
     if spawn_failure_count > 0 then
@@ -952,6 +1038,27 @@ let session_attention_items ~(session : Team_session_types.session)
         target_id = Some session.session_id;
         actor = None;
         evidence = `Assoc [ ("count", `Int detached_actor_count) ];
+      }
+      :: base
+    else base
+  in
+  let base =
+    if local64_missing_roles <> [] then
+      {
+        kind = "local64_role_gap";
+        severity = "warn";
+        summary =
+          Printf.sprintf "local64 session is missing swarm support roles: %s"
+            (String.concat ", " local64_missing_roles);
+        target_type = "team_session";
+        target_id = Some session.session_id;
+        actor = None;
+        evidence =
+          `Assoc
+            [
+              ( "missing_roles",
+                `List (List.map (fun role -> `String role) local64_missing_roles) );
+            ];
       }
       :: base
     else base
@@ -1142,10 +1249,55 @@ let session_recommendations ~(session : Team_session_types.session)
                      target_id = Some session.session_id;
                      severity = item.severity;
                      reason = item.summary;
-                     suggested_payload =
+                   suggested_payload =
                        spawn_batch_stub_of_cards no_turn_worker_cards;
                    }
-           | _ -> None)
+	           | "local64_role_gap" ->
+	               let missing_roles =
+	                 match item.evidence |> U.member "missing_roles" with
+	                 | `List xs ->
+	                     xs
+	                     |> List.filter_map (function
+	                          | `String role when String.trim role <> "" ->
+	                              Some (String.trim role)
+	                          | _ -> None)
+	                 | _ -> []
+	               in
+	               let spawn_batch =
+	                 missing_roles
+	                 |> List.map (fun role ->
+	                        let spawn_role, capsule_mode =
+	                          match role with
+	                          | "manager" -> ("middle-manager", "capsule")
+	                          | "metacog" -> ("metacog-observer", "capsule")
+	                          | "librarian" -> ("knowledge-librarian", "capsule")
+	                          | "scout" -> ("research-scout", "fresh")
+	                          | other -> (other, "fresh")
+	                        in
+	                        `Assoc
+	                          [
+	                            ("spawn_agent", `String "llama");
+	                            ( "spawn_prompt",
+	                              `String
+	                                (Printf.sprintf
+	                                   "REQUIRED: provide explicit spawn_prompt for local64 %s role"
+	                                   role) );
+	                            ("spawn_role", `String spawn_role);
+	                            ("worker_class", `String role);
+	                            ("capsule_mode", `String capsule_mode);
+	                            ("runtime_pool", `String "local64");
+	                          ])
+	               in
+	               Some
+	                 {
+	                   action_type = "team_worker_spawn_batch";
+	                   target_type = "team_session";
+	                   target_id = Some session.session_id;
+	                   severity = item.severity;
+	                   reason = item.summary;
+	                   suggested_payload = `Assoc [ ("spawn_batch", `List spawn_batch) ];
+	                 }
+	           | _ -> None)
   in
   dedup_recommendations suggestions
 
@@ -1200,9 +1352,30 @@ let build_session_digest config (session : Team_session_types.session) ~now =
          match U.member "status" team_health with
          | `String status -> normalize_team_health status
          | _ -> attention_health);
+    scale_profile =
+      (match U.member "scale_profile" summary with
+      | `String value -> value
+      | _ -> Team_session_types.scale_profile_to_string session.scale_profile);
     planned_worker_count = List.length session.planned_workers;
     active_agent_count;
     last_turn_age_sec;
+    worker_class_counts =
+      (match U.member "worker_class_counts" summary with
+      | `Assoc _ as json -> json
+      | _ ->
+          Team_session_types.worker_class_counts session.planned_workers
+          |> Team_session_types.counts_to_json);
+    runtime_pool_counts =
+      (match U.member "runtime_pool_counts" summary with
+      | `Assoc _ as json -> json
+      | _ ->
+          Team_session_types.runtime_pool_counts session.planned_workers
+          |> Team_session_types.counts_to_json);
+    local_runtime =
+      (match U.member "local_runtime" status_json with
+      | `Assoc _ as json -> json
+      | `Null as json -> json
+      | _ -> `Null);
     attention_items;
     recommended_actions;
     worker_cards;
@@ -1249,6 +1422,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     ?(include_keepers = true) (ctx : 'a context) : Yojson.Safe.t =
   let config = ctx.config in
   let initialized = Room.is_initialized config in
+  let tracked_sessions =
+    if initialized then Team_session_store.list_sessions config else []
+  in
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
   let view = parse_snapshot_view view in
@@ -1318,6 +1494,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
        ("command_plane", command_plane_json);
        ("swarm_status", swarm_status_json);
+       ("role_census", aggregate_worker_class_counts tracked_sessions);
+       ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
+       ("local_runtime", aggregated_local_runtime_json tracked_sessions);
        ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
        ("pending_confirms", pending_confirms_json ?actor config);
        ("available_actions", available_actions_json);
@@ -1346,6 +1525,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
     let now = Time_compat.now () in
+    let tracked_sessions = Team_session_store.list_sessions config in
     let command_plane_json = Command_plane_v2.snapshot_json config in
     let swarm_status_json =
       Swarm_status.build_json_from_snapshot config command_plane_json
@@ -1353,7 +1533,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
     match target_type with
     | "room" ->
         let sessions =
-          Team_session_store.list_sessions config
+          tracked_sessions
           |> List.map (fun session -> build_session_digest config session ~now)
           |> List.sort compare_session_digest
         in
@@ -1379,6 +1559,9 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
               ("swarm_status", swarm_status_json);
+              ("role_census", aggregate_worker_class_counts tracked_sessions);
+              ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
+              ("local_runtime", aggregated_local_runtime_json tracked_sessions);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ( "recommended_actions",
                 `List

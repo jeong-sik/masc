@@ -221,6 +221,14 @@ let summary_json_of_session (config : Room.config)
   let planned_runtime_actors = Team_session_types.planned_worker_actor_names session in
   let planned_participants = Team_session_types.planned_participant_names session in
   let room_active_agents = room_active_agent_names config in
+  let worker_class_counts =
+    Team_session_types.worker_class_counts session.planned_workers
+    |> Team_session_types.counts_to_json
+  in
+  let runtime_pool_counts =
+    Team_session_types.runtime_pool_counts session.planned_workers
+    |> Team_session_types.counts_to_json
+  in
   `Assoc
     [
       ("session_id", `String session.session_id);
@@ -230,7 +238,9 @@ let summary_json_of_session (config : Room.config)
       ("progress_pct", `Float progress_pct);
       ("done_delta_total", `Int done_total);
       ("done_delta_by_agent", Team_session_types.assoc_int_to_json deltas);
+      ("scale_profile", `String (Team_session_types.scale_profile_to_string session.scale_profile));
       ("active_agents", `List (List.map (fun a -> `String a) active_agents));
+      ("planned_worker_count", `Int (List.length session.planned_workers));
       ( "planned_workers",
         `List
           (List.map Team_session_types.planned_worker_to_yojson
@@ -239,6 +249,8 @@ let summary_json_of_session (config : Room.config)
         `List (List.map (fun a -> `String a) planned_runtime_actors) );
       ( "planned_participants",
         `List (List.map (fun a -> `String a) planned_participants) );
+      ("worker_class_counts", worker_class_counts);
+      ("runtime_pool_counts", runtime_pool_counts);
       ("room_active_agents", `List (List.map (fun a -> `String a) room_active_agents));
       ( "last_checkpoint_at",
         Option.fold ~none:`Null ~some:(fun v -> `Float v)
@@ -260,6 +272,11 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
     with_runtimes_lock (fun () -> Hashtbl.mem runtimes session.session_id)
   in
   let llm_cache_metrics = Prometheus.llm_cache_metrics_json () in
+  let local_runtime =
+    match session.scale_profile with
+    | Team_session_types.Scale_local64 -> Tool_llama.runtime_status_json ()
+    | Team_session_types.Scale_standard -> `Null
+  in
   let summary, team_health, communication_metrics, orchestration_state,
       cascade_metrics =
     status_sections config session
@@ -268,11 +285,13 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
     [
       ("session", Team_session_types.session_to_yojson session);
       ("runtime_running", `Bool runtime_running);
+      ("scale_profile", `String (Team_session_types.scale_profile_to_string session.scale_profile));
       ("summary", summary);
       ("team_health", team_health);
       ("communication_metrics", communication_metrics);
       ("orchestration_state", orchestration_state);
       ("cascade_metrics", cascade_metrics);
+      ("local_runtime", local_runtime);
       ("llm_cache_metrics", llm_cache_metrics);
       ( "report_paths",
         `Assoc
@@ -646,6 +665,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     ~(created_by : string) ~(goal : string) ~(duration_seconds : int)
     ~(execution_scope : Team_session_types.execution_scope)
     ~(checkpoint_interval_sec : int) ~(min_agents : int)
+    ~(scale_profile : Team_session_types.scale_profile)
     ~(orchestration_mode : Team_session_types.orchestration_mode)
     ~(communication_mode : Team_session_types.communication_mode)
     ~(model_cascade : string list)
@@ -689,6 +709,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         execution_scope;
         checkpoint_interval_sec;
         min_agents;
+        scale_profile;
         orchestration_mode;
         communication_mode;
         model_cascade;
@@ -736,6 +757,9 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
             ("created_by", `String created_by);
             ("duration_seconds", `Int duration_seconds);
             ("agent_count", `Int (List.length selected_agents));
+            ( "scale_profile",
+              `String
+                (Team_session_types.scale_profile_to_string scale_profile) );
             ( "orchestration_mode",
               `String
                 (Team_session_types.orchestration_mode_to_string

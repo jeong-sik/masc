@@ -92,7 +92,8 @@ let masc_mcp_tools = [
 
 let llama_mcp_tools = [
   "mcp__masc__masc_team_session_status";
-  "mcp__masc__masc_team_session_step";
+  "mcp__masc__masc_team_session_turn";
+  "mcp__masc__masc_memento_mori";
 ]
 
 let masc_lifecycle_suffix = {| 

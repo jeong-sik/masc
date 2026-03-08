@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 COORD_AGENT="${COORD_AGENT:-team-session-real-spawn}"
 SPAWN_RUNTIME_AGENT="${SPAWN_RUNTIME_AGENT:-codex}"
@@ -62,23 +65,7 @@ jsonrpc_call() {
       -H 'Accept: application/json, text/event-stream' \
       -H "mcp-session-id: $MCP_SESSION_ID" \
       -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"$method\",\"params\":$params}" 2>/dev/null)"; then
-      local sse_data
-      sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p')"
-      if [ -n "$sse_data" ]; then
-        local response_line
-        response_line="$(
-          printf "%s\n" "$sse_data" \
-            | rg "\"id\"[[:space:]]*:[[:space:]]*$id([[:space:]],|[[:space:]]*})" \
-            | tail -n1 || true
-        )"
-        if [ -n "$response_line" ]; then
-          printf "%s" "$response_line"
-        else
-          printf "%s\n" "$sse_data" | tail -n1
-        fi
-      else
-        printf "%s" "$raw"
-      fi
+      jsonrpc_normalize_response "$raw" "$id"
       return 0
     fi
     attempts=$((attempts + 1))

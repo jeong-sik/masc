@@ -310,7 +310,10 @@
    cache_coherence
    ;; SWARM-RISC Phase 3: OoO (Tomasulo) + Work-Stealing
    reservation_station
-   work_stealing)
+   work_stealing
+   ;; SWARM-RISC Phase 4: Speculative Execution + MCTS
+   mcts_tree
+   speculative_engine)
  (libraries
    yojson
    base64

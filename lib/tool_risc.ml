@@ -1,10 +1,11 @@
-(** Tool_risc -- MCP Tool Handlers for SWARM-RISC Pipeline + Cache + OoO
+(** Tool_risc -- MCP Tool Handlers for SWARM-RISC Pipeline + Cache + OoO + Speculative
 
-    Exposes pipeline operations, cache coherence, and OoO scheduling
-    as MCP tools.
+    Exposes pipeline operations, cache coherence, OoO scheduling,
+    and speculative execution as MCP tools.
     Phase 1 tools: pipeline_status, decode, pipeline_flush.
     Phase 2 tools: cache_status, cache_read, cache_write, cache_metrics.
     Phase 3 tools: rs_status, rs_add, rs_issue, rs_cdb, steal, ooo_metrics.
+    Phase 4 tools: spec_start, spec_status, spec_commit, spec_abort.
 
     Tool dispatch follows the project convention: match-based routing,
     no dict/map lookup.
@@ -38,6 +39,27 @@ let global_coherence = Cache_coherence.create_controller ()
 
 (** Singleton Tomasulo RS scheduler. Same thread-safety note above. *)
 let global_scheduler = Reservation_station.create_scheduler ()
+
+(* ================================================================ *)
+(* Global Speculative Engine (Phase 4)                              *)
+(* ================================================================ *)
+
+(** Default fast model for speculative execution.
+    Uses Ollama glm-4.7-flash (local, cheap).
+    Overridable via tool args at runtime. *)
+let default_fast_model : Llm_client.model_spec = {
+  provider = Ollama;
+  model_id = "glm-4.7-flash";
+  max_context = 202000;
+  api_url = "http://127.0.0.1:11434";
+  api_key_env = None;
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
+}
+
+(** Singleton speculative engine. Same thread-safety note above. *)
+let global_spec_engine =
+  Speculative_engine.create ~fast_model:default_fast_model ()
 
 (* ================================================================ *)
 (* Argument Helpers (consistent with tool_cache.ml pattern)         *)
@@ -596,10 +618,78 @@ let handle_ooo_metrics _args : result =
   ]))
 
 (* ================================================================ *)
+(* Tool: masc_risc_spec_start (Phase 4)                             *)
+(* ================================================================ *)
+
+(** Start speculative execution: branch into N candidates for MCTS
+    evaluation via fast LLM. *)
+let handle_spec_start args : result =
+  let goal = get_string args "goal" "" in
+  let query = get_string args "original_query" "" in
+  let labels = get_string_list args "candidate_labels" in
+  if goal = "" then (false, "goal is required")
+  else if labels = [] then (false, "candidate_labels is required (string list)")
+  else begin
+    let candidates = List.map (fun label ->
+      { Speculative_engine.label;
+        prompt = label;
+        metadata = `Null }
+    ) labels in
+    match Speculative_engine.branch global_spec_engine
+      ~goal ~original_query:query ~candidates with
+    | Ok session ->
+        (true, Yojson.Safe.pretty_to_string
+          (Speculative_engine.session_to_yojson session))
+    | Error msg -> (false, msg)
+  end
+
+(* ================================================================ *)
+(* Tool: masc_risc_spec_status (Phase 4)                            *)
+(* ================================================================ *)
+
+(** Query speculative engine status: active sessions, metrics, MCTS tree. *)
+let handle_spec_status _args : result =
+  (true, Yojson.Safe.pretty_to_string (Speculative_engine.status global_spec_engine))
+
+(* ================================================================ *)
+(* Tool: masc_risc_spec_commit (Phase 4)                            *)
+(* ================================================================ *)
+
+(** Commit a speculative session — accept the best candidate.
+    Only valid when session is in Ready_to_commit state. *)
+let handle_spec_commit args : result =
+  let spec_id = get_string args "spec_id" "" in
+  if spec_id = "" then (false, "spec_id is required")
+  else match Speculative_engine.commit global_spec_engine spec_id with
+    | Ok outcome ->
+        (true, Yojson.Safe.pretty_to_string (`Assoc [
+          ("committed", `Bool true);
+          ("spec_id", `String spec_id);
+          ("outcome", Speculative_engine.outcome_to_yojson outcome);
+        ]))
+    | Error msg -> (false, msg)
+
+(* ================================================================ *)
+(* Tool: masc_risc_spec_abort (Phase 4)                             *)
+(* ================================================================ *)
+
+(** Abort a speculative session — discard results and rollback.
+    Backpropagates failure reward (0.0) into MCTS tree. *)
+let handle_spec_abort args : result =
+  let spec_id = get_string args "spec_id" "" in
+  let reason = get_string args "reason" "user_abort" in
+  if spec_id = "" then (false, "spec_id is required")
+  else match Speculative_engine.abort global_spec_engine spec_id ~reason with
+    | Ok session ->
+        (true, Yojson.Safe.pretty_to_string
+          (Speculative_engine.session_to_yojson session))
+    | Error msg -> (false, msg)
+
+(* ================================================================ *)
 (* Tool Definitions (for MCP registration)                          *)
 (* ================================================================ *)
 
-(** MCP tool definitions for SWARM-RISC Phase 1 + Phase 2 + Phase 3.
+(** MCP tool definitions for SWARM-RISC Phase 1-4.
     To be registered in mcp_server_eio.ml dispatch. *)
 let tool_definitions : (string * Yojson.Safe.t) list = [
   ("masc_risc_pipeline_status", `Assoc [
@@ -880,6 +970,74 @@ let tool_definitions : (string * Yojson.Safe.t) list = [
       ("properties", `Assoc []);
     ]);
   ]);
+
+  (* Phase 4: Speculative Execution *)
+  ("masc_risc_spec_start", `Assoc [
+    ("name", `String "masc_risc_spec_start");
+    ("description", `String "Start speculative execution: branch into N candidates for MCTS evaluation via fast LLM.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The goal to accomplish speculatively.");
+        ]);
+        ("original_query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The original user query to preserve intent alignment.");
+        ]);
+        ("candidate_labels", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Labels for candidate approaches (e.g. ['schema_first', 'regex', 'llm_parse']).");
+        ]);
+      ]);
+      ("required", `List [`String "goal"; `String "candidate_labels"]);
+    ]);
+  ]);
+
+  ("masc_risc_spec_status", `Assoc [
+    ("name", `String "masc_risc_spec_status");
+    ("description", `String "Query speculative engine status: active sessions, metrics, MCTS tree summary.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ]);
+  ]);
+
+  ("masc_risc_spec_commit", `Assoc [
+    ("name", `String "masc_risc_spec_commit");
+    ("description", `String "Commit a speculative session — accept the best candidate result.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("spec_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Speculative session ID (e.g. spec-0001).");
+        ]);
+      ]);
+      ("required", `List [`String "spec_id"]);
+    ]);
+  ]);
+
+  ("masc_risc_spec_abort", `Assoc [
+    ("name", `String "masc_risc_spec_abort");
+    ("description", `String "Abort a speculative session — discard results and rollback. Backpropagates failure reward.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("spec_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Speculative session ID to abort.");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reason for aborting (default: user_abort).");
+        ]);
+      ]);
+      ("required", `List [`String "spec_id"]);
+    ]);
+  ]);
 ]
 
 (** Tool schemas in Types.tool_schema format for config.ml registration. *)
@@ -914,6 +1072,11 @@ let dispatch tool_name args : result =
   | "masc_risc_rs_complete" -> handle_rs_complete args
   | "masc_risc_steal" -> handle_steal args
   | "masc_risc_ooo_metrics" -> handle_ooo_metrics args
+  (* Phase 4: Speculative Execution *)
+  | "masc_risc_spec_start" -> handle_spec_start args
+  | "masc_risc_spec_status" -> handle_spec_status args
+  | "masc_risc_spec_commit" -> handle_spec_commit args
+  | "masc_risc_spec_abort" -> handle_spec_abort args
   | _ -> (false, Printf.sprintf "Unknown RISC tool: %s" tool_name)
 
 (** Check if a tool name is a RISC tool. *)

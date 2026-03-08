@@ -312,3 +312,7 @@ module Cache_coherence = Cache_coherence
 (* SWARM-RISC Phase 3: OoO + Work-Stealing *)
 module Reservation_station = Reservation_station
 module Work_stealing = Work_stealing
+
+(* SWARM-RISC Phase 4: Speculative Execution + MCTS *)
+module Mcts_tree = Mcts_tree
+module Speculative_engine = Speculative_engine

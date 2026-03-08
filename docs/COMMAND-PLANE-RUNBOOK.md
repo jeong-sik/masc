@@ -218,6 +218,27 @@ Content-Type: application/json
 - CPv2 benchmark
 - direct swarm orchestration
 
+## Agent Swarm Fleet Mode
+
+`agent_swarm_runner`에는 hot-swarm live harness와 별도로 planner -> workers용 fleet mode가 있다.
+
+핵심 차이:
+
+- hot-swarm harness
+  - deterministic fixture
+  - runtime-assisted claim/current_task/done
+  - CPv2 swarm proof와 dashboard truthfulness 검증이 목적
+- fleet mode
+  - planner가 `masc_batch_add_tasks`로 작업을 쪼갠다
+  - workers는 `masc_claim_next`로 task를 가져가고 `masc_set_current_task`를 직접 맞춘다
+  - 실험용 planner/worker orchestration이 목적
+
+주의:
+
+- fleet mode는 live harness의 대체가 아니다
+- planner가 task를 만들지 못하면 worker phase는 실제 작업을 못 한다
+- `claim_next`를 썼어도 worker가 `masc_set_current_task`를 생략하면 readiness가 어긋난다
+
 ## Which Tool Now?
 
 - room이 안 잡혔다: `masc_set_room`

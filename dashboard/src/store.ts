@@ -675,7 +675,9 @@ export async function refreshMessages(): Promise<void> {
     )
     const fresh = incoming.filter(m => m.seq == null || !existingSeqs.has(m.seq))
     if (fresh.length > 0) {
-      messages.value = [...current, ...fresh]
+      const merged = [...current, ...fresh]
+      // Cap at 500 messages to prevent unbounded growth in long sessions
+      messages.value = merged.length > 500 ? merged.slice(-500) : merged
     }
   } catch (err) {
     console.error('Messages selective fetch error:', err)

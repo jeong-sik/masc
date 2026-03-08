@@ -75,6 +75,26 @@ let test_validate_expected_final_marker_accepts_exact_line () =
         (Agent_swarm_swarm.extract_text validated)
   | Error message ->
       Alcotest.failf "expected marker should pass: %s" message
+
+let test_validate_expected_final_marker_requires_final_line_position () =
+  let marker = "FINAL_MARKER[demo:discover:official]" in
+  let response : Agent_sdk.Types.api_response = {
+    id = "resp-3";
+    model = "test-model";
+    stop_reason = Agent_sdk.Types.EndTurn;
+    content = [ Agent_sdk.Types.Text ("summary\n" ^ marker ^ "\ntrailing text") ];
+    usage = None;
+  } in
+  match
+    Agent_swarm_swarm.validate_expected_final_marker response
+      ~expected_final_marker:(Some marker)
+  with
+  | Ok _ -> Alcotest.fail "marker should fail when not last non-empty line"
+  | Error message ->
+      Alcotest.(check string) "position error message"
+        ("Missing expected final marker as final non-empty line: " ^ marker)
+        message
+
 let () =
   Alcotest.run "Swarm Unit" [
     "error_paths", [
@@ -83,5 +103,7 @@ let () =
         test_validate_expected_final_marker_requires_real_output;
       Alcotest.test_case "exact expected final marker passes" `Quick
         test_validate_expected_final_marker_accepts_exact_line;
+      Alcotest.test_case "expected final marker must be last non-empty line" `Quick
+        test_validate_expected_final_marker_requires_final_line_position;
     ];
   ]

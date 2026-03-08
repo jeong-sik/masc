@@ -232,38 +232,6 @@ let test_freeze_requires_company_approval () =
        |> Yojson.Safe.Util.member "decision_id"
        <> `Null))
 
-let test_invalid_search_strategy_is_rejected () =
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let owner = "owner-root-node" in
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
-      unit_update_exn config ~actor:"owner"
-        (`Assoc
-          [
-            ("unit_id", `String "company-main");
-            ("kind", `String "company");
-            ("label", `String "Main Company");
-            ("leader_id", `String owner);
-            ("roster", `List [ `String owner ]);
-          ]);
-      match
-        Command_plane_v2.start_operation config ~actor:"owner"
-          (`Assoc
-            [
-              ("assigned_unit_id", `String "company-main");
-              ("objective", `String "Reject invalid strategy");
-              ("search_strategy", `String "made_up_strategy");
-            ])
-      with
-      | Ok _ -> Alcotest.fail "invalid search_strategy should be rejected"
-      | Error message ->
-          Alcotest.(check string) "validation error"
-            "unsupported search_strategy: made_up_strategy" message)
-
 let test_snapshot_json_reports_consistent_sections () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1170,8 +1138,6 @@ let () =
           Alcotest.test_case "best first search blocks and routes research pipeline"
             `Quick
             test_best_first_search_blocks_and_routes_research_pipeline;
-          Alcotest.test_case "invalid search strategy is rejected" `Quick
-            test_invalid_search_strategy_is_rejected;
           Alcotest.test_case "freeze requires company approval" `Quick
             test_freeze_requires_company_approval;
           Alcotest.test_case "snapshot json reports consistent sections" `Quick

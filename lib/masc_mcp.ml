@@ -271,3 +271,15 @@ module Trpg_bdi = Trpg_bdi
 module Trpg_harness = Trpg_harness
 module Trpg_dm_intent = Trpg_dm_intent
 module Trpg_actor_match = Trpg_actor_match
+
+(* SWARM-RISC Agent ISA (Phase 1: types + pipeline + tools) *)
+module Risc_types = Risc_types
+module Risc_pipeline = Risc_pipeline
+module Tool_risc = Tool_risc
+
+(* SWARM-RISC Phase 2: MESI cache coherence *)
+module Cache_coherence = Cache_coherence
+
+(* SWARM-RISC Phase 3: OoO + Work-Stealing *)
+module Reservation_station = Reservation_station
+module Work_stealing = Work_stealing

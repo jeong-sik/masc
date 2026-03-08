@@ -1496,6 +1496,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     Tool_gardener.dispatch () name arguments
   else
 
+  (* SWARM-RISC Agent ISA tools — prefix guard like Tool_gardener *)
+  if Tool_risc.is_risc_tool name then
+    Tool_risc.dispatch name arguments
+  else
+
   match name with
   | "masc_lock" ->
       let file = arg_get_string "file" "" in

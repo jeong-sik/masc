@@ -1,0 +1,56 @@
+open Masc_mcp
+
+let with_test_env f =
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc_room_messages_%d_%d" (Unix.getpid ())
+       (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  Unix.mkdir tmp_dir 0o755;
+  let config = Room.default_config tmp_dir in
+  let _ = Room.init config ~agent_name:(Some "claude") in
+  try
+    f config;
+    let _ = Room.reset config in
+    Unix.rmdir tmp_dir
+  with e ->
+    let _ = Room.reset config in
+    Unix.rmdir tmp_dir;
+    raise e
+
+let test_get_messages_raw_limit_and_order () =
+  with_test_env (fun config ->
+    let _ = Room.broadcast config ~from_agent:"claude" ~content:"Message 1" in
+    let _ = Room.broadcast config ~from_agent:"claude" ~content:"Message 2" in
+    let _ = Room.broadcast config ~from_agent:"claude" ~content:"Message 3" in
+    let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:2 in
+    let contents = List.map (fun (msg : Types.message) -> msg.content) msgs in
+    Alcotest.(check int) "limit respected" 2 (List.length msgs);
+    Alcotest.(check (list string)) "newest messages first"
+      ["Message 3"; "Message 2"] contents
+  )
+
+let test_get_messages_raw_since_seq_stops_early () =
+  with_test_env (fun config ->
+    let _ = Room.broadcast config ~from_agent:"claude" ~content:"Message 1" in
+    let _ = Room.broadcast config ~from_agent:"claude" ~content:"Message 2" in
+    let _ = Room.broadcast config ~from_agent:"claude" ~content:"Message 3" in
+    let baseline = Room.get_messages_raw config ~since_seq:0 ~limit:10 in
+    let cutoff_seq =
+      match baseline with
+      | _latest :: second :: _ -> second.seq
+      | _ -> Alcotest.fail "expected at least two messages in baseline"
+    in
+    let msgs = Room.get_messages_raw config ~since_seq:cutoff_seq ~limit:10 in
+    let contents = List.map (fun (msg : Types.message) -> msg.content) msgs in
+    Alcotest.(check (list string)) "only newer than since_seq"
+      ["Message 3"] contents
+  )
+
+let () =
+  Alcotest.run "Room raw message regression" [
+    ("messages_raw", [
+      Alcotest.test_case "limit and newest-first ordering" `Quick
+        test_get_messages_raw_limit_and_order;
+      Alcotest.test_case "since_seq filters older history" `Quick
+        test_get_messages_raw_since_seq_stops_early;
+    ]);
+  ]

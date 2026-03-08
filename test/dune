@@ -170,6 +170,12 @@
  (modules test_swarm_status)
  (libraries masc_mcp alcotest yojson))
 
+; Process_eio fallback tests (bind-error retry + Unix fallback behavior)
+(test
+ (name test_process_eio_coverage)
+ (modules test_process_eio_coverage)
+ (libraries masc_mcp alcotest eio_main))
+
 ; Resilience module tests (Time, Zombie, ZeroZombie pure functions)
 (test
  (name test_resilience)

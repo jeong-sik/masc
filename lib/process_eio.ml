@@ -34,94 +34,127 @@ let get_clock () =
 
 (** ── Unix fallback for tests (when Eio not initialized) ──────────── *)
 
-let run_unix_argv_fallback (argv : string list) : string =
-  match argv with
-  | [] -> ""
-  | prog :: _ ->
-      (try
-         let ic = Unix.open_process_args_in prog (Array.of_list argv) in
-         Fun.protect
-           ~finally:(fun () -> ignore (Unix.close_process_in ic))
-           (fun () -> In_channel.input_all ic)
-       with _ -> "")
+let default_env = function
+  | Some env -> env
+  | None -> Unix.environment ()
 
-let run_unix_argv_with_status_fallback (argv : string list) : Unix.process_status * string =
-  match argv with
-  | [] -> (Unix.WEXITED 1, "")
-  | prog :: _ ->
-      (try
-         let ic = Unix.open_process_args_in prog (Array.of_list argv) in
-         let output = In_channel.input_all ic in
-         let status = Unix.close_process_in ic in
-         (status, output)
-       with _ -> (Unix.WEXITED 1, ""))
+let rec should_retry_unix_fallback = function
+  | Unix.Unix_error
+      ((Unix.EADDRINUSE | Unix.EADDRNOTAVAIL | Unix.EACCES | Unix.EPERM), "bind", _) ->
+      true
+  | Eio.Cancel.Cancelled exn -> should_retry_unix_fallback exn
+  | _ -> false
 
-let run_unix_argv_with_stdin_fallback ~(stdin_content : string) (argv : string list) : string =
+let close_quietly fd =
+  try Unix.close fd with
+  | _ -> ()
+
+let with_unix_capture ?env ?stdin_content (argv : string list)
+    ~(on_error : unit -> 'a)
+    ~(on_success : Unix.process_status -> string -> 'a) : 'a =
   match argv with
-  | [] -> ""
+  | [] -> on_error ()
   | prog :: _ ->
+      let stdout_r_ref = ref None in
+      let stdout_w_ref = ref None in
+      let stdin_r_ref = ref None in
+      let stdin_w_ref = ref None in
       (try
-         let stdin_r, stdin_w = Unix.pipe () in
-         let stdout_r, stdout_w = Unix.pipe () in
-         let args = Array.of_list argv in
-         let pid = Unix.create_process prog args stdin_r stdout_w Unix.stderr in
-         Unix.close stdin_r;
-         Unix.close stdout_w;
-         Fun.protect
-           ~finally:(fun () -> try Unix.close stdin_w with _ -> ())
-           (fun () ->
-             let rec write_all off =
-               if off < String.length stdin_content then begin
-                 let n =
-                   Unix.write_substring stdin_w stdin_content off (String.length stdin_content - off)
+         let env = default_env env in
+         let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
+         stdout_r_ref := Some stdout_r;
+         stdout_w_ref := Some stdout_w;
+         let stdin_r_opt, stdin_w_opt =
+           match stdin_content with
+           | None -> (None, None)
+           | Some _ ->
+               let r, w = Unix.pipe ~cloexec:true () in
+               (Some r, Some w)
+         in
+         stdin_r_ref := stdin_r_opt;
+         stdin_w_ref := stdin_w_opt;
+         let stdin_fd =
+           match !stdin_r_ref with
+           | Some fd -> fd
+           | None -> Unix.stdin
+         in
+         let pid =
+           Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_w
+             Unix.stderr
+         in
+         Option.iter close_quietly !stdin_r_ref;
+         stdin_r_ref := None;
+         Option.iter close_quietly !stdout_w_ref;
+         stdout_w_ref := None;
+         (match (stdin_content, !stdin_w_ref) with
+         | Some content, Some stdin_w ->
+             Fun.protect
+               ~finally:(fun () ->
+                 close_quietly stdin_w;
+                 stdin_w_ref := None)
+               (fun () ->
+                 let rec write_all off =
+                   if off < String.length content then
+                     let n =
+                       Unix.write_substring stdin_w content off
+                         (String.length content - off)
+                     in
+                     write_all (off + n)
                  in
-                 write_all (off + n)
-               end
-             in
-             write_all 0);
+                 write_all 0)
+         | _ -> ());
+         let stdout_r =
+           match !stdout_r_ref with
+           | Some fd ->
+               stdout_r_ref := None;
+               fd
+           | None -> failwith "stdout pipe already consumed"
+         in
          let ic = Unix.in_channel_of_descr stdout_r in
-         let output = In_channel.input_all ic in
-         In_channel.close ic;
-         ignore (Unix.waitpid [] pid);
-         output
-       with _ -> "")
+         let output =
+           Fun.protect
+             ~finally:(fun () -> In_channel.close ic)
+             (fun () -> In_channel.input_all ic)
+         in
+         let (_pid, status) = Unix.waitpid [] pid in
+         on_success status output
+       with _exn ->
+         Option.iter close_quietly !stdin_r_ref;
+         stdin_r_ref := None;
+         Option.iter close_quietly !stdin_w_ref;
+         stdin_w_ref := None;
+         Option.iter close_quietly !stdout_r_ref;
+         stdout_r_ref := None;
+         Option.iter close_quietly !stdout_w_ref;
+         stdout_w_ref := None;
+         on_error ())
+
+let run_unix_argv_fallback ?env (argv : string list) : string =
+  with_unix_capture ?env argv ~on_error:(fun () -> "")
+    ~on_success:(fun _status output -> output)
+
+let run_unix_argv_with_status_fallback ?env (argv : string list) :
+    Unix.process_status * string =
+  with_unix_capture ?env argv ~on_error:(fun () -> (Unix.WEXITED 1, ""))
+    ~on_success:(fun status output -> (status, output))
+
+let run_unix_argv_with_stdin_fallback ?env ~(stdin_content : string)
+    (argv : string list) : string =
+  with_unix_capture ?env ~stdin_content argv ~on_error:(fun () -> "")
+    ~on_success:(fun _status output -> output)
 
 let run_unix_argv_with_stdin_and_status_fallback
+    ?env
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string =
-  match argv with
-  | [] -> (Unix.WEXITED 1, "")
-  | prog :: _ ->
-      (try
-         let stdin_r, stdin_w = Unix.pipe () in
-         let stdout_r, stdout_w = Unix.pipe () in
-         let args = Array.of_list argv in
-         let pid = Unix.create_process prog args stdin_r stdout_w Unix.stderr in
-         Unix.close stdin_r;
-         Unix.close stdout_w;
-         Fun.protect
-           ~finally:(fun () -> try Unix.close stdin_w with _ -> ())
-           (fun () ->
-             let rec write_all off =
-               if off < String.length stdin_content then begin
-                 let n =
-                   Unix.write_substring stdin_w stdin_content off (String.length stdin_content - off)
-                 in
-                 write_all (off + n)
-               end
-             in
-             write_all 0);
-         let ic = Unix.in_channel_of_descr stdout_r in
-         let output = In_channel.input_all ic in
-         In_channel.close ic;
-         let (_pid, status) = Unix.waitpid [] pid in
-         (status, output)
-       with _ -> (Unix.WEXITED 1, ""))
+  with_unix_capture ?env ~stdin_content argv
+    ~on_error:(fun () -> (Unix.WEXITED 1, ""))
+    ~on_success:(fun status output -> (status, output))
 
 (** ── Eio-native process execution (global refs) ─────────────────── *)
 
 let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
-  if not (is_initialized ()) then run_unix_argv_fallback argv
+  if not (is_initialized ()) then run_unix_argv_fallback ?env argv
   else
     let pm = get_proc_mgr () and clk = get_clock () in
     let cwd = !_cwd_default in
@@ -136,11 +169,19 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
         Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec label;
         ""
     | exn ->
-        Eio.traceln "[Process_eio] argv error: %s — %s" label (Printexc.to_string exn);
-        ""
+        if should_retry_unix_fallback exn then (
+          Eio.traceln
+            "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+            label (Printexc.to_string exn);
+          run_unix_argv_fallback ?env argv
+        ) else (
+          Eio.traceln "[Process_eio] argv error: %s — %s" label
+            (Printexc.to_string exn);
+          "")
 
 let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (argv : string list) : string =
-  if not (is_initialized ()) then run_unix_argv_with_stdin_fallback ~stdin_content argv
+  if not (is_initialized ()) then
+    run_unix_argv_with_stdin_fallback ?env ~stdin_content argv
   else
     let pm = get_proc_mgr () and clk = get_clock () in
     let cwd = !_cwd_default in
@@ -158,15 +199,23 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
         Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec label;
         ""
     | exn ->
-        Eio.traceln "[Process_eio] argv error: %s — %s" label (Printexc.to_string exn);
-        ""
+        if should_retry_unix_fallback exn then (
+          Eio.traceln
+            "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+            label (Printexc.to_string exn);
+          run_unix_argv_with_stdin_fallback ?env ~stdin_content argv
+        ) else (
+          Eio.traceln "[Process_eio] argv error: %s — %s" label
+            (Printexc.to_string exn);
+          "")
 
 let run_argv_with_stdin_and_status
     ?(timeout_sec = 60.0)
     ?env
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string =
-  if not (is_initialized ()) then run_unix_argv_with_stdin_and_status_fallback ~stdin_content argv
+  if not (is_initialized ()) then
+    run_unix_argv_with_stdin_and_status_fallback ?env ~stdin_content argv
   else
     let pm = get_proc_mgr () and clk = get_clock () in
     let cwd = !_cwd_default in
@@ -193,11 +242,18 @@ let run_argv_with_stdin_and_status
         Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec label;
         (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
     | exn ->
-        Eio.traceln "[Process_eio] argv error: %s — %s" label (Printexc.to_string exn);
-        (Unix.WEXITED 1, "")
+        if should_retry_unix_fallback exn then (
+          Eio.traceln
+            "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+            label (Printexc.to_string exn);
+          run_unix_argv_with_stdin_and_status_fallback ?env ~stdin_content argv
+        ) else (
+          Eio.traceln "[Process_eio] argv error: %s — %s" label
+            (Printexc.to_string exn);
+          (Unix.WEXITED 1, ""))
 
 let run_argv_with_status ?(timeout_sec = 60.0) ?env (argv : string list) : Unix.process_status * string =
-  if not (is_initialized ()) then run_unix_argv_with_status_fallback argv
+  if not (is_initialized ()) then run_unix_argv_with_status_fallback ?env argv
   else
     let pm = get_proc_mgr () and clk = get_clock () in
     let cwd = !_cwd_default in
@@ -221,5 +277,12 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env (argv : string list) : Unix.
         Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec label;
         (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
     | exn ->
-        Eio.traceln "[Process_eio] argv error: %s — %s" label (Printexc.to_string exn);
-        (Unix.WEXITED 1, "")
+        if should_retry_unix_fallback exn then (
+          Eio.traceln
+            "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+            label (Printexc.to_string exn);
+          run_unix_argv_with_status_fallback ?env argv
+        ) else (
+          Eio.traceln "[Process_eio] argv error: %s — %s" label
+            (Printexc.to_string exn);
+          (Unix.WEXITED 1, ""))

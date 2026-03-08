@@ -5571,25 +5571,236 @@ let command_plane_swarm_http_json ~state request =
 let command_plane_actor request =
   Option.value ~default:"dashboard" (operator_actor_hint request)
 
+(** Eio switch and clock references for MCP handlers *)
+let current_sw : Eio.Switch.t option ref = ref None
+let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+let current_net : _ Eio.Net.t option ref = ref None
+
+let get_switch () = match !current_sw with
+  | Some s -> s
+  | None -> failwith "Eio switch not initialized"
+
+let get_clock () = match !current_clock with
+  | Some c -> c
+  | None -> failwith "Eio clock not initialized"
+
+let get_net () = match !current_net with
+  | Some n -> n
+  | None -> failwith "Eio net not initialized"
+
+let command_plane_tool_ctx ~state request : (_, _) Masc_mcp.Tool_command_plane.context =
+  {
+    config = state.Mcp_server.room_config;
+    agent_name = command_plane_actor request;
+    sw = Some (get_switch ());
+    clock = Some (get_clock ());
+    net = Some (get_net ());
+    mcp_state = Some state;
+    mcp_session_id = get_session_id_any request;
+    auth_token = auth_token_from_request request;
+  }
+
+let tool_command_plane_http_json ~state request ~name ~args =
+  match Masc_mcp.Tool_command_plane.dispatch (command_plane_tool_ctx ~state request) ~name ~args with
+  | Some (true, payload) -> (
+      try Ok (Yojson.Safe.from_string payload)
+      with Yojson.Json_error message -> Error ("invalid tool json: " ^ message))
+  | Some (false, payload) -> (
+      try
+        match Yojson.Safe.from_string payload with
+        | `Assoc fields -> (
+            match List.assoc_opt "message" fields with
+            | Some (`String message) -> Error message
+            | _ -> Error payload)
+        | _ -> Error payload
+      with Yojson.Json_error _ -> Error payload)
+  | None -> Error ("unsupported command-plane tool: " ^ name)
+
 let command_plane_unit_define_http_json ~state request ~args =
   Command_plane_v2.unit_update_json state.Mcp_server.room_config
     ~actor:(command_plane_actor request) args
 
 let command_plane_operation_start_http_json ~state request ~args =
-  match
-    Command_plane_v2.start_operation state.Mcp_server.room_config
-      ~actor:(command_plane_actor request) args
-  with
-  | Ok operation ->
-      Ok
-        (`Assoc
-          [
-            ("status", `String "ok");
-            ("result", Command_plane_v2.operation_to_json operation);
-            ("operations", command_plane_operations_http_json ~state request);
-          ])
-  | Error message -> Error message
-  | exception Invalid_argument message -> Error message
+  tool_command_plane_http_json ~state request ~name:"masc_operation_start" ~args
+
+let command_plane_chain_summary_http_json ~state request =
+  tool_command_plane_http_json ~state request ~name:"masc_chain_snapshot"
+    ~args:(`Assoc [])
+
+let command_plane_chain_run_http_json ~state request run_id =
+  tool_command_plane_http_json ~state request ~name:"masc_chain_run_get"
+    ~args:(`Assoc [ ("run_id", `String run_id) ])
+
+let stream_native_chain_events_http ~request reqd =
+  let origin = get_origin request in
+  let headers =
+    Httpun.Headers.of_list
+      ([
+         ("content-type", "text/event-stream");
+         ("cache-control", "no-cache");
+         ("connection", "keep-alive");
+         ("x-accel-buffering", "no");
+       ]
+      @ cors_headers origin)
+  in
+  let response = Httpun.Response.create ~headers `OK in
+  let writer = Httpun.Reqd.respond_with_streaming reqd response in
+  let mutex = Eio.Mutex.create () in
+  let closed = ref false in
+  let sub_ref : Masc_mcp.Chain_telemetry.subscription option ref = ref None in
+  let close_stream () =
+    if not !closed then closed := true;
+    (match !sub_ref with
+    | Some sub ->
+        Masc_mcp.Chain_telemetry.unsubscribe sub;
+        sub_ref := None
+    | None -> ());
+    try Httpun.Body.Writer.close writer with Invalid_argument _ -> ()
+  in
+  let send_raw frame =
+    if !closed || Httpun.Body.Writer.is_closed writer then (
+      close_stream ();
+      false)
+    else
+      try
+        Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+            Httpun.Body.Writer.write_string writer frame;
+            Httpun.Body.Writer.flush writer (fun _ -> ()));
+        true
+      with _ ->
+        close_stream ();
+        false
+  in
+  ignore (send_raw ": native chain stream\nretry: 3000\n\n");
+  let sub =
+    Masc_mcp.Chain_telemetry.subscribe (fun event ->
+        let payload =
+          Masc_mcp.Chain_native_eio.chain_event_json event
+          |> Yojson.Safe.to_string
+        in
+        let frame =
+          Masc_mcp.Sse.format_event
+            ~event_type:(Masc_mcp.Chain_native_eio.chain_event_name event)
+            payload
+        in
+        ignore (send_raw frame))
+  in
+  sub_ref := Some sub;
+  Eio.Fiber.fork ~sw:(get_switch ()) (fun () ->
+      try
+        while not !closed do
+          Eio.Time.sleep (get_clock ()) 30.0;
+          ignore (send_raw ": keepalive\n\n")
+        done
+      with _ -> close_stream ())
+
+let proxy_chain_events_http ~request reqd =
+  let endpoint = Masc_mcp.Llm_client_eio.resolve_endpoint () in
+  let path = Masc_mcp.Llm_client_eio.endpoint_path endpoint "/chain/events" in
+  let origin = get_origin request in
+  let headers =
+    Httpun.Headers.of_list
+      ([
+         ("content-type", "text/event-stream");
+         ("cache-control", "no-cache");
+         ("connection", "keep-alive");
+         ("x-accel-buffering", "no");
+       ]
+      @ cors_headers origin)
+  in
+  let response = Httpun.Response.create ~headers `OK in
+  let writer = Httpun.Reqd.respond_with_streaming reqd response in
+  let upstream_request =
+    let auth_header =
+      match endpoint.api_key with
+      | Some value -> [ Printf.sprintf "Authorization: Bearer %s" value ]
+      | None -> []
+    in
+    Printf.sprintf "GET %s HTTP/1.1\r\nHost: %s:%d\r\nAccept: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n%s\r\n\r\n"
+      path endpoint.host endpoint.port
+      (String.concat "\r\n" auth_header)
+  in
+  Eio.Fiber.fork ~sw:(get_switch ()) (fun () ->
+      let safe_close () =
+        try Httpun.Body.Writer.close writer with Invalid_argument _ -> ()
+      in
+      let send_error message =
+        (try
+           let payload =
+             Printf.sprintf "event: error\ndata: {\"message\":%s}\n\n"
+               (Yojson.Safe.to_string (`String message))
+           in
+           Httpun.Body.Writer.write_string writer payload;
+           Httpun.Body.Writer.flush writer ignore
+         with _ -> ());
+        safe_close ()
+      in
+      try
+        Eio.Net.with_tcp_connect ~host:endpoint.host
+          ~service:(string_of_int endpoint.port) (get_net ())
+        @@ fun flow ->
+        Eio.Flow.copy_string upstream_request flow;
+        let header_buf = Buffer.create 4096 in
+        let rec read_headers () =
+          let chunk = Cstruct.create 2048 in
+          match Eio.Flow.single_read flow chunk with
+          | n ->
+              Buffer.add_string header_buf (Cstruct.to_string ~len:n chunk);
+              let current = Buffer.contents header_buf in
+              (try
+                 let idx = Str.search_forward (Str.regexp "\r\n\r\n") current 0 in
+                 let headers_part = String.sub current 0 idx in
+                 let body_start = idx + 4 in
+                 let body_rest =
+                   if body_start >= String.length current then ""
+                   else
+                     String.sub current body_start (String.length current - body_start)
+                 in
+                 Ok (headers_part, body_rest)
+               with Not_found -> read_headers ())
+          | exception End_of_file ->
+              Error "llm-mcp closed chain/events stream before headers were received"
+        in
+        match read_headers () with
+        | Error message -> send_error message
+        | Ok (headers_part, body_rest) ->
+            let status_line =
+              match String.split_on_char '\n' headers_part with
+              | line :: _ -> String.trim line
+              | [] -> "HTTP/1.1 502 Bad Gateway"
+            in
+            let status_code =
+              match String.split_on_char ' ' status_line with
+              | _http :: code :: _ -> (try int_of_string code with _ -> 502)
+              | _ -> 502
+            in
+            if status_code < 200 || status_code >= 300 then
+              send_error
+                (Printf.sprintf "llm-mcp /chain/events upstream returned %d"
+                   status_code)
+            else (
+              if body_rest <> "" then (
+                Httpun.Body.Writer.write_string writer body_rest;
+                Httpun.Body.Writer.flush writer ignore);
+              let rec pump () =
+                let chunk = Cstruct.create 4096 in
+                match Eio.Flow.single_read flow chunk with
+                | n ->
+                    Httpun.Body.Writer.write_string writer
+                      (Cstruct.to_string ~len:n chunk);
+                    Httpun.Body.Writer.flush writer ignore;
+                    pump ()
+                | exception End_of_file -> safe_close ()
+                | exception exn -> send_error (Printexc.to_string exn)
+              in
+              pump ())
+      with exn -> send_error (Printexc.to_string exn))
+
+let command_plane_chain_events_http ~request reqd =
+  match Masc_mcp.Tool_command_plane.chain_backend () with
+  | Masc_mcp.Tool_command_plane.Native -> stream_native_chain_events_http ~request reqd
+  | Masc_mcp.Tool_command_plane.Compat_llm_mcp ->
+      proxy_chain_events_http ~request reqd
 
 let command_plane_operation_checkpoint_http_json ~state request ~args =
   match
@@ -6707,28 +6918,10 @@ let options_handler request reqd =
   let response = Httpun.Response.create ~headers `No_content in
   Httpun.Reqd.respond_with_string reqd response ""
 
-(** Eio switch and clock references for MCP handlers *)
-let current_sw : Eio.Switch.t option ref = ref None
-let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
-let current_net : _ Eio.Net.t option ref = ref None
-
-
 (** Helper functions to get initialized state or fail *)
 let get_server_state () = match !server_state with
   | Some s -> s
   | None -> failwith "Server state not initialized"
-
-let get_switch () = match !current_sw with
-  | Some s -> s
-  | None -> failwith "Eio switch not initialized"
-
-let get_clock () = match !current_clock with
-  | Some c -> c
-  | None -> failwith "Eio clock not initialized"
-
-let get_net () = match !current_net with
-  | Some n -> n
-  | None -> failwith "Eio net not initialized"
 
 
 let http_status_of_graphql = function
@@ -8283,6 +8476,40 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/chains/summary" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         match command_plane_chain_summary_http_json ~state req with
+         | Ok json ->
+             Http.Response.json ~compress:true ~request:req
+               (Yojson.Safe.to_string json) reqd
+         | Error message ->
+             Http.Response.json ~status:`Bad_gateway ~request:req
+               (Yojson.Safe.to_string (command_plane_error_json message))
+               reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/chains/events" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         command_plane_chain_events_http ~request:req reqd
+       ) request reqd)
+
+  |> Http.Router.prefix_get "/api/v1/chains/runs/" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let req_path = Http.Request.path req in
+         let prefix = "/api/v1/chains/runs/" in
+         let run_id =
+           String.sub req_path (String.length prefix)
+             (String.length req_path - String.length prefix)
+         in
+         match command_plane_chain_run_http_json ~state req run_id with
+         | Ok json ->
+             Http.Response.json ~compress:true ~request:req
+               (Yojson.Safe.to_string json) reqd
+         | Error message ->
+             Http.Response.json ~status:`Bad_gateway ~request:req
+               (Yojson.Safe.to_string (command_plane_error_json message))
+               reqd
+       ) request reqd)
   |> Http.Router.post "/api/v1/command-plane/units" (fun request reqd ->
        with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
@@ -9016,9 +9243,13 @@ let run_server ~sw ~env ~port ~base_path =
     method mono_clock = mono_clock
   end in
 
+  Unix.putenv "MASC_BASE_PATH_INPUT" base_path;
+
   (* Initialize server state with Eio context *)
   let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~base_path in
   server_state := Some state;
+  Masc_mcp.Chain_native_eio.configure_storage_paths state.room_config;
+  Masc_mcp.Tool_command_plane.backfill_chain_overlays state.room_config;
   Mcp_server.set_sse_callback state Sse.broadcast;
 
   (* Keepers are meant to be long-lived. Start their keepalive fibers on startup
@@ -9578,6 +9809,33 @@ let run_server ~sw ~env ~port ~base_path =
           let json = command_plane_swarm_http_json ~state httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/chains/summary" ->
+          let state = get_server_state () in
+          (match command_plane_chain_summary_http_json ~state httpun_request with
+           | Ok json ->
+               h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                 ~extra_headers:cors
+           | Error message ->
+               h2_respond_json h2_reqd
+                 (Yojson.Safe.to_string (command_plane_error_json message))
+                 ~status:`Bad_gateway ~extra_headers:cors)
+
+      | `GET, path when String.length path > String.length "/api/v1/chains/runs/"
+                        && String.sub path 0 (String.length "/api/v1/chains/runs/")
+                           = "/api/v1/chains/runs/" ->
+          let state = get_server_state () in
+          let prefix_len = String.length "/api/v1/chains/runs/" in
+          let run_id =
+            String.sub path prefix_len (String.length path - prefix_len)
+          in
+          (match command_plane_chain_run_http_json ~state httpun_request run_id with
+           | Ok json ->
+               h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                 ~extra_headers:cors
+           | Error message ->
+               h2_respond_json h2_reqd
+                 (Yojson.Safe.to_string (command_plane_error_json message))
+                 ~status:`Bad_gateway ~extra_headers:cors)
       | `GET, "/api/v1/command-plane/policy" ->
           let state = get_server_state () in
           let json = command_plane_policy_status_http_json ~state in

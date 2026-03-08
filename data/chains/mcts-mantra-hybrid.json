@@ -1,0 +1,113 @@
+{
+  "id": "mcts-mantra-hybrid",
+  "description": "MCTS-MANTRA Hybrid: Explore → Prioritize → Fix sequentially until quality goal",
+  "nodes": [
+    {
+      "id": "explore",
+      "type": "chain_ref",
+      "ref": "mcts-mantra-explore",
+      "description": "Phase 1: Multi-perspective issue discovery"
+    },
+    {
+      "id": "should_fix",
+      "type": "gate",
+      "description": "Check if fixes needed",
+      "condition": "{{explore.summary.health_score}} < 0.9",
+      "then_node": "fix_loop",
+      "else_node": "output_clean"
+    },
+    {
+      "id": "output_clean",
+      "type": "adapter",
+      "description": "Code is clean enough",
+      "transform": {
+        "status": "CLEAN",
+        "health_score": "{{explore.summary.health_score}}",
+        "message": "No critical issues found",
+        "report": "{{explore}}"
+      }
+    },
+    {
+      "id": "fix_loop",
+      "type": "goal_driven",
+      "description": "Phase 2: Sequential fix until health >= 0.9",
+      "goal_metric": "health_score",
+      "goal_operator": "gte",
+      "goal_value": 0.9,
+      "max_iterations": 5,
+      "measure_func": "custom:reanalyze_health",
+      "strategy_hints": {
+        "below_50": "fix_critical_first",
+        "above_50": "fix_high_priority",
+        "above_70": "fix_medium_and_polish",
+        "above_85": "final_polish"
+      },
+      "action_node": {
+        "id": "fixer",
+        "type": "pipeline",
+        "nodes": [
+          {
+            "id": "select_issue",
+            "type": "adapter",
+            "description": "Pick top priority unfixed issue",
+            "transform": {
+              "current_issue": "{{explore.top_priority[iteration - 1]}}",
+              "remaining": "{{explore.summary.total_issues}} - {{iteration}}"
+            }
+          },
+          {
+            "id": "generate_fix",
+            "type": "fanout",
+            "description": "MCTS Expansion: Multiple fix candidates",
+            "nodes": [
+              {
+                "id": "fix_conservative",
+                "type": "llm",
+                "model": "codex",
+                "prompt": "## Conservative Fixer\n\nFix this issue with MINIMAL code changes:\n\nIssue:\n{{select_issue.current_issue}}\n\nCurrent code:\n```\n{{input.code}}\n```\n\nRules:\n- Change only what's necessary\n- Preserve all existing behavior\n- Add comments explaining the fix\n\nOutput the fixed code only."
+              },
+              {
+                "id": "fix_thorough",
+                "type": "llm",
+                "model": "claude",
+                "prompt": "## Thorough Fixer\n\nFix this issue AND related problems:\n\nIssue:\n{{select_issue.current_issue}}\n\nCurrent code:\n```\n{{input.code}}\n```\n\nRules:\n- Fix the main issue\n- Fix any related issues in the same area\n- Improve code quality while you're there\n- Add proper error handling\n\nOutput the fixed code only."
+              }
+            ]
+          },
+          {
+            "id": "evaluate_fixes",
+            "type": "evaluator",
+            "description": "MCTS Simulation: Score fix candidates",
+            "candidates_from": "generate_fix",
+            "scoring_func": "anti_fake",
+            "scoring_prompt": "Which fix is better? Consider:\n1. Correctness (does it fix the issue?)\n2. Safety (no regressions?)\n3. Code quality\n\nScore 0.0-1.0",
+            "select_strategy": "best"
+          },
+          {
+            "id": "apply_fix",
+            "type": "adapter",
+            "description": "Apply best fix",
+            "transform": {
+              "code": "{{evaluate_fixes.best}}",
+              "fixed_issue": "{{select_issue.current_issue}}",
+              "iteration": "{{iteration}}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "final_report",
+      "type": "llm",
+      "model": "claude",
+      "prompt": "## Final Report Generator\n\nGenerate a summary report:\n\nOriginal health score: {{explore.summary.health_score}}\nFinal health score: {{fix_loop.health_score}}\nIterations: {{fix_loop.iterations}}\n\nFixed issues:\n{{fix_loop.fixed_issues}}\n\nRemaining issues:\n{{fix_loop.remaining_issues}}\n\nOutput a concise markdown report with:\n1. Executive Summary\n2. What was fixed\n3. What remains (if any)\n4. Recommendations"
+    }
+  ],
+  "output": "final_report",
+  "config": {
+    "max_depth": 6,
+    "max_concurrency": 3,
+    "timeout": 600,
+    "trace": true
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "test-feedback-ollama",
+  "name": "Test Feedback Loop with Ollama",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "feedback_test",
+      "type": "feedback_loop",
+      "generator": {
+        "id": "gen",
+        "type": "llm",
+        "llm": {
+          "model": "ollama:qwen3:1.7b",
+          "prompt": "Write a short haiku about coding. Output only the haiku."
+        }
+      },
+      "evaluator_config": {
+        "scoring_func": "llm_judge",
+        "scoring_prompt": "Score this haiku 0.0-1.0 based on: 1) 5-7-5 syllable structure 2) coding theme 3) poetic quality",
+        "select_strategy": "best"
+      },
+      "improver_prompt": "This haiku scored {{score}}. Feedback: {{feedback}}. Write a better haiku about coding.",
+      "max_iterations": 2,
+      "score_threshold": 0.7,
+      "score_operator": "gte"
+    }
+  ],
+  "output": "feedback_test",
+  "metadata": { "tags": ["test", "ollama"] }
+}

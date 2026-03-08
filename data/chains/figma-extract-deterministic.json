@@ -1,0 +1,41 @@
+{
+  "id": "figma-extract-deterministic",
+  "name": "Figma Extract (Deterministic)",
+  "description": "LLM 없이 Figma 노드 DSL만 추출합니다. depth=2로 고정하여 결과를 안정화합니다.",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "get-node",
+      "type": "tool",
+      "tool": {
+        "name": "figma.figma_get_node",
+        "args": {
+          "url": "{{input.url}}",
+          "depth": 2,
+          "format": "fidelity"
+        }
+      }
+    }
+  ],
+  "output": "get-node",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Figma node URL (예: https://www.figma.com/file/.../Design?node-id=1-2)"
+      }
+    },
+    "required": ["url"]
+  },
+  "output_schema": {
+    "type": "string",
+    "description": "Figma fidelity JSON (depth=2)"
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": ["figma", "deterministic", "dsl"],
+    "estimated_duration_sec": 10,
+    "estimated_cost_usd": 0.0
+  }
+}

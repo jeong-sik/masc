@@ -1,0 +1,9 @@
+{
+  "id": "translate",
+  "template": "Translate the following text from {{source_language}} to {{target_language}}:\n\n{{text}}\n\nTranslation:",
+  "version": "1.0",
+  "variables": ["source_language", "target_language", "text"],
+  "metrics": null,
+  "created_at": 1706659200.0,
+  "deprecated": false
+}

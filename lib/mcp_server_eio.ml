@@ -1205,7 +1205,18 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       mcp_session_id;
     }
   in
-  let simple_ctx_command_plane : Tool_command_plane.context = { config; agent_name } in
+  let simple_ctx_command_plane : (_, _) Tool_command_plane.context =
+    {
+      config;
+      agent_name;
+      sw = Some sw;
+      clock = Some clock;
+      net = get_net_opt ();
+      mcp_state = Some state;
+      mcp_session_id;
+      auth_token;
+    }
+  in
   let simple_ctx_cache = { Tool_cache.config } in
   let simple_ctx_tempo = { Tool_tempo.config; agent_name } in
   let simple_ctx_mitosis =
@@ -2836,6 +2847,8 @@ let tool_timeout_sec_opt ~(tool_name : string) ~(arguments : Yojson.Safe.t) : fl
       Some (Option.value requested_timeout_sec ~default:default_timeout_sec)
   | _ -> None
 
+let () = Chain_native_eio.set_tool_executor execute_tool_eio
+
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
 let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params =
   let module U = Yojson.Safe.Util in
@@ -3165,7 +3178,14 @@ let handle_list_prompts_eio id =
     Uses execute_tool_eio for tool calls.
     mcp_session_id: HTTP MCP session ID for agent_name persistence
 *)
-let handle_request ~clock ~sw ?(profile = Full) ?mcp_session_id ?auth_token state request_str =
+let handle_request
+    ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+    ~sw
+    ?(profile = Full)
+    ?mcp_session_id
+    ?auth_token
+    state
+    request_str =
   try
     let json =
       try Ok (Yojson.Safe.from_string request_str)

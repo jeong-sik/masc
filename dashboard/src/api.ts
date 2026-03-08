@@ -20,6 +20,8 @@ import type {
   OperatorActionResult,
   OperatorSnapshot,
   CommandPlaneHelpResponse,
+  CommandPlaneChainRunResponse,
+  CommandPlaneChainSummary,
   CommandPlaneSnapshot,
   CommandPlaneSwarmResponse,
   CommandPlaneSummarySnapshot,
@@ -357,6 +359,13 @@ export function fetchCommandPlaneSummary(): Promise<CommandPlaneSummarySnapshot>
   return get('/api/v1/command-plane/summary')
 }
 
+export function fetchChainSummary(): Promise<CommandPlaneChainSummary> {
+  return get('/api/v1/chains/summary')
+}
+
+export function fetchChainRun(runId: string): Promise<CommandPlaneChainRunResponse> {
+  return get(`/api/v1/chains/runs/${encodeURIComponent(runId)}`)
+}
 export function fetchCommandPlaneHelp(): Promise<CommandPlaneHelpResponse> {
   return get('/api/v1/command-plane/help')
 }

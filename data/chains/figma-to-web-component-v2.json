@@ -1,0 +1,149 @@
+{
+  "id": "figma-to-web-component-v2",
+  "name": "Figma to Web Component v2 (FeedbackLoop)",
+  "description": "Chain-level FeedbackLoop로 반복을 명시적으로 표현. SSIM 0.95+ 달성까지 코드 개선 반복.",
+  "version": "2.0.0",
+  "nodes": [
+    {
+      "id": "parse-url",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": { "url": "{{input.figma_url}}" }
+      },
+      "output_key": "figma_meta"
+    },
+    {
+      "id": "export-figma-image",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_export_image",
+        "args": {
+          "file_key": "{{figma_meta.file_key}}",
+          "node_id": "{{figma_meta.node_id}}",
+          "scale": 2,
+          "format": "png"
+        }
+      },
+      "depends_on": ["parse-url"],
+      "output_key": "figma_image"
+    },
+    {
+      "id": "get-design-structure",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_summary",
+        "args": {
+          "file_key": "{{figma_meta.file_key}}",
+          "node_id": "{{figma_meta.node_id}}"
+        }
+      },
+      "depends_on": ["parse-url"],
+      "output_key": "design_summary"
+    },
+    {
+      "id": "extract-dsl",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_bundle",
+        "args": {
+          "file_key": "{{figma_meta.file_key}}",
+          "node_id": "{{figma_meta.node_id}}",
+          "depth": 4,
+          "include_variables": true,
+          "include_image_fills": true
+        }
+      },
+      "depends_on": ["parse-url"],
+      "output_key": "figma_dsl"
+    },
+    {
+      "id": "vision-analyze",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "이 Figma 디자인을 분석하세요.\n\nFigma DSL:\n{{figma_dsl}}\n\n구조 요약:\n{{design_summary}}\n\n다음 정보를 추출하세요:\n1. 컴포넌트 타입 (버튼, 카드, 리스트 등)\n2. 레이아웃 구조 (Flexbox/Grid 패턴)\n3. 디자인 토큰 (색상, 간격, 폰트)\n4. 텍스트 내용 (characters 필드 그대로)\n\nJSON 형식으로 출력."
+      },
+      "depends_on": ["extract-dsl", "get-design-structure"],
+      "output_key": "vision_analysis"
+    },
+    {
+      "id": "component-gate",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "이 분석 결과가 구현할 만한 컴포넌트인지 판단하세요.\n\n분석:\n{{vision_analysis}}\n\nDSL 구조:\n{{design_summary}}\n\n판단 기준:\n- ✅ 구현: 2개 이상 자식 노드, 의미 있는 UI\n- ❌ 스킵: 빈 Frame, wrapper, 장식\n\n출력 (JSON): {implementable, reason, component_type, suggested_name}"
+      },
+      "depends_on": ["vision-analyze", "get-design-structure"],
+      "output_key": "gate_result"
+    },
+    {
+      "id": "code-generation-loop",
+      "type": "feedback_loop",
+      "generator": {
+        "id": "generate-react-code",
+        "type": "llm",
+        "llm": {
+          "model": "claude-cli",
+          "prompt": "React + Tailwind 컴포넌트를 생성하세요.\n\n## 디자인 분석\n{{vision_analysis}}\n\n## 게이트 결과\n{{gate_result}}\n\n## 상세 DSL\n{{figma_dsl}}\n\n## 이전 피드백 (있으면)\n{{feedback}}\n\n## 요구사항\n1. TypeScript + React.FC\n2. Tailwind CSS만 사용\n3. DSL의 텍스트 그대로 사용\n4. 정확한 색상값: #RRGGBB → bg-[#RRGGBB]\n5. 정확한 크기: w-[320px] h-[200px]\n\n코드만 출력 (설명 없이):\n```tsx\n// 컴포넌트 코드\n```"
+        }
+      },
+      "evaluator_config": {
+        "scoring_func": "custom",
+        "scoring_prompt": "생성된 코드를 HTML로 렌더링하고 Figma 원본과 SSIM 비교. 0.0-1.0 점수 반환.",
+        "tool": {
+          "server": "figma",
+          "name": "figma_image_similarity",
+          "args": {
+            "file_key": "{{figma_meta.file_key}}",
+            "node_a_id": "{{figma_meta.node_id}}",
+            "html": "{{output}}"
+          }
+        }
+      },
+      "improver_prompt": "SSIM 점수가 {{score}}로 목표(>=0.95)에 미달입니다.\n\n차이점 분석:\n{{feedback}}\n\n위 피드백을 반영하여 코드를 개선하세요. 특히 색상, 크기, 간격에 주의.",
+      "max_iterations": 5,
+      "score_threshold": 0.95,
+      "score_operator": "gte",
+      "depends_on": ["vision-analyze", "component-gate", "extract-dsl", "export-figma-image"],
+      "condition": "{{gate_result.implementable}} == true",
+      "output_key": "react_code"
+    },
+    {
+      "id": "final-output",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "최종 결과를 정리하세요.\n\n## 컴포넌트 정보\n- 타입: {{gate_result.component_type}}\n- 이름: {{gate_result.suggested_name}}\n\n## 생성된 코드\n{{react_code}}\n\n## FeedbackLoop 결과\n- 반복 횟수: {{code-generation-loop.iterations}}\n- 최종 SSIM: {{code-generation-loop.final_score}}\n\nMarkdown 형식으로 보고서 작성."
+      },
+      "depends_on": ["code-generation-loop", "component-gate"],
+      "output_key": "final_report"
+    }
+  ],
+  "output": "final-output",
+  "config": {
+    "max_depth": 8,
+    "max_concurrency": 3,
+    "timeout": 300,
+    "trace": true
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma frame/component URL"
+      }
+    },
+    "required": ["figma_url"]
+  },
+  "metadata": {
+    "author": "Chain Engine v2",
+    "tags": ["figma", "react", "tailwind", "feedback-loop", "ssim"],
+    "changelog": "v2.0.0 - Tool 내부 루프 → Chain FeedbackLoop로 리팩토링"
+  }
+}

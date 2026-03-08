@@ -1,0 +1,62 @@
+{
+  "id": "mcts-mantra-explore",
+  "description": "MCTS-MANTRA Exploration: Multi-perspective issue discovery",
+  "nodes": [
+    {
+      "id": "exploration",
+      "type": "fanout",
+      "description": "MCTS Exploration: Parallel multi-perspective analysis",
+      "nodes": [
+        {
+          "id": "security_analyst",
+          "type": "llm",
+          "model": "claude",
+          "prompt": "## Security Analyst\n\nAnalyze this code for security vulnerabilities:\n\n```\n{{input.code}}\n```\n\nCheck for:\n- Injection attacks (SQL, XSS, Command)\n- Authentication/Authorization flaws\n- Data exposure risks\n- Input validation gaps\n- Cryptographic weaknesses\n\nOutput JSON:\n```json\n{\n  \"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"...\", \"line\": N, \"description\": \"...\", \"fix\": \"...\"}],\n  \"score\": 0.0-1.0\n}\n```"
+        },
+        {
+          "id": "performance_analyst",
+          "type": "llm",
+          "model": "gemini",
+          "prompt": "## Performance Analyst\n\nAnalyze this code for performance issues:\n\n```\n{{input.code}}\n```\n\nCheck for:\n- O(n²) or worse algorithms\n- Unnecessary re-renders (React)\n- Memory leaks\n- Blocking operations\n- Missing memoization\n- N+1 queries\n\nOutput JSON:\n```json\n{\n  \"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"...\", \"line\": N, \"description\": \"...\", \"fix\": \"...\"}],\n  \"score\": 0.0-1.0\n}\n```"
+        },
+        {
+          "id": "type_analyst",
+          "type": "llm",
+          "model": "codex",
+          "prompt": "## Type Safety Analyst\n\nAnalyze this code for type safety issues:\n\n```\n{{input.code}}\n```\n\nCheck for:\n- `any` type usage\n- Missing null checks\n- Type assertions without guards\n- Implicit any\n- Unsafe casts\n- Missing generics\n\nOutput JSON:\n```json\n{\n  \"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"...\", \"line\": N, \"description\": \"...\", \"fix\": \"...\"}],\n  \"score\": 0.0-1.0\n}\n```"
+        },
+        {
+          "id": "logic_analyst",
+          "type": "llm",
+          "model": "ollama:qwen3:30b",
+          "prompt": "## Logic Analyst\n\nAnalyze this code for logic bugs:\n\n```\n{{input.code}}\n```\n\nCheck for:\n- Off-by-one errors\n- Race conditions\n- Dead code paths\n- Unreachable conditions\n- Missing edge cases\n- Incorrect boolean logic\n\nOutput JSON:\n```json\n{\n  \"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"...\", \"line\": N, \"description\": \"...\", \"fix\": \"...\"}],\n  \"score\": 0.0-1.0\n}\n```"
+        },
+        {
+          "id": "maintainability_analyst",
+          "type": "llm",
+          "model": "gemini",
+          "prompt": "## Maintainability Analyst\n\nAnalyze this code for maintainability issues:\n\n```\n{{input.code}}\n```\n\nCheck for:\n- God functions (> 50 lines)\n- Deep nesting (> 3 levels)\n- Magic numbers/strings\n- Copy-paste code\n- Missing error handling\n- Poor naming\n\nOutput JSON:\n```json\n{\n  \"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"...\", \"line\": N, \"description\": \"...\", \"fix\": \"...\"}],\n  \"score\": 0.0-1.0\n}\n```"
+        }
+      ]
+    },
+    {
+      "id": "merge_issues",
+      "type": "merge",
+      "description": "Combine all discovered issues",
+      "strategy": "custom:merge_json_issues",
+      "nodes_from": "exploration"
+    },
+    {
+      "id": "prioritize",
+      "type": "llm",
+      "model": "claude",
+      "prompt": "## Issue Prioritizer\n\nConsolidate and prioritize these issues:\n\n{{merge_issues.output}}\n\nRules:\n1. Remove duplicates (same line, similar description)\n2. Sort by: severity (high→low) → impact → effort\n3. Group by category\n4. Calculate overall health score\n\nOutput:\n```json\n{\n  \"summary\": {\n    \"total_issues\": N,\n    \"critical\": N,\n    \"high\": N,\n    \"medium\": N,\n    \"low\": N,\n    \"health_score\": 0.0-1.0\n  },\n  \"top_priority\": [...top 5 issues...],\n  \"by_category\": {\n    \"security\": [...],\n    \"performance\": [...],\n    \"type_safety\": [...],\n    \"logic\": [...],\n    \"maintainability\": [...]\n  },\n  \"quick_wins\": [...issues with low effort, high impact...]\n}\n```"
+    }
+  ],
+  "output": "prioritize",
+  "config": {
+    "max_concurrency": 5,
+    "timeout": 180,
+    "trace": true
+  }
+}

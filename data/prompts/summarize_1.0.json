@@ -1,0 +1,13 @@
+{
+  "id": "summarize",
+  "template": "Summarize the following text in {{max_sentences}} sentences or less:\n\n{{text}}\n\nSummary:",
+  "version": "1.0",
+  "variables": ["max_sentences", "text"],
+  "metrics": {
+    "usage_count": 156,
+    "avg_score": 0.85,
+    "last_used": 1737504000.0
+  },
+  "created_at": 1704067200.0,
+  "deprecated": false
+}

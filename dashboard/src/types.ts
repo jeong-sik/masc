@@ -837,6 +837,16 @@ export type CommandPlaneOperationStatus =
   | 'failed'
   | string
 
+export interface CommandPlaneChainRecord {
+  kind: string
+  chain_id?: string | null
+  goal?: string | null
+  run_id?: string | null
+  status: string
+  viewer_path?: string | null
+  last_sync_at?: string | null
+}
+
 export interface CommandPlaneOperationRecord {
   operation_id: string
   objective: string
@@ -852,6 +862,7 @@ export interface CommandPlaneOperationRecord {
   created_by?: string
   source?: string
   status: CommandPlaneOperationStatus
+  chain?: CommandPlaneChainRecord | null
   created_at?: string
   updated_at?: string
 }
@@ -1134,6 +1145,72 @@ export interface CommandPlaneSummarySnapshot {
   swarm_proof?: CommandPlaneSwarmProof
 }
 
+export interface ChainRuntimeStatus {
+  chain_id?: string | null
+  started_at?: number | null
+  progress?: number | null
+  elapsed_sec?: number | null
+}
+
+export interface ChainHistoryEventSummary {
+  event: string
+  chain_id?: string | null
+  timestamp?: string | null
+  duration_ms?: number | null
+  message?: string | null
+  tokens?: number | null
+}
+
+export interface CommandPlaneChainOverlay {
+  operation: CommandPlaneOperationRecord
+  runtime?: ChainRuntimeStatus | null
+  history?: ChainHistoryEventSummary | null
+  mermaid?: string | null
+  preview_run?: CommandPlaneChainRun | null
+}
+
+export interface CommandPlaneChainConnection {
+  status: 'connected' | 'degraded' | 'disconnected' | string
+  base_url?: string | null
+  message?: string | null
+}
+
+export interface CommandPlaneChainSummary {
+  version?: string
+  generated_at?: string
+  connection: CommandPlaneChainConnection
+  summary?: {
+    linked_operations?: number
+    active_chains?: number
+    running_operations?: number
+    recent_failures?: number
+    last_history_event_at?: string | null
+  }
+  operations: CommandPlaneChainOverlay[]
+  recent_history: ChainHistoryEventSummary[]
+}
+
+export interface CommandPlaneChainRunNode {
+  id: string
+  type?: string
+  status?: string
+  duration_ms?: number | null
+  error?: string | null
+}
+
+export interface CommandPlaneChainRun {
+  run_id?: string | null
+  chain_id: string
+  duration_ms?: number | null
+  success?: boolean | null
+  mermaid?: string
+  nodes: CommandPlaneChainRunNode[]
+}
+
+export interface CommandPlaneChainRunResponse {
+  run?: CommandPlaneChainRun | null
+}
+
 export interface CommandPlaneHelpDocLink {
   title: string
   path: string
@@ -1315,6 +1392,7 @@ export type CommandPlaneSurface =
   | 'topology'
   | 'alerts'
   | 'trace'
+  | 'chains'
   | 'control'
 
 export interface ServerStatus {

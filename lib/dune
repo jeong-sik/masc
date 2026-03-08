@@ -70,6 +70,35 @@
    agent_swarm_swarm
    agent_swarm_tool_input
    agent_swarm_tools
+   safe_parse
+   prompt_registry
+   chain_types
+   chain_trace_types
+   chain_category
+   chain_stats
+   chain_utils
+   chain_conversation
+   chain_iteration
+   chain_composer
+   chain_evaluator
+   chain_parser
+   chain_mermaid_parser
+   chain_compiler
+   chain_registry
+   chain_telemetry
+   chain_error
+   chain_log
+   chain_retry
+   chain_executor_retry
+   chain_adapter_eio
+   checkpoint_store
+   run_log_eio
+   langfuse
+   chain_spawn_registry
+   chain_executor_eio
+   chain_orchestrator_eio
+   chain_run_store
+   chain_native_eio
    llm_client_eio
    llm_direct
    log

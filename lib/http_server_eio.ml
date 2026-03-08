@@ -87,6 +87,8 @@ end
 
 (** Simple response helpers *)
 module Response = struct
+  let html_cache_control = "no-store, max-age=0, must-revalidate"
+
   let text ?(status = `OK) body reqd =
     let headers = Httpun.Headers.of_list ([
       ("content-type", "text/plain; charset=utf-8");
@@ -173,7 +175,7 @@ module Response = struct
     | Some inm when String.equal inm etag_value ->
         let headers = Httpun.Headers.of_list [
           ("etag", etag_value);
-          ("cache-control", "no-cache");
+          ("cache-control", html_cache_control);
         ] in
         let response = Httpun.Response.create ~headers `Not_modified in
         Httpun.Reqd.respond_with_string reqd response ""
@@ -190,7 +192,7 @@ module Response = struct
           ("content-type", "text/html; charset=utf-8");
           ("content-length", string_of_int (String.length final_body));
           ("etag", etag_value);
-          ("cache-control", "no-cache");
+          ("cache-control", html_cache_control);
           ("vary", "Accept-Encoding");
         ] in
         let headers = match encoding with

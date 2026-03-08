@@ -93,6 +93,71 @@ let test_stale_supervised_session_keeps_stale_flag () =
   check string "stale supervised recommendation" "masc_team_session_status"
     (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string)
 
+let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_present ()
+    =
+  let now = M.Time_compat.now () in
+  let stale_iso = M.Command_plane_v2.iso_of_unix (now -. 3600.) in
+  let operation : M.Swarm_status.operation_info =
+    {
+      operation_id = "detachment-ts-old";
+      objective = "Historical supervised session";
+      source = "projected";
+      status = "completed";
+      trace_id = "ts-old";
+      detachment_session_id = Some "ts-old";
+      note = Some "duration_reached";
+      updated_at = Some stale_iso;
+    }
+  in
+  let detachment : M.Swarm_status.detachment_info =
+    {
+      detachment_id = "detachment-ts-old";
+      operation_id = "detachment-ts-old";
+      source = "projected";
+      status = "cancelled";
+      runtime_kind = Some "team_session";
+      session_id = Some "ts-old";
+      roster = [ "worker-a"; "worker-b" ];
+      leader_id = Some "worker-a";
+      last_event_at = Some stale_iso;
+      last_progress_at = Some stale_iso;
+      updated_at = Some stale_iso;
+    }
+  in
+  let session : M.Swarm_status.session_info =
+    {
+      session_id = "ts-old";
+      goal = "Historical supervised session";
+      status = "completed";
+      started_at = now -. 7200.;
+      updated_at_iso = stale_iso;
+      last_event_at = Some stale_iso;
+      last_turn_at = Some stale_iso;
+      worker_names = [ "worker-a"; "worker-b" ];
+      min_agents_violation_streak = 0;
+      policy_violation_count = 0;
+    }
+  in
+  let json =
+    M.Swarm_status.build_json_from_inputs ~now ~operations:[ operation ]
+      ~detachments:[ detachment ] ~alerts:[] ~decisions:[] ~traces:[]
+      ~sessions:[ session ]
+  in
+  let supervised = find_lane json "supervised" in
+  check bool "supervised lane absent for terminal-only artifacts" false
+    (supervised |> U.member "present" |> U.to_bool);
+  check int "supervised operations filtered" 0
+    (supervised |> U.member "counts" |> U.member "operations" |> U.to_int);
+  check int "supervised detachments filtered" 0
+    (supervised |> U.member "counts" |> U.member "detachments" |> U.to_int);
+  check int "supervised workers filtered" 0
+    (supervised |> U.member "counts" |> U.member "workers" |> U.to_int);
+  check bool "no stale flag when lane absent" false
+    (List.exists
+       (fun flag ->
+         String.equal "stale_data" (flag |> U.member "code" |> U.to_string))
+       (supervised |> U.member "hard_flags" |> U.to_list))
+
 let () =
   run "Swarm_status"
     [
@@ -104,5 +169,8 @@ let () =
             test_supervised_session_keeps_lane_present;
           test_case "stale_session_keeps_stale_flag" `Quick
             test_stale_supervised_session_keeps_stale_flag;
+          test_case "terminal_projected_artifacts_do_not_keep_supervised_lane_present"
+            `Quick
+            test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_present;
         ] );
     ]

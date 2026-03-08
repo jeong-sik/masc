@@ -7,9 +7,11 @@ let masc_instructions = {|
 You have access to MASC coordination tools:
 - masc_list_tasks: See available tasks
 - masc_claim_task: Claim a task (provide task_id)
+- masc_set_current_task: Bind the claimed task as current planning task
 - masc_broadcast: Send a message to all agents (provide message)
 - masc_complete_task: Mark a task as done (provide task_id)
 - masc_room_status: Check room status
+- masc_heartbeat: Refresh your liveness in the room
 
 Use these tools to coordinate with other agents in the room.|}
 
@@ -63,9 +65,11 @@ let worker ~specialization =
 Instructions:
 1. Use masc_list_tasks to find available tasks
 2. Use masc_claim_task to claim a task you can handle
-3. Work on the task using your available tools
-4. Use masc_broadcast to report progress
-5. Use masc_complete_task when done
+3. Immediately call masc_set_current_task for the claimed task id
+4. Send masc_heartbeat during the task so you remain visible
+5. Work on the task using your available tools
+6. Use masc_broadcast to report progress
+7. Use masc_complete_task when done
 %s
 %s|} specialization masc_instructions dev_instructions
 
@@ -82,4 +86,3 @@ Work step by step:
 5. Iterate until the goal is achieved
 
 Be precise and verify each step before moving on.|} goal dev_instructions
-

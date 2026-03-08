@@ -5550,6 +5550,12 @@ let command_plane_traces_http_json ~state request =
   let limit = int_query_param request "limit" ~default:25 |> clamp ~min_v:1 ~max_v:200 in
   Command_plane_v2.list_traces_json state.Mcp_server.room_config ?operation_id ~limit ()
 
+let command_plane_swarm_http_json ~state request =
+  let run_id = query_param request "run_id" in
+  let operation_id = query_param request "operation_id" in
+  Command_plane_v2.swarm_live_json state.Mcp_server.room_config ?run_id
+    ?operation_id ()
+
 let command_plane_actor request =
   Option.value ~default:"dashboard" (operator_actor_hint request)
 
@@ -8253,6 +8259,12 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/command-plane/swarm" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_swarm_http_json ~state req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.post "/api/v1/command-plane/units" (fun request reqd ->
        with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
@@ -9531,6 +9543,11 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/command-plane/traces" ->
           let state = get_server_state () in
           let json = command_plane_traces_http_json ~state httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/swarm" ->
+          let state = get_server_state () in
+          let json = command_plane_swarm_http_json ~state httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/command-plane/policy" ->

@@ -21,6 +21,7 @@ import type {
   OperatorSnapshot,
   CommandPlaneHelpResponse,
   CommandPlaneSnapshot,
+  CommandPlaneSwarmResponse,
 } from './types'
 
 // --- Auth ---
@@ -310,6 +311,13 @@ export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {
 
 export function fetchCommandPlaneHelp(): Promise<CommandPlaneHelpResponse> {
   return get('/api/v1/command-plane/help')
+}
+
+export function fetchCommandPlaneSwarm(runId?: string): Promise<CommandPlaneSwarmResponse> {
+  const params = new URLSearchParams()
+  if (runId) params.set('run_id', runId)
+  const query = params.toString()
+  return get(`/api/v1/command-plane/swarm${query ? `?${query}` : ''}`)
 }
 
 export function runCommandPlaneAction(

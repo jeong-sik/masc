@@ -138,6 +138,7 @@ module Agent_swarm_client = Agent_swarm_client
 module Agent_swarm_dev_tools = Agent_swarm_dev_tools
 module Agent_swarm_external_agent = Agent_swarm_external_agent
 module Agent_swarm_fleet = Agent_swarm_fleet
+module Agent_swarm_live_harness = Agent_swarm_live_harness
 module Agent_swarm_prompts = Agent_swarm_prompts
 module Agent_swarm_runner = Agent_swarm_runner
 module Agent_swarm_swarm = Agent_swarm_swarm

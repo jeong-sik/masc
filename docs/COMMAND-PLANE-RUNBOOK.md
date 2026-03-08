@@ -103,6 +103,49 @@
 9. `masc_operation_finalize`
    - 정상 종료 시 operation을 completed로 닫는다.
 
+### 첫 번째 concrete example: 12-worker live harness
+
+가장 먼저 검증할 예시는 research-radar가 아니라 `synthetic live harness`다.
+
+실행 순서:
+
+1. 로컬 `llama.cpp`를 `qwen35-hot` 프로파일로 `127.0.0.1:8085`에서 띄운다.
+2. `anthropic-proxy` 또는 호환 local provider를 `127.0.0.1:3034`에 둔다.
+3. repo root에서 아래를 실행한다.
+
+```bash
+scripts/harness_agent_swarm_live.sh
+```
+
+권장 시작 명령:
+
+```bash
+LLAMA_PRESET=qwen35-hot ~/me/scripts/llama-server.sh restart
+```
+
+기본 프로파일:
+
+- 12 workers
+- lanes: `official`, `research`, `reviews`
+- roles: `discover`, `verify`, `summarize`, `audit`
+- topology: `company -> platoon -> squad`
+- operation target: single managed squad
+
+성공 기준:
+
+- `peak_hot_slots >= 10`
+- `joined_workers = 12`
+- `current_task_bound = 12`
+- `fresh_heartbeats = 12`
+- `completed_workers = 12`
+- `final_markers_seen = 12`
+- `summary.pass = true`
+
+확인 위치:
+
+- `GET /api/v1/command-plane/swarm?run_id=<RUN_ID>&operation_id=<OP_ID>`
+- dashboard `Command Plane -> swarm`
+
 ### 최소 HTTP 예시
 
 ```http
@@ -223,6 +266,13 @@ Content-Type: application/json
 정리:
 - `masc_dispatch_tick`을 아직 안 돌렸거나
 - target unit가 blocked/frozen/approval pending 상태일 수 있음
+
+### 5. worker가 이미 leave 했는데 swarm 화면에서 빠져 보임
+
+정리:
+- live presence는 없어도 된다
+- completed task ownership + final marker가 기록돼 있으면 joined/task-bound로 복원된다
+- 그래서 harness 완료 후 `live_workers`보다 `joined_workers/current_task_bound/final_markers_seen`이 더 중요하다
 
 ## 관련 문서
 

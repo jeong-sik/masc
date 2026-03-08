@@ -22,8 +22,10 @@ let test_supervised_trace_only_does_not_make_lane_present () =
     }
   in
   let json =
-    M.Swarm_status.build_json_from_inputs ~now:(M.Time_compat.now ()) ~operations:[]
-      ~detachments:[] ~alerts:[] ~decisions:[] ~traces:[ trace ] ~sessions:[]
+    M.Swarm_status.build_json_from_inputs
+      ~timeline_limit_override:M.Swarm_status.timeline_limit
+      ~now:(M.Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
+      ~decisions:[] ~traces:[ trace ] ~sessions:[]
   in
   let supervised = find_lane json "supervised" in
   check bool "supervised lane absent" false
@@ -52,8 +54,10 @@ let test_supervised_session_keeps_lane_present () =
     }
   in
   let json =
-    M.Swarm_status.build_json_from_inputs ~now:(M.Time_compat.now ()) ~operations:[]
-      ~detachments:[] ~alerts:[] ~decisions:[] ~traces:[] ~sessions:[ session ]
+    M.Swarm_status.build_json_from_inputs
+      ~timeline_limit_override:M.Swarm_status.timeline_limit
+      ~now:(M.Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
+      ~decisions:[] ~traces:[] ~sessions:[ session ]
   in
   let supervised = find_lane json "supervised" in
   check bool "supervised lane present" true
@@ -78,8 +82,10 @@ let test_stale_supervised_session_keeps_stale_flag () =
     }
   in
   let json =
-    M.Swarm_status.build_json_from_inputs ~now:(M.Time_compat.now ()) ~operations:[]
-      ~detachments:[] ~alerts:[] ~decisions:[] ~traces:[] ~sessions:[ session ]
+    M.Swarm_status.build_json_from_inputs
+      ~timeline_limit_override:M.Swarm_status.timeline_limit
+      ~now:(M.Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
+      ~decisions:[] ~traces:[] ~sessions:[ session ]
   in
   let supervised = find_lane json "supervised" in
   let hard_flags = supervised |> U.member "hard_flags" |> U.to_list in

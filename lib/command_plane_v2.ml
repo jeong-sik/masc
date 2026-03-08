@@ -2356,9 +2356,23 @@ let float_age_seconds timestamp =
     (fun ts -> max 0. (Unix.gettimeofday () -. ts))
     (Room.parse_iso_time_opt timestamp)
 
+let timestamp_on_or_after ~boundary timestamp =
+  match Room.parse_iso_time_opt timestamp with
+  | Some ts -> ts >= boundary
+  | None -> false
+
 let run_tokens run_id =
   let safe = safe_slug run_id in
-  [ run_id; safe; "swarm-live:" ^ run_id; "swarm-live:" ^ safe ]
+  [
+    run_id;
+    safe;
+    "run_id=" ^ run_id;
+    "run_id=" ^ safe;
+    "swarm-live:" ^ run_id;
+    "swarm-live:" ^ safe;
+    "live-harness-" ^ run_id;
+    "live-harness-" ^ safe;
+  ]
   |> filter_nonempty_strings
 
 let value_matches_tokens tokens value =
@@ -2377,8 +2391,45 @@ let best_overlap expected_names rows roster_of =
   in
   rows
   |> List.map (fun row -> (row, overlap_count row))
+  |> List.filter (fun (_, score) -> score > 0)
   |> List.sort (fun (_, left) (_, right) -> compare right left)
   |> list_hd_opt
+
+let extract_run_id_from_note token =
+  token
+  |> String.split_on_char ' '
+  |> List.find_map (fun part ->
+         let trimmed = String.trim part in
+         if String.length trimmed > 7
+            && String.equal (String.lowercase_ascii (String.sub trimmed 0 7)) "run_id="
+         then
+           nonempty_string
+             (Some
+                (String.sub trimmed 7 (String.length trimmed - 7)
+                |> String.trim))
+         else None)
+
+let extract_run_id_from_prefixed_token ~prefix token =
+  let prefix_len = String.length prefix in
+  if String.length token > prefix_len
+     && String.equal
+          (String.lowercase_ascii (String.sub token 0 prefix_len))
+          (String.lowercase_ascii prefix)
+  then
+    nonempty_string
+      (Some
+         (String.sub token prefix_len (String.length token - prefix_len)
+         |> String.trim))
+  else None
+
+let extract_run_id token =
+  option_or_else
+    (extract_run_id_from_note token)
+    (fun () ->
+      option_or_else
+        (extract_run_id_from_prefixed_token ~prefix:"swarm-live:" token)
+        (fun () ->
+          extract_run_id_from_prefixed_token ~prefix:"live-harness-" token))
 
 let count_true rows predicate =
   List.fold_left (fun acc row -> if predicate row then acc + 1 else acc) 0 rows
@@ -2450,26 +2501,28 @@ let swarm_live_json config ?run_id ?operation_id () =
               [
                 operation.note;
                 operation.checkpoint_ref;
-                Some operation.objective;
-                Some operation.trace_id;
-                Some operation.operation_id;
               ]
               |> List.filter_map Fun.id
             in
-            let extract token =
-              if string_contains_ci ~needle:"swarm-live:" token then
-                let idx = String.index_from_opt (String.lowercase_ascii token) 0 's' in
-                match idx with
-                | Some _ ->
-                    let parts = String.split_on_char ':' token in
-                    list_hd_opt (List.rev parts)
-                | None -> None
-              else None
-            in
-            candidates |> List.find_map extract
+            candidates |> List.find_map extract_run_id
             |> Option.value ~default:"swarm-live")
         | None -> "swarm-live")
   in
+  let operation_started_at =
+    Option.bind selected_operation (fun (operation : operation_record) ->
+        Room.parse_iso_time_opt operation.created_at)
+  in
+  let message_in_scope (message : Types.message) =
+    match operation_started_at with
+    | Some boundary -> timestamp_on_or_after ~boundary message.timestamp
+    | None -> true
+  in
+  let task_in_scope (task : Types.task) =
+    match operation_started_at with
+    | Some boundary -> timestamp_on_or_after ~boundary task.created_at
+    | None -> true
+  in
+  let scoped_tasks = tasks |> List.filter task_in_scope in
   let harness_summary =
     find_swarm_live_artifact_json config effective_run_id "swarm-live-summary.json"
   in
@@ -2509,26 +2562,35 @@ let swarm_live_json config ?run_id ?operation_id () =
            | None -> true)
   in
   let matched_detachment =
-    best_overlap expected_workers operation_detachments
-      (fun (row : detachment_record) -> row.roster)
-    |> Option.map fst
-    |> fun current ->
-    option_or_else current (fun () ->
+    match selected_operation with
+    | Some _ ->
+        best_overlap expected_workers operation_detachments
+          (fun (row : detachment_record) -> row.roster)
+        |> Option.map fst
+    | None ->
         best_overlap expected_workers detachments
           (fun (row : detachment_record) -> row.roster)
-        |> Option.map fst)
+        |> Option.map fst
   in
   let matched_squad =
-    Option.bind matched_detachment (fun (detachment : detachment_record) ->
-        lookup_unit units detachment.assigned_unit_id)
-    |> fun current ->
-    option_or_else current (fun () ->
-        units
-        |> List.filter (fun (unit : unit_record) -> unit.kind = Squad)
-        |> fun rows ->
-        best_overlap expected_workers rows
-          (fun (unit : unit_record) -> unit.roster)
-        |> Option.map fst)
+    match selected_operation with
+    | Some operation ->
+        option_or_else
+          (lookup_unit units operation.assigned_unit_id)
+          (fun () ->
+            Option.bind matched_detachment (fun (detachment : detachment_record) ->
+                lookup_unit units detachment.assigned_unit_id))
+    | None ->
+        option_or_else
+          (Option.bind matched_detachment (fun (detachment : detachment_record) ->
+               lookup_unit units detachment.assigned_unit_id))
+          (fun () ->
+            units
+            |> List.filter (fun (unit : unit_record) -> unit.kind = Squad)
+            |> fun rows ->
+            best_overlap expected_workers rows
+              (fun (unit : unit_record) -> unit.roster)
+            |> Option.map fst)
   in
   let pending_decisions =
     decisions
@@ -2551,7 +2613,7 @@ let swarm_live_json config ?run_id ?operation_id () =
   in
   let matching_messages =
     messages
-    |> List.filter message_matches_run
+    |> List.filter (fun message -> message_in_scope message && message_matches_run message)
     |> List.sort (fun (left : Types.message) (right : Types.message) -> compare right.seq left.seq)
   in
   let recent_messages =
@@ -2565,7 +2627,7 @@ let swarm_live_json config ?run_id ?operation_id () =
       matching_messages
   in
   let task_by_id =
-    List.map (fun (task : Types.task) -> (task.id, task)) tasks
+    List.map (fun (task : Types.task) -> (task.id, task)) scoped_tasks
   in
   let find_agent name =
     agents |> List.find_opt (fun (agent : Types.agent) -> String.equal agent.name name)
@@ -2608,7 +2670,7 @@ let swarm_live_json config ?run_id ?operation_id () =
              | None -> false
            in
            let assigned_task =
-             tasks
+             scoped_tasks
              |> List.find_opt (fun (task : Types.task) ->
                     match task_assignee task with
                     | Some assignee when String.equal assignee plan.name ->
@@ -2634,7 +2696,7 @@ let swarm_live_json config ?run_id ?operation_id () =
            in
            let task_bound = task_matches_run || Option.is_some assigned_task in
            let bound_task_id =
-             option_first_some current_task
+             option_first_some (if task_matches_run then current_task else None)
                (Option.map (fun (task : Types.task) -> task.id) assigned_task)
            in
            let bound_task_title =
@@ -2747,10 +2809,18 @@ let swarm_live_json config ?run_id ?operation_id () =
         U.member "final_markers_seen" json |> U.to_int_option)
   in
   let effective_completed_workers =
-    max completed_workers (Option.value artifact_completed_workers ~default:0)
+    match selected_operation with
+    | Some _ -> completed_workers
+    | None ->
+        if completed_workers > 0 then completed_workers
+        else Option.value artifact_completed_workers ~default:0
   in
   let effective_final_markers_seen =
-    max final_markers_seen (Option.value artifact_final_markers_seen ~default:0)
+    match selected_operation with
+    | Some _ -> final_markers_seen
+    | None ->
+        if final_markers_seen > 0 then final_markers_seen
+        else Option.value artifact_final_markers_seen ~default:0
   in
   let live_sample_count = List.length live_slot_samples in
   let live_peak_hot_slots =

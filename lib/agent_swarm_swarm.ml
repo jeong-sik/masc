@@ -47,22 +47,28 @@ let final_marker_line text =
          String.length line >= 13
          && String.sub line 0 13 = "FINAL_MARKER[")
 
-let ensure_expected_final_marker (response : Types.api_response)
+let response_has_expected_final_marker (response : Types.api_response)
     ~(expected_final_marker : string option) =
   match expected_final_marker with
-  | None -> response
+  | None -> true
   | Some marker ->
       let text = extract_text response in
       if String.equal marker "" then
-        response
-      else if
+        true
+      else
         String.split_on_char '\n' text
         |> List.map String.trim
         |> List.exists (fun line -> String.equal line marker)
-      then
-        response
-      else
-        { response with content = response.content @ [ Text marker ] }
+
+let validate_expected_final_marker (response : Types.api_response)
+    ~(expected_final_marker : string option) =
+  if response_has_expected_final_marker response ~expected_final_marker then
+    Ok response
+  else
+    match expected_final_marker with
+    | Some marker ->
+        Error (Printf.sprintf "Missing expected final marker: %s" marker)
+    | None -> Ok response
 
 let contains_substring ~needle haystack =
   let needle_len = String.length needle in
@@ -270,9 +276,8 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
           let result =
             match result with
             | Ok response ->
-                Ok
-                  (ensure_expected_final_marker response
-                     ~expected_final_marker:spec.expected_final_marker)
+                validate_expected_final_marker response
+                  ~expected_final_marker:spec.expected_final_marker
             | Error _ as error -> error
           in
           let result =

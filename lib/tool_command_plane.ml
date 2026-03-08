@@ -327,6 +327,10 @@ let schemas : tool_schema list =
             ("autonomy_level", string_prop "Autonomy level such as L3_Guided or L4_Autonomous.");
             ("policy_class", string_prop "Policy class name.");
             ("budget_class", string_prop "Budget class name.");
+            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "generic"; `String "research_pipeline" ]); ("description", `String "Workload profile used by CPv2 search fabric. Default: generic.") ]);
+            ("stage", string_prop "Optional stage label such as normalize, verify, curate, rank, or audit.");
+            ("depends_on_operation_ids", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]); ("description", `String "Optional upstream operation ids that must complete or checkpoint before this operation can issue.") ]);
+            ("search_strategy", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "legacy"; `String "best_first_v1" ]); ("description", `String "Optional CPv2 routing strategy. legacy preserves current behavior; best_first_v1 enables dependency-aware search routing.") ]);
             ("detachment_session_id", string_prop "Optional backing team-session id.");
             ("checkpoint_ref", string_prop "Optional initial checkpoint reference.");
             ("active_goal_ids", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
@@ -397,7 +401,7 @@ let schemas : tool_schema list =
     {
       name = "masc_dispatch_plan";
       description =
-        "Recommend the best target units for an operation based on platoon locality, roster liveness, and capacity.";
+        "Recommend the best target units for an operation. best_first_v1 plans include score breakdown, routing reason, and dependency blockers.";
       input_schema =
         object_schema
           [

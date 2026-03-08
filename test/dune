@@ -237,6 +237,16 @@
  (libraries masc_mcp alcotest yojson unix))
 
 (test
+ (name test_cp_search_fabric)
+ (modules test_cp_search_fabric)
+ (libraries masc_mcp alcotest yojson unix))
+
+(executable
+ (name test_cp_search_fabric_benchmark)
+ (modules test_cp_search_fabric_benchmark)
+ (libraries masc_mcp yojson unix))
+
+(test
  (name test_tool_team_session)
  (modules test_tool_team_session)
  (libraries masc_mcp alcotest yojson unix eio eio_main))

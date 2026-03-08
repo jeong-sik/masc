@@ -4,6 +4,7 @@
 
 실제 MCP tool 사용 순서와 canonical workflow는 여기서 설명하지 않는다.
 
+- merged 구조 요약: [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md)
 - CPv2 benchmark / swarm: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 - benchmark 비교 실험: [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)
 - supervised team-session: [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)

@@ -145,9 +145,10 @@ let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_presen
     }
   in
   let json =
-    M.Swarm_status.build_json_from_inputs ~now ~operations:[ operation ]
-      ~detachments:[ detachment ] ~alerts:[] ~decisions:[] ~traces:[]
-      ~sessions:[ session ]
+    M.Swarm_status.build_json_from_inputs
+      ~timeline_limit_override:M.Swarm_status.timeline_limit ~now
+      ~operations:[ operation ] ~detachments:[ detachment ] ~alerts:[]
+      ~decisions:[] ~traces:[] ~sessions:[ session ]
   in
   let supervised = find_lane json "supervised" in
   check bool "supervised lane absent for terminal-only artifacts" false

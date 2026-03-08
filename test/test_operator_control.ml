@@ -185,6 +185,86 @@ let test_digest_team_session_shape () =
          | `List _ -> true
          | _ -> false))
 
+let test_snapshot_and_digest_expose_role_runtime_census () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let update_result =
+        Team_session_store.update_session config session_id (fun session ->
+            {
+              session with
+              planned_workers =
+                [
+                  {
+                    Team_session_types.spawn_agent = "llama";
+                    runtime_actor = Some "llama-local-manager";
+                    spawn_role = Some "middle-manager";
+                    spawn_model = Some "qwen3.5";
+                    worker_class = Some Team_session_types.Worker_manager;
+                    parent_actor = None;
+                    capsule_mode = Some Team_session_types.Capsule_capsule;
+                    runtime_pool = Some "local64";
+                  };
+                  {
+                    Team_session_types.spawn_agent = "llama";
+                    runtime_actor = Some "llama-local-metacog";
+                    spawn_role = Some "metacog-observer";
+                    spawn_model = Some "qwen3.5";
+                    worker_class = Some Team_session_types.Worker_metacog;
+                    parent_actor = Some "llama-local-manager";
+                    capsule_mode = Some Team_session_types.Capsule_capsule;
+                    runtime_pool = Some "local64";
+                  };
+                  {
+                    Team_session_types.spawn_agent = "llama";
+                    runtime_actor = Some "llama-local-executor";
+                    spawn_role = Some "executor-1";
+                    spawn_model = Some "qwen3.5";
+                    worker_class = Some Team_session_types.Worker_executor;
+                    parent_actor = Some "llama-local-manager";
+                    capsule_mode = Some Team_session_types.Capsule_inherit;
+                    runtime_pool = Some "local64";
+                  };
+                ];
+              updated_at_iso = Types.now_iso ();
+            })
+      in
+      (match update_result with Ok _ -> () | Error err -> Alcotest.fail err);
+      let ctx = operator_ctx env sw config "dashboard" in
+      let snapshot = Operator_control.snapshot_json ctx in
+      Alcotest.(check int) "room role census manager" 1
+        Yojson.Safe.Util.(snapshot |> member "role_census" |> member "manager" |> to_int);
+      Alcotest.(check int) "room role census metacog" 1
+        Yojson.Safe.Util.(snapshot |> member "role_census" |> member "metacog" |> to_int);
+      Alcotest.(check int) "room runtime pool local64" 3
+        Yojson.Safe.Util.(snapshot |> member "runtime_pools" |> member "local64" |> to_int);
+      let digest =
+        match
+          Operator_control.digest_json ~actor:"dashboard"
+            ~target_type:"team_session" ~target_id:session_id ctx
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let session_card =
+        Yojson.Safe.Util.(digest |> member "session_cards" |> index 0)
+      in
+      Alcotest.(check string) "scale_profile" "standard"
+        Yojson.Safe.Util.(session_card |> member "scale_profile" |> to_string);
+      Alcotest.(check int) "session card manager count" 1
+        Yojson.Safe.Util.(session_card |> member "worker_class_counts" |> member "manager" |> to_int);
+      Alcotest.(check int) "session card metacog count" 1
+        Yojson.Safe.Util.(session_card |> member "worker_class_counts" |> member "metacog" |> to_int);
+      Alcotest.(check int) "session card runtime pool local64" 3
+        Yojson.Safe.Util.(session_card |> member "runtime_pool_counts" |> member "local64" |> to_int))
+
 let test_task_inject_requires_confirm_then_executes () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -535,14 +615,18 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
               session with
               started_at = now -. 240.0;
               planned_workers =
-                [
-                  {
-                    Team_session_types.spawn_agent = "llama";
-                    runtime_actor = Some "llama-local-deadbeef";
-                    spawn_role = Some "implementer-a";
-                    spawn_model = Some "qwen3.5";
-                  };
-                ];
+	                [
+	                  {
+	                    Team_session_types.spawn_agent = "llama";
+	                    runtime_actor = Some "llama-local-deadbeef";
+	                    spawn_role = Some "implementer-a";
+	                    spawn_model = Some "qwen3.5";
+	                    worker_class = None;
+	                    parent_actor = None;
+	                    capsule_mode = None;
+	                    runtime_pool = None;
+	                  };
+	                ];
               updated_at_iso = Types.now_iso ();
             })
       in
@@ -815,6 +899,8 @@ let () =
             test_digest_room_exposes_pending_confirm_attention;
           Alcotest.test_case "digest team session shape" `Quick
             test_digest_team_session_shape;
+          Alcotest.test_case "snapshot and digest expose role runtime census" `Quick
+            test_snapshot_and_digest_expose_role_runtime_census;
           Alcotest.test_case "task inject confirm flow" `Quick
             test_task_inject_requires_confirm_then_executes;
           Alcotest.test_case "team turn fallback actor" `Quick

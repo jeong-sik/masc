@@ -74,7 +74,16 @@ let mcp_endpoint_url ~(auth_token : string option) =
       base ^ "?token=" ^ token
   | _ -> base
 
-let normalize_mcp_body body =
+let request_id_matches request_id json =
+  let open Yojson.Safe.Util in
+  match member "id" json with
+  | `Int value -> value = request_id
+  | `Intlit value -> (
+      try int_of_string value = request_id with _ -> false)
+  | `String value -> String.equal value (string_of_int request_id)
+  | _ -> false
+
+let normalize_mcp_body ~request_id body =
   let lines = String.split_on_char '\n' body in
   let data_lines =
     List.filter_map
@@ -88,9 +97,21 @@ let normalize_mcp_body body =
           None)
       lines
   in
-  match List.rev data_lines with
-  | last :: _ -> last
-  | [] -> body
+  let matching_line =
+    List.find_map
+      (fun line ->
+        try
+          let json = Yojson.Safe.from_string line in
+          if request_id_matches request_id json then Some line else None
+        with _ -> None)
+      data_lines
+  in
+  match matching_line with
+  | Some line -> line
+  | None -> (
+      match List.rev data_lines with
+      | last :: _ -> last
+      | [] -> body)
 
 let extract_tool_text json =
   let open Yojson.Safe.Util in
@@ -112,65 +133,119 @@ let extract_jsonrpc_error json =
       | _ -> None)
   | _ -> None
 
+let post_json_via_eio ~sw ~(auth_token : string option) ~session_id
+    ~(request_body : string) : (string, string) result =
+  match Eio_context.get_net_opt () with
+  | None -> Error "Eio net not initialized"
+  | Some net ->
+      let client = Cohttp_eio.Client.make ~https:None net in
+      let headers =
+        Cohttp.Header.of_list
+          ([
+             ("content-type", "application/json");
+             ("accept", "application/json, text/event-stream");
+             ("x-masc-force-json", "1");
+             ("mcp-session-id", session_id);
+           ]
+          @
+          match auth_token with
+          | Some token when String.trim token <> "" ->
+              [ ("authorization", "Bearer " ^ token) ]
+          | _ -> [])
+      in
+      try
+        let uri = Uri.of_string (mcp_endpoint_url ~auth_token) in
+        let body = Eio.Flow.string_source request_body in
+        let response, response_body =
+          Cohttp_eio.Client.post client ~sw uri ~headers ~body
+        in
+        let status = Cohttp.Response.status response |> Cohttp.Code.code_of_status in
+        let raw_body =
+          Eio.Buf_read.(parse_exn take_all) response_body
+            ~max_size:(8 * 1024 * 1024)
+        in
+        if Cohttp.Code.is_success status then Ok raw_body
+        else Error (sprintf "MASC HTTP %d: %s" status raw_body)
+      with exn -> Error (Printexc.to_string exn)
+
 let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : string)
     ~(params : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
-  let _ = sw in
+  let request_id = next_jsonrpc_id () in
   let request_body =
     `Assoc
       [
         ("jsonrpc", `String "2.0");
-        ("id", `Int (next_jsonrpc_id ()));
+        ("id", `Int request_id);
         ("method", `String method_name);
         ("params", params);
       ]
     |> Yojson.Safe.to_string
   in
-  let argv =
-    [
-      "curl";
-      "-sS";
-      "--http1.1";
-      "--max-time";
-      "15";
-      "-X";
-      "POST";
-      (mcp_endpoint_url ~auth_token);
-      "-H";
-      "content-type: application/json";
-      "-H";
-      "accept: application/json, text/event-stream";
-      "-H";
-      "x-masc-force-json: 1";
-      "-H";
-      ("mcp-session-id: " ^ session_id);
-    ]
-    @
-    match auth_token with
-    | Some token when String.trim token <> "" ->
-        [ "-H"; "authorization: Bearer " ^ token ]
-    | _ -> []
-  in
-  try
-    let (status, raw_body) =
-      Process_eio.run_argv_with_stdin_and_status
-        ~timeout_sec:20.0 ~stdin_content:request_body
-        (argv @ [ "--data-binary"; "@-" ])
+  let curl_fallback () =
+    let argv =
+      [
+        "curl";
+        "-sS";
+        "--http1.1";
+        "--max-time";
+        "15";
+        "-X";
+        "POST";
+        (mcp_endpoint_url ~auth_token);
+        "-H";
+        "content-type: application/json";
+        "-H";
+        "accept: application/json, text/event-stream";
+        "-H";
+        "x-masc-force-json: 1";
+        "-H";
+        ("mcp-session-id: " ^ session_id);
+      ]
+      @
+      match auth_token with
+      | Some token when String.trim token <> "" ->
+          [ "-H"; "authorization: Bearer " ^ token ]
+      | _ -> []
     in
-    (match status with
-     | Unix.WEXITED 0 ->
-         let normalized = normalize_mcp_body raw_body in
-         let json = Yojson.Safe.from_string normalized in
-         (match extract_jsonrpc_error json with
-          | Some msg -> Error msg
-          | None -> Ok json)
-     | Unix.WEXITED code ->
-         Error (sprintf "curl exited with code %d: %s" code raw_body)
-     | Unix.WSIGNALED code ->
-         Error (sprintf "curl signaled: %d" code)
-     | Unix.WSTOPPED code ->
-         Error (sprintf "curl stopped: %d" code))
-  with exn ->
-    Error (Printexc.to_string exn)
+    try
+      let status, raw_body =
+        Process_eio.run_argv_with_stdin_and_status
+          ~timeout_sec:20.0 ~stdin_content:request_body
+          (argv @ [ "--data-binary"; "@-" ])
+      in
+      match status with
+      | Unix.WEXITED 0 -> Ok raw_body
+      | Unix.WEXITED code ->
+          Error (sprintf "curl exited with code %d: %s" code raw_body)
+      | Unix.WSIGNALED code ->
+          Error (sprintf "curl signaled: %d" code)
+      | Unix.WSTOPPED code ->
+          Error (sprintf "curl stopped: %d" code)
+    with exn -> Error (Printexc.to_string exn)
+  in
+  let perform_request () =
+    match Eio_context.get_net_opt () with
+    | Some _ -> post_json_via_eio ~sw ~auth_token ~session_id ~request_body
+    | None -> curl_fallback ()
+  in
+  let rec decode attempts_left =
+    match perform_request () with
+    | Error e -> Error e
+    | Ok raw_body ->
+        let normalized = normalize_mcp_body ~request_id raw_body in
+        if String.trim normalized = "" && attempts_left > 0 then
+          decode (attempts_left - 1)
+        else
+          try
+            let json = Yojson.Safe.from_string normalized in
+            match extract_jsonrpc_error json with
+            | Some msg -> Error msg
+            | None -> Ok json
+          with Yojson.Json_error msg ->
+            if attempts_left > 0 then decode (attempts_left - 1)
+            else Error ("invalid JSON-RPC response: " ^ msg)
+  in
+  decode 1
 
 let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
     ~(args : Yojson.Safe.t) :
@@ -195,47 +270,78 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
       in
       Ok { text = extract_tool_text json; is_error }
 
+let local_worker_extra_schemas : Types.tool_schema list =
+  [
+    {
+      Types.name = "masc_team_session_status";
+      description =
+        "Get the current status and progress summary for a team session.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("session_id", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "session_id" ]);
+          ];
+    };
+    {
+      Types.name = "masc_team_session_turn";
+      description =
+        "Record a team orchestration turn and optionally execute broadcast or checkpoint action.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("session_id", `Assoc [ ("type", `String "string") ]);
+                  ("message", `Assoc [ ("type", `String "string") ]);
+                  ("turn_kind", `Assoc [ ("type", `String "string") ]);
+                  ("target_agent", `Assoc [ ("type", `String "string") ]);
+                  ("task_title", `Assoc [ ("type", `String "string") ]);
+                  ("task_description", `Assoc [ ("type", `String "string") ]);
+                  ("task_priority", `Assoc [ ("type", `String "integer") ]);
+                ] );
+            ("required", `List [ `String "session_id"; `String "turn_kind" ]);
+          ];
+    };
+  ]
+
 let list_masc_tools ~sw ~(auth_token : string option) ~session_id
     ?(names : string list option = None) () :
     (Types.tool_schema list, string) result =
-  let open Yojson.Safe.Util in
-  let params =
-    match names with
-    | None -> `Assoc []
-    | Some values ->
-        `Assoc
-          [
-            ( "names",
-              `List (List.map (fun value -> `String value) values) );
-          ]
-  in
-  match call_jsonrpc ~sw ~auth_token ~session_id ~method_name:"tools/list"
-          ~params
-  with
-  | Error e -> Error e
-  | Ok json ->
-      let tools_json =
-        match json |> member "result" |> member "tools" with
-        | `List items -> items
-        | _ -> []
+  let _ = sw in
+  let _ = auth_token in
+  let _ = session_id in
+  let all_schemas = local_worker_extra_schemas in
+  match names with
+  | None -> Ok all_schemas
+  | Some values ->
+      let requested =
+        values |> List.map String.trim |> List.filter (fun value -> value <> "")
+        |> unique_preserve_order
       in
       let schemas =
-        List.filter_map
-          (fun tool_json ->
-            match tool_json with
-            | `Assoc fields -> (
-                match
-                  List.assoc_opt "name" fields,
-                  List.assoc_opt "description" fields,
-                  List.assoc_opt "inputSchema" fields
-                with
-                | Some (`String name), Some (`String description), Some input_schema ->
-                    Some { Types.name; description; input_schema }
-                | _ -> None)
-            | _ -> None)
-          tools_json
+        List.filter
+          (fun (schema : Types.tool_schema) -> List.mem schema.name requested)
+          all_schemas
       in
-      Ok schemas
+      let missing =
+        List.filter
+          (fun tool_name ->
+            not (List.exists (fun (schema : Types.tool_schema) -> String.equal schema.name tool_name) schemas))
+          requested
+      in
+      if missing <> [] then
+        Error
+          (sprintf "unknown tool schema(s): %s"
+             (String.concat ", " missing))
+      else Ok schemas
 
 let tool_schema_of_name schemas tool_name =
   List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name tool_name) schemas

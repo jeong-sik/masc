@@ -1,8 +1,10 @@
-(** Tool_risc -- MCP Tool Handlers for SWARM-RISC Pipeline + Cache Coherence
+(** Tool_risc -- MCP Tool Handlers for SWARM-RISC Pipeline + Cache + OoO
 
-    Exposes pipeline operations and cache coherence as MCP tools.
+    Exposes pipeline operations, cache coherence, and OoO scheduling
+    as MCP tools.
     Phase 1 tools: pipeline_status, decode, pipeline_flush.
     Phase 2 tools: cache_status, cache_read, cache_write, cache_metrics.
+    Phase 3 tools: rs_status, rs_add, rs_issue, rs_cdb, steal, ooo_metrics.
 
     Tool dispatch follows the project convention: match-based routing,
     no dict/map lookup.
@@ -25,6 +27,13 @@ let global_registry = create_registry ()
 
 (** Singleton MESI coherence controller shared across all cache tools. *)
 let global_coherence = Cache_coherence.create_controller ()
+
+(* ================================================================ *)
+(* Global OoO Scheduler (Phase 3)                                   *)
+(* ================================================================ *)
+
+(** Singleton Tomasulo RS scheduler shared across all OoO tools. *)
+let global_scheduler = Reservation_station.create_scheduler ()
 
 (* ================================================================ *)
 (* Argument Helpers (consistent with tool_cache.ml pattern)         *)
@@ -445,10 +454,148 @@ let handle_cache_metrics args : result =
       ]))
 
 (* ================================================================ *)
+(* Tool: masc_risc_rs_status (Phase 3)                              *)
+(* ================================================================ *)
+
+(** Query reservation station state for an agent or aggregate.
+    - agent_id: specific agent's RS entries
+    - No args: aggregate OoO metrics *)
+let handle_rs_status args : result =
+  let agent_id = get_string_opt args "agent_id" in
+  match agent_id with
+  | Some aid ->
+      let rs = Reservation_station.get_or_create_rs global_scheduler ~agent_id:aid () in
+      (true, Yojson.Safe.pretty_to_string (Reservation_station.agent_rs_to_yojson rs))
+  | None ->
+      let metrics = Reservation_station.aggregate_metrics global_scheduler in
+      (true, Yojson.Safe.pretty_to_string metrics)
+
+(* ================================================================ *)
+(* Tool: masc_risc_rs_add (Phase 3)                                 *)
+(* ================================================================ *)
+
+(** Add an entry to an agent's reservation station.
+    - agent_id: agent owning the RS
+    - op_id: unique operation ID
+    - instruction: instruction spec (JSON)
+    - operand_tags: list of op_ids this depends on
+    - parent_task_id: parent task *)
+let handle_rs_add args : result =
+  let agent_id = get_string args "agent_id" "" in
+  let op_id = get_string args "op_id" "" in
+  let parent_task_id = get_string args "parent_task_id" agent_id in
+  let operand_tags = get_string_list args "operand_tags" in
+  if agent_id = "" then (false, "agent_id is required")
+  else if op_id = "" then (false, "op_id is required")
+  else
+    let instruction = match args with
+      | `Assoc fields ->
+          (match List.assoc_opt "instruction" fields with
+           | Some json -> parse_instruction json
+           | None -> None)
+      | _ -> None
+    in
+    match instruction with
+    | None -> (false, "Valid instruction is required")
+    | Some instr ->
+        let rs = Reservation_station.get_or_create_rs global_scheduler ~agent_id () in
+        match Reservation_station.add_entry rs ~op_id ~instruction:instr ~parent_task_id ~operand_tags with
+        | Ok entry ->
+            (true, Yojson.Safe.pretty_to_string (`Assoc [
+              ("added", `Bool true);
+              ("entry", Reservation_station.entry_to_yojson entry);
+            ]))
+        | Error msg -> (false, msg)
+
+(* ================================================================ *)
+(* Tool: masc_risc_rs_issue (Phase 3)                               *)
+(* ================================================================ *)
+
+(** Try to issue the next ready entry from an agent's RS.
+    Returns the entry to execute, or reports stall. *)
+let handle_rs_issue args : result =
+  let agent_id = get_string args "agent_id" "" in
+  if agent_id = "" then (false, "agent_id is required")
+  else
+    let rs = Reservation_station.get_or_create_rs global_scheduler ~agent_id () in
+    match Reservation_station.try_issue rs with
+    | Some entry ->
+        (true, Yojson.Safe.pretty_to_string (`Assoc [
+          ("issued", `Bool true);
+          ("entry", Reservation_station.entry_to_yojson entry);
+        ]))
+    | None ->
+        (true, Yojson.Safe.pretty_to_string (`Assoc [
+          ("issued", `Bool false);
+          ("reason", `String "No ready entries (stall)");
+          ("pending", `Int (Reservation_station.pending_count rs));
+        ]))
+
+(* ================================================================ *)
+(* Tool: masc_risc_rs_complete (Phase 3)                            *)
+(* ================================================================ *)
+
+(** Mark an issued RS entry as completed and broadcast result on CDB.
+    This triggers cross-agent dependency resolution. *)
+let handle_rs_complete args : result =
+  let agent_id = get_string args "agent_id" "" in
+  let op_id = get_string args "op_id" "" in
+  if agent_id = "" then (false, "agent_id is required")
+  else if op_id = "" then (false, "op_id is required")
+  else
+    let result_value = match args with
+      | `Assoc fields ->
+          (match List.assoc_opt "result" fields with
+           | Some v -> v
+           | None -> `String "completed")
+      | _ -> `String "completed"
+    in
+    let rs = Reservation_station.get_or_create_rs global_scheduler ~agent_id () in
+    match Reservation_station.complete_entry rs ~op_id ~result:result_value with
+    | Ok () ->
+        (* Broadcast on global CDB — resolve cross-agent deps *)
+        let wakeups = Reservation_station.global_cdb_broadcast global_scheduler
+          ~completed_op_id:op_id ~result:result_value in
+        (true, Yojson.Safe.pretty_to_string (`Assoc [
+          ("completed", `Bool true);
+          ("op_id", `String op_id);
+          ("cdb_wakeups", `Int wakeups);
+        ]))
+    | Error msg -> (false, msg)
+
+(* ================================================================ *)
+(* Tool: masc_risc_steal (Phase 3)                                  *)
+(* ================================================================ *)
+
+(** Attempt work stealing: idle agent takes ready work from busiest agent. *)
+let handle_steal args : result =
+  let thief_id = get_string args "thief_id" "" in
+  if thief_id = "" then (false, "thief_id is required")
+  else begin
+    (* Ensure thief has an RS *)
+    let _thief_rs = Reservation_station.get_or_create_rs global_scheduler ~agent_id:thief_id () in
+    let steal_result = Work_stealing.steal global_scheduler ~thief_id in
+    (true, Yojson.Safe.pretty_to_string (Work_stealing.steal_result_to_yojson steal_result))
+  end
+
+(* ================================================================ *)
+(* Tool: masc_risc_ooo_metrics (Phase 3)                            *)
+(* ================================================================ *)
+
+(** Get OoO scheduling metrics: RS utilization, CDB events, steal stats. *)
+let handle_ooo_metrics _args : result =
+  let rs_metrics = Reservation_station.aggregate_metrics global_scheduler in
+  let steal_overview = Work_stealing.steal_overview global_scheduler in
+  (true, Yojson.Safe.pretty_to_string (`Assoc [
+    ("reservation_stations", rs_metrics);
+    ("work_stealing", steal_overview);
+  ]))
+
+(* ================================================================ *)
 (* Tool Definitions (for MCP registration)                          *)
 (* ================================================================ *)
 
-(** MCP tool definitions for SWARM-RISC Phase 1 + Phase 2.
+(** MCP tool definitions for SWARM-RISC Phase 1 + Phase 2 + Phase 3.
     To be registered in mcp_server_eio.ml dispatch. *)
 let tool_definitions : (string * Yojson.Safe.t) list = [
   ("masc_risc_pipeline_status", `Assoc [
@@ -619,6 +766,116 @@ let tool_definitions : (string * Yojson.Safe.t) list = [
       ]);
     ]);
   ]);
+
+  (* Phase 3: OoO + Work-Stealing tools *)
+
+  ("masc_risc_rs_status", `Assoc [
+    ("name", `String "masc_risc_rs_status");
+    ("description", `String "Query Reservation Station state: entries, dependencies, ready/issued status. Optionally filter by agent_id.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent whose RS to query (optional, omit for aggregate)")
+        ]);
+      ]);
+    ]);
+  ]);
+
+  ("masc_risc_rs_add", `Assoc [
+    ("name", `String "masc_risc_rs_add");
+    ("description", `String "Add an instruction entry to an agent's Reservation Station with dependency tags.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent owning the RS")
+        ]);
+        ("op_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Unique operation ID")
+        ]);
+        ("instruction", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Instruction spec with mnemonic and operands")
+        ]);
+        ("operand_tags", `Assoc [
+          ("type", `String "array");
+          ("description", `String "List of op_ids this entry depends on");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("parent_task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Parent task ID (optional, defaults to agent_id)")
+        ]);
+      ]);
+      ("required", `List [`String "agent_id"; `String "op_id"; `String "instruction"]);
+    ]);
+  ]);
+
+  ("masc_risc_rs_issue", `Assoc [
+    ("name", `String "masc_risc_rs_issue");
+    ("description", `String "Try to issue the next ready entry from an agent's Reservation Station (Tomasulo scheduling).");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent whose RS to issue from")
+        ]);
+      ]);
+      ("required", `List [`String "agent_id"]);
+    ]);
+  ]);
+
+  ("masc_risc_rs_complete", `Assoc [
+    ("name", `String "masc_risc_rs_complete");
+    ("description", `String "Complete an issued RS entry and broadcast result on CDB for cross-agent dependency resolution.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent that executed the entry")
+        ]);
+        ("op_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Operation ID to complete")
+        ]);
+        ("result", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Result value (optional, defaults to 'completed')")
+        ]);
+      ]);
+      ("required", `List [`String "agent_id"; `String "op_id"]);
+    ]);
+  ]);
+
+  ("masc_risc_steal", `Assoc [
+    ("name", `String "masc_risc_steal");
+    ("description", `String "Work stealing: idle agent takes ready-but-unissued entries from the busiest agent.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("thief_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent attempting to steal work")
+        ]);
+      ]);
+      ("required", `List [`String "thief_id"]);
+    ]);
+  ]);
+
+  ("masc_risc_ooo_metrics", `Assoc [
+    ("name", `String "masc_risc_ooo_metrics");
+    ("description", `String "Get OoO scheduling metrics: RS utilization, CDB events, steal statistics.");
+    ("inputSchema", `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ]);
+  ]);
 ]
 
 (** Tool schemas in Types.tool_schema format for config.ml registration. *)
@@ -646,6 +903,13 @@ let dispatch tool_name args : result =
   | "masc_risc_cache_read" -> handle_cache_read args
   | "masc_risc_cache_write" -> handle_cache_write args
   | "masc_risc_cache_metrics" -> handle_cache_metrics args
+  (* Phase 3: OoO + Work-Stealing *)
+  | "masc_risc_rs_status" -> handle_rs_status args
+  | "masc_risc_rs_add" -> handle_rs_add args
+  | "masc_risc_rs_issue" -> handle_rs_issue args
+  | "masc_risc_rs_complete" -> handle_rs_complete args
+  | "masc_risc_steal" -> handle_steal args
+  | "masc_risc_ooo_metrics" -> handle_ooo_metrics args
   | _ -> (false, Printf.sprintf "Unknown RISC tool: %s" tool_name)
 
 (** Check if a tool name is a RISC tool. *)

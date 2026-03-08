@@ -278,3 +278,7 @@ module Tool_risc = Tool_risc
 
 (* SWARM-RISC Phase 2: MESI cache coherence *)
 module Cache_coherence = Cache_coherence
+
+(* SWARM-RISC Phase 3: OoO + Work-Stealing *)
+module Reservation_station = Reservation_station
+module Work_stealing = Work_stealing

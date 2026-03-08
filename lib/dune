@@ -277,7 +277,10 @@
    risc_pipeline
    tool_risc
    ;; SWARM-RISC Phase 2: MESI cache coherence
-   cache_coherence)
+   cache_coherence
+   ;; SWARM-RISC Phase 3: OoO (Tomasulo) + Work-Stealing
+   reservation_station
+   work_stealing)
  (libraries
    yojson
    base64

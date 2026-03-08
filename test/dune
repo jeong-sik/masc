@@ -652,3 +652,9 @@
  (name test_cache_coherence)
  (modules test_cache_coherence)
  (libraries masc_mcp yojson unix))
+
+; SWARM-RISC Phase 3: OoO (Tomasulo RS) + Work-Stealing tests
+(test
+ (name test_reservation_station)
+ (modules test_reservation_station)
+ (libraries masc_mcp yojson unix))

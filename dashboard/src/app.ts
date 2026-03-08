@@ -213,6 +213,24 @@ export function App() {
     }
   }, [])
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const tab = route.value.tab
+      if (tab === 'command') void refreshCommandPlaneSnapshot()
+      else if (tab === 'ops') void refreshOperatorSnapshot()
+      else if (tab === 'board') void refreshBoard()
+      else if (tab === 'trpg') void refreshTrpg()
+      else if (tab === 'goals') {
+        void refreshGoals()
+        void refreshMdal()
+      }
+    }, 15000)
+
+    return () => {
+      clearInterval(interval)
+    }
+  }, [])
+
   // Fetch tab-specific data when tab changes
   useEffect(() => {
     const tab = route.value.tab

@@ -800,8 +800,8 @@ export function startPeriodicRefresh(): void {
   _periodicId = setInterval(() => {
     if (!connected.value) {
       invalidateDashboardCache()
-      refreshDashboard()
     }
+    refreshDashboard()
   }, 10000)
 }
 

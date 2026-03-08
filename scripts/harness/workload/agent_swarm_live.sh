@@ -356,7 +356,7 @@ HARNESS_ARTIFACT_FILE="${RUN_ARTIFACT_DIR}/harness-result.json"
 rm -rf "$RUN_ARTIFACT_DIR"
 mkdir -p "$RUN_ARTIFACT_DIR"
 
-echo "[4/10] describe deterministic 12-worker manifest"
+echo "[4/10] describe deterministic swarm manifest"
 MANIFEST_JSON="$("$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" \
   --describe \
   --run-id "$RUN_ID" \
@@ -393,7 +393,7 @@ call_tool_checked 90011 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" '{un
 call_tool_checked 90012 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" --argjson roster "$SQUAD_ROSTER_JSON" '{unit_id:("squad-" + $run_id),kind:"squad",label:("Live Swarm Squad " + $run_id),parent_unit_id:("platoon-" + $run_id),leader_id:"swarm-harness",roster:$roster,policy:{autonomy_level:"L4_Autonomous",escalation_timeout_sec:180},budget:{headcount_cap:16,active_operation_cap:1}}')" >/dev/null
 
 echo "[7/10] start managed operation"
-OPERATION_RAW="$(call_tool_checked 90120 "masc_operation_start" "$(jq -cn --arg run_id "$RUN_ID" '{assigned_unit_id:("squad-" + $run_id),objective:("Run deterministic 12-worker live harness " + $run_id),autonomy_level:"L4_Autonomous",policy_class:"guarded",budget_class:"standard",note:("run_id=" + $run_id)}')")"
+OPERATION_RAW="$(call_tool_checked 90120 "masc_operation_start" "$(jq -cn --arg run_id "$RUN_ID" --arg expected_workers "$EXPECTED_WORKERS" --arg required_final_markers "$REQUIRED_FINAL_MARKERS" --arg min_hot_slots "$MIN_HOT_SLOTS" '{assigned_unit_id:("squad-" + $run_id),objective:("Run deterministic " + $expected_workers + "-worker live harness " + $run_id),autonomy_level:"L4_Autonomous",policy_class:"guarded",budget_class:"standard",note:("run_id=" + $run_id + " worker_count=" + $expected_workers + " required_final_markers=" + $required_final_markers + " min_hot_slots=" + $min_hot_slots)}')")"
 OPERATION_ID="$(printf "%s" "$OPERATION_RAW" | extract_result | jq -r '.operation_id // empty')"
 if [ -z "$OPERATION_ID" ]; then
   printf "%s\n" "$OPERATION_RAW" >&2
@@ -427,8 +427,9 @@ HARNESS_PID="$!"
 
 attempt=0
 RUN_ID_QUERY="$(urlencode "$RUN_ID")"
+OPERATION_ID_QUERY="$(urlencode "$OPERATION_ID")"
 while [ "$attempt" -lt 60 ]; do
-  SWARM_LIVE_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}")"
+  SWARM_LIVE_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}&operation_id=${OPERATION_ID_QUERY}")"
   LIVE_WORKERS="$(printf "%s" "$SWARM_LIVE_JSON" | jq -r '.summary.live_workers // 0')"
   if [ "$LIVE_WORKERS" -ge "$EXPECTED_WORKERS" ]; then
     break
@@ -453,7 +454,6 @@ echo "[10/10] checkpoint + finalize"
 SUCCESSFUL_WORKERS="$(printf "%s" "$HARNESS_RESULT" | jq -r '.summary.successful_workers')"
 call_tool_checked 90130 "masc_operation_checkpoint" "$(jq -cn --arg operation_id "$OPERATION_ID" --arg checkpoint_ref "live-harness-${RUN_ID}" --arg note "successful_workers=${SUCCESSFUL_WORKERS}/${EXPECTED_WORKERS}" '{operation_id:$operation_id,checkpoint_ref:$checkpoint_ref,note:$note}')" >/dev/null
 
-OPERATION_ID_QUERY="$(urlencode "$OPERATION_ID")"
 SWARM_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}&operation_id=${OPERATION_ID_QUERY}")"
 require_json "$SWARM_JSON"
 PASS="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.pass // false')"
@@ -467,7 +467,7 @@ FINAL_MARKERS_SEEN="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.final_markers_
 PASS_HOT="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.pass_hot_concurrency // false')"
 PASS_E2E="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.pass_end_to_end // false')"
 if [ "$PASS" = "true" ]; then
-  call_tool_checked 90131 "masc_operation_finalize" "$(jq -cn --arg operation_id "$OPERATION_ID" --arg note "12-worker live harness passed" '{operation_id:$operation_id,note:$note}')" >/dev/null
+  call_tool_checked 90131 "masc_operation_finalize" "$(jq -cn --arg operation_id "$OPERATION_ID" --arg note "${EXPECTED_WORKERS}-worker live harness passed" '{operation_id:$operation_id,note:$note}')" >/dev/null
   OPERATION_ID=""
 fi
 

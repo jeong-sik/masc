@@ -350,28 +350,24 @@ let () = run_test "status: includes metrics and sessions" (fun () ->
 (* Tests: Session management                                        *)
 (* ================================================================ *)
 
-let () = run_test "multiple sessions tracked" (fun () ->
+let () = run_test "multiple sessions on same engine (progressive widening)" (fun () ->
   let engine = make_engine () in
-  (* Need separate engines since expand on root fails when root already has children *)
-  let engine1 = make_engine () in
-  let engine2 = make_engine () in
-  let c1 = make_candidates ["a1"] in
+  let c1 = make_candidates ["a1"; "a2"] in
   let c2 = make_candidates ["b1"] in
-  let s1 = Result.get_ok (Speculative_engine.branch engine1
+  let s1 = Result.get_ok (Speculative_engine.branch engine
     ~goal:"goal1" ~original_query:"q1" ~candidates:c1) in
-  let s2 = Result.get_ok (Speculative_engine.branch engine2
+  let s2 = Result.get_ok (Speculative_engine.branch engine
     ~goal:"goal2" ~original_query:"q2" ~candidates:c2) in
   check "session 1 exists" (s1.spec_id <> "");
   check "session 2 exists" (s2.spec_id <> "");
-  (* Different engines share counter namespace, so IDs may collide.
-     Just check both are valid spec-NNNN format. *)
-  check "spec_id format valid" (String.length s1.spec_id > 0 &&
-    String.length s2.spec_id > 0);
-
-  (* Also test on same engine — will fail because root already expanded *)
-  let _s_first = Result.get_ok (Speculative_engine.branch engine
-    ~goal:"g1" ~original_query:"q1" ~candidates:(make_candidates ["x"])) in
-  check "engine has 1 session" (List.length engine.sessions = 1);
+  check "different spec_ids" (s1.spec_id <> s2.spec_id);
+  check "engine has 2 sessions" (List.length engine.sessions = 2);
+  check "session 1 has 2 child_node_ids" (List.length s1.child_node_ids = 2);
+  check "session 2 has 1 child_node_id" (List.length s2.child_node_ids = 1);
+  (* Tree should have root + 2 (expand) + 1 (add_child) = 4 nodes *)
+  check "tree has 4 nodes" (engine.tree.node_count = 4);
+  check "root has 3 children total" (List.length engine.tree.root.children = 3);
+  check "total_speculations = 2" (engine.total_speculations = 2);
 )
 
 let () = run_test "tree accessor" (fun () ->
@@ -388,7 +384,7 @@ let () = run_test "tree accessor" (fun () ->
 let () = run_test "branch creates MCTS children" (fun () ->
   let engine = make_engine () in
   let candidates = make_candidates ["opt-1"; "opt-2"; "opt-3"] in
-  let _session = Result.get_ok (Speculative_engine.branch engine
+  let session = Result.get_ok (Speculative_engine.branch engine
     ~goal:"test" ~original_query:"q" ~candidates) in
   let tree = Speculative_engine.tree engine in
   check "tree has 4 nodes" (tree.node_count = 4);
@@ -399,6 +395,8 @@ let () = run_test "branch creates MCTS children" (fun () ->
     (List.mem "opt-1" child_labels
      && List.mem "opt-2" child_labels
      && List.mem "opt-3" child_labels);
+  (* child_node_ids should match tree children *)
+  check "3 child_node_ids" (List.length session.child_node_ids = 3);
 )
 
 (* ================================================================ *)

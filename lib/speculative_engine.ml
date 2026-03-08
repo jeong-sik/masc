@@ -68,7 +68,8 @@ type spec_session = {
   outcomes : simulation_outcome list;
   best_candidate : string option;
   state : spec_state;
-  tree_node_id : string;    (** MCTS node_id where branching occurred *)
+  tree_node_id : string;       (** MCTS node_id where branching occurred *)
+  child_node_ids : string list; (** MCTS node_ids for this session's candidates *)
   created_at : float;
   completed_at : float option;
 }
@@ -251,8 +252,20 @@ let branch (engine : t)
     let spec_id = generate_spec_id engine in
     let root_id = engine.tree.root.id in
     let labels = List.map (fun c -> c.label) candidates in
-    (* expand mutates the tree in-place *)
-    ignore (Mcts_tree.expand engine.tree root_id ~labels);
+    (* Try expand first (works if root has no children).
+       If root already expanded (prior session), use add_child for
+       progressive widening — each candidate becomes a new child.
+       This makes multi-session operation safe. *)
+    let child_ids = match Mcts_tree.expand engine.tree root_id ~labels with
+      | Ok children -> List.map (fun (c : Mcts_tree.node) -> c.id) children
+      | Error _ ->
+        (* Root already expanded: add each candidate individually *)
+        List.filter_map (fun label ->
+          match Mcts_tree.add_child engine.tree root_id ~label with
+          | Ok child -> Some child.id
+          | Error _ -> None
+        ) labels
+    in
     let session = {
       spec_id;
       goal;
@@ -262,6 +275,7 @@ let branch (engine : t)
       best_candidate = None;
       state = Branching;
       tree_node_id = root_id;
+      child_node_ids = child_ids;
       created_at = Time_compat.now ();
       completed_at = None;
     } in
@@ -350,9 +364,9 @@ let simulate_all (engine : t) (spec_id : string)
     let outcomes = List.map (fun candidate ->
       simulate_candidate engine ~goal:session.goal ~candidate
     ) session.candidates in
-    (* Record simulations in MCTS tree *)
-    let children = engine.tree.root.children in
-    List.iter2 (fun (child : Mcts_tree.node) outcome ->
+    (* Record simulations in MCTS tree using session-specific child IDs.
+       This is safe for multi-session: each session tracks its own children. *)
+    List.iter2 (fun child_id outcome ->
       let sim : Mcts_tree.simulation_result = {
         model_used = engine.config.fast_model.model_id;
         output =
@@ -363,9 +377,9 @@ let simulate_all (engine : t) (spec_id : string)
         latency_ms = float_of_int outcome.latency_ms;
       } in
       let reward = Mcts_tree.reward_of_verdict outcome.verdict in
-      ignore (Mcts_tree.record_simulation engine.tree child.id sim);
-      Mcts_tree.backpropagate engine.tree child.id reward
-    ) children outcomes;
+      ignore (Mcts_tree.record_simulation engine.tree child_id sim);
+      Mcts_tree.backpropagate engine.tree child_id reward
+    ) session.child_node_ids outcomes;
     let session = { session with
       state = Verifying;
       outcomes;
@@ -432,7 +446,15 @@ let select_best (engine : t) (spec_id : string)
               ~fast_response:outcome.fast_response with
             | Ok guard ->
               guard.intent_aligned && guard.format_compliant && guard.side_effect_safe
-            | Error _e -> true  (* Guard failure = allow *)
+            | Error _e ->
+              (* Fail-open by design: if the guard LLM itself errors (network,
+                 timeout, model unavailable), we allow the candidate through
+                 rather than blocking the entire speculative pipeline.
+                 Rationale: the guard is a secondary quality check — the primary
+                 signal is the verifier verdict (which already passed to reach
+                 this point).  Blocking here would make speculation fragile
+                 under transient LLM failures. *)
+              true
       in
       if not guard_ok then begin
         let reason = "semantic guard rejected best candidate" in

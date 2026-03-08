@@ -674,7 +674,8 @@ let handle_spec_commit args : result =
 (* ================================================================ *)
 
 (** Abort a speculative session — discard results and rollback.
-    Backpropagates failure reward (0.0) into MCTS tree. *)
+    Note: MCTS tree is not updated on abort — the simulation outcomes
+    already recorded during simulate_all remain for future UCB1 selection. *)
 let handle_spec_abort args : result =
   let spec_id = get_string args "spec_id" "" in
   let reason = get_string args "reason" "user_abort" in

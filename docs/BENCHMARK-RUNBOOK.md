@@ -81,6 +81,21 @@ scripts/harness_agent_swarm_live.sh
 - `hot 10+`는 orchestration proof와 별개다. `llama.cpp /slots` 샘플이 없으면 pass로 보지 않는다.
 - worker가 완료 후 leave해도 completed task ownership과 final marker가 있으면 swarm read model은 복원 가능해야 한다.
 
+## planner -> workers fleet mode
+
+hot-swarm proof와 별도로, `agent_swarm_runner`에는 planner가 tasks를 만들고 workers가 `claim_next`로 병렬 처리하는 2-phase fleet mode가 있다.
+
+이 경로는 다음을 검증할 때 쓴다.
+
+- planner prompt가 `masc_batch_add_tasks`를 제대로 쓰는지
+- worker prompt가 `masc_claim_next -> masc_set_current_task -> masc_complete_task` 순서를 지키는지
+- generic agent-swarm library 경로가 MASC task surface와 계속 맞는지
+
+이 모드는 보조 경로다.
+
+- hot-swarm proof의 pass/fail 기준을 대체하지 않는다
+- CPv2 operation/detachment 진실원천은 여전히 live harness/read model 쪽이다
+
 ## 최소 unit 예시
 
 ```json

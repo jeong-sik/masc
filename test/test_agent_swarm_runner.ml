@@ -11,15 +11,16 @@ let runner_config_testable : runner_config Alcotest.testable =
     (fun fmt c ->
       Format.fprintf fmt
         "{goal=%S; provider=%S; workdir=%S; max_turns=%d; \
-         fleet=%b; masc_url=%S; verbose=%b}"
+         fleet=%b; members=%d; masc_url=%S; verbose=%b}"
         c.goal c.provider_name c.workdir c.max_turns
-        c.fleet_mode c.masc_url c.verbose)
+        c.fleet_mode c.num_members c.masc_url c.verbose)
     (fun a b ->
       a.goal = b.goal
       && a.provider_name = b.provider_name
       && a.workdir = b.workdir
       && a.max_turns = b.max_turns
       && a.fleet_mode = b.fleet_mode
+      && a.num_members = b.num_members
       && a.masc_url = b.masc_url
       && a.verbose = b.verbose)
 
@@ -49,6 +50,7 @@ let test_parse_full () =
     workdir = "/tmp/work";
     max_turns = 5;
     fleet_mode = true;
+    num_members = 3;
     masc_url = "http://example.com:9000";
     verbose = true;
   } in
@@ -66,6 +68,26 @@ let test_parse_invalid_max_turns () =
   Alcotest.check result_config "invalid max-turns"
     (Error "Invalid --max-turns: abc")
     (parse_args argv)
+
+let test_parse_members () =
+  let argv = [| "fleet_runner"; "--goal"; "test"; "--fleet"; "--members"; "5" |] in
+  let expected = { default_config with
+    goal = "test";
+    fleet_mode = true;
+    num_members = 5;
+  } in
+  Alcotest.check result_config "members parse"
+    (Ok expected) (parse_args argv)
+
+let test_parse_members_invalid () =
+  let argv = [| "fleet_runner"; "--goal"; "test"; "--members"; "abc" |] in
+  Alcotest.check result_config "invalid members"
+    (Error "Invalid --members: abc") (parse_args argv)
+
+let test_parse_members_zero () =
+  let argv = [| "fleet_runner"; "--goal"; "test"; "--members"; "0" |] in
+  Alcotest.check result_config "zero members"
+    (Error "Invalid --members: 0") (parse_args argv)
 
 let test_provider_resolve () =
   let known = ["local-qwen"; "local-mlx"; "sonnet"; "haiku"; "opus"] in
@@ -87,6 +109,9 @@ let () =
       Alcotest.test_case "full" `Quick test_parse_full;
       Alcotest.test_case "missing goal" `Quick test_parse_missing_goal;
       Alcotest.test_case "invalid max-turns" `Quick test_parse_invalid_max_turns;
+      Alcotest.test_case "members" `Quick test_parse_members;
+      Alcotest.test_case "invalid members" `Quick test_parse_members_invalid;
+      Alcotest.test_case "zero members" `Quick test_parse_members_zero;
     ];
     "resolve_provider", [
       Alcotest.test_case "known providers" `Quick test_provider_resolve;

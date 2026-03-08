@@ -21,6 +21,11 @@ type fleet_result = {
   result : (string, string) result;
 }
 
+type run_full_plan = {
+  planner_spec : Agent_swarm_swarm.agent_spec;
+  worker_specs : Agent_swarm_swarm.agent_spec list;
+}
+
 let member_name = function
   | Sdk_agent spec -> spec.Agent_swarm_swarm.name
   | Ext_agent config -> config.Agent_swarm_external_agent.name
@@ -34,6 +39,38 @@ let extract_text (resp : Types.api_response) =
   resp.content
   |> List.filter_map (function Types.Text s -> Some s | _ -> None)
   |> String.concat "\n"
+
+let planner_spec ~provider ~goal =
+  {
+    Agent_swarm_swarm.name = "fleet-planner";
+    provider;
+    system_prompt = Agent_swarm_prompts.fleet_planner ~goal;
+    tools = [];
+    max_tokens = None;
+    max_turns = 10;
+    include_masc_tools = true;
+    managed_task = None;
+    expected_final_marker = None;
+  }
+
+let worker_specs ~provider ~num_members ~workdir ~max_turns =
+  List.init num_members (fun i ->
+      let name = Printf.sprintf "fleet-worker-%d" (i + 1) in
+      {
+        Agent_swarm_swarm.name = name;
+        provider;
+        system_prompt = Agent_swarm_prompts.fleet_worker ~name ~workdir;
+        tools = [];
+        max_tokens = None;
+        max_turns;
+        include_masc_tools = true;
+        managed_task = None;
+        expected_final_marker = None;
+      })
+
+let build_run_full_plan ~provider ~goal ~num_members ~workdir ~max_turns =
+  { planner_spec = planner_spec ~provider ~goal;
+    worker_specs = worker_specs ~provider ~num_members ~workdir ~max_turns }
 
 let run_member ~sw ~net ~clock ~proc_mgr ~masc_url member ~goal =
   match member with
@@ -82,3 +119,72 @@ let run ~sw ~net ~clock ~proc_mgr config ~goal =
       ~message:(Printf.sprintf "Fleet done:\n%s" summary) in
     results_list
   )
+
+let run_full ~sw ~net ~clock ~proc_mgr ~masc_url ~provider
+    ~goal ~num_members ?workdir ~max_turns () =
+  let coordinator =
+    Agent_swarm_client.create ~net ~base_url:masc_url
+      ~agent_name:"fleet-coordinator"
+  in
+  let _joined = Agent_swarm_client.join ~sw coordinator in
+  Fun.protect
+    ~finally:(fun () ->
+      try ignore (Agent_swarm_client.leave ~sw coordinator) with _ -> ())
+    (fun () ->
+      let _ =
+        Agent_swarm_client.broadcast ~sw coordinator
+          ~message:
+            (Printf.sprintf "Fleet run_full: %s (members: %d)" goal num_members)
+      in
+      let workdir = match workdir with Some path -> path | None -> Sys.getcwd () in
+      let plan =
+        build_run_full_plan ~provider ~goal ~num_members ~workdir ~max_turns
+      in
+      let planner_result =
+        Agent_swarm_swarm.run_agent ~sw ~net ~clock ~masc_url plan.planner_spec
+          ~goal:(Printf.sprintf "Decompose this goal into tasks: %s" goal)
+      in
+      match planner_result.result with
+      | Error e ->
+        let _ =
+          Agent_swarm_client.broadcast ~sw coordinator
+            ~message:(Printf.sprintf "Planning failed: %s" e)
+        in
+        [planner_result]
+      | Ok _ ->
+        let _ =
+          Agent_swarm_client.broadcast ~sw coordinator
+            ~message:"Planning complete, launching workers"
+        in
+        let dev_tools =
+          Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir ()
+        in
+        let results =
+          Array.make (List.length plan.worker_specs)
+            { Agent_swarm_swarm.agent_name = ""; result = Error "pending" }
+        in
+        Eio.Fiber.all
+          (List.mapi
+             (fun i spec () ->
+               let result =
+                 Agent_swarm_swarm.run_agent ~sw ~net ~clock ~masc_url
+                   ~extra_tools:dev_tools spec
+                   ~goal:"Claim and complete available tasks"
+               in
+               results.(i) <- result)
+             plan.worker_specs);
+        let worker_results = Array.to_list results in
+        let summary =
+          worker_results
+          |> List.map (fun (result : Agent_swarm_swarm.agent_result) ->
+                 Printf.sprintf "- %s: %s" result.agent_name
+                   (match result.result with
+                    | Ok _ -> "OK"
+                    | Error e -> "Error: " ^ e))
+          |> String.concat "\n"
+        in
+        let _ =
+          Agent_swarm_client.broadcast ~sw coordinator
+            ~message:(Printf.sprintf "Fleet done:\n%s" summary)
+        in
+        planner_result :: worker_results)

@@ -11,6 +11,7 @@ type runner_config = {
   workdir : string;
   max_turns : int;
   fleet_mode : bool;
+  num_members : int;
   masc_url : string;
   verbose : bool;
 }
@@ -21,6 +22,7 @@ let default_config = {
   workdir = ".";
   max_turns = 10;
   fleet_mode = false;
+  num_members = 3;
   masc_url = "http://127.0.0.1:8935";
   verbose = false;
 }
@@ -54,6 +56,10 @@ let parse_args argv =
          | _ -> Error (Printf.sprintf "Invalid --max-turns: %s" argv.(i + 1)))
       | "--fleet" ->
         loop (i + 1) { acc with fleet_mode = true }
+      | "--members" when i + 1 < len ->
+        (match int_of_string_opt argv.(i + 1) with
+         | Some n when n > 0 -> loop (i + 2) { acc with num_members = n }
+         | _ -> Error (Printf.sprintf "Invalid --members: %s" argv.(i + 1)))
       | "--masc-url" when i + 1 < len ->
         loop (i + 2) { acc with masc_url = argv.(i + 1) }
       | "--verbose" | "-v" ->
@@ -94,22 +100,12 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
 let run_fleet ~sw ~net ~clock ~proc_mgr config =
   let provider_cfg = match resolve_provider config.provider_name with
     | Some p -> p | None -> Provider.local_qwen () in
-  let leader_spec : Agent_swarm_fleet.fleet_member =
-    Agent_swarm_fleet.Sdk_agent {
-      Agent_swarm_swarm.name = "fleet-leader";
-      provider = provider_cfg;
-      system_prompt =
-        Agent_swarm_prompts.worker ~specialization:"autonomous development";
-      tools = [];
-      max_tokens = None;
-      max_turns = config.max_turns;
-      include_masc_tools = true;
-      managed_task = None;
-      expected_final_marker = None;
-    } in
-  let fleet_config : Agent_swarm_fleet.fleet_config = {
-    masc_url = config.masc_url;
-    leader_name = "fleet-runner";
-    members = [(leader_spec, [Agent_swarm_fleet.Code; Agent_swarm_fleet.General])];
-  } in
-  Agent_swarm_fleet.run ~sw ~net ~clock ~proc_mgr fleet_config ~goal:config.goal
+  let workdir = if config.workdir = "." then None else Some config.workdir in
+  Agent_swarm_fleet.run_full ~sw ~net ~clock ~proc_mgr
+    ~masc_url:config.masc_url
+    ~provider:provider_cfg
+    ~goal:config.goal
+    ~num_members:config.num_members
+    ?workdir
+    ~max_turns:config.max_turns
+    ()

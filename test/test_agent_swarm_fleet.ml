@@ -83,6 +83,47 @@ let test_fleet_prompt () =
   Alcotest.(check bool) "has bob" true (has_sub prompt "bob");
   Alcotest.(check bool) "has masc" true (has_sub prompt "masc_")
 
+let test_fleet_planner_prompt () =
+  let prompt = Agent_swarm_prompts.fleet_planner ~goal:"Ship the feature" in
+  Alcotest.(check bool) "has goal" true (has_sub prompt "Ship the feature");
+  Alcotest.(check bool) "uses batch add" true
+    (has_sub prompt "masc_batch_add_tasks");
+  Alcotest.(check bool) "planner no dev tools" true
+    (has_sub prompt "Do not use development tools")
+
+let test_fleet_worker_prompt () =
+  let prompt =
+    Agent_swarm_prompts.fleet_worker ~name:"fleet-worker-1" ~workdir:"/tmp/work"
+  in
+  Alcotest.(check bool) "has worker name" true
+    (has_sub prompt "fleet-worker-1");
+  Alcotest.(check bool) "has workdir" true
+    (has_sub prompt "/tmp/work");
+  Alcotest.(check bool) "uses claim_next" true
+    (has_sub prompt "masc_claim_next");
+  Alcotest.(check bool) "uses set current task" true
+    (has_sub prompt "masc_set_current_task")
+
+let test_run_full_plan () =
+  let provider = Provider.local_qwen () in
+  let plan =
+    Agent_swarm_fleet.build_run_full_plan ~provider ~goal:"Fix the bug"
+      ~num_members:3 ~workdir:"/tmp/work" ~max_turns:7
+  in
+  Alcotest.(check string) "planner name" "fleet-planner"
+    plan.planner_spec.Agent_swarm_swarm.name;
+  Alcotest.(check bool) "planner uses masc tools" true
+    plan.planner_spec.Agent_swarm_swarm.include_masc_tools;
+  Alcotest.(check int) "worker count" 3 (List.length plan.worker_specs);
+  Alcotest.(check string) "first worker" "fleet-worker-1"
+    ((List.hd plan.worker_specs).Agent_swarm_swarm.name);
+  Alcotest.(check bool) "worker prompt carries workdir" true
+    (has_sub (List.hd plan.worker_specs).Agent_swarm_swarm.system_prompt "/tmp/work");
+  Alcotest.(check bool) "worker turn budget" true
+    (List.for_all
+       (fun spec -> spec.Agent_swarm_swarm.max_turns = 7)
+       plan.worker_specs)
+
 let () =
   Alcotest.run "Fleet Unit" [
     "external_agent", [
@@ -100,5 +141,11 @@ let () =
     "prompts", [
       Alcotest.test_case "fleet prompt" `Quick
         test_fleet_prompt;
+      Alcotest.test_case "fleet planner prompt" `Quick
+        test_fleet_planner_prompt;
+      Alcotest.test_case "fleet worker prompt" `Quick
+        test_fleet_worker_prompt;
+      Alcotest.test_case "run_full plan" `Quick
+        test_run_full_plan;
     ];
   ]

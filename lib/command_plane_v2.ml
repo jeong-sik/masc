@@ -2791,6 +2791,23 @@ let extract_run_id_from_note token =
                 |> String.trim))
          else None)
 
+let extract_int_field_from_note ~field token =
+  let prefix = String.lowercase_ascii field ^ "=" in
+  let prefix_len = String.length prefix in
+  token
+  |> String.split_on_char ' '
+  |> List.find_map (fun part ->
+         let trimmed = String.trim part in
+         if String.length trimmed > prefix_len
+            && String.equal
+                 (String.lowercase_ascii (String.sub trimmed 0 prefix_len))
+                 prefix
+         then
+           int_of_string_opt
+             (String.sub trimmed prefix_len (String.length trimmed - prefix_len)
+             |> String.trim)
+         else None)
+
 let extract_run_id_from_prefixed_token ~prefix token =
   let prefix_len = String.length prefix in
   if String.length token > prefix_len
@@ -2921,18 +2938,38 @@ let swarm_live_json config ?run_id ?operation_id () =
     Option.bind harness_summary (fun json ->
         U.member "worker_count" json |> U.to_int_option)
   in
+  let worker_count_from_operation =
+    Option.bind selected_operation (fun (operation : operation_record) ->
+        Option.bind operation.note
+          (extract_int_field_from_note ~field:"worker_count"))
+  in
   let required_final_markers =
     Option.bind harness_summary (fun json ->
         U.member "required_final_markers" json |> U.to_int_option)
   in
+  let required_final_markers_from_operation =
+    Option.bind selected_operation (fun (operation : operation_record) ->
+        Option.bind operation.note
+          (extract_int_field_from_note ~field:"required_final_markers"))
+  in
   let min_hot_slots =
     Option.bind harness_summary (fun json ->
         U.member "min_hot_slots" json |> U.to_int_option)
-    |> Option.value ~default:10
+  in
+  let min_hot_slots_from_operation =
+    Option.bind selected_operation (fun (operation : operation_record) ->
+        Option.bind operation.note
+          (extract_int_field_from_note ~field:"min_hot_slots"))
+  in
+  let min_hot_slots =
+    Option.value min_hot_slots
+      ~default:(Option.value min_hot_slots_from_operation ~default:10)
   in
   let plans =
     Agent_swarm_live_harness.build_worker_plans
-      ~worker_count:(Option.value worker_count_from_artifact ~default:12)
+      ~worker_count:
+        (Option.value worker_count_from_artifact
+           ~default:(Option.value worker_count_from_operation ~default:12))
       effective_run_id
   in
   let expected_workers = List.map (fun (plan : Agent_swarm_live_harness.worker_plan) -> plan.name) plans in
@@ -3332,7 +3369,10 @@ let swarm_live_json config ?run_id ?operation_id () =
   in
   let expected_count = List.length expected_workers in
   let required_final_markers =
-    Option.value required_final_markers ~default:expected_count
+    Option.value required_final_markers
+      ~default:
+        (Option.value required_final_markers_from_operation
+           ~default:expected_count)
   in
   let pass_hot_concurrency =
     peak_hot_slots >= min_hot_slots

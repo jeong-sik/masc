@@ -71,6 +71,10 @@ let setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two =
         ("roster", `List [ `String alpha_lead; `String alpha_two ]);
       ])
 
+let detachment_rows_for_operation config operation_id =
+  Command_plane_v2.list_detachments_json ~operation_id config
+  |> Yojson.Safe.Util.member "detachments"
+  |> Yojson.Safe.Util.to_list
 let test_platoon_assignment_expands_detachments_and_tick_runs () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -917,6 +921,211 @@ let test_swarm_live_json_reads_custom_worker_count_from_operation_note () =
         (swarm |> member "workers" |> to_list |> List.length);
       Alcotest.(check int) "live workers from joined roster" 13
         (swarm |> member "summary" |> member "live_workers" |> to_int))
+
+let test_best_first_search_blocks_and_routes_research_pipeline () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let normalize_lead = "normalize-lead-node" in
+      let verify_lead = "verify-lead-node" in
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
+      ignore (Room.join config ~agent_name:normalize_lead ~capabilities:[] ());
+      ignore (Room.join config ~agent_name:verify_lead ~capabilities:[] ());
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "company-main");
+            ("kind", `String "company");
+            ("label", `String "Main Company");
+            ("leader_id", `String owner);
+            ( "roster",
+              `List
+                [ `String owner; `String normalize_lead; `String verify_lead ] );
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "platoon-research");
+            ("kind", `String "platoon");
+            ("label", `String "Research Platoon");
+            ("parent_unit_id", `String "company-main");
+            ("leader_id", `String owner);
+            ( "roster",
+              `List [ `String normalize_lead; `String verify_lead ] );
+            ("capability_profile", `List [ `String "research"; `String "research_pipeline" ]);
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "squad-normalize");
+            ("kind", `String "squad");
+            ("label", `String "Normalize Squad");
+            ("parent_unit_id", `String "platoon-research");
+            ("leader_id", `String normalize_lead);
+            ("roster", `List [ `String normalize_lead ]);
+            ( "capability_profile",
+              `List
+                [
+                  `String "normalize";
+                  `String "research";
+                  `String "research_pipeline";
+                ] );
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "squad-verify");
+            ("kind", `String "squad");
+            ("label", `String "Verify Squad");
+            ("parent_unit_id", `String "platoon-research");
+            ("leader_id", `String verify_lead);
+            ("roster", `List [ `String verify_lead ]);
+            ( "capability_profile",
+              `List
+                [
+                  `String "verify";
+                  `String "research";
+                  `String "research_pipeline";
+                ] );
+          ]);
+      let normalize_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "platoon-research");
+              ("objective", `String "Normalize research items");
+              ("policy_class", `String "guarded");
+              ("budget_class", `String "standard");
+              ("workload_profile", `String "research_pipeline");
+              ("stage", `String "normalize");
+              ("search_strategy", `String "best_first_v1");
+            ])
+      in
+      let verify_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "platoon-research");
+              ("objective", `String "Verify research items");
+              ("policy_class", `String "guarded");
+              ("budget_class", `String "standard");
+              ("workload_profile", `String "research_pipeline");
+              ("stage", `String "verify");
+              ("search_strategy", `String "best_first_v1");
+              ( "depends_on_operation_ids",
+                `List [ `String normalize_op.operation_id ] );
+            ])
+      in
+      let verify_plan_before = Command_plane_v2.dispatch_plan_json config
+        (`Assoc [ ("operation_id", `String verify_op.operation_id) ])
+      in
+      Alcotest.(check string) "verify initially blocked" "blocked"
+        (verify_plan_before |> Yojson.Safe.Util.member "readiness"
+       |> Yojson.Safe.Util.to_string);
+      Alcotest.(check int) "one dependency blocker" 1
+        (verify_plan_before |> Yojson.Safe.Util.member "dependency_blockers"
+       |> Yojson.Safe.Util.to_list |> List.length);
+      Alcotest.(check bool) "score breakdown exposed" true
+        (verify_plan_before |> Yojson.Safe.Util.member "recommended_units"
+       |> Yojson.Safe.Util.index 0 |> Yojson.Safe.Util.member "score_breakdown"
+       <> `Null);
+      Alcotest.(check int) "verify has no detachment while blocked" 0
+        (List.length (detachment_rows_for_operation config verify_op.operation_id));
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.dispatch_tick_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String normalize_op.operation_id) ])));
+      let normalize_state =
+        Command_plane_v2.operation_status_json config
+          ~operation_id:normalize_op.operation_id ()
+      in
+      let normalize_assigned_unit =
+        normalize_state |> Yojson.Safe.Util.member "operations"
+        |> Yojson.Safe.Util.index 0
+        |> Yojson.Safe.Util.member "operation"
+        |> Yojson.Safe.Util.member "assigned_unit_id"
+        |> Yojson.Safe.Util.to_string
+      in
+      Alcotest.(check string) "normalize routed to normalize squad"
+        "squad-normalize" normalize_assigned_unit;
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.checkpoint_operation config ~actor:"owner"
+              (`Assoc
+                [
+                  ("operation_id", `String normalize_op.operation_id);
+                  ("checkpoint_ref", `String "ckpt-normalize-1");
+                ])));
+      let verify_tick =
+        unwrap_ok
+          (Command_plane_v2.dispatch_tick_json config ~actor:"owner"
+             (`Assoc [ ("operation_id", `String verify_op.operation_id) ]))
+      in
+      Alcotest.(check int) "verify detachment materialized after upstream checkpoint" 1
+        (verify_tick |> Yojson.Safe.Util.member "summary"
+       |> Yojson.Safe.Util.member "detachments_considered"
+       |> Yojson.Safe.Util.to_int);
+      let verify_rows = detachment_rows_for_operation config verify_op.operation_id in
+      Alcotest.(check int) "verify now has one detachment" 1 (List.length verify_rows);
+      let detachment_id =
+        verify_rows |> List.hd |> Yojson.Safe.Util.member "detachment"
+        |> Yojson.Safe.Util.member "detachment_id"
+        |> Yojson.Safe.Util.to_string
+      in
+      let verify_status =
+        unwrap_ok
+          (Command_plane_v2.detachment_status_json config
+             (`Assoc [ ("detachment_id", `String detachment_id) ]))
+      in
+      Alcotest.(check string) "verify routed to verify squad"
+        "squad-verify"
+        (verify_status |> Yojson.Safe.Util.member "result"
+       |> Yojson.Safe.Util.member "detachment"
+       |> Yojson.Safe.Util.member "assigned_unit_id"
+       |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "detachment status exposes search strategy"
+        "best_first_v1"
+        (verify_status |> Yojson.Safe.Util.member "result"
+       |> Yojson.Safe.Util.member "search"
+       |> Yojson.Safe.Util.member "strategy"
+       |> Yojson.Safe.Util.to_string))
+
+let test_invalid_search_strategy_is_rejected () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "company-main");
+            ("kind", `String "company");
+            ("label", `String "Main Company");
+            ("leader_id", `String owner);
+            ("roster", `List [ `String owner ]);
+          ]);
+      match
+        Command_plane_v2.start_operation config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Reject invalid strategy");
+              ("search_strategy", `String "made_up_strategy");
+            ])
+      with
+      | Ok _ -> Alcotest.fail "invalid search_strategy should be rejected"
+      | Error message ->
+          Alcotest.(check string) "validation error"
+            "unsupported search_strategy: made_up_strategy" message)
+
 let () =
   Alcotest.run "Command_plane_v2"
     [
@@ -924,6 +1133,11 @@ let () =
         [
           Alcotest.test_case "platoon assignment expands detachments" `Quick
             test_platoon_assignment_expands_detachments_and_tick_runs;
+          Alcotest.test_case "invalid search strategy is rejected" `Quick
+            test_invalid_search_strategy_is_rejected;
+          Alcotest.test_case "best first search blocks and routes research pipeline"
+            `Quick
+            test_best_first_search_blocks_and_routes_research_pipeline;
           Alcotest.test_case "freeze requires company approval" `Quick
             test_freeze_requires_company_approval;
           Alcotest.test_case "snapshot json reports consistent sections" `Quick

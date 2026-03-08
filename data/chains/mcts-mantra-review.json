@@ -1,0 +1,90 @@
+{
+  "id": "mcts-mantra-review",
+  "description": "MCTS-style MANTRA code review: Expansion → Simulation → Selection → Backprop",
+  "nodes": [
+    {
+      "id": "expansion",
+      "type": "fanout",
+      "description": "MCTS Expansion: Generate multiple refactoring candidates",
+      "nodes": [
+        {
+          "id": "candidate_claude",
+          "type": "llm",
+          "model": "claude",
+          "prompt": "## MANTRA Developer (Claude)\n\nRefactor this code following best practices:\n\n```\n{{input.code}}\n```\n\nReview feedback:\n{{input.feedback}}\n\nProvide:\n1. Refactored code\n2. Brief explanation of changes\n3. Confidence score (0.0-1.0)"
+        },
+        {
+          "id": "candidate_gemini",
+          "type": "llm",
+          "model": "gemini",
+          "prompt": "## MANTRA Developer (Gemini)\n\nRefactor this code with a different approach:\n\n```\n{{input.code}}\n```\n\nReview feedback:\n{{input.feedback}}\n\nFocus on:\n- Performance optimization\n- Type safety\n- Edge case handling\n\nProvide refactored code and confidence score."
+        },
+        {
+          "id": "candidate_codex",
+          "type": "llm",
+          "model": "codex",
+          "prompt": "## MANTRA Developer (Codex)\n\nRefactor with minimal changes:\n\n```\n{{input.code}}\n```\n\nReview feedback:\n{{input.feedback}}\n\nPrinciple: Smallest change that addresses all feedback.\nProvide refactored code and confidence score."
+        }
+      ]
+    },
+    {
+      "id": "simulation",
+      "type": "evaluator",
+      "description": "MCTS Simulation: Score each candidate",
+      "candidates_from": "expansion",
+      "scoring_func": "anti_fake",
+      "scoring_prompt": "Evaluate this refactored code for:\n1. Correctness (does it fix the issues?)\n2. Code quality (readability, maintainability)\n3. No regressions (preserves existing behavior)\n4. Test coverage considerations\n\nScore 0.0-1.0",
+      "select_strategy": "best",
+      "min_score": 0.6
+    },
+    {
+      "id": "selection_gate",
+      "type": "gate",
+      "description": "MCTS Selection: Check if quality threshold met",
+      "condition": "{{simulation.score}} >= 0.8",
+      "then_node": "output_pass",
+      "else_node": "backprop"
+    },
+    {
+      "id": "output_pass",
+      "type": "adapter",
+      "description": "Quality threshold met - pass through",
+      "transform": {
+        "code": "{{simulation.best.code}}",
+        "score": "{{simulation.score}}",
+        "iterations": 1,
+        "status": "PASS"
+      }
+    },
+    {
+      "id": "backprop",
+      "type": "goal_driven",
+      "description": "MCTS Backpropagation: Iterative repair until quality goal",
+      "goal_metric": "quality_score",
+      "goal_operator": "gte",
+      "goal_value": 0.85,
+      "max_iterations": 3,
+      "measure_func": "llm_judge",
+      "measure_prompt": "Score this code 0.0-1.0 for production readiness",
+      "action_node": {
+        "id": "repairer",
+        "type": "llm",
+        "model": "claude",
+        "prompt": "## MANTRA Repairer (Iteration {{iteration}}/{{max_iterations}})\n\nCurrent score: {{progress}}\nTarget: 0.85\n\nCode to repair:\n```\n{{simulation.best.code}}\n```\n\nPrevious feedback:\n{{previous_feedback}}\n\nFix the remaining issues. Focus on:\n{{step:Critical bugs first,Code quality improvements,Edge cases and error handling}}"
+      },
+      "output": {
+        "code": "{{repairer.code}}",
+        "score": "{{progress}}",
+        "iterations": "{{iteration}}",
+        "status": "REPAIRED"
+      }
+    }
+  ],
+  "output": "selection_gate",
+  "config": {
+    "max_depth": 4,
+    "max_concurrency": 3,
+    "timeout": 300,
+    "trace": true
+  }
+}

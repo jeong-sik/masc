@@ -410,3 +410,344 @@ let call_chain ~net ~clock ~goal ?chain_id ?(host=default_host) ?(port=default_p
       Error (ConnectionError (Unix.error_message err))
   | exn ->
       Error (ConnectionError (Printexc.to_string exn))
+
+type endpoint = {
+  host : string;
+  port : int;
+  base_path : string;
+  api_key : string option;
+}
+
+type tool_response = {
+  text : string;
+  extra : (string * string) list;
+}
+
+type chain_run_response = {
+  output : string;
+  chain_id : string option;
+  run_id : string option;
+  duration_ms : int option;
+  trace_count : int option;
+}
+
+type chain_orchestrate_response = {
+  summary : string;
+  success : bool option;
+  total_replans : int option;
+  chain_id : string option;
+  run_id : string option;
+}
+
+let normalize_env = function
+  | Some raw ->
+      let value = String.trim raw in
+      if value = "" then None else Some value
+  | None -> None
+
+let configured_api_key () =
+  match normalize_env (Sys.getenv_opt "LLM_MCP_API_KEY") with
+  | Some value -> Some value
+  | None -> normalize_env (Sys.getenv_opt "MCP_API_KEY")
+
+let normalize_base_path path =
+  let trimmed = String.trim path in
+  if trimmed = "" || String.equal trimmed "/" then ""
+  else if trimmed.[0] = '/' then trimmed
+  else "/" ^ trimmed
+
+let resolve_endpoint ?host ?port () =
+  let default_endpoint =
+    {
+      host = default_host;
+      port = default_port;
+      base_path = "";
+      api_key = configured_api_key ();
+    }
+  in
+  let from_url =
+    match normalize_env (Sys.getenv_opt "LLM_MCP_URL") with
+    | None -> default_endpoint
+    | Some url ->
+        let uri = Uri.of_string url in
+        {
+          host = Option.value ~default:default_endpoint.host (Uri.host uri);
+          port = Option.value ~default:default_endpoint.port (Uri.port uri);
+          base_path = normalize_base_path (Uri.path uri);
+          api_key = configured_api_key ();
+        }
+  in
+  {
+    from_url with
+    host = Option.value ~default:from_url.host host;
+    port = Option.value ~default:from_url.port port;
+  }
+
+let endpoint_path endpoint path =
+  let normalized =
+    if path = "" then "/"
+    else if path.[0] = '/' then path
+    else "/" ^ path
+  in
+  endpoint.base_path ^ normalized
+
+let parse_http_response raw =
+  let body_start =
+    try
+      let idx = Str.search_forward (Str.regexp "\r\n\r\n") raw 0 in
+      idx + 4
+    with Not_found -> 0
+  in
+  let headers =
+    if body_start >= 4 then String.sub raw 0 (body_start - 4) else ""
+  in
+  let status_code =
+    match String.split_on_char '\n' headers with
+    | status_line :: _ ->
+        let cleaned = String.trim status_line in
+        (match String.split_on_char ' ' cleaned with
+        | _http :: code :: _ -> (try int_of_string code with _ -> 200)
+        | _ -> 200)
+    | [] -> 200
+  in
+  let body =
+    if body_start >= String.length raw then ""
+    else String.sub raw body_start (String.length raw - body_start)
+  in
+  (status_code, body)
+
+let http_request ~net ~clock ?(timeout_sec=default_timeout_sec) ?(meth="GET")
+    ?(headers=[]) ?body endpoint ~path () =
+  let request_body = Option.value ~default:"" body in
+  let path = endpoint_path endpoint path in
+  let extra_headers =
+    headers
+    @
+    match endpoint.api_key with
+    | Some value -> [("Authorization", "Bearer " ^ value)]
+    | None -> []
+  in
+  let has_header name =
+    List.exists (fun (key, _) -> String.equal (String.lowercase_ascii key) name) extra_headers
+  in
+  let header_lines =
+    [
+      ("Host", Printf.sprintf "%s:%d" endpoint.host endpoint.port);
+      ("Accept", "application/json, text/event-stream");
+      ("Connection", "close");
+    ]
+    @ (if request_body <> "" && not (has_header "content-type") then [("Content-Type", "application/json")] else [])
+    @ (if request_body <> "" then [("Content-Length", string_of_int (String.length request_body))] else [])
+    @ extra_headers
+  in
+  let request =
+    Printf.sprintf "%s %s HTTP/1.1\r\n%s\r\n\r\n%s" meth path
+      (String.concat "\r\n" (List.map (fun (key, value) -> key ^ ": " ^ value) header_lines))
+      request_body
+  in
+  let do_request () =
+    Eio.Net.with_tcp_connect ~host:endpoint.host ~service:(string_of_int endpoint.port) net
+    @@ fun flow ->
+    Eio.Flow.copy_string request flow;
+    Eio.Flow.shutdown flow `Send;
+    let buf = Buffer.create 16384 in
+    let rec read_all () =
+      let chunk = Cstruct.create 4096 in
+      match Eio.Flow.single_read flow chunk with
+      | n ->
+          Buffer.add_string buf (Cstruct.to_string ~len:n chunk);
+          read_all ()
+      | exception End_of_file -> ()
+    in
+    read_all ();
+    let status_code, response_body = parse_http_response (Buffer.contents buf) in
+    if status_code >= 200 && status_code < 300 then Ok response_body
+    else Error (ServerError (status_code, response_body))
+  in
+  try Eio.Time.with_timeout_exn clock timeout_sec do_request
+  with
+  | Eio.Time.Timeout -> Error Timeout
+  | Unix.Unix_error (err, _, _) -> Error (ConnectionError (Unix.error_message err))
+  | exn -> Error (ConnectionError (Printexc.to_string exn))
+
+let build_jsonrpc_request ~name ~arguments =
+  Yojson.Safe.to_string
+    (`Assoc
+      [
+        ("jsonrpc", `String "2.0");
+        ("id", `Int 1);
+        ("method", `String "tools/call");
+        ("params", `Assoc [ ("name", `String name); ("arguments", arguments) ]);
+      ])
+
+let extract_response_payload body =
+  let lines = String.split_on_char '\n' body in
+  let data_lines =
+    List.filter_map
+      (fun line ->
+        let trimmed = String.trim line in
+        if String.length trimmed > 6 && String.sub trimmed 0 6 = "data: " then
+          Some (String.sub trimmed 6 (String.length trimmed - 6))
+        else None)
+      lines
+  in
+  match List.rev data_lines with
+  | payload :: _ -> payload
+  | [] -> String.trim body
+
+let parse_extra_block text =
+  let marker = "\n\n[Extra]\n" in
+  try
+    let idx = Str.search_forward (Str.regexp_string marker) text 0 in
+    let prefix = String.sub text 0 idx in
+    let suffix_start = idx + String.length marker in
+    let suffix = String.sub text suffix_start (String.length text - suffix_start) in
+    let extra =
+      match Yojson.Safe.from_string suffix with
+      | `Assoc fields ->
+          fields
+          |> List.filter_map (fun (key, value) ->
+                 match value with
+                 | `String raw -> Some (key, raw)
+                 | other -> Some (key, Yojson.Safe.to_string other))
+      | _ -> []
+    in
+    { text = prefix; extra }
+  with
+  | Not_found | Yojson.Json_error _ -> { text; extra = [] }
+
+let parse_tool_response body =
+  let payload = extract_response_payload body in
+  if payload = "" then Error (ParseError "No data in response")
+  else
+    try
+      let json = Yojson.Safe.from_string payload in
+      match json with
+      | `Assoc fields -> (
+          match List.assoc_opt "result" fields, List.assoc_opt "error" fields with
+          | Some (`Assoc result_fields), _ ->
+              let is_error =
+                match List.assoc_opt "isError" result_fields with
+                | Some (`Bool value) -> value
+                | _ -> false
+              in
+              let text =
+                match List.assoc_opt "content" result_fields with
+                | Some (`List [`Assoc content_fields]) -> (
+                    match List.assoc_opt "text" content_fields with
+                    | Some (`String value) -> value
+                    | _ -> "")
+                | Some (`String value) -> value
+                | _ -> ""
+              in
+              if is_error then Error (ServerError (500, text))
+              else Ok (parse_extra_block text)
+          | _, Some (`Assoc err) ->
+              let message =
+                match List.assoc_opt "message" err with
+                | Some (`String value) -> value
+                | _ -> "Unknown error"
+              in
+              Error (ServerError (500, message))
+          | _ -> Error (ParseError "Invalid JSON-RPC response"))
+      | _ -> Error (ParseError "Invalid JSON structure")
+    with
+    | Yojson.Json_error msg -> Error (ParseError msg)
+    | exn -> Error (ParseError (Printexc.to_string exn))
+
+let call_jsonrpc_tool ~net ~clock ?host ?port ?(timeout_sec=120.0) ~name ~arguments () =
+  let endpoint = resolve_endpoint ?host ?port () in
+  let body = build_jsonrpc_request ~name ~arguments in
+  match http_request ~net ~clock ~timeout_sec ~meth:"POST" ~body endpoint ~path:"/mcp" () with
+  | Ok response_body -> parse_tool_response response_body
+  | Error _ as err -> err
+
+let int_of_extra extra key =
+  Option.bind (List.assoc_opt key extra) (fun value ->
+      try Some (int_of_string value) with _ -> None)
+
+let bool_of_extra extra key =
+  Option.bind (List.assoc_opt key extra) (fun value ->
+      try Some (bool_of_string value) with _ -> None)
+
+let call_chain_run ~net ~clock ?host ?port ?chain_id ?mermaid ?input_json
+    ?(trace=true) ?(checkpoint_enabled=true) ?(timeout_sec=120.0) () =
+  let fields =
+    []
+    |> (fun acc ->
+         match chain_id with Some value -> ("chain_id", `String value) :: acc | None -> acc)
+    |> (fun acc ->
+         match mermaid with Some value -> ("mermaid", `String value) :: acc | None -> acc)
+    |> (fun acc ->
+         match input_json with Some value -> ("input", value) :: acc | None -> acc)
+  in
+  let arguments =
+    `Assoc
+      (List.rev
+         (("trace", `Bool trace)
+          :: ("checkpoint_enabled", `Bool checkpoint_enabled)
+          :: ("timeout", `Int (int_of_float timeout_sec))
+          :: fields))
+  in
+  match call_jsonrpc_tool ~net ~clock ?host ?port ~timeout_sec ~name:"chain.run" ~arguments () with
+  | Ok response ->
+      Ok
+        {
+          output = response.text;
+          chain_id = List.assoc_opt "chain_id" response.extra;
+          run_id = List.assoc_opt "run_id" response.extra;
+          duration_ms = int_of_extra response.extra "duration_ms";
+          trace_count = int_of_extra response.extra "trace_count";
+        }
+  | Error _ as err -> err
+
+let call_chain_orchestrate ~net ~clock ?host ?port ~goal ?chain_id
+    ?(timeout_sec=120.0) ?(max_replans=2) () =
+  let fields =
+    match chain_id with
+    | Some value -> [ ("chain_id", `String value) ]
+    | None -> []
+  in
+  let arguments =
+    `Assoc
+      (fields
+       @ [
+           ("goal", `String goal);
+           ("timeout", `Int (int_of_float timeout_sec));
+           ("max_replans", `Int max_replans);
+           ("trace", `Bool false);
+           ("verify_on_complete", `Bool true);
+         ])
+  in
+  match
+    call_jsonrpc_tool ~net ~clock ?host ?port ~timeout_sec ~name:"chain.orchestrate"
+      ~arguments ()
+  with
+  | Ok response ->
+      Ok
+        {
+          summary = response.text;
+          success = bool_of_extra response.extra "success";
+          total_replans = int_of_extra response.extra "total_replans";
+          chain_id = List.assoc_opt "chain_id" response.extra;
+          run_id = List.assoc_opt "run_id" response.extra;
+        }
+  | Error _ as err -> err
+
+let fetch_chain_status_json ~net ~clock ?host ?port ?(timeout_sec=15.0) () =
+  let endpoint = resolve_endpoint ?host ?port () in
+  match http_request ~net ~clock ~timeout_sec endpoint ~path:"/chain/status" () with
+  | Ok body -> (try Ok (Yojson.Safe.from_string body) with Yojson.Json_error msg -> Error (ParseError msg))
+  | Error _ as err -> err
+
+let fetch_chain_history_json ~net ~clock ?host ?port ?(timeout_sec=15.0) () =
+  let endpoint = resolve_endpoint ?host ?port () in
+  match http_request ~net ~clock ~timeout_sec endpoint ~path:"/chain/history" () with
+  | Ok body -> (try Ok (Yojson.Safe.from_string body) with Yojson.Json_error msg -> Error (ParseError msg))
+  | Error _ as err -> err
+
+let fetch_chain_run_json ~net ~clock ?host ?port ?(timeout_sec=15.0) ~run_id () =
+  let endpoint = resolve_endpoint ?host ?port () in
+  match http_request ~net ~clock ~timeout_sec endpoint ~path:("/chain/runs/" ^ run_id) () with
+  | Ok body -> (try Ok (Yojson.Safe.from_string body) with Yojson.Json_error msg -> Error (ParseError msg))
+  | Error _ as err -> err

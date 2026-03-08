@@ -33,7 +33,10 @@ import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
 import { refreshOperatorSnapshot } from './operator-store'
-import { refreshCommandPlaneCurrentSurface, refreshCommandPlaneSummary } from './command-store'
+import {
+  refreshCommandPlaneChainSummary,
+  refreshCommandPlaneCurrentSurface,
+} from './command-store'
 import { activityPanelOpen, closeActivityPanel, toggleActivityPanel } from './activity-panel'
 
 const QUICK_ACTIONS_OPEN_KEY = 'masc_dashboard_quick_actions_open'
@@ -133,7 +136,10 @@ function SideRail() {
             class="rail-refresh-btn"
             onClick=${() => {
               refreshDashboard()
-              if (current === 'command') refreshCommandPlaneCurrentSurface()
+              if (current === 'command') {
+                refreshCommandPlaneCurrentSurface()
+                refreshCommandPlaneChainSummary()
+              }
               if (current === 'ops') refreshOperatorSnapshot()
               if (current === 'board') refreshBoard()
               if (current === 'trpg') refreshTrpg()
@@ -216,7 +222,10 @@ export function App() {
   useEffect(() => {
     const interval = setInterval(() => {
       const tab = route.value.tab
-      if (tab === 'command') void refreshCommandPlaneCurrentSurface()
+      if (tab === 'command') {
+        void refreshCommandPlaneCurrentSurface()
+        void refreshCommandPlaneChainSummary()
+      }
       else if (tab === 'ops') void refreshOperatorSnapshot()
       else if (tab === 'board') void refreshBoard()
       else if (tab === 'trpg') void refreshTrpg()
@@ -234,7 +243,10 @@ export function App() {
   // Fetch tab-specific data when tab changes
   useEffect(() => {
     const tab = route.value.tab
-    if (tab === 'command') refreshCommandPlaneSummary()
+    if (tab === 'command') {
+      refreshCommandPlaneCurrentSurface()
+      refreshCommandPlaneChainSummary()
+    }
     if (tab === 'ops') refreshOperatorSnapshot()
     if (tab === 'board') refreshBoard()
     if (tab === 'trpg') refreshTrpg()

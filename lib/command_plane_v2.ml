@@ -50,6 +50,20 @@ type operation_status =
   | Cancelled
   | Failed
 
+type chain_record = {
+  kind : string;
+  backend : string;
+  chain_id : string option;
+  goal : string option;
+  run_id : string option;
+  status : string;
+  history_event : Yojson.Safe.t option;
+  mermaid : string option;
+  preview_run : Yojson.Safe.t option;
+  viewer_path : string option;
+  last_sync_at : string option;
+}
+
 type operation_record = {
   operation_id : string;
   objective : string;
@@ -69,6 +83,7 @@ type operation_record = {
   created_by : string;
   source : string;
   status : operation_status;
+  chain : chain_record option;
   created_at : string;
   updated_at : string;
 }
@@ -538,6 +553,25 @@ let unit_of_json json =
           }
 
 let operation_to_json (operation : operation_record) =
+  let chain_json =
+    match operation.chain with
+    | Some chain ->
+        `Assoc
+          [
+            ("kind", `String chain.kind);
+            ("backend", `String chain.backend);
+            ("chain_id", match chain.chain_id with Some value -> `String value | None -> `Null);
+            ("goal", match chain.goal with Some value -> `String value | None -> `Null);
+            ("run_id", match chain.run_id with Some value -> `String value | None -> `Null);
+            ("status", `String chain.status);
+            ("history_event", match chain.history_event with Some value -> value | None -> `Null);
+            ("mermaid", match chain.mermaid with Some value -> `String value | None -> `Null);
+            ("preview_run", match chain.preview_run with Some value -> value | None -> `Null);
+            ("viewer_path", match chain.viewer_path with Some value -> `String value | None -> `Null);
+            ("last_sync_at", match chain.last_sync_at with Some value -> `String value | None -> `Null);
+          ]
+    | None -> `Null
+  in
   `Assoc
     [
       ("operation_id", `String operation.operation_id);
@@ -561,11 +595,41 @@ let operation_to_json (operation : operation_record) =
       ("created_by", `String operation.created_by);
       ("source", `String operation.source);
       ("status", `String (string_of_operation_status operation.status));
+      ("chain", chain_json);
       ("created_at", `String operation.created_at);
       ("updated_at", `String operation.updated_at);
     ]
 
 let operation_of_json json =
+  let chain_of_json = function
+    | (`Assoc _ as value) -> (
+        match get_string_opt value "kind", get_string_opt value "status" with
+        | Some kind, Some status ->
+            Some
+              {
+                kind;
+                backend = get_string_default value "backend" "legacy";
+                chain_id = get_string_opt value "chain_id";
+                goal = get_string_opt value "goal";
+                run_id = get_string_opt value "run_id";
+                status;
+                history_event =
+                  (match U.member "history_event" value with
+                  | `Null -> None
+                  | `Assoc _ as json -> Some json
+                  | _ -> None);
+                mermaid = get_string_opt value "mermaid";
+                preview_run =
+                  (match U.member "preview_run" value with
+                  | `Null -> None
+                  | `Assoc _ as json -> Some json
+                  | _ -> None);
+                viewer_path = get_string_opt value "viewer_path";
+                last_sync_at = get_string_opt value "last_sync_at";
+              }
+        | _ -> None)
+    | _ -> None
+  in
   match
     (match get_string_opt json "status" with
     | Some value -> operation_status_of_string value
@@ -601,6 +665,10 @@ let operation_of_json json =
             created_by;
             source = get_string_default json "source" "managed";
             status;
+            chain =
+              (match U.member "chain" json with
+              | `Assoc _ as value -> chain_of_json value
+              | _ -> None);
             created_at = get_string_default json "created_at" (Types.now_iso ());
             updated_at = get_string_default json "updated_at" (Types.now_iso ());
           }
@@ -1388,6 +1456,7 @@ let projected_team_session_operations config units managed_operations =
            created_by = session.created_by;
            source = "projected";
            status = operation_status_of_session session.status;
+           chain = None;
            created_at = session.created_at_iso;
            updated_at = session.updated_at_iso;
          })
@@ -1447,6 +1516,7 @@ let projected_swarm_operations config units managed_operations =
             created_by = "swarm";
             source = "projected";
             status = Active;
+            chain = None;
             created_at = last_evolution;
             updated_at = last_evolution;
           };
@@ -1785,7 +1855,8 @@ let topology_json_from_state (state : snapshot_state) =
            match unit.parent_unit_id with
            | None -> true
            | Some parent_id -> lookup_unit units parent_id = None)
-    |> List.sort (fun a b -> compare (kind_order a.kind, a.label) (kind_order b.kind, b.label))
+    |> List.sort (fun (a : unit_record) (b : unit_record) ->
+           compare (kind_order a.kind, a.label) (kind_order b.kind, b.label))
   in
   let trees =
     roots
@@ -4199,10 +4270,25 @@ let apply_operation_assignment config ~(actor : string) (operation : operation_r
 
 let update_operation_status config ~(actor : string) ~operation_id ~status ~note ~event_type =
   with_operation config operation_id (fun operations current ->
+      let next_chain_status =
+        match status with
+        | Planned -> Some "pending"
+        | Active -> Some "running"
+        | Paused -> Some "paused"
+        | Cancelled -> Some "cancelled"
+        | Completed -> Some "completed"
+        | Failed -> Some "failed"
+      in
       let updated =
         {
           current with
           status;
+          chain =
+            (match current.chain, next_chain_status with
+            | Some chain, Some chain_status ->
+                Some { chain with status = chain_status }
+            | None, Some _ -> None
+            | existing, None -> existing);
           note =
             (match note, current.note with
             | Some value, _ -> Some value
@@ -4216,6 +4302,23 @@ let update_operation_status config ~(actor : string) ~operation_id ~status ~note
       append_cp_event config ~trace_id:updated.trace_id ~event_type
         ~operation_id:updated.operation_id ~unit_id:updated.assigned_unit_id ~actor
         (`Assoc [ ("status", `String (string_of_operation_status status)) ]);
+      Ok updated)
+
+let update_operation config ~(actor : string) ~operation_id ?event_type ?detail f =
+  with_operation config operation_id (fun operations current ->
+      let updated : operation_record =
+        f current |> fun (operation : operation_record) -> { operation with updated_at = Types.now_iso () }
+      in
+      write_operations config (replace_operation operations updated);
+      let _, _, units, _ = topology_units config in
+      let _ = sync_managed_detachments config units updated in
+      (match event_type with
+      | Some current_event_type ->
+          append_cp_event config ~trace_id:updated.trace_id ~event_type:current_event_type
+            ~operation_id:updated.operation_id ~unit_id:updated.assigned_unit_id
+            ~actor
+            (Option.value ~default:(`Assoc []) detail)
+      | None -> ());
       Ok updated)
 
 let update_unit config ~(actor : string) ~unit_id f ~event_type detail =
@@ -4255,6 +4358,42 @@ let start_operation config ~(actor : string) json =
       let search_strategy_raw = get_string_default json "search_strategy" "legacy" in
       let* workload_profile = validate_workload_profile workload_profile_raw in
       let* search_strategy = validate_search_strategy search_strategy_raw in
+      let chain =
+        match U.member "chain" json with
+        | (`Assoc _ as chain_json) -> (
+            match get_string_opt chain_json "kind", get_string_opt chain_json "status" with
+            | Some kind, Some status ->
+                Some
+                  {
+                    kind;
+                    backend = get_string_default chain_json "backend" "legacy";
+                    chain_id = get_string_opt chain_json "chain_id";
+                    goal = get_string_opt chain_json "goal";
+                    run_id = get_string_opt chain_json "run_id";
+                    status;
+                    history_event =
+                      (match U.member "history_event" chain_json with
+                      | `Null -> None
+                      | `Assoc _ as json -> Some json
+                      | _ -> None);
+                    mermaid = get_string_opt chain_json "mermaid";
+                    preview_run =
+                      (match U.member "preview_run" chain_json with
+                      | `Null -> None
+                      | `Assoc _ as json -> Some json
+                      | _ -> None);
+                    viewer_path = get_string_opt chain_json "viewer_path";
+                    last_sync_at = get_string_opt chain_json "last_sync_at";
+                  }
+            | _ -> None)
+        | _ -> None
+      in
+      let checkpoint_ref =
+        match get_string_opt json "checkpoint_ref", chain with
+        | Some value, _ -> Some value
+        | None, Some { run_id = Some run_id; _ } -> Some run_id
+        | None, _ -> None
+      in
       let operation =
         {
           operation_id = next_operation_id ();
@@ -4269,7 +4408,7 @@ let start_operation config ~(actor : string) json =
           search_strategy;
           detachment_session_id = get_string_opt json "detachment_session_id";
           trace_id = next_trace_id ();
-          checkpoint_ref = get_string_opt json "checkpoint_ref";
+          checkpoint_ref;
           active_goal_ids = get_string_list json "active_goal_ids";
           note = get_string_opt json "note";
           created_by = actor;
@@ -4282,6 +4421,7 @@ let start_operation config ~(actor : string) json =
              with
             | Some value -> value
             | None -> Active);
+          chain;
           created_at = Types.now_iso ();
           updated_at = Types.now_iso ();
         }

@@ -1,0 +1,32 @@
+{
+  "id": "sonnet-test",
+  "name": "Sonnet E2E Test Chain",
+  "description": "Minimal chain using Sonnet only",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "task_001",
+      "type": "llm",
+      "llm": {
+        "model": "sonnet",
+        "prompt": "Return exactly: sonnet-step1"
+      },
+      "output_key": "step1"
+    },
+    {
+      "id": "task_002",
+      "type": "llm",
+      "llm": {
+        "model": "sonnet",
+        "prompt": "Return exactly: sonnet-step2"
+      },
+      "depends_on": ["task_001"],
+      "output_key": "step2"
+    }
+  ],
+  "output": "task_002",
+  "metadata": {
+    "tags": ["test", "sonnet"],
+    "estimated_duration_sec": 20
+  }
+}

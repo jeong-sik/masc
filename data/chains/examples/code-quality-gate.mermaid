@@ -1,0 +1,25 @@
+%%{init: {"theme": "base"}}%%
+%% Code Quality Gate - Anti-Fake Test Detection
+%% Uses hybrid heuristic + LLM scoring to prevent fake tests
+%% Usage: chain.run mermaid="@data/chains/examples/code-quality-gate.mermaid" input="Generate tests for encode/decode"
+
+graph LR
+    %% Phase 1: Generate code with multiple LLMs (Diamond pattern)
+    input["LLM:gemini 'Generate OCaml tests for: {{input}}'"]
+    alt1["LLM:claude 'Generate OCaml tests for: {{input}}'"]
+
+    %% Phase 2: Quality Gate with anti_fake scoring
+    eval{Evaluator:anti_fake:Best:0.7}
+
+    %% Phase 3: If passed, output; if failed, regenerate with feedback
+    gate{Gate:{{eval.score}} >= 0.7}
+    output["Output: {{eval.selected}}"]
+    fix["LLM:gemini 'Fix fake tests. Add real assertions:\n{{eval.selected}}'"]
+
+    %% Connections
+    input --> eval
+    alt1 --> eval
+    eval --> gate
+    gate -->|pass| output
+    gate -->|fail| fix
+    fix --> eval

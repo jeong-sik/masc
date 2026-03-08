@@ -110,7 +110,7 @@ val create_state_eio :
     @param request_str Raw JSON-RPC request string
     @return JSON response *)
 val handle_request :
-  clock:_ Eio.Time.clock ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   sw:Eio.Switch.t ->
   ?profile:tool_profile ->
   ?mcp_session_id:string ->

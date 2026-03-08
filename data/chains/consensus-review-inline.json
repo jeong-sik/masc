@@ -1,0 +1,71 @@
+{
+  "id": "consensus-review-inline",
+  "name": "Consensus Code Review (Inline)",
+  "description": "3-LLM consensus code review for inline code snippets",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "codex-review",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "You are the implementation expert. Analyze this code for:\n1. Logic errors and bugs\n2. Performance issues\n3. Security vulnerabilities\n\nCode:\n```\n{{input.code}}\n```\n\nProvide structured findings as JSON: {\"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"bug|perf|security\", \"line\": N, \"description\": \"...\", \"suggestion\": \"...\"}]}"
+      },
+      "output_key": "codex_findings"
+    },
+    {
+      "id": "claude-review",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "You are the quality guardian. Analyze this code for:\n1. Code clarity and readability\n2. Maintainability concerns\n3. Best practices violations\n\nCode:\n```\n{{input.code}}\n```\n\nProvide structured findings as JSON: {\"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"clarity|maintainability|practice\", \"line\": N, \"description\": \"...\", \"suggestion\": \"...\"}]}"
+      },
+      "output_key": "claude_findings"
+    },
+    {
+      "id": "gemini-review",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "You are the strategist. Analyze this code for:\n1. Architectural concerns\n2. Scalability issues\n3. Integration risks\n\nCode:\n```\n{{input.code}}\n```\n\nProvide structured findings as JSON: {\"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"architecture|scalability|integration\", \"line\": N, \"description\": \"...\", \"suggestion\": \"...\"}]}"
+      },
+      "output_key": "gemini_findings"
+    },
+    {
+      "id": "consensus-merge",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "You are the consensus coordinator. Merge these 3 reviews into a unified report.\n\nCodex (bugs/perf/security):\n{{codex_findings}}\n\nClaude (clarity/maintainability):\n{{claude_findings}}\n\nGemini (architecture/scalability):\n{{gemini_findings}}\n\nCreate a prioritized action plan:\n1. Deduplicate overlapping issues\n2. Rank by severity and consensus (issues found by multiple reviewers = higher priority)\n3. Output markdown report with:\n   - Executive Summary (1 paragraph)\n   - Critical Issues (must fix)\n   - Recommendations (should fix)\n   - Minor Suggestions (nice to have)\n   - Consensus Score (how much the 3 AIs agreed)"
+      },
+      "depends_on": ["codex-review", "claude-review", "gemini-review"],
+      "output_key": "final_report"
+    }
+  ],
+  "output": "consensus-merge",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "code": {
+        "type": "string",
+        "description": "Inline code to review"
+      }
+    },
+    "required": ["code"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "final_report": { "type": "string" },
+      "codex_findings": { "type": "string" },
+      "claude_findings": { "type": "string" },
+      "gemini_findings": { "type": "string" }
+    }
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": ["consensus", "code-review", "multi-llm", "inline"],
+    "estimated_duration_sec": 90,
+    "estimated_cost_usd": 0.12
+  }
+}

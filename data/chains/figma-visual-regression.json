@@ -1,0 +1,133 @@
+{
+  "id": "figma-visual-regression",
+  "name": "Figma Visual Regression (Semantic Gate + SSIM + Text)",
+  "description": "Runs figma_verify_semantic first (layout/text/style). If semantic passes, SKIP SSIM and return PASS. If semantic fails (or tool unavailable), run figma_verify_visual to generate SSIM/text artifacts, but keep overall_passed=false (semantic is the gate). Always returns JSON with overall_passed + semantic + visual (nullable).",
+  "version": "1.1.0",
+  "nodes": [
+    {
+      "id": "parse-url",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": { "url": "{{input.figma_url}}" }
+      },
+      "output_key": "figma_meta"
+    },
+    {
+      "id": "semantic",
+      "type": "fallback",
+      "primary": {
+        "id": "verify-semantic",
+        "type": "tool",
+        "tool": {
+          "server": "figma",
+          "name": "figma_verify_semantic",
+          "args": {
+            "file_key": "{{figma_meta.file_key}}",
+            "node_id": "{{figma_meta.node_id}}",
+            "token": "env:FIGMA_TOKEN",
+            "html": "{{input.html}}",
+            "width": 375,
+            "height": 812,
+            "score_threshold": 0.90
+          }
+        }
+      },
+      "fallbacks": [
+        {
+          "id": "verify-semantic-stub",
+          "type": "tool",
+          "tool": {
+            "name": "echo",
+            "args": {
+              "input": "{\"file_key\":\"{{figma_meta.file_key}}\",\"node_id\":\"{{figma_meta.node_id}}\",\"semantic_verification\":{\"passed\":false,\"score\":0.0,\"mismatches\":[{\"type\":\"tool_unavailable\",\"message\":\"figma_verify_semantic not available (fallback stub)\"}]}}"
+            }
+          }
+        }
+      ],
+      "depends_on": ["parse-url"],
+      "output_key": "semantic"
+    },
+    {
+      "id": "gate-ssim",
+      "type": "gate",
+      "condition": "semantic_passed",
+      "input_mapping": [["condition", "{{semantic.semantic_verification.passed}}"]],
+      "then": {
+        "id": "pass-json",
+        "type": "tool",
+        "tool": {
+          "name": "echo",
+          "args": {
+            "input": "{\n  \"overall_passed\": true,\n  \"file_key\": \"{{figma_meta.file_key}}\",\n  \"node_id\": \"{{figma_meta.node_id}}\",\n  \"semantic\": {{semantic.output}},\n  \"visual\": null\n}"
+          }
+        }
+      },
+      "else": {
+        "id": "fail-path",
+        "type": "pipeline",
+        "nodes": [
+          {
+            "id": "verify-visual",
+            "type": "tool",
+            "tool": {
+              "server": "figma",
+              "name": "figma_verify_visual",
+              "args": {
+                "file_key": "{{figma_meta.file_key}}",
+                "node_id": "{{figma_meta.node_id}}",
+                "token": "env:FIGMA_TOKEN",
+                "html": "{{input.html}}",
+                "target_ssim": 0.95,
+                "max_iterations": 3,
+                "width": 375,
+                "height": 812
+              }
+            }
+          },
+          {
+            "id": "fail-json",
+            "type": "tool",
+            "tool": {
+              "name": "echo",
+              "args": {
+                "input": "{\n  \"overall_passed\": false,\n  \"file_key\": \"{{figma_meta.file_key}}\",\n  \"node_id\": \"{{figma_meta.node_id}}\",\n  \"semantic\": {{semantic.output}},\n  \"visual\": {{verify-visual.output}}\n}"
+              }
+            }
+          }
+        ]
+      },
+      "depends_on": ["semantic"]
+    }
+  ],
+  "output": "gate-ssim",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma URL containing file_key and node-id (e.g., https://www.figma.com/design/<file_key>/... ?node-id=1-2)"
+      },
+      "html": {
+        "type": "string",
+        "description": "HTML string to render and compare against the Figma node render."
+      }
+    },
+    "required": ["figma_url", "html"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "overall_passed": { "type": "boolean" },
+      "file_key": { "type": "string" },
+      "node_id": { "type": "string" },
+      "semantic": { "type": "object" },
+      "visual": { "type": ["object", "null"] }
+    }
+  },
+  "metadata": {
+    "tags": ["figma", "visual-regression", "ssim", "text", "verify"],
+    "estimated_duration_sec": 60
+  }
+}

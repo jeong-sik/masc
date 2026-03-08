@@ -89,6 +89,11 @@
  (name test_mdal_store)
  (modules test_mdal_store)
  (libraries masc_mcp alcotest yojson unix))
+
+(test
+ (name test_agent_swarm_live_harness)
+ (modules test_agent_swarm_live_harness)
+ (libraries masc_mcp agent_sdk alcotest yojson))
 ; ============================================================
 ; Eio module tests (Pure sync - Cache_eio, Metrics_store_eio, Hebbian_eio)
 ; ============================================================

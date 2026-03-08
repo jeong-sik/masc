@@ -6,12 +6,22 @@
 
 open Agent_sdk
 
+type managed_task = {
+  title_fragment: string;
+  claim_marker: string;
+  done_marker: string;
+}
+
 type agent_spec = {
   name: string;
   provider: Provider.config;
   system_prompt: string;
   tools: Tool.t list;
+  max_tokens: int option;
   max_turns: int;
+  include_masc_tools: bool;
+  managed_task: managed_task option;
+  expected_final_marker: string option;
 }
 
 type swarm_config = {
@@ -24,30 +34,273 @@ type agent_result = {
   result: (Types.api_response, string) result;
 }
 
+let extract_text (response : Types.api_response) =
+  response.content
+  |> List.filter_map (function Types.Text text -> Some text | _ -> None)
+  |> String.concat "\n"
+
+let final_marker_line text =
+  text
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.find_opt (fun line ->
+         String.length line >= 13
+         && String.sub line 0 13 = "FINAL_MARKER[")
+
+let ensure_expected_final_marker (response : Types.api_response)
+    ~(expected_final_marker : string option) =
+  match expected_final_marker with
+  | None -> response
+  | Some marker ->
+      let text = extract_text response in
+      if String.equal marker "" then
+        response
+      else if
+        String.split_on_char '\n' text
+        |> List.map String.trim
+        |> List.exists (fun line -> String.equal line marker)
+      then
+        response
+      else
+        { response with content = response.content @ [ Text marker ] }
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      if idx + needle_len > haystack_len then false
+      else if String.sub haystack idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+
+let find_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then Some 0
+  else
+    let rec loop idx =
+      if idx + needle_len > haystack_len then None
+      else if String.sub haystack idx needle_len = needle then Some idx
+      else loop (idx + 1)
+    in
+    loop 0
+
+type listed_task = {
+  task_id: string;
+  title: string;
+}
+
+let rpc_first_text json =
+  let open Yojson.Safe.Util in
+  json
+  |> member "content"
+  |> to_list
+  |> List.find_map (fun entry -> member "text" entry |> to_string_option)
+
+let parse_task_board text =
+  text
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun raw_line ->
+         let line = String.trim raw_line in
+         match find_substring ~needle:"] " line with
+         | None -> None
+         | Some bracket_idx ->
+             let after_idx = bracket_idx + 2 in
+             if after_idx >= String.length line then
+               None
+             else
+               let after =
+                 String.sub line after_idx (String.length line - after_idx)
+               in
+               match find_substring ~needle:": " after with
+               | None -> None
+               | Some colon_idx ->
+                   let task_id = String.sub after 0 colon_idx |> String.trim in
+                   let title_idx = colon_idx + 2 in
+                   let title =
+                     String.sub after title_idx (String.length after - title_idx)
+                     |> String.trim
+                   in
+                   if task_id = "" || title = "" then
+                     None
+                   else
+                     Some { task_id; title })
+
+type managed_task_binding = {
+  task_id: string;
+}
+
+let prepare_managed_task ~sw masc spec =
+  match spec.managed_task with
+  | None -> Ok None
+  | Some managed ->
+      (match Agent_swarm_client.list_tasks ~sw masc with
+      | Error e ->
+          Error (Printf.sprintf "Task listing failed: %s" e)
+      | Ok json ->
+          (match rpc_first_text json with
+          | None -> Error "Task listing returned no text payload"
+          | Some text ->
+              let tasks = parse_task_board text in
+              (match
+                 List.find_opt
+                   (fun (task : listed_task) ->
+                     contains_substring ~needle:managed.title_fragment task.title)
+                   tasks
+               with
+              | None ->
+                  Error
+                    (Printf.sprintf "No task matched title fragment: %s"
+                       managed.title_fragment)
+              | Some task ->
+                  (match Agent_swarm_client.claim ~sw masc ~task_id:task.task_id with
+                  | Error e ->
+                      Error
+                        (Printf.sprintf "Task claim failed for %s: %s"
+                           task.task_id e)
+                  | Ok _ ->
+                      (match
+                         Agent_swarm_client.set_current_task ~sw masc
+                           ~task_id:task.task_id
+                       with
+                      | Error e ->
+                          Error
+                            (Printf.sprintf
+                               "Failed to bind current_task for %s: %s"
+                               task.task_id e)
+                      | Ok _ ->
+                          (match Agent_swarm_client.heartbeat ~sw masc with
+                          | Error e ->
+                              Error
+                                (Printf.sprintf
+                                   "Heartbeat failed after binding task %s: %s"
+                                   task.task_id e)
+                          | Ok _ ->
+                              ignore
+                                (Agent_swarm_client.broadcast ~sw masc
+                                   ~message:
+                                     (Printf.sprintf "%s agent=%s task_id=%s"
+                                        managed.claim_marker spec.name
+                                        task.task_id));
+                              Ok (Some { task_id = task.task_id })))))))
+
+let finalize_managed_task ~sw masc spec binding =
+  match spec.managed_task with
+  | None -> Ok ()
+  | Some managed -> (
+      match Agent_swarm_client.heartbeat ~sw masc with
+      | Error e ->
+          Error
+            (Printf.sprintf
+               "Heartbeat failed before completing task %s: %s"
+               binding.task_id e)
+      | Ok _ -> (
+          match Agent_swarm_client.done_task ~sw masc ~task_id:binding.task_id with
+          | Error e ->
+              Error
+                (Printf.sprintf "Task completion failed for %s: %s"
+                   binding.task_id e)
+          | Ok _ ->
+              ignore
+                (Agent_swarm_client.broadcast ~sw masc
+                   ~message:
+                     (Printf.sprintf "%s agent=%s task_id=%s"
+                        managed.done_marker spec.name binding.task_id));
+              Ok ()))
+
 (** Run a single agent: join MASC, run LLM loop, leave MASC.
     [extra_tools] are appended after MASC tools (e.g., dev_tools from Fleet). *)
-let run_agent ~sw ~net ~masc_url ?(extra_tools=[]) spec ~goal =
+let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
   let masc = Agent_swarm_client.create ~net ~base_url:masc_url ~agent_name:spec.name in
   match Agent_swarm_client.join ~sw masc with
   | Error e ->
     { agent_name = spec.name;
       result = Error (Printf.sprintf "MASC join failed: %s" e) }
-  | Ok _ ->
-    let masc_tools = Agent_swarm_tools.make_tools masc ~sw in
-    let all_tools = spec.tools @ masc_tools @ extra_tools in
-    let config = {
-      Types.default_config with
-      name = spec.name;
-      model = Types.Custom spec.provider.model_id;
-      system_prompt = Some spec.system_prompt;
-      max_turns = spec.max_turns;
-    } in
-    let agent = Agent.create ~net ~config ~tools:all_tools ~provider:spec.provider () in
-    let result = Agent.run ~sw agent goal in
-    (match Agent_swarm_client.leave ~sw masc with
-     | Ok _ -> ()
-     | Error e -> Printf.eprintf "[%s] MASC leave warning: %s\n%!" spec.name e);
-    { agent_name = spec.name; result }
+  | Ok _ -> (
+      match prepare_managed_task ~sw masc spec with
+      | Error e ->
+          (match Agent_swarm_client.leave ~sw masc with
+           | Ok _ -> ()
+           | Error warn ->
+               Printf.eprintf "[%s] MASC leave warning: %s\n%!" spec.name warn);
+          { agent_name = spec.name; result = Error e }
+      | Ok managed_task ->
+          let result =
+            Eio.Switch.run (fun inner_sw ->
+              Eio.Fiber.fork_daemon ~sw:inner_sw (fun () ->
+                let rec loop () =
+                  Eio.Time.sleep clock 30.0;
+                  (match Agent_swarm_client.heartbeat ~sw:inner_sw masc with
+                   | Ok _ -> ()
+                   | Error e ->
+                       Printf.eprintf "[%s] heartbeat error: %s\n%!" spec.name e);
+                  loop ()
+                in
+                (try loop ()
+                 with
+                 | Eio.Cancel.Cancelled _ -> `Stop_daemon
+                 | End_of_file -> `Stop_daemon)
+              );
+              let masc_tools =
+                if spec.include_masc_tools then
+                  Agent_swarm_tools.make_tools masc ~sw:inner_sw
+                else
+                  []
+              in
+              let all_tools = spec.tools @ masc_tools @ extra_tools in
+              let config = {
+                Types.default_config with
+                name = spec.name;
+                model = Types.Custom spec.provider.model_id;
+                system_prompt = Some spec.system_prompt;
+                max_tokens =
+                  Option.value spec.max_tokens
+                    ~default:Types.default_config.max_tokens;
+                max_turns = spec.max_turns;
+              } in
+              let agent =
+                Agent.create ~net ~config ~tools:all_tools ~provider:spec.provider ()
+              in
+              Agent.run ~sw:inner_sw agent goal
+            )
+          in
+          let result =
+            match result with
+            | Ok response ->
+                Ok
+                  (ensure_expected_final_marker response
+                     ~expected_final_marker:spec.expected_final_marker)
+            | Error _ as error -> error
+          in
+          let result =
+            match result, managed_task with
+            | Ok response, Some binding -> (
+                match finalize_managed_task ~sw masc spec binding with
+                | Ok () -> Ok response
+                | Error e -> Error e)
+            | _ -> result
+          in
+          (match result with
+           | Ok response -> (
+               let marker =
+                 match spec.expected_final_marker with
+                 | Some expected -> Some expected
+                 | None -> final_marker_line (extract_text response)
+               in
+               match marker with
+               | Some value ->
+                   ignore
+                     (Agent_swarm_client.broadcast ~sw masc
+                        ~message:(Printf.sprintf "%s agent=%s" value spec.name))
+               | None -> ())
+           | Error _ -> ());
+          (match Agent_swarm_client.leave ~sw masc with
+           | Ok _ -> ()
+           | Error e -> Printf.eprintf "[%s] MASC leave warning: %s\n%!" spec.name e);
+          { agent_name = spec.name; result })
 
 (** Run all agents in parallel using Eio fibers.
     A heartbeat daemon fiber runs alongside the agents and sends keepalive pings
@@ -91,7 +344,7 @@ let run ~sw ~net ~clock config ~goal =
       (* Agent fibers: run all agents in parallel, then inner_sw exits and
          cancels the heartbeat fiber. *)
       Eio.Fiber.List.map (fun spec ->
-        run_agent ~sw:inner_sw ~net ~masc_url:config.masc_url spec ~goal
+        run_agent ~sw:inner_sw ~net ~clock ~masc_url:config.masc_url spec ~goal
       ) config.agents
     )
   in

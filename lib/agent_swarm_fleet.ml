@@ -40,7 +40,7 @@ let run_member ~sw ~net ~clock ~proc_mgr ~masc_url member ~goal =
   | Sdk_agent spec ->
     let dev_tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
     let resp =
-      Agent_swarm_swarm.run_agent ~sw ~net ~masc_url ~extra_tools:dev_tools spec ~goal
+      Agent_swarm_swarm.run_agent ~sw ~net ~clock ~masc_url ~extra_tools:dev_tools spec ~goal
     in
     (match resp.result with
      | Ok r -> Ok (extract_text r)

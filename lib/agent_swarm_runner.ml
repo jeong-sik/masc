@@ -101,7 +101,11 @@ let run_fleet ~sw ~net ~clock ~proc_mgr config =
       system_prompt =
         Agent_swarm_prompts.worker ~specialization:"autonomous development";
       tools = [];
+      max_tokens = None;
       max_turns = config.max_turns;
+      include_masc_tools = true;
+      managed_task = None;
+      expected_final_marker = None;
     } in
   let fleet_config : Agent_swarm_fleet.fleet_config = {
     masc_url = config.masc_url;

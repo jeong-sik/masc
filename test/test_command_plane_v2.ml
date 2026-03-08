@@ -265,6 +265,153 @@ let test_snapshot_json_reports_consistent_sections () =
               | `String value -> String.equal value operation.operation_id
               | _ -> false)))
 
+let test_swarm_live_json_restores_completed_workers_after_leave () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let run_id = "swarm-live-proof" in
+      let plans = Agent_swarm_live_harness.build_worker_plans run_id in
+      let worker_names =
+        List.map
+          (fun (plan : Agent_swarm_live_harness.worker_plan) -> plan.name)
+          plans
+      in
+      let leader = List.hd worker_names in
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
+      List.iter
+        (fun worker -> ignore (Room.join config ~agent_name:worker ~capabilities:[] ()))
+        worker_names;
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "company-main");
+            ("kind", `String "company");
+            ("label", `String "Main Company");
+            ("leader_id", `String owner);
+            ("roster", `List (List.map (fun name -> `String name) (owner :: worker_names)));
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "platoon-alpha");
+            ("kind", `String "platoon");
+            ("label", `String "Alpha Platoon");
+            ("parent_unit_id", `String "company-main");
+            ("leader_id", `String leader);
+            ("roster", `List (List.map (fun name -> `String name) worker_names));
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "squad-alpha-1");
+            ("kind", `String "squad");
+            ("label", `String "Alpha Squad 1");
+            ("parent_unit_id", `String "platoon-alpha");
+            ("leader_id", `String leader);
+            ("roster", `List (List.map (fun name -> `String name) worker_names));
+          ]);
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "squad-alpha-1");
+              ("objective", `String (Printf.sprintf "Run %s live harness" run_id));
+              ("note", `String (Printf.sprintf "run_id=%s" run_id));
+              ("policy_class", `String "guarded");
+              ("budget_class", `String "standard");
+            ])
+      in
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.dispatch_tick_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String operation.operation_id) ])));
+      List.iteri
+        (fun idx (plan : Agent_swarm_live_harness.worker_plan) ->
+          ignore
+            (Room.add_task config ~title:plan.task_title ~priority:2
+               ~description:plan.task_description);
+          let task_id = Printf.sprintf "task-%03d" (idx + 1) in
+          ignore (Room.claim_task config ~agent_name:plan.name ~task_id);
+          ignore (Room.broadcast config ~from_agent:plan.name
+                    ~content:(Printf.sprintf "%s agent=%s task_id=%s"
+                                plan.claim_marker plan.name task_id));
+          ignore (Room.broadcast config ~from_agent:plan.name
+                    ~content:(Printf.sprintf "%s agent=%s" plan.done_marker plan.name));
+          ignore (Room.complete_task config ~agent_name:plan.name ~task_id
+                    ~notes:plan.final_marker);
+          ignore (Room.broadcast config ~from_agent:plan.name
+                    ~content:(Printf.sprintf "%s agent=%s" plan.final_marker plan.name));
+          ignore (Room.leave config ~agent_name:plan.name))
+        plans;
+      let artifact_dir =
+        Filename.concat base_dir ".masc/control-plane/swarm-live/swarm-live-proof"
+      in
+      Room_utils.mkdir_p artifact_dir;
+      Room_utils.write_json config
+        (Filename.concat artifact_dir "swarm-live-summary.json")
+        (`Assoc
+          [
+            ("run_id", `String run_id);
+            ("worker_count", `Int 12);
+            ("required_final_markers", `Int 12);
+            ("completed_workers", `Int 12);
+            ("final_markers_seen", `Int 12);
+            ("pass_hot_concurrency", `Bool true);
+            ("pass_end_to_end", `Bool true);
+            ("pass", `Bool true);
+            ("min_hot_slots", `Int 10);
+          ]);
+      Room_utils.write_json config
+        (Filename.concat artifact_dir "slot-telemetry.json")
+        (`Assoc
+          [
+            ("slot_url", `String "http://127.0.0.1:8085");
+            ("total_slots", `Int 12);
+            ("ctx_per_slot", `Int 262144);
+            ("active_slots_now", `Int 0);
+            ("peak_active_slots", `Int 12);
+            ("sample_count", `Int 4);
+            ("hot_window_ok", `Bool true);
+            ("last_sample_at", `String (Types.now_iso ()));
+            ( "timeline",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("timestamp", `String (Types.now_iso ()));
+                      ("active_slots", `Int 12);
+                      ("active_slot_ids", `List [ `Int 0; `Int 1; `Int 2; `Int 3 ]);
+                    ];
+                ] );
+          ]);
+      let swarm =
+        Command_plane_v2.swarm_live_json config ~run_id ~operation_id:operation.operation_id ()
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check int) "joined workers" 12
+        (swarm |> member "summary" |> member "joined_workers" |> to_int);
+      Alcotest.(check int) "live workers drained" 0
+        (swarm |> member "summary" |> member "live_workers" |> to_int);
+      Alcotest.(check int) "task ownership restored" 12
+        (swarm |> member "summary" |> member "current_task_bound" |> to_int);
+      Alcotest.(check int) "completed workers" 12
+        (swarm |> member "summary" |> member "completed_workers" |> to_int);
+      Alcotest.(check int) "final markers seen" 12
+        (swarm |> member "summary" |> member "final_markers_seen" |> to_int);
+      Alcotest.(check int) "peak hot slots" 12
+        (swarm |> member "summary" |> member "peak_hot_slots" |> to_int);
+      Alcotest.(check bool) "hot pass" true
+        (swarm |> member "summary" |> member "pass_hot_concurrency" |> to_bool);
+      Alcotest.(check bool) "e2e pass" true
+        (swarm |> member "summary" |> member "pass_end_to_end" |> to_bool);
+      Alcotest.(check int) "provider total slots" 12
+        (swarm |> member "provider" |> member "total_slots" |> to_int);
+      Alcotest.(check bool) "swarm pass" true
+        (swarm |> member "summary" |> member "pass" |> to_bool))
 let () =
   Alcotest.run "Command_plane_v2"
     [
@@ -276,5 +423,11 @@ let () =
             test_freeze_requires_company_approval;
           Alcotest.test_case "snapshot json reports consistent sections" `Quick
             test_snapshot_json_reports_consistent_sections;
+          Alcotest.test_case "swarm live restores completed workers" `Quick
+            test_swarm_live_json_restores_completed_workers_after_leave;
+          Alcotest.test_case "snapshot json reports consistent sections" `Quick
+            test_snapshot_json_reports_consistent_sections;
+          Alcotest.test_case "swarm live restores completed workers" `Quick
+            test_swarm_live_json_restores_completed_workers_after_leave;
         ] );
     ]

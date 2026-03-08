@@ -47,6 +47,38 @@
 4. scheduler reconcile
    - `masc_dispatch_tick`
 
+## 첫 smoke는 12-worker live harness로 한다
+
+실제 외부 소스를 긁기 전에 deterministic fixture로 orchestration부터 증명한다.
+
+```bash
+LLAMA_PRESET=qwen35-hot ~/me/scripts/llama-server.sh restart
+scripts/harness_agent_swarm_live.sh
+```
+
+이 harness는:
+
+- worker 12명 이상이 실제로 join/claim/current_task/heartbeat/done/final marker를 남기는지 확인한다
+- `CPv2 swarm` read model과 dashboard가 그 사실을 올바르게 표현하는지 함께 검증한다
+- 외부 네트워크 fetch 없이 synthetic fixture만 사용한다
+
+기대 체크리스트:
+
+- peak hot slots >= 10
+- detachment materialized
+- joined workers = expected workers
+- current task bound = expected workers
+- fresh heartbeats = expected workers
+- completed workers = expected workers
+- final markers seen = expected workers
+
+주의:
+
+- `masc_claim`만으로는 충분하지 않다. 각 worker는 `masc_set_current_task`를 호출해야 한다.
+- `masc_dispatch_tick`을 안 돌리면 detachment가 생기지 않는다.
+- `hot 10+`는 orchestration proof와 별개다. `llama.cpp /slots` 샘플이 없으면 pass로 보지 않는다.
+- worker가 완료 후 leave해도 completed task ownership과 final marker가 있으면 swarm read model은 복원 가능해야 한다.
+
 ## 최소 unit 예시
 
 ```json

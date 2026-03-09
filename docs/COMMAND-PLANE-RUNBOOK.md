@@ -222,9 +222,12 @@ Content-Type: application/json
 - [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)
 
 1. `masc_operator_snapshot`
-2. `masc_operator_action`
-3. `masc_operator_confirm`
-4. 필요 시 `masc_team_session_events`
+2. `masc_operator_digest`
+   - room/team-session 상태를 operator-friendly하게 요약한다.
+   - command-plane search/microarch signal은 여기서 먼저 읽고, 더 자세한 정보가 필요할 때만 full command-plane surface로 내려간다.
+3. `masc_operator_action`
+4. `masc_operator_confirm`
+5. 필요 시 `masc_team_session_events`
 
 언제 쓰나:
 

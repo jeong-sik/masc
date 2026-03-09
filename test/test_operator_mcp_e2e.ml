@@ -616,6 +616,8 @@ let test_operator_mcp_supervises_team_session () =
     (match digest_result |> U.member "attention_items" with `List _ -> true | _ -> false);
   check bool "digest recommendation array" true
     (match digest_result |> U.member "recommended_actions" with `List _ -> true | _ -> false);
+  check bool "digest command plane" true
+    (digest_result |> U.member "command_plane" <> `Null);
 
   let note_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"

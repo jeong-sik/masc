@@ -1678,24 +1678,120 @@ let build_session_digest config (session : Team_session_types.session) ~now =
   }
 
 let build_room_attention_items config =
-  let pending_confirms = read_pending_confirms config in
-  if pending_confirms = [] then []
-  else
+  let command_plane_summary = Command_plane_v2.summary_json config in
+  let microarch_signals =
+    command_plane_summary
+    |> U.member "operations"
+    |> U.member "microarch"
+    |> U.member "signals"
+  in
+  let signal_items =
     [
-      {
-        kind = "pending_confirm_waiting";
-        severity = "warn";
-        summary =
-          Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
-            (List.length pending_confirms);
-        target_type = "room";
-        target_id = None;
-        actor = None;
-        evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
-      };
+      ( "command_issue_pressure",
+        "command-plane issue pressure is elevated",
+        microarch_signals |> U.member "issue_pressure" );
+      ( "command_cache_contention",
+        "command-plane cache contention is elevated",
+        microarch_signals |> U.member "cache_contention" );
+      ( "command_scheduler_efficiency",
+        "command-plane scheduler efficiency is degraded",
+        microarch_signals |> U.member "scheduler_efficiency" );
+      ( "command_routing_confidence",
+        "command-plane routing confidence is degraded",
+        microarch_signals |> U.member "routing_confidence" );
+      ( "command_speculative_posture",
+        "command-plane speculative posture needs review",
+        microarch_signals |> U.member "speculative_posture" );
     ]
+    |> List.filter_map (fun (kind, summary, signal_json) ->
+           match signal_json |> U.member "tone" with
+           | `String "warn" ->
+               Some
+                 {
+                   kind;
+                   severity = "warn";
+                   summary;
+                   target_type = "room";
+                   target_id = None;
+                   actor = None;
+                   evidence = signal_json;
+                 }
+           | `String "bad" ->
+               Some
+                 {
+                   kind;
+                   severity = "bad";
+                   summary;
+                   target_type = "room";
+                   target_id = None;
+                   actor = None;
+                   evidence = signal_json;
+                 }
+           | _ -> None)
+  in
+  let pending_confirms = read_pending_confirms config in
+  let pending_items =
+    if pending_confirms = [] then []
+    else
+      [
+        {
+          kind = "pending_confirm_waiting";
+          severity = "warn";
+          summary =
+            Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
+              (List.length pending_confirms);
+          target_type = "room";
+          target_id = None;
+          actor = None;
+          evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
+        };
+      ]
+  in
+  List.sort compare_attention (pending_items @ signal_items)
 
-let room_recommendations _config = []
+let room_recommendations config =
+  let command_plane_summary = Command_plane_v2.summary_json config in
+  let microarch_signals =
+    command_plane_summary
+    |> U.member "operations"
+    |> U.member "microarch"
+    |> U.member "signals"
+  in
+  let signal_recommendations =
+    [
+      ( microarch_signals |> U.member "issue_pressure",
+        "broadcast",
+        "command-plane issue pressure is elevated",
+        "[operator] Issue pressure is elevated. Inspect blocked operations, run a dispatch tick, and checkpoint or finalize stale work." );
+      ( microarch_signals |> U.member "routing_confidence",
+        "broadcast",
+        "command-plane routing confidence is degraded",
+        "[operator] Routing confidence is low. Inspect candidate scoring and avoid risky manual rebalance until blockers clear." );
+      ( microarch_signals |> U.member "cache_contention",
+        "broadcast",
+        "command-plane cache contention is elevated",
+        "[operator] Cache contention is elevated. Reduce concurrent hot lanes or rebalance worker placement before scaling further." );
+      ( microarch_signals |> U.member "speculative_posture",
+        "broadcast",
+        "command-plane speculative posture needs review",
+        "[operator] Speculative posture is unstable. Review commit and abort rates before widening speculation." );
+    ]
+    |> List.filter_map
+         (fun (signal_json, action_type, reason, message) ->
+           match signal_json |> U.member "tone" with
+           | `String ("warn" | "bad" as severity) ->
+               Some
+                 {
+                   action_type;
+                   target_type = "room";
+                   target_id = None;
+                   severity;
+                   reason;
+                   suggested_payload = `Assoc [ ("message", `String message) ];
+                 }
+           | _ -> None)
+  in
+  dedup_recommendations signal_recommendations
 
 type snapshot_view =
   | Summary
@@ -1817,9 +1913,12 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
           ("target_type", `String "room");
           ("target_id", `Null);
           ("health", `String "ok");
+          ("command_plane", `Assoc []);
           ("swarm_status", Swarm_status.empty_json);
           ("attention_items", `List []);
+          ("attention_summary", summary_of_attention_items []);
           ("recommended_actions", `List []);
+          ("recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
           ("session_cards", `List []);
           ("worker_cards", `List []);
         ])
@@ -1828,9 +1927,10 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
     let* target_type = normalize_digest_target_type target_type in
     let now = Time_compat.now () in
     let tracked_sessions = Team_session_store.list_sessions config in
-    let command_plane_json = Command_plane_v2.snapshot_json config in
+    let command_plane_snapshot_json = Command_plane_v2.snapshot_json config in
+    let command_plane_digest_json = Command_plane_v2.summary_json config in
     let swarm_status_json =
-      Swarm_status.build_json_from_snapshot config command_plane_json
+      Swarm_status.build_json_from_snapshot config command_plane_snapshot_json
     in
     match target_type with
     | "room" ->
@@ -1860,6 +1960,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
               ("target_type", `String "room");
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
+              ("command_plane", command_plane_digest_json);
               ("swarm_status", swarm_status_json);
               ("role_census", aggregate_worker_class_counts tracked_sessions);
               ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
@@ -1871,10 +1972,13 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
               ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
               ("local_runtime", aggregated_local_runtime_json tracked_sessions);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
+              ("attention_summary", summary_of_attention_items attention_items);
               ( "recommended_actions",
                 `List
                   (List.map (recommended_action_to_yojson ~actor:actor_name)
                      recommended_actions) );
+              ( "recommendation_summary",
+                summary_of_recommendations ~actor:actor_name recommended_actions );
               ( "session_cards",
                 `List
                   (List.map (session_card_to_yojson ~actor:actor_name) limited_sessions)
@@ -1905,15 +2009,20 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
                       ("target_type", `String "team_session");
                       ("target_id", `String session_id);
                       ("health", `String digest.health);
+                      ("command_plane", command_plane_digest_json);
                       ("swarm_status", swarm_status_json);
                       ( "attention_items",
                         `List
                           (List.map attention_item_to_yojson digest.attention_items)
                       );
+                      ("attention_summary", summary_of_attention_items digest.attention_items);
                       ( "recommended_actions",
                         `List
                           (List.map (recommended_action_to_yojson ~actor:actor_name)
                              digest.recommended_actions) );
+                      ( "recommendation_summary",
+                        summary_of_recommendations ~actor:actor_name
+                          digest.recommended_actions );
                       ("session_cards", `List [ session_card_to_yojson ~actor:actor_name digest ]);
                       ("worker_cards", `List (List.map worker_card_to_yojson worker_cards));
                     ])))

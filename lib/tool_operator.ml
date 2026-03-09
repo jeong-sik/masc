@@ -67,9 +67,9 @@ let digest_schema ~remote =
     name = "masc_operator_digest";
     description =
       if remote then
-        "Read an intervention-oriented operator digest. Use this when you need health, attention items, worker summaries, and recommended next actions before deciding how to intervene."
+        "Read an intervention-oriented operator digest. Use this when you need room or team-session health, attention items, command-plane search or microarch signals, worker summaries, and recommended next actions before deciding how to intervene."
       else
-        "Read a high-signal operator digest with intervention recommendations for the room or a specific team session. Use this when raw snapshot data is too low-level for fast supervision.";
+        "Read a high-signal operator digest with intervention recommendations for the room or a specific team session. Use this when raw snapshot data is too low-level for fast supervision and you want translated command-plane search or microarch signals.";
     input_schema =
       `Assoc
         [

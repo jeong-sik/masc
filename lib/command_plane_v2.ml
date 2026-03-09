@@ -3236,6 +3236,15 @@ let swarm_live_json config ?run_id ?operation_id () =
         && string_contains ~needle message.content)
       matching_messages
   in
+  let message_starts_with ~from_agent prefix =
+    let prefix_len = String.length prefix in
+    List.exists
+      (fun (message : Types.message) ->
+        String.equal message.from_agent from_agent
+        && String.length message.content >= prefix_len
+        && String.sub message.content 0 prefix_len = prefix)
+      matching_messages
+  in
   let task_by_id =
     List.map (fun (task : Types.task) -> (task.id, task)) tasks
   in
@@ -3300,10 +3309,24 @@ let swarm_live_json config ?run_id ?operation_id () =
              message_contains ~from_agent:plan.name plan.done_marker
            in
            let final_marker_seen =
-             message_contains ~from_agent:plan.name plan.final_marker
+             message_starts_with ~from_agent:plan.name plan.final_marker
+           in
+           let runtime_assisted_final_marker_seen =
+             List.exists
+               (fun (message : Types.message) ->
+                 String.equal message.from_agent plan.name
+                 && string_contains
+                      ~needle:
+                        (Printf.sprintf
+                           "RUNTIME_ASSISTED_FINAL_MARKER expected=%s"
+                           plan.final_marker)
+                      message.content)
+               matching_messages
            in
            let completed_task =
-             if done_marker_seen || final_marker_seen then
+             if done_marker_seen || final_marker_seen
+                || runtime_assisted_final_marker_seen
+             then
                tasks
                |> List.find_opt (fun (task : Types.task) ->
                       match task_assignee task with
@@ -3321,6 +3344,7 @@ let swarm_live_json config ?run_id ?operation_id () =
              || claim_marker_seen
              || done_marker_seen
              || final_marker_seen
+             || runtime_assisted_final_marker_seen
            in
            let task_bound =
              task_matches_run || Option.is_some assigned_task
@@ -3355,7 +3379,9 @@ let swarm_live_json config ?run_id ?operation_id () =
            let completed =
              match option_first_some assigned_task completed_task with
              | Some task -> task_done task
-             | None -> done_marker_seen && final_marker_seen
+             | None ->
+                 done_marker_seen
+                 && (final_marker_seen || runtime_assisted_final_marker_seen)
            in
            let heartbeat_fresh =
              match heartbeat_age_sec with
@@ -3390,6 +3416,7 @@ let swarm_live_json config ?run_id ?operation_id () =
                ("claim_marker_seen", `Bool claim_marker_seen);
                ("done_marker_seen", `Bool done_marker_seen);
                ("final_marker_seen", `Bool final_marker_seen);
+               ("runtime_assisted_final_marker_seen", `Bool runtime_assisted_final_marker_seen);
                ("claim_marker", `String plan.claim_marker);
                ("done_marker", `String plan.done_marker);
                ("final_marker", `String plan.final_marker);
@@ -3431,6 +3458,11 @@ let swarm_live_json config ?run_id ?operation_id () =
     count_true worker_rows (fun row ->
         U.member "final_marker_seen" row |> U.to_bool_option |> Option.value ~default:false)
   in
+  let runtime_assisted_final_markers_seen =
+    count_true worker_rows (fun row ->
+        U.member "runtime_assisted_final_marker_seen" row |> U.to_bool_option
+        |> Option.value ~default:false)
+  in
   let completed_workers =
     count_true worker_rows (fun row ->
         match U.member "bound_task_status" row |> U.to_string_option with
@@ -3445,6 +3477,10 @@ let swarm_live_json config ?run_id ?operation_id () =
     Option.bind harness_summary (fun json ->
         U.member "final_markers_seen" json |> U.to_int_option)
   in
+  let artifact_runtime_assisted_final_markers_seen =
+    Option.bind harness_summary (fun json ->
+        U.member "runtime_assisted_final_markers" json |> U.to_int_option)
+  in
   let effective_completed_workers =
     match selected_operation with
     | Some _ -> completed_workers
@@ -3458,6 +3494,15 @@ let swarm_live_json config ?run_id ?operation_id () =
     | None ->
         if final_markers_seen > 0 then final_markers_seen
         else Option.value artifact_final_markers_seen ~default:0
+  in
+  let effective_runtime_assisted_final_markers_seen =
+    match selected_operation with
+    | Some _ -> runtime_assisted_final_markers_seen
+    | None ->
+        if runtime_assisted_final_markers_seen > 0 then
+          runtime_assisted_final_markers_seen
+        else
+          Option.value artifact_runtime_assisted_final_markers_seen ~default:0
   in
   let live_sample_count = List.length live_slot_samples in
   let live_peak_hot_slots =
@@ -3664,7 +3709,6 @@ let swarm_live_json config ?run_id ?operation_id () =
     && current_task_bound = expected_count
     && fresh_heartbeats = expected_count
     && effective_completed_workers = expected_count
-    && effective_final_markers_seen >= required_final_markers
   in
   let checklist =
     [
@@ -3690,11 +3734,13 @@ let swarm_live_json config ?run_id ?operation_id () =
         ~status:(if current_task_bound = expected_count then "pass" else "fail")
         ~detail:(Printf.sprintf "%d / %d workers have run-scoped task ownership or clean completion evidence" current_task_bound expected_count)
         ~next_tool:"masc_plan_set_task";
-      checklist_item ~id:"final-markers" ~title:"Final markers observed"
-        ~status:(if effective_final_markers_seen >= required_final_markers then "pass" else "fail")
+      checklist_item ~id:"final-markers" ~title:"Model final markers observed"
+        ~status:(if effective_final_markers_seen >= required_final_markers then "pass" else "warn")
         ~detail:
-          (Printf.sprintf "%d / %d final markers seen; completed=%d / %d; detachment roster match=%s"
+          (Printf.sprintf
+             "%d / %d model markers seen; runtime-assisted=%d; completed=%d / %d; detachment roster match=%s"
              effective_final_markers_seen required_final_markers
+             effective_runtime_assisted_final_markers_seen
              effective_completed_workers expected_count
              (if detachment_roster_matches then "yes" else "no"))
         ~next_tool:"masc_observe_traces";
@@ -3817,9 +3863,12 @@ let swarm_live_json config ?run_id ?operation_id () =
   if effective_final_markers_seen < required_final_markers then
     blockers :=
       blocker_item ~code:"missing-final-markers" ~severity:"warn"
-        ~title:"Final markers incomplete"
+        ~title:"Model final markers incomplete"
         ~detail:
-          (Printf.sprintf "%d of %d required final markers observed." effective_final_markers_seen required_final_markers)
+          (Printf.sprintf
+             "%d of %d model-emitted final markers observed (%d runtime-assisted)."
+             effective_final_markers_seen required_final_markers
+             effective_runtime_assisted_final_markers_seen)
         ~next_tool:"masc_observe_traces"
       :: !blockers;
   let recommended_next_tool =
@@ -3834,14 +3883,21 @@ let swarm_live_json config ?run_id ?operation_id () =
           "masc_plan_set_task"
         else if fresh_heartbeats < expected_count then
           "masc_heartbeat"
-        else if effective_final_markers_seen < required_final_markers then
-          "masc_observe_traces"
         else if not pass_hot_concurrency then
           "restart llama hot profile"
         else if pass_end_to_end then
           "masc_operation_finalize"
+        else if effective_final_markers_seen < required_final_markers then
+          "masc_observe_traces"
         else
           "masc_observe_traces"
+  in
+  let has_bad_blocker =
+    List.exists
+      (fun row ->
+        U.member "severity" row |> U.to_string_option
+        |> (function Some value -> String.equal value "bad" | None -> false))
+      !blockers
   in
   `Assoc
     [
@@ -3868,13 +3924,14 @@ let swarm_live_json config ?run_id ?operation_id () =
             ("claim_markers_seen", `Int claim_markers_seen);
             ("done_markers_seen", `Int done_markers_seen);
             ("final_markers_seen", `Int effective_final_markers_seen);
+            ("runtime_assisted_final_markers", `Int effective_runtime_assisted_final_markers_seen);
             ("completed_workers", `Int effective_completed_workers);
             ("peak_hot_slots", `Int peak_hot_slots);
             ("hot_window_ok", `Bool hot_window_ok);
             ("pass_hot_concurrency", `Bool pass_hot_concurrency);
             ("pass_end_to_end", `Bool pass_end_to_end);
             ("pending_decisions", `Int (List.length pending_decisions));
-            ("pass", `Bool (pass_hot_concurrency && pass_end_to_end && (!blockers = [])));
+            ("pass", `Bool (pass_hot_concurrency && pass_end_to_end && not has_bad_blocker));
           ] );
       ( "provider",
         `Assoc

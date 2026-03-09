@@ -109,9 +109,13 @@ let test_ensure_expected_final_marker_synthesizes_missing_line () =
       ~expected_final_marker:(Some marker)
   with
   | Ok validated ->
-      Alcotest.(check string) "marker appended"
-        ("summary without marker\n\n" ^ marker)
-        (Agent_swarm_swarm.extract_text validated)
+      Alcotest.(check string) "response preserved"
+        "summary without marker"
+        (Agent_swarm_swarm.extract_text validated.response);
+      Alcotest.(check bool) "model marker missing" false
+        validated.model_final_marker_seen;
+      Alcotest.(check bool) "runtime assistance recorded" true
+        validated.final_marker_assisted
   | Error message ->
       Alcotest.failf "expected runtime marker synthesis: %s" message
 

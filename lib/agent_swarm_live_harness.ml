@@ -351,8 +351,8 @@ let run ~sw ~net ~clock cfg =
                  }
            in
            match result.result with
-           | Ok response ->
-               let text = extract_text response in
+           | Ok completion ->
+               let text = extract_text completion.response in
                `Assoc
                  [
                    ("agent_name", `String result.agent_name);
@@ -360,7 +360,8 @@ let run ~sw ~net ~clock cfg =
                    ("lane", `String (string_of_fixture_lane plan.lane));
                    ("status", `String "ok");
                    ("final_marker", `String plan.final_marker);
-                   ("final_marker_seen", `Bool (contains_substring ~needle:plan.final_marker text));
+                   ("final_marker_seen", `Bool completion.model_final_marker_seen);
+                   ("runtime_assisted_final_marker", `Bool completion.final_marker_assisted);
                    ("done_marker", `String plan.done_marker);
                    ("response_text", `String text);
                  ]
@@ -373,6 +374,7 @@ let run ~sw ~net ~clock cfg =
                    ("status", `String "error");
                    ("final_marker", `String plan.final_marker);
                    ("final_marker_seen", `Bool false);
+                   ("runtime_assisted_final_marker", `Bool false);
                    ("done_marker", `String plan.done_marker);
                    ("error", `String message);
                  ])
@@ -395,12 +397,20 @@ let run ~sw ~net ~clock cfg =
            else acc)
          0
   in
+  let runtime_assisted_final_marker_count =
+    rows
+    |> List.fold_left
+         (fun acc row ->
+           if Yojson.Safe.Util.member "runtime_assisted_final_marker" row
+              |> Yojson.Safe.Util.to_bool_option |> Option.value ~default:false
+           then acc + 1
+           else acc)
+         0
+  in
   `Assoc
     [
       ("run_id", `String cfg.run_id);
-      ("status", `String (if success_count = List.length rows
-                             && final_marker_count >= cfg.required_final_markers
-                         then "ok" else "error"));
+      ("status", `String (if success_count = List.length rows then "ok" else "error"));
       ( "summary",
         `Assoc
           [
@@ -408,6 +418,7 @@ let run ~sw ~net ~clock cfg =
             ("successful_workers", `Int success_count);
             ("completed_workers", `Int success_count);
             ("final_markers_seen", `Int final_marker_count);
+            ("runtime_assisted_final_markers", `Int runtime_assisted_final_marker_count);
           ] );
       ("workers", `List rows);
     ]

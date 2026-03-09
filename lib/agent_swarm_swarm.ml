@@ -29,9 +29,15 @@ type swarm_config = {
   agents: agent_spec list;
 }
 
+type completion_result = {
+  response: Types.api_response;
+  model_final_marker_seen: bool;
+  final_marker_assisted: bool;
+}
+
 type agent_result = {
   agent_name: string;
-  result: (Types.api_response, string) result;
+  result: (completion_result, string) result;
 }
 
 let extract_text (response : Types.api_response) =
@@ -84,38 +90,42 @@ let validate_expected_final_marker (response : Types.api_response)
              marker)
     | None -> Ok response
 
-let append_final_marker_text text marker =
-  let base = String.trim text in
-  if String.equal base "" then
-    marker
-  else
-    base ^ "\n\n" ^ marker
-
 let ensure_expected_final_marker (response : Types.api_response)
     ~(expected_final_marker : string option) =
+  let model_final_marker_seen =
+    response_has_expected_final_marker response ~expected_final_marker
+  in
   match validate_expected_final_marker response ~expected_final_marker with
-  | Ok validated -> Ok validated
+  | Ok validated ->
+      Ok
+        {
+          response = validated;
+          model_final_marker_seen;
+          final_marker_assisted = false;
+        }
   | Error _ -> (
       match expected_final_marker with
-      | None -> Ok response
+      | None ->
+          Ok
+            {
+              response;
+              model_final_marker_seen;
+              final_marker_assisted = false;
+            }
       | Some marker ->
           let text = extract_text response |> String.trim in
           if String.equal text "" then
-            validate_expected_final_marker response ~expected_final_marker
+            Error
+              (Printf.sprintf
+                 "Missing expected final marker as final non-empty line: %s"
+                 marker)
           else
-            let rec rewrite acc = function
-              | [] ->
-                  List.rev
-                    (Types.Text (append_final_marker_text text marker) :: acc)
-              | Types.Text value :: rest ->
-                  let updated =
-                    Types.Text (append_final_marker_text value marker)
-                  in
-                  List.rev_append acc (updated :: rest)
-              | item :: rest -> rewrite (item :: acc) rest
-            in
-            let content = rewrite [] response.content in
-            { response with content } |> Result.ok)
+            Ok
+              {
+                response;
+                model_final_marker_seen = false;
+                final_marker_assisted = true;
+              })
 
 let contains_substring ~needle haystack =
   let needle_len = String.length needle in
@@ -329,18 +339,25 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
           in
           let result =
             match result, managed_task with
-            | Ok response, Some binding -> (
+            | Ok completion, Some binding -> (
                 match finalize_managed_task ~sw masc spec binding with
-                | Ok () -> Ok response
+                | Ok () -> Ok completion
                 | Error e -> Error e)
             | _ -> result
           in
           (match result with
-           | Ok response -> (
+           | Ok completion -> (
                let marker =
                  match spec.expected_final_marker with
-                 | Some expected -> Some expected
-                 | None -> final_marker_line (extract_text response)
+                 | Some expected when completion.model_final_marker_seen ->
+                     Some expected
+                 | Some expected when completion.final_marker_assisted ->
+                     Some
+                       (Printf.sprintf
+                          "RUNTIME_ASSISTED_FINAL_MARKER expected=%s agent=%s"
+                          expected spec.name)
+                 | Some _ -> None
+                 | None -> final_marker_line (extract_text completion.response)
                in
                match marker with
                | Some value ->

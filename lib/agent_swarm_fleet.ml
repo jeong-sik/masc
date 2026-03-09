@@ -81,7 +81,7 @@ let run_member ~sw ~net ~clock ~proc_mgr ~masc_url member ~goal =
       Agent_swarm_swarm.run_agent ~sw ~net ~clock ~masc_url ~extra_tools:dev_tools spec ~goal
     in
     (match resp.result with
-     | Ok r -> Ok (extract_text r)
+     | Ok r -> Ok (extract_text r.response)
      | Error e -> Error e)
   | Ext_agent config ->
     Agent_swarm_external_agent.run_with_masc ~sw ~proc_mgr ~clock ~net ~masc_url

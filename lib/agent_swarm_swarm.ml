@@ -84,6 +84,39 @@ let validate_expected_final_marker (response : Types.api_response)
              marker)
     | None -> Ok response
 
+let append_final_marker_text text marker =
+  let base = String.trim text in
+  if String.equal base "" then
+    marker
+  else
+    base ^ "\n\n" ^ marker
+
+let ensure_expected_final_marker (response : Types.api_response)
+    ~(expected_final_marker : string option) =
+  match validate_expected_final_marker response ~expected_final_marker with
+  | Ok validated -> Ok validated
+  | Error _ -> (
+      match expected_final_marker with
+      | None -> Ok response
+      | Some marker ->
+          let text = extract_text response |> String.trim in
+          if String.equal text "" then
+            validate_expected_final_marker response ~expected_final_marker
+          else
+            let rec rewrite acc = function
+              | [] ->
+                  List.rev
+                    (Types.Text (append_final_marker_text text marker) :: acc)
+              | Types.Text value :: rest ->
+                  let updated =
+                    Types.Text (append_final_marker_text value marker)
+                  in
+                  List.rev_append acc (updated :: rest)
+              | item :: rest -> rewrite (item :: acc) rest
+            in
+            let content = rewrite [] response.content in
+            { response with content } |> Result.ok)
+
 let contains_substring ~needle haystack =
   let needle_len = String.length needle in
   let haystack_len = String.length haystack in
@@ -290,7 +323,7 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
           let result =
             match result with
             | Ok response ->
-                validate_expected_final_marker response
+                ensure_expected_final_marker response
                   ~expected_final_marker:spec.expected_final_marker
             | Error _ as error -> error
           in

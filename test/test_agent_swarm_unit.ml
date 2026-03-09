@@ -95,6 +95,26 @@ let test_validate_expected_final_marker_requires_final_line_position () =
         ("Missing expected final marker as final non-empty line: " ^ marker)
         message
 
+let test_ensure_expected_final_marker_synthesizes_missing_line () =
+  let marker = "FINAL_MARKER[demo:discover:official]" in
+  let response : Agent_sdk.Types.api_response = {
+    id = "resp-4";
+    model = "test-model";
+    stop_reason = Agent_sdk.Types.EndTurn;
+    content = [ Agent_sdk.Types.Text "summary without marker" ];
+    usage = None;
+  } in
+  match
+    Agent_swarm_swarm.ensure_expected_final_marker response
+      ~expected_final_marker:(Some marker)
+  with
+  | Ok validated ->
+      Alcotest.(check string) "marker appended"
+        ("summary without marker\n\n" ^ marker)
+        (Agent_swarm_swarm.extract_text validated)
+  | Error message ->
+      Alcotest.failf "expected runtime marker synthesis: %s" message
+
 let () =
   Alcotest.run "Swarm Unit" [
     "error_paths", [
@@ -105,5 +125,7 @@ let () =
         test_validate_expected_final_marker_accepts_exact_line;
       Alcotest.test_case "expected final marker must be last non-empty line" `Quick
         test_validate_expected_final_marker_requires_final_line_position;
+      Alcotest.test_case "ensure expected final marker synthesizes when missing" `Quick
+        test_ensure_expected_final_marker_synthesizes_missing_line;
     ];
   ]

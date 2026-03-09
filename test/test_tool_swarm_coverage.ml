@@ -36,9 +36,9 @@ let test_get_float_missing () =
   check (float 0.001) "uses default" 0.3 (Tool_args.get_float args "rate" 0.3)
 
 let test_get_float_from_int () =
-  (* JSON often has ints where floats are expected *)
+  (* JSON often has ints where floats are expected — should convert *)
   let args = `Assoc [("rate", `Int 1)] in
-  check (float 0.001) "int fallback to default" 0.5 (Tool_args.get_float args "rate" 0.5)
+  check (float 0.001) "int converts to float" 1.0 (Tool_args.get_float args "rate" 0.5)
 
 let test_get_int_exists () =
   let args = `Assoc [("limit", `Int 10)] in

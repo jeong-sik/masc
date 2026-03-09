@@ -7,10 +7,11 @@ type t = {
   agent_name: string;
   net: [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
   mutable request_id: int;
+  mutable session_id: string option;
 }
 
 let create ~net ~base_url ~agent_name =
-  { base_url; agent_name; net; request_id = 0 }
+  { base_url; agent_name; net; request_id = 0; session_id = None }
 
 (** Build a JSON-RPC 2.0 request envelope for MCP tools/call *)
 let build_request t ~masc_method ~arguments =
@@ -63,10 +64,18 @@ let call_rpc ~sw t ~masc_method ~arguments =
   let body_json = build_request t ~masc_method ~arguments in
   let body_str = Yojson.Safe.to_string body_json in
   let uri = Uri.of_string (t.base_url ^ "/mcp") in
-  let headers = Http.Header.of_list [
-    ("Content-Type", "application/json");
-    ("Accept", "application/json, text/event-stream");
-  ] in
+  let headers =
+    Http.Header.of_list
+      ([
+         ("Content-Type", "application/json");
+         ("Accept", "application/json, text/event-stream");
+       ]
+      @
+      match t.session_id with
+      | Some session_id when String.trim session_id <> "" ->
+          [ ("mcp-session-id", session_id) ]
+      | _ -> [])
+  in
   (* MASC server runs on localhost HTTP; TLS not needed *)
   let client = Cohttp_eio.Client.make ~https:None t.net in
   try
@@ -74,6 +83,13 @@ let call_rpc ~sw t ~masc_method ~arguments =
       Cohttp_eio.Client.post ~sw client ~headers
         ~body:(Cohttp_eio.Body.of_string body_str) uri
     in
+    t.session_id <-
+      (let session_id =
+         Http.Header.get (Cohttp.Response.headers resp) "mcp-session-id"
+       in
+       session_id
+       |> Option.map String.trim
+       |> (function Some value when value <> "" -> Some value | _ -> None));
     match Cohttp.Response.status resp with
     | `OK ->
       let resp_str = Eio.Buf_read.(of_flow ~max_size:(10 * 1024 * 1024) body |> take_all) in
@@ -142,8 +158,9 @@ let batch_add_tasks ~sw t ~tasks =
     ~arguments:[("tasks", tasks_json)]
 
 let claim ~sw t ~task_id =
-  call_rpc ~sw t ~masc_method:"masc_claim"
+  call_rpc ~sw t ~masc_method:"masc_transition"
     ~arguments:[
+      ("action", `String "claim");
       ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
     ]
@@ -159,22 +176,25 @@ let set_current_task ~sw t ~task_id =
     ]
 
 let done_task ~sw t ~task_id =
-  call_rpc ~sw t ~masc_method:"masc_done"
+  call_rpc ~sw t ~masc_method:"masc_transition"
     ~arguments:[
+      ("action", `String "done");
       ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
     ]
 
 let release_task ~sw t ~task_id =
-  call_rpc ~sw t ~masc_method:"masc_release"
+  call_rpc ~sw t ~masc_method:"masc_transition"
     ~arguments:[
+      ("action", `String "release");
       ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
     ]
 
 let cancel_task ~sw t ~task_id ~reason =
-  call_rpc ~sw t ~masc_method:"masc_cancel_task"
+  call_rpc ~sw t ~masc_method:"masc_transition"
     ~arguments:[
+      ("action", `String "cancel");
       ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
       ("reason", `String reason);

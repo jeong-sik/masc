@@ -3224,7 +3224,7 @@ let swarm_live_json config ?run_id ?operation_id () =
       matching_messages
   in
   let task_by_id =
-    List.map (fun (task : Types.task) -> (task.id, task)) scoped_tasks
+    List.map (fun (task : Types.task) -> (task.id, task)) tasks
   in
   let find_agent name =
     agents |> List.find_opt (fun (agent : Types.agent) -> String.equal agent.name name)
@@ -3289,44 +3289,65 @@ let swarm_live_json config ?run_id ?operation_id () =
            let final_marker_seen =
              message_contains ~from_agent:plan.name plan.final_marker
            in
+           let completed_task =
+             if done_marker_seen || final_marker_seen then
+               tasks
+               |> List.find_opt (fun (task : Types.task) ->
+                      match task_assignee task with
+                      | Some assignee when String.equal assignee plan.name ->
+                          value_matches_tokens (run_tokens effective_run_id) task.title
+                      | _ -> false)
+             else
+               None
+           in
            let joined =
              Option.is_some agent
              || Option.is_some assigned_task
+             || Option.is_some completed_task
              || Option.is_some last_message
              || claim_marker_seen
              || done_marker_seen
              || final_marker_seen
            in
-           let task_bound = task_matches_run || Option.is_some assigned_task in
+           let task_bound =
+             task_matches_run || Option.is_some assigned_task
+             || Option.is_some completed_task
+           in
            let bound_task_id =
              option_first_some (if task_matches_run then current_task else None)
-               (Option.map (fun (task : Types.task) -> task.id) assigned_task)
+               (option_first_some
+                  (Option.map (fun (task : Types.task) -> task.id) assigned_task)
+                  (Option.map (fun (task : Types.task) -> task.id) completed_task))
            in
            let bound_task_title =
              match bound_task_id with
              | Some value -> find_task_title value
-             | None -> Option.map (fun (task : Types.task) -> task.title) assigned_task
+             | None ->
+                 option_first_some
+                   (Option.map (fun (task : Types.task) -> task.title) assigned_task)
+                   (Option.map (fun (task : Types.task) -> task.title) completed_task)
            in
            let bound_task_status =
              match bound_task_id with
              | Some value -> find_task_status value
              | None ->
-                 assigned_task
-                 |> Option.map (fun (task : Types.task) ->
-                        Types.string_of_task_status task.task_status)
+                 option_first_some
+                   (assigned_task
+                    |> Option.map (fun (task : Types.task) ->
+                           Types.string_of_task_status task.task_status))
+                   (completed_task
+                    |> Option.map (fun (task : Types.task) ->
+                           Types.string_of_task_status task.task_status))
+           in
+           let completed =
+             match option_first_some assigned_task completed_task with
+             | Some task -> task_done task
+             | None -> done_marker_seen && final_marker_seen
            in
            let heartbeat_fresh =
              match heartbeat_age_sec with
              | Some age -> age <= Room.heartbeat_timeout_seconds
-             | None ->
-                 (match assigned_task with
-                 | Some task -> task_done task
-                 | None -> false)
-           in
-           let completed =
-             match assigned_task with
-             | Some task -> task_done task
-             | None -> false
+             | None -> completed
            in
            `Assoc
              [

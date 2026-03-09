@@ -19,6 +19,7 @@ MIN_HOT_SLOTS="${MIN_HOT_SLOTS:-10}"
 REQUIRED_FINAL_MARKERS="${REQUIRED_FINAL_MARKERS:-$WORKER_COUNT}"
 MAX_TURNS="${MAX_TURNS:-8}"
 START_SERVER="${START_SERVER:-1}"
+SKIP_BUILD="${SKIP_BUILD:-0}"
 SLOT_SAMPLE_INTERVAL_SEC="${SLOT_SAMPLE_INTERVAL_SEC:-0.25}"
 EXPECTED_SLOTS="${EXPECTED_SLOTS:-$WORKER_COUNT}"
 EXPECTED_CTX="${EXPECTED_CTX:-262144}"
@@ -62,11 +63,7 @@ jsonrpc_call() {
   sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p')"
   if [ -n "$sse_data" ]; then
     local response_line
-    response_line="$(
-      printf "%s\n" "$sse_data" \
-        | rg "\"id\"[[:space:]]*:[[:space:]]*$id([[:space:]],|[[:space:]]*})" \
-        | tail -n1 || true
-    )"
+    response_line="$(printf "%s\n" "$sse_data" | tail -n1)"
     if [ -n "$response_line" ]; then
       printf "%s" "$response_line"
     else
@@ -224,7 +221,7 @@ stop_slot_sampler() {
 
 write_slot_telemetry() {
   local props_file
-  props_file="$(mktemp /tmp/agent-swarm-live-props.XXXXXX.json)"
+  props_file="$(mktemp -t agent-swarm-live-props).json"
   curl -fsS "${SLOT_URL}/props" >"$props_file"
   python3 - "$SLOT_SAMPLES_FILE" "$props_file" "$SLOT_URL" "$MIN_HOT_SLOTS" "$SLOT_TELEMETRY_FILE" <<'PY'
 import json
@@ -284,10 +281,10 @@ write_runtime_doctor() {
   local stage="${1:-$CURRENT_STAGE}"
   [ -n "$RUNTIME_DOCTOR_FILE" ] || return 0
   local provider_file slot_health_file props_file models_file provider_status slot_health_status
-  provider_file="$(mktemp /tmp/agent-swarm-live-provider.XXXXXX.json)"
-  slot_health_file="$(mktemp /tmp/agent-swarm-live-slot-health.XXXXXX.txt)"
-  props_file="$(mktemp /tmp/agent-swarm-live-props.XXXXXX.json)"
-  models_file="$(mktemp /tmp/agent-swarm-live-models.XXXXXX.json)"
+  provider_file="$(mktemp -t agent-swarm-live-provider).json"
+  slot_health_file="$(mktemp -t agent-swarm-live-slot-health).txt"
+  props_file="$(mktemp -t agent-swarm-live-props).json"
+  models_file="$(mktemp -t agent-swarm-live-models).json"
 
   provider_status="$(curl -sS -o "$provider_file" -w '%{http_code}' \
     -X POST "${PROVIDER_BASE_URL}/v1/messages" \
@@ -496,8 +493,14 @@ HARNESS_ARTIFACT_FILE=""
 RUNTIME_DOCTOR_FILE=""
 
 CURRENT_STAGE="build"
-echo "[1/11] build harness binaries"
-dune build --root "$REPO_ROOT" bin/main_eio.exe bin/agent_swarm_harness_cli.exe >/dev/null
+if [ "$SKIP_BUILD" = "1" ]; then
+  echo "[1/11] reuse existing harness binaries"
+  [ -x "$REPO_ROOT/_build/default/bin/main_eio.exe" ] || fail_stage "build_missing" "main_eio.exe missing while SKIP_BUILD=1"
+  [ -x "$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" ] || fail_stage "build_missing" "agent_swarm_harness_cli.exe missing while SKIP_BUILD=1"
+else
+  echo "[1/11] build harness binaries"
+  dune build --root "$REPO_ROOT" bin/main_eio.exe bin/agent_swarm_harness_cli.exe >/dev/null
+fi
 
 if [ "$START_SERVER" = "1" ]; then
   rm -rf "$BASE_PATH"
@@ -553,8 +556,8 @@ SQUAD_ROSTER_JSON="$(printf "%s" "$MANIFEST_JSON" | jq -c '[.workers[].name]')"
 
 CURRENT_STAGE="room-task-hygiene"
 echo "[5/11] room/task hygiene"
-call_tool_checked 90001 "masc_init" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')" >/dev/null
-call_tool_checked 90002 "masc_set_room" "$(jq -cn --arg path "$BASE_PATH" '{path:$path}')" >/dev/null
+call_tool_checked 90001 "masc_set_room" "$(jq -cn --arg path "$BASE_PATH" '{path:$path}')" >/dev/null
+call_tool_checked 90002 "masc_init" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')" >/dev/null
 call_tool_checked 90003 "masc_join" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a,capabilities:["agent-swarm","command-plane","benchmark"]}')" >/dev/null
 HARNESS_TASK_RAW="$(call_tool_checked 90004 "masc_add_task" "$(jq -cn --arg title "[${RUN_ID}] orchestrate live swarm" --arg desc "Prepare units, tasks, and live harness execution" '{title:$title,description:$desc,priority:1}')")"
 HARNESS_TASK_ID="$(extract_added_task_id "$HARNESS_TASK_RAW")"
@@ -563,7 +566,7 @@ if [ -z "$HARNESS_TASK_ID" ]; then
   echo "failed to extract coordinator task id" >&2
   exit 1
 fi
-call_tool_checked 90005 "masc_claim" "$(jq -cn --arg a "$HARNESS_AGENT" --arg task_id "$HARNESS_TASK_ID" '{agent_name:$a,task_id:$task_id}')" >/dev/null
+call_tool_checked 90005 "masc_transition" "$(jq -cn --arg a "$HARNESS_AGENT" --arg task_id "$HARNESS_TASK_ID" '{action:"claim",agent_name:$a,task_id:$task_id}')" >/dev/null
 call_tool_checked 90006 "masc_plan_set_task" "$(jq -cn --arg task_id "$HARNESS_TASK_ID" '{task_id:$task_id}')" >/dev/null
 call_tool_checked 90007 "masc_heartbeat" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')" >/dev/null
 
@@ -573,19 +576,8 @@ call_tool_checked 90010 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" '{un
 call_tool_checked 90011 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" '{unit_id:("platoon-" + $run_id),kind:"platoon",label:("Live Swarm Platoon " + $run_id),parent_unit_id:("company-" + $run_id),leader_id:"swarm-harness",policy:{autonomy_level:"L4_Autonomous",escalation_timeout_sec:180}}')" >/dev/null
 call_tool_checked 90012 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" --argjson roster "$SQUAD_ROSTER_JSON" '{unit_id:("squad-" + $run_id),kind:"squad",label:("Live Swarm Squad " + $run_id),parent_unit_id:("platoon-" + $run_id),leader_id:"swarm-harness",roster:$roster,policy:{autonomy_level:"L4_Autonomous",escalation_timeout_sec:180},budget:{headcount_cap:16,active_operation_cap:1}}')" >/dev/null
 
-CURRENT_STAGE="start-operation"
-echo "[7/11] start managed operation"
-OPERATION_RAW="$(call_tool_checked 90120 "masc_operation_start" "$(jq -cn --arg run_id "$RUN_ID" --arg expected_workers "$EXPECTED_WORKERS" --arg required_final_markers "$REQUIRED_FINAL_MARKERS" --arg min_hot_slots "$MIN_HOT_SLOTS" '{assigned_unit_id:("squad-" + $run_id),objective:("Run deterministic " + $expected_workers + "-worker live harness " + $run_id),autonomy_level:"L4_Autonomous",policy_class:"guarded",budget_class:"standard",note:("run_id=" + $run_id + " worker_count=" + $expected_workers + " required_final_markers=" + $required_final_markers + " min_hot_slots=" + $min_hot_slots)}')")"
-OPERATION_ID="$(printf "%s" "$OPERATION_RAW" | extract_result | jq -r '.operation_id // empty')"
-if [ -z "$OPERATION_ID" ]; then
-  printf "%s\n" "$OPERATION_RAW" >&2
-  echo "operation_id missing" >&2
-  exit 1
-fi
-call_tool_checked 90121 "masc_dispatch_tick" "$(jq -cn --arg operation_id "$OPERATION_ID" '{operation_id:$operation_id}')" >/dev/null
-
 CURRENT_STAGE="seed-worker-tasks"
-echo "[8/11] seed per-worker tasks"
+echo "[7/11] seed per-worker tasks"
 printf "%s" "$MANIFEST_JSON" \
   | jq -c '.workers[]' \
   | while IFS= read -r worker; do
@@ -594,7 +586,7 @@ printf "%s" "$MANIFEST_JSON" \
       call_tool_checked 90100 "masc_add_task" "$(jq -cn --arg title "$TITLE" --arg description "$DESC" '{title:$title,description:$description,priority:2}')" >/dev/null
     done
 CURRENT_STAGE="run-harness"
-echo "[9/11] run live harness against local qwen"
+echo "[8/11] run live harness against local qwen"
 HARNESS_RESULT_FILE="$(mktemp -t agent-swarm-live-result)"
 start_slot_sampler
 "$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" \
@@ -611,9 +603,8 @@ HARNESS_PID="$!"
 
 attempt=0
 RUN_ID_QUERY="$(urlencode "$RUN_ID")"
-OPERATION_ID_QUERY="$(urlencode "$OPERATION_ID")"
 while [ "$attempt" -lt 60 ]; do
-  SWARM_LIVE_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}&operation_id=${OPERATION_ID_QUERY}")"
+  SWARM_LIVE_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}")"
   LIVE_WORKERS="$(printf "%s" "$SWARM_LIVE_JSON" | jq -r '.summary.live_workers // 0')"
   if [ "$LIVE_WORKERS" -ge "$EXPECTED_WORKERS" ]; then
     break
@@ -624,6 +615,18 @@ while [ "$attempt" -lt 60 ]; do
   sleep 1
   attempt=$((attempt + 1))
 done
+
+CURRENT_STAGE="start-operation"
+echo "[9/11] start managed operation"
+OPERATION_RAW="$(call_tool_checked 90120 "masc_operation_start" "$(jq -cn --arg run_id "$RUN_ID" --arg expected_workers "$EXPECTED_WORKERS" --arg required_final_markers "$REQUIRED_FINAL_MARKERS" --arg min_hot_slots "$MIN_HOT_SLOTS" '{assigned_unit_id:("squad-" + $run_id),objective:("Run deterministic " + $expected_workers + "-worker live harness " + $run_id),autonomy_level:"L4_Autonomous",policy_class:"guarded",budget_class:"standard",note:("run_id=" + $run_id + " worker_count=" + $expected_workers + " required_final_markers=" + $required_final_markers + " min_hot_slots=" + $min_hot_slots)}')")"
+OPERATION_ID="$(printf "%s" "$OPERATION_RAW" | extract_result | jq -r '.operation_id // empty')"
+if [ -z "$OPERATION_ID" ]; then
+  printf "%s\n" "$OPERATION_RAW" >&2
+  echo "operation_id missing" >&2
+  exit 1
+fi
+call_tool_checked 90121 "masc_dispatch_tick" "$(jq -cn --arg operation_id "$OPERATION_ID" '{operation_id:$operation_id}')" >/dev/null
+OPERATION_ID_QUERY="$(urlencode "$OPERATION_ID")"
 
 wait "$HARNESS_PID"
 HARNESS_PID=""

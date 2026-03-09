@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
+.PHONY: build test test-unit test-contract test-all clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
 
 # Default target
 all: build
@@ -10,9 +10,23 @@ all: build
 build:
 	dune build --root .
 
-# Run tests
+# Run tests (alias for test-unit)
 test:
 	dune test --root .
+
+# Unit tests only (no server required)
+test-unit:
+	dune test --root .
+
+# Contract harness (requires running server on :8935)
+test-contract:
+	bash scripts/harness/contract/team_session_contract.sh
+	bash scripts/harness/contract/streamable_http_contract.sh
+	bash scripts/harness/contract/game_view_precondition.sh
+	bash scripts/harness/contract/trpg_session_contract.sh
+
+# All tests: unit + contract
+test-all: test-unit test-contract
 
 # Clean build artifacts
 clean:

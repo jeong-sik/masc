@@ -1,60 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
-
-MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 AGENT_NAME="${AGENT_NAME:-team-session-harness}"
 DURATION_SEC="${DURATION_SEC:-120}"
 MCP_SESSION_ID="${MCP_SESSION_ID:-team-session-contract-$(date +%s)-$RANDOM}"
+export MCP_SESSION_ID
 
-curl_post_mcp() {
-  local body="$1"
-  local attempts=0
-  local max_attempts=4
-  local output=""
-  while [ "$attempts" -lt "$max_attempts" ]; do
-    if output="$(curl -sS -m 25 -X POST "$MCP_URL" \
-      -H 'Content-Type: application/json' \
-      -H 'Accept: application/json, text/event-stream' \
-      -H "mcp-session-id: $MCP_SESSION_ID" \
-      -d "$body" 2>/dev/null)"; then
-      printf "%s" "$output"
-      return 0
-    fi
-    attempts=$((attempts + 1))
-    sleep 1
-  done
-  return 1
-}
-
-call_tool() {
-  local id="$1"
-  local name="$2"
-  local args_json="$3"
-  local raw
-
-  raw="$(curl_post_mcp "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"
-  jsonrpc_normalize_response "$raw" "$id"
-}
-
-extract_result() {
-  jq -c 'try (.result.content[0].text | fromjson | .result) catch empty'
-}
-
-extract_error() {
-  jq -r 'try (.result.content[0].text | fromjson | .message) catch (.error.message // "")'
-}
-
-require_ok() {
-  local payload="$1"
-  if ! printf "%s" "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "FAIL: invalid json payload"
-    printf "%s\n" "$payload"
-    exit 1
-  fi
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/test_framework.sh"
 
 echo "[1/12] masc_init"
 r1="$(call_tool 4101 "masc_init" "{\"agent_name\":\"$AGENT_NAME\"}")"

@@ -60,6 +60,15 @@ let test_vertex_base_url () =
     "https://aiplatform.googleapis.com/v1/projects/demo/locations/global/endpoints/openapi"
     (Adapter.gemini_vertex_openai_base_url ~project:"demo" ~location:"global")
 
+let test_default_cli_agent_name () =
+  check string "default cli agent" "claude"
+    (Adapter.default_cli_agent_name ())
+
+let test_default_local_model_label () =
+  with_env "OLLAMA_DEFAULT_MODEL" (Some "my-local-model") (fun () ->
+      check string "default local label" "ollama:my-local-model"
+        (Adapter.default_local_model_label ()))
+
 let () =
   run "Provider Adapter"
     [
@@ -72,5 +81,7 @@ let () =
             test_gemini_direct_auth_api_key_fallback;
           test_case "gemini missing auth" `Quick test_gemini_direct_auth_missing;
           test_case "vertex base url" `Quick test_vertex_base_url;
+          test_case "default cli agent" `Quick test_default_cli_agent_name;
+          test_case "default local model label" `Quick test_default_local_model_label;
         ] );
     ]

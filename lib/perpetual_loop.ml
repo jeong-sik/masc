@@ -113,7 +113,7 @@ let default_config ~goal ~models ?verifier ?session_dir () =
     session_base_dir = session_base;
     on_event = (fun _ -> ());  (* No-op default *)
     coding_mode = false;
-    coding_agent = "claude";
+    coding_agent = Provider_adapter.default_cli_agent_name ();
     coding_timeout_s = Env_config.Spawn.coding_timeout_seconds;
     coding_sw = None;
     coding_proc_mgr = None;
@@ -153,7 +153,7 @@ let create_state config =
   in
   let primary_model = match config.model_cascade with
     | m :: _ -> m
-    | [] -> Llm_client.ollama_glm
+    | [] -> Llm_client.default_local_model_spec ()
   in
   let context = Context_manager.create
     ~system_prompt
@@ -380,7 +380,7 @@ let run_coding_turn ~config ~state =
       let next_model = match config.model_cascade with
         | _ :: m :: _ -> m
         | [m] -> m
-        | [] -> Llm_client.ollama_glm
+        | [] -> Llm_client.default_local_model_spec ()
       in
       emit (Handoff {
         to_model = next_model.model_id;
@@ -464,7 +464,7 @@ let run_turn ~config ~state =
       let primary_model =
         match config.model_cascade with
         | m :: _ -> m
-        | [] -> Llm_client.ollama_glm
+        | [] -> Llm_client.default_local_model_spec ()
       in
       let used_model =
         let used =
@@ -573,7 +573,7 @@ let run_turn ~config ~state =
         let next_model = match config.model_cascade with
           | _ :: m :: _ -> m  (* Next model in cascade *)
           | [m] -> m          (* Same model *)
-          | [] -> Llm_client.ollama_glm
+          | [] -> Llm_client.default_local_model_spec ()
         in
         emit (Handoff {
           to_model = next_model.model_id;

@@ -5973,7 +5973,7 @@ let execute_approved_plan
     ~(trajectory_acc : Trajectory.accumulator option)
     : string * float * string list =
   let gate_config = autonomous_gate_config ~autonomy_level in
-  let primary = match specs with p :: _ -> p | [] -> Llm_client.ollama_glm in
+  let primary = match specs with p :: _ -> p | [] -> Llm_client.default_local_model_spec () in
   let system_prompt = Printf.sprintf
 {|You are a keeper agent executing an approved action plan.
 Your name: %s
@@ -6134,7 +6134,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
     | None -> None
     | Some L1_Reactive -> None
     | Some level ->
-        let primary = match specs with p :: _ -> p | [] -> Llm_client.ollama_glm in
+        let primary = match specs with p :: _ -> p | [] -> Llm_client.default_local_model_spec () in
         let verify_model = Llm_client.ollama_lfm in
         let keeper_context =
           Printf.sprintf "keeper=%s autonomy=%s turns=%d cost=$%.4f"
@@ -6488,7 +6488,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                let primary =
                  match specs with
                  | p :: _ -> p
-                 | [] -> Llm_client.ollama_glm
+                 | [] -> Llm_client.default_local_model_spec ()
                in
                let base_dir = session_base_dir ctx.config in
                let (session, ctx_opt) =
@@ -6730,7 +6730,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                let primary_model =
                  match model_specs_of_strings meta_current.models with
                  | Ok (primary :: _) -> primary
-                 | _ -> Llm_client.ollama_glm
+                 | _ -> Llm_client.default_local_model_spec ()
                in
                let base_dir = session_base_dir ctx.config in
                let (_session, ctx_opt) =
@@ -7006,7 +7006,7 @@ let handle_keeper_up ctx args : tool_result =
              let trace_id = generate_trace_id () in
              let primary = match specs with
                | m :: _ -> m
-               | [] -> Llm_client.ollama_glm
+               | [] -> Llm_client.default_local_model_spec ()
              in
              let base_dir = session_base_dir ctx.config in
              mkdir_p base_dir;
@@ -7236,7 +7236,7 @@ let handle_keeper_status ctx args : tool_result =
       (match model_specs_of_strings models with
        | Error e -> (false, "❌ " ^ e)
        | Ok specs ->
-         let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm in
+         let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.default_local_model_spec () in
          let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then
@@ -7836,7 +7836,7 @@ let handle_keeper_msg ctx args : tool_result =
              (match ensure_api_keys specs with
               | Error e -> Error e
               | Ok () ->
-                let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm in
+                let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.default_local_model_spec () in
                 let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
                 let system_prompt =
                   build_keeper_system_prompt
@@ -7972,7 +7972,7 @@ let handle_keeper_msg ctx args : tool_result =
          (match ensure_api_keys specs with
           | Error e -> (false, "❌ " ^ e)
           | Ok () ->
-            let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm in
+            let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.default_local_model_spec () in
             let base_dir = session_base_dir ctx.config in
             mkdir_p base_dir;
             let (session, ctx_opt) = load_context_from_checkpoint

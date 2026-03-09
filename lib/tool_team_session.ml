@@ -1108,7 +1108,7 @@ let parse_step_spawn_specs args =
     match Yojson.Safe.Util.member "spawn_timeout_seconds" args with
     | `Int value -> max 1 value
     | `Intlit raw -> (try max 1 (int_of_string raw) with _ -> 300)
-    | _ -> get_int args "spawn_timeout_seconds" 300
+    | _ -> max 1 (get_int args "spawn_timeout_seconds" 300)
   in
   let batch_specs_result =
     match Yojson.Safe.Util.member "spawn_batch" args with

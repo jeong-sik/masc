@@ -280,7 +280,7 @@ let discover config ?(endpoint : string option) ?(capability : string option) ()
   | Some url ->
     (* Remote discovery - fetch agent card from well-known URL via curl *)
     let well_known = url ^ "/.well-known/agent-card.json" in
-    let argv = ["curl"; "-s"; "--max-time"; "10";
+    let argv = ["curl"; "-s"; "--max-time"; "10"; "--proto"; "=https,http";
                 "-H"; "Accept: application/json"; well_known] in
     (try
       let (status, body) = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in

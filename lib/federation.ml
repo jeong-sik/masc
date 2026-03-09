@@ -866,7 +866,7 @@ let status () : Yojson.Safe.t =
 *)
 let discover_remote ~endpoint : Yojson.Safe.t =
   let well_known = endpoint ^ "/.well-known/agent-card.json" in
-  let argv = ["curl"; "-s"; "--max-time"; "10";
+  let argv = ["curl"; "-s"; "--max-time"; "10"; "--proto"; "=https,http";
               "-H"; "Accept: application/json"; well_known] in
   try
     let (status, body) = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
@@ -947,7 +947,7 @@ let list_org_rooms ~org_id : Yojson.Safe.t =
       | Some member ->
         let endpoint = Option.value member.organization.endpoint ~default:"unknown" in
         let rooms_url = endpoint ^ "/api/rooms" in
-        let argv = ["curl"; "-s"; "--max-time"; "10";
+        let argv = ["curl"; "-s"; "--max-time"; "10"; "--proto"; "=https,http";
                     "-H"; "Accept: application/json"; rooms_url] in
         (try
           let (status, body) = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in

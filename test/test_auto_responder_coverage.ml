@@ -12,6 +12,28 @@ open Alcotest
 
 module Auto_responder = Masc_mcp.Auto_responder
 
+let file_contains_pattern file_rel pattern =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  let path = Filename.concat source_root file_rel in
+  if not (Sys.file_exists path) then false
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let content = In_channel.input_all ic in
+        let rec loop idx =
+          let remaining = String.length content - idx in
+          let plen = String.length pattern in
+          remaining >= plen
+          && (String.sub content idx plen = pattern || loop (idx + 1))
+        in
+        if String.length pattern = 0 then true else loop 0)
+
 (* ============================================================
    mode Type Tests
    ============================================================ *)
@@ -94,16 +116,13 @@ let test_build_response_prompt_contains_leave () =
 
 (* ============================================================
    extract_nickname Tests
-   NOTE: Current implementation has a bug where String.sub 0 10 is compared
-   to "  Nickname:" (11 chars), so it always returns None.
-   Tests match actual behavior.
    ============================================================ *)
 
 let test_extract_nickname_returns_option () =
   let response = "Some text\n  Nickname: claude-rare-beaver\nMore text" in
   let nick = Auto_responder.extract_nickname response in
-  (* Implementation bug: comparison always fails, returns None *)
-  check (option string) "returns option type" None nick
+  check (option string) "returns parsed nickname"
+    (Some "claude-rare-beaver") nick
 
 let test_extract_nickname_empty () =
   let nick = Auto_responder.extract_nickname "" in
@@ -117,7 +136,7 @@ let test_extract_nickname_no_match () =
 let test_extract_nickname_wrong_format () =
   let response = "Nickname: test" in  (* Missing leading spaces *)
   let nick = Auto_responder.extract_nickname response in
-  check (option string) "wrong format" None nick
+  check (option string) "wrong format still accepted" (Some "test") nick
 
 let test_extract_nickname_multiline () =
   let response = "Line1\nLine2\nLine3" in
@@ -189,6 +208,14 @@ let test_build_response_prompt_long_content () =
   let prompt = Auto_responder.build_response_prompt ~from_agent:"a" ~content:long_content ~mention:"b" in
   check bool "handles long content" true (String.length prompt > 1000)
 
+let test_auto_responder_uses_shared_llm_client () =
+  check bool "uses Llm_client.run_prompt_cascade"
+    true
+    (file_contains_pattern "lib/auto_responder.ml" "Llm_client.run_prompt_cascade");
+  check bool "legacy Llm_direct dispatch removed"
+    false
+    (file_contains_pattern "lib/auto_responder.ml" "Llm_direct.dispatch")
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -240,5 +267,8 @@ let () =
     ];
     "edge_cases", [
       test_case "long content" `Quick test_build_response_prompt_long_content;
+    ];
+    "source", [
+      test_case "shared llm client" `Quick test_auto_responder_uses_shared_llm_client;
     ];
   ]

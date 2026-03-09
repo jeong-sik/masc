@@ -135,29 +135,49 @@ let run_cli_agent ~agent_type ~prompt =
   in
   debug_log (Printf.sprintf "SPAWN_DONE %s output=%s" status_s preview)
 
-(* --- LLM mode: direct call + in-process MASC HTTP tools/call --- *)
+(* --- LLM mode: shared cascade + in-process MASC HTTP tools/call --- *)
+
+let auto_responder_model_strings ~agent_type =
+  match agent_type with
+  | "claude" -> [ "claude:sonnet"; Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+  | "gemini" ->
+      [ "gemini:flash"; Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+  | "glm" -> [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+  | "codex" | "ollama" | _ ->
+      [
+        Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+      ]
+
+let available_model_specs_for_agent_type ~agent_type =
+  Llm_client.available_model_specs_of_strings
+    (auto_responder_model_strings ~agent_type)
+
+let llm_response_is_valid (resp : Llm_client.completion_response) =
+  let s = String.trim resp.content in
+  let s_lower = String.lowercase_ascii s in
+  let len = String.length s in
+  len > 0
+  && not (len >= 5 && String.sub s_lower 0 5 = "error")
+  && not (len >= 14 && String.sub s 0 14 = "Empty response")
+  && not (len >= 9 && String.sub s 0 9 = "{\"error\":")
 
 let call_llm_direct_sync ~agent_type ~prompt =
-  let tool_name =
-    match agent_type with
-    | "gemini" -> "glm" (* Gemini not directly supported, use GLM *)
-    | "claude" -> "claude-cli"
-    | "codex" -> "ollama" (* Codex not directly supported, use Ollama *)
-    | "glm" -> "glm"
-    | _ -> "ollama"
-  in
-  let model =
-    match tool_name with
-    | "glm" -> "glm-4.7"
-    | "ollama" -> Env_config.Ollama.default_model
-    | "claude-cli" -> "claude-sonnet-4-20250514"
-    | _ -> "glm-4-flash"
-  in
   try
-    let response =
-      Llm_direct.dispatch ~tool_name ~model ~prompt ~timeout_sec:30 ~max_chars:500 ()
-    in
-    if response = "" then "no response" else response
+    match
+      Llm_client.run_prompt_cascade ~timeout_sec:30
+        ~accept:llm_response_is_valid
+        ~model_specs:(available_model_specs_for_agent_type ~agent_type)
+        ~max_tokens:500 ~prompt ()
+    with
+    | Ok resp ->
+        debug_log
+          (Printf.sprintf "LLM_MODEL_USED %s for agent_type=%s" resp.model_used
+             agent_type);
+        if String.trim resp.content = "" then "no response" else resp.content
+    | Error err ->
+        Printf.eprintf "[auto_responder] LLM cascade failed: %s\n%!" err;
+        "no response"
   with exn ->
     Printf.eprintf "[auto_responder] LLM call failed: %s\n%!" (Printexc.to_string exn);
     "no response"
@@ -207,12 +227,19 @@ let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
         Error (Printexc.to_string exn)
 
 let extract_nickname (response_text : string) : string option =
+  let prefix = "Nickname:" in
   let lines = String.split_on_char '\n' response_text in
   let rec find = function
     | [] -> None
     | line :: rest ->
-        if String.length line > 12 && String.sub line 0 10 = "  Nickname:" then
-          Some (String.trim (String.sub line 10 (String.length line - 10)))
+        let trimmed = String.trim line in
+        if String.length trimmed >= String.length prefix
+           && String.sub trimmed 0 (String.length prefix) = prefix
+        then
+          Some
+            (String.trim
+               (String.sub trimmed (String.length prefix)
+                  (String.length trimmed - String.length prefix)))
         else find rest
   in
   find lines
@@ -320,4 +347,3 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
         );
         Some task_id
       )
-

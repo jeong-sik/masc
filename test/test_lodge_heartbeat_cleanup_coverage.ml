@@ -96,6 +96,11 @@ let test_lodge_heartbeat_updates_self_summary () =
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_reaction.update_self_summary")
 
+let test_lodge_heartbeat_uses_shared_prompt_cascade () =
+  check bool "heartbeat uses shared prompt cascade"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Llm_client.run_prompt_cascade")
+
 let test_lodge_heartbeat_uses_tom_context () =
   check bool "ToM context used"
     true
@@ -160,6 +165,7 @@ let () =
           test_case "profile shellout removed" `Quick test_lodge_heartbeat_no_profile_shellout;
           test_case "tool assignment prompt mainline" `Quick test_lodge_heartbeat_uses_tool_assignment_prompt;
           test_case "graphql defaults and guards" `Quick test_lodge_graphql_defaults_and_guards;
+          test_case "shared prompt cascade helper" `Quick test_lodge_heartbeat_uses_shared_prompt_cascade;
           test_case "reflection updates self summary" `Quick test_lodge_heartbeat_updates_self_summary;
           test_case "ToM context used" `Quick test_lodge_heartbeat_uses_tom_context;
           test_case "no heuristic fallback policy locked" `Quick test_lodge_heartbeat_no_heuristic_fallback_policy;

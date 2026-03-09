@@ -295,6 +295,8 @@ let completion_cache_key (req : completion_request) =
   let canonical = Yojson.Safe.to_string (completion_request_fingerprint_json req) in
   Llm_response_cache.make_key ~namespace:"llmresp" ~content:canonical
 
+let cache_key_of_request = completion_cache_key
+
 let token_usage_to_json (u : token_usage) : Yojson.Safe.t =
   `Assoc
     [
@@ -1063,7 +1065,8 @@ let complete ?timeout_sec ?ollama_timeout_sec (req : completion_request) : (comp
 (* Cascade: try models in order                                     *)
 (* ================================================================ *)
 
-let cascade ?timeout_sec ?ollama_timeout_sec (requests : completion_request list) : (completion_response, string) result =
+let cascade ?(accept = fun _ -> true) ?timeout_sec ?ollama_timeout_sec
+    (requests : completion_request list) : (completion_response, string) result =
   with_llm_permit (fun () ->
     let avail = Eio.Semaphore.get_value llm_semaphore in
     eprintf "[llm_client] cascade: acquired permit (%d/%d available)\n%!"
@@ -1099,9 +1102,15 @@ let cascade ?timeout_sec ?ollama_timeout_sec (requests : completion_request list
         in
         match attempt_result with
         | Ok resp ->
-          eprintf "[llm_client] cascade: success with %s (%dms)\n%!"
-            resp.model_used resp.latency_ms;
-          Ok resp
+          if accept resp then (
+            eprintf "[llm_client] cascade: success with %s (%dms)\n%!"
+              resp.model_used resp.latency_ms;
+            Ok resp)
+          else (
+            eprintf
+              "[llm_client] cascade: %s rejected by validator, continuing\n%!"
+              resp.model_used;
+            try_next ("response rejected by validator" :: errors) rest)
         | Error e ->
           eprintf "[llm_client] cascade: %s failed: %s\n%!"
             req.model.model_id e;
@@ -1202,3 +1211,40 @@ let default_local_model_spec () =
   match model_spec_of_string (Provider_adapter.default_local_model_label ()) with
   | Ok spec -> spec
   | Error _ -> ollama_glm
+
+let available_model_specs_of_strings model_strs =
+  model_strs
+  |> List.filter_map (fun model_str ->
+         match model_spec_of_string model_str with
+         | Error err ->
+             eprintf "[llm_client] ignoring invalid model spec %s: %s\n%!"
+               model_str err;
+             None
+         | Ok spec -> (
+             match spec.api_key_env with
+             | Some env_name ->
+                 let value = Sys.getenv_opt env_name |> Option.value ~default:"" in
+                 if String.trim value = "" then (
+                   eprintf "[llm_client] skipping %s: %s not set\n%!"
+                     model_str env_name;
+                   None)
+                 else Some spec
+             | None -> Some spec))
+
+let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec ?ollama_timeout_sec
+    ?(accept = fun _ -> true) ~model_specs ~max_tokens ~prompt () =
+  let requests =
+    List.map
+      (fun (model : model_spec) ->
+        ({
+           model;
+           messages = [ user_msg prompt ];
+           temperature;
+           max_tokens;
+           tools = [];
+           response_format = `Text;
+         }
+          : completion_request))
+      model_specs
+  in
+  cascade ?timeout_sec ?ollama_timeout_sec ~accept requests

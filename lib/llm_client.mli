@@ -109,12 +109,15 @@ val complete :
 
 (** Cascade — try models in order until one succeeds.
     Each request targets a different model. First success wins.
+    Optional [accept] can reject a syntactically successful response and force
+    the cascade to continue with the next model.
     Optional [timeout_sec] sets an overall wall-clock budget (seconds) for the
     full cascade. Remaining budget is applied per-attempt.
     Optional [ollama_timeout_sec] overrides Ollama request timeout (seconds)
     for all tries in this cascade.
     @return Ok response from first successful model, Error if all fail. *)
 val cascade :
+  ?accept:(completion_response -> bool) ->
   ?timeout_sec:int ->
   ?ollama_timeout_sec:int ->
   completion_request list ->
@@ -153,6 +156,26 @@ val tool_msg : name:string -> call_id:string -> string -> message
 
 (** Estimate token count for a message list (heuristic: ~4 chars per token). *)
 val estimate_tokens : message list -> int
+
+(** Parse model strings and keep only models that are callable in the current
+    environment. Invalid specs and specs with missing API keys are skipped. *)
+val available_model_specs_of_strings : string list -> model_spec list
+
+(** Run a text-only single-prompt cascade over an ordered model list. *)
+val run_prompt_cascade :
+  ?temperature:float ->
+  ?timeout_sec:int ->
+  ?ollama_timeout_sec:int ->
+  ?accept:(completion_response -> bool) ->
+  model_specs:model_spec list ->
+  max_tokens:int ->
+  prompt:string ->
+  unit ->
+  (completion_response, string) result
+
+(** Stable cache key for a completion request. Useful for cache inspection and
+    deterministic tests. *)
+val cache_key_of_request : completion_request -> string
 
 (** Parse model spec from string like "ollama:glm-4.7-flash:latest",
     "claude:opus", or "gemini:gemini-3-flash-preview".

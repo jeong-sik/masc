@@ -108,6 +108,16 @@
  (libraries masc_mcp alcotest yojson unix))
 
 (test
+ (name test_lodge_cascade)
+ (modules test_lodge_cascade)
+ (libraries masc_mcp alcotest unix))
+
+(test
+ (name test_llm_client_cascade)
+ (modules test_llm_client_cascade)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_metrics_store_eio)
  (modules test_metrics_store_eio)
  (libraries masc_mcp alcotest str yojson))

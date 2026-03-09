@@ -229,14 +229,14 @@ export function Activity() {
 
   return html`
     <div class="stats-grid">
-      <${ActivityStat} label="Visible rows" value=${rows.length} />
-      <${ActivityStat} label="Tracked messages" value=${counts.messages} color="#47b8ff" />
-      <${ActivityStat} label="Keeper signals" value=${counts.keepers} color="#4ade80" />
-      <${ActivityStat} label="Board signals" value=${counts.board} color="#fbbf24" />
-      <${ActivityStat} label="SSE events" value=${eventCount.value} color="#c084fc" />
+      <${ActivityStat} label="Visible rows 표시 행" value=${rows.length} />
+      <${ActivityStat} label="Tracked messages 추적 메시지" value=${counts.messages} color="#47b8ff" />
+      <${ActivityStat} label="Keeper signals 키퍼 신호" value=${counts.keepers} color="#4ade80" />
+      <${ActivityStat} label="Board signals 보드 신호" value=${counts.board} color="#fbbf24" />
+      <${ActivityStat} label="SSE events SSE 이벤트" value=${eventCount.value} color="#c084fc" />
     </div>
 
-    <${Card} title="Unified Activity" class="section">
+    <${Card} title="Unified Activity 통합 활동" class="section">
       <div class="activity-toolbar">
         <div class="activity-filter-row">
           ${(['all', 'messages', 'board', 'tasks', 'keepers', 'system'] as ActivityFilter[]).map(filter => html`
@@ -270,7 +270,7 @@ export function Activity() {
           />`}
     <//>
 
-    <${Card} title="Agent Motion" class="section">
+    <${Card} title="Agent Motion 에이전트 동향" class="section">
       <div class="activity-motion-list">
         ${motionRows.length === 0
           ? html`<div class="empty-state">No active agents</div>`

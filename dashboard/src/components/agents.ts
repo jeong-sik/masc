@@ -381,14 +381,14 @@ export function Agents() {
   return html`
     <div class="agents-monitor">
       <div class="stats-grid">
-        <${MonitorStat} label="Agents online" value=${onlineAgents} color="#4ade80" caption="active + idle" />
-        <${MonitorStat} label="Working now" value=${workingAgents} color="#fbbf24" caption="task or claimed load" />
-        <${MonitorStat} label="Fresh signals" value=${freshSignals} color="#22d3ee" caption="within last 2 minutes" />
-        <${MonitorStat} label="Agent alerts" value=${agentAlerts.length} color=${agentAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="quiet or offline" />
-        <${MonitorStat} label="Keeper alerts" value=${keeperAlerts.length} color=${keeperAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="stale or high pressure" />
+        <${MonitorStat} label="Agents online 온라인" value=${onlineAgents} color="#4ade80" caption="활성 + 대기 에이전트" />
+        <${MonitorStat} label="Working now 작업중" value=${workingAgents} color="#fbbf24" caption="작업 또는 할당된 부하" />
+        <${MonitorStat} label="Fresh signals 최신 신호" value=${freshSignals} color="#22d3ee" caption="최근 2분 이내" />
+        <${MonitorStat} label="Agent alerts 에이전트 경고" value=${agentAlerts.length} color=${agentAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="비활성 또는 오프라인" />
+        <${MonitorStat} label="Keeper alerts 키퍼 경고" value=${keeperAlerts.length} color=${keeperAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="오래되거나 높은 부하" />
       </div>
 
-      <${Card} title="Attention Queue" class="section">
+      <${Card} title="Attention Queue 주의 필요" class="section">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">Who needs intervention right now</h2>
           <p class="monitor-subheadline">Rows are sorted by severity first, then by the freshest signal we have.</p>
@@ -401,7 +401,7 @@ export function Agents() {
       <//>
 
       <div class="agents-workbench">
-        <${Card} title="Active Agents" class="section">
+        <${Card} title="Active Agents 활성 에이전트" class="section">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">Short-horizon execution monitor</h2>
             <p class="monitor-subheadline">Live agents stay grouped here first so execution drift is visible before you scan offline history.</p>
@@ -413,7 +413,7 @@ export function Agents() {
           </div>
         <//>
 
-        <${Card} title="Keeper Watch" class="section">
+        <${Card} title="Keeper Watch 키퍼 감시" class="section">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">Long-running keeper health</h2>
             <p class="monitor-subheadline">Heartbeat, context pressure, and continuity state in one list.</p>
@@ -425,7 +425,7 @@ export function Agents() {
           </div>
         <//>
 
-        <${Card} title="Offline Agents" class="section">
+        <${Card} title="Offline Agents 오프라인" class="section">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">Who dropped out of the live loop</h2>
             <p class="monitor-subheadline">Offline rows are separated so they do not drown the active execution monitor.</p>

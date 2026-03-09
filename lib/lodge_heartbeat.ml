@@ -2125,54 +2125,52 @@ let tom_context_for_posts ~agent_name (posts : Board.post list) =
              (Lodge_tom.tom_prompt_section predictions)))
   |> String.concat "\n\n"
 
+let heartbeat_response_is_valid s =
+  let len = String.length s in
+  let s_lower = String.lowercase_ascii s in
+  len > 10
+  && not (len >= 5 && String.sub s_lower 0 5 = "error")
+  && not (len >= 14 && String.sub s 0 14 = "Empty response")
+  && not (len >= 9 && String.sub s 0 9 = "{\"error\":")
+  && not (String.length s_lower >= 19 && String.sub s_lower 0 19 = "you've hit your lim")
+  && not (String.length s_lower >= 10 && String.sub s_lower 0 10 = "rate limit")
+
+let heartbeat_response_accepted (resp : Llm_client.completion_response) =
+  heartbeat_response_is_valid resp.content
+
+let run_heartbeat_llm_once ~agent_name ~prompt =
+  let models = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
+  let started_at = Time_compat.now () in
+  let result =
+    if models = [] then (
+      Printf.printf
+        "   ⚠️ [%s] No heartbeat model pool available, skipping\n%!" agent_name;
+      Error "no heartbeat model pool available")
+    else
+      Llm_client.run_prompt_cascade ~timeout_sec:60
+        ~accept:heartbeat_response_accepted ~model_specs:models ~max_tokens:4000
+        ~prompt ()
+  in
+  let duration_ms =
+    int_of_float ((Time_compat.now () -. started_at) *. 1000.0)
+  in
+  match result with
+  | Ok resp ->
+      {
+        Lodge_cascade.response = resp.content;
+        llm_used = resp.model_used;
+        duration_ms;
+      }
+  | Error err ->
+      Printf.printf "   ❌ [%s] Heartbeat cascade failed: %s\n%!" agent_name err;
+      { Lodge_cascade.response = ""; llm_used = "none"; duration_ms }
+
 let run_heartbeat_llm_traced ~agent_name ~phase ~prompt =
-  let is_valid_response s =
-    let len = String.length s in
-    let s_lower = String.lowercase_ascii s in
-    len > 10
-    && not (len >= 5 && String.sub s_lower 0 5 = "error")
-    && not (len >= 14 && String.sub s 0 14 = "Empty response")
-    && not (len >= 9 && String.sub s 0 9 = "{\"error\":")
-    && not (String.length s_lower >= 19 && String.sub s_lower 0 19 = "you've hit your lim")
-    && not (String.length s_lower >= 10 && String.sub s_lower 0 10 = "rate limit")
-  in
-  let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
-    let model =
-      List.assoc_opt "model" extra_args
-      |> Option.map Yojson.Safe.Util.to_string
-      |> Option.value ~default:"glm-4.7"
-    in
-    let api_key =
-      List.assoc_opt "api_key" extra_args
-      |> Option.map Yojson.Safe.Util.to_string
-      |> Option.value ~default:""
-    in
-    Llm_direct.dispatch ~tool_name ~api_key ~model ~prompt:p ~timeout_sec ~max_chars ()
-  in
-  let slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
   let tick_id =
     Printf.sprintf "%s-%d" agent_name
       (int_of_float (Time_compat.now () *. 1000.0) mod 1000000)
   in
-  let cascade_result =
-    if List.length slots > 0 then
-      Lodge_cascade.run_cascade_traced
-        ~slots ~prompt ~timeout_sec:60 ~max_chars:4000
-        ~call_llm:cascade_call_llm
-        ~is_valid:is_valid_response
-        ~agent_name
-    else begin
-      Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent_name;
-      let started_at = Time_compat.now () in
-      let response =
-        Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:60 ~max_chars:4000 ()
-      in
-      let duration_ms =
-        int_of_float ((Time_compat.now () -. started_at) *. 1000.0)
-      in
-      Lodge_cascade.{ response; llm_used = "glm(glm-4.7)"; duration_ms }
-    end
-  in
+  let cascade_result = run_heartbeat_llm_once ~agent_name ~prompt in
   save_trace
     {
       tick_id;
@@ -2546,37 +2544,7 @@ let execute_agent_action ~agent_name ~action =
     Wraps the LLM cascade in a simple (prompt -> string) signature. *)
 let make_call_llm ~agent_name : (prompt:string -> string) =
   fun ~prompt ->
-    let is_valid_response s =
-      let len = String.length s in
-      let s_lower = String.lowercase_ascii s in
-      len > 10 &&
-      not (len >= 5 && String.sub s_lower 0 5 = "error") &&
-      not (len >= 14 && String.sub s 0 14 = "Empty response") &&
-      not (len >= 9 && String.sub s 0 9 = "{\"error\":") &&
-      (* Rate limit / quota messages from Claude CLI *)
-      not (len >= 19 && String.sub s_lower 0 19 = "you've hit your lim") &&
-      not (len >= 10 && String.sub s_lower 0 10 = "rate limit")
-    in
-    let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
-      let model = List.assoc_opt "model" extra_args
-        |> Option.map Yojson.Safe.Util.to_string
-        |> Option.value ~default:"glm-4.7" in
-      let api_key = List.assoc_opt "api_key" extra_args
-        |> Option.map Yojson.Safe.Util.to_string
-        |> Option.value ~default:"" in
-      Llm_direct.dispatch ~tool_name ~api_key ~model ~prompt:p ~timeout_sec ~max_chars ()
-    in
-    let slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
-    if List.length slots > 0 then
-      Lodge_cascade.run_cascade
-        ~slots ~prompt ~timeout_sec:60 ~max_chars:4000
-        ~call_llm:cascade_call_llm
-        ~is_valid:is_valid_response
-        ~agent_name
-    else begin
-      Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent_name;
-      Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:60 ~max_chars:4000 ()
-    end
+    (run_heartbeat_llm_once ~agent_name ~prompt).Lodge_cascade.response
 
 (** {1 Plan-based Agent Selection} *)
 

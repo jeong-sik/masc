@@ -19,7 +19,7 @@ Thumbs.db
 .masc/
 .worktrees/
 
-# LLM cascade config (contains env var names for API keys)
+# Local heartbeat model-pool override
 config/llm_cascade.json
 
 # Database files

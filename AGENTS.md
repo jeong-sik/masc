@@ -46,7 +46,7 @@ lib/                    # Core library (~200 .ml files)
   env_config.ml         # Centralized env var management (12-Factor)
 bin/                    # Executable entry points
 config/
-  llm_cascade.json      # LLM cascade slot config (hot-reload every 60s)
+  llm_cascade.json      # Local heartbeat model-pool config (provider:model, hot-reload)
   lodge.env             # Heartbeat config (tick interval, quiet hours)
 test/                   # Test suite
 ```
@@ -88,12 +88,11 @@ let with_lodge_lock f =
   | Some mutex -> Eio.Mutex.use_rw ~protect:true mutex f
   | None -> f ()
 
-(* Correct: cascade slot config *)
-type cascade_slot = {
-  tool_name : string;
-  model : string;
-  key_env : string option;
-}
+(* Correct: local heartbeat model-pool config *)
+let heartbeat_action_models = [
+  "llama:qwen3.5-35b-a3b-ud-q8-xl";
+  "glm:glm-4.7";
+]
 ```
 
 ### Naming
@@ -167,7 +166,7 @@ dune build @check
 - Changes to `room.ml` state machine (affects all coordination)
 - Changes to `lodge_heartbeat.ml` tick logic (affects autonomous agents)
 - Adding new MCP tool registrations in `tools.ml`
-- Modifying `config/llm_cascade.json` slot ordering
+- Modifying `config/llm_cascade.json` model ordering
 - Changes to `board.ml` post ID generation (cryptographic)
 
 ### Never Do

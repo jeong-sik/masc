@@ -265,8 +265,33 @@ let get_chain_id_for_preset = function
   | _ -> None
 
 (** Default LLM dispatcher for Walph loop. Exposed as overridable parameter for tests. *)
-let default_llm_dispatch ~tool_name ~model ~prompt ~timeout_sec ~max_chars () =
-  Llm_direct.dispatch ~tool_name ~model ~prompt ~timeout_sec ~max_chars ()
+let walph_default_model_strings () =
+  [
+    Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
+    Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+  ]
+
+let walph_available_model_specs () =
+  Llm_client.available_model_specs_of_strings (walph_default_model_strings ())
+
+let walph_response_is_valid (resp : Llm_client.completion_response) =
+  let content = String.trim resp.content in
+  let lower = String.lowercase_ascii content in
+  let len = String.length content in
+  len > 0
+  && not (len >= 5 && String.sub lower 0 5 = "error")
+  && not (len >= 14 && String.sub content 0 14 = "Empty response")
+  && not (len >= 9 && String.sub content 0 9 = "{\"error\":")
+
+let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec ~max_chars () =
+  match
+    Llm_client.run_prompt_cascade ~timeout_sec
+      ~accept:walph_response_is_valid
+      ~model_specs:(walph_available_model_specs ()) ~max_tokens:max_chars
+      ~prompt ()
+  with
+  | Ok resp -> resp.content
+  | Error err -> failwith err
 
 (** {1 Main Loop} *)
 

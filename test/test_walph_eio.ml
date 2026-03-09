@@ -26,6 +26,22 @@ let contains text pattern =
   with Not_found ->
     false
 
+let file_contains_pattern file_rel pattern =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  let path = Filename.concat source_root file_rel in
+  if not (Sys.file_exists path) then false
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let content = In_channel.input_all ic in
+        contains content pattern)
+
 (** Test fixture: Create isolated config with Eio environment *)
 let with_test_config name f =
   Eio_main.run @@ fun env ->
@@ -296,6 +312,18 @@ let test_eio_error_cutoff () =
     "max_consecutive_errors reached (2)"
     (status |> member "last_stop_reason" |> to_string)
 
+let test_eio_default_dispatch_uses_shared_cascade () =
+  check bool "uses Llm_client.run_prompt_cascade" true
+    (file_contains_pattern "lib/room_walph_eio.ml" "Llm_client.run_prompt_cascade");
+  check bool "legacy direct dispatch removed" false
+    (file_contains_pattern "lib/room_walph_eio.ml" "Llm_direct.dispatch");
+  check bool "shared pool starts with ollama" true
+    (file_contains_pattern "lib/room_walph_eio.ml"
+       {|Printf.sprintf "ollama:%s" Env_config.Ollama.default_model|});
+  check bool "shared pool falls back to glm" true
+    (file_contains_pattern "lib/room_walph_eio.ml"
+       {|Printf.sprintf "glm:%s" Env_config.Llm.default_model|})
+
 (* ============================================
    Test Registration
    ============================================ *)
@@ -312,6 +340,8 @@ let eio_tests = [
   "list walph states", `Quick, test_eio_list_walph_states;
   "status json fields", `Quick, test_eio_status_json_fields;
   "error cutoff", `Quick, test_eio_error_cutoff;
+  "default dispatch uses shared cascade", `Quick,
+  test_eio_default_dispatch_uses_shared_cascade;
 ]
 
 let () =

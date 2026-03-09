@@ -1,277 +1,118 @@
-(** Lodge Cascade — JSON-driven LLM cascade with strategy-aware routing.
+(** Lodge Cascade — local heartbeat model-pool loader.
 
-    Reads slot arrays from config/llm_cascade.json.
-    Each slot = (tool_name, model, api_key_env).
-    Claude slots are rotated round-robin across heartbeat ticks.
-    Config file is hot-reloaded by checking mtime every 60s.
+    Reads provider:model arrays from config/llm_cascade.json.
+    Entries requiring API keys are skipped when the key is not set.
+    Invalid entries are ignored with a warning.
 
-    Strategies:
-    - sequential: try slots in config order (default, current behavior)
-    - cost_optimized: reorder by cost tier ascending (cheapest first)
-    - quality_first: reorder by cost tier descending (strongest first) *)
+    The file is hot-reloaded via a simple mtime cache.
+    When the file or requested key is missing, built-in defaults are used. *)
 
 open Printf
 
-(* ---------- Types ---------- *)
-
-type cascade_slot = {
-  tool_name : string;    (* "glm", "ollama", "llama", "claude-cli" *)
-  model : string;        (* "glm-4.7", "glm-4.7-flash", "claude-sonnet-4-20250514" *)
-  key_env : string option; (* env var name for api_key, e.g. "CLAUDE_CODE_OAUTH_TOKEN_anyang" *)
-}
-
-(** Routing strategy for slot ordering *)
-type strategy =
-  | Sequential       (** Config order, Claude round-robin (default) *)
-  | Cost_optimized   (** Cheapest first: ollama(0) → glm(1) → claude(3) *)
-  | Quality_first    (** Strongest first: claude(3) → glm(1) → ollama(0) *)
-
-let strategy_of_string = function
-  | "cost_optimized" -> Cost_optimized
-  | "quality_first" -> Quality_first
-  | _ -> Sequential
-
-let string_of_strategy = function
-  | Sequential -> "sequential"
-  | Cost_optimized -> "cost_optimized"
-  | Quality_first -> "quality_first"
-
-(** Result of a cascade call, including which LLM was used *)
 type cascade_result = {
-  response : string;     (* LLM response text *)
-  llm_used : string;     (* e.g. "glm(glm-4.7)", "claude-cli(NG_TOKEN)" *)
-  duration_ms : int;     (* Time taken in milliseconds *)
+  response : string;
+  llm_used : string;
+  duration_ms : int;
 }
 
-(* ---------- Config Cache ---------- *)
-
-(* mtime-based cache: (path -> (mtime, parsed_json)) *)
 let config_cache : (string, float * Yojson.Safe.t) Hashtbl.t = Hashtbl.create 4
 
-(* Claude round-robin counter — persists for process lifetime (lock-free) *)
-let claude_rr_counter = Atomic.make 0
-
 let load_json_file path =
-  let st = Unix.stat path in
-  let mtime = st.Unix.st_mtime in
-  match Hashtbl.find_opt config_cache path with
-  | Some (cached_mtime, json) when Float.equal cached_mtime mtime -> json
-  | _ ->
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let n = in_channel_length ic in
-      let buf = Bytes.create n in
-      really_input ic buf 0 n;
-      buf)
-    |> fun buf ->
-    let json = Yojson.Safe.from_string (Bytes.to_string buf) in
-    Hashtbl.replace config_cache path (mtime, json);
-    json
-
-(* ---------- Config Parsing ---------- *)
-
-let parse_slot (json : Yojson.Safe.t) : cascade_slot =
-  let open Yojson.Safe.Util in
-  let tool_name = json |> member "tool" |> to_string in
-  let model = json |> member "model" |> to_string in
-  let key_env = json |> member "key_env" |> to_string_option in
-  { tool_name; model; key_env }
-
-(** Parse cost_tiers from config: tool_name -> int cost tier *)
-let parse_cost_tiers (json : Yojson.Safe.t) : (string * int) list =
-  let open Yojson.Safe.Util in
-  match json |> member "cost_tiers" with
-  | `Assoc pairs ->
-    List.filter_map (fun (k, v) ->
-      match v with `Int n -> Some (k, n) | _ -> None
-    ) pairs
-  | _ -> [("ollama", 0); ("llama", 0); ("glm", 1); ("claude-cli", 3)]
-
-(** Parse per-cascade strategy from config *)
-let parse_strategy (json : Yojson.Safe.t) ~cascade_name : strategy =
-  let open Yojson.Safe.Util in
-  match json |> member "strategy" with
-  | `Assoc _ as strat ->
-    (match strat |> member cascade_name |> to_string_option with
-     | Some s -> strategy_of_string s
-     | None -> Sequential)
-  | `String s -> strategy_of_string s
-  | _ -> Sequential
-
-(** Reorder slots based on strategy and cost tiers *)
-let apply_strategy ~(strategy : strategy) ~(cost_tiers : (string * int) list)
-    (slots : cascade_slot list) : cascade_slot list =
-  match strategy with
-  | Sequential -> slots  (* Config order, unchanged *)
-  | Cost_optimized ->
-    let cost_of s =
-      List.assoc_opt s.tool_name cost_tiers |> Option.value ~default:1
-    in
-    List.stable_sort (fun a b -> compare (cost_of a) (cost_of b)) slots
-  | Quality_first ->
-    let cost_of s =
-      List.assoc_opt s.tool_name cost_tiers |> Option.value ~default:1
-    in
-    List.stable_sort (fun a b -> compare (cost_of b) (cost_of a)) slots
-
-let load_cascade ~config_path ~cascade_name : cascade_slot list =
   try
-    let json = load_json_file config_path in
-    let open Yojson.Safe.Util in
-    let arr = json |> member cascade_name |> to_list in
-    List.map parse_slot arr
+    let st = Unix.stat path in
+    let mtime = st.Unix.st_mtime in
+    match Hashtbl.find_opt config_cache path with
+    | Some (cached_mtime, json) when Float.equal cached_mtime mtime -> Ok json
+    | _ ->
+        let ic = open_in path in
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr ic)
+          (fun () ->
+            let n = in_channel_length ic in
+            let buf = Bytes.create n in
+            really_input ic buf 0 n;
+            let json = Yojson.Safe.from_string (Bytes.to_string buf) in
+            Hashtbl.replace config_cache path (mtime, json);
+            Ok json)
   with
-  | Sys_error msg ->
-    eprintf "[cascade] config load failed: %s — using empty cascade\n%!" msg;
-    []
-  | exn ->
-    eprintf "[cascade] config parse error: %s — using empty cascade\n%!" (Printexc.to_string exn);
-    []
-
-(** Load cascade with strategy applied *)
-let load_cascade_with_strategy ~config_path ~cascade_name : cascade_slot list =
-  try
-    let json = load_json_file config_path in
-    let open Yojson.Safe.Util in
-    let arr = json |> member cascade_name |> to_list in
-    let slots = List.map parse_slot arr in
-    let strategy = parse_strategy json ~cascade_name in
-    let cost_tiers = parse_cost_tiers json in
-    let reordered = apply_strategy ~strategy ~cost_tiers slots in
-    if strategy <> Sequential then
-      printf "[cascade] %s: strategy=%s, %d slots reordered\n%!"
-        cascade_name (string_of_strategy strategy) (List.length reordered);
-    reordered
-  with
-  | Sys_error msg ->
-    eprintf "[cascade] config load failed: %s — using empty cascade\n%!" msg;
-    []
-  | exn ->
-    eprintf "[cascade] config parse error: %s — using empty cascade\n%!" (Printexc.to_string exn);
-    []
-
-(* ---------- Slot Reordering (Claude Rotation) ---------- *)
-
-(** Partition slots into non-claude prefix, claude group, non-claude suffix.
-    Then rotate the claude group by the round-robin counter. *)
-let rotate_claude_slots (slots : cascade_slot list) : cascade_slot list =
-  (* Split into three groups: prefix (before first claude), claudes, suffix (after last claude) *)
-  let rec split_prefix acc = function
-    | [] -> (List.rev acc, [], [])
-    | s :: rest when s.tool_name = "claude-cli" ->
-      let claudes, suffix = split_claudes [s] rest in
-      (List.rev acc, claudes, suffix)
-    | s :: rest -> split_prefix (s :: acc) rest
-  and split_claudes acc = function
-    | [] -> (List.rev acc, [])
-    | s :: rest when s.tool_name = "claude-cli" ->
-      split_claudes (s :: acc) rest
-    | rest -> (List.rev acc, rest)
-  in
-  let prefix, claudes, suffix = split_prefix [] slots in
-  if List.length claudes <= 1 then slots  (* Nothing to rotate *)
-  else begin
-    let n = List.length claudes in
-    let offset = Atomic.fetch_and_add claude_rr_counter 1 mod n in
-    (* Rotate: drop first `offset` elements, append them at end *)
-    let arr = Array.of_list claudes in
-    let rotated = Array.init n (fun i -> arr.((i + offset) mod n)) in
-    prefix @ Array.to_list rotated @ suffix
-  end
-
-(* ---------- Cascade Execution ---------- *)
-
-(** Resolve env var name to its value at runtime. *)
-let resolve_key (key_env : string option) : string option =
-  match key_env with
-  | None -> None
-  | Some env_name -> Sys.getenv_opt env_name
-
-(** Run cascade with tracing: try each slot in order until one succeeds.
-    Returns cascade_result with response, LLM used, and duration.
-    @param slots Ordered list of cascade slots
-    @param prompt Prompt to send to LLM
-    @param timeout_sec Curl --max-time
-    @param max_chars Max response chars to keep
-    @param call_llm Function that actually invokes llm-mcp
-    @param is_valid Predicate to check if response is usable
-    @param agent_name For logging *)
-let run_cascade_traced
-    ~(slots : cascade_slot list)
-    ~(prompt : string)
-    ~(timeout_sec : int)
-    ~(max_chars : int)
-    ~(call_llm : tool_name:string -> extra_args:(string * Yojson.Safe.t) list -> prompt:string -> timeout_sec:int -> max_chars:int -> string)
-    ~(is_valid : string -> bool)
-    ~(agent_name : string)
-  : cascade_result =
-  let start_time = Time_compat.now () in
-  let rotated = rotate_claude_slots slots in
-  let rec try_slots = function
-    | [] ->
-      printf "   ❌ [%s] All LLMs failed, skipping\n%!" agent_name;
-      let duration_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
-      { response = ""; llm_used = "none"; duration_ms }
-    | slot :: rest ->
-      let extra_args =
-        let base = [("model", `String slot.model)] in
-        match resolve_key slot.key_env with
-        | Some k ->
-          printf "   🔑 [%s] api_key resolved for %s (%d chars)\n%!" agent_name
-            (Option.value ~default:"?" slot.key_env) (String.length k);
-          ("api_key", `String k) :: base
-        | None ->
-          (match slot.key_env with
-           | Some env -> printf "   ⚠️ [%s] env var %s NOT FOUND\n%!" agent_name env
-           | None -> ());
-          base
-      in
-      let label = match slot.key_env with
-        | Some env -> sprintf "%s(%s)" slot.tool_name (String.sub env (max 0 (String.length env - 8)) (min 8 (String.length env)))
-        | None -> slot.tool_name
-      in
-      printf "   🔍 [%s] trying %s...\n%!" agent_name label;
-      let r = call_llm ~tool_name:slot.tool_name ~extra_args ~prompt ~timeout_sec ~max_chars in
-      printf "   🔍 [%s] %s returned (%d chars)\n%!" agent_name label (String.length r);
-      if is_valid r then begin
-        printf "   🧠 [%s] %s: %s\n%!" agent_name label
-          (if String.length r > 80 then String.sub r 0 80 ^ "..." else r);
-        let duration_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
-        { response = r; llm_used = label; duration_ms }
-      end else begin
-        printf "   ⚠️ [%s] %s failed (%d chars), next...\n%!" agent_name label (String.length r);
-        try_slots rest
-      end
-  in
-  try_slots rotated
-
-(** Run cascade: try each slot in order until one succeeds.
-    Backward-compatible wrapper that returns only the response string.
-    @param slots Ordered list of cascade slots
-    @param prompt Prompt to send to LLM
-    @param timeout_sec Curl --max-time
-    @param max_chars Max response chars to keep
-    @param call_llm Function that actually invokes llm-mcp
-    @param is_valid Predicate to check if response is usable
-    @param agent_name For logging *)
-let run_cascade
-    ~(slots : cascade_slot list)
-    ~(prompt : string)
-    ~(timeout_sec : int)
-    ~(max_chars : int)
-    ~(call_llm : tool_name:string -> extra_args:(string * Yojson.Safe.t) list -> prompt:string -> timeout_sec:int -> max_chars:int -> string)
-    ~(is_valid : string -> bool)
-    ~(agent_name : string)
-  : string =
-  let result = run_cascade_traced ~slots ~prompt ~timeout_sec ~max_chars ~call_llm ~is_valid ~agent_name in
-  result.response
-
-(* ---------- Convenience: get_cascade (cached load + rotate) ---------- *)
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) ->
+      Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+  | exn -> Error (Printexc.to_string exn)
 
 let default_config_path () =
-  let me = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp") in
-  Filename.concat (Filename.concat me "workspace/yousleepwhen/masc-mcp") "config/llm_cascade.json"
+  let me =
+    Sys.getenv_opt "ME_ROOT"
+    |> Option.value
+         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
+  in
+  Filename.concat
+    (Filename.concat me "workspace/yousleepwhen/masc-mcp")
+    "config/llm_cascade.json"
 
-let get_cascade ?(config_path = "") ~cascade_name () : cascade_slot list =
-  let path = if String.length config_path > 0 then config_path else default_config_path () in
-  load_cascade_with_strategy ~config_path:path ~cascade_name
+let default_model_strings ~cascade_name =
+  match cascade_name with
+  | "heartbeat_action" | "heartbeat_wake" ->
+      [
+        "llama:qwen3.5-35b-a3b-ud-q8-xl";
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+      ]
+  | _ -> []
+
+let model_key_of_cascade cascade_name = cascade_name ^ "_models"
+
+let read_model_strings ~config_path ~cascade_name =
+  let key = model_key_of_cascade cascade_name in
+  match load_json_file config_path with
+  | Error msg ->
+      eprintf
+        "[cascade] config load failed for %s: %s — using built-in defaults\n%!"
+        key msg;
+      default_model_strings ~cascade_name
+  | Ok json -> (
+      let open Yojson.Safe.Util in
+      match json |> member key with
+      | `List items ->
+          let parsed =
+            List.filter_map
+              (function
+                | `String s -> Some (String.trim s)
+                | other ->
+                    eprintf
+                      "[cascade] %s: ignoring non-string entry %s\n%!"
+                      key (Yojson.Safe.to_string other);
+                    None)
+              items
+          in
+          if parsed = [] then (
+            eprintf
+              "[cascade] %s: empty model list — using built-in defaults\n%!" key;
+            default_model_strings ~cascade_name)
+          else parsed
+      | `Null ->
+          eprintf
+            "[cascade] %s not found in %s — using built-in defaults\n%!" key
+            config_path;
+          default_model_strings ~cascade_name
+      | other ->
+          eprintf
+            "[cascade] %s must be a string list, got %s — using built-in defaults\n%!"
+            key (Yojson.Safe.to_string other);
+          default_model_strings ~cascade_name)
+
+let get_cascade ?(config_path = "") ~cascade_name () :
+    Llm_client.model_spec list =
+  let path =
+    if String.length config_path > 0 then config_path else default_config_path ()
+  in
+  let configured = read_model_strings ~config_path:path ~cascade_name in
+  let specs = Llm_client.available_model_specs_of_strings configured in
+  if specs <> [] then specs
+  else
+    let defaults = default_model_strings ~cascade_name in
+    if configured = defaults then []
+    else (
+      eprintf
+        "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!"
+        cascade_name;
+      Llm_client.available_model_specs_of_strings defaults)

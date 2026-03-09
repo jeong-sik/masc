@@ -211,6 +211,12 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
                     parent_actor = None;
                     capsule_mode = Some Team_session_types.Capsule_capsule;
                     runtime_pool = Some "local64";
+                    model_tier = Some Team_session_types.Tier_35b;
+                    task_profile = Some Team_session_types.Profile_decide;
+                    risk_level = Some Team_session_types.Risk_high;
+                    routing_confidence = Some 0.94;
+                    routing_reason = Some "explicit:lead_manager";
+                    routing_escalated = false;
                   };
                   {
                     Team_session_types.spawn_agent = "llama";
@@ -221,6 +227,12 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
                     parent_actor = Some "llama-local-manager";
                     capsule_mode = Some Team_session_types.Capsule_capsule;
                     runtime_pool = Some "local64";
+                    model_tier = Some Team_session_types.Tier_35b;
+                    task_profile = Some Team_session_types.Profile_verify;
+                    risk_level = Some Team_session_types.Risk_high;
+                    routing_confidence = Some 0.88;
+                    routing_reason = Some "policy:metacog_guard";
+                    routing_escalated = true;
                   };
                   {
                     Team_session_types.spawn_agent = "llama";
@@ -231,6 +243,12 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
                     parent_actor = Some "llama-local-manager";
                     capsule_mode = Some Team_session_types.Capsule_inherit;
                     runtime_pool = Some "local64";
+                    model_tier = Some Team_session_types.Tier_9b;
+                    task_profile = Some Team_session_types.Profile_normalize;
+                    risk_level = Some Team_session_types.Risk_low;
+                    routing_confidence = Some 0.83;
+                    routing_reason = Some "rule:machine_checkable";
+                    routing_escalated = false;
                   };
                 ];
               updated_at_iso = Types.now_iso ();
@@ -245,6 +263,14 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
         Yojson.Safe.Util.(snapshot |> member "role_census" |> member "metacog" |> to_int);
       Alcotest.(check int) "room runtime pool local64" 3
         Yojson.Safe.Util.(snapshot |> member "runtime_pools" |> member "local64" |> to_int);
+      Alcotest.(check int) "room tier 35b count" 2
+        Yojson.Safe.Util.(snapshot |> member "model_tiers" |> member "35b" |> to_int);
+      Alcotest.(check int) "room tier 9b count" 1
+        Yojson.Safe.Util.(snapshot |> member "model_tiers" |> member "9b" |> to_int);
+      Alcotest.(check int) "room task profile normalize" 1
+        Yojson.Safe.Util.(snapshot |> member "task_profiles" |> member "normalize" |> to_int);
+      Alcotest.(check int) "room escalation count" 1
+        Yojson.Safe.Util.(snapshot |> member "escalation_count" |> to_int);
       let digest =
         match
           Operator_control.digest_json ~actor:"dashboard"
@@ -263,7 +289,35 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
       Alcotest.(check int) "session card metacog count" 1
         Yojson.Safe.Util.(session_card |> member "worker_class_counts" |> member "metacog" |> to_int);
       Alcotest.(check int) "session card runtime pool local64" 3
-        Yojson.Safe.Util.(session_card |> member "runtime_pool_counts" |> member "local64" |> to_int))
+        Yojson.Safe.Util.(session_card |> member "runtime_pool_counts" |> member "local64" |> to_int);
+      Alcotest.(check int) "session card tier 35b count" 2
+        Yojson.Safe.Util.(session_card |> member "tier_counts" |> member "35b" |> to_int);
+      Alcotest.(check int) "session card tier 9b count" 1
+        Yojson.Safe.Util.(session_card |> member "tier_counts" |> member "9b" |> to_int);
+      Alcotest.(check int) "session card profile decide count" 1
+        Yojson.Safe.Util.(session_card |> member "task_profile_counts" |> member "decide" |> to_int);
+      Alcotest.(check int) "session card escalation count" 1
+        Yojson.Safe.Util.(session_card |> member "escalation_count" |> to_int);
+      let worker_cards =
+        Yojson.Safe.Util.(digest |> member "worker_cards" |> to_list)
+      in
+      let manager_card =
+        match
+          List.find_opt
+            (fun card ->
+              Yojson.Safe.Util.(card |> member "actor" |> to_string)
+              = "llama-local-manager")
+            worker_cards
+        with
+        | Some card -> card
+        | None -> Alcotest.fail "expected manager worker card"
+      in
+      Alcotest.(check string) "manager card model tier" "35b"
+        Yojson.Safe.Util.(manager_card |> member "model_tier" |> to_string);
+      Alcotest.(check string) "manager card task profile" "decide"
+        Yojson.Safe.Util.(manager_card |> member "task_profile" |> to_string);
+      Alcotest.(check string) "manager card risk level" "high"
+        Yojson.Safe.Util.(manager_card |> member "risk_level" |> to_string))
 
 let test_task_inject_requires_confirm_then_executes () =
   Eio_main.run @@ fun env ->
@@ -625,6 +679,12 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
 	                    parent_actor = None;
 	                    capsule_mode = None;
 	                    runtime_pool = None;
+	                    model_tier = Some Team_session_types.Tier_9b;
+	                    task_profile = Some Team_session_types.Profile_normalize;
+	                    risk_level = Some Team_session_types.Risk_low;
+	                    routing_confidence = Some 0.82;
+	                    routing_reason = Some "rule:machine_checkable";
+	                    routing_escalated = false;
 	                  };
 	                ];
               updated_at_iso = Types.now_iso ();

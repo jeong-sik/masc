@@ -21,6 +21,7 @@ fi
 HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-$default_http_timeout}"
 WAIT_AFTER_SPAWN_SEC="${WAIT_AFTER_SPAWN_SEC:-3}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
+LOCAL64_ROUTER_MODE="${LOCAL64_ROUTER_MODE:-hybrid}"
 MCP_SESSION_ID="${MCP_SESSION_ID:-team-session-local64-$(date +%s)-$RANDOM}"
 GOAL="${GOAL:-Validate local64 swarm role coverage, runtime visibility, and operator census}"
 
@@ -151,16 +152,92 @@ build_spawn_batch() {
     local actor
     actor="$(printf 'local64-smoke-%02d' "$idx")"
     local prompt
-    prompt="$(
-      printf '%s\n' \
-        "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
-        "1) mcp__masc__masc_join(agent_name=\"${actor}\", capabilities=[\"swarm\",\"${role}\"])" \
-        "2) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] ${role} online for local64 smoke\")" \
-        "3) mcp__masc__masc_leave(agent_name=\"${actor}\")" \
-        "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
-    )"
+    local task_profile=""
+    if [ "$LOCAL64_ROUTER_MODE" = "hybrid" ]; then
+      case "$role" in
+        manager)
+          task_profile="decide"
+          prompt="$(
+            printf '%s\n' \
+              "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
+              "이 작업은 session routing/decide 성격이다." \
+              "1) mcp__masc__masc_join(agent_name=\"${actor}\", capabilities=[\"swarm\",\"manager\"])" \
+              "2) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] manager decide online for hybrid smoke\")" \
+              "3) mcp__masc__masc_leave(agent_name=\"${actor}\")" \
+              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+          )"
+          ;;
+        metacog)
+          task_profile="verify"
+          prompt="$(
+            printf '%s\n' \
+              "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
+              "이 작업은 session verify 성격이다." \
+              "1) mcp__masc__masc_join(agent_name=\"${actor}\", capabilities=[\"swarm\",\"metacog\"])" \
+              "2) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] metacog verify online for hybrid smoke\")" \
+              "3) mcp__masc__masc_leave(agent_name=\"${actor}\")" \
+              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+          )"
+          ;;
+        librarian)
+          task_profile="summarize"
+          prompt="$(
+            printf '%s\n' \
+              "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
+              "이 작업은 short answer summarize 성격이다." \
+              "1) mcp__masc__masc_join(agent_name=\"${actor}\", capabilities=[\"swarm\",\"librarian\"])" \
+              "2) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] librarian summarize online for hybrid smoke\")" \
+              "3) mcp__masc__masc_leave(agent_name=\"${actor}\")" \
+              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+          )"
+          ;;
+        scout)
+          task_profile="extract"
+          prompt="$(
+            printf '%s\n' \
+              "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
+              "이 작업은 fetch and collect source extract 성격이다." \
+              "1) mcp__masc__masc_join(agent_name=\"${actor}\", capabilities=[\"swarm\",\"scout\"])" \
+              "2) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] scout extract online for hybrid smoke\")" \
+              "3) mcp__masc__masc_leave(agent_name=\"${actor}\")" \
+              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+          )"
+          ;;
+        *)
+          task_profile="normalize"
+          prompt="$(
+            printf '%s\n' \
+              "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
+              "이 작업은 normalize evidence into strict JSON schema 성격이다." \
+              "1) mcp__masc__masc_join(agent_name=\"${actor}\", capabilities=[\"swarm\",\"executor\"])" \
+              "2) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] executor normalize online for hybrid smoke\")" \
+              "3) mcp__masc__masc_leave(agent_name=\"${actor}\")" \
+              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+          )"
+          ;;
+      esac
+    else
+      prompt="$(
+        printf '%s\n' \
+          "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
+          "1) mcp__masc__masc_join(agent_name=\"${actor}\", capabilities=[\"swarm\",\"${role}\"])" \
+          "2) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] ${role} online for local64 smoke\")" \
+          "3) mcp__masc__masc_leave(agent_name=\"${actor}\")" \
+          "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+      )"
+    fi
 
-    if [ -n "$model" ]; then
+    if [ "$LOCAL64_ROUTER_MODE" = "hybrid" ]; then
+      jq -cn \
+        --arg prompt "$prompt" \
+        --arg role "$spawn_role" \
+        --arg worker_class "$role" \
+        --arg capsule_mode "$capsule_mode" \
+        --arg runtime_pool "local64" \
+        --arg task_profile "$task_profile" \
+        '{spawn_agent:"llama",spawn_prompt:$prompt,spawn_role:$role,worker_class:$worker_class,capsule_mode:$capsule_mode,runtime_pool:$runtime_pool,task_profile:$task_profile}' \
+        >>"$tmp_file"
+    elif [ -n "$model" ]; then
       jq -cn \
         --arg prompt "$prompt" \
         --arg role "$spawn_role" \
@@ -210,6 +287,12 @@ echo "[3/8] inspect local llama runtime"
 runtime_raw="$(call_tool 91004 "masc_llama_runtime_status" '{"include_models":true}')"
 require_tool_success "$runtime_raw"
 require_result_condition "$runtime_raw" '.runtime_count >= 1 and .configured_capacity >= 1' "runtime status missing pool data"
+worker_tier_available="false"
+if [ -n "${MASC_TEAM_SESSION_MODEL_9B:-}" ]; then
+  worker_tier_available="true"
+elif printf '%s' "$runtime_raw" | extract_result | jq -e '[.models[]? | ascii_downcase] | any(contains("9b"))' >/dev/null 2>&1; then
+  worker_tier_available="true"
+fi
 
 echo "[4/8] spawn local64 batch (spawn_timeout=${SPAWN_TIMEOUT_SEC}s http_timeout=${HTTP_TIMEOUT_SEC}s workers=${WORKER_COUNT})"
 spawn_batch_json="$(build_spawn_batch "$SESSION_ID" "$WORKER_COUNT" "$LLAMA_SWARM_MODEL")"
@@ -230,7 +313,7 @@ sleep "$WAIT_AFTER_SPAWN_SEC"
 echo "[6/8] verify team session status visibility"
 status_raw="$(call_tool 91006 "masc_team_session_status" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s}')")"
 require_tool_success "$status_raw"
-require_result_condition "$status_raw" '
+status_expr='
   .summary.scale_profile == "local64"
   and (.summary.planned_worker_count >= '"$WORKER_COUNT"')
   and ((.summary.worker_class_counts.manager // 0) >= 1)
@@ -239,17 +322,63 @@ require_result_condition "$status_raw" '
   and ((.summary.worker_class_counts.scout // 0) >= 1)
   and ((.summary.runtime_pool_counts.local64 // 0) >= '"$WORKER_COUNT"')
   and (.local_runtime != null)
-' "session status did not expose local64 role/runtime visibility"
+'
+if [ "$LOCAL64_ROUTER_MODE" = "hybrid" ]; then
+  if [ "$worker_tier_available" = "true" ]; then
+    status_expr='
+      '"$status_expr"'
+      and ((.summary.tier_counts["35b"] // 0) >= 2)
+      and ((.summary.tier_counts["9b"] // 0) >= 1)
+      and ((.summary.task_profile_counts.decide // 0) >= 1)
+      and ((.summary.task_profile_counts.verify // 0) >= 1)
+      and ((.summary.task_profile_counts.extract // 0) >= 1)
+      and ((.summary.task_profile_counts.summarize // 0) >= 1)
+      and ((.summary.task_profile_counts.normalize // 0) >= 1)
+    '
+  else
+    status_expr='
+      '"$status_expr"'
+      and ((.summary.tier_counts["35b"] // 0) >= '"$WORKER_COUNT"')
+      and ((.summary.escalation_count // 0) >= 1)
+      and ((.summary.task_profile_counts.decide // 0) >= 1)
+      and ((.summary.task_profile_counts.verify // 0) >= 1)
+      and ((.summary.task_profile_counts.extract // 0) >= 1)
+      and ((.summary.task_profile_counts.summarize // 0) >= 1)
+      and ((.summary.task_profile_counts.normalize // 0) >= 1)
+    '
+  fi
+fi
+require_result_condition "$status_raw" "$status_expr" "session status did not expose local64 role/runtime visibility"
 
 echo "[7/8] verify operator room census"
 digest_raw="$(call_tool 91007 "masc_operator_digest" '{"target_type":"room"}')"
 require_tool_success "$digest_raw"
-require_result_condition "$digest_raw" '
+digest_expr='
   ((.role_census.manager // 0) >= 1)
   and ((.role_census.metacog // 0) >= 1)
   and ((.runtime_pools.local64 // 0) >= '"$WORKER_COUNT"')
   and (.local_runtime != null)
-' "operator digest did not expose local64 census/runtime visibility"
+'
+if [ "$LOCAL64_ROUTER_MODE" = "hybrid" ]; then
+  if [ "$worker_tier_available" = "true" ]; then
+    digest_expr='
+      '"$digest_expr"'
+      and ((.model_tiers["35b"] // 0) >= 2)
+      and ((.model_tiers["9b"] // 0) >= 1)
+      and ((.task_profiles.decide // 0) >= 1)
+      and ((.task_profiles.normalize // 0) >= 1)
+    '
+  else
+    digest_expr='
+      '"$digest_expr"'
+      and ((.model_tiers["35b"] // 0) >= '"$WORKER_COUNT"')
+      and ((.escalation_count // 0) >= 1)
+      and ((.task_profiles.decide // 0) >= 1)
+      and ((.task_profiles.normalize // 0) >= 1)
+    '
+  fi
+fi
+require_result_condition "$digest_raw" "$digest_expr" "operator digest did not expose local64 census/runtime visibility"
 
 echo "[8/8] benchmark runtime pool"
 bench_raw="$(call_tool 91008 "masc_llama_runtime_bench" '{"parallelism":8,"rounds":1,"runtime_pool":"local64"}')"
@@ -257,3 +386,6 @@ require_tool_success "$bench_raw"
 require_result_condition "$bench_raw" '.total_requests >= 1 and .per_runtime_breakdown != null' "runtime bench did not return breakdown"
 
 echo "PASS: local64 smoke session=${SESSION_ID} workers=${WORKER_COUNT}"
+if [ -n "${MASC_LOCAL64_BASE_PATH:-}" ]; then
+  echo "ARTIFACT_DIR=${MASC_LOCAL64_BASE_PATH}/.masc/team-sessions/${SESSION_ID}"
+fi

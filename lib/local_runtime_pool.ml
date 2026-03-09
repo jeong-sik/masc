@@ -313,6 +313,15 @@ let preference_matches (runtime : runtime) preferred_pool =
       || String.equal preferred "default"
       || String.equal runtime.id preferred
 
+let runtime_matches_requested_model (runtime : runtime) requested_model =
+  match trim_opt requested_model with
+  | None -> `Any
+  | Some requested -> (
+      match runtime.model with
+      | Some configured when String.equal configured requested -> `Exact
+      | None -> `Generic
+      | Some _ -> `Mismatch)
+
 let runtime_sort_key (runtime : runtime) =
   let overload = max 0 (runtime.active_slots - runtime.max_concurrency) in
   let latency =
@@ -321,7 +330,7 @@ let runtime_sort_key (runtime : runtime) =
   (overload, runtime.active_slots, latency, runtime.failure_streak, runtime.id)
 
 (* Pure selection — no side effects, no Eio calls. *)
-let select_runtime_from (runtimes : runtime list) ?preferred_pool () :
+let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name () :
     (runtime, string) result =
   let matching =
     List.filter (fun runtime -> preference_matches runtime preferred_pool) runtimes
@@ -330,6 +339,44 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool () :
   match matching with
   | [] -> Error "no local llama runtimes configured"
   | runtimes ->
+      let requested_model = trim_opt model_name in
+      let exact_model_matches =
+        List.filter
+          (fun runtime ->
+            match runtime_matches_requested_model runtime requested_model with
+            | `Exact -> true
+            | _ -> false)
+          runtimes
+      in
+      let generic_model_matches =
+        List.filter
+          (fun runtime ->
+            match runtime_matches_requested_model runtime requested_model with
+            | `Generic -> true
+            | _ -> false)
+          runtimes
+      in
+      let candidate_runtimes_result =
+        match requested_model with
+        | None -> Ok runtimes
+        | Some requested -> (
+            match exact_model_matches with
+            | _ :: _ -> Ok exact_model_matches
+            | [] -> (
+                match generic_model_matches with
+                | _ :: _ -> Ok generic_model_matches
+                | [] ->
+                    let scope =
+                      match trim_opt preferred_pool with
+                      | Some pool -> sprintf " in runtime pool %s" pool
+                      | None -> ""
+                    in
+                    Error
+                      (sprintf
+                         "no local llama runtime configured for model %s%s"
+                         requested scope)))
+      in
+      let* runtimes = candidate_runtimes_result in
       let now = Time_compat.now () in
       let healthy =
         List.filter
@@ -340,15 +387,23 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool () :
           runtimes
       in
       let candidates = if healthy = [] then runtimes else healthy in
-      let sorted = List.sort (fun a b -> compare (runtime_sort_key a) (runtime_sort_key b)) candidates in
+      let sorted =
+        List.sort (fun a b -> compare (runtime_sort_key a) (runtime_sort_key b))
+          candidates
+      in
       match sorted with
       | runtime :: _ -> Ok runtime
-      | [] -> Error "no local llama runtimes configured"
+      | [] -> (
+          match requested_model with
+          | Some requested ->
+              Error
+                (sprintf "no local llama runtime configured for model %s" requested)
+          | None -> Error "no local llama runtimes configured")
 
 (* Backward-compatible wrapper that loads from env first. *)
-let select_runtime ?preferred_pool () =
+let select_runtime ?preferred_pool ?model_name () =
   ensure_loaded ();
-  select_runtime_from (!pool).runtimes ?preferred_pool ()
+  select_runtime_from (!pool).runtimes ?preferred_pool ?model_name ()
 
 (* acquire: ensure_loaded may yield (Eio.traceln inside debug_log).
    After that, reading !pool and swapping pool := are yield-free. *)
@@ -356,7 +411,7 @@ let acquire ?preferred_pool ~model_name () =
   ensure_loaded ();
   (* --- yield-free critical section --- *)
   let state : pool_state = !pool in
-  let* runtime = select_runtime_from state.runtimes ?preferred_pool () in
+  let* runtime = select_runtime_from state.runtimes ?preferred_pool ?model_name () in
   let* model_name = model_name_for_runtime runtime model_name in
   let updated = { runtime with
     active_slots = runtime.active_slots + 1;

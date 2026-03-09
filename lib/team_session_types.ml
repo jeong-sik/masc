@@ -64,6 +64,23 @@ type worker_class =
   | Worker_librarian
   | Worker_metacog
 
+type model_tier =
+  | Tier_35b
+  | Tier_9b
+
+type task_profile =
+  | Profile_extract
+  | Profile_normalize
+  | Profile_summarize
+  | Profile_verify
+  | Profile_decide
+  | Profile_synthesize
+
+type risk_level =
+  | Risk_low
+  | Risk_medium
+  | Risk_high
+
 type capsule_mode =
   | Capsule_fresh
   | Capsule_inherit
@@ -78,6 +95,12 @@ type planned_worker = {
   parent_actor : string option;
   capsule_mode : capsule_mode option;
   runtime_pool : string option;
+  model_tier : model_tier option;
+  task_profile : task_profile option;
+  risk_level : risk_level option;
+  routing_confidence : float option;
+  routing_reason : string option;
+  routing_escalated : bool;
 }
 
 type session = {
@@ -283,6 +306,43 @@ let worker_class_of_string = function
   | "metacog" -> Some Worker_metacog
   | _ -> None
 
+let model_tier_to_string = function
+  | Tier_35b -> "35b"
+  | Tier_9b -> "9b"
+
+let model_tier_of_string = function
+  | "35b" -> Some Tier_35b
+  | "9b" -> Some Tier_9b
+  | _ -> None
+
+let task_profile_to_string = function
+  | Profile_extract -> "extract"
+  | Profile_normalize -> "normalize"
+  | Profile_summarize -> "summarize"
+  | Profile_verify -> "verify"
+  | Profile_decide -> "decide"
+  | Profile_synthesize -> "synthesize"
+
+let task_profile_of_string = function
+  | "extract" -> Some Profile_extract
+  | "normalize" -> Some Profile_normalize
+  | "summarize" -> Some Profile_summarize
+  | "verify" -> Some Profile_verify
+  | "decide" -> Some Profile_decide
+  | "synthesize" -> Some Profile_synthesize
+  | _ -> None
+
+let risk_level_to_string = function
+  | Risk_low -> "low"
+  | Risk_medium -> "medium"
+  | Risk_high -> "high"
+
+let risk_level_of_string = function
+  | "low" -> Some Risk_low
+  | "medium" -> Some Risk_medium
+  | "high" -> Some Risk_high
+  | _ -> None
+
 let capsule_mode_to_string = function
   | Capsule_fresh -> "fresh"
   | Capsule_inherit -> "inherit"
@@ -318,6 +378,12 @@ let planned_worker_key (w : planned_worker) =
               (Option.map worker_class_to_string w.worker_class);
           "pool:"
           ^ Option.value ~default:"" (Option.map String.trim w.runtime_pool);
+          "tier:"
+          ^ Option.value ~default:""
+              (Option.map model_tier_to_string w.model_tier);
+          "profile:"
+          ^ Option.value ~default:""
+              (Option.map task_profile_to_string w.task_profile);
         ]
 
 let dedup_planned_workers xs =
@@ -431,6 +497,55 @@ let runtime_pool_counts workers =
     workers;
   Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
 
+let model_tier_counts workers =
+  let tbl = Hashtbl.create 4 in
+  List.iter
+    (fun (worker : planned_worker) ->
+      match worker.model_tier with
+      | None -> ()
+      | Some tier ->
+          let key = model_tier_to_string tier in
+          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
+          Hashtbl.replace tbl key (prev + 1))
+    workers;
+  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+
+let task_profile_counts workers =
+  let tbl = Hashtbl.create 8 in
+  List.iter
+    (fun (worker : planned_worker) ->
+      match worker.task_profile with
+      | None -> ()
+      | Some profile ->
+          let key = task_profile_to_string profile in
+          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
+          Hashtbl.replace tbl key (prev + 1))
+    workers;
+  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+
+let escalation_count workers =
+  List.fold_left
+    (fun acc (worker : planned_worker) ->
+      if worker.routing_escalated then acc + 1 else acc)
+    0 workers
+
+let routing_reason_summary ?(max_items = 8) workers =
+  let rec take acc remaining = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | x :: xs ->
+        if List.mem x acc then take acc remaining xs
+        else take (x :: acc) (remaining - 1) xs
+  in
+  workers
+  |> List.filter_map (fun (worker : planned_worker) ->
+         match worker.routing_reason with
+         | Some reason ->
+             let trimmed = String.trim reason in
+             if trimmed = "" then None else Some trimmed
+         | None -> None)
+  |> take [] max_items
+
 let planned_worker_to_yojson (w : planned_worker) =
   `Assoc
     [
@@ -449,6 +564,21 @@ let planned_worker_to_yojson (w : planned_worker) =
           ~some:(fun mode -> `String (capsule_mode_to_string mode))
           w.capsule_mode );
       ("runtime_pool", Option.fold ~none:`Null ~some:(fun s -> `String s) w.runtime_pool);
+      ( "model_tier",
+        Option.fold ~none:`Null
+          ~some:(fun tier -> `String (model_tier_to_string tier))
+          w.model_tier );
+      ( "task_profile",
+        Option.fold ~none:`Null
+          ~some:(fun profile -> `String (task_profile_to_string profile))
+          w.task_profile );
+      ( "risk_level",
+        Option.fold ~none:`Null
+          ~some:(fun level -> `String (risk_level_to_string level))
+          w.risk_level );
+      ("routing_confidence", Option.fold ~none:`Null ~some:(fun value -> `Float value) w.routing_confidence);
+      ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) w.routing_reason);
+      ("routing_escalated", `Bool w.routing_escalated);
     ]
 
 let planned_worker_of_yojson (json : Yojson.Safe.t) =
@@ -482,6 +612,35 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
                   capsule_mode_of_string
                     (String.lowercase_ascii (String.trim value)));
             runtime_pool = member "runtime_pool" json |> to_string_option;
+            model_tier =
+              Option.bind
+                (member "model_tier" json |> to_string_option)
+                (fun value ->
+                  model_tier_of_string
+                    (String.lowercase_ascii (String.trim value)));
+            task_profile =
+              Option.bind
+                (member "task_profile" json |> to_string_option)
+                (fun value ->
+                  task_profile_of_string
+                    (String.lowercase_ascii (String.trim value)));
+            risk_level =
+              Option.bind
+                (member "risk_level" json |> to_string_option)
+                (fun value ->
+                  risk_level_of_string
+                    (String.lowercase_ascii (String.trim value)));
+            routing_confidence =
+              (match member "routing_confidence" json with
+              | `Float value -> Some value
+              | `Int value -> Some (float_of_int value)
+              | `Intlit raw -> (try Some (float_of_string raw) with _ -> None)
+              | _ -> None);
+            routing_reason = member "routing_reason" json |> to_string_option;
+            routing_escalated =
+              (match member "routing_escalated" json with
+              | `Bool value -> value
+              | _ -> false);
           })
         spawn_agent
   | _ -> None

@@ -356,6 +356,17 @@ let derived_llama_runtime_actor ~session_id ~prompt =
   let digest = Digest.string (session_id ^ "\n" ^ prompt) |> Digest.to_hex in
   Printf.sprintf "llama-local-%s" (String.sub digest 0 8)
 
+type routing_decision = {
+  model_tier : Team_session_types.model_tier;
+  task_profile : Team_session_types.task_profile;
+  risk_level : Team_session_types.risk_level;
+  confidence : float option;
+  reason : string;
+  judge_used : bool;
+  escalate_if : string list;
+  escalated : bool;
+}
+
 type spawn_spec = {
   spawn_agent : string;
   spawn_prompt : string;
@@ -365,6 +376,11 @@ type spawn_spec = {
   parent_actor : string option;
   capsule_mode : Team_session_types.capsule_mode option;
   runtime_pool : string option;
+  model_tier : Team_session_types.model_tier option;
+  task_profile : Team_session_types.task_profile option;
+  risk_level : Team_session_types.risk_level option;
+  routing_confidence : float option;
+  routing_reason : string option;
   spawn_selection_note : string option;
   spawn_timeout_seconds : int;
 }
@@ -376,6 +392,510 @@ type prepared_spawn = {
   runtime_lease : Local_runtime_pool.lease option;
   assigned_runtime : string option;
 }
+
+let trim_opt = function
+  | None -> None
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+
+let env_trim_opt name = Sys.getenv_opt name |> trim_opt
+
+let bool_env_default name ~default =
+  match env_trim_opt name with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some ("0" | "false" | "no" | "off") -> false
+  | _ -> default
+
+let float_env_default name ~default =
+  match env_trim_opt name with
+  | Some raw -> (
+      try float_of_string raw with _ -> default)
+  | None -> default
+
+let int_env_default name ~default =
+  match env_trim_opt name with
+  | Some raw -> (
+      try int_of_string raw with _ -> default)
+  | None -> default
+
+let contains_ci haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then
+      true
+    else if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let contains_any_ci haystack needles =
+  List.exists (fun needle -> contains_ci haystack needle) needles
+
+let runtime_inventory_models () =
+  Local_runtime_pool.snapshots ()
+  |> List.filter_map (fun (runtime : Local_runtime_pool.runtime_snapshot) ->
+         trim_opt runtime.model)
+  |> Team_session_types.dedup_strings
+
+let first_runtime_inventory_model () =
+  match runtime_inventory_models () with
+  | model :: _ -> Some model
+  | [] -> None
+
+let explicit_lead_model () = env_trim_opt "MASC_TEAM_SESSION_MODEL_35B"
+let explicit_worker_model () = env_trim_opt "MASC_TEAM_SESSION_MODEL_9B"
+
+let inferred_lead_model () =
+  match explicit_lead_model () with
+  | Some _ as explicit -> explicit
+  | None -> (
+      match env_trim_opt "LLAMA_SWARM_MODEL" with
+      | Some _ as env_model -> env_model
+      | None ->
+          let inventory = runtime_inventory_models () in
+          match List.find_opt (fun model -> contains_ci model "35b") inventory with
+          | Some _ as matched -> matched
+          | None -> first_runtime_inventory_model ())
+
+let inferred_worker_model () =
+  match explicit_worker_model () with
+  | Some _ as explicit -> explicit
+  | None ->
+      runtime_inventory_models ()
+      |> List.find_opt (fun model -> contains_ci model "9b")
+
+let infer_model_tier_from_model_name model_name =
+  match trim_opt model_name with
+  | None -> None
+  | Some model_name -> (
+      match inferred_worker_model (), inferred_lead_model () with
+      | Some worker_model, _ when String.equal worker_model model_name ->
+          Some Team_session_types.Tier_9b
+      | _, Some lead_model when String.equal lead_model model_name ->
+          Some Team_session_types.Tier_35b
+      | _ when contains_ci model_name "35b" -> Some Team_session_types.Tier_35b
+      | _ when contains_ci model_name "9b" -> Some Team_session_types.Tier_9b
+      | _ -> None)
+
+let default_risk_for_profile = function
+  | Team_session_types.Profile_extract
+  | Team_session_types.Profile_normalize
+  | Team_session_types.Profile_summarize ->
+      Team_session_types.Risk_low
+  | Team_session_types.Profile_verify
+  | Team_session_types.Profile_decide ->
+      Team_session_types.Risk_high
+  | Team_session_types.Profile_synthesize ->
+      Team_session_types.Risk_medium
+
+let min_risk left right =
+  match (left, right) with
+  | Team_session_types.Risk_high, _
+  | _, Team_session_types.Risk_high ->
+      Team_session_types.Risk_high
+  | Team_session_types.Risk_medium, _
+  | _, Team_session_types.Risk_medium ->
+      Team_session_types.Risk_medium
+  | _ -> Team_session_types.Risk_low
+
+let default_tier_for_profile ~risk_level = function
+  | (Team_session_types.Profile_extract
+    | Team_session_types.Profile_normalize
+    | Team_session_types.Profile_summarize)
+    when risk_level <> Team_session_types.Risk_high ->
+      Team_session_types.Tier_9b
+  | _ -> Team_session_types.Tier_35b
+
+let normalized_spawn_text ~spawn_prompt ~spawn_role =
+  String.concat "\n"
+    ([ spawn_prompt ]
+    @
+    match spawn_role with
+    | Some role -> [ role ]
+    | None -> [])
+  |> String.lowercase_ascii
+
+let keyword_matches text =
+  let groups =
+    [
+      ( Team_session_types.Profile_extract,
+        [ "fetch"; "collect"; "gather"; "search"; "find source"; "read docs"; "web"; "official docs"; "article"; "paper"; "source" ] );
+      ( Team_session_types.Profile_normalize,
+        [ "normalize"; "convert"; "transform"; "schema"; "format"; "json"; "label"; "tag"; "dedup" ] );
+      ( Team_session_types.Profile_summarize,
+        [ "summarize"; "summary"; "digest"; "brief"; "recap"; "short answer"; "bullet" ] );
+      ( Team_session_types.Profile_verify,
+        [ "verify"; "validate"; "check"; "review"; "audit"; "judge"; "prove"; "test"; "compare" ] );
+      ( Team_session_types.Profile_decide,
+        [ "decide"; "choose"; "route"; "triage"; "prioritize"; "assign"; "classify" ] );
+      ( Team_session_types.Profile_synthesize,
+        [ "synthesize"; "write"; "draft"; "compose"; "architecture"; "design"; "plan"; "proposal"; "explain" ] );
+    ]
+  in
+  List.filter_map
+    (fun (profile, keywords) ->
+      if contains_any_ci text keywords then Some profile else None)
+    groups
+
+let high_risk_keywords =
+  [ "security"; "policy"; "final"; "merge"; "customer"; "public"; "external"; "production"; "critical"; "architecture"; "decision" ]
+
+let router_judge_enabled () =
+  bool_env_default "MASC_TEAM_SESSION_ROUTER_JUDGE" ~default:true
+
+let router_judge_timeout_sec () =
+  max 5 (int_env_default "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC" ~default:15)
+
+let router_judge_confidence_threshold () =
+  let value =
+    float_env_default "MASC_TEAM_SESSION_ROUTER_CONFIDENCE_THRESHOLD"
+      ~default:0.72
+  in
+  if value < 0.0 then 0.0 else if value > 1.0 then 1.0 else value
+
+let router_judge_model () =
+  match env_trim_opt "MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL" with
+  | Some _ as explicit -> explicit
+  | None -> inferred_lead_model ()
+
+let llama_router_model_spec model_id =
+  {
+    Llm_client.provider = Llm_client.Llama;
+    model_id;
+    max_context = 262_144;
+    api_url = Env_config.Llama.server_url;
+    api_key_env = None;
+    cost_per_1k_input = 0.0;
+    cost_per_1k_output = 0.0;
+  }
+
+let classify_risk ~task_profile ~spawn_prompt ~spawn_role =
+  let text = normalized_spawn_text ~spawn_prompt ~spawn_role in
+  let base = default_risk_for_profile task_profile in
+  if contains_any_ci text high_risk_keywords then
+    min_risk base Team_session_types.Risk_high
+  else base
+
+let heuristic_routing ~spawn_prompt ~spawn_role ~worker_class ~task_profile
+    ~risk_level ~model_tier ~routing_confidence ~routing_reason =
+  let resolved_profile =
+    match task_profile with
+    | Some profile -> Some (profile, "explicit_task_profile", 0.99)
+    | None -> (
+        match worker_class with
+        | Some Team_session_types.Worker_manager ->
+            Some (Team_session_types.Profile_decide, "rule:worker_class=manager", 0.97)
+        | Some Team_session_types.Worker_metacog ->
+            Some (Team_session_types.Profile_verify, "rule:worker_class=metacog", 0.97)
+        | Some Team_session_types.Worker_scout ->
+            Some (Team_session_types.Profile_extract, "rule:worker_class=scout", 0.95)
+        | Some Team_session_types.Worker_librarian ->
+            Some (Team_session_types.Profile_summarize, "rule:worker_class=librarian", 0.94)
+        | _ ->
+            let matches =
+              keyword_matches
+                (normalized_spawn_text ~spawn_prompt ~spawn_role)
+            in
+            match matches with
+            | [ profile ] -> Some (profile, "rule:keyword_match", 0.78)
+            | _ -> None)
+  in
+  match resolved_profile with
+  | Some (profile, reason, confidence) ->
+      let resolved_risk =
+        match risk_level with
+        | Some explicit -> explicit
+        | None -> classify_risk ~task_profile:profile ~spawn_prompt ~spawn_role
+      in
+      let resolved_tier =
+        match model_tier with
+        | Some explicit -> explicit
+        | None -> default_tier_for_profile ~risk_level:resolved_risk profile
+      in
+      let confidence =
+        match routing_confidence with
+        | Some value -> Some value
+        | None -> Some confidence
+      in
+      let reason =
+        match routing_reason with
+        | Some explicit -> explicit
+        | None -> reason
+      in
+      Some
+        {
+          model_tier = resolved_tier;
+          task_profile = profile;
+          risk_level = resolved_risk;
+          confidence;
+          reason;
+          judge_used = false;
+          escalate_if =
+            [ "worker failure"; "schema mismatch"; "context pressure"; "evidence conflict" ];
+          escalated = false;
+        }
+  | None -> None
+
+let parse_routing_decision_json (json : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  let model_tier =
+    match member "model_tier" json |> to_string_option with
+    | Some raw ->
+        Team_session_types.model_tier_of_string
+          (String.lowercase_ascii (String.trim raw))
+    | None -> None
+  in
+  let task_profile =
+    match member "task_profile" json |> to_string_option with
+    | Some raw ->
+        Team_session_types.task_profile_of_string
+          (String.lowercase_ascii (String.trim raw))
+    | None -> None
+  in
+  let risk_level =
+    match member "risk_level" json |> to_string_option with
+    | Some raw ->
+        Team_session_types.risk_level_of_string
+          (String.lowercase_ascii (String.trim raw))
+    | None -> None
+  in
+  match (model_tier, task_profile, risk_level) with
+  | Some model_tier, Some task_profile, Some risk_level ->
+      let confidence =
+        match member "confidence" json with
+        | `Float value -> Some value
+        | `Int value -> Some (float_of_int value)
+        | `Intlit raw -> (try Some (float_of_string raw) with _ -> None)
+        | _ -> None
+      in
+      let reason =
+        member "reason" json |> to_string_option
+        |> Option.value ~default:"llm_judge"
+      in
+      let escalate_if =
+        match member "escalate_if" json with
+        | `List xs ->
+            xs
+            |> List.filter_map (function
+                   | `String value ->
+                       let trimmed = String.trim value in
+                       if trimmed = "" then None else Some trimmed
+                   | _ -> None)
+        | _ -> []
+      in
+      Some
+        {
+          model_tier;
+          task_profile;
+          risk_level;
+          confidence;
+          reason;
+          judge_used = true;
+          escalate_if;
+          escalated = false;
+        }
+  | _ -> None
+
+let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
+  match router_judge_model () with
+  | None -> None
+  | Some judge_model ->
+      let worker_class_text =
+        match worker_class with
+        | Some kind -> Team_session_types.worker_class_to_string kind
+        | None -> "unspecified"
+      in
+      let role_text = Option.value ~default:"unspecified" spawn_role in
+      let prompt =
+        Printf.sprintf
+          "Classify the worker task for a quality-first 2-tier swarm router.\n\
+           Return strict JSON only with keys: model_tier, task_profile, risk_level, confidence, reason, escalate_if.\n\
+           model_tier must be one of [\"35b\",\"9b\"].\n\
+           task_profile must be one of [\"extract\",\"normalize\",\"summarize\",\"verify\",\"decide\",\"synthesize\"].\n\
+           risk_level must be one of [\"low\",\"medium\",\"high\"].\n\
+           Use 35b for final judgment, ambiguous work, open-ended synthesis, architecture, or high-risk outputs.\n\
+           Use 9b only for low-risk, machine-checkable, or strict-template subtasks.\n\
+           worker_class=%s\n\
+           spawn_role=%s\n\
+           worker_prompt=%S\n"
+          worker_class_text role_text spawn_prompt
+      in
+      let request : Llm_client.completion_request =
+        {
+          model = llama_router_model_spec judge_model;
+          messages =
+            [
+              {
+                Llm_client.role = Llm_client.System;
+                content =
+                  "You are a routing judge for a hybrid swarm. Output only JSON.";
+                name = None;
+                tool_call_id = None;
+              };
+              {
+                Llm_client.role = Llm_client.User;
+                content = prompt;
+                name = None;
+                tool_call_id = None;
+              };
+            ];
+          temperature = 0.0;
+          max_tokens = 220;
+          tools = [];
+          response_format = `Json;
+        }
+      in
+      match
+        Llm_client.complete ~timeout_sec:(router_judge_timeout_sec ()) request
+      with
+      | Ok response -> (
+          try
+            Yojson.Safe.from_string response.content
+            |> parse_routing_decision_json
+          with _ -> None)
+      | Error _ -> None
+
+let routing_summary_line (decision : routing_decision) =
+  Printf.sprintf
+    "[routing] profile=%s tier=%s risk=%s confidence=%s reason=%s judge=%b escalated=%b"
+    (Team_session_types.task_profile_to_string decision.task_profile)
+    (Team_session_types.model_tier_to_string decision.model_tier)
+    (Team_session_types.risk_level_to_string decision.risk_level)
+    (match decision.confidence with
+    | Some value -> Printf.sprintf "%.2f" value
+    | None -> "n/a")
+    decision.reason decision.judge_used decision.escalated
+
+let merge_selection_note selection_note routing_note =
+  match (trim_opt selection_note, trim_opt (Some routing_note)) with
+  | None, None -> None
+  | Some note, None | None, Some note -> Some note
+  | Some note, Some routing when String.equal note routing -> Some note
+  | Some note, Some routing -> Some (note ^ " | " ^ routing)
+
+let fallback_model_for_tier = function
+  | Some Team_session_types.Tier_9b -> (
+      match inferred_worker_model () with
+      | Some _ as worker -> worker
+      | None -> inferred_lead_model ())
+  | Some Team_session_types.Tier_35b -> inferred_lead_model ()
+  | None -> inferred_lead_model ()
+
+let finalize_routing_decision ~spawn_model ~(decision : routing_decision) =
+  let resolved_model, escalated, reason =
+    match decision.model_tier with
+    | Team_session_types.Tier_35b -> (inferred_lead_model (), decision.escalated, decision.reason)
+    | Team_session_types.Tier_9b -> (
+        match inferred_worker_model () with
+        | Some model -> (Some model, decision.escalated, decision.reason)
+        | None ->
+            ( inferred_lead_model (),
+              true,
+              decision.reason ^ "; fallback:9b_unavailable->35b" ))
+  in
+  let resolved_model =
+    match trim_opt spawn_model with
+    | Some explicit -> Some explicit
+    | None -> resolved_model
+  in
+  let resolved_tier =
+    match trim_opt spawn_model with
+    | Some explicit ->
+        Option.value ~default:decision.model_tier
+          (infer_model_tier_from_model_name (Some explicit))
+    | None ->
+        if escalated then Team_session_types.Tier_35b else decision.model_tier
+  in
+  (resolved_model, resolved_tier, escalated, reason)
+
+let resolve_routing_for_spec (spec : spawn_spec) =
+  if not (String.equal spec.spawn_agent "llama") then
+    spec
+  else
+    let explicit_tier =
+      match spec.model_tier with
+      | Some tier -> Some tier
+      | None -> infer_model_tier_from_model_name spec.spawn_model
+    in
+    let heuristic =
+      heuristic_routing ~spawn_prompt:spec.spawn_prompt ~spawn_role:spec.spawn_role
+        ~worker_class:spec.worker_class ~task_profile:spec.task_profile
+        ~risk_level:spec.risk_level ~model_tier:explicit_tier
+        ~routing_confidence:spec.routing_confidence
+        ~routing_reason:spec.routing_reason
+    in
+    let decision =
+      match heuristic with
+      | Some decision ->
+          let confidence =
+            Option.value ~default:1.0 decision.confidence
+          in
+          if confidence >= router_judge_confidence_threshold ()
+             || Option.is_some spec.task_profile
+             || Option.is_some spec.model_tier
+          then
+            decision
+          else
+            (match llm_judge_routing ~spawn_prompt:spec.spawn_prompt
+                     ~spawn_role:spec.spawn_role ~worker_class:spec.worker_class with
+            | Some llm -> llm
+            | None ->
+                {
+                  decision with
+                  model_tier = Team_session_types.Tier_35b;
+                  risk_level = Team_session_types.Risk_high;
+                  reason = decision.reason ^ "; fallback:uncertain->35b";
+                  escalated = true;
+                })
+      | None -> (
+          match llm_judge_routing ~spawn_prompt:spec.spawn_prompt
+                   ~spawn_role:spec.spawn_role ~worker_class:spec.worker_class with
+          | Some llm -> llm
+          | None ->
+              {
+                model_tier = Option.value ~default:Team_session_types.Tier_35b explicit_tier;
+                task_profile =
+                  Option.value ~default:Team_session_types.Profile_synthesize
+                    spec.task_profile;
+                risk_level =
+                  Option.value ~default:Team_session_types.Risk_high spec.risk_level;
+                confidence = Some 0.0;
+                reason = Option.value ~default:"fallback:ambiguous->35b" spec.routing_reason;
+                judge_used = false;
+                escalate_if =
+                  [ "worker failure"; "schema mismatch"; "context pressure"; "evidence conflict" ];
+                escalated = true;
+              })
+    in
+    let spawn_model, model_tier, routing_escalated, routing_reason =
+      finalize_routing_decision ~spawn_model:spec.spawn_model ~decision
+    in
+    let routing_confidence =
+      match spec.routing_confidence with
+      | Some _ as explicit -> explicit
+      | None -> decision.confidence
+    in
+    let routing_note =
+      routing_summary_line { decision with model_tier; reason = routing_reason; escalated = routing_escalated }
+    in
+    {
+      spec with
+      spawn_model;
+      model_tier = Some model_tier;
+      task_profile = Some decision.task_profile;
+      risk_level = Some decision.risk_level;
+      routing_confidence;
+      routing_reason = Some routing_reason;
+      spawn_selection_note =
+        merge_selection_note spec.spawn_selection_note routing_note;
+    }
 
 let parse_spawn_spec_from_object batch_index json =
   let open Yojson.Safe.Util in
@@ -406,12 +926,40 @@ let parse_spawn_spec_from_object batch_index json =
         Team_session_types.worker_class_of_string
           (String.lowercase_ascii (String.trim raw)))
   in
+  let get_optional_model_tier key =
+    Option.bind
+      (get_optional_string key)
+      (fun raw ->
+        Team_session_types.model_tier_of_string
+          (String.lowercase_ascii (String.trim raw)))
+  in
+  let get_optional_task_profile key =
+    Option.bind
+      (get_optional_string key)
+      (fun raw ->
+        Team_session_types.task_profile_of_string
+          (String.lowercase_ascii (String.trim raw)))
+  in
+  let get_optional_risk_level key =
+    Option.bind
+      (get_optional_string key)
+      (fun raw ->
+        Team_session_types.risk_level_of_string
+          (String.lowercase_ascii (String.trim raw)))
+  in
   let get_optional_capsule_mode key =
     Option.bind
       (get_optional_string key)
       (fun raw ->
         Team_session_types.capsule_mode_of_string
           (String.lowercase_ascii (String.trim raw)))
+  in
+  let get_optional_float key =
+    match member key json with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | `Intlit raw -> (try Some (float_of_string raw) with _ -> None)
+    | _ -> None
   in
   let get_timeout key =
     match member key json with
@@ -431,6 +979,11 @@ let parse_spawn_spec_from_object batch_index json =
           parent_actor = get_optional_string "parent_actor";
           capsule_mode = get_optional_capsule_mode "capsule_mode";
           runtime_pool = get_optional_string "runtime_pool";
+          model_tier = get_optional_model_tier "model_tier";
+          task_profile = get_optional_task_profile "task_profile";
+          risk_level = get_optional_risk_level "risk_level";
+          routing_confidence = get_optional_float "routing_confidence";
+          routing_reason = get_optional_string "routing_reason";
           spawn_selection_note = get_optional_string "spawn_selection_note";
           spawn_timeout_seconds = get_timeout "spawn_timeout_seconds";
         }
@@ -457,17 +1010,18 @@ let parse_step_spawn_specs args =
   match batch_specs_result with
   | Error e -> Error e
   | Ok batch_specs ->
+      let route_specs specs = Ok (List.map resolve_routing_for_spec specs) in
       if singular_present && batch_specs <> [] then
         Error "spawn_batch cannot be combined with spawn_agent/spawn_prompt"
       else if batch_specs <> [] then
-        Ok batch_specs
+        route_specs batch_specs
       else
         match (singular_agent, singular_prompt) with
         | None, None -> Ok []
         | Some _, None | None, Some _ ->
             Error "spawn_agent and spawn_prompt must be provided together"
         | Some spawn_agent, Some spawn_prompt ->
-            Ok
+            route_specs
               [
                 {
                   spawn_agent;
@@ -488,6 +1042,26 @@ let parse_step_spawn_specs args =
                         Team_session_types.capsule_mode_of_string
                           (String.lowercase_ascii (String.trim raw)));
                   runtime_pool = get_string_opt args "runtime_pool";
+                  model_tier =
+                    Option.bind
+                      (get_string_opt args "model_tier")
+                      (fun raw ->
+                        Team_session_types.model_tier_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  task_profile =
+                    Option.bind
+                      (get_string_opt args "task_profile")
+                      (fun raw ->
+                        Team_session_types.task_profile_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  risk_level =
+                    Option.bind
+                      (get_string_opt args "risk_level")
+                      (fun raw ->
+                        Team_session_types.risk_level_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  routing_confidence = get_float_opt args "routing_confidence";
+                  routing_reason = get_string_opt args "routing_reason";
                   spawn_selection_note = get_string_opt args "spawn_selection_note";
                   spawn_timeout_seconds = get_int args "spawn_timeout_seconds" 300;
                 };
@@ -504,6 +1078,18 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
     parent_actor = spec.parent_actor;
     capsule_mode = spec.capsule_mode;
     runtime_pool = spec.runtime_pool;
+    model_tier = spec.model_tier;
+    task_profile = spec.task_profile;
+    risk_level = spec.risk_level;
+    routing_confidence = spec.routing_confidence;
+    routing_reason = spec.routing_reason;
+    routing_escalated =
+      (match spec.routing_reason with
+      | Some reason ->
+          contains_ci reason "fallback:"
+          || contains_ci reason "escalate"
+          || contains_ci reason "uncertain->35b"
+      | None -> false);
   }
 
 let register_planned_workers config session_id workers =
@@ -529,6 +1115,16 @@ let register_planned_workers config session_id workers =
               ( "runtime_pool_counts",
                 Team_session_types.runtime_pool_counts updated.planned_workers
                 |> Team_session_types.counts_to_json );
+              ( "tier_counts",
+                Team_session_types.model_tier_counts updated.planned_workers
+                |> Team_session_types.counts_to_json );
+              ( "task_profile_counts",
+                Team_session_types.task_profile_counts updated.planned_workers
+                |> Team_session_types.counts_to_json );
+              ( "escalation_count",
+                `Int
+                  (Team_session_types.escalation_count updated.planned_workers)
+              );
               ( "runtime_actors",
                 `List
                   (workers
@@ -648,7 +1244,9 @@ let handle_step ctx args : result =
               let task_priority = get_int args "task_priority" 3 in
               let append_spawn_event ?spawn_agent ?runtime_actor ?spawn_role
                   ?spawn_model ?worker_class ?parent_actor ?capsule_mode
-                  ?runtime_pool ?assigned_runtime ?spawn_selection_note ~success ?exit_code
+                  ?runtime_pool ?model_tier ?task_profile ?risk_level
+                  ?routing_confidence ?routing_reason ?assigned_runtime
+                  ?spawn_selection_note ~success ?exit_code
                   ?elapsed_ms ?output_preview ?error () =
                 let detail =
                   `Assoc
@@ -684,6 +1282,29 @@ let handle_step ctx args : result =
                       ( "runtime_pool",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           runtime_pool );
+                      ( "model_tier",
+                        Option.fold ~none:`Null
+                          ~some:(fun tier ->
+                            `String
+                              (Team_session_types.model_tier_to_string tier))
+                          model_tier );
+                      ( "task_profile",
+                        Option.fold ~none:`Null
+                          ~some:(fun profile ->
+                            `String
+                              (Team_session_types.task_profile_to_string
+                                 profile))
+                          task_profile );
+                      ( "risk_level",
+                        Option.fold ~none:`Null
+                          ~some:(fun level ->
+                            `String
+                              (Team_session_types.risk_level_to_string level))
+                          risk_level );
+                      ("routing_confidence", float_opt_to_json routing_confidence);
+                      ( "routing_reason",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          routing_reason );
                       ( "assigned_runtime",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           assigned_runtime );
@@ -727,7 +1348,12 @@ let handle_step ctx args : result =
                 in
                 let runtime_model =
                   if String.equal spec.spawn_agent "llama" then
-                    match spec.spawn_model with
+                    let resolved_spawn_model =
+                      match spec.spawn_model with
+                      | Some _ as explicit -> explicit
+                      | None -> fallback_model_for_tier spec.model_tier
+                    in
+                    match resolved_spawn_model with
                     | None ->
                         Error
                           "spawn_model is required when spawn_agent=llama"
@@ -739,20 +1365,21 @@ let handle_step ctx args : result =
                         with
                         | Ok assignment ->
                             Ok
-                              ( Local_runtime_pool.model_spec_of_assignment
+                              ( { spec with spawn_model = Some assignment.model_name },
+                                Local_runtime_pool.model_spec_of_assignment
                                   assignment,
                                 Some assignment.lease,
                                 Some assignment.runtime_id )
                         | Error err -> Error err)
                   else
-                    Ok (Llm_client.ollama_glm, None, None)
+                    Ok (spec, Llm_client.ollama_glm, None, None)
                 in
                 match runtime_model with
                 | Error e -> Error (spec, runtime_actor_name, e)
-                | Ok (runtime_model, runtime_lease, assigned_runtime) ->
+                | Ok (resolved_spec, runtime_model, runtime_lease, assigned_runtime) ->
                     Ok
                       {
-                        spec;
+                        spec = resolved_spec;
                         runtime_actor_name;
                         runtime_model;
                         runtime_lease;
@@ -775,6 +1402,11 @@ let handle_step ctx args : result =
                             ?parent_actor:failed_spec.parent_actor
                             ?capsule_mode:failed_spec.capsule_mode
                             ?runtime_pool:failed_spec.runtime_pool
+                            ?model_tier:failed_spec.model_tier
+                            ?task_profile:failed_spec.task_profile
+                            ?risk_level:failed_spec.risk_level
+                            ?routing_confidence:failed_spec.routing_confidence
+                            ?routing_reason:failed_spec.routing_reason
                             ?spawn_selection_note:failed_spec.spawn_selection_note
                             ~success:false ~error:msg ();
                           Error msg)
@@ -817,6 +1449,11 @@ let handle_step ctx args : result =
                               ?parent_actor:prepared.spec.parent_actor
                               ?capsule_mode:prepared.spec.capsule_mode
                               ?runtime_pool:prepared.spec.runtime_pool
+                              ?model_tier:prepared.spec.model_tier
+                              ?task_profile:prepared.spec.task_profile
+                              ?risk_level:prepared.spec.risk_level
+                              ?routing_confidence:prepared.spec.routing_confidence
+                              ?routing_reason:prepared.spec.routing_reason
                               ?assigned_runtime:prepared.assigned_runtime
                               ?spawn_selection_note:
                                 prepared.spec.spawn_selection_note
@@ -842,6 +1479,12 @@ let handle_step ctx args : result =
                                   ?parent_actor:prepared.spec.parent_actor
                                   ?capsule_mode:prepared.spec.capsule_mode
                                   ?runtime_pool:prepared.spec.runtime_pool
+                                  ?model_tier:prepared.spec.model_tier
+                                  ?task_profile:prepared.spec.task_profile
+                                  ?risk_level:prepared.spec.risk_level
+                                  ?routing_confidence:
+                                    prepared.spec.routing_confidence
+                                  ?routing_reason:prepared.spec.routing_reason
                                   ?assigned_runtime:prepared.assigned_runtime
                                   ?spawn_selection_note:
                                     prepared.spec.spawn_selection_note
@@ -877,6 +1520,13 @@ let handle_step ctx args : result =
                                        ?parent_actor:prepared.spec.parent_actor
                                        ?capsule_mode:prepared.spec.capsule_mode
                                        ?runtime_pool:prepared.spec.runtime_pool
+                                       ?model_tier:prepared.spec.model_tier
+                                       ?task_profile:prepared.spec.task_profile
+                                       ?risk_level:prepared.spec.risk_level
+                                       ?routing_confidence:
+                                         prepared.spec.routing_confidence
+                                       ?routing_reason:
+                                         prepared.spec.routing_reason
                                        ?assigned_runtime:prepared.assigned_runtime
                                        ?spawn_selection_note:
                                          prepared.spec.spawn_selection_note
@@ -982,6 +1632,35 @@ let handle_step ctx args : result =
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
                                                     prepared.spec.runtime_pool );
+                                                ( "model_tier",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun tier ->
+                                                      `String
+                                                        (Team_session_types.model_tier_to_string
+                                                           tier))
+                                                    prepared.spec.model_tier );
+                                                ( "task_profile",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun profile ->
+                                                      `String
+                                                        (Team_session_types.task_profile_to_string
+                                                           profile))
+                                                    prepared.spec.task_profile );
+                                                ( "risk_level",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun level ->
+                                                      `String
+                                                        (Team_session_types.risk_level_to_string
+                                                           level))
+                                                    prepared.spec.risk_level );
+                                                ( "routing_confidence",
+                                                  float_opt_to_json
+                                                    prepared.spec.routing_confidence
+                                                );
+                                                ( "routing_reason",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun s -> `String s)
+                                                    prepared.spec.routing_reason );
                                                 ( "assigned_runtime",
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
@@ -1602,6 +2281,41 @@ let schemas : tool_schema list =
 	                            ] );
 	                      ] );
 	                  ("runtime_pool", `Assoc [ ("type", `String "string") ]);
+	                  ( "model_tier",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ("enum", `List [ `String "35b"; `String "9b" ]);
+	                      ] );
+	                  ( "task_profile",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ( "enum",
+	                          `List
+	                            [
+	                              `String "extract";
+	                              `String "normalize";
+	                              `String "summarize";
+	                              `String "verify";
+	                              `String "decide";
+	                              `String "synthesize";
+	                            ] );
+	                      ] );
+	                  ( "risk_level",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ( "enum",
+	                          `List
+	                            [
+	                              `String "low";
+	                              `String "medium";
+	                              `String "high";
+	                            ] );
+	                      ] );
+	                  ("routing_confidence", `Assoc [ ("type", `String "number") ]);
+	                  ("routing_reason", `Assoc [ ("type", `String "string") ]);
 	                  ("spawn_selection_note", `Assoc [ ("type", `String "string") ]);
 	                  ("spawn_prompt", `Assoc [ ("type", `String "string") ]);
 	                  ("spawn_timeout_seconds", `Assoc [ ("type", `String "integer") ]);
@@ -1647,6 +2361,41 @@ let schemas : tool_schema list =
 	                                              ] );
 	                                        ] );
 	                                    ("runtime_pool", `Assoc [ ("type", `String "string") ]);
+	                                    ( "model_tier",
+	                                      `Assoc
+	                                        [
+	                                          ("type", `String "string");
+	                                          ("enum", `List [ `String "35b"; `String "9b" ]);
+	                                        ] );
+	                                    ( "task_profile",
+	                                      `Assoc
+	                                        [
+	                                          ("type", `String "string");
+	                                          ( "enum",
+	                                            `List
+	                                              [
+	                                                `String "extract";
+	                                                `String "normalize";
+	                                                `String "summarize";
+	                                                `String "verify";
+	                                                `String "decide";
+	                                                `String "synthesize";
+	                                              ] );
+	                                        ] );
+	                                    ( "risk_level",
+	                                      `Assoc
+	                                        [
+	                                          ("type", `String "string");
+	                                          ( "enum",
+	                                            `List
+	                                              [
+	                                                `String "low";
+	                                                `String "medium";
+	                                                `String "high";
+	                                              ] );
+	                                        ] );
+	                                    ("routing_confidence", `Assoc [ ("type", `String "number") ]);
+	                                    ("routing_reason", `Assoc [ ("type", `String "string") ]);
 	                                    ( "spawn_selection_note",
 	                                      `Assoc [ ("type", `String "string") ] );
 	                                    ("spawn_prompt", `Assoc [ ("type", `String "string") ]);

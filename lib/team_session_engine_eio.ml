@@ -229,6 +229,20 @@ let summary_json_of_session (config : Room.config)
     Team_session_types.runtime_pool_counts session.planned_workers
     |> Team_session_types.counts_to_json
   in
+  let tier_counts =
+    Team_session_types.model_tier_counts session.planned_workers
+    |> Team_session_types.counts_to_json
+  in
+  let task_profile_counts =
+    Team_session_types.task_profile_counts session.planned_workers
+    |> Team_session_types.counts_to_json
+  in
+  let escalation_count =
+    Team_session_types.escalation_count session.planned_workers
+  in
+  let routing_reason_summary =
+    Team_session_types.routing_reason_summary session.planned_workers
+  in
   `Assoc
     [
       ("session_id", `String session.session_id);
@@ -251,6 +265,11 @@ let summary_json_of_session (config : Room.config)
         `List (List.map (fun a -> `String a) planned_participants) );
       ("worker_class_counts", worker_class_counts);
       ("runtime_pool_counts", runtime_pool_counts);
+      ("tier_counts", tier_counts);
+      ("task_profile_counts", task_profile_counts);
+      ("escalation_count", `Int escalation_count);
+      ( "routing_reason_summary",
+        `List (List.map (fun reason -> `String reason) routing_reason_summary) );
       ("room_active_agents", `List (List.map (fun a -> `String a) room_active_agents));
       ( "last_checkpoint_at",
         Option.fold ~none:`Null ~some:(fun v -> `Float v)

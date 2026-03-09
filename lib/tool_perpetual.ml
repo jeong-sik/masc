@@ -152,7 +152,7 @@ let handle_start ctx args =
   let coding_mode = args |> member "coding_mode" |> to_bool_option
                     |> Option.value ~default:false in
   let coding_agent = args |> member "coding_agent" |> to_string_option
-                     |> Option.value ~default:"claude" in
+                     |> Option.value ~default:(Provider_adapter.default_cli_agent_name ()) in
   let coding_timeout = args |> member "coding_timeout_sec" |> to_int_option
                        |> Option.value ~default:Env_config.Spawn.coding_timeout_seconds in
   (* Parse model specs *)

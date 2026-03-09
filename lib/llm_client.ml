@@ -1195,5 +1195,10 @@ let model_spec_of_string s =
         | _ ->
           Error
             (sprintf
-              "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, llama, claude, gemini, glm, openrouter, mlx, custom)"
+               "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, llama, claude, gemini, glm, openrouter, mlx, custom)"
                s provider)
+
+let default_local_model_spec () =
+  match model_spec_of_string (Provider_adapter.default_local_model_label ()) with
+  | Ok spec -> spec
+  | Error _ -> ollama_glm

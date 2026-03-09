@@ -213,6 +213,18 @@ let resolve_cli_adapter label =
 let resolve_cli_canonical_name label =
   Option.map (fun adapter -> adapter.meta.canonical_name) (resolve_cli_adapter label)
 
+let default_cli_agent_name () = "claude"
+
+let default_local_model_label () =
+  let model_id =
+    match Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" with
+    | Some raw ->
+        let trimmed = String.trim raw in
+        if trimmed = "" then "glm-4.7-flash" else trimmed
+    | None -> "glm-4.7-flash"
+  in
+  "ollama:" ^ model_id
+
 let vertex_location () =
   match Sys.getenv_opt google_cloud_location_env with
   | Some raw ->

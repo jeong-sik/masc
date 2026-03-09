@@ -141,6 +141,10 @@ val openai_default : model_spec
 val glm_cloud : model_spec
 val gemini_pro : model_spec
 
+(** Resolve the canonical default local model through the provider registry.
+    Falls back to [ollama_glm] if parsing fails. *)
+val default_local_model_spec : unit -> model_spec
+
 (** Create a message. *)
 val system_msg : string -> message
 val user_msg : string -> message

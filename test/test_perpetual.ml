@@ -193,6 +193,11 @@ let test_llm_client () = group "LLM Client" (fun () ->
     (Llm_client.openai_default.provider = Llm_client.OpenAI);
   assert_true "builtin:llama_default_provider"
     (Llm_client.llama_default.provider = Llm_client.Llama);
+  let default_local = Llm_client.default_local_model_spec () in
+  assert_true "builtin:default_local_provider"
+    (default_local.provider = Llm_client.Ollama);
+  assert_equal "builtin:default_local_model_id"
+    Masc_mcp.Env_config.Ollama.default_model default_local.model_id;
 )
 
 (* ================================================================ *)
@@ -524,7 +529,8 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
   assert_true "config:coding_mode_default" (not config.coding_mode);
 
   (* 12. Default config: coding_agent is "claude" *)
-  assert_equal "config:coding_agent_default" "claude" config.coding_agent;
+  assert_equal "config:coding_agent_default"
+    (Masc_mcp.Provider_adapter.default_cli_agent_name ()) config.coding_agent;
 
   (* 13. Default config: coding_timeout_s uses env default *)
   assert_true "config:coding_timeout_positive" (config.coding_timeout_s > 0);

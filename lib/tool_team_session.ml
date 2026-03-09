@@ -1525,7 +1525,7 @@ let handle_step ctx args : result =
                                 Some assignment.runtime_id )
                         | Error err -> Error err)
                   else
-                    Ok (Llm_client.ollama_glm, None, None)
+                    Ok (Llm_client.default_local_model_spec (), None, None)
                 in
                 match runtime_model with
                 | Error e -> Error (spec, runtime_actor_name, e)

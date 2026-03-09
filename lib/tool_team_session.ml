@@ -346,6 +346,7 @@ type spawn_spec = {
   spawn_agent : string;
   spawn_prompt : string;
   spawn_model : string option;
+  spawn_model_explicit : bool;
   spawn_role : string option;
   worker_class : Team_session_types.worker_class option;
   parent_actor : string option;
@@ -355,6 +356,7 @@ type spawn_spec = {
   control_domain : Team_session_types.control_domain option;
   supervisor_actor : string option;
   model_tier : Team_session_types.model_tier option;
+  model_tier_explicit : bool;
   task_profile : Team_session_types.task_profile option;
   risk_level : Team_session_types.risk_level option;
   routing_confidence : float option;
@@ -454,12 +456,14 @@ let infer_model_tier_from_model_name model_name =
   match trim_opt model_name with
   | None -> None
   | Some model_name -> (
-      match inferred_worker_model (), inferred_lead_model () with
-      | Some worker_model, _ when String.equal worker_model model_name ->
+      match
+        (inferred_worker_model (), inferred_middle_model (), inferred_lead_model ())
+      with
+      | Some worker_model, _, _ when String.equal worker_model model_name ->
           Some Team_session_types.Tier_9b
-      | _, Some middle_model when String.equal middle_model model_name ->
+      | _, Some middle_model, _ when String.equal middle_model model_name ->
           Some Team_session_types.Tier_27b
-      | _, Some lead_model when String.equal lead_model model_name ->
+      | _, _, Some lead_model when String.equal lead_model model_name ->
           Some Team_session_types.Tier_35b
       | _ when contains_ci model_name "35b" -> Some Team_session_types.Tier_35b
       | _ when contains_ci model_name "27b" -> Some Team_session_types.Tier_27b
@@ -968,14 +972,19 @@ let annotate_control_hierarchy_for_session
           inferred_supervisor_actor_of_spec ~lane_id ~control_domain spec
         in
         let model_tier =
-          Some (controller_target_tier_of_spec ~control_domain spec)
+          match (spec.model_tier_explicit, spec.model_tier) with
+          | true, (Some _ as explicit) -> explicit
+          | _ -> Some (controller_target_tier_of_spec ~control_domain spec)
         in
         let spawn_model =
-          match model_tier with
-          | Some Team_session_types.Tier_35b -> inferred_lead_model ()
-          | Some Team_session_types.Tier_27b -> inferred_middle_model ()
-          | Some Team_session_types.Tier_9b -> inferred_worker_model ()
-          | None -> spec.spawn_model
+          match (spec.spawn_model_explicit, trim_opt spec.spawn_model) with
+          | true, (Some _ as explicit) -> explicit
+          | _ -> (
+              match model_tier with
+              | Some Team_session_types.Tier_35b -> inferred_lead_model ()
+              | Some Team_session_types.Tier_27b -> inferred_middle_model ()
+              | Some Team_session_types.Tier_9b -> inferred_worker_model ()
+              | None -> spec.spawn_model)
         in
         {
           spec with
@@ -1071,6 +1080,7 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
           spawn_agent;
           spawn_prompt;
           spawn_model = get_optional_string "spawn_model";
+          spawn_model_explicit = Option.is_some (get_optional_string "spawn_model");
           spawn_role = get_optional_string "spawn_role";
           worker_class = get_optional_worker_class "worker_class";
           parent_actor = get_optional_string "parent_actor";
@@ -1080,6 +1090,7 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
           control_domain = get_optional_control_domain "control_domain";
           supervisor_actor = get_optional_string "supervisor_actor";
           model_tier = get_optional_model_tier "model_tier";
+          model_tier_explicit = Option.is_some (get_optional_string "model_tier");
           task_profile = get_optional_task_profile "task_profile";
           risk_level = get_optional_risk_level "risk_level";
           routing_confidence = get_optional_float "routing_confidence";
@@ -1093,7 +1104,12 @@ let parse_step_spawn_specs args =
   let singular_agent = get_string_opt args "spawn_agent" in
   let singular_prompt = get_string_opt args "spawn_prompt" in
   let singular_present = Option.is_some singular_agent || Option.is_some singular_prompt in
-  let default_batch_timeout = get_int args "spawn_timeout_seconds" 300 in
+  let default_batch_timeout =
+    match Yojson.Safe.Util.member "spawn_timeout_seconds" args with
+    | `Int value -> max 1 value
+    | `Intlit raw -> (try max 1 (int_of_string raw) with _ -> 300)
+    | _ -> get_int args "spawn_timeout_seconds" 300
+  in
   let batch_specs_result =
     match Yojson.Safe.Util.member "spawn_batch" args with
     | `Null -> Ok []
@@ -1131,6 +1147,7 @@ let parse_step_spawn_specs args =
                   spawn_agent;
                   spawn_prompt;
                   spawn_model = get_string_opt args "spawn_model";
+                  spawn_model_explicit = Option.is_some (get_string_opt args "spawn_model");
                   spawn_role = get_string_opt args "spawn_role";
                   worker_class =
                     Option.bind
@@ -1160,6 +1177,7 @@ let parse_step_spawn_specs args =
                       (fun raw ->
                         Team_session_types.model_tier_of_string
                           (String.lowercase_ascii (String.trim raw)));
+                  model_tier_explicit = Option.is_some (get_string_opt args "model_tier");
                   task_profile =
                     Option.bind
                       (get_string_opt args "task_profile")

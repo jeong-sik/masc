@@ -1,0 +1,8 @@
+{
+  "heartbeat_action_models": [
+    "glm:glm-4.7"
+  ],
+  "heartbeat_wake_models": [
+    "glm:glm-4.7"
+  ]
+}

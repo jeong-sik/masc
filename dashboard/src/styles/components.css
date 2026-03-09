@@ -1874,6 +1874,88 @@ button.monitor-row.bad {
   gap: 10px;
 }
 
+/* ── Health Strip (traffic-light compact) ──────────────────── */
+.health-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+
+.health-dot {
+  font-size: 13px;
+  font-weight: 600;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.health-uptime {
+  margin-left: auto;
+  font-size: 12px;
+  color: #8ba2c9;
+}
+
+/* ── StatCard delta + sparkline ────────────────────────────── */
+.stat-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.stat-value-row .stat-value {
+  margin-top: 0;
+}
+
+.stat-delta {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stat-delta.up { color: #4ade80; }
+.stat-delta.down { color: #fb7185; }
+.stat-delta.neutral { color: #64748b; }
+
+.stat-sparkline {
+  width: 60px;
+  height: 20px;
+  color: rgba(148, 163, 184, 0.6);
+  flex-shrink: 0;
+}
+
+/* ── Runtime Collapsible ──────────────────────────────────── */
+.runtime-collapsible {
+  margin-top: 4px;
+}
+
+.runtime-summary {
+  cursor: pointer;
+  color: #8ba2c9;
+  font-size: 12px;
+  padding: 6px 0;
+  list-style: none;
+  user-select: none;
+}
+
+.runtime-summary::-webkit-details-marker {
+  display: none;
+}
+
+.runtime-summary::before {
+  content: '▸ ';
+  display: inline;
+}
+
+.runtime-collapsible[open] > .runtime-summary::before {
+  content: '▾ ';
+}
+
+.runtime-collapsible .overview-note-stack {
+  margin-top: 8px;
+}
+
 .overview-note-stack {
   margin-top: 12px;
   display: grid;

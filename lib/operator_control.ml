@@ -2060,7 +2060,7 @@ let default_target_type_for action_type =
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | _ -> ""
 
-let generate_confirm_token config =
+let generate_confirm_token ~clock config =
   let max_attempts = 10 in
   let rec loop attempts =
     if attempts >= max_attempts then
@@ -2077,8 +2077,8 @@ let generate_confirm_token config =
       in
       if exists then begin
         (* Exponential backoff: 1ms, 2ms, 4ms, ... up to ~512ms *)
-        let backoff_us = 1000 * (1 lsl (min attempts 9)) in
-        ignore (Unix.select [] [] [] (float_of_int backoff_us /. 1_000_000.0));
+        let backoff_s = float_of_int (1000 * (1 lsl (min attempts 9))) /. 1_000_000.0 in
+        Eio.Time.sleep clock backoff_s;
         loop (attempts + 1)
       end else Ok token
   in
@@ -2767,7 +2767,7 @@ let action_json ?actor_hint (ctx : 'a context) args =
   let started_at = Unix.gettimeofday () in
   if confirm_required request.action_type then (
     let expires_at = iso_of_unix (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
-    let* token = generate_confirm_token ctx.config in
+    let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
     let entry =
       {
         token;

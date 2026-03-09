@@ -3,6 +3,7 @@
 
 import type {
   DashboardData,
+  DashboardMissionResponse,
   BoardPost,
   BoardComment,
   BoardHearth,
@@ -277,6 +278,10 @@ export type DashboardMode = 'compact' | 'full'
 
 export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<DashboardData> {
   return get(`/api/v1/dashboard?mode=${mode}`)
+}
+
+export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
+  return get('/api/v1/dashboard/mission')
 }
 
 // --- Individual resource fetchers (selective SSE-driven refresh) ---

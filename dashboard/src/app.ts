@@ -19,7 +19,7 @@ import {
   tasks,
   keepers,
 } from './store'
-import { Overview } from './components/overview'
+import { Mission } from './components/mission'
 import { Command } from './components/command'
 import { Ops } from './components/ops'
 import { Board } from './components/board'
@@ -33,6 +33,7 @@ import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
+import { refreshMissionSnapshot } from './mission-store'
 import {
   commandPlaneSurface,
   refreshCommandPlaneChainSummary,
@@ -96,7 +97,10 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
                 refreshCommandPlaneSwarm()
               }
             }
-            if (currentTab === 'ops') {
+            if (currentTab === 'mission' || currentTab === 'overview') {
+              refreshMissionSnapshot()
+            }
+            if (currentTab === 'intervene' || currentTab === 'ops') {
               refreshOperatorSnapshot()
               refreshOperatorRoomDigest()
             }
@@ -110,8 +114,8 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
         >
           Refresh Now
         </button>
-        <button class="rail-secondary-btn" onClick=${() => navigate('ops')}>
-          Open Ops
+        <button class="rail-secondary-btn" onClick=${() => navigate('intervene')}>
+          Open Intervene
         </button>
       </div>
     </section>
@@ -192,10 +196,14 @@ function TabContent() {
   const tab = route.value.tab
 
   switch (tab) {
+    case 'mission':
+      return html`<${Mission} />`
+    case 'intervene':
+      return html`<${Ops} />`
     case 'command':
       return html`<${Command} />`
     case 'overview':
-      return html`<${Overview} />`
+      return html`<${Mission} />`
     case 'ops':
       return html`<${Ops} />`
     case 'board':
@@ -207,7 +215,7 @@ function TabContent() {
     case 'trpg':
       return html`<${Trpg} />`
     default:
-      return html`<${Overview} />`
+      return html`<${Mission} />`
   }
 }
 
@@ -243,7 +251,10 @@ export function App() {
           void refreshCommandPlaneSwarm()
         }
       }
-      else if (tab === 'ops') {
+      else if (tab === 'mission' || tab === 'overview') {
+        void refreshMissionSnapshot()
+      }
+      else if (tab === 'intervene' || tab === 'ops') {
         void refreshOperatorSnapshot()
         void refreshOperatorRoomDigest()
       }
@@ -270,7 +281,10 @@ export function App() {
         refreshCommandPlaneSwarm()
       }
     }
-    if (tab === 'ops') {
+    if (tab === 'mission' || tab === 'overview') {
+      refreshMissionSnapshot()
+    }
+    if (tab === 'intervene' || tab === 'ops') {
       refreshOperatorSnapshot()
       refreshOperatorRoomDigest()
     }

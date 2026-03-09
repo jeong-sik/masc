@@ -5453,7 +5453,214 @@ button.monitor-row.bad.state-quiet {
   gap: 16px;
 }
 
+.mission-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mission-header-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.mission-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.mission-stat-card {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  display: grid;
+  gap: 6px;
+}
+
+.mission-stat-card.ok { border-color: rgba(74,222,128,0.24); }
+.mission-stat-card.warn { border-color: rgba(251,191,36,0.24); }
+.mission-stat-card.bad { border-color: rgba(248,113,113,0.28); }
+
+.mission-stat-label {
+  color: rgba(255,255,255,0.52);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mission-stat-value {
+  color: var(--text-strong);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.mission-stat-detail {
+  color: rgba(255,255,255,0.68);
+  line-height: 1.45;
+}
+
+.mission-primary-grid,
+.mission-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.mission-list-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mission-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.mission-card-target {
+  color: rgba(255,255,255,0.52);
+  font-size: 12px;
+}
+
+.mission-priority-block,
+.mission-action-highlight,
+.mission-incident-card,
+.mission-action-card,
+.mission-session-card {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+}
+
+.mission-priority-block.ok,
+.mission-action-card.ok,
+.mission-session-card.ok,
+.mission-incident-card.ok { border-color: rgba(74,222,128,0.24); }
+
+.mission-priority-block.warn,
+.mission-action-card.warn,
+.mission-session-card.warn,
+.mission-incident-card.warn { border-color: rgba(251,191,36,0.24); }
+
+.mission-priority-block.bad,
+.mission-action-card.bad,
+.mission-session-card.bad,
+.mission-incident-card.bad { border-color: rgba(248,113,113,0.28); }
+
+.mission-priority-block strong,
+.mission-incident-card strong,
+.mission-session-card strong {
+  color: var(--text-strong);
+  display: block;
+  line-height: 1.45;
+}
+
+.mission-action-highlight {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  background: linear-gradient(180deg, rgba(34,211,238,0.1), rgba(255,255,255,0.03));
+}
+
+.mission-action-highlight p,
+.mission-action-card p {
+  margin: 0;
+  color: rgba(255,255,255,0.8);
+  line-height: 1.5;
+}
+
+.mission-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.mission-focus-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mission-focus-item {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  display: grid;
+  gap: 6px;
+}
+
+.mission-focus-item span {
+  color: rgba(255,255,255,0.52);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.mission-focus-item strong {
+  color: var(--text-strong);
+  font-size: 18px;
+}
+
+.mission-session-meta,
+.mission-session-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  color: rgba(255,255,255,0.64);
+  font-size: 12px;
+}
+
+.mission-target-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 14px;
+}
+
+.mission-target-block {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mission-target-title {
+  color: rgba(255,255,255,0.52);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.mission-target-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.mission-target-empty {
+  color: rgba(255,255,255,0.6);
+  line-height: 1.45;
+}
+
 @media (max-width: 1100px) {
+  .mission-primary-grid,
+  .mission-content-grid,
+  .mission-target-grid,
+  .mission-focus-grid,
   .agents-workbench {
     grid-template-columns: 1fr;
   }

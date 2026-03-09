@@ -350,11 +350,11 @@ export function Ops() {
   return html`
     <section class="ops-view">
       <div class="ops-header card">
-        <div>
-          <div class="card-title">Operator Control</div>
-          <h2 class="ops-heading">Guided control for room, sessions, and keepers</h2>
+      <div>
+          <div class="card-title">Intervene</div>
+          <h2 class="ops-heading">room, session, keeper를 위한 개입 워크스페이스</h2>
           <p class="ops-subheading">
-            Structured actions only. Destructive changes remain behind confirmation tokens.
+            즉시 실행 가능한 액션만 모읍니다. 위험한 변경은 confirmation token 뒤에 둡니다.
           </p>
         </div>
         <div class="ops-toolbar">
@@ -389,8 +389,8 @@ export function Ops() {
 
       <section class="card">
         <div class="monitor-section-head">
-          <h2 class="monitor-headline">Action Priority</h2>
-          <p class="monitor-subheadline">Ops is the command surface. These four signals explain when to intervene before you drop into a specific control panel.</p>
+          <h2 class="monitor-headline">개입 우선순위</h2>
+          <p class="monitor-subheadline">지금 어디를 먼저 손대야 하는지, 그리고 어떤 표면으로 내려가야 하는지를 여기서 먼저 판단합니다.</p>
         </div>
         <div class="ops-priority-grid">
           ${priorityCards.map(card => html`

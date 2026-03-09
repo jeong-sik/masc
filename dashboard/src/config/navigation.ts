@@ -19,36 +19,43 @@ export interface DashboardNavSection {
 export const DASHBOARD_NAV_SECTIONS: DashboardNavSection[] = [
   {
     id: 'observe',
-    label: 'Observe',
-    description: 'Live health, execution state, and room-wide telemetry',
+    label: 'Monitor',
+    description: '지금 상태와 우선순위를 먼저 읽는 운영 랜딩',
   },
   {
     id: 'coordinate',
-    label: 'Coordinate',
-    description: 'Conversation, decisions, planning, and backlog context',
+    label: 'Workspace',
+    description: '대화, 계획, 에이전트 상태를 보조 작업 공간으로 분리',
   },
   {
     id: 'command',
-    label: 'Command',
-    description: 'Direct control surfaces and intervention workflows',
+    label: 'Act',
+    description: '개입과 지휘를 실제로 실행하는 표면',
   },
 ]
 
 // Primary IA for the side rail navigation.
 export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
   {
-    id: 'command',
-    label: 'Command',
-    icon: '\uD83E\uDDED',
-    group: 'command',
-    description: 'Company, platoon, squad, and agent command plane with operation and trace visibility',
-  },
-  {
-    id: 'overview',
-    label: 'Overview',
+    id: 'mission',
+    label: '상황판',
     icon: '\uD83C\uDFE0',
     group: 'observe',
-    description: 'Room health, keeper pressure, and top-line execution status',
+    description: '지금 문제, 다음 액션, 운영 포커스를 먼저 보는 기본 랜딩',
+  },
+  {
+    id: 'intervene',
+    label: '개입',
+    icon: '\uD83C\uDFAE',
+    group: 'command',
+    description: 'room/session/keeper 액션을 실제로 실행하는 intervention workspace',
+  },
+  {
+    id: 'command',
+    label: '지휘',
+    icon: '\uD83E\uDDED',
+    group: 'command',
+    description: 'command plane, swarm, trace, approvals를 drill-down으로 보는 상세 화면',
   },
   {
     id: 'agents',
@@ -70,13 +77,6 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     icon: '\uD83C\uDFAF',
     group: 'coordinate',
     description: 'Goals, MDAL loops, and task backlog in one planning surface',
-  },
-  {
-    id: 'ops',
-    label: 'Ops',
-    icon: '\uD83C\uDFAE',
-    group: 'command',
-    description: 'Guided operator controls for room, sessions, and keepers',
   },
   {
     id: 'trpg',

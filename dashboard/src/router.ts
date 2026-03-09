@@ -6,14 +6,16 @@ import { signal, type ReadonlySignal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
 
-const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
+const DEFAULT_ROUTE: RouteState = { tab: 'mission', params: {}, postId: null }
 const LEGACY_TAB_ALIASES: Record<string, TabId> = {
-  journal: 'overview',
+  overview: 'mission',
+  journal: 'mission',
   mdal: 'goals',
   tasks: 'goals',
-  execution: 'overview',
+  execution: 'mission',
   council: 'board',
-  activity: 'overview',
+  activity: 'mission',
+  ops: 'intervene',
 }
 
 function isTabId(v: string | null | undefined): v is TabId {
@@ -69,7 +71,7 @@ function parseSegments(
     ? tabFromPath
     : isTabId(tabFromQuery)
       ? tabFromQuery
-      : 'overview'
+      : 'mission'
 
   let postId: string | null = null
   if (tab === 'board') {
@@ -147,7 +149,8 @@ window.addEventListener('hashchange', () => {
 // --- Navigation helpers ---
 
 export function navigate(tab: TabId, params?: Record<string, string>): void {
-  const next = { tab, params: params ?? {}, postId: null } satisfies RouteState
+  const canonical = normalizeTabAlias(tab) ?? tab
+  const next = { tab: canonical as TabId, params: params ?? {}, postId: null } satisfies RouteState
   window.location.hash = toHash(next)
 }
 
@@ -187,6 +190,6 @@ export function initRouter(): void {
   }
 
   // Default route
-  window.location.hash = '#overview'
+  window.location.hash = '#mission'
   route.value = parseHash(window.location.hash)
 }

@@ -3970,6 +3970,13 @@ button.council-row.selected {
   min-height: 0;
 }
 
+.ops-lane-panel {
+  border-color: rgba(71, 184, 255, 0.18);
+  background:
+    linear-gradient(180deg, rgba(13, 22, 40, 0.76), rgba(13, 22, 40, 0.62)),
+    radial-gradient(circle at top right, rgba(71, 184, 255, 0.1), transparent 42%);
+}
+
 .ops-studio-panel {
   gap: 16px;
 }
@@ -4174,6 +4181,7 @@ button.council-row.selected {
 }
 
 @media (max-width: 1180px) {
+  .command-entry-strip,
   .ops-priority-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4186,6 +4194,10 @@ button.council-row.selected {
 @media (max-width: 860px) {
   .ops-header {
     flex-direction: column;
+  }
+
+  .command-entry-strip {
+    grid-template-columns: 1fr;
   }
 
   .ops-toolbar {
@@ -4258,6 +4270,7 @@ button.council-row.selected {
 .panel-actions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .monitor-stat-card {
@@ -4291,6 +4304,41 @@ button.council-row.selected {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.command-entry-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.command-entry-card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(138, 163, 211, 0.16);
+  background: rgba(255,255,255,0.035);
+  display: grid;
+  gap: 6px;
+}
+
+.command-entry-label {
+  color: rgba(148, 163, 184, 0.92);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.command-entry-card strong {
+  color: #f8fafc;
+  font-size: 18px;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.command-entry-card p {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.72);
+  line-height: 1.5;
 }
 
 .command-primary-layout {

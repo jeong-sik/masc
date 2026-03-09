@@ -7,9 +7,9 @@ import {
   confirmOperatorPendingAction,
   dispatchOperatorAction,
   operatorActionBusy,
+  operatorActionLog,
   operatorDigestError,
   operatorDigestLoading,
-  operatorActionLog,
   operatorError,
   operatorLoading,
   operatorRoomDigest,
@@ -34,7 +34,7 @@ function initialActorName(): string {
 
 const actorName = signal(initialActorName())
 const broadcastMessage = signal('')
-const pauseReason = signal('Operator pause')
+const pauseReason = signal('운영 점검')
 const taskTitle = signal('')
 const taskDescription = signal('')
 const taskPriority = signal('2')
@@ -44,7 +44,7 @@ const teamMessage = signal('')
 const teamTaskTitle = signal('')
 const teamTaskDescription = signal('')
 const teamTaskPriority = signal('2')
-const teamStopReason = signal('Operator stop request')
+const teamStopReason = signal('운영자 중지 요청')
 const selectedKeeperName = signal('')
 const keeperMessage = signal('')
 
@@ -65,10 +65,10 @@ function prettyJson(value: unknown): string {
 }
 
 function relativeAge(seconds?: number): string {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return 'n/a'
-  if (seconds < 60) return `${Math.round(seconds)}s ago`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`
-  return `${Math.round(seconds / 3600)}h ago`
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return '확인 없음'
+  if (seconds < 60) return `${Math.round(seconds)}초 전`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}분 전`
+  return `${Math.round(seconds / 3600)}시간 전`
 }
 
 type OpsPriorityTone = 'ok' | 'warn' | 'bad'
@@ -120,6 +120,82 @@ function isKeeperAttention(item: OperatorAttentionItem): boolean {
   return item.target_type === 'keeper'
 }
 
+function actionTypeLabel(value?: string | null): string {
+  switch (value) {
+    case 'broadcast':
+      return '방송'
+    case 'room_pause':
+      return 'room 일시정지'
+    case 'room_resume':
+      return 'room 재개'
+    case 'team_turn':
+      return '세션 업데이트'
+    case 'team_stop':
+      return '세션 중지'
+    case 'keeper_msg':
+      return 'keeper 메시지'
+    case 'task_inject':
+      return '작업 주입'
+    default:
+      return value?.trim() || '액션'
+  }
+}
+
+function targetTypeLabel(value?: string | null): string {
+  switch (value) {
+    case 'room':
+      return 'room'
+    case 'team_session':
+      return 'session'
+    case 'keeper':
+      return 'keeper'
+    default:
+      return value?.trim() || 'target'
+  }
+}
+
+function displayStatus(value?: string | null): string {
+  const normalized = normalizeStatus(value)
+  switch (normalized) {
+    case 'running':
+    case 'active':
+      return '진행 중'
+    case 'paused':
+      return '일시정지'
+    case 'ended':
+    case 'done':
+      return '종료'
+    case 'offline':
+      return '오프라인'
+    case 'idle':
+      return '대기'
+    case 'unknown':
+    case '':
+      return '확인 필요'
+    default:
+      return value?.trim() || '확인 필요'
+  }
+}
+
+function deliveryModeLabel(confirmRequired?: boolean): string {
+  return confirmRequired ? '확인 후 실행' : '즉시 실행'
+}
+
+function sessionActionLabel(value: typeof teamTurnKind.value): string {
+  switch (value) {
+    case 'note':
+      return '노트'
+    case 'broadcast':
+      return '방송'
+    case 'task':
+      return '작업'
+    case 'checkpoint':
+      return '체크포인트'
+    default:
+      return value
+  }
+}
+
 async function executeAction(input: {
   action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'team_turn' | 'team_stop' | 'keeper_msg' | 'task_inject'
   target_type: 'room' | 'team_session' | 'keeper'
@@ -137,13 +213,13 @@ async function executeAction(input: {
       payload: input.payload,
     })
     if (result.confirm_required) {
-      showToast('Confirmation queued', 'warning')
+      showToast('확인 대기열에 올렸습니다', 'warning')
     } else {
       showToast(input.successMessage, 'success')
     }
     return result
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Operator action failed'
+    const message = err instanceof Error ? err.message : '개입 실행에 실패했습니다'
     showToast(message, 'error')
     return null
   }
@@ -156,7 +232,7 @@ async function submitBroadcast() {
     action_type: 'broadcast',
     target_type: 'room',
     payload: { message },
-    successMessage: 'Broadcast sent',
+    successMessage: '방송을 보냈습니다',
   })
   if (result) broadcastMessage.value = ''
 }
@@ -165,8 +241,8 @@ async function submitPause() {
   await executeAction({
     action_type: 'room_pause',
     target_type: 'room',
-    payload: { reason: pauseReason.value.trim() || 'Operator pause' },
-    successMessage: 'Pause request sent',
+    payload: { reason: pauseReason.value.trim() || '운영 점검' },
+    successMessage: 'room 일시정지를 요청했습니다',
   })
 }
 
@@ -175,7 +251,7 @@ async function submitResume() {
     action_type: 'room_resume',
     target_type: 'room',
     payload: {},
-    successMessage: 'Room resumed',
+    successMessage: 'room 재개를 요청했습니다',
   })
 }
 
@@ -187,10 +263,10 @@ async function submitTaskInject() {
     target_type: 'room',
     payload: {
       title,
-      description: taskDescription.value.trim() || 'Injected from Ops tab',
+      description: taskDescription.value.trim() || 'Intervene 화면에서 주입',
       priority: Number.parseInt(taskPriority.value, 10) || 2,
     },
-    successMessage: 'Task injection submitted',
+    successMessage: '작업 주입을 보냈습니다',
   })
   if (result) {
     taskTitle.value = ''
@@ -202,7 +278,7 @@ async function submitTeamTurn() {
   const snapshot = operatorSnapshot.value
   const sessionId = selectedSessionId.value || snapshot?.sessions[0]?.session_id || ''
   if (!sessionId) {
-    showToast('Select a team session first', 'warning')
+    showToast('먼저 세션을 고르세요', 'warning')
     return
   }
   const payload: Record<string, unknown> = {
@@ -211,8 +287,8 @@ async function submitTeamTurn() {
   const message = teamMessage.value.trim()
   if (message) payload.message = message
   if (teamTurnKind.value === 'task') {
-    payload.task_title = teamTaskTitle.value.trim() || 'Operator injected task'
-    payload.task_description = teamTaskDescription.value.trim() || 'Injected from Ops tab'
+    payload.task_title = teamTaskTitle.value.trim() || '운영자 주입 작업'
+    payload.task_description = teamTaskDescription.value.trim() || 'Intervene 화면에서 주입'
     payload.task_priority = Number.parseInt(teamTaskPriority.value, 10) || 2
   }
   const result = await executeAction({
@@ -220,7 +296,7 @@ async function submitTeamTurn() {
     target_type: 'team_session',
     target_id: sessionId,
     payload,
-    successMessage: 'Team session updated',
+    successMessage: '세션 액션을 적용했습니다',
   })
   if (result) {
     teamMessage.value = ''
@@ -235,15 +311,15 @@ async function submitTeamStop() {
   const snapshot = operatorSnapshot.value
   const sessionId = selectedSessionId.value || snapshot?.sessions[0]?.session_id || ''
   if (!sessionId) {
-    showToast('Select a team session first', 'warning')
+    showToast('먼저 세션을 고르세요', 'warning')
     return
   }
   await executeAction({
     action_type: 'team_stop',
     target_type: 'team_session',
     target_id: sessionId,
-    payload: { reason: teamStopReason.value.trim() || 'Operator stop request' },
-    successMessage: 'Team stop requested',
+    payload: { reason: teamStopReason.value.trim() || '운영자 중지 요청' },
+    successMessage: '세션 중지를 요청했습니다',
   })
 }
 
@@ -252,7 +328,7 @@ async function submitKeeperMessage() {
   const keeperName = selectedKeeperName.value || snapshot?.keepers[0]?.name || ''
   const message = keeperMessage.value.trim()
   if (!keeperName) {
-    showToast('Select a keeper first', 'warning')
+    showToast('먼저 keeper를 고르세요', 'warning')
     return
   }
   if (!message) return
@@ -261,7 +337,7 @@ async function submitKeeperMessage() {
     target_type: 'keeper',
     target_id: keeperName,
     payload: { message },
-    successMessage: `Message sent to ${keeperName}`,
+    successMessage: `${keeperName}에게 메시지를 보냈습니다`,
   })
   if (result) keeperMessage.value = ''
 }
@@ -270,9 +346,9 @@ async function confirmPending(confirmToken: string) {
   const actor = actorName.value.trim() || 'dashboard'
   try {
     await confirmOperatorPendingAction(actor, confirmToken)
-    showToast('Confirmation executed', 'success')
+    showToast('확인 실행을 완료했습니다', 'success')
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Confirmation failed'
+    const message = err instanceof Error ? err.message : '확인 실행에 실패했습니다'
     showToast(message, 'error')
   }
 }
@@ -286,6 +362,8 @@ export function Ops() {
   const keepers = snapshot?.keepers ?? []
   const pendingConfirms = snapshot?.pending_confirms ?? []
   const recentMessages = snapshot?.recent_messages ?? []
+  const recommendedActions = roomDigest?.recommended_actions ?? []
+  const availableActions = snapshot?.available_actions ?? []
   const selectedSession = sessions.find(session => session.session_id === selectedSessionId.value) ?? sessions[0] ?? null
   const selectedKeeper = keepers.find(keeper => keeper.name === selectedKeeperName.value) ?? keepers[0] ?? null
   const roomAttention = roomDigest?.attention_items ?? []
@@ -307,58 +385,72 @@ export function Ops() {
   const priorityCards: OpsPriorityCardData[] = [
     {
       key: 'room',
-      label: 'Room Gate',
-      value: room.paused ? 'Paused' : 'Open',
+      label: 'Room 게이트',
+      value: room.paused ? '일시정지' : '열림',
       detail: room.paused
-        ? `Resume gate armed${room.pause_reason ? ` · ${room.pause_reason}` : ''}`
-        : 'Commands are live and the room is accepting new work',
+        ? `재개 전환 대기 중${room.pause_reason ? ` · ${room.pause_reason}` : ''}`
+        : '지금은 새 액션과 새 작업을 바로 받을 수 있습니다',
       tone: room.paused ? 'bad' : 'ok',
     },
     {
       key: 'confirm',
-      label: 'Pending Confirm',
+      label: '확인 대기',
       value: pendingConfirms.length,
       detail: pendingConfirms.length > 0
-        ? 'Previewed operator actions are waiting for confirmation'
-        : 'No confirm gates are currently blocking execution',
+        ? '미리보기만 된 개입이 아직 사람 확인을 기다리고 있습니다'
+        : '지금 막혀 있는 확인 대기는 없습니다',
       tone: pendingConfirms.length > 0 ? 'warn' : 'ok',
     },
     {
       key: 'session',
-      label: 'Session Risk',
+      label: '세션 리스크',
       value: sessionAttention.length > 0 ? sessionAttention.length : sessions.length,
       detail: sessionAttention.length > 0
-        ? sessionAttention[0]?.summary ?? 'Team sessions need steering, stop, or checkpoint attention'
+        ? sessionAttention[0]?.summary ?? '세션 중 하나가 방향 수정이나 중지 판단을 기다리고 있습니다'
         : sessions.length === 0
-          ? 'No supervised team session is active right now'
-          : 'No session-level attention items are currently active',
-      tone: sessionAttention.length > 0 ? attentionTone(sessionAttention) : sessions.length === 0 ? 'warn' : flaggedSessions.some(session => normalizeStatus(session.status) === 'paused') ? 'bad' : flaggedSessions.length > 0 ? 'warn' : 'ok',
+          ? '지금 관리 중인 team session이 없습니다'
+          : '세션 쪽 긴급 attention은 현재 없습니다',
+      tone: sessionAttention.length > 0
+        ? attentionTone(sessionAttention)
+        : sessions.length === 0
+          ? 'warn'
+          : flaggedSessions.some(session => normalizeStatus(session.status) === 'paused')
+            ? 'bad'
+            : flaggedSessions.length > 0
+              ? 'warn'
+              : 'ok',
     },
     {
       key: 'keeper',
-      label: 'Keeper Pressure',
+      label: 'Keeper 압력',
       value: keeperAttention.length > 0 ? keeperAttention.length : flaggedKeepers.length,
       detail: keeperAttention.length > 0
-        ? keeperAttention[0]?.summary ?? 'At least one keeper needs direct intervention'
+        ? keeperAttention[0]?.summary ?? '직접 메시지나 상태 점검이 필요한 keeper가 있습니다'
         : flaggedKeepers.length > 0
-          ? 'At least one keeper is stale, offline, or missing telemetry'
-          : 'Keepers are available for direct intervention',
-      tone: keeperAttention.length > 0 ? attentionTone(keeperAttention) : flaggedKeepers.some(keeper => keeperPriorityTone(keeper) === 'bad') ? 'bad' : flaggedKeepers.length > 0 ? 'warn' : 'ok',
+          ? 'stale, offline, telemetry 누락 keeper가 보입니다'
+          : '지금은 keeper 쪽이 비교적 안정적입니다',
+      tone: keeperAttention.length > 0
+        ? attentionTone(keeperAttention)
+        : flaggedKeepers.some(keeper => keeperPriorityTone(keeper) === 'bad')
+          ? 'bad'
+          : flaggedKeepers.length > 0
+            ? 'warn'
+            : 'ok',
     },
   ]
 
   return html`
     <section class="ops-view">
       <div class="ops-header card">
-      <div>
+        <div>
           <div class="card-title">Intervene</div>
-          <h2 class="ops-heading">room, session, keeper를 위한 개입 워크스페이스</h2>
+          <h2 class="ops-heading">room, session, keeper에 바로 손대는 개입 화면</h2>
           <p class="ops-subheading">
-            즉시 실행 가능한 액션만 모읍니다. 위험한 변경은 confirmation token 뒤에 둡니다.
+            읽는 화면이 아니라 행동하는 화면입니다. room, session, keeper를 나눠서 보고 바로 개입합니다.
           </p>
         </div>
         <div class="ops-toolbar">
-          <label class="control-label" for="ops-actor">Actor</label>
+          <label class="control-label" for="ops-actor">개입 ID</label>
           <input
             id="ops-actor"
             class="control-input ops-actor-input"
@@ -375,22 +467,18 @@ export function Ops() {
             }}
             disabled=${operatorLoading.value || operatorActionBusy.value}
           >
-            ${operatorLoading.value ? 'Refreshing...' : 'Refresh'}
+            ${operatorLoading.value ? '새로고침 중...' : '새로고침'}
           </button>
         </div>
       </div>
 
-      ${operatorError.value ? html`
-        <section class="ops-banner error">${operatorError.value}</section>
-      ` : null}
-      ${operatorDigestError.value ? html`
-        <section class="ops-banner error">${operatorDigestError.value}</section>
-      ` : null}
+      ${operatorError.value ? html`<section class="ops-banner error">${operatorError.value}</section>` : null}
+      ${operatorDigestError.value ? html`<section class="ops-banner error">${operatorDigestError.value}</section>` : null}
 
       <section class="card">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">개입 우선순위</h2>
-          <p class="monitor-subheadline">지금 어디를 먼저 손대야 하는지, 그리고 어떤 표면으로 내려가야 하는지를 여기서 먼저 판단합니다.</p>
+          <p class="monitor-subheadline">지금 가장 먼저 손댈 대상이 room인지, session인지, keeper인지 먼저 좁힙니다.</p>
         </div>
         <div class="ops-priority-grid">
           ${priorityCards.map(card => html`
@@ -403,101 +491,153 @@ export function Ops() {
         </div>
       </section>
 
-      <section class="card ops-panel">
-        <div class="card-title">Recommended Actions</div>
-        <p class="ops-context-note">Digest-backed recommendations are the smallest next interventions the backend currently suggests.</p>
-        ${operatorDigestLoading.value && !roomDigest ? html`
-          <div class="ops-empty">Loading operator digest…</div>
-        ` : roomDigest && roomDigest.recommended_actions.length > 0 ? html`
-          <div class="ops-log-list">
-            ${roomDigest.recommended_actions.map(item => html`
-              <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="ops-log-entry ${item.severity}">
-                <div class="ops-log-head">
-                  <strong>${item.action_type}</strong>
-                  <span>${item.target_type}${item.target_id ? `:${item.target_id}` : ''}</span>
-                  <span>${item.confirm_required ? 'confirm' : 'direct'}</span>
-                </div>
-                <div class="ops-log-body">${item.reason}</div>
-              </article>
-            `)}
-          </div>
-        ` : html`
-          <div class="ops-empty">No digest recommendations are active right now.</div>
-        `}
-      </section>
-
-      ${pendingConfirms.length > 0 ? html`
-        <section class="card ops-confirmations">
-          <div class="card-title">Pending Confirmations</div>
-          <p class="ops-context-note">Only previewed actions that still need an explicit operator confirmation stay here.</p>
-          <div class="ops-confirmation-list">
-            ${pendingConfirms.map(item => html`
-              <article key=${item.confirm_token} class="ops-confirmation-card">
-                <div class="ops-confirmation-meta">
-                  <strong>${item.action_type ?? 'unknown'}</strong>
-                  <span>${item.target_type ?? 'target'}${item.target_id ? `:${item.target_id}` : ''}</span>
-                  <span>${item.delegated_tool ?? 'delegated tool pending'}</span>
-                </div>
-                ${item.preview ? html`<pre class="ops-code-block">${prettyJson(item.preview)}</pre>` : null}
-                <div class="ops-confirmation-actions">
-                  <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
-                    Confirm
-                  </button>
-                  <span class="ops-token">${item.confirm_token}</span>
-                </div>
-              </article>
-            `)}
-          </div>
-        </section>
-      ` : null}
-
       <div class="ops-workbench">
         <div class="ops-column">
+          <section class="card ops-panel ops-lane-panel">
+            <div class="card-title">Room 개입</div>
+            <p class="ops-context-note">전체 room에 영향 주는 액션입니다. 방송, 정지/재개, 작업 주입을 여기서 처리합니다.</p>
+
+            <div class="ops-stat-grid">
+              <div class="ops-stat">
+                <span>Room</span>
+                <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
+              </div>
+              <div class="ops-stat">
+                <span>프로젝트</span>
+                <strong>${room.project ?? '확인 없음'}</strong>
+              </div>
+              <div class="ops-stat">
+                <span>클러스터</span>
+                <strong>${room.cluster ?? '확인 없음'}</strong>
+              </div>
+              <div class="ops-stat ${room.paused ? 'warn' : 'ok'}">
+                <span>상태</span>
+                <strong>${room.paused ? '일시정지' : '진행 중'}</strong>
+              </div>
+            </div>
+
+            <label class="control-label" for="ops-broadcast">Room 방송</label>
+            <div class="control-row">
+              <input
+                id="ops-broadcast"
+                class="control-input"
+                type="text"
+                placeholder="@agent 또는 room 전체 공지"
+                value=${broadcastMessage.value}
+                onInput=${(event: Event) => { broadcastMessage.value = (event.target as HTMLInputElement).value }}
+                onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
+                disabled=${operatorActionBusy.value}
+              />
+              <button class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
+                보내기
+              </button>
+            </div>
+
+            <label class="control-label" for="ops-pause-reason">일시정지 / 재개</label>
+            <div class="control-row ops-split-row">
+              <input
+                id="ops-pause-reason"
+                class="control-input"
+                type="text"
+                value=${pauseReason.value}
+                onInput=${(event: Event) => { pauseReason.value = (event.target as HTMLInputElement).value }}
+                disabled=${operatorActionBusy.value}
+              />
+              <button class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
+                일시정지
+              </button>
+              <button class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
+                재개
+              </button>
+            </div>
+
+            <div class="ops-section-head">작업 주입</div>
+            <input
+              class="control-input"
+              type="text"
+              placeholder="작업 제목"
+              value=${taskTitle.value}
+              onInput=${(event: Event) => { taskTitle.value = (event.target as HTMLInputElement).value }}
+              disabled=${operatorActionBusy.value}
+            />
+            <textarea
+              class="control-textarea"
+              rows=${3}
+              placeholder="작업 설명"
+              value=${taskDescription.value}
+              onInput=${(event: Event) => { taskDescription.value = (event.target as HTMLTextAreaElement).value }}
+              disabled=${operatorActionBusy.value}
+            ></textarea>
+            <div class="control-row ops-split-row">
+              <select
+                class="control-input ops-select"
+                value=${taskPriority.value}
+                onChange=${(event: Event) => { taskPriority.value = (event.target as HTMLSelectElement).value }}
+                disabled=${operatorActionBusy.value}
+              >
+                <option value="1">P1</option>
+                <option value="2">P2</option>
+                <option value="3">P3</option>
+                <option value="4">P4</option>
+                <option value="5">P5</option>
+              </select>
+              <button class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
+                주입
+              </button>
+            </div>
+          </section>
+
           <section class="card ops-panel">
-            <div class="card-title">Priority Queue</div>
+            <div class="card-title">추천 개입</div>
+            <p class="ops-context-note">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
+            ${operatorDigestLoading.value && !roomDigest ? html`
+              <div class="ops-empty">개입 추천을 불러오는 중입니다...</div>
+            ` : recommendedActions.length > 0 ? html`
+              <div class="ops-log-list">
+                ${recommendedActions.map(item => html`
+                  <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="ops-log-entry ${item.severity}">
+                    <div class="ops-log-head">
+                      <strong>${actionTypeLabel(item.action_type)}</strong>
+                      <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
+                      <span>${deliveryModeLabel(item.confirm_required)}</span>
+                    </div>
+                    <div class="ops-log-body">${item.reason}</div>
+                  </article>
+                `)}
+              </div>
+            ` : html`
+              <div class="ops-empty">지금 떠 있는 추천 개입은 없습니다.</div>
+            `}
+          </section>
+
+          <section class="card ops-panel">
+            <div class="card-title">승인 대기</div>
+            <p class="ops-context-note">미리보기만 끝났고 아직 사람이 눌러줘야 하는 액션만 남깁니다.</p>
             ${pendingConfirms.length > 0 ? html`
               <div class="ops-confirmation-list">
                 ${pendingConfirms.map(item => html`
                   <article key=${item.confirm_token} class="ops-confirmation-card">
                     <div class="ops-confirmation-meta">
-                      <strong>${item.action_type ?? 'unknown'}</strong>
-                      <span>${item.target_type ?? 'target'}${item.target_id ? `:${item.target_id}` : ''}</span>
-                      <span>${item.delegated_tool ?? 'delegated tool pending'}</span>
+                      <strong>${actionTypeLabel(item.action_type)}</strong>
+                      <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
+                      <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
                     </div>
                     ${item.preview ? html`<pre class="ops-code-block compact">${prettyJson(item.preview)}</pre>` : null}
                     <div class="ops-confirmation-actions">
                       <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
-                        Confirm
+                        실행
                       </button>
                       <span class="ops-token">${item.confirm_token}</span>
                     </div>
                   </article>
                 `)}
               </div>
-            ` : html`<div class="ops-empty">No pending confirmations.</div>`}
+            ` : html`<div class="ops-empty">지금 승인 대기는 없습니다.</div>`}
           </section>
 
           <section class="card ops-panel">
-            <div class="card-title">Operator Log</div>
-            <div class="ops-log-list">
-              ${operatorActionLog.value.length === 0 ? html`
-                <div class="ops-empty">No operator actions in this session yet.</div>
-              ` : operatorActionLog.value.map(entry => html`
-                <article key=${entry.id} class="ops-log-entry ${entry.outcome}">
-                  <div class="ops-log-head">
-                    <strong>${entry.action_type}</strong>
-                    <span>${entry.target_label}</span>
-                    <span>${entry.at}</span>
-                  </div>
-                  <div class="ops-log-body">${entry.message}</div>
-                </article>
-              `)}
-            </div>
-          </section>
-
-          <section class="card ops-panel">
-            <div class="card-title">Room Feed</div>
-            <p class="ops-context-note">Recent chatter stays available for operator context, but it is secondary to the intervention queue.</p>
+            <div class="card-title">최근 Room 메시지</div>
+            <p class="ops-context-note">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
             ${roomFeed.length > 0 ? html`
               <div class="ops-feed-list">
                 ${roomFeed.map(message => html`
@@ -510,16 +650,17 @@ export function Ops() {
                   </article>
                 `)}
               </div>
-            ` : html`<div class="ops-empty">No recent room messages.</div>`}
+            ` : html`<div class="ops-empty">최근 room 메시지가 없습니다.</div>`}
           </section>
         </div>
 
         <div class="ops-column">
-          <section class="card ops-panel">
-            <div class="card-title">Session Queue</div>
-            <p class="ops-context-note">Select the session that needs steering. This queue should answer which run is hot, paused, or drifting.</p>
+          <section class="card ops-panel ops-lane-panel">
+            <div class="card-title">Session 개입</div>
+            <p class="ops-context-note">어떤 세션이 뜨거운지 고르고, 그 세션에만 노트, 작업, 중지를 적용합니다.</p>
+
             <div class="ops-entity-list">
-              ${sessions.length === 0 ? html`<div class="ops-empty">No team sessions available.</div>` : sessions.map(session => html`
+              ${sessions.length === 0 ? html`<div class="ops-empty">지금 활성 team session이 없습니다.</div>` : sessions.map(session => html`
                 <button
                   key=${session.session_id}
                   class="ops-entity-card ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
@@ -527,12 +668,12 @@ export function Ops() {
                 >
                   <div class="ops-entity-title-row">
                     <strong>${session.session_id}</strong>
-                    <span class="status-badge ${session.status ?? 'idle'}">${session.status ?? 'unknown'}</span>
+                    <span class="status-badge ${session.status ?? 'idle'}">${displayStatus(session.status)}</span>
                   </div>
                   <div class="ops-entity-meta">
                     <span>${Math.round(session.progress_pct ?? 0)}%</span>
-                    <span>${session.done_delta_total ?? 0} done</span>
-                    <span>${session.team_health?.status ? String(session.team_health.status) : 'health n/a'}</span>
+                    <span>${session.done_delta_total ?? 0}건 완료</span>
+                    <span>${session.team_health?.status ? displayStatus(String(session.team_health.status)) : '상태 확인 필요'}</span>
                   </div>
                 </button>
               `)}
@@ -540,25 +681,25 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel">
-            <div class="card-title">Session Digest</div>
-            <p class="ops-context-note">Worker cards and attention items come from operator digest, not the lighter snapshot.</p>
+            <div class="card-title">선택한 Session 요약</div>
+            <p class="ops-context-note">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
             ${selectedSession && sessionDigest ? html`
               <div class="ops-log-list">
                 ${sessionDigest.attention_items.length > 0 ? sessionDigest.attention_items.map(item => html`
                   <article key=${`${item.kind}:${item.target_id ?? 'session'}`} class="ops-log-entry ${item.severity}">
                     <div class="ops-log-head">
                       <strong>${item.kind}</strong>
-                      <span>${item.target_type}${item.target_id ? `:${item.target_id}` : ''}</span>
+                      <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                     </div>
                     <div class="ops-log-body">${item.summary}</div>
                   </article>
-                `) : html`<div class="ops-empty">No session-specific attention items.</div>`}
+                `) : html`<div class="ops-empty">이 세션의 attention item은 없습니다.</div>`}
                 ${sessionDigest.worker_cards.length > 0 ? sessionDigest.worker_cards.map(card => html`
-                  <article key=${`${card.actor ?? card.spawn_role ?? 'worker'}:${card.spawn_agent ?? 'runtime'}`} class="ops-log-entry">
+                  <article key=${`${card.actor ?? card.spawn_role ?? 'worker'}:${card.spawn_agent ?? card.runtime_pool ?? 'runtime'}`} class="ops-log-entry">
                     <div class="ops-log-head">
                       <strong>${card.actor ?? card.spawn_role ?? 'worker'}</strong>
-                      <span>${card.status}</span>
-                      <span>${card.spawn_agent ?? card.runtime_pool ?? 'runtime n/a'}</span>
+                      <span>${displayStatus(card.status)}</span>
+                      <span>${card.spawn_agent ?? card.runtime_pool ?? 'runtime 확인 필요'}</span>
                     </div>
                     <div class="ops-log-body">
                       ${(card.worker_class ?? 'worker')}${card.lane_id ? ` · ${card.lane_id}` : ''}${card.routing_reason ? ` · ${card.routing_reason}` : ''}
@@ -567,15 +708,110 @@ export function Ops() {
                 `) : null}
               </div>
             ` : html`
-              <div class="ops-empty">Select a team session to load digest-backed worker cards.</div>
+              <div class="ops-empty">세션을 고르면 세부 요약을 불러옵니다.</div>
             `}
           </section>
 
-          <section class="card ops-panel">
-            <div class="card-title">Keeper Queue</div>
-            <p class="ops-context-note">Keepers are long-lived operators. Pick one when you need recovery, course correction, or a direct probe.</p>
+          <section class="card ops-panel ops-lane-panel">
+            <div class="card-title">선택한 Session 액션</div>
+            <p class="ops-context-note">선택한 세션에만 메모, 작업, 체크포인트, 중지 요청을 보냅니다.</p>
+
+            ${selectedSession ? html`
+              <div class="ops-detail-card">
+                <div class="ops-detail-title">${selectedSession.session_id}</div>
+                <div class="ops-detail-meta">
+                  <span>상태: ${displayStatus(selectedSession.status)}</span>
+                  <span>경과: ${selectedSession.elapsed_sec ?? 0}초</span>
+                  <span>남은 시간: ${selectedSession.remaining_sec ?? 0}초</span>
+                </div>
+                ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
+                  <pre class="ops-code-block compact">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
+                ` : null}
+              </div>
+            ` : html`<div class="ops-empty">먼저 세션을 하나 고르세요.</div>`}
+
+            <label class="control-label" for="ops-turn-kind">세션 액션</label>
+            <div class="control-row ops-split-row">
+              <select
+                id="ops-turn-kind"
+                class="control-input ops-select"
+                value=${teamTurnKind.value}
+                onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
+                disabled=${operatorActionBusy.value || !selectedSession}
+              >
+                <option value="note">노트</option>
+                <option value="broadcast">방송</option>
+                <option value="task">작업</option>
+                <option value="checkpoint">체크포인트</option>
+              </select>
+              <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${operatorActionBusy.value || !selectedSession}>
+                적용
+              </button>
+            </div>
+            <div class="ops-context-note">현재 선택: ${sessionActionLabel(teamTurnKind.value)}</div>
+
+            <textarea
+              class="control-textarea"
+              rows=${3}
+              placeholder="세션에 남길 메시지"
+              value=${teamMessage.value}
+              onInput=${(event: Event) => { teamMessage.value = (event.target as HTMLTextAreaElement).value }}
+              disabled=${operatorActionBusy.value || !selectedSession}
+            ></textarea>
+
+            ${teamTurnKind.value === 'task' ? html`
+              <input
+                class="control-input"
+                type="text"
+                placeholder="주입할 작업 제목"
+                value=${teamTaskTitle.value}
+                onInput=${(event: Event) => { teamTaskTitle.value = (event.target as HTMLInputElement).value }}
+                disabled=${operatorActionBusy.value || !selectedSession}
+              />
+              <textarea
+                class="control-textarea"
+                rows=${2}
+                placeholder="주입할 작업 설명"
+                value=${teamTaskDescription.value}
+                onInput=${(event: Event) => { teamTaskDescription.value = (event.target as HTMLTextAreaElement).value }}
+                disabled=${operatorActionBusy.value || !selectedSession}
+              ></textarea>
+              <select
+                class="control-input ops-select"
+                value=${teamTaskPriority.value}
+                onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
+                disabled=${operatorActionBusy.value || !selectedSession}
+              >
+                <option value="1">P1</option>
+                <option value="2">P2</option>
+                <option value="3">P3</option>
+                <option value="4">P4</option>
+                <option value="5">P5</option>
+              </select>
+            ` : null}
+
+            <div class="control-row ops-split-row">
+              <input
+                class="control-input"
+                type="text"
+                value=${teamStopReason.value}
+                onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
+                disabled=${operatorActionBusy.value || !selectedSession}
+              />
+              <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${operatorActionBusy.value || !selectedSession}>
+                세션 중지
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <div class="ops-column">
+          <section class="card ops-panel ops-lane-panel">
+            <div class="card-title">Keeper 개입</div>
+            <p class="ops-context-note">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
+
             <div class="ops-entity-list">
-              ${keepers.length === 0 ? html`<div class="ops-empty">No keepers available.</div>` : keepers.map(keeper => html`
+              ${keepers.length === 0 ? html`<div class="ops-empty">지금 보이는 keeper가 없습니다.</div>` : keepers.map(keeper => html`
                 <button
                   key=${keeper.name}
                   class="ops-entity-card ${selectedKeeper?.name === keeper.name ? 'active' : ''}"
@@ -583,11 +819,11 @@ export function Ops() {
                 >
                   <div class="ops-entity-title-row">
                     <strong>${keeper.name}</strong>
-                    <span class="status-badge ${keeper.status ?? 'idle'}">${keeper.status ?? 'unknown'}</span>
+                    <span class="status-badge ${keeper.status ?? 'idle'}">${displayStatus(keeper.status)}</span>
                   </div>
                   <div class="ops-entity-meta">
-                    <span>${keeper.model ?? 'model n/a'}</span>
-                    <span>${typeof keeper.context_ratio === 'number' ? `${Math.round(keeper.context_ratio * 100)}% ctx` : 'ctx n/a'}</span>
+                    <span>${keeper.model ?? 'model 확인 필요'}</span>
+                    <span>${typeof keeper.context_ratio === 'number' ? `${Math.round(keeper.context_ratio * 100)}% ctx` : 'ctx 확인 필요'}</span>
                     <span>${relativeAge(keeper.last_turn_ago_s)}</span>
                   </div>
                 </button>
@@ -595,237 +831,72 @@ export function Ops() {
             </div>
           </section>
 
-          <section class="card ops-panel">
-            <div class="card-title">Available Actions</div>
-            <p class="ops-context-note">These are the actions the backend currently advertises, even if they are not all wired into inline controls yet.</p>
-            <div class="ops-log-list">
-              ${snapshot?.available_actions?.length
-                ? snapshot.available_actions.map(action => html`
-                    <article key=${`${action.action_type}:${action.target_type}`} class="ops-log-entry">
-                      <div class="ops-log-head">
-                        <strong>${action.action_type}</strong>
-                        <span>${action.target_type}</span>
-                        <span>${action.confirm_required ? 'confirm' : 'direct'}</span>
-                      </div>
-                      <div class="ops-log-body">${action.description ?? 'No description'}</div>
-                    </article>
-                  `)
-                : html`<div class="ops-empty">No available action descriptors.</div>`}
+          <section class="card ops-panel ops-lane-panel">
+            <div class="card-title">선택한 Keeper 액션</div>
+            <p class="ops-context-note">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
+
+            ${selectedKeeper ? html`
+              <div class="ops-detail-card">
+                <div class="ops-detail-title">${selectedKeeper.name}</div>
+                <div class="ops-detail-meta">
+                  <span>자율성: ${selectedKeeper.autonomy_level ?? '확인 없음'}</span>
+                  <span>세대: ${selectedKeeper.generation ?? 0}</span>
+                  <span>활성 목표: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
+                </div>
+              </div>
+            ` : html`<div class="ops-empty">먼저 keeper를 하나 고르세요.</div>`}
+
+            <label class="control-label" for="ops-keeper-message">Keeper 메시지</label>
+            <textarea
+              id="ops-keeper-message"
+              class="control-textarea"
+              rows=${6}
+              placeholder="구조화된 probe, 방향 수정, 재지시 내용을 적으세요"
+              value=${keeperMessage.value}
+              onInput=${(event: Event) => { keeperMessage.value = (event.target as HTMLTextAreaElement).value }}
+              disabled=${operatorActionBusy.value || !selectedKeeper}
+            ></textarea>
+            <div class="control-row">
+              <button class="control-btn" onClick=${() => { void submitKeeperMessage() }} disabled=${operatorActionBusy.value || !selectedKeeper || keeperMessage.value.trim() === ''}>
+                keeper에 보내기
+              </button>
             </div>
           </section>
-        </div>
 
-        <div class="ops-column ops-studio-column">
-          <section class="card ops-panel ops-studio-panel">
-            <div class="card-title">Action Studio</div>
-            <p class="ops-context-note">All write controls are centralized here. Room actions stay global; session and keeper actions always target the currently selected entity.</p>
-
-            <div class="ops-studio-group">
-              <div class="ops-section-head">Room Gate</div>
-              <div class="ops-stat-grid">
-                <div class="ops-stat">
-                  <span>Room</span>
-                  <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
-                </div>
-                <div class="ops-stat">
-                  <span>Project</span>
-                  <strong>${room.project ?? 'n/a'}</strong>
-                </div>
-                <div class="ops-stat">
-                  <span>Cluster</span>
-                  <strong>${room.cluster ?? 'n/a'}</strong>
-                </div>
-                <div class="ops-stat ${room.paused ? 'warn' : 'ok'}">
-                  <span>Status</span>
-                  <strong>${room.paused ? 'Paused' : 'Running'}</strong>
-                </div>
-              </div>
-
-              <label class="control-label" for="ops-broadcast">Room Broadcast</label>
-              <div class="control-row">
-                <input
-                  id="ops-broadcast"
-                  class="control-input"
-                  type="text"
-                  placeholder="@agent or room-wide operator update"
-                  value=${broadcastMessage.value}
-                  onInput=${(event: Event) => { broadcastMessage.value = (event.target as HTMLInputElement).value }}
-                  onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
-                  disabled=${operatorActionBusy.value}
-                />
-                <button class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
-                  Send
-                </button>
-              </div>
-
-              <label class="control-label" for="ops-pause-reason">Pause or Resume</label>
-              <div class="control-row ops-split-row">
-                <input
-                  id="ops-pause-reason"
-                  class="control-input"
-                  type="text"
-                  value=${pauseReason.value}
-                  onInput=${(event: Event) => { pauseReason.value = (event.target as HTMLInputElement).value }}
-                  disabled=${operatorActionBusy.value}
-                />
-                <button class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
-                  Pause
-                </button>
-                <button class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
-                  Resume
-                </button>
-              </div>
-
-              <div class="ops-section-head">Inject Work</div>
-              <input
-                class="control-input"
-                type="text"
-                placeholder="Task title"
-                value=${taskTitle.value}
-                onInput=${(event: Event) => { taskTitle.value = (event.target as HTMLInputElement).value }}
-                disabled=${operatorActionBusy.value}
-              />
-              <textarea
-                class="control-textarea"
-                rows=${3}
-                placeholder="Task description"
-                value=${taskDescription.value}
-                onInput=${(event: Event) => { taskDescription.value = (event.target as HTMLTextAreaElement).value }}
-                disabled=${operatorActionBusy.value}
-              ></textarea>
-              <div class="control-row ops-split-row">
-                <select
-                  class="control-input ops-select"
-                  value=${taskPriority.value}
-                  onChange=${(event: Event) => { taskPriority.value = (event.target as HTMLSelectElement).value }}
-                  disabled=${operatorActionBusy.value}
-                >
-                  <option value="1">P1</option>
-                  <option value="2">P2</option>
-                  <option value="3">P3</option>
-                  <option value="4">P4</option>
-                  <option value="5">P5</option>
-                </select>
-                <button class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
-                  Inject
-                </button>
-              </div>
+          <section class="card ops-panel">
+            <div class="card-title">가능한 액션 목록</div>
+            <p class="ops-context-note">백엔드가 현재 허용한다고 광고하는 액션입니다. 일부는 이 화면의 폼과 1:1로 연결됩니다.</p>
+            <div class="ops-log-list">
+              ${availableActions.length
+                ? availableActions.map(action => html`
+                    <article key=${`${action.action_type}:${action.target_type}`} class="ops-log-entry">
+                      <div class="ops-log-head">
+                        <strong>${actionTypeLabel(action.action_type)}</strong>
+                        <span>${targetTypeLabel(action.target_type)}</span>
+                        <span>${deliveryModeLabel(action.confirm_required)}</span>
+                      </div>
+                      <div class="ops-log-body">${action.description ?? '설명이 아직 없습니다.'}</div>
+                    </article>
+                  `)
+                : html`<div class="ops-empty">노출된 액션 설명이 없습니다.</div>`}
             </div>
+          </section>
 
-            <div class="ops-studio-group">
-              <div class="ops-section-head">Selected Session</div>
-              ${selectedSession ? html`
-                <div class="ops-detail-card">
-                  <div class="ops-detail-title">${selectedSession.session_id}</div>
-                  <div class="ops-detail-meta">
-                    <span>Status: ${selectedSession.status ?? 'unknown'}</span>
-                    <span>Elapsed: ${selectedSession.elapsed_sec ?? 0}s</span>
-                    <span>Remaining: ${selectedSession.remaining_sec ?? 0}s</span>
+          <section class="card ops-panel">
+            <div class="card-title">최근 개입 로그</div>
+            <div class="ops-log-list">
+              ${operatorActionLog.value.length === 0 ? html`
+                <div class="ops-empty">이 세션에서 실행한 개입이 아직 없습니다.</div>
+              ` : operatorActionLog.value.map(entry => html`
+                <article key=${entry.id} class="ops-log-entry ${entry.outcome}">
+                  <div class="ops-log-head">
+                    <strong>${actionTypeLabel(entry.action_type)}</strong>
+                    <span>${entry.target_label}</span>
+                    <span>${entry.at}</span>
                   </div>
-                  ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
-                    <pre class="ops-code-block compact">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
-                  ` : null}
-                </div>
-              ` : html`<div class="ops-empty">Select a team session to edit notes, inject tasks, or stop the run.</div>`}
-
-              <label class="control-label" for="ops-turn-kind">Session Action</label>
-              <div class="control-row ops-split-row">
-                <select
-                  id="ops-turn-kind"
-                  class="control-input ops-select"
-                  value=${teamTurnKind.value}
-                  onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
-                  disabled=${operatorActionBusy.value || !selectedSession}
-                >
-                  <option value="note">Note</option>
-                  <option value="broadcast">Broadcast</option>
-                  <option value="task">Task</option>
-                  <option value="checkpoint">Checkpoint</option>
-                </select>
-                <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${operatorActionBusy.value || !selectedSession}>
-                  Apply
-                </button>
-              </div>
-              <textarea
-                class="control-textarea"
-                rows=${3}
-                placeholder="Session message"
-                value=${teamMessage.value}
-                onInput=${(event: Event) => { teamMessage.value = (event.target as HTMLTextAreaElement).value }}
-                disabled=${operatorActionBusy.value || !selectedSession}
-              ></textarea>
-              ${teamTurnKind.value === 'task' ? html`
-                <input
-                  class="control-input"
-                  type="text"
-                  placeholder="Injected task title"
-                  value=${teamTaskTitle.value}
-                  onInput=${(event: Event) => { teamTaskTitle.value = (event.target as HTMLInputElement).value }}
-                  disabled=${operatorActionBusy.value || !selectedSession}
-                />
-                <textarea
-                  class="control-textarea"
-                  rows=${2}
-                  placeholder="Injected task description"
-                  value=${teamTaskDescription.value}
-                  onInput=${(event: Event) => { teamTaskDescription.value = (event.target as HTMLTextAreaElement).value }}
-                  disabled=${operatorActionBusy.value || !selectedSession}
-                ></textarea>
-                <select
-                  class="control-input ops-select"
-                  value=${teamTaskPriority.value}
-                  onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
-                  disabled=${operatorActionBusy.value || !selectedSession}
-                >
-                  <option value="1">P1</option>
-                  <option value="2">P2</option>
-                  <option value="3">P3</option>
-                  <option value="4">P4</option>
-                  <option value="5">P5</option>
-                </select>
-              ` : null}
-              <div class="control-row ops-split-row">
-                <input
-                  class="control-input"
-                  type="text"
-                  value=${teamStopReason.value}
-                  onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
-                  disabled=${operatorActionBusy.value || !selectedSession}
-                />
-                <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${operatorActionBusy.value || !selectedSession}>
-                  Stop
-                </button>
-              </div>
-            </div>
-
-            <div class="ops-studio-group">
-              <div class="ops-section-head">Selected Keeper</div>
-              ${selectedKeeper ? html`
-                <div class="ops-detail-card">
-                  <div class="ops-detail-title">${selectedKeeper.name}</div>
-                  <div class="ops-detail-meta">
-                    <span>Autonomy: ${selectedKeeper.autonomy_level ?? 'n/a'}</span>
-                    <span>Generation: ${selectedKeeper.generation ?? 0}</span>
-                    <span>Goals: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
-                  </div>
-                </div>
-              ` : html`<div class="ops-empty">Select a keeper to send a direct intervention.</div>`}
-
-              <label class="control-label" for="ops-keeper-message">Keeper Message</label>
-              <textarea
-                id="ops-keeper-message"
-                class="control-textarea"
-                rows=${6}
-                placeholder="Send a structured intervention or course correction"
-                value=${keeperMessage.value}
-                onInput=${(event: Event) => { keeperMessage.value = (event.target as HTMLTextAreaElement).value }}
-                disabled=${operatorActionBusy.value || !selectedKeeper}
-              ></textarea>
-              <div class="control-row">
-                <button class="control-btn" onClick=${() => { void submitKeeperMessage() }} disabled=${operatorActionBusy.value || !selectedKeeper || keeperMessage.value.trim() === ''}>
-                  Send Keeper Message
-                </button>
-              </div>
+                  <div class="ops-log-body">${entry.message}</div>
+                </article>
+              `)}
             </div>
           </section>
         </div>

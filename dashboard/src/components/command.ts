@@ -203,24 +203,59 @@ function historySummary(history?: ChainHistoryEventSummary | null): string {
 }
 
 const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: string }> = [
-  { id: 'summary', label: '요약' },
-  { id: 'swarm', label: '스웜' },
   { id: 'operations', label: '작전' },
+  { id: 'swarm', label: '스웜' },
   { id: 'chains', label: '체인' },
   { id: 'topology', label: '토폴로지' },
   { id: 'alerts', label: '알림' },
   { id: 'trace', label: '트레이스' },
   { id: 'control', label: '제어' },
+  { id: 'summary', label: '요약' },
 ]
 const COMMAND_SURFACES: CommandPlaneSurface[] = COMMAND_SURFACE_META.map(item => item.id)
 const CHAIN_SSE_EVENT_TYPES = ['chain_start', 'node_start', 'node_complete', 'chain_complete', 'chain_error']
+
+const COMMAND_SURFACE_GUIDE: Record<CommandPlaneSurface, { title: string; description: string }> = {
+  operations: {
+    title: '현재 작전 상세',
+    description: '활성 operation, detachment, dependency를 먼저 읽는 기본 진입 표면입니다.',
+  },
+  swarm: {
+    title: '스웜 실행 흐름',
+    description: 'lane 이동, worker 결속, blocker를 따라가며 현장감 있게 보는 표면입니다.',
+  },
+  chains: {
+    title: '체인 런타임',
+    description: '체인 연결 상태와 operation별 실행 그래프를 확인하는 표면입니다.',
+  },
+  topology: {
+    title: '지휘 계층',
+    description: 'company에서 agent까지 지휘 계층과 live roster를 확인합니다.',
+  },
+  alerts: {
+    title: '경보 모음',
+    description: '지금 개입을 밀어올리는 alert만 모아서 보는 표면입니다.',
+  },
+  trace: {
+    title: '최근 트레이스',
+    description: 'operation, actor, unit 단위 이벤트를 시간순으로 보는 표면입니다.',
+  },
+  control: {
+    title: '승인과 제어',
+    description: 'decision 승인과 unit 제어를 실제로 수행하는 표면입니다.',
+  },
+  summary: {
+    title: '지휘 요약',
+    description: '전체 지휘면을 한 번에 훑는 계기판 성격의 요약 표면입니다.',
+  },
+}
 
 function isCommandSurface(value: string | undefined): value is CommandPlaneSurface {
   return !!value && COMMAND_SURFACES.includes(value as CommandPlaneSurface)
 }
 
 function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
-  if (surface === 'summary') return {}
+  if (surface === 'operations') return {}
   if (surface === 'chains') {
     const operationId = commandPlaneChainFocusOperationId.value
     return operationId ? { surface, operation: operationId } : { surface }
@@ -259,6 +294,80 @@ function actionDisabled(key: string): boolean {
 
 function currentCommandPlaneSummary() {
   return commandPlaneSummary.value
+}
+
+function currentSurfaceRecommendation(surface: CommandPlaneSurface): {
+  tool: string
+  reason: string
+} {
+  const summary = commandPlaneSummary.value
+  const swarm = commandPlaneSwarm.value
+  const chainSummary = commandPlaneChainSummary.value
+
+  switch (surface) {
+    case 'operations':
+      return {
+        tool: 'masc_operation_status',
+        reason: `활성 작전 ${summary?.operations.summary?.active ?? 0}개와 dependency를 먼저 확인합니다.`,
+      }
+    case 'swarm':
+      return {
+        tool: swarm?.recommended_next_tool ?? summary?.swarm_status?.recommended_next_action?.tool ?? 'masc_observe_traces',
+        reason: summary?.swarm_status?.recommended_next_action?.reason ?? 'lane 이동과 blocker를 보고 다음 probe 도구를 고릅니다.',
+      }
+    case 'chains':
+      return {
+        tool: chainSummary?.operations[0]?.preview_run?.chain_id ? 'masc_chain_run_get' : 'masc_chain_snapshot',
+        reason: '체인 연결 상태와 최근 run 그래프를 함께 보면 병목을 빨리 좁힐 수 있습니다.',
+      }
+    case 'topology':
+      return {
+        tool: 'masc_observe_topology',
+        reason: '지휘 계층과 live roster를 같이 봐야 빈 squad나 고립 unit을 놓치지 않습니다.',
+      }
+    case 'alerts':
+      return {
+        tool: 'masc_observe_alerts',
+        reason: '경보에서 먼저 문제가 된 unit과 operation을 고릅니다.',
+      }
+    case 'trace':
+      return {
+        tool: 'masc_observe_traces',
+        reason: 'trace 흐름으로 원인 이벤트를 바로 따라갈 수 있습니다.',
+      }
+    case 'control':
+      return {
+        tool: 'masc_operator_action',
+        reason: '승인이나 kill switch 같은 실제 조작은 control 표면과 operator action이 이어집니다.',
+      }
+    case 'summary':
+    default:
+      return {
+        tool: 'masc_observe_operations',
+        reason: '요약을 본 뒤에는 현재 작전 표면으로 내려가 실제 움직임을 확인하는 게 가장 빠릅니다.',
+      }
+  }
+}
+
+function CommandEntryStrip() {
+  const surface = commandPlaneSurface.value
+  const guide = COMMAND_SURFACE_GUIDE[surface]
+  const recommendation = currentSurfaceRecommendation(surface)
+
+  return html`
+    <section class="command-entry-strip">
+      <article class="command-entry-card">
+        <span class="command-entry-label">현재 표면</span>
+        <strong>${guide.title}</strong>
+        <p>${guide.description}</p>
+      </article>
+      <article class="command-entry-card">
+        <span class="command-entry-label">다음 추천</span>
+        <strong>${recommendation.tool}</strong>
+        <p>${recommendation.reason}</p>
+      </article>
+    </section>
+  `
 }
 
 function GraphicGauge({
@@ -1886,10 +1995,10 @@ function TopologySurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <section class="card command-section">
-      <div class="card-title">Topology</div>
+      <div class="card-title">지휘 계층</div>
       ${snapshot && snapshot.topology.units.length > 0
         ? html`${snapshot.topology.units.map(node => html`<${TopologyNode} node=${node} />`)}`
-        : html`<div class="empty-state">No command topology projected yet.</div>`}
+        : html`<div class="empty-state">아직 그려진 지휘 계층이 없습니다.</div>`}
     </section>
   `
 }
@@ -1898,12 +2007,12 @@ function AlertsSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <section class="card command-section">
-      <div class="card-title">Alerts</div>
+      <div class="card-title">경보</div>
       ${snapshot && snapshot.alerts.alerts.length > 0
         ? html`<div class="command-card-stack">
             ${snapshot.alerts.alerts.map(alert => html`<${AlertCard} alert=${alert} />`)}
           </div>`
-        : html`<div class="empty-state">No command-plane alerts right now.</div>`}
+        : html`<div class="empty-state">지금 올라온 command-plane 경보는 없습니다.</div>`}
     </section>
   `
 }
@@ -1912,12 +2021,12 @@ function TraceSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <section class="card command-section">
-      <div class="card-title">Trace</div>
+      <div class="card-title">최근 트레이스</div>
       ${snapshot && snapshot.traces.events.length > 0
         ? html`<div class="command-trace-stack">
             ${snapshot.traces.events.map(event => html`<${TraceRow} event=${event} />`)}
           </div>`
-        : html`<div class="empty-state">No recent trace events.</div>`}
+        : html`<div class="empty-state">최근 trace event가 없습니다.</div>`}
     </section>
   `
 }
@@ -1927,21 +2036,21 @@ function ControlSurface() {
   return html`
     <div class="command-surface-grid">
       <section class="card command-section">
-        <div class="card-title">Approval Queue</div>
+        <div class="card-title">승인 대기</div>
         ${snapshot && snapshot.decisions.decisions.length > 0
           ? html`<div class="command-card-stack">
               ${snapshot.decisions.decisions.map(decision => html`<${DecisionCard} decision=${decision} />`)}
             </div>`
-          : html`<div class="empty-state">No approval queue items.</div>`}
+          : html`<div class="empty-state">지금 승인 대기 항목은 없습니다.</div>`}
       </section>
 
       <section class="card command-section">
-        <div class="card-title">Unit Controls</div>
+        <div class="card-title">Unit 제어</div>
         ${snapshot && snapshot.capacity.capacity.length > 0
           ? html`<div class="command-card-stack">
               ${snapshot.capacity.capacity.map(row => html`<${CapacityRowCard} row=${row} />`)}
             </div>`
-          : html`<div class="empty-state">No capacity rows projected.</div>`}
+          : html`<div class="empty-state">제어할 capacity 행이 아직 없습니다.</div>`}
       </section>
     </div>
   `
@@ -1990,7 +2099,7 @@ export function Command() {
       setCommandPlaneSurface(requestedSurface)
     }
     else if (!requestedSurface) {
-      setCommandPlaneSurface('summary')
+      setCommandPlaneSurface('operations')
     }
     if (requestedOperation) {
       focusCommandPlaneChainOperation(requestedOperation)
@@ -2040,7 +2149,7 @@ export function Command() {
       <div class="panel-header">
         <div>
           <h2>지휘면 / Command Plane</h2>
-          <p>Operations-first command surface for company → platoon → squad → agent orchestration, approvals, alerts, and traceability.</p>
+          <p>기본 진입은 현재 작전입니다. 여기서는 지금 무엇이 움직이고 막히는지 확인한 뒤, 필요한 surface로만 더 깊게 내려갑니다.</p>
         </div>
         <div class="panel-actions">
           <button
@@ -2050,7 +2159,7 @@ export function Command() {
             }}
             disabled=${actionDisabled('dispatch:tick')}
           >
-            ${actionDisabled('dispatch:tick') ? 'Reconciling…' : 'Run Tick'}
+            ${actionDisabled('dispatch:tick') ? '정리 중...' : 'Tick 실행'}
           </button>
           <button
             class="control-btn ghost"
@@ -2061,7 +2170,7 @@ export function Command() {
             }}
             disabled=${commandPlaneLoading.value}
           >
-            ${commandPlaneLoading.value ? 'Refreshing…' : 'Refresh'}
+            ${commandPlaneLoading.value ? '새로고침 중...' : '새로고침'}
           </button>
         </div>
       </div>
@@ -2072,6 +2181,7 @@ export function Command() {
       ${commandPlaneActionError.value
         ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
         : null}
+      <${CommandEntryStrip} />
       <${SurfaceTabs} />
       <${SurfaceBody} />
     </section>

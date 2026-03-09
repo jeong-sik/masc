@@ -658,26 +658,10 @@ function GuidedPanel() {
   )
 
   return html`
-    <div class="command-guide-grid">
+    <div class="command-guided-layout">
       <section class="card command-section">
-        <div class="card-title">Readiness</div>
-        <div class="command-guide-readiness">
-          ${readiness.map(item => html`
-            <article class="command-guide-card ${toneClass(item.tone)}">
-              <div class="command-guide-head">
-                <strong>${item.title}</strong>
-                <span class="command-chip ${toneClass(item.tone)}">${item.tone}</span>
-              </div>
-              <p>${item.detail}</p>
-              <div class="command-card-foot">Next tool: ${item.tool}</div>
-            </article>
-          `)}
-        </div>
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Next Step</div>
-        <article class="command-guide-card highlight">
+        <div class="card-title">Immediate Actions</div>
+        <div class="command-guide-card highlight command-next-step-card">
           <div class="command-guide-head">
             <strong>${nextStep?.title ?? nextTool}</strong>
             <span class="command-chip ok">${nextTool}</span>
@@ -688,28 +672,52 @@ function GuidedPanel() {
                 ${nextStep.success_signals.map(signal => html`<span class="command-tag ok">${signal}</span>`)}
               </div>`
             : null}
-          ${pitfalls.length > 0
-            ? html`<div class="command-guide-list">
-                ${pitfalls.map(pitfall => html`
-                  <article class="command-guide-inline">
-                    <strong>${pitfall.title}</strong>
-                    <div>${pitfall.symptom}</div>
-                    <div class="command-card-sub">Fix with ${pitfall.fix_tool}: ${pitfall.fix_summary}</div>
-                  </article>
-                `)}
-              </div>`
-            : null}
-        </article>
+        </div>
+
+        <div class="command-readiness-list">
+          ${readiness.map(item => html`
+            <article class="command-readiness-row ${toneClass(item.tone)}">
+              <div>
+                <div class="command-readiness-title-row">
+                  <strong>${item.title}</strong>
+                  <span class="command-chip ${toneClass(item.tone)}">${item.tone}</span>
+                </div>
+                <p>${item.detail}</p>
+              </div>
+              <div class="command-card-foot">Next tool: ${item.tool}</div>
+            </article>
+          `)}
+        </div>
+
+        ${pitfalls.length > 0
+          ? html`
+              <div class="command-guide-card warn">
+                <div class="command-guide-head">
+                  <strong>Common Pitfalls</strong>
+                  <span class="command-chip warn">${pitfalls.length}</span>
+                </div>
+                <div class="command-guide-list">
+                  ${pitfalls.map(pitfall => html`
+                    <article class="command-guide-inline">
+                      <strong>${pitfall.title}</strong>
+                      <div>${pitfall.symptom}</div>
+                      <div class="command-card-sub">Fix with ${pitfall.fix_tool}: ${pitfall.fix_summary}</div>
+                    </article>
+                  `)}
+                </div>
+              </div>
+            `
+          : null}
       </section>
 
       <section class="card command-section">
-        <div class="card-title">How It Works</div>
+        <div class="card-title">Operating Paths</div>
         ${commandPlaneHelpLoading.value
           ? html`<div class="empty-state">Loading CPv2 runbook…</div>`
           : commandPlaneHelpError.value
             ? html`<div class="empty-state error">${commandPlaneHelpError.value}</div>`
             : html`
-                <div class="command-guide-paths">
+                <div class="command-path-grid">
                   ${renderedPaths.map(path => html`
                     <article class="command-guide-card">
                       <div class="command-guide-head">
@@ -718,8 +726,8 @@ function GuidedPanel() {
                       </div>
                       <p>${path.summary}</p>
                       <div class="command-card-sub">${path.when_to_use}</div>
-                      <div class="command-step-list">
-                        ${path.steps.map(step => html`
+                      <div class="command-step-list compact">
+                        ${path.steps.slice(0, 4).map(step => html`
                           <div class="command-step-row">
                             <span class="command-step-tool">${step.tool}</span>
                             <span>${step.title}</span>
@@ -743,8 +751,10 @@ function GuidedPanel() {
 function SummarySurface() {
   return html`
     <${SummaryCards} />
-    <${SwarmPanel} />
-    <${GuidedPanel} />
+    <div class="command-primary-layout">
+      <${SwarmPanel} />
+      <${GuidedPanel} />
+    </div>
   `
 }
 
@@ -1631,7 +1641,6 @@ export function Command() {
           >
             ${actionDisabled('dispatch:tick') ? 'Reconciling…' : 'Run Tick'}
           </button>
-          <button class="control-btn ghost" onClick=${() => { void refreshCommandPlaneCurrentSurface() }} disabled=${commandPlaneLoading.value}>
           <button class="control-btn ghost" onClick=${() => { void refreshCommandPlaneCurrentSurface(); void refreshCommandPlaneChainSummary() }} disabled=${commandPlaneLoading.value}>
             ${commandPlaneLoading.value ? 'Refreshing…' : 'Refresh'}
           </button>

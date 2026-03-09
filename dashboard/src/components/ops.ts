@@ -263,6 +263,7 @@ export function Ops() {
   const selectedKeeper = keepers.find(keeper => keeper.name === selectedKeeperName.value) ?? keepers[0] ?? null
   const flaggedSessions = sessions.filter(session => sessionPriorityTone(session) !== 'ok')
   const flaggedKeepers = keepers.filter(keeper => keeperPriorityTone(keeper) !== 'ok')
+  const roomFeed = recentMessages.slice(0, 5)
   const priorityCards: OpsPriorityCardData[] = [
     {
       key: 'room',
@@ -372,291 +373,334 @@ export function Ops() {
         </section>
       ` : null}
 
-      <div class="ops-grid">
-        <section class="card ops-panel">
-          <div class="card-title">Room Control</div>
-          <div class="ops-stat-grid">
-            <div class="ops-stat">
-              <span>Room</span>
-              <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
-            </div>
-            <div class="ops-stat">
-              <span>Project</span>
-              <strong>${room.project ?? 'n/a'}</strong>
-            </div>
-            <div class="ops-stat">
-              <span>Cluster</span>
-              <strong>${room.cluster ?? 'n/a'}</strong>
-            </div>
-            <div class="ops-stat ${room.paused ? 'warn' : 'ok'}">
-              <span>Status</span>
-              <strong>${room.paused ? 'Paused' : 'Running'}</strong>
-            </div>
-          </div>
+      <div class="ops-workbench">
+        <div class="ops-column">
+          <section class="card ops-panel">
+            <div class="card-title">Priority Queue</div>
+            ${pendingConfirms.length > 0 ? html`
+              <div class="ops-confirmation-list">
+                ${pendingConfirms.map(item => html`
+                  <article key=${item.confirm_token} class="ops-confirmation-card">
+                    <div class="ops-confirmation-meta">
+                      <strong>${item.action_type ?? 'unknown'}</strong>
+                      <span>${item.target_type ?? 'target'}${item.target_id ? `:${item.target_id}` : ''}</span>
+                      <span>${item.delegated_tool ?? 'delegated tool pending'}</span>
+                    </div>
+                    ${item.preview ? html`<pre class="ops-code-block compact">${prettyJson(item.preview)}</pre>` : null}
+                    <div class="ops-confirmation-actions">
+                      <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
+                        Confirm
+                      </button>
+                      <span class="ops-token">${item.confirm_token}</span>
+                    </div>
+                  </article>
+                `)}
+              </div>
+            ` : html`<div class="ops-empty">No pending confirmations.</div>`}
+          </section>
 
-          <label class="control-label" for="ops-broadcast">Broadcast</label>
-          <div class="control-row">
-            <input
-              id="ops-broadcast"
-              class="control-input"
-              type="text"
-              placeholder="@agent or room-wide operator update"
-              value=${broadcastMessage.value}
-              onInput=${(event: Event) => { broadcastMessage.value = (event.target as HTMLInputElement).value }}
-              onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
-              disabled=${operatorActionBusy.value}
-            />
-            <button class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
-              Send
-            </button>
-          </div>
-
-          <label class="control-label" for="ops-pause-reason">Pause Reason</label>
-          <div class="control-row ops-split-row">
-            <input
-              id="ops-pause-reason"
-              class="control-input"
-              type="text"
-              value=${pauseReason.value}
-              onInput=${(event: Event) => { pauseReason.value = (event.target as HTMLInputElement).value }}
-              disabled=${operatorActionBusy.value}
-            />
-            <button class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
-              Pause
-            </button>
-            <button class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
-              Resume
-            </button>
-          </div>
-
-          <div class="ops-section-head">Task Inject</div>
-          <input
-            class="control-input"
-            type="text"
-            placeholder="Task title"
-            value=${taskTitle.value}
-            onInput=${(event: Event) => { taskTitle.value = (event.target as HTMLInputElement).value }}
-            disabled=${operatorActionBusy.value}
-          />
-          <textarea
-            class="control-textarea"
-            rows=${3}
-            placeholder="Task description"
-            value=${taskDescription.value}
-            onInput=${(event: Event) => { taskDescription.value = (event.target as HTMLTextAreaElement).value }}
-            disabled=${operatorActionBusy.value}
-          ></textarea>
-          <div class="control-row ops-split-row">
-            <select
-              class="control-input ops-select"
-              value=${taskPriority.value}
-              onChange=${(event: Event) => { taskPriority.value = (event.target as HTMLSelectElement).value }}
-              disabled=${operatorActionBusy.value}
-            >
-              <option value="1">P1</option>
-              <option value="2">P2</option>
-              <option value="3">P3</option>
-              <option value="4">P4</option>
-              <option value="5">P5</option>
-            </select>
-            <button class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
-              Inject
-            </button>
-          </div>
-
-          ${recentMessages.length > 0 ? html`
-            <div class="ops-section-head">Context Tail</div>
-            <div class="ops-context-note">Recent room chatter stays available for context, but command work remains the primary focus of this tab.</div>
-            <div class="ops-feed-list">
-              ${recentMessages.slice(0, 6).map(message => html`
-                <article key=${message.seq ?? message.id ?? message.timestamp} class="ops-feed-item">
-                  <div class="ops-feed-meta">
-                    <strong>${message.from}</strong>
-                    <span>${message.timestamp}</span>
+          <section class="card ops-panel">
+            <div class="card-title">Operator Log</div>
+            <div class="ops-log-list">
+              ${operatorActionLog.value.length === 0 ? html`
+                <div class="ops-empty">No operator actions in this session yet.</div>
+              ` : operatorActionLog.value.map(entry => html`
+                <article key=${entry.id} class="ops-log-entry ${entry.outcome}">
+                  <div class="ops-log-head">
+                    <strong>${entry.action_type}</strong>
+                    <span>${entry.target_label}</span>
+                    <span>${entry.at}</span>
                   </div>
-                  <div class="ops-feed-content">${message.content}</div>
+                  <div class="ops-log-body">${entry.message}</div>
                 </article>
               `)}
             </div>
-          ` : null}
-        </section>
+          </section>
 
-        <section class="card ops-panel">
-          <div class="card-title">Team Sessions</div>
-          <div class="ops-entity-list">
-            ${sessions.length === 0 ? html`<div class="ops-empty">No team sessions available.</div>` : sessions.map(session => html`
-              <button
-                key=${session.session_id}
-                class="ops-entity-card ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
-                onClick=${() => { selectedSessionId.value = session.session_id }}
-              >
-                <div class="ops-entity-title-row">
-                  <strong>${session.session_id}</strong>
-                  <span class="status-badge ${session.status ?? 'idle'}">${session.status ?? 'unknown'}</span>
-                </div>
-                <div class="ops-entity-meta">
-                  <span>${Math.round(session.progress_pct ?? 0)}%</span>
-                  <span>${session.done_delta_total ?? 0} done</span>
-                  <span>${session.team_health?.status ? String(session.team_health.status) : 'health n/a'}</span>
-                </div>
-              </button>
-            `)}
-          </div>
-
-          ${selectedSession ? html`
-            <div class="ops-detail-card">
-              <div class="ops-detail-title">${selectedSession.session_id}</div>
-              <div class="ops-detail-meta">
-                <span>Status: ${selectedSession.status ?? 'unknown'}</span>
-                <span>Elapsed: ${selectedSession.elapsed_sec ?? 0}s</span>
-                <span>Remaining: ${selectedSession.remaining_sec ?? 0}s</span>
+          <section class="card ops-panel">
+            <div class="card-title">Room Feed</div>
+            <p class="ops-context-note">Recent chatter stays available for operator context, but it is secondary to the intervention queue.</p>
+            ${roomFeed.length > 0 ? html`
+              <div class="ops-feed-list">
+                ${roomFeed.map(message => html`
+                  <article key=${message.seq ?? message.id ?? message.timestamp} class="ops-feed-item">
+                    <div class="ops-feed-meta">
+                      <strong>${message.from}</strong>
+                      <span>${message.timestamp}</span>
+                    </div>
+                    <div class="ops-feed-content">${message.content}</div>
+                  </article>
+                `)}
               </div>
-              ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
-                <pre class="ops-code-block compact">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
-              ` : null}
-            </div>
-          ` : null}
-
-          <label class="control-label" for="ops-turn-kind">Session Action</label>
-          <div class="control-row ops-split-row">
-            <select
-              id="ops-turn-kind"
-              class="control-input ops-select"
-              value=${teamTurnKind.value}
-              onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
-              disabled=${operatorActionBusy.value || !selectedSession}
-            >
-              <option value="note">Note</option>
-              <option value="broadcast">Broadcast</option>
-              <option value="task">Task</option>
-              <option value="checkpoint">Checkpoint</option>
-            </select>
-            <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${operatorActionBusy.value || !selectedSession}>
-              Apply
-            </button>
-          </div>
-          <textarea
-            class="control-textarea"
-            rows=${3}
-            placeholder="Session message"
-            value=${teamMessage.value}
-            onInput=${(event: Event) => { teamMessage.value = (event.target as HTMLTextAreaElement).value }}
-            disabled=${operatorActionBusy.value || !selectedSession}
-          ></textarea>
-          ${teamTurnKind.value === 'task' ? html`
-            <input
-              class="control-input"
-              type="text"
-              placeholder="Injected task title"
-              value=${teamTaskTitle.value}
-              onInput=${(event: Event) => { teamTaskTitle.value = (event.target as HTMLInputElement).value }}
-              disabled=${operatorActionBusy.value || !selectedSession}
-            />
-            <textarea
-              class="control-textarea"
-              rows=${2}
-              placeholder="Injected task description"
-              value=${teamTaskDescription.value}
-              onInput=${(event: Event) => { teamTaskDescription.value = (event.target as HTMLTextAreaElement).value }}
-              disabled=${operatorActionBusy.value || !selectedSession}
-            ></textarea>
-            <select
-              class="control-input ops-select"
-              value=${teamTaskPriority.value}
-              onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
-              disabled=${operatorActionBusy.value || !selectedSession}
-            >
-              <option value="1">P1</option>
-              <option value="2">P2</option>
-              <option value="3">P3</option>
-              <option value="4">P4</option>
-              <option value="5">P5</option>
-            </select>
-          ` : null}
-
-          <div class="ops-section-head">Stop Session</div>
-          <div class="control-row ops-split-row">
-            <input
-              class="control-input"
-              type="text"
-              value=${teamStopReason.value}
-              onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
-              disabled=${operatorActionBusy.value || !selectedSession}
-            />
-            <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${operatorActionBusy.value || !selectedSession}>
-              Stop
-            </button>
-          </div>
-        </section>
-
-        <section class="card ops-panel">
-          <div class="card-title">Keepers</div>
-          <div class="ops-entity-list">
-            ${keepers.length === 0 ? html`<div class="ops-empty">No keepers available.</div>` : keepers.map(keeper => html`
-              <button
-                key=${keeper.name}
-                class="ops-entity-card ${selectedKeeper?.name === keeper.name ? 'active' : ''}"
-                onClick=${() => { selectedKeeperName.value = keeper.name }}
-              >
-                <div class="ops-entity-title-row">
-                  <strong>${keeper.name}</strong>
-                  <span class="status-badge ${keeper.status ?? 'idle'}">${keeper.status ?? 'unknown'}</span>
-                </div>
-                <div class="ops-entity-meta">
-                  <span>${keeper.model ?? 'model n/a'}</span>
-                  <span>${typeof keeper.context_ratio === 'number' ? `${Math.round(keeper.context_ratio * 100)}% ctx` : 'ctx n/a'}</span>
-                  <span>${relativeAge(keeper.last_turn_ago_s)}</span>
-                </div>
-              </button>
-            `)}
-          </div>
-
-          ${selectedKeeper ? html`
-            <div class="ops-detail-card">
-              <div class="ops-detail-title">${selectedKeeper.name}</div>
-              <div class="ops-detail-meta">
-                <span>Autonomy: ${selectedKeeper.autonomy_level ?? 'n/a'}</span>
-                <span>Generation: ${selectedKeeper.generation ?? 0}</span>
-                <span>Goals: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
-              </div>
-            </div>
-          ` : null}
-
-          <label class="control-label" for="ops-keeper-message">Keeper Message</label>
-          <textarea
-            id="ops-keeper-message"
-            class="control-textarea"
-            rows=${6}
-            placeholder="Send a structured intervention or course correction"
-            value=${keeperMessage.value}
-            onInput=${(event: Event) => { keeperMessage.value = (event.target as HTMLTextAreaElement).value }}
-            disabled=${operatorActionBusy.value || !selectedKeeper}
-          ></textarea>
-          <div class="control-row">
-            <button class="control-btn" onClick=${() => { void submitKeeperMessage() }} disabled=${operatorActionBusy.value || !selectedKeeper || keeperMessage.value.trim() === ''}>
-              Send Keeper Message
-            </button>
-          </div>
-        </section>
-      </div>
-
-      <section class="card ops-log-panel">
-        <div class="card-title">Recent Operator Actions</div>
-        <div class="ops-log-list">
-          ${operatorActionLog.value.length === 0 ? html`
-            <div class="ops-empty">No operator actions in this session yet.</div>
-          ` : operatorActionLog.value.map(entry => html`
-            <article key=${entry.id} class="ops-log-entry ${entry.outcome}">
-              <div class="ops-log-head">
-                <strong>${entry.action_type}</strong>
-                <span>${entry.target_label}</span>
-                <span>${entry.at}</span>
-              </div>
-              <div class="ops-log-body">${entry.message}</div>
-            </article>
-          `)}
+            ` : html`<div class="ops-empty">No recent room messages.</div>`}
+          </section>
         </div>
-      </section>
+
+        <div class="ops-column">
+          <section class="card ops-panel">
+            <div class="card-title">Session Queue</div>
+            <p class="ops-context-note">Select the session that needs steering. This queue should answer which run is hot, paused, or drifting.</p>
+            <div class="ops-entity-list">
+              ${sessions.length === 0 ? html`<div class="ops-empty">No team sessions available.</div>` : sessions.map(session => html`
+                <button
+                  key=${session.session_id}
+                  class="ops-entity-card ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
+                  onClick=${() => { selectedSessionId.value = session.session_id }}
+                >
+                  <div class="ops-entity-title-row">
+                    <strong>${session.session_id}</strong>
+                    <span class="status-badge ${session.status ?? 'idle'}">${session.status ?? 'unknown'}</span>
+                  </div>
+                  <div class="ops-entity-meta">
+                    <span>${Math.round(session.progress_pct ?? 0)}%</span>
+                    <span>${session.done_delta_total ?? 0} done</span>
+                    <span>${session.team_health?.status ? String(session.team_health.status) : 'health n/a'}</span>
+                  </div>
+                </button>
+              `)}
+            </div>
+          </section>
+
+          <section class="card ops-panel">
+            <div class="card-title">Keeper Queue</div>
+            <p class="ops-context-note">Keepers are long-lived operators. Pick one when you need recovery, course correction, or a direct probe.</p>
+            <div class="ops-entity-list">
+              ${keepers.length === 0 ? html`<div class="ops-empty">No keepers available.</div>` : keepers.map(keeper => html`
+                <button
+                  key=${keeper.name}
+                  class="ops-entity-card ${selectedKeeper?.name === keeper.name ? 'active' : ''}"
+                  onClick=${() => { selectedKeeperName.value = keeper.name }}
+                >
+                  <div class="ops-entity-title-row">
+                    <strong>${keeper.name}</strong>
+                    <span class="status-badge ${keeper.status ?? 'idle'}">${keeper.status ?? 'unknown'}</span>
+                  </div>
+                  <div class="ops-entity-meta">
+                    <span>${keeper.model ?? 'model n/a'}</span>
+                    <span>${typeof keeper.context_ratio === 'number' ? `${Math.round(keeper.context_ratio * 100)}% ctx` : 'ctx n/a'}</span>
+                    <span>${relativeAge(keeper.last_turn_ago_s)}</span>
+                  </div>
+                </button>
+              `)}
+            </div>
+          </section>
+        </div>
+
+        <div class="ops-column ops-studio-column">
+          <section class="card ops-panel ops-studio-panel">
+            <div class="card-title">Action Studio</div>
+            <p class="ops-context-note">All write controls are centralized here. Room actions stay global; session and keeper actions always target the currently selected entity.</p>
+
+            <div class="ops-studio-group">
+              <div class="ops-section-head">Room Gate</div>
+              <div class="ops-stat-grid">
+                <div class="ops-stat">
+                  <span>Room</span>
+                  <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
+                </div>
+                <div class="ops-stat">
+                  <span>Project</span>
+                  <strong>${room.project ?? 'n/a'}</strong>
+                </div>
+                <div class="ops-stat">
+                  <span>Cluster</span>
+                  <strong>${room.cluster ?? 'n/a'}</strong>
+                </div>
+                <div class="ops-stat ${room.paused ? 'warn' : 'ok'}">
+                  <span>Status</span>
+                  <strong>${room.paused ? 'Paused' : 'Running'}</strong>
+                </div>
+              </div>
+
+              <label class="control-label" for="ops-broadcast">Room Broadcast</label>
+              <div class="control-row">
+                <input
+                  id="ops-broadcast"
+                  class="control-input"
+                  type="text"
+                  placeholder="@agent or room-wide operator update"
+                  value=${broadcastMessage.value}
+                  onInput=${(event: Event) => { broadcastMessage.value = (event.target as HTMLInputElement).value }}
+                  onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
+                  disabled=${operatorActionBusy.value}
+                />
+                <button class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
+                  Send
+                </button>
+              </div>
+
+              <label class="control-label" for="ops-pause-reason">Pause or Resume</label>
+              <div class="control-row ops-split-row">
+                <input
+                  id="ops-pause-reason"
+                  class="control-input"
+                  type="text"
+                  value=${pauseReason.value}
+                  onInput=${(event: Event) => { pauseReason.value = (event.target as HTMLInputElement).value }}
+                  disabled=${operatorActionBusy.value}
+                />
+                <button class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
+                  Pause
+                </button>
+                <button class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
+                  Resume
+                </button>
+              </div>
+
+              <div class="ops-section-head">Inject Work</div>
+              <input
+                class="control-input"
+                type="text"
+                placeholder="Task title"
+                value=${taskTitle.value}
+                onInput=${(event: Event) => { taskTitle.value = (event.target as HTMLInputElement).value }}
+                disabled=${operatorActionBusy.value}
+              />
+              <textarea
+                class="control-textarea"
+                rows=${3}
+                placeholder="Task description"
+                value=${taskDescription.value}
+                onInput=${(event: Event) => { taskDescription.value = (event.target as HTMLTextAreaElement).value }}
+                disabled=${operatorActionBusy.value}
+              ></textarea>
+              <div class="control-row ops-split-row">
+                <select
+                  class="control-input ops-select"
+                  value=${taskPriority.value}
+                  onChange=${(event: Event) => { taskPriority.value = (event.target as HTMLSelectElement).value }}
+                  disabled=${operatorActionBusy.value}
+                >
+                  <option value="1">P1</option>
+                  <option value="2">P2</option>
+                  <option value="3">P3</option>
+                  <option value="4">P4</option>
+                  <option value="5">P5</option>
+                </select>
+                <button class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
+                  Inject
+                </button>
+              </div>
+            </div>
+
+            <div class="ops-studio-group">
+              <div class="ops-section-head">Selected Session</div>
+              ${selectedSession ? html`
+                <div class="ops-detail-card">
+                  <div class="ops-detail-title">${selectedSession.session_id}</div>
+                  <div class="ops-detail-meta">
+                    <span>Status: ${selectedSession.status ?? 'unknown'}</span>
+                    <span>Elapsed: ${selectedSession.elapsed_sec ?? 0}s</span>
+                    <span>Remaining: ${selectedSession.remaining_sec ?? 0}s</span>
+                  </div>
+                  ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
+                    <pre class="ops-code-block compact">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
+                  ` : null}
+                </div>
+              ` : html`<div class="ops-empty">Select a team session to edit notes, inject tasks, or stop the run.</div>`}
+
+              <label class="control-label" for="ops-turn-kind">Session Action</label>
+              <div class="control-row ops-split-row">
+                <select
+                  id="ops-turn-kind"
+                  class="control-input ops-select"
+                  value=${teamTurnKind.value}
+                  onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
+                  disabled=${operatorActionBusy.value || !selectedSession}
+                >
+                  <option value="note">Note</option>
+                  <option value="broadcast">Broadcast</option>
+                  <option value="task">Task</option>
+                  <option value="checkpoint">Checkpoint</option>
+                </select>
+                <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${operatorActionBusy.value || !selectedSession}>
+                  Apply
+                </button>
+              </div>
+              <textarea
+                class="control-textarea"
+                rows=${3}
+                placeholder="Session message"
+                value=${teamMessage.value}
+                onInput=${(event: Event) => { teamMessage.value = (event.target as HTMLTextAreaElement).value }}
+                disabled=${operatorActionBusy.value || !selectedSession}
+              ></textarea>
+              ${teamTurnKind.value === 'task' ? html`
+                <input
+                  class="control-input"
+                  type="text"
+                  placeholder="Injected task title"
+                  value=${teamTaskTitle.value}
+                  onInput=${(event: Event) => { teamTaskTitle.value = (event.target as HTMLInputElement).value }}
+                  disabled=${operatorActionBusy.value || !selectedSession}
+                />
+                <textarea
+                  class="control-textarea"
+                  rows=${2}
+                  placeholder="Injected task description"
+                  value=${teamTaskDescription.value}
+                  onInput=${(event: Event) => { teamTaskDescription.value = (event.target as HTMLTextAreaElement).value }}
+                  disabled=${operatorActionBusy.value || !selectedSession}
+                ></textarea>
+                <select
+                  class="control-input ops-select"
+                  value=${teamTaskPriority.value}
+                  onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
+                  disabled=${operatorActionBusy.value || !selectedSession}
+                >
+                  <option value="1">P1</option>
+                  <option value="2">P2</option>
+                  <option value="3">P3</option>
+                  <option value="4">P4</option>
+                  <option value="5">P5</option>
+                </select>
+              ` : null}
+              <div class="control-row ops-split-row">
+                <input
+                  class="control-input"
+                  type="text"
+                  value=${teamStopReason.value}
+                  onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
+                  disabled=${operatorActionBusy.value || !selectedSession}
+                />
+                <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${operatorActionBusy.value || !selectedSession}>
+                  Stop
+                </button>
+              </div>
+            </div>
+
+            <div class="ops-studio-group">
+              <div class="ops-section-head">Selected Keeper</div>
+              ${selectedKeeper ? html`
+                <div class="ops-detail-card">
+                  <div class="ops-detail-title">${selectedKeeper.name}</div>
+                  <div class="ops-detail-meta">
+                    <span>Autonomy: ${selectedKeeper.autonomy_level ?? 'n/a'}</span>
+                    <span>Generation: ${selectedKeeper.generation ?? 0}</span>
+                    <span>Goals: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
+                  </div>
+                </div>
+              ` : html`<div class="ops-empty">Select a keeper to send a direct intervention.</div>`}
+
+              <label class="control-label" for="ops-keeper-message">Keeper Message</label>
+              <textarea
+                id="ops-keeper-message"
+                class="control-textarea"
+                rows=${6}
+                placeholder="Send a structured intervention or course correction"
+                value=${keeperMessage.value}
+                onInput=${(event: Event) => { keeperMessage.value = (event.target as HTMLTextAreaElement).value }}
+                disabled=${operatorActionBusy.value || !selectedKeeper}
+              ></textarea>
+              <div class="control-row">
+                <button class="control-btn" onClick=${() => { void submitKeeperMessage() }} disabled=${operatorActionBusy.value || !selectedKeeper || keeperMessage.value.trim() === ''}>
+                  Send Keeper Message
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
     </section>
   `
 }

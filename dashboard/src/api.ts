@@ -18,7 +18,6 @@ import type {
   BoardSortMode,
   OperatorActionRequest,
   OperatorActionResult,
-  OperatorDigest,
   OperatorSnapshot,
   CommandPlaneHelpResponse,
   CommandPlaneChainRunResponse,
@@ -350,19 +349,6 @@ export function fetchMdalLoops(options: FetchMdalLoopsOptions = {}): Promise<Mda
 
 export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
   return get('/api/v1/operator')
-}
-
-export function fetchOperatorDigest(
-  targetType: 'room' | 'team_session' = 'room',
-  targetId?: string,
-  includeWorkers = true,
-): Promise<OperatorDigest> {
-  const params = new URLSearchParams()
-  params.set('target_type', targetType)
-  if (targetId) params.set('target_id', targetId)
-  if (!includeWorkers) params.set('include_workers', 'false')
-  const query = params.toString()
-  return get(`/api/v1/operator/digest${query ? `?${query}` : ''}`)
 }
 
 export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {

@@ -320,8 +320,14 @@ let agent_state_of_json json =
 
     Automatically subscribes to Messages for A2A communication.
     This ensures all agents can receive broadcasts immediately after joining.
+    If the agent is already active, updates heartbeat without emitting AgentJoin.
 *)
 let register_agent config ~name ?(capabilities=[]) () =
+  let already_active =
+    match Backend_eio.FileSystem.get config.backend (agent_key name) with
+    | Ok _ -> true
+    | Error _ -> false
+  in
   let agent = {
     name;
     last_seen = Time_compat.now ();
@@ -346,13 +352,16 @@ let register_agent config ~name ?(capabilities=[]) () =
         ~resource:Subscriptions.Messages
         () in
 
-      (* Log join event *)
-      let _ = log_event config
-        ~event_type:AgentJoin
-        ~agent:name
-        ~payload:(`Assoc [
-          ("capabilities", `List (List.map (fun c -> `String c) capabilities))
-        ]) in
+      (* Log join event only for new agents, skip for re-joins *)
+      if not already_active then begin
+        let _ = log_event config
+          ~event_type:AgentJoin
+          ~agent:name
+          ~payload:(`Assoc [
+            ("capabilities", `List (List.map (fun c -> `String c) capabilities))
+          ]) in
+        ()
+      end;
 
       Ok agent
   | Error e ->

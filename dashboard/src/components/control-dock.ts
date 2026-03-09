@@ -104,6 +104,7 @@ function parseJoinedAgentName(text: string): string | null {
 }
 
 async function joinRoom() {
+  if (joined.value) return
   const agent = agentName.value.trim()
   if (!agent) return
   joining.value = true
@@ -123,6 +124,7 @@ async function joinRoom() {
 }
 
 async function leaveRoom() {
+  if (!joined.value) return
   const agent = agentName.value.trim()
   if (!agent) return
   leaving.value = true
@@ -291,6 +293,7 @@ export function ControlDock() {
 
   useEffect(() => {
     void joinRoom()
+    return () => { void leaveRoom() }
   }, [])
 
   useEffect(() => {

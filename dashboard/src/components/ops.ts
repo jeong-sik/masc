@@ -6,7 +6,6 @@ import {
   confirmOperatorPendingAction,
   dispatchOperatorAction,
   operatorActionBusy,
-  operatorDigest,
   operatorActionLog,
   operatorError,
   operatorLoading,
@@ -77,15 +76,6 @@ interface OpsPriorityCardData {
 
 function normalizeStatus(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
-}
-
-function signalTone(value?: { tone?: string }): OpsPriorityTone {
-  return value?.tone === 'bad' ? 'bad' : value?.tone === 'warn' ? 'warn' : 'ok'
-}
-
-function metricText(value?: number, suffix = ''): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a'
-  return `${Math.round(value)}${suffix}`
 }
 
 function sessionPriorityTone(session: OperatorSessionSnapshot): OpsPriorityTone {
@@ -264,7 +254,6 @@ async function confirmPending(confirmToken: string) {
 
 export function Ops() {
   const snapshot = operatorSnapshot.value
-  const digest = operatorDigest.value
   const room = snapshot?.room ?? {}
   const sessions = snapshot?.sessions ?? []
   const keepers = snapshot?.keepers ?? []
@@ -275,14 +264,6 @@ export function Ops() {
   const flaggedSessions = sessions.filter(session => sessionPriorityTone(session) !== 'ok')
   const flaggedKeepers = keepers.filter(keeper => keeperPriorityTone(keeper) !== 'ok')
   const roomFeed = recentMessages.slice(0, 5)
-  const commandPlane = digest?.command_plane
-  const microarch = commandPlane?.operations.microarch
-  const signals = microarch?.signals
-  const issuePressure = signals?.issue_pressure
-  const routingConfidence = signals?.routing_confidence
-  const cacheContention = signals?.cache_contention
-  const speculativePosture = signals?.speculative_posture
-  const digestAttention = digest?.attention_items ?? []
   const priorityCards: OpsPriorityCardData[] = [
     {
       key: 'room',
@@ -319,44 +300,6 @@ export function Ops() {
         ? 'At least one keeper is stale, offline, or running hot'
         : 'Keepers are available for direct intervention',
       tone: flaggedKeepers.some(keeper => keeperPriorityTone(keeper) === 'bad') ? 'bad' : flaggedKeepers.length > 0 ? 'warn' : 'ok',
-    },
-    {
-      key: 'issue-pressure',
-      label: 'Issue Pressure',
-      value: typeof issuePressure?.pending_ops === 'number' && typeof issuePressure?.blocked_ops === 'number'
-        ? issuePressure.pending_ops + issuePressure.blocked_ops
-        : 'n/a',
-      detail: issuePressure
-        ? `${metricText(issuePressure.pending_ops)} pending · ${metricText(issuePressure.blocked_ops)} blocked`
-        : 'Command-plane pressure signal not available',
-      tone: signalTone(issuePressure),
-    },
-    {
-      key: 'routing',
-      label: 'Routing Confidence',
-      value: metricText(routingConfidence?.avg_best_score, '%'),
-      detail: routingConfidence
-        ? `${metricText(routingConfidence.avg_candidate_count)} avg candidates · ${metricText(routingConfidence.best_first_operations)} best-first ops`
-        : 'Routing confidence signal not available',
-      tone: signalTone(routingConfidence),
-    },
-    {
-      key: 'cache',
-      label: 'Cache Contention',
-      value: metricText(cacheContention?.bus_traffic),
-      detail: cacheContention
-        ? `${metricText((cacheContention.l1_hit_rate ?? 0) * 100, '%')} L1 hit · ${metricText(cacheContention.invalidation_count)} invalidations`
-        : 'Cache contention signal not available',
-      tone: signalTone(cacheContention),
-    },
-    {
-      key: 'speculative',
-      label: 'Speculative Posture',
-      value: metricText(speculativePosture?.active_sessions),
-      detail: speculativePosture
-        ? `${metricText((speculativePosture.commit_rate ?? 0) * 100, '%')} commit rate`
-        : 'Speculative posture signal not available',
-      tone: signalTone(speculativePosture),
     },
   ]
 
@@ -404,46 +347,6 @@ export function Ops() {
           `)}
         </div>
       </section>
-
-      ${commandPlane ? html`
-        <section class="card ops-panel">
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">Command-Plane Readiness</h2>
-            <p class="monitor-subheadline">Operator digest now carries translated search and microarch signals so you can decide whether to intervene without opening the full command-plane surface.</p>
-          </div>
-          <div class="ops-stat-grid">
-            <div class="ops-stat ${signalTone(issuePressure)}">
-              <span>Issue Pressure</span>
-              <strong>${priorityCards.find(card => card.key === 'issue-pressure')?.value ?? 'n/a'}</strong>
-            </div>
-            <div class="ops-stat ${signalTone(routingConfidence)}">
-              <span>Routing</span>
-              <strong>${priorityCards.find(card => card.key === 'routing')?.value ?? 'n/a'}</strong>
-            </div>
-            <div class="ops-stat ${signalTone(cacheContention)}">
-              <span>Cache</span>
-              <strong>${priorityCards.find(card => card.key === 'cache')?.value ?? 'n/a'}</strong>
-            </div>
-            <div class="ops-stat ${signalTone(speculativePosture)}">
-              <span>Speculation</span>
-              <strong>${priorityCards.find(card => card.key === 'speculative')?.value ?? 'n/a'}</strong>
-            </div>
-          </div>
-          ${digestAttention.length > 0 ? html`
-            <div class="ops-feed-list">
-              ${digestAttention.slice(0, 4).map(item => html`
-                <article key=${item.kind} class="ops-feed-item">
-                  <div class="ops-feed-meta">
-                    <strong>${item.kind}</strong>
-                    <span>${item.severity ?? 'ok'}</span>
-                  </div>
-                  <div class="ops-feed-content">${item.summary ?? 'No summary available'}</div>
-                </article>
-              `)}
-            </div>
-          ` : html`<div class="ops-empty">No command-plane attention items right now.</div>`}
-        </section>
-      ` : null}
 
       ${pendingConfirms.length > 0 ? html`
         <section class="card ops-confirmations">

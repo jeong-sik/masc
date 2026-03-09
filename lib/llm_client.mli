@@ -17,6 +17,7 @@ type provider =
   | Ollama
   | Llama
   | Claude
+  | OpenAI
   | Gemini
   | Glm_cloud
   | OpenRouter
@@ -136,6 +137,7 @@ val ollama_lfm : model_spec
 val llama_default : model_spec
 val claude_opus : model_spec
 val claude_sonnet : model_spec
+val openai_default : model_spec
 val glm_cloud : model_spec
 val gemini_pro : model_spec
 

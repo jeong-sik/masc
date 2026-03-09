@@ -147,6 +147,7 @@
    orchestrator
    planning_eio
    post_verifier
+   provider_adapter
    process_eio
    progress
    pulse

@@ -10,11 +10,20 @@ let test_get_config_known_agents () =
   Alcotest.(check string) "claude agent_name" "claude" claude.Spawn.agent_name;
   Alcotest.(check bool) "claude has mcp_tools" true (List.length claude.mcp_tools > 0);
 
+  let claude_alias = Spawn.get_config "claude-code" in
+  Alcotest.(check bool) "claude-code alias exists" true (Option.is_some claude_alias);
+
   let gemini = Spawn.get_config "gemini" in
   Alcotest.(check bool) "gemini config exists" true (Option.is_some gemini);
 
+  let gemini_alias = Spawn.get_config "gemini-cli" in
+  Alcotest.(check bool) "gemini-cli alias exists" true (Option.is_some gemini_alias);
+
   let codex = Spawn.get_config "codex" in
   Alcotest.(check bool) "codex config exists" true (Option.is_some codex);
+
+  let codex_alias = Spawn.get_config "codex-cli" in
+  Alcotest.(check bool) "codex-cli alias exists" true (Option.is_some codex_alias);
 
   let ollama = Spawn.get_config "ollama" in
   Alcotest.(check bool) "ollama config exists" true (Option.is_some ollama);

@@ -1488,6 +1488,37 @@ let test_step_spawn_batch_applies_hybrid_routing () =
       Alcotest.(check int) "summary synthesize count" 1
         Yojson.Safe.Util.(summary |> member "task_profile_counts" |> member "synthesize" |> to_int))
 
+let test_parse_step_spawn_specs_applies_top_level_batch_timeout () =
+  let args =
+    `Assoc
+      [
+        ("spawn_timeout_seconds", `Int 1500);
+        ( "spawn_batch",
+          `List
+            [
+              `Assoc
+                [
+                  ("spawn_agent", `String "llama");
+                  ("spawn_prompt", `String "first prompt");
+                ];
+              `Assoc
+                [
+                  ("spawn_agent", `String "llama");
+                  ("spawn_prompt", `String "second prompt");
+                  ("spawn_timeout_seconds", `Int 45);
+                ];
+            ] );
+      ]
+  in
+  let specs = unwrap_ok (Tool_team_session.parse_step_spawn_specs args) in
+  match specs with
+  | [ first; second ] ->
+      Alcotest.(check int) "top-level timeout applied to first batch item" 1500
+        first.spawn_timeout_seconds;
+      Alcotest.(check int) "item timeout still overrides default" 45
+        second.spawn_timeout_seconds
+  | _ -> Alcotest.fail "expected exactly two parsed spawn specs"
+
 let test_reconcile_failed_spawn_actor_detaches_without_turn () =
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -2102,6 +2133,8 @@ let () =
             `Quick test_step_spawn_batch_records_planned_workers;
           Alcotest.test_case "step-spawn-batch-applies-hybrid-routing"
             `Quick test_step_spawn_batch_applies_hybrid_routing;
+          Alcotest.test_case "parse-step-spawn-specs-applies-top-level-batch-timeout"
+            `Quick test_parse_step_spawn_specs_applies_top_level_batch_timeout;
           Alcotest.test_case "reconcile-failed-spawn-actor-detaches-without-turn"
             `Quick test_reconcile_failed_spawn_actor_detaches_without_turn;
           Alcotest.test_case "reconcile-failed-spawn-actor-retains-after-turn"

@@ -163,6 +163,7 @@ let test_masc_mcp_tools_contains_run_deliverable () =
 let test_llama_mcp_tools_curated () =
   check (list string) "llama tools"
     [
+      "mcp__masc__masc_heartbeat";
       "mcp__masc__masc_team_session_status";
       "mcp__masc__masc_team_session_turn";
       "mcp__masc__masc_memento_mori";

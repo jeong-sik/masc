@@ -719,3 +719,9 @@
  (name test_speculative)
  (modules test_speculative)
  (libraries masc_mcp yojson unix str))
+
+; Proof criteria pure-function unit tests (no server required)
+(test
+ (name test_proof_criteria)
+ (modules test_proof_criteria)
+ (libraries masc_mcp alcotest yojson))

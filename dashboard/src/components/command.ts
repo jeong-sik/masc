@@ -309,15 +309,71 @@ function swarmLaneTone(lane: CommandPlaneSwarmLane): string {
   return 'ok'
 }
 
-function SwarmLaneCard({ lane }: { lane: CommandPlaneSwarmLane }) {
+function SwarmHealthBar({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
+  const counts = { moving: 0, waiting: 0, stalled: 0, terminal: 0 }
+  for (const lane of lanes) {
+    const m = lane.motion_state as keyof typeof counts
+    if (m in counts) counts[m]++
+    else counts.waiting++
+  }
+  const total = lanes.length
+  if (total === 0) return null
+
+  const segments: Array<{ key: string; count: number; color: string }> = [
+    { key: 'moving', count: counts.moving, color: 'var(--ok)' },
+    { key: 'waiting', count: counts.waiting, color: 'var(--warn)' },
+    { key: 'stalled', count: counts.stalled, color: 'var(--bad)' },
+    { key: 'terminal', count: counts.terminal, color: '#556' },
+  ]
+
+  return html`
+    <div>
+      <div class="swarm-health-bar">
+        ${segments.filter(s => s.count > 0).map(s => html`
+          <div class="swarm-health-seg ${s.key}" style="flex: ${s.count}"></div>
+        `)}
+      </div>
+      <div class="swarm-health-labels">
+        ${segments.filter(s => s.count > 0).map(s => html`
+          <span class="swarm-health-label">
+            <span class="swarm-health-swatch" style="background: ${s.color}"></span>
+            ${s.count} ${s.key}
+          </span>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function SwarmWorkerGrid({ total }: { total: number }) {
+  const maxDots = 20
+  const present = Math.min(total, maxDots)
+  const overflow = total > maxDots ? total - maxDots : 0
+  const dots = Array.from({ length: present })
+
+  return html`
+    <div class="swarm-worker-grid">
+      ${dots.map(() => html`<span class="swarm-worker-dot present"></span>`)}
+      ${overflow > 0 ? html`<span class="swarm-worker-count">+${overflow}</span>` : null}
+      <span class="swarm-worker-count">(${total} workers)</span>
+    </div>
+  `
+}
+
+function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
   const counts = lane.counts ?? {}
   const tone = swarmLaneTone(lane)
+  const totalWorkers = counts.workers ?? 0
+  const ops = counts.operations ?? 0
+  const dets = counts.detachments ?? 0
+  const totalOps = ops + dets
+
   return html`
-    <article class="command-card compact">
-      <div class="command-card-head">
-        <div>
+    <article class="swarm-lane-strip ${toneClass(tone)}">
+      <div class="swarm-lane-head">
+        <div class="swarm-lane-head-left">
+          <span class="swarm-motion-dot ${lane.motion_state}"></span>
           <strong>${lane.label}</strong>
-          <div class="command-card-sub">${lane.source_of_truth}</div>
         </div>
         <div class="command-tag-row">
           <span class="command-chip ${toneClass(tone)}">${lane.phase}</span>
@@ -325,18 +381,38 @@ function SwarmLaneCard({ lane }: { lane: CommandPlaneSwarmLane }) {
           <span class="command-chip">${relativeTime(lane.last_movement_at)}</span>
         </div>
       </div>
-      <div class="command-card-grid">
-        <span>Movement</span><span>${lane.movement_reason}</span>
-        <span>Step</span><span>${lane.current_step}</span>
-        <span>Counts</span><span>${counts.operations ?? 0} ops · ${counts.detachments ?? 0} dets · ${counts.workers ?? 0} workers · ${counts.approvals ?? 0} approvals · ${counts.alerts ?? 0} alerts</span>
+      <div class="swarm-lane-details">
+        <div class="swarm-lane-row">
+          <span class="swarm-lane-row-label">Step</span>
+          <span>${lane.current_step}</span>
+        </div>
+        ${totalWorkers > 0
+          ? html`
+              <div class="swarm-lane-row">
+                <span class="swarm-lane-row-label">Workers</span>
+                <${SwarmWorkerGrid} total=${totalWorkers} />
+              </div>
+            `
+          : null}
+        ${totalOps > 0
+          ? html`
+              <div class="swarm-lane-row">
+                <span class="swarm-lane-row-label">Ops</span>
+                <div class="swarm-mini-bar">
+                  <div class="swarm-mini-bar-fill" style="width: ${totalOps > 0 ? Math.round((ops / totalOps) * 100) : 0}%; background: var(--${tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'ok'})"></div>
+                </div>
+                <span class="swarm-worker-count">${ops} ops · ${dets} dets</span>
+              </div>
+            `
+          : null}
       </div>
       ${lane.blockers.length > 0
-        ? html`<div class="command-card-foot">Blockers: ${lane.blockers.join(' · ')}</div>`
+        ? html`<div class="swarm-lane-blockers">Blockers: ${lane.blockers.join(' · ')}</div>`
         : null}
       ${lane.hard_flags.length > 0
         ? html`
-            <div class="command-tag-row">
-              ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="command-tag ${toneClass(flag.severity)}">${flag.code}</span>`)}
+            <div class="swarm-lane-flags">
+              ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="command-chip ${toneClass(flag.severity)}">${flag.code}</span>`)}
             </div>
           `
         : null}
@@ -344,32 +420,29 @@ function SwarmLaneCard({ lane }: { lane: CommandPlaneSwarmLane }) {
   `
 }
 
-function SwarmTimelineRow({ event }: { event: CommandPlaneSwarmTimelineEvent }) {
+function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEvent }) {
+  const ts = event.timestamp ? new Date(event.timestamp) : null
+  const validTs = ts && !isNaN(ts.getTime()) ? ts : null
+  const timeStr = validTs ? `${String(validTs.getHours()).padStart(2, '0')}:${String(validTs.getMinutes()).padStart(2, '0')}` : ''
   return html`
-    <div class="command-trace-row">
-      <div class="command-trace-head">
+    <div class="swarm-event-node">
+      <span class="swarm-event-dot ${toneClass(event.tone)}"></span>
+      <span class="swarm-event-time">${timeStr}</span>
+      <div class="swarm-event-body">
         <strong>${event.title}</strong>
-        <span class="command-chip ${toneClass(event.tone)}">${event.lane_id}</span>
-        <span class="command-chip">${event.kind}</span>
-        <span class="command-chip">${relativeTime(event.timestamp)}</span>
+        <span class="swarm-event-kind">${event.kind}</span>
+        ${event.detail ? html`<div class="command-card-sub">${event.detail}</div>` : null}
       </div>
-      <div class="command-card-sub">${event.source}</div>
-      <div class="command-card-foot">${event.detail}</div>
     </div>
   `
 }
 
-function SwarmGapRow({ gap }: { gap: CommandPlaneSwarmGap }) {
+function SwarmGapDot({ gap }: { gap: CommandPlaneSwarmGap }) {
   return html`
-    <div class="command-guide-inline">
-      <div class="command-guide-head">
-        <strong>${gap.code}</strong>
-        <span class="command-chip ${toneClass(gap.severity)}">${gap.count}</span>
-      </div>
-      <p>${gap.summary}</p>
-      ${gap.lane_ids.length > 0
-        ? html`<div class="command-tag-row">${gap.lane_ids.map(laneId => html`<span class="command-tag">${laneId}</span>`)}</div>`
-        : null}
+    <div class="swarm-gap-inline">
+      <span class="swarm-gap-dot"></span>
+      <span class="command-chip ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
+      <span class="command-card-sub">${gap.summary}</span>
     </div>
   `
 }
@@ -418,7 +491,7 @@ function SwarmPanel() {
   const proof = summary?.swarm_proof
   const lanes = swarm?.lanes.filter(lane => lane.present) ?? []
   const gaps = swarm?.gaps.items ?? []
-  const timeline = swarm?.timeline.slice(0, 6) ?? []
+  const timeline = swarm?.timeline.slice(0, 8) ?? []
   const overview = swarm?.overview
   const recommendation = swarm?.recommended_next_action
 
@@ -434,10 +507,12 @@ function SwarmPanel() {
               <div class="monitor-stat-card"><span>Next Action</span><strong>${recommendation?.label ?? 'Observe operator state'}</strong><small>${recommendation?.tool ?? 'masc_operator_snapshot'}</small></div>
             </div>
 
+            ${lanes.length > 0 ? html`<${SwarmHealthBar} lanes=${lanes} />` : null}
+
             <div class="command-swarm-layout">
               <div class="command-card-stack">
                 ${lanes.length > 0
-                  ? lanes.map(lane => html`<${SwarmLaneCard} lane=${lane} />`)
+                  ? lanes.map(lane => html`<${SwarmLaneStrip} lane=${lane} />`)
                   : html`<div class="empty-state">No active swarm lanes.</div>`}
               </div>
 
@@ -459,7 +534,7 @@ function SwarmPanel() {
                     <span class="command-chip ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
                   </div>
                   ${gaps.length > 0
-                    ? html`<div class="command-card-stack">${gaps.slice(0, 4).map(gap => html`<${SwarmGapRow} gap=${gap} />`)}</div>`
+                    ? html`<div class="swarm-event-rail">${gaps.slice(0, 4).map(gap => html`<${SwarmGapDot} gap=${gap} />`)}</div>`
                     : html`<p>No hard gaps are currently visible.</p>`}
                 </div>
 
@@ -469,7 +544,7 @@ function SwarmPanel() {
                     <span class="command-chip">${timeline.length}</span>
                   </div>
                   ${timeline.length > 0
-                    ? html`<div class="command-card-stack">${timeline.map(event => html`<${SwarmTimelineRow} event=${event} />`)}</div>`
+                    ? html`<div class="swarm-event-rail">${timeline.map(event => html`<${SwarmEventNode} event=${event} />`)}</div>`
                     : html`<p>No recent movement events are attached yet.</p>`}
                 </div>
               </div>

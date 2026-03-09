@@ -350,6 +350,19 @@ let validate_search_strategy = function
   | "legacy" | "best_first_v1" as value -> Ok value
   | other -> Error (Printf.sprintf "unsupported search_strategy: %s" other)
 
+let room_search_strategy_default config =
+  match (Room.read_state config).search_strategy_default with
+  | Some ("legacy" | "best_first_v1" as value) -> value
+  | _ -> "legacy"
+
+let room_speculation_enabled config =
+  (Room.read_state config).speculation_enabled
+
+let room_speculation_budget config =
+  match (Room.read_state config).speculation_budget with
+  | Some value when value > 0 -> value
+  | _ -> 4
+
 let string_of_unit_kind = function
   | Company -> "company"
   | Platoon -> "platoon"
@@ -4348,6 +4361,64 @@ let operation_search_candidates config units operations
     ~operation:(search_operation_descriptor operation)
     ~candidates:(search_candidates_for_operation config units operations operation)
 
+let take_list n xs =
+  let rec loop acc remaining count =
+    match remaining, count with
+    | _, count when count <= 0 -> List.rev acc
+    | [], _ -> List.rev acc
+    | item :: rest, _ -> loop (item :: acc) rest (count - 1)
+  in
+  loop [] xs n
+
+let speculative_candidates_for_operation (operation : operation_record)
+    (candidates : Cp_search_fabric.scored_candidate list) =
+  List.map
+    (fun (candidate : Cp_search_fabric.scored_candidate) ->
+      {
+        Speculative_engine.label = candidate.unit_id;
+        prompt =
+          Printf.sprintf
+            "Objective: %s\nWorkload: %s\nStage: %s\nCandidate unit: %s\nSearch score: %.1f\nRouting reason: %s\n\nDecide whether this is the best execution target. Keep the answer concise."
+            operation.objective
+            (operation_workload_profile operation)
+            (operation_stage_key operation)
+            candidate.unit_id
+            candidate.breakdown.total
+            candidate.routing_reason;
+        metadata =
+          `Assoc
+            [
+              ("unit_id", `String candidate.unit_id);
+              ("score", `Float candidate.breakdown.total);
+              ("routing_reason", `String candidate.routing_reason);
+            ];
+      })
+    candidates
+
+let speculative_pick_candidate config (operation : operation_record)
+    (candidates : Cp_search_fabric.scored_candidate list) =
+  if
+    not (room_speculation_enabled config)
+    || operation_search_strategy operation <> Cp_search_fabric.Best_first_v1
+    || List.length candidates < 2
+  then
+    None
+  else
+    let budget = min (room_speculation_budget config) (List.length candidates) in
+    let candidates = take_list budget candidates in
+    match
+      Speculative_engine.speculate Tool_risc.global_spec_engine
+        ~goal:(Printf.sprintf "route-%s" operation.operation_id)
+        ~original_query:operation.objective
+        ~candidates:(speculative_candidates_for_operation operation candidates)
+    with
+    | Ok outcome ->
+        List.find_opt
+          (fun (candidate : Cp_search_fabric.scored_candidate) ->
+            String.equal candidate.unit_id outcome.candidate_label)
+          candidates
+    | Error _ -> None
+
 let operation_search_json config units operations (operation : operation_record) =
   let readiness = operation_readiness operations operation in
   let candidates =
@@ -4361,9 +4432,22 @@ let operation_search_json config units operations (operation : operation_record)
     | best :: _ -> Some best.Cp_search_fabric.unit_id
     | [] -> Some operation.assigned_unit_id
   in
-  Cp_search_fabric.summary_json
-    ~strategy:(operation_search_strategy operation)
-    ~readiness ~candidates ~selected_unit_id
+  let base_json =
+    Cp_search_fabric.summary_json
+      ~strategy:(operation_search_strategy operation)
+      ~readiness ~candidates ~selected_unit_id
+  in
+  match base_json with
+  | `Assoc fields ->
+      `Assoc
+        ( ("speculation",
+           `Assoc
+             [
+               ("enabled", `Bool (room_speculation_enabled config));
+               ("budget", `Int (room_speculation_budget config));
+             ] )
+        :: fields )
+  | other -> other
 
 let update_search_stats_for_operation config operation ~outcome =
   let stage = operation_stage_key operation in
@@ -4643,7 +4727,9 @@ let start_operation config ~(actor : string) json =
   | Error message -> Error message
   | Ok _ ->
       let workload_profile_raw = get_string_default json "workload_profile" "generic" in
-      let search_strategy_raw = get_string_default json "search_strategy" "legacy" in
+      let search_strategy_raw =
+        get_string_default json "search_strategy" (room_search_strategy_default config)
+      in
       let* workload_profile = validate_workload_profile workload_profile_raw in
       let* search_strategy = validate_search_strategy search_strategy_raw in
       let chain =
@@ -5488,6 +5574,11 @@ let maybe_apply_best_first_assignment config ~actor units operations
           match candidates with
           | [] -> operation
           | best :: _ ->
+              let best =
+                match speculative_pick_candidate config operation candidates with
+                | Some candidate -> candidate
+                | None -> best
+              in
               let current =
                 candidates
                 |> List.find_opt (fun (candidate : Cp_search_fabric.scored_candidate) ->

@@ -390,6 +390,9 @@ type room_state = {
   pause_reason: string option; [@default None]  (** Reason for pause *)
   paused_by: string option; [@default None]  (** Who paused the room *)
   paused_at: string option; [@default None]  (** When paused *)
+  search_strategy_default: string option; [@default None]
+  speculation_enabled: bool; [@default false]
+  speculation_budget: int option; [@default None]
 } [@@deriving yojson { strict = false }, show]
 
 (* ============================================ *)

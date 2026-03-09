@@ -3,8 +3,6 @@
     Handles: masc_post_create, masc_post_list, masc_comment_add, masc_vote
 *)
 
-open Yojson.Safe.Util
-
 type result = bool * string
 
 (* Input validation *)
@@ -46,21 +44,7 @@ type context = {
   agent_name: string;
 }
 
-(* JSON helpers *)
-let get_string args key default =
-  match args |> member key with
-  | `String s -> s
-  | _ -> default
-
-let get_string_opt args key =
-  match args |> member key with
-  | `String s -> Some s
-  | _ -> None
-
-let get_int args key default =
-  match args |> member key with
-  | `Int i -> i
-  | _ -> default
+open Tool_args
 
 (* Format timestamp as relative time *)
 let format_timestamp_relative ts =

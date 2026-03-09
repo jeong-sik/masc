@@ -1,5 +1,7 @@
 (** Tool_audit - Audit query and statistics handlers *)
 
+open Tool_args
+
 type context = {
   config: Room.config;
 }
@@ -11,40 +13,6 @@ type audit_event = {
   success: bool;
   detail: string option;
 }
-
-(* Helper functions *)
-let get_string args key default =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`String s) -> s
-       | _ -> default)
-  | _ -> default
-
-let get_string_opt args key =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`String s) when s <> "" -> Some s
-       | _ -> None)
-  | _ -> None
-
-let get_int args key default =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`Int i) -> i
-       | _ -> default)
-  | _ -> default
-
-let get_float args key default =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`Float f) -> f
-       | Some (`Int i) -> float_of_int i
-       | _ -> default)
-  | _ -> default
 
 (* Audit log path *)
 let audit_log_path (config : Room.config) =

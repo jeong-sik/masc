@@ -141,37 +141,37 @@ let () = test "dispatch_cleanup_zombies" (fun () ->
 (* Test helper functions *)
 let () = test "get_int_present" (fun () ->
   let args = `Assoc [("key", `Int 42)] in
-  assert (Tool_misc.get_int args "key" 0 = 42)
+  assert (Tool_args.get_int args "key" 0 = 42)
 )
 
 let () = test "get_int_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_misc.get_int args "key" 99 = 99)
+  assert (Tool_args.get_int args "key" 99 = 99)
 )
 
 let () = test "get_bool_true" (fun () ->
   let args = `Assoc [("key", `Bool true)] in
-  assert (Tool_misc.get_bool args "key" false = true)
+  assert (Tool_args.get_bool args "key" false = true)
 )
 
 let () = test "get_bool_false" (fun () ->
   let args = `Assoc [("key", `Bool false)] in
-  assert (Tool_misc.get_bool args "key" true = false)
+  assert (Tool_args.get_bool args "key" true = false)
 )
 
 let () = test "get_bool_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_misc.get_bool args "key" true = true)
+  assert (Tool_args.get_bool args "key" true = true)
 )
 
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in
-  assert (Tool_misc.get_string args "key" "default" = "value")
+  assert (Tool_args.get_string args "key" "default" = "value")
 )
 
 let () = test "get_string_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_misc.get_string args "key" "default" = "default")
+  assert (Tool_args.get_string args "key" "default" = "default")
 )
 
 let () = Printf.printf "\n✅ All Tool_misc tests passed!\n"

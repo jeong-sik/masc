@@ -166,27 +166,27 @@ let () = test "dispatch_room_enter_no_id" (fun () ->
 (* Test helper functions *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in
-  assert (Tool_room.get_string args "key" "default" = "value")
+  assert (Tool_args.get_string args "key" "default" = "value")
 )
 
 let () = test "get_string_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_room.get_string args "key" "default" = "default")
+  assert (Tool_args.get_string args "key" "default" = "default")
 )
 
 let () = test "get_bool_true" (fun () ->
   let args = `Assoc [("key", `Bool true)] in
-  assert (Tool_room.get_bool args "key" false = true)
+  assert (Tool_args.get_bool args "key" false = true)
 )
 
 let () = test "get_bool_false" (fun () ->
   let args = `Assoc [("key", `Bool false)] in
-  assert (Tool_room.get_bool args "key" true = false)
+  assert (Tool_args.get_bool args "key" true = false)
 )
 
 let () = test "get_bool_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_room.get_bool args "key" true = true)
+  assert (Tool_args.get_bool args "key" true = true)
 )
 
 let () = Printf.printf "\n✅ All Tool_room tests passed!\n"

@@ -13,12 +13,6 @@ type context = {
 (** Tool result type *)
 type result = bool * string
 
-(** {1 Argument Helpers} *)
-
-val get_string : Yojson.Safe.t -> string -> string -> string
-val get_string_opt : Yojson.Safe.t -> string -> string option
-val get_float : Yojson.Safe.t -> string -> float -> float
-
 (** {1 Individual Handlers} *)
 
 val handle_tempo_get : context -> Yojson.Safe.t -> result

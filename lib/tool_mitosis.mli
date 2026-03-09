@@ -92,22 +92,6 @@ val reset_handoff_cooldown : unit -> unit
     [success] is [true] when the tool executed without errors. *)
 type result = bool * string
 
-(** {1 Argument Helpers} *)
-
-(** [get_string args key default] extracts a string value from the
-    JSON [args] object at [key], returning [default] if absent or
-    not a string. *)
-val get_string : Yojson.Safe.t -> string -> string -> string
-
-(** [get_float args key default] extracts a float value from the
-    JSON [args] object at [key], returning [default] if absent.
-    Accepts both JSON floats and integers. *)
-val get_float : Yojson.Safe.t -> string -> float -> float
-
-(** [get_bool args key default] extracts a boolean value from the
-    JSON [args] object at [key], returning [default] if absent. *)
-val get_bool : Yojson.Safe.t -> string -> bool -> bool
-
 (** {1 DNA Validation} *)
 
 (** [validate_dna dna] checks DNA quality before handoff.

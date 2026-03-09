@@ -1,4 +1,5 @@
 open Types
+open Tool_args
 
 module U = Yojson.Safe.Util
 
@@ -14,18 +15,6 @@ type ('clock, 'net) context = {
 }
 
 type result = bool * string
-
-let get_string_opt args key =
-  match U.member key args with
-  | `String s ->
-      let trimmed = String.trim s in
-      if trimmed = "" then None else Some trimmed
-  | _ -> None
-
-let get_bool_default args key default =
-  match U.member key args with
-  | `Bool value -> value
-  | _ -> default
 
 let get_json_opt args key =
   match U.member key args with
@@ -171,7 +160,7 @@ let parse_chain_launch args =
                     chain_id = value;
                     input_json = get_json_opt args "chain_input";
                     checkpoint_enabled =
-                      get_bool_default args "chain_checkpoint_enabled" true;
+                      get_bool args "chain_checkpoint_enabled" true;
                   }))
       | None, Some goal -> Ok (Some (Chain_orchestrate { goal })))
   | other ->

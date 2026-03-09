@@ -7,10 +7,6 @@ type context = {
   agent_name: string;
 }
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-val get_int : Yojson.Safe.t -> string -> int -> int
-val get_int_opt : Yojson.Safe.t -> string -> int option
-
 val handle_add_task : context -> Yojson.Safe.t -> result
 val handle_batch_add_tasks : context -> Yojson.Safe.t -> result
 val handle_claim : context -> Yojson.Safe.t -> result

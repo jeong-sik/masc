@@ -173,35 +173,7 @@ let get_session_id () =
     | Some sid when sid <> "" -> sid
     | _ -> Printf.sprintf "session-%d" (int_of_float (Time_compat.now () *. 1000.0) mod 1000000)
 
-(** {1 Argument Helpers} *)
-
-let get_string args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`String s) -> s
-       | Some _ -> Printf.eprintf "[MITOSIS/WARN] %s: type mismatch\n%!" key; default
-       | None -> default)
-  | _ -> default
-
-let get_float args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`Float f) -> f
-       | Some (`Int i) -> Float.of_int i
-       | Some _ -> Printf.eprintf "[MITOSIS/WARN] %s: type mismatch\n%!" key; default
-       | None -> default)
-  | _ -> default
-
-let get_bool args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`Bool b) -> b
-       | Some _ -> Printf.eprintf "[MITOSIS/WARN] %s: type mismatch\n%!" key; default
-       | None -> default)
-  | _ -> default
+open Tool_args
 
 (** Clamp context_ratio to valid range with warning - BALTHASAR feedback *)
 let validate_context_ratio ratio =
@@ -221,26 +193,6 @@ let set_bool_arg args key value =
       `Assoc ((key, `Bool value) :: fields')
   | _ ->
       `Assoc [ (key, `Bool value) ]
-
-let get_string_list args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`List xs) ->
-           let vals =
-             List.filter_map (function
-               | `String s ->
-                   let v = String.trim s in
-                   if v = "" then None else Some v
-               | _ -> None
-             ) xs
-           in
-           if vals = [] then default else vals
-       | Some _ ->
-           Printf.eprintf "[MITOSIS/WARN] %s: type mismatch\n%!" key;
-           default
-       | None -> default)
-  | _ -> default
 
 let default_verifier_models = [
   "ollama:glm-4.7-flash";
@@ -277,7 +229,7 @@ let perspectives_for_profile profile =
   | _ -> default_verifier_perspectives
 
 let resolve_verifier_perspectives args =
-  let explicit = get_string_list args "verifier_perspectives" [] in
+  let explicit = get_string_list args "verifier_perspectives" in
   if explicit <> [] then
     ("custom", explicit)
   else
@@ -446,7 +398,7 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
   if not verify_enabled then
     (None, true)
   else
-    let model_strs = get_string_list args "verifier_models" default_verifier_models in
+    let model_strs = match get_string_list args "verifier_models" with [] -> default_verifier_models | xs -> xs in
     let (perspective_profile, perspectives) = resolve_verifier_perspectives args in
     let goal =
       get_string args "verifier_goal"

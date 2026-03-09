@@ -1,5 +1,6 @@
 (** Tool_portal Module Coverage Tests *)
 
+module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 let () = Random.self_init ()
@@ -12,23 +13,23 @@ module Tool_portal = Masc_mcp.Tool_portal
 
 let test_get_string_exists () =
   let args = `Assoc [("target_agent", `String "claude-001")] in
-  check string "extracts string" "claude-001" (Tool_portal.get_string args "target_agent" "default")
+  check string "extracts string" "claude-001" (Tool_args.get_string args "target_agent" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_portal.get_string args "target_agent" "default")
+  check string "uses default" "default" (Tool_args.get_string args "target_agent" "default")
 
 let test_get_string_opt_exists () =
   let args = `Assoc [("initial_message", `String "hello")] in
-  check (option string) "extracts option" (Some "hello") (Tool_portal.get_string_opt args "initial_message")
+  check (option string) "extracts option" (Some "hello") (Tool_args.get_string_opt args "initial_message")
 
 let test_get_string_opt_missing () =
   let args = `Assoc [] in
-  check (option string) "returns None" None (Tool_portal.get_string_opt args "initial_message")
+  check (option string) "returns None" None (Tool_args.get_string_opt args "initial_message")
 
 let test_get_string_opt_empty () =
   let args = `Assoc [("initial_message", `String "")] in
-  check (option string) "empty is None" None (Tool_portal.get_string_opt args "initial_message")
+  check (option string) "empty is None" None (Tool_args.get_string_opt args "initial_message")
 
 (* ============================================================
    Context Creation Tests

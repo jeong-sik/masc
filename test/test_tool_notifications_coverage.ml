@@ -7,6 +7,7 @@
     handlers, limit boundary, empty queue, queue mutation (consume). *)
 
 module Tool_notifications = Masc_mcp.Tool_notifications
+module Tool_args = Masc_mcp.Tool_args
 module Session = Masc_mcp.Session
 
 (* ============================================================
@@ -36,22 +37,22 @@ let json_to_int json = Yojson.Safe.Util.to_int json
 let test_get_int_present () =
   let args = `Assoc [("limit", `Int 5)] in
   Alcotest.(check int) "extracts int" 5
-    (Tool_notifications.get_int args "limit" 10)
+    (Tool_args.get_int args "limit" 10)
 
 let test_get_int_missing () =
   let args = `Assoc [] in
   Alcotest.(check int) "returns default" 10
-    (Tool_notifications.get_int args "limit" 10)
+    (Tool_args.get_int args "limit" 10)
 
 let test_get_int_wrong_type () =
   let args = `Assoc [("limit", `String "five")] in
   Alcotest.(check int) "returns default on wrong type" 10
-    (Tool_notifications.get_int args "limit" 10)
+    (Tool_args.get_int args "limit" 10)
 
 let test_get_int_non_assoc () =
   let args = `Null in
   Alcotest.(check int) "returns default on non-assoc" 10
-    (Tool_notifications.get_int args "limit" 10)
+    (Tool_args.get_int args "limit" 10)
 
 (* ============================================================
    Dispatch routing tests

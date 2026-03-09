@@ -14,16 +14,7 @@ type context = {
   agent_name: string;
 }
 
-(* JSON helpers *)
-let get_string args key default =
-  match args |> member key with
-  | `String s -> s
-  | _ -> default
-
-let get_bool args key default =
-  match args |> member key with
-  | `Bool b -> b
-  | _ -> default
+open Tool_args
 
 (* Handlers *)
 

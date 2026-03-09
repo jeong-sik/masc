@@ -1,36 +1,13 @@
 (** Tool_walph - Walph loop control handlers *)
 
+open Tool_args
+
 type ('a, 'b) context = {
   config: Room.config;
   agent_name: string;
   net: 'a Eio.Net.t;
   clock: 'b Eio.Time.clock;
 }
-
-(* Helper functions *)
-let get_string args key default =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`String s) -> s
-       | _ -> default)
-  | _ -> default
-
-let get_string_opt args key =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`String s) when s <> "" -> Some s
-       | _ -> None)
-  | _ -> None
-
-let get_int args key default =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`Int i) -> i
-       | _ -> default)
-  | _ -> default
 
 (* Handle masc_walph_loop *)
 let handle_walph_loop ctx args =

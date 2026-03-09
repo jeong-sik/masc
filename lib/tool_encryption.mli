@@ -1,7 +1,5 @@
 (** Encryption tools - Data encryption management *)
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-
 type context = {
   state: Mcp_server.server_state;
 }

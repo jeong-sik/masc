@@ -13,26 +13,7 @@ type context = {
   agent_name: string;
 }
 
-(* JSON helpers *)
-let get_string args key default =
-  match args |> member key with
-  | `String s -> s
-  | _ -> default
-
-let get_int args key default =
-  match args |> member key with
-  | `Int i -> i
-  | _ -> default
-
-let get_bool args key default =
-  match args |> member key with
-  | `Bool b -> b
-  | _ -> default
-
-let get_int_opt args key =
-  match args |> member key with
-  | `Int i -> Some i
-  | _ -> None
+open Tool_args
 
 let result_to_response = function
   | Ok msg -> (true, msg)

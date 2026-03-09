@@ -18,6 +18,7 @@
 *)
 
 open Types
+open Tool_args
 
 let keeper_debug =
   try Sys.getenv "MASC_KEEPER_DEBUG" = "1" with Not_found -> false
@@ -476,38 +477,6 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
     ];
   };
 ]
-
-(* --------------------------------------------------------------- *)
-(* Helpers                                                          *)
-(* --------------------------------------------------------------- *)
-
-let get_string args key default =
-  Safe_ops.json_string ~default key args
-
-let get_string_opt args key =
-  match Safe_ops.json_string_opt key args with
-  | Some "" -> None
-  | other -> other
-
-let get_bool args key default =
-  Safe_ops.json_bool ~default key args
-
-let get_bool_opt args key =
-  let open Yojson.Safe.Util in
-  try
-    match args |> member key with
-    | `Null -> None
-    | j -> Some (to_bool j)
-  with Type_error _ -> None
-
-let get_int args key default =
-  Safe_ops.json_int ~default key args
-
-let get_float args key default =
-  Safe_ops.json_float ~default key args
-
-let get_string_list args key =
-  Safe_ops.json_string_list key args
 
 let bool_default_true_of_env name =
   match Sys.getenv_opt name with

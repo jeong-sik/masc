@@ -3,7 +3,7 @@
     Handles: dashboard, verify_handoff, gc, cleanup_zombies
 *)
 
-open Yojson.Safe.Util
+open Tool_args
 
 type result = bool * string
 
@@ -11,22 +11,6 @@ type context = {
   config: Room.config;
   agent_name: string;
 }
-
-(* JSON helpers *)
-let get_int args key default =
-  match args |> member key with
-  | `Int i -> i
-  | _ -> default
-
-let get_bool args key default =
-  match args |> member key with
-  | `Bool b -> b
-  | _ -> default
-
-let get_string args key default =
-  match args |> member key with
-  | `String s -> s
-  | _ -> default
 
 (* Handlers *)
 

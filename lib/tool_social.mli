@@ -1,9 +1,5 @@
 (** Tool_social - MCP tool handlers for social features *)
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-val get_string_opt : Yojson.Safe.t -> string -> string option
-val get_int : Yojson.Safe.t -> string -> int -> int
-
 type context = {
   config: Room_utils.config;
   agent_name: string;

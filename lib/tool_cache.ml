@@ -4,6 +4,8 @@
     6 tools: cache_set, cache_get, cache_delete, cache_list, cache_clear, cache_stats
 *)
 
+open Tool_args
+
 (** Tool handler context *)
 type context = {
   config: Room.config;
@@ -11,41 +13,6 @@ type context = {
 
 (** Tool result type *)
 type result = bool * string
-
-(** {1 Argument Helpers} *)
-
-let get_string args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`String s) -> s
-       | _ -> default)
-  | _ -> default
-
-let get_string_opt args key =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`String s) when s <> "" -> Some s
-       | _ -> None)
-  | _ -> None
-
-let get_int_opt args key =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`Int i) -> Some i
-       | _ -> None)
-  | _ -> None
-
-let get_string_list args key =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`List lst) ->
-           List.filter_map (function `String s -> Some s | _ -> None) lst
-       | _ -> [])
-  | _ -> []
 
 (** {1 Individual Handlers} *)
 

@@ -1,9 +1,6 @@
 (** Encryption tools - Data encryption management *)
 
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
+open Tool_args
 
 type context = {
   state: Mcp_server.server_state;

@@ -133,7 +133,10 @@ let json_int ?(default = 0) key json =
 
 let json_float ?(default = 0.0) key json =
   let open Yojson.Safe.Util in
-  try json |> member key |> to_float
+  try
+    match json |> member key with
+    | `Int i -> float_of_int i
+    | j -> to_float j
   with Type_error _ -> default
 
 let json_bool ?(default = false) key json =
@@ -143,7 +146,9 @@ let json_bool ?(default = false) key json =
 
 let json_string_list key json =
   let open Yojson.Safe.Util in
-  try json |> member key |> to_list |> List.map to_string
+  try
+    json |> member key |> to_list |> List.filter_map (fun v ->
+      try Some (to_string v) with Type_error _ -> None)
   with Type_error _ -> []
 
 let json_string_opt key json =
@@ -169,6 +174,14 @@ let json_float_opt key json =
     | `Null -> None
     | `Int i -> Some (float_of_int i)
     | j -> Some (to_float j)
+  with Type_error _ -> None
+
+let json_bool_opt key json =
+  let open Yojson.Safe.Util in
+  try
+    match json |> member key with
+    | `Null -> None
+    | j -> Some (to_bool j)
   with Type_error _ -> None
 
 (** {1 Safe Process Execution} *)

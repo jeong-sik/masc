@@ -1,5 +1,6 @@
 (** Tool_run Module Coverage Tests *)
 
+module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 let () = Random.self_init ()
@@ -12,23 +13,23 @@ module Tool_run = Masc_mcp.Tool_run
 
 let test_get_string_exists () =
   let args = `Assoc [("task_id", `String "run-123")] in
-  check string "extracts string" "run-123" (Tool_run.get_string args "task_id" "default")
+  check string "extracts string" "run-123" (Tool_args.get_string args "task_id" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_run.get_string args "task_id" "default")
+  check string "uses default" "default" (Tool_args.get_string args "task_id" "default")
 
 let test_get_string_opt_exists () =
   let args = `Assoc [("agent_name", `String "claude")] in
-  check (option string) "extracts option" (Some "claude") (Tool_run.get_string_opt args "agent_name")
+  check (option string) "extracts option" (Some "claude") (Tool_args.get_string_opt args "agent_name")
 
 let test_get_string_opt_missing () =
   let args = `Assoc [] in
-  check (option string) "returns None" None (Tool_run.get_string_opt args "agent_name")
+  check (option string) "returns None" None (Tool_args.get_string_opt args "agent_name")
 
 let test_get_string_opt_empty () =
   let args = `Assoc [("agent_name", `String "")] in
-  check (option string) "empty is None" None (Tool_run.get_string_opt args "agent_name")
+  check (option string) "empty is None" None (Tool_args.get_string_opt args "agent_name")
 
 (* ============================================================
    Context Creation Tests

@@ -36,36 +36,7 @@ let ( let* ) = Result.bind
 
 let protocol_version = "masc.game-view/0.1"
 
-let get_string args key default =
-  match args |> member key with
-  | `String s -> s
-  | _ -> default
-
-let get_string_opt args key =
-  match args |> member key with
-  | `String s when String.trim s <> "" -> Some s
-  | _ -> None
-
-let get_float_opt args key =
-  match args |> member key with
-  | `Float f -> Some f
-  | `Int n -> Some (Float.of_int n)
-  | _ -> None
-
-let get_int args key default =
-  match args |> member key with
-  | `Int n -> n
-  | `Intlit s -> (
-      try int_of_string s with _ -> default)
-  | _ -> default
-
-let get_string_list args key =
-  match args |> member key with
-  | `List xs ->
-      List.filter_map
-        (function `String s when String.trim s <> "" -> Some s | _ -> None)
-        xs
-  | _ -> []
+open Tool_args
 
 let get_object_opt args key =
   match args |> member key with

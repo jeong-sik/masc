@@ -1,8 +1,5 @@
 (** Auth tools - Authentication and authorization *)
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-val get_bool : Yojson.Safe.t -> string -> bool -> bool
-
 type context = {
   config: Room.config;
   agent_name: string;

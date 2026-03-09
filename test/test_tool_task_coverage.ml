@@ -192,32 +192,32 @@ let () = test "handle_batch_add_tasks" (fun () ->
 (* Test helper functions *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in
-  assert (Tool_task.get_string args "key" "default" = "value")
+  assert (Tool_args.get_string args "key" "default" = "value")
 )
 
 let () = test "get_string_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_task.get_string args "key" "default" = "default")
+  assert (Tool_args.get_string args "key" "default" = "default")
 )
 
 let () = test "get_int_present" (fun () ->
   let args = `Assoc [("key", `Int 42)] in
-  assert (Tool_task.get_int args "key" 0 = 42)
+  assert (Tool_args.get_int args "key" 0 = 42)
 )
 
 let () = test "get_int_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_task.get_int args "key" 99 = 99)
+  assert (Tool_args.get_int args "key" 99 = 99)
 )
 
 let () = test "get_int_opt_present" (fun () ->
   let args = `Assoc [("key", `Int 42)] in
-  assert (Tool_task.get_int_opt args "key" = Some 42)
+  assert (Tool_args.get_int_opt args "key" = Some 42)
 )
 
 let () = test "get_int_opt_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_task.get_int_opt args "key" = None)
+  assert (Tool_args.get_int_opt args "key" = None)
 )
 
 let () = Printf.printf "\n✅ All Tool_task tests passed!\n"

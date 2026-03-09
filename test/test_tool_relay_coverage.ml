@@ -162,50 +162,50 @@ let run ~sw ~proc_mgr =
   (* Test get_string helper *)
   test "get_string_present" (fun () ->
     let args = `Assoc [("key", `String "value")] in
-    assert (Tool_relay.get_string args "key" "default" = "value")
+    assert (Tool_args.get_string args "key" "default" = "value")
   );
 
   test "get_string_missing" (fun () ->
     let args = `Assoc [] in
-    assert (Tool_relay.get_string args "key" "default" = "default")
+    assert (Tool_args.get_string args "key" "default" = "default")
   );
 
   (* Test get_int helper *)
   test "get_int_present" (fun () ->
     let args = `Assoc [("key", `Int 42)] in
-    assert (Tool_relay.get_int args "key" 0 = 42)
+    assert (Tool_args.get_int args "key" 0 = 42)
   );
 
   test "get_int_missing" (fun () ->
     let args = `Assoc [] in
-    assert (Tool_relay.get_int args "key" 99 = 99)
+    assert (Tool_args.get_int args "key" 99 = 99)
   );
 
   (* Test get_string_opt helper *)
   test "get_string_opt_present" (fun () ->
     let args = `Assoc [("key", `String "value")] in
-    assert (Tool_relay.get_string_opt args "key" = Some "value")
+    assert (Tool_args.get_string_opt args "key" = Some "value")
   );
 
   test "get_string_opt_missing" (fun () ->
     let args = `Assoc [] in
-    assert (Tool_relay.get_string_opt args "key" = None)
+    assert (Tool_args.get_string_opt args "key" = None)
   );
 
   test "get_string_opt_empty" (fun () ->
     let args = `Assoc [("key", `String "")] in
-    assert (Tool_relay.get_string_opt args "key" = None)
+    assert (Tool_args.get_string_opt args "key" = None)
   );
 
   (* Test get_string_list helper *)
   test "get_string_list_present" (fun () ->
     let args = `Assoc [("key", `List [`String "a"; `String "b"])] in
-    assert (Tool_relay.get_string_list args "key" = ["a"; "b"])
+    assert (Tool_args.get_string_list args "key" = ["a"; "b"])
   );
 
   test "get_string_list_missing" (fun () ->
     let args = `Assoc [] in
-    assert (Tool_relay.get_string_list args "key" = [])
+    assert (Tool_args.get_string_list args "key" = [])
   );
 
   Printf.printf "\n✅ All Tool_relay tests passed!\n"

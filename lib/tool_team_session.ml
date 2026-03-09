@@ -987,7 +987,7 @@ let annotate_control_hierarchy_for_session
         })
       specs
 
-let parse_spawn_spec_from_object batch_index json =
+let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
   let open Yojson.Safe.Util in
   let get_required_string key =
     match member key json with
@@ -1061,8 +1061,8 @@ let parse_spawn_spec_from_object batch_index json =
   let get_timeout key =
     match member key json with
     | `Int n -> max 1 n
-    | `Intlit s -> (try max 1 (int_of_string s) with _ -> 300)
-    | _ -> 300
+    | `Intlit s -> (try max 1 (int_of_string s) with _ -> default_timeout)
+    | _ -> default_timeout
   in
   match (get_required_string "spawn_agent", get_required_string "spawn_prompt") with
   | Ok spawn_agent, Ok spawn_prompt ->
@@ -1093,6 +1093,7 @@ let parse_step_spawn_specs args =
   let singular_agent = get_string_opt args "spawn_agent" in
   let singular_prompt = get_string_opt args "spawn_prompt" in
   let singular_present = Option.is_some singular_agent || Option.is_some singular_prompt in
+  let default_batch_timeout = get_int args "spawn_timeout_seconds" 300 in
   let batch_specs_result =
     match Yojson.Safe.Util.member "spawn_batch" args with
     | `Null -> Ok []
@@ -1100,7 +1101,10 @@ let parse_step_spawn_specs args =
         let rec loop idx acc = function
           | [] -> Ok (List.rev acc)
           | json :: rest -> (
-              match parse_spawn_spec_from_object idx json with
+              match
+                parse_spawn_spec_from_object ~default_timeout:default_batch_timeout
+                  idx json
+              with
               | Ok spec -> loop (idx + 1) (spec :: acc) rest
               | Error e -> Error e)
         in

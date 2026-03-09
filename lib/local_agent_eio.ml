@@ -300,6 +300,17 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
 let local_worker_extra_schemas : Types.tool_schema list =
   [
     {
+      Types.name = "masc_heartbeat";
+      description =
+        "Update the worker heartbeat timestamp so long-running local tasks are not reaped as zombies.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ("properties", `Assoc []);
+          ];
+    };
+    {
       Types.name = "masc_team_session_status";
       description =
         "Get the current status and progress summary for a team session.";
@@ -431,6 +442,194 @@ If more tools are required, call them. Otherwise return the final result.|}
     original_prompt tool_lines
     (if already_used = [] then "none" else String.concat ", " already_used)
 
+let split_top_level delimiter (text : string) =
+  let len = String.length text in
+  let buf = Buffer.create len in
+  let acc = ref [] in
+  let in_string = ref false in
+  let escaped = ref false in
+  let paren_depth = ref 0 in
+  let bracket_depth = ref 0 in
+  let brace_depth = ref 0 in
+  let flush () =
+    let item = Buffer.contents buf |> String.trim in
+    Buffer.clear buf;
+    if item <> "" then acc := item :: !acc
+  in
+  for idx = 0 to len - 1 do
+    let ch = text.[idx] in
+    if !in_string then (
+      Buffer.add_char buf ch;
+      if !escaped then
+        escaped := false
+      else
+        match ch with
+        | '\\' -> escaped := true
+        | '"' -> in_string := false
+        | _ -> ())
+    else
+      match ch with
+      | '"' ->
+          in_string := true;
+          Buffer.add_char buf ch
+      | '(' ->
+          incr paren_depth;
+          Buffer.add_char buf ch
+      | ')' ->
+          decr paren_depth;
+          Buffer.add_char buf ch
+      | '[' ->
+          incr bracket_depth;
+          Buffer.add_char buf ch
+      | ']' ->
+          decr bracket_depth;
+          Buffer.add_char buf ch
+      | '{' ->
+          incr brace_depth;
+          Buffer.add_char buf ch
+      | '}' ->
+          decr brace_depth;
+          Buffer.add_char buf ch
+      | c
+        when c = delimiter && !paren_depth = 0 && !bracket_depth = 0
+             && !brace_depth = 0 ->
+          flush ()
+      | _ -> Buffer.add_char buf ch
+  done;
+  flush ();
+  List.rev !acc
+
+let find_top_level_char target (text : string) =
+  let len = String.length text in
+  let in_string = ref false in
+  let escaped = ref false in
+  let paren_depth = ref 0 in
+  let bracket_depth = ref 0 in
+  let brace_depth = ref 0 in
+  let result = ref None in
+  let idx = ref 0 in
+  while !idx < len && !result = None do
+    let ch = text.[!idx] in
+    if !in_string then
+      if !escaped then
+        escaped := false
+      else
+        match ch with
+        | '\\' -> escaped := true
+        | '"' -> in_string := false
+        | _ -> ()
+    else
+      match ch with
+      | '"' -> in_string := true
+      | '(' -> incr paren_depth
+      | ')' -> decr paren_depth
+      | '[' -> incr bracket_depth
+      | ']' -> decr bracket_depth
+      | '{' -> incr brace_depth
+      | '}' -> decr brace_depth
+      | _ when ch = target && !paren_depth = 0 && !bracket_depth = 0 && !brace_depth = 0 ->
+          result := Some !idx
+      | _ -> ();
+    incr idx
+  done;
+  !result
+
+let parse_text_tool_args (args_text : string) =
+  let trimmed = String.trim args_text in
+  if trimmed = "" then Ok (`Assoc [])
+  else
+    let parts = split_top_level ',' trimmed in
+    let rec build acc = function
+      | [] -> Ok (`Assoc (List.rev acc))
+      | part :: rest -> (
+          match find_top_level_char '=' part with
+          | None ->
+              Error (sprintf "invalid tool arg assignment: %s" part)
+          | Some idx ->
+              let key = String.sub part 0 idx |> String.trim in
+              let value_text =
+                String.sub part (idx + 1) (String.length part - idx - 1)
+                |> String.trim
+              in
+              if key = "" then
+                Error "empty tool arg key"
+              else
+                match Yojson.Safe.from_string value_text with
+                | value -> build ((key, value) :: acc) rest
+                | exception Yojson.Json_error msg ->
+                    Error
+                      (sprintf "invalid tool arg JSON for %s: %s" key msg))
+    in
+    build [] parts
+
+let parse_text_tool_calls (content : string) : Llm_client.tool_call list =
+  let prefix = "mcp__masc__" in
+  let prefix_len = String.length prefix in
+  let len = String.length content in
+  let is_name_char = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
+    | _ -> false
+  in
+  let rec parse_args idx depth in_string escaped =
+    if idx >= len then None
+    else
+      let ch = content.[idx] in
+      if in_string then
+        if escaped then
+          parse_args (idx + 1) depth true false
+        else
+          match ch with
+          | '\\' -> parse_args (idx + 1) depth true true
+          | '"' -> parse_args (idx + 1) depth false false
+          | _ -> parse_args (idx + 1) depth true false
+      else
+        match ch with
+        | '"' -> parse_args (idx + 1) depth true false
+        | '(' -> parse_args (idx + 1) (depth + 1) false false
+        | ')' ->
+            if depth = 1 then Some idx
+            else parse_args (idx + 1) (depth - 1) false false
+        | _ -> parse_args (idx + 1) depth false false
+  in
+  let rec collect idx call_id acc =
+    if idx >= len - prefix_len then List.rev acc
+    else if String.sub content idx prefix_len <> prefix then
+      collect (idx + 1) call_id acc
+    else
+      let name_start = idx in
+      let name_end = ref (idx + prefix_len) in
+      while !name_end < len && is_name_char content.[!name_end] do
+        incr name_end
+      done;
+      if !name_end >= len || content.[!name_end] <> '(' then
+        collect (!name_end) call_id acc
+      else
+        match parse_args (!name_end + 1) 1 false false with
+        | None -> collect (!name_end + 1) call_id acc
+        | Some close_idx ->
+            let tool_name =
+              String.sub content name_start (!name_end - name_start)
+              |> strip_mcp_prefix
+            in
+            let args_raw =
+              String.sub content (!name_end + 1) (close_idx - !name_end - 1)
+            in
+            (match parse_text_tool_args args_raw with
+            | Ok args_json ->
+                collect (close_idx + 1) (call_id + 1)
+                  ({
+                     Llm_client.call_id = sprintf "text-fallback-%d" call_id;
+                     call_name = tool_name;
+                     call_arguments = Yojson.Safe.to_string args_json;
+                   }
+                  :: acc)
+            | Error msg ->
+                eprintf "[local-worker] ignored text tool call (%s): %s\n%!"
+                  tool_name msg;
+                collect (close_idx + 1) call_id acc)
+  in
+  collect 0 1 []
+
 let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () =
   {
     Llm_client.input_tokens;
@@ -468,6 +667,14 @@ let local_worker_max_tokens () =
       match int_of_string_opt (String.trim raw) with
       | Some value -> max 64 (min 2048 value)
       | None -> 1024)
+
+let local_worker_heartbeat_interval_sec () =
+  match Sys.getenv_opt "MASC_LOCAL_WORKER_HEARTBEAT_SEC" with
+  | None -> 60
+  | Some raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some value -> max 0 (min 600 value)
+      | None -> 60)
 
 let join_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
   let args =
@@ -540,6 +747,34 @@ let worker_auth_token ~base_path ~worker_name =
   else
     Ok None
 
+let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
+    ~worker_name =
+  let interval = local_worker_heartbeat_interval_sec () in
+  match (interval, Eio_context.get_clock_opt ()) with
+  | interval, _ when interval <= 0 -> fun () -> ()
+  | _, None -> fun () -> ()
+  | interval, Some clock ->
+      let active = ref true in
+      Eio.Fiber.fork ~sw (fun () ->
+          let rec loop () =
+            if !active then (
+              Eio.Time.sleep clock (float_of_int interval);
+              if !active then (
+                match
+                  call_masc_tool ~sw ~auth_token ~session_id
+                    ~tool_name:"masc_heartbeat" ~args:(`Assoc [])
+                with
+                | Ok _ -> ()
+                | Error e ->
+                    eprintf "[local-worker] heartbeat error for %s: %s\n%!"
+                      worker_name e;
+                loop ()))
+          in
+          try loop () with exn ->
+            eprintf "[local-worker] heartbeat loop error for %s: %s\n%!"
+              worker_name (Printexc.to_string exn));
+      fun () -> active := false
+
 let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
     ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
@@ -553,8 +788,13 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
         | Ok _ -> ()
         | Error e -> raise (Failure ("worker join failed: " ^ e))
       in
+      let stop_heartbeat =
+        start_worker_heartbeat ~sw ~auth_token ~session_id:mcp_session_id
+          ~worker_name
+      in
       Fun.protect
         ~finally:(fun () ->
+          stop_heartbeat ();
           ignore (leave_worker ~sw ~auth_token ~session_id:mcp_session_id ~worker_name))
         (fun () ->
           let allowed_names =
@@ -600,8 +840,13 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
               match Llm_client.complete ~timeout_sec request with
               | Error e -> Error e
               | Ok resp ->
+                  let tool_calls =
+                    match resp.tool_calls with
+                    | [] -> parse_text_tool_calls resp.content
+                    | calls -> calls
+                  in
                   let usage_acc = merge_usage usage_acc resp.usage in
-                  if resp.tool_calls = [] then
+                  if tool_calls = [] then
                     let output =
                       let trimmed = String.trim resp.content in
                       if trimmed <> "" then trimmed
@@ -661,10 +906,10 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
                                      [ ("tool", `String tc.call_name); ("error", `String e) ])
                           in
                           ((tc : Llm_client.tool_call), output))
-                        resp.tool_calls
+                        tool_calls
                     in
                     let round_tools =
-                      List.map (fun (tc : Llm_client.tool_call) -> tc.call_name) resp.tool_calls
+                      List.map (fun (tc : Llm_client.tool_call) -> tc.call_name) tool_calls
                     in
                     let tools_used = tools_used @ round_tools in
                     let output =

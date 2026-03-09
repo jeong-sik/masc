@@ -1316,6 +1316,13 @@ let session_has_turn_for_actor config session_id actor_name =
              String.equal (String.trim recorded_actor) actor_name
          | _ -> false)
 
+let auto_note_message_of_spawn_output output =
+  let trimmed = String.trim output in
+  if trimmed = "" then
+    None
+  else
+    Some ("[auto-note] " ^ truncate_for_event ~max_len:480 trimmed)
+
 let reconcile_failed_spawn_actor config session_id actor_name =
   if session_has_turn_for_actor config session_id actor_name then
     Ok `Retained
@@ -1755,6 +1762,29 @@ let handle_step ctx args : result =
                                           ~exit_code:spawn_result.exit_code
                                           ~elapsed_ms:spawn_result.elapsed_ms
                                           ~output_preview ();
+                                        (match
+                                           ( spawn_result.success,
+                                             prepared.runtime_actor_name,
+                                             auto_note_message_of_spawn_output
+                                               spawn_result.output )
+                                         with
+                                        | true, Some worker_actor, Some auto_note
+                                          when not
+                                                 (session_has_turn_for_actor
+                                                    ctx.config session_id
+                                                    worker_actor) ->
+                                            ignore
+                                              (record_session_turn_json
+                                                 ~config:ctx.config ~session_id
+                                                 ~actor:worker_actor
+                                                 ~turn_kind:
+                                                   Team_session_types.Turn_note
+                                                 ~message:(Some auto_note)
+                                                 ~target_agent:None
+                                                 ~task_title:None
+                                                 ~task_description:None
+                                                 ~task_priority:3)
+                                        | _ -> ());
                                         (match
                                            (spawn_result.success, prepared.runtime_actor_name)
                                          with

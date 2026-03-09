@@ -176,6 +176,12 @@
  (modules test_process_eio_coverage)
  (libraries masc_mcp alcotest eio_main))
 
+; Local worker text-tool-call fallback coverage
+(test
+ (name test_local_agent_eio_coverage)
+ (modules test_local_agent_eio_coverage)
+ (libraries masc_mcp alcotest yojson))
+
 ; Resilience module tests (Time, Zombie, ZeroZombie pure functions)
 (test
  (name test_resilience)

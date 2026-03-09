@@ -91,6 +91,10 @@ export const commandPlaneChainRunError = signal<string | null>(null)
 export const commandPlaneChainFocusOperationId = signal<string | null>(null)
 let activeChainRunRequestId: string | null = null
 
+function surfaceNeedsDetail(surface: CommandPlaneSurface): boolean {
+  return surface !== 'summary' && surface !== 'swarm'
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -1254,7 +1258,7 @@ function normalizeSwarm(raw: unknown): CommandPlaneSwarmResponse {
 
 export function setCommandPlaneSurface(surface: CommandPlaneSurface): void {
   commandPlaneSurface.value = surface
-  if (surface !== 'summary') {
+  if (surfaceNeedsDetail(surface)) {
     void ensureCommandPlaneDetail()
   }
 }
@@ -1298,7 +1302,7 @@ export async function ensureCommandPlaneDetail(): Promise<void> {
 
 export async function refreshCommandPlaneCurrentSurface(): Promise<void> {
   await refreshCommandPlaneSummary()
-  if (commandPlaneSurface.value !== 'summary') {
+  if (surfaceNeedsDetail(commandPlaneSurface.value)) {
     await refreshCommandPlaneSnapshot()
   }
 }
@@ -1385,7 +1389,7 @@ async function runAction(key: string, path: string, body: Record<string, unknown
   try {
     await runCommandPlaneAction(path, body)
     await refreshCommandPlaneSummary()
-    if (commandPlaneSnapshot.value || commandPlaneSurface.value !== 'summary') {
+    if (commandPlaneSnapshot.value || surfaceNeedsDetail(commandPlaneSurface.value)) {
       await refreshCommandPlaneSnapshot()
     }
     await refreshCommandPlaneSwarm()

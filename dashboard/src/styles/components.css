@@ -4322,6 +4322,10 @@ button.council-row.selected {
   margin-top: 16px;
 }
 
+.command-swarm-layout.compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 /* ── SwarmHealthBar ────────────────────────────── */
 .swarm-health-bar {
   display: flex;
@@ -4657,6 +4661,12 @@ button.council-row.selected {
   margin-top: 12px;
 }
 
+.command-section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .command-surface-tabs {
   display: flex;
   gap: 10px;
@@ -4683,6 +4693,15 @@ button.council-row.selected {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
   gap: 16px;
+}
+
+@media (max-width: 1450px) {
+  .command-guided-layout,
+  .command-surface-grid,
+  .command-grid,
+  .command-trace-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 1100px) {
@@ -4749,6 +4768,8 @@ button.council-row.selected {
   color: rgba(255,255,255,0.56);
   font-size: 12px;
   margin-top: 4px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .command-card-grid {
@@ -4770,6 +4791,8 @@ button.council-row.selected {
   color: #67e8f9;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .command-action-row {
@@ -4902,6 +4925,8 @@ button.council-row.selected {
   margin: 10px 0 0;
   color: rgba(255,255,255,0.78);
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .command-trace-row {
@@ -4912,6 +4937,8 @@ button.council-row.selected {
 
 .command-trace-main {
   min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .command-trace-detail {
@@ -4926,21 +4953,22 @@ button.council-row.selected {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-@media (max-width: 1100px) {
-  .command-primary-layout,
-  .command-guided-layout,
-  .command-summary-grid,
-  .command-surface-grid,
-  .command-grid,
-  .command-trace-row {
-    grid-template-columns: 1fr;
-  }
+.command-card-grid span,
+.command-guide-card p,
+.command-readiness-row p,
+.command-guide-inline,
+.command-doc-links .command-tag,
+.swarm-event-node,
+.swarm-event-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ── Activity Panel (global slide-out) ────────────────────── */

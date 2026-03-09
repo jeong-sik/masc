@@ -118,16 +118,28 @@ function asStringArray(value: unknown): string[] {
     .filter(Boolean)
 }
 
+function currentLocationParams(): URLSearchParams {
+  if (typeof window === 'undefined') return new URLSearchParams()
+  const search = new URLSearchParams(window.location.search)
+  const hash = window.location.hash.replace(/^#/, '')
+  const queryIdx = hash.indexOf('?')
+  if (queryIdx >= 0) {
+    const hashSearch = new URLSearchParams(hash.slice(queryIdx + 1))
+    hashSearch.forEach((value, key) => {
+      if (!search.has(key)) search.set(key, value)
+    })
+  }
+  return search
+}
+
 function currentSwarmRunId(): string | undefined {
-  if (typeof window === 'undefined') return undefined
-  const params = new URLSearchParams(window.location.search)
+  const params = currentLocationParams()
   const value = params.get('run_id') ?? undefined
   return value && value.trim() !== '' ? value.trim() : undefined
 }
 
 function currentSwarmOperationId(): string | undefined {
-  if (typeof window === 'undefined') return undefined
-  const params = new URLSearchParams(window.location.search)
+  const params = currentLocationParams()
   const value = params.get('operation_id') ?? undefined
   return value && value.trim() !== '' ? value.trim() : undefined
 }

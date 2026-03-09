@@ -14,17 +14,20 @@ type result = bool * string
 
 (** Read Lodge config from .masc/config.json *)
 let read_lodge_config () =
-  let config_path = Filename.concat (Env_config.me_root ()) ".masc/config.json" in
-  try
-    let ic = open_in config_path in
-    let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> really_input_string ic (in_channel_length ic)) in
-    let json = Yojson.Safe.from_string content in
-    let lodge = Yojson.Safe.Util.(member "lodge" json) in
-    let lang = Yojson.Safe.Util.(member "language" lodge |> to_string_option) in
-    let inst = Yojson.Safe.Util.(member "instruction" lodge |> to_string_option) in
-    (lang, inst)
-  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ | Sys_error _ -> (None, None)
+  match Env_config.me_root_opt () with
+  | None -> (None, None)
+  | Some root ->
+      let config_path = Filename.concat root ".masc/config.json" in
+      try
+        let ic = open_in config_path in
+        let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
+          (fun () -> really_input_string ic (in_channel_length ic)) in
+        let json = Yojson.Safe.from_string content in
+        let lodge = Yojson.Safe.Util.(member "lodge" json) in
+        let lang = Yojson.Safe.Util.(member "language" lodge |> to_string_option) in
+        let inst = Yojson.Safe.Util.(member "instruction" lodge |> to_string_option) in
+        (lang, inst)
+      with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ | Sys_error _ -> (None, None)
 
 let (config_language, config_instruction) = read_lodge_config ()
 

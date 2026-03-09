@@ -72,20 +72,9 @@ let assoc_get key fields = List.assoc_opt key fields
 let assoc_put key value fields =
   (key, value) :: List.remove_assoc key fields
 
-let get_string_opt key json =
-  match json |> member key with
-  | `String s -> Some s
-  | _ -> None
-
-let get_int_opt key json =
-  match json |> member key with
-  | `Int i -> Some i
-  | _ -> None
-
-let get_bool_opt key json =
-  match json |> member key with
-  | `Bool b -> Some b
-  | _ -> None
+let get_string_opt = Safe_ops.json_string_opt
+let get_int_opt = Safe_ops.json_int_opt
+let get_bool_opt = Safe_ops.json_bool_opt
 
 let assoc_fields_or_empty = function
   | `Assoc fields -> fields

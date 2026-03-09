@@ -215,56 +215,13 @@ let mind_to_json (m : mind) : Yojson.Safe.t =
 
 (** {1 Deserialization helpers} *)
 
-let get_string json key =
-  match json with
-  | `Assoc l -> (match List.assoc_opt key l with Some (`String s) -> s | _ -> "")
-  | _ -> ""
-
-let get_float json key =
-  match json with
-  | `Assoc l -> (match List.assoc_opt key l with
-    | Some (`Float f) -> f
-    | Some (`Int i) -> float_of_int i
-    | _ -> 0.0)
-  | _ -> 0.0
-
-let get_int json key =
-  match json with
-  | `Assoc l -> (match List.assoc_opt key l with
-    | Some (`Int i) -> i
-    | Some (`Float f) -> int_of_float f
-    | _ -> 0)
-  | _ -> 0
-
-let get_bool json key =
-  match json with
-  | `Assoc l -> (match List.assoc_opt key l with Some (`Bool b) -> b | _ -> false)
-  | _ -> false
-
-let get_string_list json key =
-  match json with
-  | `Assoc l -> (match List.assoc_opt key l with
-    | Some (`List items) ->
-      List.filter_map (function `String s -> Some s | _ -> None) items
-    | _ -> [])
-  | _ -> []
-
-let get_string_opt json key =
-  match json with
-  | `Assoc l -> (match List.assoc_opt key l with
-    | Some (`String s) -> Some s
-    | Some `Null -> None
-    | _ -> None)
-  | _ -> None
-
-let get_float_opt json key =
-  match json with
-  | `Assoc l -> (match List.assoc_opt key l with
-    | Some (`Float f) -> Some f
-    | Some (`Int i) -> Some (float_of_int i)
-    | Some `Null -> None
-    | _ -> None)
-  | _ -> None
+let get_string json key = Safe_ops.json_string key json
+let get_float json key = Safe_ops.json_float key json
+let get_int json key = Safe_ops.json_int key json
+let get_bool json key = Safe_ops.json_bool key json
+let get_string_list json key = Safe_ops.json_string_list key json
+let get_string_opt json key = Safe_ops.json_string_opt key json
+let get_float_opt json key = Safe_ops.json_float_opt key json
 
 let self_model_of_json json : self_model =
   let state_str = get_string json "current_state" in

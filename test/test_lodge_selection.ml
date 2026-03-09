@@ -35,7 +35,7 @@ let test_sample_beta_clamp_minimum () =
   (* Very small alpha/beta should be clamped to 0.1 *)
   let _ = Lodge_selection.sample_beta ~alpha:0.01 ~beta:0.01 in
   (* Should not crash *)
-  check bool "handles small alpha/beta" true true
+  ()
 
 (** {1 Starvation Bonus Tests} *)
 
@@ -197,7 +197,7 @@ let test_stronger_trigger_replaces_weaker_duplicate () =
   let selected = List.hd results in
   match selected.Lodge_selection.trigger with
   | Lodge_selection.Mentioned _ ->
-      check bool "mentioned overrides alert for same agent" true true
+      ()
   | _ ->
       fail "expected Mentioned trigger to override ContentAlert"
 

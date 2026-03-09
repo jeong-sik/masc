@@ -177,7 +177,7 @@ let test_init_run_no_agent () =
 let test_read_nonexistent () =
   with_initialized_masc @@ fun config ->
   match Run_eio.read_run config "nonexistent-task" with
-  | Error _ -> check bool "returns error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error"
 
 (* ============================================================
@@ -257,7 +257,7 @@ let test_get_run () =
 let test_get_nonexistent () =
   with_initialized_masc @@ fun config ->
   match Run_eio.get config ~task_id:"nonexistent" with
-  | Error _ -> check bool "returns error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error"
 
 let test_list_empty () =
@@ -284,26 +284,26 @@ let test_run_record_of_json_missing_field () =
   (* Missing required fields should return None *)
   let json = `Assoc [("task_id", `String "t1")] in
   match Run_eio.run_record_of_json json with
-  | None -> check bool "ok" true true  (* created_at missing *)
+  | None -> ()  (* created_at missing *)
   | Some _ -> fail "expected None for incomplete json"
 
 let test_run_record_of_json_invalid_type () =
   (* Wrong type should return None *)
   let json = `String "not an object" in
   match Run_eio.run_record_of_json json with
-  | None -> check bool "ok" true true
+  | None -> ()
   | Some _ -> fail "expected None for invalid type"
 
 let test_log_entry_of_json_missing_field () =
   let json = `Assoc [("timestamp", `String "2024-01-01")] in
   match Run_eio.log_entry_of_json json with
-  | None -> check bool "ok" true true  (* note missing *)
+  | None -> ()  (* note missing *)
   | Some _ -> fail "expected None"
 
 let test_log_entry_of_json_invalid () =
   let json = `Null in
   match Run_eio.log_entry_of_json json with
-  | None -> check bool "ok" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -313,13 +313,13 @@ let test_log_entry_of_json_invalid () =
 let test_update_plan_nonexistent () =
   with_initialized_masc @@ fun config ->
   match Run_eio.update_plan config ~task_id:"nonexistent-task" ~content:"plan" with
-  | Error _ -> check bool "returns error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error"
 
 let test_set_deliverable_nonexistent () =
   with_initialized_masc @@ fun config ->
   match Run_eio.set_deliverable config ~task_id:"nonexistent-task" ~content:"deliv" with
-  | Error _ -> check bool "returns error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error"
 
 let test_read_logs_nonexistent () =
@@ -369,7 +369,7 @@ let test_init_run_idempotent () =
   match Run_eio.init config ~task_id:"task-idem" ~agent_name:(Some "second") with
   | Ok run ->
       (* Second init should succeed and update agent *)
-      check bool "ok" true true;
+      ();
       (match run.agent_name with
        | Some a -> check string "agent" "second" a
        | None -> fail "expected agent")

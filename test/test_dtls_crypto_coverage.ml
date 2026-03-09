@@ -65,32 +65,32 @@ let test_cipher_suite_ecdhe_256 () =
 
 let test_of_int_null () =
   match Dtls_crypto.cipher_suite_of_int 0x0000 with
-  | Some Dtls_crypto.TLS_NULL_WITH_NULL_NULL -> check bool "null" true true
+  | Some Dtls_crypto.TLS_NULL_WITH_NULL_NULL -> ()
   | _ -> fail "expected TLS_NULL"
 
 let test_of_int_aes_128 () =
   match Dtls_crypto.cipher_suite_of_int 0x009C with
-  | Some Dtls_crypto.TLS_RSA_WITH_AES_128_GCM_SHA256 -> check bool "aes 128" true true
+  | Some Dtls_crypto.TLS_RSA_WITH_AES_128_GCM_SHA256 -> ()
   | _ -> fail "expected AES_128"
 
 let test_of_int_aes_256 () =
   match Dtls_crypto.cipher_suite_of_int 0x009D with
-  | Some Dtls_crypto.TLS_RSA_WITH_AES_256_GCM_SHA384 -> check bool "aes 256" true true
+  | Some Dtls_crypto.TLS_RSA_WITH_AES_256_GCM_SHA384 -> ()
   | _ -> fail "expected AES_256"
 
 let test_of_int_ecdhe_128 () =
   match Dtls_crypto.cipher_suite_of_int 0xC02F with
-  | Some Dtls_crypto.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 -> check bool "ecdhe 128" true true
+  | Some Dtls_crypto.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 -> ()
   | _ -> fail "expected ECDHE_128"
 
 let test_of_int_ecdhe_256 () =
   match Dtls_crypto.cipher_suite_of_int 0xC030 with
-  | Some Dtls_crypto.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 -> check bool "ecdhe 256" true true
+  | Some Dtls_crypto.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 -> ()
   | _ -> fail "expected ECDHE_256"
 
 let test_of_int_invalid () =
   match Dtls_crypto.cipher_suite_of_int 0xFFFF with
-  | None -> check bool "none" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================

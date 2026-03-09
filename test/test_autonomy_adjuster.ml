@@ -140,7 +140,7 @@ let test_adjust_recovering_caps_at_half () =
    | _ ->
      (* If not recovering, the test setup did not trigger the right state.
         Skip gracefully — this depends on circuit breaker thresholds. *)
-     check bool "health state not Recovering (OK, threshold-dependent)" true true)
+     ())
 
 (** {1 Clamp Tests} *)
 
@@ -190,7 +190,7 @@ let test_json_malformed () =
   let bad = `Assoc [("agent_name", `String "x")] in
   match Aa.autonomy_record_of_yojson bad with
   | Ok _ -> fail "should have failed on malformed JSON"
-  | Error _ -> check bool "malformed JSON rejected" true true
+  | Error _ -> ()
 
 (** {1 Batch Operation Tests} *)
 

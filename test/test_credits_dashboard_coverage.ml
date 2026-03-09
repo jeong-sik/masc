@@ -131,7 +131,7 @@ let test_json_api_valid_json () =
   (* Should be parseable JSON *)
   try
     let _ = Yojson.Safe.from_string json in
-    check bool "valid json" true true
+    ()
   with _ -> check bool "valid json" true false
 
 (* ============================================================

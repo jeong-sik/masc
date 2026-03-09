@@ -160,13 +160,13 @@ let test_dispatch_swarm_walph () =
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_swarm.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 let test_dispatch_non_swarm_tool () =
   let ctx = make_ctx () in
   match Tool_swarm.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-  | None -> check bool "returns None for non-swarm" true true
+  | None -> ()
   | Some _ -> fail "expected None for non-swarm tool"
 
 (* ============================================================
@@ -184,7 +184,7 @@ let test_handle_init_parses_behavior () =
   with
   | Effect.Unhandled _ ->
       (* Some paths may require Eio runtime *)
-      check bool "requires Eio runtime" true true
+      ()
 
 let test_handle_join_parses_agent_name () =
   let ctx = make_ctx () in

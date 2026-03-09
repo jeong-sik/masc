@@ -105,7 +105,7 @@ let test_trigger_reason_timeout () =
 let test_trigger_reason_explicit () =
   let r = Handover_eio.Explicit in
   match r with
-  | Handover_eio.Explicit -> check bool "explicit" true true
+  | Handover_eio.Explicit -> ()
   | _ -> fail "expected Explicit"
 
 let test_trigger_reason_fatal_error () =
@@ -117,7 +117,7 @@ let test_trigger_reason_fatal_error () =
 let test_trigger_reason_task_complete () =
   let r = Handover_eio.TaskComplete in
   match r with
-  | Handover_eio.TaskComplete -> check bool "task_complete" true true
+  | Handover_eio.TaskComplete -> ()
   | _ -> fail "expected TaskComplete"
 
 (* ============================================================
@@ -265,7 +265,7 @@ let test_handover_json_roundtrip () =
 let test_handover_of_json_invalid () =
   let json = `Assoc [("invalid", `String "data")] in
   match Handover_eio.handover_of_json json with
-  | None -> check bool "returns None" true true
+  | None -> ()
   | Some _ -> fail "expected None for invalid json"
 
 (* ============================================================
@@ -294,7 +294,7 @@ let test_save_and_load_handover () =
 let test_load_nonexistent () =
   with_eio_env @@ fun ~fs config ->
   match Handover_eio.load_handover ~fs config "nonexistent-id" with
-  | Error _ -> check bool "returns error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error for nonexistent"
 
 (* ============================================================
@@ -349,7 +349,7 @@ let test_claim_handover_success () =
 let test_claim_handover_nonexistent () =
   with_eio_env @@ fun ~fs config ->
   match Handover_eio.claim_handover ~fs config ~handover_id:"fake-id" ~agent_name:"x" with
-  | Error _ -> check bool "returns error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error"
 
 (* ============================================================

@@ -69,7 +69,7 @@ let test_metric_type_histogram () =
 let test_register_counter_basic () =
   Prometheus.register_counter ~name:"test_counter_basic" ~help:"A test counter" ();
   (* Registration should not throw *)
-  check bool "registered" true true
+  ()
 
 let test_register_counter_with_labels () =
   Prometheus.register_counter
@@ -77,12 +77,12 @@ let test_register_counter_with_labels () =
     ~help:"Counter with labels"
     ~labels:[("env", "test")]
     ();
-  check bool "registered with labels" true true
+  ()
 
 let test_register_counter_idempotent () =
   Prometheus.register_counter ~name:"test_counter_idem" ~help:"Idempotent" ();
   Prometheus.register_counter ~name:"test_counter_idem" ~help:"Idempotent" ();
-  check bool "idempotent" true true
+  ()
 
 (* ============================================================
    register_gauge Tests
@@ -90,7 +90,7 @@ let test_register_counter_idempotent () =
 
 let test_register_gauge_basic () =
   Prometheus.register_gauge ~name:"test_gauge_basic" ~help:"A test gauge" ();
-  check bool "registered" true true
+  ()
 
 let test_register_gauge_with_labels () =
   Prometheus.register_gauge
@@ -98,7 +98,7 @@ let test_register_gauge_with_labels () =
     ~help:"Gauge with labels"
     ~labels:[("env", "test")]
     ();
-  check bool "registered with labels" true true
+  ()
 
 (* ============================================================
    inc_counter Tests
@@ -106,20 +106,20 @@ let test_register_gauge_with_labels () =
 
 let test_inc_counter_default () =
   Prometheus.inc_counter "test_inc_default" ();
-  check bool "incremented" true true
+  ()
 
 let test_inc_counter_with_delta () =
   Prometheus.inc_counter "test_inc_delta" ~delta:5.0 ();
-  check bool "incremented with delta" true true
+  ()
 
 let test_inc_counter_with_labels () =
   Prometheus.inc_counter "test_inc_labels" ~labels:[("type", "test")] ();
-  check bool "incremented with labels" true true
+  ()
 
 let test_inc_counter_auto_register () =
   Prometheus.inc_counter "test_auto_register" ();
   (* Counter is auto-registered if not exists *)
-  check bool "auto registered" true true
+  ()
 
 (* ============================================================
    set_gauge Tests
@@ -127,20 +127,20 @@ let test_inc_counter_auto_register () =
 
 let test_set_gauge_basic () =
   Prometheus.set_gauge "test_set_basic" 42.0;
-  check bool "set" true true
+  ()
 
 let test_set_gauge_with_labels () =
   Prometheus.set_gauge "test_set_labels" ~labels:[("env", "test")] 100.0;
-  check bool "set with labels" true true
+  ()
 
 let test_set_gauge_auto_register () =
   Prometheus.set_gauge "test_set_auto" 1.0;
-  check bool "auto registered" true true
+  ()
 
 let test_set_gauge_overwrite () =
   Prometheus.set_gauge "test_set_overwrite" 1.0;
   Prometheus.set_gauge "test_set_overwrite" 2.0;
-  check bool "overwritten" true true
+  ()
 
 (* ============================================================
    inc_gauge Tests
@@ -148,15 +148,15 @@ let test_set_gauge_overwrite () =
 
 let test_inc_gauge_default () =
   Prometheus.inc_gauge "test_inc_gauge_default" ();
-  check bool "incremented" true true
+  ()
 
 let test_inc_gauge_with_delta () =
   Prometheus.inc_gauge "test_inc_gauge_delta" ~delta:10.0 ();
-  check bool "incremented with delta" true true
+  ()
 
 let test_inc_gauge_with_labels () =
   Prometheus.inc_gauge "test_inc_gauge_labels" ~labels:[("type", "test")] ();
-  check bool "incremented with labels" true true
+  ()
 
 (* ============================================================
    dec_gauge Tests
@@ -165,12 +165,12 @@ let test_inc_gauge_with_labels () =
 let test_dec_gauge_default () =
   Prometheus.set_gauge "test_dec_gauge" 10.0;
   Prometheus.dec_gauge "test_dec_gauge" ();
-  check bool "decremented" true true
+  ()
 
 let test_dec_gauge_with_delta () =
   Prometheus.set_gauge "test_dec_delta" 10.0;
   Prometheus.dec_gauge "test_dec_delta" ~delta:5.0 ();
-  check bool "decremented with delta" true true
+  ()
 
 (* ============================================================
    to_prometheus_text Tests
@@ -236,31 +236,31 @@ let test_llm_cache_metrics_json () =
 
 let test_record_request () =
   Prometheus.record_request ();
-  check bool "request recorded" true true
+  ()
 
 let test_record_task_completed () =
   Prometheus.record_task_completed ();
-  check bool "task completed recorded" true true
+  ()
 
 let test_record_task_failed () =
   Prometheus.record_task_failed ();
-  check bool "task failed recorded" true true
+  ()
 
 let test_record_error_default () =
   Prometheus.record_error ();
-  check bool "error recorded" true true
+  ()
 
 let test_record_error_with_type () =
   Prometheus.record_error ~error_type:"test_error" ();
-  check bool "error recorded with type" true true
+  ()
 
 let test_set_active_agents () =
   Prometheus.set_active_agents 5;
-  check bool "active agents set" true true
+  ()
 
 let test_set_pending_tasks () =
   Prometheus.set_pending_tasks 10;
-  check bool "pending tasks set" true true
+  ()
 
 (* ============================================================
    update_uptime Tests
@@ -268,7 +268,7 @@ let test_set_pending_tasks () =
 
 let test_update_uptime () =
   Prometheus.update_uptime ();
-  check bool "uptime updated" true true
+  ()
 
 (* ============================================================
    init Tests
@@ -277,7 +277,7 @@ let test_update_uptime () =
 let test_init () =
   (* init is called automatically on module load *)
   Prometheus.init ();
-  check bool "init" true true
+  ()
 
 (* ============================================================
    label Type Tests
@@ -294,31 +294,31 @@ let test_label_type () =
 
 let test_empty_metric_name () =
   Prometheus.inc_counter "" ();
-  check bool "empty name" true true
+  ()
 
 let test_special_chars_in_name () =
   Prometheus.inc_counter "metric_with_underscore" ();
-  check bool "underscore name" true true
+  ()
 
 let test_unicode_in_label () =
   Prometheus.inc_counter "test_unicode" ~labels:[("한글", "값")] ();
-  check bool "unicode label" true true
+  ()
 
 let test_negative_gauge () =
   Prometheus.set_gauge "test_negative" (-10.0);
-  check bool "negative gauge" true true
+  ()
 
 let test_zero_gauge () =
   Prometheus.set_gauge "test_zero" 0.0;
-  check bool "zero gauge" true true
+  ()
 
 let test_large_value () =
   Prometheus.set_gauge "test_large" 1e15;
-  check bool "large value" true true
+  ()
 
 let test_small_value () =
   Prometheus.set_gauge "test_small" 1e-15;
-  check bool "small value" true true
+  ()
 
 (* ============================================================
    Test Runners

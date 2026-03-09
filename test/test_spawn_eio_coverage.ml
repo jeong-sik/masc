@@ -47,7 +47,7 @@ let test_spawn_config_no_working_dir () =
     mcp_tools = [];
   } in
   match cfg.working_dir with
-  | None -> check bool "no working_dir" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_spawn_config_mcp_tools () =
@@ -191,7 +191,7 @@ let test_parse_claude_json_success () =
   match Spawn_eio.parse_claude_json json with
   | (Some "Hello", Some 100, Some 200, None, None, Some cost) ->
       check (float 0.001) "cost" 0.005 cost
-  | _ -> check bool "valid parse" true true  (* Structure may vary *)
+  | _ -> ()  (* Structure may vary *)
 
 let test_parse_claude_json_invalid () =
   let (result, _, _, _, _, _) = Spawn_eio.parse_claude_json "not json" in
@@ -482,7 +482,7 @@ let test_spawn_llama_requires_explicit_runtime_model () =
 
 let test_get_config_unknown () =
   match Spawn_eio.get_config "nonexistent" with
-  | None -> check bool "None" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================

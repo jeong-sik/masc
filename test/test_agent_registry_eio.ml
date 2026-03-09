@@ -101,7 +101,7 @@ let test_concurrent_access () =
     done
   ));
   
-  check bool "survived concurrent access" true true
+  ()
 
 let () =
   run "Agent_registry_eio" [

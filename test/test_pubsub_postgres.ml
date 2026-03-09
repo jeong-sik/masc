@@ -31,7 +31,7 @@ let test_notify_query_compiles () =
     B.default_config with
     postgres_url = None;  (* Will fail but compiles *)
   } in
-  check bool "notify_q query compiles" true true
+  ()
 
 (** Test pg_notify payload limit documentation *)
 let test_notify_payload_limit () =
@@ -83,7 +83,7 @@ let test_hybrid_approach_doc () =
      1. NOTIFY: Real-time push (< 1ms latency)
      2. Table queue: Reliability (persisted, no loss)
      3. Caqti compatibility: Works with connection pool *)
-  check bool "hybrid documented" true true
+  ()
 
 let () =
   run "Pubsub Postgres" [

@@ -161,7 +161,7 @@ let test_to_json_has_fitness_halflife () =
 let test_print_config_no_error () =
   (* Should not throw, just prints to stderr *)
   Level2_config.print_config ();
-  check bool "no error" true true
+  ()
 
 (* ============================================================
    Test Runners

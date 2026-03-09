@@ -103,7 +103,7 @@ let test_self_model_to_json_basic () =
   } in
   let json = Mind_eio.self_model_to_json s in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 let test_self_model_to_json_has_id () =
@@ -222,7 +222,7 @@ let test_thought_to_json_basic () =
   } in
   let json = Mind_eio.thought_to_json t in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 let test_thought_to_json_type_observation () =
@@ -325,7 +325,7 @@ let test_goal_to_json_basic () =
   } in
   let json = Mind_eio.goal_to_json g in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 let test_goal_to_json_status_active () =
@@ -451,7 +451,7 @@ let test_anomaly_to_json_basic () =
   } in
   let json = Mind_eio.anomaly_to_json a in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 let test_anomaly_to_json_severity_low () =
@@ -619,7 +619,7 @@ let test_insight_to_json () =
   } in
   let json = Mind_eio.insight_to_json i in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 (* ============================================================
@@ -649,7 +649,7 @@ let test_learning_to_json () =
   } in
   let json = Mind_eio.learning_to_json l in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 (* ============================================================
@@ -681,7 +681,7 @@ let test_value_to_json () =
   } in
   let json = Mind_eio.value_to_json v in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 (* ============================================================
@@ -953,7 +953,7 @@ let test_mind_to_json_returns_assoc () =
   let m = make_test_mind () in
   let json = Mind_eio.mind_to_json m in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 let test_mind_to_json_has_self () =
@@ -1104,7 +1104,7 @@ let test_pure_evaluate_action () =
   let eval = Mind_eio.Pure.evaluate_action m ~action_description:"random action" in
   check string "target_id" "action" eval.target_id;
   let _ : float = eval.score in
-  check bool "has score" true true
+  ()
 
 let test_pure_active_goals () =
   let m = make_test_mind () in

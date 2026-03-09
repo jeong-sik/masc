@@ -23,19 +23,19 @@ let test_git_root_returns_option () =
   let result = Room_git.git_root ~base_path:"." in
   (* Just verify it returns an option *)
   let _ : string option = result in
-  check bool "returns option" true true
+  ()
 
 let test_git_root_nonexistent () =
   let result = Room_git.git_root ~base_path:"/nonexistent/path/xyz" in
   match result with
-  | None -> check bool "nonexistent returns None" true true
-  | Some _ -> check bool "might exist" true true  (* allow both outcomes *)
+  | None -> ()
+  | Some _ -> ()  (* allow both outcomes *)
 
 let test_git_root_tmp () =
   let result = Room_git.git_root ~base_path:"/tmp" in
   match result with
-  | None -> check bool "/tmp is not git repo" true true
-  | Some _ -> check bool "/tmp might be in git repo" true true
+  | None -> ()
+  | Some _ -> ()
 
 let test_git_root_current_nonempty () =
   match Room_git.git_root ~base_path:"." with
@@ -59,7 +59,7 @@ let test_is_git_repo_current () =
 let test_is_git_repo_returns_bool () =
   let result = Room_git.is_git_repo ~base_path:"/tmp" in
   let _ : bool = result in
-  check bool "returns bool" true true
+  ()
 
 let test_is_git_repo_nonexistent () =
   let result = Room_git.is_git_repo ~base_path:"/nonexistent/xyz" in
@@ -69,7 +69,7 @@ let test_is_git_repo_root () =
   let result = Room_git.is_git_repo ~base_path:"/" in
   (* Root directory is unlikely to be a git repo *)
   let _ : bool = result in
-  check bool "returns bool for root" true true
+  ()
 
 (* ============================================================
    remote_branch_exists Tests
@@ -80,7 +80,7 @@ let test_remote_branch_exists_returns_bool () =
   | Some root ->
       let result = Room_git.remote_branch_exists root "main" in
       let _ : bool = result in
-      check bool "returns bool" true true
+      ()
   | None -> fail "need git repo"
 
 let test_remote_branch_exists_main_or_master () =
@@ -89,10 +89,10 @@ let test_remote_branch_exists_main_or_master () =
       let has_main = Room_git.remote_branch_exists root "main" in
       let has_master = Room_git.remote_branch_exists root "master" in
       if has_main || has_master then
-        check bool "has main or master" true true
+        ()
       else
         (* CI or shallow clones may not have origin refs *)
-        check bool "no main/master on remote" true true
+        ()
   | None -> fail "need git repo"
 
 let test_remote_branch_exists_nonexistent () =
@@ -118,7 +118,7 @@ let test_origin_head_branch_returns_option () =
   | Some root ->
       let result = Room_git.origin_head_branch root in
       let _ : string option = result in
-      check bool "returns option" true true
+      ()
   | None -> fail "need git repo"
 
 let test_origin_head_branch_typical_values () =
@@ -130,7 +130,7 @@ let test_origin_head_branch_typical_values () =
            check bool "branch nonempty" true (String.length branch > 0)
        | None ->
            (* origin/HEAD might not be set *)
-           check bool "origin HEAD not set" true true)
+           ())
   | None -> fail "need git repo"
 
 (* ============================================================
@@ -148,7 +148,7 @@ let test_resolve_base_branch_main () =
             check (option string) "no fallback needed" None fallback
         | Error _ -> fail "should resolve main"
       end else
-        check bool "main not on remote" true true
+        ()
   | None -> fail "need git repo for test"
 
 let test_resolve_base_branch_returns_result () =
@@ -156,7 +156,7 @@ let test_resolve_base_branch_returns_result () =
   | Some root ->
       let result = Room_git.resolve_base_branch root "main" in
       let _ : (string * string option, Masc_mcp.Types.masc_error) result = result in
-      check bool "returns result" true true
+      ()
   | None -> fail "need git repo"
 
 let test_resolve_base_branch_nonexistent_fallback () =
@@ -170,7 +170,7 @@ let test_resolve_base_branch_nonexistent_fallback () =
            check bool "has fallback note" true (fallback <> None)
        | Error _ ->
            (* Error if no fallback available either *)
-           check bool "no fallback available" true true)
+           ())
   | None -> fail "need git repo"
 
 (* ============================================================
@@ -180,7 +180,7 @@ let test_resolve_base_branch_nonexistent_fallback () =
 let test_list_returns_json () =
   let result = Room_git.list ~base_path:"." in
   let _ : Yojson.Safe.t = result in
-  check bool "returns json" true true
+  ()
 
 let test_list_has_worktrees_key () =
   let result = Room_git.list ~base_path:"." in
@@ -216,7 +216,7 @@ let test_list_worktrees_is_list () =
   let open Yojson.Safe.Util in
   let worktrees = result |> member "worktrees" in
   match worktrees with
-  | `List _ -> check bool "worktrees is list" true true
+  | `List _ -> ()
   | _ -> fail "worktrees should be list"
 
 let test_list_nonrepo () =
@@ -244,7 +244,7 @@ let test_list_worktree_has_path () =
   | wt :: _ ->
       let path = wt |> member "path" |> to_string in
       check bool "path nonempty" true (String.length path > 0)
-  | [] -> check bool "no worktrees" true true
+  | [] -> ()
 
 let test_list_worktree_has_branch () =
   let result = Room_git.list ~base_path:"." in
@@ -253,8 +253,8 @@ let test_list_worktree_has_branch () =
   match worktrees with
   | wt :: _ ->
       let _ = wt |> member "branch" in
-      check bool "has branch key" true true
-  | [] -> check bool "no worktrees" true true
+      ()
+  | [] -> ()
 
 let test_list_worktree_has_is_masc () =
   let result = Room_git.list ~base_path:"." in
@@ -264,8 +264,8 @@ let test_list_worktree_has_is_masc () =
   | wt :: _ ->
       let is_masc = wt |> member "is_masc" |> to_bool in
       let _ : bool = is_masc in
-      check bool "has is_masc bool" true true
-  | [] -> check bool "no worktrees" true true
+      ()
+  | [] -> ()
 
 (* ============================================================
    get_info Tests
@@ -274,7 +274,7 @@ let test_list_worktree_has_is_masc () =
 let test_get_info_returns_option () =
   let result = Room_git.get_info ~base_path:"." ~agent_name:"test" ~task_id:"001" in
   let _ : (string * string) option = result in
-  check bool "returns option" true true
+  ()
 
 let test_get_info_nonexistent () =
   let result = Room_git.get_info ~base_path:"." ~agent_name:"nonexistent" ~task_id:"xyz123" in

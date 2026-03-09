@@ -40,27 +40,27 @@ let test_string_of_content_type_unknown () =
 
 let test_content_type_of_int_20 () =
   match Dtls.content_type_of_int 20 with
-  | Dtls.ChangeCipherSpec -> check bool "ChangeCipherSpec" true true
+  | Dtls.ChangeCipherSpec -> ()
   | _ -> fail "expected ChangeCipherSpec"
 
 let test_content_type_of_int_21 () =
   match Dtls.content_type_of_int 21 with
-  | Dtls.Alert -> check bool "Alert" true true
+  | Dtls.Alert -> ()
   | _ -> fail "expected Alert"
 
 let test_content_type_of_int_22 () =
   match Dtls.content_type_of_int 22 with
-  | Dtls.Handshake -> check bool "Handshake" true true
+  | Dtls.Handshake -> ()
   | _ -> fail "expected Handshake"
 
 let test_content_type_of_int_23 () =
   match Dtls.content_type_of_int 23 with
-  | Dtls.ApplicationData -> check bool "ApplicationData" true true
+  | Dtls.ApplicationData -> ()
   | _ -> fail "expected ApplicationData"
 
 let test_content_type_of_int_unknown () =
   match Dtls.content_type_of_int 99 with
-  | Dtls.Unknown 99 -> check bool "Unknown" true true
+  | Dtls.Unknown 99 -> ()
   | _ -> fail "expected Unknown"
 
 let test_int_of_content_type_change_cipher_spec () =
@@ -108,32 +108,32 @@ let test_string_of_handshake_type_finished () =
 
 let test_handshake_type_of_int_0 () =
   match Dtls.handshake_type_of_int 0 with
-  | Dtls.HelloRequest -> check bool "HelloRequest" true true
+  | Dtls.HelloRequest -> ()
   | _ -> fail "expected HelloRequest"
 
 let test_handshake_type_of_int_1 () =
   match Dtls.handshake_type_of_int 1 with
-  | Dtls.ClientHello -> check bool "ClientHello" true true
+  | Dtls.ClientHello -> ()
   | _ -> fail "expected ClientHello"
 
 let test_handshake_type_of_int_2 () =
   match Dtls.handshake_type_of_int 2 with
-  | Dtls.ServerHello -> check bool "ServerHello" true true
+  | Dtls.ServerHello -> ()
   | _ -> fail "expected ServerHello"
 
 let test_handshake_type_of_int_11 () =
   match Dtls.handshake_type_of_int 11 with
-  | Dtls.Certificate -> check bool "Certificate" true true
+  | Dtls.Certificate -> ()
   | _ -> fail "expected Certificate"
 
 let test_handshake_type_of_int_20 () =
   match Dtls.handshake_type_of_int 20 with
-  | Dtls.Finished -> check bool "Finished" true true
+  | Dtls.Finished -> ()
   | _ -> fail "expected Finished"
 
 let test_handshake_type_of_int_unknown () =
   match Dtls.handshake_type_of_int 99 with
-  | Dtls.Unknown 99 -> check bool "Unknown" true true
+  | Dtls.Unknown 99 -> ()
   | _ -> fail "expected Unknown"
 
 (* ============================================================
@@ -244,7 +244,7 @@ let test_decode_record_header_valid () =
 let test_decode_record_header_too_short () =
   let short = Bytes.of_string "short" in
   match Dtls.decode_record_header short with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 (* ============================================================
@@ -327,7 +327,7 @@ let test_decode_record_too_short () =
   } in
   let header_bytes = Dtls.encode_record_header header in
   match Dtls.decode_record header_bytes with
-  | Error _ -> check bool "error for truncated" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_decode_record_roundtrip () =

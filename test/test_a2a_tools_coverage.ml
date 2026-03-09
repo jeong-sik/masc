@@ -18,27 +18,27 @@ module A2a_tools = Masc_mcp.A2a_tools
 
 let test_task_type_sync () =
   match A2a_tools.task_type_of_string "sync" with
-  | Ok A2a_tools.Sync -> check bool "sync" true true
+  | Ok A2a_tools.Sync -> ()
   | _ -> fail "expected Sync"
 
 let test_task_type_async () =
   match A2a_tools.task_type_of_string "async" with
-  | Ok A2a_tools.Async -> check bool "async" true true
+  | Ok A2a_tools.Async -> ()
   | _ -> fail "expected Async"
 
 let test_task_type_stream () =
   match A2a_tools.task_type_of_string "stream" with
-  | Ok A2a_tools.Stream -> check bool "stream" true true
+  | Ok A2a_tools.Stream -> ()
   | _ -> fail "expected Stream"
 
 let test_task_type_invalid () =
   match A2a_tools.task_type_of_string "invalid" with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error"
 
 let test_task_type_empty () =
   match A2a_tools.task_type_of_string "" with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error"
 
 (* ============================================================
@@ -47,27 +47,27 @@ let test_task_type_empty () =
 
 let test_event_type_task_update () =
   match A2a_tools.event_type_of_string "task_update" with
-  | Ok A2a_tools.TaskUpdate -> check bool "task_update" true true
+  | Ok A2a_tools.TaskUpdate -> ()
   | _ -> fail "expected TaskUpdate"
 
 let test_event_type_broadcast () =
   match A2a_tools.event_type_of_string "broadcast" with
-  | Ok A2a_tools.Broadcast -> check bool "broadcast" true true
+  | Ok A2a_tools.Broadcast -> ()
   | _ -> fail "expected Broadcast"
 
 let test_event_type_completion () =
   match A2a_tools.event_type_of_string "completion" with
-  | Ok A2a_tools.Completion -> check bool "completion" true true
+  | Ok A2a_tools.Completion -> ()
   | _ -> fail "expected Completion"
 
 let test_event_type_error () =
   match A2a_tools.event_type_of_string "error" with
-  | Ok A2a_tools.Error -> check bool "error" true true
+  | Ok A2a_tools.Error -> ()
   | _ -> fail "expected Error"
 
 let test_event_type_invalid () =
   match A2a_tools.event_type_of_string "invalid" with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error"
 
 (* ============================================================
@@ -109,42 +109,6 @@ let test_event_type_roundtrip_broadcast () =
   | Error _ -> fail "roundtrip failed"
 
 (* ============================================================
-   Type Tests
-   ============================================================ *)
-
-let test_artifact_type_name () =
-  let _ : string = "test" in
-  check bool "name is string" true true
-
-let test_artifact_type_mime_type () =
-  let _ : string = "text/plain" in
-  check bool "mime_type is string" true true
-
-let test_artifact_type_data () =
-  let _ : string = "data" in
-  check bool "data is string" true true
-
-let test_delegate_result_task_id () =
-  let _ : string = "task_123" in
-  check bool "task_id is string" true true
-
-let test_delegate_result_status () =
-  let _ : string = "completed" in
-  check bool "status is string" true true
-
-let test_subscription_id () =
-  let _ : string = "sub_123" in
-  check bool "id is string" true true
-
-let test_subscription_agent_filter () =
-  let _ : string option = None in
-  check bool "agent_filter is option" true true
-
-let test_subscription_created_at () =
-  let _ : string = "2026-01-27T00:00:00Z" in
-  check bool "created_at is string" true true
-
-(* ============================================================
    subscription_to_json Tests
    ============================================================ *)
 
@@ -157,7 +121,7 @@ let test_subscription_to_json_with_filter () =
   } in
   let json = A2a_tools.subscription_to_json sub in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 let test_subscription_to_json_no_filter () =
@@ -202,7 +166,7 @@ let test_subscription_of_json_null_filter () =
 let test_subscription_of_json_invalid () =
   let json = `List [] in
   match A2a_tools.subscription_of_json json with
-  | None -> check bool "None" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -226,7 +190,7 @@ let test_artifact_to_json () =
   } in
   let json = A2a_tools.artifact_to_yojson artifact in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 let test_artifact_of_json () =
@@ -262,7 +226,7 @@ let test_delegate_result_to_json () =
   } in
   let json = A2a_tools.delegate_result_to_yojson result in
   match json with
-  | `Assoc _ -> check bool "is assoc" true true
+  | `Assoc _ -> ()
   | _ -> fail "expected Assoc"
 
 let test_delegate_result_of_json () =
@@ -433,7 +397,7 @@ let test_subscription_to_json_empty_events () =
   let json = A2a_tools.subscription_to_json sub in
   let open Yojson.Safe.Util in
   match json |> member "event_types" with
-  | `List [] -> check bool "empty list" true true
+  | `List [] -> ()
   | _ -> fail "expected empty list"
 
 let test_subscription_to_json_all_events () =
@@ -477,7 +441,7 @@ let test_subscription_of_json_missing_id () =
     ("created_at", `String "2026-01-27T00:00:00Z");
   ] in
   match A2a_tools.subscription_of_json json with
-  | None -> check bool "None for missing id" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_subscription_of_json_invalid_event_types () =
@@ -665,20 +629,6 @@ let () =
       test_case "broadcast" `Quick test_event_type_roundtrip_broadcast;
       test_case "completion" `Quick test_event_type_roundtrip_completion;
       test_case "error" `Quick test_event_type_roundtrip_error;
-    ];
-    "artifact_type", [
-      test_case "name" `Quick test_artifact_type_name;
-      test_case "mime_type" `Quick test_artifact_type_mime_type;
-      test_case "data" `Quick test_artifact_type_data;
-    ];
-    "delegate_result_type", [
-      test_case "task_id" `Quick test_delegate_result_task_id;
-      test_case "status" `Quick test_delegate_result_status;
-    ];
-    "subscription_type", [
-      test_case "id" `Quick test_subscription_id;
-      test_case "agent_filter" `Quick test_subscription_agent_filter;
-      test_case "created_at" `Quick test_subscription_created_at;
     ];
     "subscription_to_json", [
       test_case "with filter" `Quick test_subscription_to_json_with_filter;

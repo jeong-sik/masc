@@ -20,23 +20,23 @@ module Cancellation = Masc_mcp.Cancellation
 let test_token_type_id () =
   (* Token has id field *)
   let _ : string = "token_id" in
-  check bool "id is string" true true
+  ()
 
 let test_token_type_cancelled () =
   let _ : bool = false in
-  check bool "cancelled is bool" true true
+  ()
 
 let test_token_type_reason () =
   let _ : string option = None in
-  check bool "reason is option" true true
+  ()
 
 let test_token_type_callbacks () =
   let _ : (unit -> unit) list = [] in
-  check bool "callbacks is list" true true
+  ()
 
 let test_token_type_created_at () =
   let _ : float = 0.0 in
-  check bool "created_at is float" true true
+  ()
 
 (* ============================================================
    TokenStore.create_with_id Tests
@@ -61,7 +61,7 @@ let test_create_with_id_idempotent () =
   Cancellation.TokenStore.create_with_id id;
   Cancellation.TokenStore.create_with_id id;  (* Should not fail *)
   Cancellation.TokenStore.remove id;
-  check bool "idempotent" true true
+  ()
 
 (* ============================================================
    TokenStore.get Tests
@@ -91,7 +91,7 @@ let test_remove_existing () =
 
 let test_remove_nonexistent () =
   Cancellation.TokenStore.remove "nonexistent_remove_xyz";
-  check bool "no error" true true
+  ()
 
 (* ============================================================
    TokenStore.list_all Tests
@@ -130,7 +130,7 @@ let test_cancel_sets_cancelled () =
 
 let test_cancel_nonexistent () =
   Cancellation.TokenStore.cancel "nonexistent_cancel_xyz";
-  check bool "no error" true true
+  ()
 
 (* ============================================================
    Test Runners

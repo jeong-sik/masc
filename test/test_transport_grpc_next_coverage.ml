@@ -61,12 +61,12 @@ let test_default_config_tls () =
 
 let test_default_config_cert_file () =
   match Transport_grpc_next.default_config.cert_file with
-  | None -> check bool "no cert" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_default_config_key_file () =
   match Transport_grpc_next.default_config.key_file with
-  | None -> check bool "no key" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -94,12 +94,12 @@ let test_tls_config () =
 
 let test_check_dependencies () =
   match Transport_grpc_next.check_dependencies () with
-  | Transport_grpc_next.Available -> check bool "available" true true
+  | Transport_grpc_next.Available -> ()
   | _ -> fail "expected Available"
 
 let test_service_status_not_installed () =
   let _ : Transport_grpc_next.service_status = Transport_grpc_next.NotInstalled in
-  check bool "NotInstalled exists" true true
+  ()
 
 let test_service_status_running () =
   let status : Transport_grpc_next.service_status =
@@ -248,7 +248,7 @@ let test_decode_join_request_valid () =
 
 let test_decode_join_request_invalid () =
   match Transport_grpc_next.decode_join_request "invalid" with
-  | None -> check bool "returns None" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_decode_leave_request_valid () =

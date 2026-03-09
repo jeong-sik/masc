@@ -215,7 +215,7 @@ let test_cancel_task_claimed_by_other () =
 
     let result = Room.cancel_task_r config ~agent_name:"claude" ~task_id:"task-001" ~reason:"" in
     match result with
-    | Error _ -> Alcotest.(check bool) "cannot cancel other's task" true true
+    | Error _ -> ()
     | Ok _ -> Alcotest.fail "Expected Error"
   )
 
@@ -223,7 +223,7 @@ let test_cancel_task_nonexistent () =
   with_test_env (fun config ->
     let result = Room.cancel_task_r config ~agent_name:"claude" ~task_id:"task-999" ~reason:"" in
     match result with
-    | Error Types.TaskNotFound _ -> Alcotest.(check bool) "task not found" true true
+    | Error Types.TaskNotFound _ -> ()
     | _ -> Alcotest.fail "Expected TaskNotFound"
   )
 
@@ -235,7 +235,7 @@ let test_cancel_done_task () =
 
     let result = Room.cancel_task_r config ~agent_name:"claude" ~task_id:"task-001" ~reason:"" in
     match result with
-    | Error Types.TaskInvalidState _ -> Alcotest.(check bool) "cannot cancel done task" true true
+    | Error Types.TaskInvalidState _ -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState"
   )
 
@@ -280,7 +280,7 @@ let test_transition_invalid () =
     (* Try to start without claiming first *)
     let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:"start" () in
     match result with
-    | Error Types.TaskInvalidState _ -> Alcotest.(check bool) "invalid transition" true true
+    | Error Types.TaskInvalidState _ -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState"
   )
 
@@ -292,7 +292,7 @@ let test_transition_version_mismatch () =
     let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001"
                    ~action:"claim" ~expected_version:999 () in
     match result with
-    | Error Types.TaskInvalidState _ -> Alcotest.(check bool) "version mismatch" true true
+    | Error Types.TaskInvalidState _ -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState for version mismatch"
   )
 
@@ -320,7 +320,7 @@ let test_resume_not_paused () =
   with_test_env (fun config ->
     let result = Room.resume config ~by:"claude" in
     match result with
-    | `Already_running -> Alcotest.(check bool) "already running" true true
+    | `Already_running -> ()
     | _ -> Alcotest.fail "Expected Already_running"
   )
 
@@ -337,7 +337,7 @@ let test_pause_info () =
 let test_pause_info_not_paused () =
   with_test_env (fun config ->
     match Room.pause_info config with
-    | None -> Alcotest.(check bool) "no pause info" true true
+    | None -> ()
     | Some _ -> Alcotest.fail "Expected None"
   )
 
@@ -410,7 +410,7 @@ let test_complete_task_r_not_claimed () =
 
     let result = Room.complete_task_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
     match result with
-    | Error Types.TaskNotClaimed _ -> Alcotest.(check bool) "not claimed error" true true
+    | Error Types.TaskNotClaimed _ -> ()
     | _ -> Alcotest.fail "Expected TaskNotClaimed"
   )
 
@@ -418,7 +418,7 @@ let test_complete_task_r_not_found () =
   with_test_env (fun config ->
     let result = Room.complete_task_r config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
     match result with
-    | Error Types.TaskNotFound _ -> Alcotest.(check bool) "not found error" true true
+    | Error Types.TaskNotFound _ -> ()
     | _ -> Alcotest.fail "Expected TaskNotFound"
   )
 
@@ -439,7 +439,7 @@ let test_claim_task_r_already_claimed () =
 
     let result = Room.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     match result with
-    | Error Types.TaskAlreadyClaimed _ -> Alcotest.(check bool) "already claimed" true true
+    | Error Types.TaskAlreadyClaimed _ -> ()
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed"
   )
 
@@ -467,27 +467,27 @@ let test_gc_with_tasks () =
 
 let test_task_id_to_int_valid () =
   match Room.task_id_to_int "task-001" with
-  | Some 1 -> Alcotest.(check bool) "parses task-001" true true
+  | Some 1 -> ()
   | _ -> Alcotest.fail "Expected Some 1"
 
 let test_task_id_to_int_large () =
   match Room.task_id_to_int "task-999" with
-  | Some 999 -> Alcotest.(check bool) "parses task-999" true true
+  | Some 999 -> ()
   | _ -> Alcotest.fail "Expected Some 999"
 
 let test_task_id_to_int_invalid_prefix () =
   match Room.task_id_to_int "issue-001" with
-  | None -> Alcotest.(check bool) "rejects invalid prefix" true true
+  | None -> ()
   | Some _ -> Alcotest.fail "Expected None"
 
 let test_task_id_to_int_empty () =
   match Room.task_id_to_int "" with
-  | None -> Alcotest.(check bool) "rejects empty" true true
+  | None -> ()
   | Some _ -> Alcotest.fail "Expected None"
 
 let test_task_id_to_int_only_prefix () =
   match Room.task_id_to_int "task-" with
-  | None -> Alcotest.(check bool) "rejects just prefix" true true
+  | None -> ()
   | Some _ -> Alcotest.fail "Expected None"
 
 (* ============================================================ *)
@@ -507,7 +507,7 @@ let test_update_agent_status () =
     | Some agent ->
         let result = Room.update_agent_r config ~agent_name:agent.name ~status:(Some "listening") () in
         (match result with
-         | Ok _ -> Alcotest.(check bool) "status updated" true true
+         | Ok _ -> ()
          | Error _ -> Alcotest.fail "Expected Ok")
     | None -> Alcotest.fail "Gemini agent not found"
   )
@@ -525,7 +525,7 @@ let test_update_agent_capabilities () =
         let result = Room.update_agent_r config ~agent_name:agent.name
                        ~capabilities:(Some ["python"; "code-review"]) () in
         (match result with
-         | Ok _ -> Alcotest.(check bool) "capabilities updated" true true
+         | Ok _ -> ()
          | Error _ -> Alcotest.fail "Expected Ok")
     | None -> Alcotest.fail "Gemini agent not found"
   )
@@ -534,7 +534,7 @@ let test_update_agent_not_found () =
   with_test_env (fun config ->
     let result = Room.update_agent_r config ~agent_name:"nonexistent" ~status:(Some "active") () in
     match result with
-    | Error Types.AgentNotFound _ -> Alcotest.(check bool) "agent not found" true true
+    | Error Types.AgentNotFound _ -> ()
     | _ -> Alcotest.fail "Expected AgentNotFound"
   )
 

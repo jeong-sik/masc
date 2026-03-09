@@ -44,11 +44,11 @@ let () =
               Unix.sleepf 0.05;
               Sse.touch "sess-3";
               (* No exception = pass *)
-              Alcotest.(check bool) "touched" true true;
+              ();
               Sse.unregister "sess-3");
           Alcotest.test_case "nonexistent no error" `Quick (fun () ->
               Sse.touch "nonexistent";
-              Alcotest.(check bool) "no crash" true true);
+              ());
         ] );
       ( "close_all_clients",
         [

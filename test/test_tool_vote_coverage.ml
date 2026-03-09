@@ -67,7 +67,7 @@ let test_dispatch_vote_create () =
     match Tool_vote.dispatch ctx ~name:"masc_vote_create" ~args with
     | Some (success, _) -> check bool "succeeds" true success
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_vote_cast () =
   let ctx = make_ctx () in
@@ -76,29 +76,29 @@ let test_dispatch_vote_cast () =
     match Tool_vote.dispatch ctx ~name:"masc_vote_cast" ~args with
     | Some (success, _) -> check bool "succeeds" true success
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_vote_status () =
   let ctx = make_ctx () in
   let args = `Assoc [("vote_id", `String "vote-001")] in
   try
     match Tool_vote.dispatch ctx ~name:"masc_vote_status" ~args with
-    | Some _ -> check bool "routes to vote_status" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_votes () =
   let ctx = make_ctx () in
   try
     match Tool_vote.dispatch ctx ~name:"masc_votes" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to votes" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_vote.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================

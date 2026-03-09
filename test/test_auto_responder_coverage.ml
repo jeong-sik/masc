@@ -186,7 +186,7 @@ let test_chain_window_positive () =
 let test_is_enabled_type () =
   let enabled = Auto_responder.is_enabled () in
   let _ : bool = enabled in
-  check bool "returns bool" true true
+  ()
 
 (* ============================================================
    get_mode Tests

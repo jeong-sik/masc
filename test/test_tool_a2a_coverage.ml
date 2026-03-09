@@ -64,18 +64,18 @@ let test_dispatch_a2a_discover () =
   let ctx = make_ctx () in
   try
     match Tool_a2a.dispatch ctx ~name:"masc_a2a_discover" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to a2a_discover" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (error expected)" true true
+  with _ -> ()
 
 let test_dispatch_a2a_query_skill () =
   let ctx = make_ctx () in
   let args = `Assoc [("agent_name", `String "claude"); ("skill_id", `String "coding")] in
   try
     match Tool_a2a.dispatch ctx ~name:"masc_a2a_query_skill" ~args with
-    | Some _ -> check bool "routes to a2a_query_skill" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (error expected)" true true
+  with _ -> ()
 
 let test_dispatch_a2a_delegate () =
   let ctx = make_ctx () in
@@ -87,41 +87,41 @@ let test_dispatch_a2a_delegate () =
   ] in
   try
     match Tool_a2a.dispatch ctx ~name:"masc_a2a_delegate" ~args with
-    | Some _ -> check bool "routes to a2a_delegate" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (error expected)" true true
+  with _ -> ()
 
 let test_dispatch_a2a_subscribe () =
   let ctx = make_ctx () in
   let args = `Assoc [("events", `List [`String "broadcast"; `String "task_update"])] in
   try
     match Tool_a2a.dispatch ctx ~name:"masc_a2a_subscribe" ~args with
-    | Some _ -> check bool "routes to a2a_subscribe" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (error expected)" true true
+  with _ -> ()
 
 let test_dispatch_a2a_unsubscribe () =
   let ctx = make_ctx () in
   let args = `Assoc [("subscription_id", `String "sub-001")] in
   try
     match Tool_a2a.dispatch ctx ~name:"masc_a2a_unsubscribe" ~args with
-    | Some _ -> check bool "routes to a2a_unsubscribe" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (error expected)" true true
+  with _ -> ()
 
 let test_dispatch_poll_events () =
   let ctx = make_ctx () in
   let args = `Assoc [("subscription_id", `String "sub-001"); ("clear", `Bool true)] in
   try
     match Tool_a2a.dispatch ctx ~name:"masc_poll_events" ~args with
-    | Some _ -> check bool "routes to poll_events" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (error expected)" true true
+  with _ -> ()
 
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_a2a.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================

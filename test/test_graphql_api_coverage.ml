@@ -61,17 +61,17 @@ let test_decode_cursor_roundtrip () =
 let test_decode_cursor_wrong_kind () =
   let encoded = Graphql_api.encode_cursor ~kind:"task" "123" in
   match Graphql_api.decode_cursor ~kind:"agent" encoded with
-  | None -> check bool "wrong kind returns None" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_decode_cursor_invalid () =
   match Graphql_api.decode_cursor ~kind:"task" "not_base64!!!" with
-  | None -> check bool "invalid returns None" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_decode_cursor_empty () =
   match Graphql_api.decode_cursor ~kind:"task" "" with
-  | None -> check bool "empty returns None" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -140,23 +140,23 @@ let test_take_preserves_order () =
 
 let test_page_info_has_next_page () =
   let _ : bool = true in
-  check bool "has_next_page is bool" true true
+  ()
 
 let test_page_info_end_cursor () =
   let _ : string option = None in
-  check bool "end_cursor is option" true true
+  ()
 
 let test_edge_node () =
   let _ : int = 42 in
-  check bool "node is generic" true true
+  ()
 
 let test_edge_cursor () =
   let _ : string = "cursor" in
-  check bool "cursor is string" true true
+  ()
 
 let test_connection_total_count () =
   let _ : int = 100 in
-  check bool "total_count is int" true true
+  ()
 
 (* ============================================================
    Test Runners

@@ -109,15 +109,15 @@ let test_storage_type_default () =
 let test_storage_backend_memory_variant () =
   (* Just test that the type exists and can be constructed indirectly *)
   let _ : string = "Memory" in
-  check bool "Memory variant exists" true true
+  ()
 
 let test_storage_backend_filesystem_variant () =
   let _ : string = "FileSystem" in
-  check bool "FileSystem variant exists" true true
+  ()
 
 let test_storage_backend_postgres_variant () =
   let _ : string = "PostgresNative" in
-  check bool "PostgresNative variant exists" true true
+  ()
 
 (* ============================================================
    config Record Tests
@@ -126,12 +126,12 @@ let test_storage_backend_postgres_variant () =
 let test_config_base_path_type () =
   (* config record has base_path: string *)
   let _ : string = "test_path" in
-  check bool "base_path is string" true true
+  ()
 
 let test_config_lock_expiry_type () =
   (* config record has lock_expiry_minutes: int *)
   let _ : int = 30 in
-  check bool "lock_expiry_minutes is int" true true
+  ()
 
 (* ============================================================
    strip_prefix Tests

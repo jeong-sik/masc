@@ -46,7 +46,7 @@ let test_agent_id_of_yojson_ok () =
 let test_agent_id_of_yojson_err () =
   let json = `Int 123 in
   match Types.Agent_id.of_yojson json with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_agent_id_empty () =
@@ -102,7 +102,7 @@ let test_task_id_of_yojson_ok () =
 let test_task_id_of_yojson_err () =
   let json = `Bool true in
   match Types.Task_id.of_yojson json with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 (* ============================================================
@@ -195,7 +195,7 @@ let test_agent_status_of_string_opt_inactive () =
 
 let test_agent_status_of_string_opt_unknown () =
   match Types.agent_status_of_string_opt "unknown-status" with
-  | None -> check bool "is None" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -241,12 +241,12 @@ let test_agent_status_of_yojson_busy () =
 
 let test_agent_status_of_yojson_unknown () =
   match Types.agent_status_of_yojson (`String "invalid") with
-  | Error _ -> check bool "is Error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_agent_status_of_yojson_wrong_type () =
   match Types.agent_status_of_yojson (`Int 123) with
-  | Error _ -> check bool "is Error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 (* ============================================================
@@ -391,7 +391,7 @@ let test_task_status_of_yojson_cancelled () =
 let test_task_status_of_yojson_unknown () =
   let json = `Assoc [("status", `String "invalid_status")] in
   match Types.task_status_of_yojson json with
-  | Error _ -> check bool "is Error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 (* ============================================================
@@ -432,7 +432,7 @@ let test_worktree_info_of_yojson () =
 let test_worktree_info_of_yojson_missing_field () =
   let json = `Assoc [("branch", `String "main")] in
   match Types.worktree_info_of_yojson json with
-  | Error _ -> check bool "is Error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 (* ============================================================

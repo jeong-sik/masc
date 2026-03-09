@@ -71,7 +71,7 @@ let test_get_bool_default_false () =
 
 let test_print_summary_no_error () =
   Env_config.print_summary ();
-  check bool "no error" true true
+  ()
 
 (* ============================================================
    Zombie Module Tests

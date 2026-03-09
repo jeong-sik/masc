@@ -124,7 +124,7 @@ let test_dispatch_handover_get_no_fs () =
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_handover.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================

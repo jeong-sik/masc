@@ -58,37 +58,37 @@ let test_time_now_not_future () =
 
 let test_parse_iso8601_valid () =
   match Resilience.Time.parse_iso8601_opt "2024-01-15T10:30:00Z" with
-  | Some _ -> check bool "valid" true true
+  | Some _ -> ()
   | None -> fail "expected Some"
 
 let test_parse_iso8601_invalid () =
   match Resilience.Time.parse_iso8601_opt "not a timestamp" with
-  | None -> check bool "invalid" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso8601_empty () =
   match Resilience.Time.parse_iso8601_opt "" with
-  | None -> check bool "empty" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso8601_partial () =
   match Resilience.Time.parse_iso8601_opt "2024-01-15" with
-  | None -> check bool "partial" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso8601_no_z () =
   match Resilience.Time.parse_iso8601_opt "2024-01-15T10:30:00" with
-  | None -> check bool "no Z" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso8601_midnight () =
   match Resilience.Time.parse_iso8601_opt "2024-01-01T00:00:00Z" with
-  | Some _ -> check bool "midnight" true true
+  | Some _ -> ()
   | None -> fail "expected Some"
 
 let test_parse_iso8601_end_of_day () =
   match Resilience.Time.parse_iso8601_opt "2024-12-31T23:59:59Z" with
-  | Some _ -> check bool "end of day" true true
+  | Some _ -> ()
   | None -> fail "expected Some"
 
 (* ============================================================

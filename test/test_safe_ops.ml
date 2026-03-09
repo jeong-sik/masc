@@ -173,12 +173,12 @@ let test_remove_file_logged_nonexistent () =
   let open Masc_mcp.Safe_ops in
   (* Should not raise, just log *)
   remove_file_logged "/nonexistent/file.tmp";
-  check bool "no exception" true true
+  ()
 
 let test_remove_file_logged_custom_context () =
   let open Masc_mcp.Safe_ops in
   remove_file_logged ~context:"custom" "/nonexistent/file.tmp";
-  check bool "no exception with context" true true
+  ()
 
 (* close_in_logged *)
 let test_close_in_logged_valid () =
@@ -190,7 +190,7 @@ let test_close_in_logged_valid () =
   let ic = open_in path in
   close_in_logged ic;
   Sys.remove path;
-  check bool "closed" true true
+  ()
 
 (* get_env_int_logged *)
 let test_get_env_int_logged_missing () =

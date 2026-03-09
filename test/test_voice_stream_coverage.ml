@@ -59,7 +59,7 @@ let test_client_message_subscribe () =
 let test_client_message_unsubscribe () =
   let msg = Voice_stream.Unsubscribe in
   match msg with
-  | Voice_stream.Unsubscribe -> check bool "unsubscribe" true true
+  | Voice_stream.Unsubscribe -> ()
   | _ -> fail "expected Unsubscribe"
 
 let test_client_message_unknown () =
@@ -120,13 +120,13 @@ let test_parse_subscribe () =
 let test_parse_unsubscribe () =
   let json = {|{"type": "unsubscribe"}|} in
   match Voice_stream.parse_client_message json with
-  | Voice_stream.Unsubscribe -> check bool "ok" true true
+  | Voice_stream.Unsubscribe -> ()
   | _ -> fail "expected Unsubscribe"
 
 let test_parse_unknown_type () =
   let json = {|{"type": "unknown_type"}|} in
   match Voice_stream.parse_client_message json with
-  | Voice_stream.Unknown _ -> check bool "ok" true true
+  | Voice_stream.Unknown _ -> ()
   | _ -> fail "expected Unknown"
 
 let test_parse_invalid_json () =
@@ -138,14 +138,14 @@ let test_parse_invalid_json () =
 let test_parse_empty_object () =
   let json = {|{}|} in
   match Voice_stream.parse_client_message json with
-  | Voice_stream.Unknown _ -> check bool "ok" true true
+  | Voice_stream.Unknown _ -> ()
   | _ -> fail "expected Unknown"
 
 let test_parse_missing_agent_id () =
   (* subscribe without agent_id should fail *)
   let json = {|{"type": "subscribe"}|} in
   match Voice_stream.parse_client_message json with
-  | Voice_stream.Unknown _ -> check bool "fails gracefully" true true
+  | Voice_stream.Unknown _ -> ()
   | Voice_stream.Subscribe _ -> fail "should have failed"
   | _ -> fail "unexpected"
 

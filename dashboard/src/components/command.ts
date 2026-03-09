@@ -314,7 +314,7 @@ function SwarmHealthBar({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
   for (const lane of lanes) {
     const m = lane.motion_state as keyof typeof counts
     if (m in counts) counts[m]++
-    else counts.moving++
+    else counts.waiting++
   }
   const total = lanes.length
   if (total === 0) return null
@@ -348,7 +348,7 @@ function SwarmHealthBar({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
 function SwarmWorkerGrid({ workers, total }: { workers: number; total: number }) {
   const maxDots = 20
   const active = Math.min(workers, maxDots)
-  const idle = Math.min(total - workers, maxDots - active)
+  const idle = Math.max(0, Math.min(total - workers, maxDots - active))
   const overflow = total > maxDots ? total - maxDots : 0
   const dots: Array<{ active: boolean }> = []
   for (let i = 0; i < active; i++) dots.push({ active: true })
@@ -368,9 +368,9 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
   const tone = swarmLaneTone(lane)
   const totalWorkers = counts.workers ?? 0
   const activeWorkers = Math.max(0, totalWorkers - (counts.alerts ?? 0))
-  const totalOps = (counts.operations ?? 0) + (counts.detachments ?? 0)
-  const completedOps = counts.operations ?? 0
-  const progressPct = totalOps > 0 ? Math.round((completedOps / totalOps) * 100) : 0
+  const ops = counts.operations ?? 0
+  const dets = counts.detachments ?? 0
+  const totalOps = ops + dets
 
   return html`
     <article class="swarm-lane-strip ${toneClass(tone)}">
@@ -403,9 +403,9 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
               <div class="swarm-lane-row">
                 <span class="swarm-lane-row-label">Ops</span>
                 <div class="swarm-mini-bar">
-                  <div class="swarm-mini-bar-fill" style="width: ${progressPct}%; background: var(--${tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'ok'})"></div>
+                  <div class="swarm-mini-bar-fill" style="width: ${totalOps > 0 ? Math.round((ops / totalOps) * 100) : 0}%; background: var(--${tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'ok'})"></div>
                 </div>
-                <span class="swarm-worker-count">${progressPct}%</span>
+                <span class="swarm-worker-count">${ops} ops · ${dets} dets</span>
               </div>
             `
           : null}
@@ -426,7 +426,8 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
 
 function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEvent }) {
   const ts = event.timestamp ? new Date(event.timestamp) : null
-  const timeStr = ts ? `${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}` : ''
+  const validTs = ts && !isNaN(ts.getTime()) ? ts : null
+  const timeStr = validTs ? `${String(validTs.getHours()).padStart(2, '0')}:${String(validTs.getMinutes()).padStart(2, '0')}` : ''
   return html`
     <div class="swarm-event-node">
       <span class="swarm-event-dot ${toneClass(event.tone)}"></span>

@@ -4300,9 +4300,6 @@ button.council-row.selected {
   display: inline-block;
   flex-shrink: 0;
 }
-.swarm-motion-dot.ok { background: var(--ok); }
-.swarm-motion-dot.warn { background: var(--warn); }
-.swarm-motion-dot.bad { background: var(--bad); }
 .swarm-motion-dot.moving { animation: workingPulse 1.5s ease-in-out infinite; background: var(--ok); }
 .swarm-motion-dot.stalled { animation: warnBlink 1s ease-in-out infinite; background: var(--bad); }
 .swarm-motion-dot.waiting { background: var(--warn); }

@@ -85,10 +85,13 @@ Heartbeat의 LLM 호출 순서:
 | Cloudflare Tunnel | `com.jeongsik.masc-cloudflared` | — |
 
 ### launchd 환경변수 필수
-plist `EnvironmentVariables`에 반드시 포함:
-- `GRAPHQL_API_KEY` — GraphQL 인증
-- `SSL_CERT_FILE` — TLS 인증서 경로
-- `MASC_ORCHESTRATOR_ENABLED=0` — Orchestrator 비활성화 (EADDRINUSE 방지)
+- 비밀값은 tracked plist에 넣지 않는다.
+- `start-masc-mcp.sh`가 launchd 시작 시 `~/.zshenv`를 읽어서 `GRAPHQL_API_KEY`와 각종 OAuth/API 토큰을 주입한다.
+- plist `EnvironmentVariables`에는 비밀이 아닌 기본값만 둔다.
+- 유지해야 하는 plist 기본값:
+  - `SSL_CERT_FILE` — TLS 인증서 경로
+  - `MASC_ORCHESTRATOR_ENABLED=0` — Orchestrator 비활성화 (EADDRINUSE 방지)
+  - `MASC_MCP_PORT`, `MASC_BASE_PATH`, `PATH` — launchd 런타임 기본값
 
 ### 관리 명령
 ```bash

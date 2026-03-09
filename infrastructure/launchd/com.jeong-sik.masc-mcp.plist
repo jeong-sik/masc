@@ -52,20 +52,10 @@
         <string>180</string>
         <key>MASC_ZOMBIE_CLEANUP_INTERVAL_SEC</key>
         <string>30</string>
-        <key>GRAPHQL_API_KEY</key>
-        <string>Cuovi59bsPTt9+J+NCqBM+5Sks9fHuCuVhBhT+oI+2A=</string>
         <key>SSL_CERT_FILE</key>
         <string>/opt/homebrew/etc/ca-certificates/cert.pem</string>
         <key>SSL_CERT_DIR</key>
         <string>/etc/ssl/certs</string>
-        <key>CLAUDE_CODE_OAUTH_TOKEN_anyang</key>
-        <string>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</string>
-        <key>CLAUDE_CODE_OAUTH_TOKEN_for</key>
-        <string>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</string>
-        <key>CLAUDE_CODE_OAUTH_TOKEN_kidsnote</key>
-        <string>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</string>
-        <key>CLAUDE_CODE_OAUTH_TOKEN_yhhjsjmk</key>
-        <string>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</string>
     </dict>
 
     <key>WorkingDirectory</key>

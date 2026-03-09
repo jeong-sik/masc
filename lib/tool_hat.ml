@@ -1,9 +1,6 @@
 (** Hat tools - Agent role management *)
 
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
+open Tool_args
 
 type context = {
   config: Room.config;

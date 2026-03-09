@@ -9,7 +9,7 @@
     Replaces tool_social.ml for new installations.
 *)
 
-open Yojson.Safe.Util
+open Tool_args
 
 type result = bool * string
 
@@ -46,34 +46,6 @@ let visibility_of_string = function
   | "unlisted" -> Some Board.Unlisted
   | "internal" -> Some Board.Internal
   | "direct" -> Some Board.Direct
-  | _ -> None
-
-(** {1 JSON Helpers} *)
-
-let get_string args key default =
-  match args |> member key with
-  | `String s -> s
-  | _ -> default
-
-let get_string_opt args key =
-  match args |> member key with
-  | `String s -> Some s
-  | _ -> None
-
-let get_int args key default =
-  match args |> member key with
-  | `Int i -> i
-  | _ -> default
-
-let get_bool args key default =
-  match args |> member key with
-  | `Bool b -> b
-  | _ -> default
-
-let get_float_opt args key =
-  match args |> member key with
-  | `Float f -> Some f
-  | `Int i -> Some (float_of_int i)
   | _ -> None
 
 (** {1 Formatters} *)

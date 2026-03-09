@@ -1,4 +1,5 @@
 open Types
+open Tool_args
 
 type 'a context = {
   config : Room.config;
@@ -10,18 +11,6 @@ type 'a context = {
 }
 
 type result = bool * string
-
-let get_string_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `String s ->
-      let trimmed = String.trim s in
-      if trimmed = "" then None else Some trimmed
-  | _ -> None
-
-let get_bool args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Bool value -> value
-  | _ -> default
 
 let schema_properties entries = `Assoc entries
 

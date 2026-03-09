@@ -1,8 +1,5 @@
 (** Heartbeat tools - Agent health monitoring *)
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-val get_int : Yojson.Safe.t -> string -> int -> int
-
 type 'a context = {
   config: Room.config;
   agent_name: string;

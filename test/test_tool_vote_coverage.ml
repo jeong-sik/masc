@@ -1,5 +1,6 @@
 (** Tool_vote Module Coverage Tests *)
 
+module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 let () = Random.self_init ()
@@ -12,31 +13,31 @@ module Tool_vote = Masc_mcp.Tool_vote
 
 let test_get_string_exists () =
   let args = `Assoc [("topic", `String "Should we merge?")] in
-  check string "extracts string" "Should we merge?" (Tool_vote.get_string args "topic" "default")
+  check string "extracts string" "Should we merge?" (Tool_args.get_string args "topic" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_vote.get_string args "topic" "default")
+  check string "uses default" "default" (Tool_args.get_string args "topic" "default")
 
 let test_get_int_exists () =
   let args = `Assoc [("required_votes", `Int 3)] in
-  check int "extracts int" 3 (Tool_vote.get_int args "required_votes" 2)
+  check int "extracts int" 3 (Tool_args.get_int args "required_votes" 2)
 
 let test_get_int_missing () =
   let args = `Assoc [] in
-  check int "uses default" 2 (Tool_vote.get_int args "required_votes" 2)
+  check int "uses default" 2 (Tool_args.get_int args "required_votes" 2)
 
 let test_get_string_list_exists () =
   let args = `Assoc [("options", `List [`String "yes"; `String "no"; `String "abstain"])] in
-  check (list string) "extracts list" ["yes"; "no"; "abstain"] (Tool_vote.get_string_list args "options")
+  check (list string) "extracts list" ["yes"; "no"; "abstain"] (Tool_args.get_string_list args "options")
 
 let test_get_string_list_missing () =
   let args = `Assoc [] in
-  check (list string) "returns empty" [] (Tool_vote.get_string_list args "options")
+  check (list string) "returns empty" [] (Tool_args.get_string_list args "options")
 
 let test_get_string_list_mixed () =
   let args = `Assoc [("options", `List [`String "yes"; `Int 1; `String "no"])] in
-  check (list string) "filters non-strings" ["yes"; "no"] (Tool_vote.get_string_list args "options")
+  check (list string) "filters non-strings" ["yes"; "no"] (Tool_args.get_string_list args "options")
 
 (* ============================================================
    Context Creation Tests

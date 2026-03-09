@@ -1,9 +1,5 @@
 (** Vote tools - Consensus voting system *)
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-val get_int : Yojson.Safe.t -> string -> int -> int
-val get_string_list : Yojson.Safe.t -> string -> string list
-
 type context = {
   config: Room.config;
   agent_name: string;

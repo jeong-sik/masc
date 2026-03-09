@@ -1,5 +1,6 @@
 (** Tool_cache Module Coverage Tests *)
 
+module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 let () = Random.self_init ()
@@ -12,39 +13,39 @@ module Tool_cache = Masc_mcp.Tool_cache
 
 let test_get_string_exists () =
   let args = `Assoc [("key", `String "mykey")] in
-  check string "extracts string" "mykey" (Tool_cache.get_string args "key" "default")
+  check string "extracts string" "mykey" (Tool_args.get_string args "key" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_cache.get_string args "key" "default")
+  check string "uses default" "default" (Tool_args.get_string args "key" "default")
 
 let test_get_string_opt_exists () =
   let args = `Assoc [("tag", `String "important")] in
-  check (option string) "extracts option" (Some "important") (Tool_cache.get_string_opt args "tag")
+  check (option string) "extracts option" (Some "important") (Tool_args.get_string_opt args "tag")
 
 let test_get_string_opt_missing () =
   let args = `Assoc [] in
-  check (option string) "returns None" None (Tool_cache.get_string_opt args "tag")
+  check (option string) "returns None" None (Tool_args.get_string_opt args "tag")
 
 let test_get_int_opt_exists () =
   let args = `Assoc [("ttl_seconds", `Int 3600)] in
-  check (option int) "extracts option" (Some 3600) (Tool_cache.get_int_opt args "ttl_seconds")
+  check (option int) "extracts option" (Some 3600) (Tool_args.get_int_opt args "ttl_seconds")
 
 let test_get_int_opt_missing () =
   let args = `Assoc [] in
-  check (option int) "returns None" None (Tool_cache.get_int_opt args "ttl_seconds")
+  check (option int) "returns None" None (Tool_args.get_int_opt args "ttl_seconds")
 
 let test_get_string_list_exists () =
   let args = `Assoc [("tags", `List [`String "a"; `String "b"])] in
-  check (list string) "extracts list" ["a"; "b"] (Tool_cache.get_string_list args "tags")
+  check (list string) "extracts list" ["a"; "b"] (Tool_args.get_string_list args "tags")
 
 let test_get_string_list_missing () =
   let args = `Assoc [] in
-  check (list string) "returns empty" [] (Tool_cache.get_string_list args "tags")
+  check (list string) "returns empty" [] (Tool_args.get_string_list args "tags")
 
 let test_get_string_list_mixed () =
   let args = `Assoc [("tags", `List [`String "a"; `Int 1; `String "b"])] in
-  check (list string) "filters non-strings" ["a"; "b"] (Tool_cache.get_string_list args "tags")
+  check (list string) "filters non-strings" ["a"; "b"] (Tool_args.get_string_list args "tags")
 
 (* ============================================================
    Context Creation Tests

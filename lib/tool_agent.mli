@@ -37,15 +37,3 @@ val handle_consolidate_learning : context -> Yojson.Safe.t -> bool * string
 
 (** Handle masc_agent_card *)
 val handle_agent_card : context -> Yojson.Safe.t -> bool * string
-
-(** Helper: get string from args *)
-val get_string : Yojson.Safe.t -> string -> string -> string
-
-(** Helper: get string option from args *)
-val get_string_opt : Yojson.Safe.t -> string -> string option
-
-(** Helper: get int from args *)
-val get_int : Yojson.Safe.t -> string -> int -> int
-
-(** Helper: get string list from args *)
-val get_string_list : Yojson.Safe.t -> string -> string list

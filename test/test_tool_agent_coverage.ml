@@ -6,6 +6,7 @@
     masc_agent_fitness, masc_select_agent, masc_collaboration_graph,
     masc_consolidate_learning, masc_agent_card
 *)
+module Tool_args = Masc_mcp.Tool_args
 
 module Tool_agent = Masc_mcp.Tool_agent
 module Room = Masc_mcp.Room
@@ -259,42 +260,42 @@ let test_agent_card_refresh () =
 let test_get_string_present () =
   let args = `Assoc [("key", `String "value")] in
   Alcotest.(check string) "extracts string" "value"
-    (Tool_agent.get_string args "key" "default")
+    (Tool_args.get_string args "key" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
   Alcotest.(check string) "uses default" "default"
-    (Tool_agent.get_string args "key" "default")
+    (Tool_args.get_string args "key" "default")
 
 let test_get_string_opt_present () =
   let args = `Assoc [("key", `String "value")] in
   Alcotest.(check (option string)) "extracts Some" (Some "value")
-    (Tool_agent.get_string_opt args "key")
+    (Tool_args.get_string_opt args "key")
 
 let test_get_string_opt_missing () =
   let args = `Assoc [] in
   Alcotest.(check (option string)) "returns None" None
-    (Tool_agent.get_string_opt args "key")
+    (Tool_args.get_string_opt args "key")
 
 let test_get_int_present () =
   let args = `Assoc [("key", `Int 42)] in
   Alcotest.(check int) "extracts int" 42
-    (Tool_agent.get_int args "key" 0)
+    (Tool_args.get_int args "key" 0)
 
 let test_get_int_missing () =
   let args = `Assoc [] in
   Alcotest.(check int) "uses default" 99
-    (Tool_agent.get_int args "key" 99)
+    (Tool_args.get_int args "key" 99)
 
 let test_get_string_list_present () =
   let args = `Assoc [("key", `List [`String "a"; `String "b"])] in
   Alcotest.(check (list string)) "extracts list" ["a"; "b"]
-    (Tool_agent.get_string_list args "key")
+    (Tool_args.get_string_list args "key")
 
 let test_get_string_list_missing () =
   let args = `Assoc [] in
   Alcotest.(check (list string)) "empty list" []
-    (Tool_agent.get_string_list args "key")
+    (Tool_args.get_string_list args "key")
 
 (* ============================================================
    Test runner

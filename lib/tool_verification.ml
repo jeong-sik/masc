@@ -10,13 +10,9 @@
 *)
 
 open Yojson.Safe.Util
+open Tool_args
 
 type result = bool * string
-
-let get_string args key default =
-  match args |> member key with
-  | `String s -> s
-  | _ -> default
 
 (** masc_verify_request: Create a verification request *)
 let handle_request config agent_name args =

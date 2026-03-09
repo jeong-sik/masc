@@ -4,6 +4,7 @@
     read_audit_events, and helper functions
     for 3 tools: masc_audit_query, masc_audit_stats, masc_governance_report
 *)
+module Tool_args = Masc_mcp.Tool_args
 
 module Tool_audit = Masc_mcp.Tool_audit
 module Room = Masc_mcp.Room
@@ -152,47 +153,47 @@ let test_read_audit_events_empty () =
 let test_get_string_present () =
   let args = `Assoc [("key", `String "value")] in
   Alcotest.(check string) "extracts string" "value"
-    (Tool_audit.get_string args "key" "default")
+    (Tool_args.get_string args "key" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
   Alcotest.(check string) "uses default" "default"
-    (Tool_audit.get_string args "key" "default")
+    (Tool_args.get_string args "key" "default")
 
 let test_get_string_opt_present () =
   let args = `Assoc [("key", `String "value")] in
   Alcotest.(check (option string)) "extracts Some" (Some "value")
-    (Tool_audit.get_string_opt args "key")
+    (Tool_args.get_string_opt args "key")
 
 let test_get_string_opt_missing () =
   let args = `Assoc [] in
   Alcotest.(check (option string)) "returns None" None
-    (Tool_audit.get_string_opt args "key")
+    (Tool_args.get_string_opt args "key")
 
 let test_get_int_present () =
   let args = `Assoc [("key", `Int 42)] in
   Alcotest.(check int) "extracts int" 42
-    (Tool_audit.get_int args "key" 0)
+    (Tool_args.get_int args "key" 0)
 
 let test_get_int_missing () =
   let args = `Assoc [] in
   Alcotest.(check int) "uses default" 99
-    (Tool_audit.get_int args "key" 99)
+    (Tool_args.get_int args "key" 99)
 
 let test_get_float_present () =
   let args = `Assoc [("key", `Float 3.14)] in
   Alcotest.(check (float 0.001)) "extracts float" 3.14
-    (Tool_audit.get_float args "key" 0.0)
+    (Tool_args.get_float args "key" 0.0)
 
 let test_get_float_from_int () =
   let args = `Assoc [("key", `Int 42)] in
   Alcotest.(check (float 0.001)) "int to float" 42.0
-    (Tool_audit.get_float args "key" 0.0)
+    (Tool_args.get_float args "key" 0.0)
 
 let test_get_float_missing () =
   let args = `Assoc [] in
   Alcotest.(check (float 0.001)) "uses default" 1.5
-    (Tool_audit.get_float args "key" 1.5)
+    (Tool_args.get_float args "key" 1.5)
 
 (* ============================================================
    Test runner

@@ -4,6 +4,8 @@
     5 tools: tempo, tempo_get, tempo_set, tempo_adjust, tempo_reset
 *)
 
+open Tool_args
+
 (** Tool handler context *)
 type context = {
   config: Room.config;
@@ -12,33 +14,6 @@ type context = {
 
 (** Tool result type *)
 type result = bool * string
-
-(** {1 Argument Helpers} *)
-
-let get_string args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`String s) -> s
-       | _ -> default)
-  | _ -> default
-
-let get_string_opt args key =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`String s) when s <> "" -> Some s
-       | _ -> None)
-  | _ -> None
-
-let get_float args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`Float f) -> f
-       | Some (`Int i) -> Float.of_int i
-       | _ -> default)
-  | _ -> default
 
 (** {1 Individual Handlers} *)
 

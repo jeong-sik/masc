@@ -98,17 +98,17 @@ let () = test "handle_encryption_disable" (fun () ->
 (* Test get_string helper *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in
-  assert (Tool_encryption.get_string args "key" "default" = "value")
+  assert (Tool_args.get_string args "key" "default" = "value")
 )
 
 let () = test "get_string_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_encryption.get_string args "key" "default" = "default")
+  assert (Tool_args.get_string args "key" "default" = "default")
 )
 
 let () = test "get_string_wrong_type" (fun () ->
   let args = `Assoc [("key", `Int 42)] in
-  assert (Tool_encryption.get_string args "key" "default" = "default")
+  assert (Tool_args.get_string args "key" "default" = "default")
 )
 
 let () = Printf.printf "\n✅ All Tool_encryption tests passed!\n"

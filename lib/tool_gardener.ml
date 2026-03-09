@@ -7,20 +7,10 @@
     - [masc_gardener_config]: Get current configuration
 *)
 
-open Yojson.Safe.Util
 open Gardener_types
+open Tool_args
 
 type result = bool * string
-
-(** {1 Helper Functions} *)
-
-let get_string args key default =
-  try args |> member key |> to_string
-  with _ -> default
-
-let get_string_opt args key =
-  try Some (args |> member key |> to_string)
-  with _ -> None
 
 (** {1 Tool Handlers} *)
 

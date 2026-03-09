@@ -5,6 +5,7 @@ open Alcotest
 let () = Random.self_init ()
 
 module Tool_mitosis = Masc_mcp.Tool_mitosis
+module Tool_args = Masc_mcp.Tool_args
 
 (* ============================================================
    Argument Helper Tests
@@ -12,35 +13,35 @@ module Tool_mitosis = Masc_mcp.Tool_mitosis
 
 let test_get_string_exists () =
   let args = `Assoc [("summary", `String "test summary")] in
-  check string "extracts string" "test summary" (Tool_mitosis.get_string args "summary" "default")
+  check string "extracts string" "test summary" (Tool_args.get_string args "summary" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_mitosis.get_string args "summary" "default")
+  check string "uses default" "default" (Tool_args.get_string args "summary" "default")
 
 let test_get_float_exists () =
   let args = `Assoc [("context_ratio", `Float 0.75)] in
-  check (float 0.001) "extracts float" 0.75 (Tool_mitosis.get_float args "context_ratio" 0.0)
+  check (float 0.001) "extracts float" 0.75 (Tool_args.get_float args "context_ratio" 0.0)
 
 let test_get_float_from_int () =
   let args = `Assoc [("context_ratio", `Int 1)] in
-  check (float 0.001) "converts int" 1.0 (Tool_mitosis.get_float args "context_ratio" 0.0)
+  check (float 0.001) "converts int" 1.0 (Tool_args.get_float args "context_ratio" 0.0)
 
 let test_get_float_missing () =
   let args = `Assoc [] in
-  check (float 0.001) "uses default" 0.5 (Tool_mitosis.get_float args "context_ratio" 0.5)
+  check (float 0.001) "uses default" 0.5 (Tool_args.get_float args "context_ratio" 0.5)
 
 let test_get_bool_exists_true () =
   let args = `Assoc [("task_done", `Bool true)] in
-  check bool "extracts true" true (Tool_mitosis.get_bool args "task_done" false)
+  check bool "extracts true" true (Tool_args.get_bool args "task_done" false)
 
 let test_get_bool_exists_false () =
   let args = `Assoc [("task_done", `Bool false)] in
-  check bool "extracts false" false (Tool_mitosis.get_bool args "task_done" true)
+  check bool "extracts false" false (Tool_args.get_bool args "task_done" true)
 
 let test_get_bool_missing () =
   let args = `Assoc [] in
-  check bool "uses default" true (Tool_mitosis.get_bool args "task_done" true)
+  check bool "uses default" true (Tool_args.get_bool args "task_done" true)
 
 (* ============================================================
    Context Creation Tests

@@ -1,36 +1,6 @@
 (** Handover tools - Cellular agent handover DNA *)
 
-(* Argument helpers *)
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
-
-let get_string_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `String s when s <> "" -> Some s
-  | _ -> None
-
-let get_int args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Int n -> n
-  | _ -> default
-
-let _get_int_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `Int n -> Some n
-  | _ -> None
-
-let get_bool args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Bool b -> b
-  | _ -> default
-
-let get_string_list args key =
-  match Yojson.Safe.Util.member key args with
-  | `List items ->
-      List.filter_map (function `String s -> Some s | _ -> None) items
-  | _ -> []
+open Tool_args
 
 (* Context required by handover tools - needs Eio filesystem *)
 type context = {
@@ -99,7 +69,7 @@ let handle_handover_claim ctx args =
 let handle_handover_claim_and_spawn ctx args =
   let handover_id = get_string args "handover_id" "" in
   let additional_instructions = get_string_opt args "additional_instructions" in
-  let timeout_seconds = _get_int_opt args "timeout_seconds" in
+  let timeout_seconds = get_int_opt args "timeout_seconds" in
   match ctx.fs, ctx.proc_mgr, ctx.sw with
   | Some fs, Some pm, Some sw ->
       (match Handover_eio.claim_and_spawn ~sw ~fs ~proc_mgr:pm ctx.config

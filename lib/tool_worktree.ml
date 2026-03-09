@@ -1,10 +1,6 @@
 (** Worktree tools - Git worktree management for task isolation *)
 
-(* Argument helpers *)
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
+open Tool_args
 
 (* Context required by worktree tools *)
 type context = {

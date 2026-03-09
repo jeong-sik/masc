@@ -1,4 +1,5 @@
 module U = Yojson.Safe.Util
+open Tool_args
 
 let ( let* ) = Result.bind
 
@@ -41,29 +42,6 @@ type action_log_entry = {
 
 let json_ok fields =
   `Assoc (("status", `String "ok") :: fields)
-
-let get_string args key default =
-  match U.member key args with
-  | `String s -> s
-  | _ -> default
-
-let get_string_opt args key =
-  match U.member key args with
-  | `String s ->
-      let trimmed = String.trim s in
-      if trimmed = "" then None else Some trimmed
-  | _ -> None
-
-let get_int args key default =
-  match U.member key args with
-  | `Int n -> n
-  | `Intlit s -> (try int_of_string s with _ -> default)
-  | _ -> default
-
-let get_bool args key default =
-  match U.member key args with
-  | `Bool b -> b
-  | _ -> default
 
 let get_payload args =
   match U.member "payload" args with

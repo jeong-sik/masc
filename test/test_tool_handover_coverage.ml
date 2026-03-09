@@ -5,6 +5,7 @@ open Alcotest
 let () = Random.self_init ()
 
 module Tool_handover = Masc_mcp.Tool_handover
+module Tool_args = Masc_mcp.Tool_args
 
 (* ============================================================
    Argument Helper Tests
@@ -12,43 +13,43 @@ module Tool_handover = Masc_mcp.Tool_handover
 
 let test_get_string_exists () =
   let args = `Assoc [("task_id", `String "task-001")] in
-  check string "extracts string" "task-001" (Tool_handover.get_string args "task_id" "default")
+  check string "extracts string" "task-001" (Tool_args.get_string args "task_id" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_handover.get_string args "task_id" "default")
+  check string "uses default" "default" (Tool_args.get_string args "task_id" "default")
 
 let test_get_string_opt_exists () =
   let args = `Assoc [("additional_instructions", `String "Be careful")] in
-  check (option string) "extracts option" (Some "Be careful") (Tool_handover.get_string_opt args "additional_instructions")
+  check (option string) "extracts option" (Some "Be careful") (Tool_args.get_string_opt args "additional_instructions")
 
 let test_get_string_opt_missing () =
   let args = `Assoc [] in
-  check (option string) "returns None" None (Tool_handover.get_string_opt args "additional_instructions")
+  check (option string) "returns None" None (Tool_args.get_string_opt args "additional_instructions")
 
 let test_get_int_exists () =
   let args = `Assoc [("context_pct", `Int 85)] in
-  check int "extracts int" 85 (Tool_handover.get_int args "context_pct" 0)
+  check int "extracts int" 85 (Tool_args.get_int args "context_pct" 0)
 
 let test_get_int_missing () =
   let args = `Assoc [] in
-  check int "uses default" 0 (Tool_handover.get_int args "context_pct" 0)
+  check int "uses default" 0 (Tool_args.get_int args "context_pct" 0)
 
 let test_get_bool_exists () =
   let args = `Assoc [("pending_only", `Bool true)] in
-  check bool "extracts bool" true (Tool_handover.get_bool args "pending_only" false)
+  check bool "extracts bool" true (Tool_args.get_bool args "pending_only" false)
 
 let test_get_bool_missing () =
   let args = `Assoc [] in
-  check bool "uses default" false (Tool_handover.get_bool args "pending_only" false)
+  check bool "uses default" false (Tool_args.get_bool args "pending_only" false)
 
 let test_get_string_list_exists () =
   let args = `Assoc [("completed_steps", `List [`String "step1"; `String "step2"])] in
-  check (list string) "extracts list" ["step1"; "step2"] (Tool_handover.get_string_list args "completed_steps")
+  check (list string) "extracts list" ["step1"; "step2"] (Tool_args.get_string_list args "completed_steps")
 
 let test_get_string_list_missing () =
   let args = `Assoc [] in
-  check (list string) "returns empty" [] (Tool_handover.get_string_list args "completed_steps")
+  check (list string) "returns empty" [] (Tool_args.get_string_list args "completed_steps")
 
 (* ============================================================
    Context Creation Tests

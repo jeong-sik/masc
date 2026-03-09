@@ -1,7 +1,5 @@
 (** Hat tools - Agent role management *)
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-
 type context = {
   config: Room.config;
   agent_name: string;

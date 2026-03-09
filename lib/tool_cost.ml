@@ -1,34 +1,10 @@
 (** Tool_cost - Cost tracking and reporting handlers *)
 
+open Tool_args
+
 type context = {
   agent_name: string;
 }
-
-(* Helper functions *)
-let get_string args key default =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`String s) -> s
-       | _ -> default)
-  | _ -> default
-
-let get_int args key default =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`Int i) -> i
-       | _ -> default)
-  | _ -> default
-
-let get_float args key default =
-  match args with
-  | `Assoc l ->
-      (match List.assoc_opt key l with
-       | Some (`Float f) -> f
-       | Some (`Int i) -> float_of_int i
-       | _ -> default)
-  | _ -> default
 
 (* Safe exec helper - runs CLI command and returns result (Eio-native) *)
 let safe_exec args =

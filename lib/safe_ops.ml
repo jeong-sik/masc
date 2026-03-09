@@ -171,6 +171,14 @@ let json_float_opt key json =
     | j -> Some (to_float j)
   with Type_error _ -> None
 
+let json_bool_opt key json =
+  let open Yojson.Safe.Util in
+  try
+    match json |> member key with
+    | `Null -> None
+    | j -> Some (to_bool j)
+  with Type_error _ -> None
+
 (** {1 Safe Process Execution} *)
 
 (* Intentionally empty: process execution lives in Process_eio (argv-only). *)

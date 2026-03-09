@@ -1,14 +1,6 @@
 (** Auth tools - Authentication and authorization *)
 
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
-
-let get_bool args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Bool b -> b
-  | _ -> default
+open Tool_args
 
 type context = {
   config: Room.config;

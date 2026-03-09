@@ -121,12 +121,12 @@ let () = test "dispatch_get_config" (fun () ->
 (* Test helper functions *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in
-  assert (Tool_control.get_string args "key" "default" = "value")
+  assert (Tool_args.get_string args "key" "default" = "value")
 )
 
 let () = test "get_string_missing" (fun () ->
   let args = `Assoc [] in
-  assert (Tool_control.get_string args "key" "default" = "default")
+  assert (Tool_args.get_string args "key" "default" = "default")
 )
 
 let () = Printf.printf "\n✅ All Tool_control tests passed!\n"

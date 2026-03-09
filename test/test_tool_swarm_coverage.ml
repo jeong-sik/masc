@@ -3,6 +3,7 @@
     Tests for swarm tool handlers - argument extraction, dispatch logic.
     Integration tests require Eio runtime and filesystem.
 *)
+module Tool_args = Masc_mcp.Tool_args
 
 open Alcotest
 
@@ -16,48 +17,48 @@ module Tool_swarm = Masc_mcp.Tool_swarm
 
 let test_get_string_exists () =
   let args = `Assoc [("name", `String "claude")] in
-  check string "extracts string" "claude" (Tool_swarm.get_string args "name" "default")
+  check string "extracts string" "claude" (Tool_args.get_string args "name" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_swarm.get_string args "name" "default")
+  check string "uses default" "default" (Tool_args.get_string args "name" "default")
 
 let test_get_string_wrong_type () =
   let args = `Assoc [("name", `Int 42)] in
-  check string "uses default on type mismatch" "default" (Tool_swarm.get_string args "name" "default")
+  check string "uses default on type mismatch" "default" (Tool_args.get_string args "name" "default")
 
 let test_get_float_exists () =
   let args = `Assoc [("rate", `Float 0.5)] in
-  check (float 0.001) "extracts float" 0.5 (Tool_swarm.get_float args "rate" 0.0)
+  check (float 0.001) "extracts float" 0.5 (Tool_args.get_float args "rate" 0.0)
 
 let test_get_float_missing () =
   let args = `Assoc [] in
-  check (float 0.001) "uses default" 0.3 (Tool_swarm.get_float args "rate" 0.3)
+  check (float 0.001) "uses default" 0.3 (Tool_args.get_float args "rate" 0.3)
 
 let test_get_float_from_int () =
   (* JSON often has ints where floats are expected *)
   let args = `Assoc [("rate", `Int 1)] in
-  check (float 0.001) "int fallback to default" 0.5 (Tool_swarm.get_float args "rate" 0.5)
+  check (float 0.001) "int fallback to default" 0.5 (Tool_args.get_float args "rate" 0.5)
 
 let test_get_int_exists () =
   let args = `Assoc [("limit", `Int 10)] in
-  check int "extracts int" 10 (Tool_swarm.get_int args "limit" 5)
+  check int "extracts int" 10 (Tool_args.get_int args "limit" 5)
 
 let test_get_int_missing () =
   let args = `Assoc [] in
-  check int "uses default" 5 (Tool_swarm.get_int args "limit" 5)
+  check int "uses default" 5 (Tool_args.get_int args "limit" 5)
 
 let test_get_bool_exists_true () =
   let args = `Assoc [("enabled", `Bool true)] in
-  check bool "extracts true" true (Tool_swarm.get_bool args "enabled" false)
+  check bool "extracts true" true (Tool_args.get_bool args "enabled" false)
 
 let test_get_bool_exists_false () =
   let args = `Assoc [("enabled", `Bool false)] in
-  check bool "extracts false" false (Tool_swarm.get_bool args "enabled" true)
+  check bool "extracts false" false (Tool_args.get_bool args "enabled" true)
 
 let test_get_bool_missing () =
   let args = `Assoc [] in
-  check bool "uses default" true (Tool_swarm.get_bool args "enabled" true)
+  check bool "uses default" true (Tool_args.get_bool args "enabled" true)
 
 (* ============================================================
    Context Creation Tests

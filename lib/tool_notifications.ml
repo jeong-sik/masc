@@ -56,17 +56,7 @@ Use masc_check_notifications first if you want to preview before consuming.";
   };
 ]
 
-(* ================================================================ *)
-(* Argument Helpers                                                 *)
-(* ================================================================ *)
-
-let get_int args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`Int i) -> i
-       | _ -> default)
-  | _ -> default
+open Tool_args
 
 (* ================================================================ *)
 (* Handlers                                                         *)

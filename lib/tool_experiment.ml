@@ -6,29 +6,7 @@
 
     Storage: file-based under .masc/experiments/ (one JSON per experiment). *)
 
-(* {1 Argument Helpers} *)
-
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
-
-let get_float args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Float f -> f
-  | `Int n -> Float.of_int n
-  | _ -> default
-
-let get_int args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Int n -> n
-  | _ -> default
-
-let get_string_list args key =
-  match Yojson.Safe.Util.member key args with
-  | `List items ->
-      List.filter_map (function `String s -> Some s | _ -> None) items
-  | _ -> []
+open Tool_args
 
 (* {1 Types} *)
 

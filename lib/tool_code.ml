@@ -10,22 +10,7 @@
 *)
 
 open Types
-
-(* Argument helpers *)
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
-
-let get_int args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Int i -> i
-  | _ -> default
-
-let get_bool args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Bool b -> b
-  | _ -> default
+open Tool_args
 
 (* Context required by code tools *)
 type context = {

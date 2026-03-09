@@ -1,5 +1,6 @@
 (** Tool_a2a Module Coverage Tests *)
 
+module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 let () = Random.self_init ()
@@ -12,35 +13,35 @@ module Tool_a2a = Masc_mcp.Tool_a2a
 
 let test_get_string_exists () =
   let args = `Assoc [("target_agent", `String "codex-001")] in
-  check string "extracts string" "codex-001" (Tool_a2a.get_string args "target_agent" "default")
+  check string "extracts string" "codex-001" (Tool_args.get_string args "target_agent" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_a2a.get_string args "target_agent" "default")
+  check string "uses default" "default" (Tool_args.get_string args "target_agent" "default")
 
 let test_get_string_opt_exists () =
   let args = `Assoc [("endpoint", `String "https://example.com")] in
-  check (option string) "extracts option" (Some "https://example.com") (Tool_a2a.get_string_opt args "endpoint")
+  check (option string) "extracts option" (Some "https://example.com") (Tool_args.get_string_opt args "endpoint")
 
 let test_get_string_opt_missing () =
   let args = `Assoc [] in
-  check (option string) "returns None" None (Tool_a2a.get_string_opt args "endpoint")
+  check (option string) "returns None" None (Tool_args.get_string_opt args "endpoint")
 
 let test_get_int_exists () =
   let args = `Assoc [("timeout", `Int 600)] in
-  check int "extracts int" 600 (Tool_a2a.get_int args "timeout" 300)
+  check int "extracts int" 600 (Tool_args.get_int args "timeout" 300)
 
 let test_get_int_missing () =
   let args = `Assoc [] in
-  check int "uses default" 300 (Tool_a2a.get_int args "timeout" 300)
+  check int "uses default" 300 (Tool_args.get_int args "timeout" 300)
 
 let test_get_bool_exists () =
   let args = `Assoc [("clear", `Bool false)] in
-  check bool "extracts bool" false (Tool_a2a.get_bool args "clear" true)
+  check bool "extracts bool" false (Tool_args.get_bool args "clear" true)
 
 let test_get_bool_missing () =
   let args = `Assoc [] in
-  check bool "uses default" true (Tool_a2a.get_bool args "clear" true)
+  check bool "uses default" true (Tool_args.get_bool args "clear" true)
 
 (* ============================================================
    Context Creation Tests

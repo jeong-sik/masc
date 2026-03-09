@@ -1,50 +1,11 @@
 open Types
+open Tool_args
 
 type context = {
   config : Room.config;
   agent_name : string;
   call_keeper_msg : (Yojson.Safe.t -> (bool * string)) option;
 }
-
-let get_string_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `String s ->
-      let trimmed = String.trim s in
-      if trimmed = "" then None else Some trimmed
-  | _ -> None
-
-let get_string args key default =
-  match get_string_opt args key with
-  | Some s -> s
-  | None -> default
-
-let get_int_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `Int i -> Some i
-  | `Intlit s -> (
-      try Some (int_of_string s) with _ -> None)
-  | _ -> None
-
-let get_int args key default =
-  match get_int_opt args key with
-  | Some i -> i
-  | None -> default
-
-let get_bool args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Bool b -> b
-  | _ -> default
-
-let get_string_list args key =
-  match Yojson.Safe.Util.member key args with
-  | `List xs ->
-      xs
-      |> List.filter_map (function
-             | `String s ->
-                 let t = String.trim s in
-                 if t = "" then None else Some t
-             | _ -> None)
-  | _ -> []
 
 let split_csv raw =
   raw

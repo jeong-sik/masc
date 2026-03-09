@@ -13,23 +13,7 @@ type context = {
 (** Tool result type *)
 type result = bool * string
 
-(** {1 Argument Helpers} *)
-
-let get_string args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`String s) -> s
-       | _ -> default)
-  | _ -> default
-
-let get_int args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`Int i) -> i
-       | _ -> default)
-  | _ -> default
+open Tool_args
 
 (** {1 Individual Handlers} *)
 

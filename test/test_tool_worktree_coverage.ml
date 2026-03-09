@@ -1,5 +1,6 @@
 (** Tool_worktree Module Coverage Tests *)
 
+module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 let () = Random.self_init ()
@@ -12,19 +13,19 @@ module Tool_worktree = Masc_mcp.Tool_worktree
 
 let test_get_string_exists () =
   let args = `Assoc [("task_id", `String "task-001")] in
-  check string "extracts string" "task-001" (Tool_worktree.get_string args "task_id" "default")
+  check string "extracts string" "task-001" (Tool_args.get_string args "task_id" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_worktree.get_string args "task_id" "default")
+  check string "uses default" "default" (Tool_args.get_string args "task_id" "default")
 
 let test_get_string_base_branch () =
   let args = `Assoc [("base_branch", `String "main")] in
-  check string "extracts branch" "main" (Tool_worktree.get_string args "base_branch" "develop")
+  check string "extracts branch" "main" (Tool_args.get_string args "base_branch" "develop")
 
 let test_get_string_base_branch_default () =
   let args = `Assoc [] in
-  check string "uses develop default" "develop" (Tool_worktree.get_string args "base_branch" "develop")
+  check string "uses develop default" "develop" (Tool_args.get_string args "base_branch" "develop")
 
 (* ============================================================
    Context Creation Tests

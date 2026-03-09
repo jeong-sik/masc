@@ -5,6 +5,7 @@
 *)
 
 open Yojson.Safe.Util
+open Tool_args
 
 (** Tool handler context - shared dependencies *)
 type context = {
@@ -12,12 +13,6 @@ type context = {
   fs: Eio.Fs.dir_ty Eio.Path.t option;
   agent_name: string;
 }
-
-(** Argument extraction helpers *)
-let get_string args key default = Safe_ops.json_string ~default key args
-let get_float args key default = Safe_ops.json_float ~default key args
-let get_int args key default = Safe_ops.json_int ~default key args
-let get_bool args key default = Safe_ops.json_bool ~default key args
 
 (** Tool result type *)
 type result = bool * string

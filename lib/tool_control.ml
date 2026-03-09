@@ -3,7 +3,7 @@
     Handles: pause, pause_status, resume, switch_mode, get_config
 *)
 
-open Yojson.Safe.Util
+open Tool_args
 
 type result = bool * string
 
@@ -11,24 +11,6 @@ type context = {
   config: Room.config;
   agent_name: string;
 }
-
-(* JSON helpers *)
-let get_string args key default =
-  match args |> member key with
-  | `String s -> s
-  | _ -> default
-
-let get_string_list args key =
-  match args |> member key with
-  | `List values ->
-      List.filter_map
-        (function
-          | `String s ->
-              let trimmed = String.trim s in
-              if trimmed = "" then None else Some trimmed
-          | _ -> None)
-        values
-  | _ -> []
 
 (* Handlers *)
 

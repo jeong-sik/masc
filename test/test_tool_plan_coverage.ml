@@ -1,5 +1,6 @@
 (** Tool_plan Module Coverage Tests *)
 
+module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 let () = Random.self_init ()
@@ -12,23 +13,23 @@ module Tool_plan = Masc_mcp.Tool_plan
 
 let test_get_string_exists () =
   let args = `Assoc [("task_id", `String "task-123")] in
-  check string "extracts string" "task-123" (Tool_plan.get_string args "task_id" "default")
+  check string "extracts string" "task-123" (Tool_args.get_string args "task_id" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_plan.get_string args "task_id" "default")
+  check string "uses default" "default" (Tool_args.get_string args "task_id" "default")
 
 let test_get_string_wrong_type () =
   let args = `Assoc [("task_id", `Int 42)] in
-  check string "uses default on type mismatch" "default" (Tool_plan.get_string args "task_id" "default")
+  check string "uses default on type mismatch" "default" (Tool_args.get_string args "task_id" "default")
 
 let test_get_int_exists () =
   let args = `Assoc [("index", `Int 5)] in
-  check int "extracts int" 5 (Tool_plan.get_int args "index" 0)
+  check int "extracts int" 5 (Tool_args.get_int args "index" 0)
 
 let test_get_int_missing () =
   let args = `Assoc [] in
-  check int "uses default" 0 (Tool_plan.get_int args "index" 0)
+  check int "uses default" 0 (Tool_args.get_int args "index" 0)
 
 (* ============================================================
    Context Creation Tests

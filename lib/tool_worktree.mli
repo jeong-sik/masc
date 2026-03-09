@@ -1,7 +1,5 @@
 (** Worktree tools - Git worktree management for task isolation *)
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-
 type context = {
   config: Room.config;
   agent_name: string;

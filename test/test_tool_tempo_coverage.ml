@@ -1,5 +1,6 @@
 (** Tool_tempo Module Coverage Tests *)
 
+module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 let () = Random.self_init ()
@@ -12,31 +13,31 @@ module Tool_tempo = Masc_mcp.Tool_tempo
 
 let test_get_string_exists () =
   let args = `Assoc [("action", `String "get")] in
-  check string "extracts string" "get" (Tool_tempo.get_string args "action" "default")
+  check string "extracts string" "get" (Tool_args.get_string args "action" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
-  check string "uses default" "default" (Tool_tempo.get_string args "action" "default")
+  check string "uses default" "default" (Tool_args.get_string args "action" "default")
 
 let test_get_string_opt_exists () =
   let args = `Assoc [("reason", `String "manual")] in
-  check (option string) "extracts option" (Some "manual") (Tool_tempo.get_string_opt args "reason")
+  check (option string) "extracts option" (Some "manual") (Tool_args.get_string_opt args "reason")
 
 let test_get_string_opt_missing () =
   let args = `Assoc [] in
-  check (option string) "returns None" None (Tool_tempo.get_string_opt args "reason")
+  check (option string) "returns None" None (Tool_args.get_string_opt args "reason")
 
 let test_get_float_exists () =
   let args = `Assoc [("interval", `Float 30.0)] in
-  check (float 0.001) "extracts float" 30.0 (Tool_tempo.get_float args "interval" 0.0)
+  check (float 0.001) "extracts float" 30.0 (Tool_args.get_float args "interval" 0.0)
 
 let test_get_float_from_int () =
   let args = `Assoc [("interval", `Int 30)] in
-  check (float 0.001) "converts int" 30.0 (Tool_tempo.get_float args "interval" 0.0)
+  check (float 0.001) "converts int" 30.0 (Tool_args.get_float args "interval" 0.0)
 
 let test_get_float_missing () =
   let args = `Assoc [] in
-  check (float 0.001) "uses default" 10.0 (Tool_tempo.get_float args "interval" 10.0)
+  check (float 0.001) "uses default" 10.0 (Tool_args.get_float args "interval" 10.0)
 
 (* ============================================================
    Context Creation Tests

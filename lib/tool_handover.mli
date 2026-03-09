@@ -1,11 +1,5 @@
 (** Handover tools - Cellular agent handover DNA *)
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-val get_string_opt : Yojson.Safe.t -> string -> string option
-val get_int : Yojson.Safe.t -> string -> int -> int
-val get_bool : Yojson.Safe.t -> string -> bool -> bool
-val get_string_list : Yojson.Safe.t -> string -> string list
-
 type context = {
   config: Room.config;
   agent_name: string;

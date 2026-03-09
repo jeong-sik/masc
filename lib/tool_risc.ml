@@ -61,42 +61,7 @@ let default_fast_model : Llm_client.model_spec = {
 let global_spec_engine =
   Speculative_engine.create ~fast_model:default_fast_model ()
 
-(* ================================================================ *)
-(* Argument Helpers (consistent with tool_cache.ml pattern)         *)
-(* ================================================================ *)
-
-let get_string args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`String s) -> s
-       | _ -> default)
-  | _ -> default
-
-let get_string_opt args key =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`String s) when s <> "" -> Some s
-       | _ -> None)
-  | _ -> None
-
-let get_string_list args key =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`List lst) ->
-           List.filter_map (function `String s -> Some s | _ -> None) lst
-       | _ -> [])
-  | _ -> []
-
-let get_int args key default =
-  match args with
-  | `Assoc fields ->
-      (match List.assoc_opt key fields with
-       | Some (`Int i) -> i
-       | _ -> default)
-  | _ -> default
+open Tool_args
 
 (* ================================================================ *)
 (* Tool Result Type                                                 *)

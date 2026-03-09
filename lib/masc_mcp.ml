@@ -60,6 +60,7 @@ module Llm_client_eio = Llm_client_eio
 module Room_git = Room_git
 module Room_portal = Room_portal
 module Room_worktree = Room_worktree
+module Tool_args = Tool_args
 module Tool_code = Tool_code
 module Room_eio = Room_eio
 

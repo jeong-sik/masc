@@ -1,34 +1,11 @@
 (** Tool_agent - Agent management, metrics, and capability discovery handlers *)
 
+open Tool_args
+
 type context = {
   config: Room.config;
   agent_name: string;
 }
-
-(** Helper: get string from args *)
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
-
-(** Helper: get string option from args *)
-let get_string_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> Some s
-  | _ -> None
-
-(** Helper: get int from args *)
-let get_int args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Int i -> i
-  | _ -> default
-
-(** Helper: get string list from args *)
-let get_string_list args key =
-  match Yojson.Safe.Util.member key args with
-  | `List items ->
-      List.filter_map (function `String s -> Some s | _ -> None) items
-  | _ -> []
 
 (** Helper: result to response *)
 let result_to_response = function

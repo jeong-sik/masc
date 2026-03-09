@@ -10,6 +10,7 @@
 
     @since 2.76.0
 *)
+module Tool_args = Masc_mcp.Tool_args
 
 open Alcotest
 
@@ -47,22 +48,22 @@ let cleanup_blacklist agent_id =
 let test_get_string_exists () =
   let args = `Assoc [("target_agent", `String "agent-1")] in
   check string "extracts string" "agent-1"
-    (Tool_suspend.get_string args "target_agent" "default")
+    (Tool_args.get_string args "target_agent" "default")
 
 let test_get_string_missing () =
   let args = `Assoc [] in
   check string "uses default" "default"
-    (Tool_suspend.get_string args "target_agent" "default")
+    (Tool_args.get_string args "target_agent" "default")
 
 let test_get_string_wrong_type () =
   let args = `Assoc [("target_agent", `Int 42)] in
   check string "uses default on type mismatch" "default"
-    (Tool_suspend.get_string args "target_agent" "default")
+    (Tool_args.get_string args "target_agent" "default")
 
 let test_get_string_non_assoc () =
   let args = `List [`String "a"] in
   check string "uses default on non-assoc" "default"
-    (Tool_suspend.get_string args "target_agent" "default")
+    (Tool_args.get_string args "target_agent" "default")
 
 (* ============================================================
    get_string_opt Tests
@@ -71,27 +72,27 @@ let test_get_string_non_assoc () =
 let test_get_string_opt_exists () =
   let args = `Assoc [("agent_id", `String "agent-1")] in
   check (option string) "returns Some" (Some "agent-1")
-    (Tool_suspend.get_string_opt args "agent_id")
+    (Tool_args.get_string_opt args "agent_id")
 
 let test_get_string_opt_missing () =
   let args = `Assoc [] in
   check (option string) "returns None" None
-    (Tool_suspend.get_string_opt args "agent_id")
+    (Tool_args.get_string_opt args "agent_id")
 
 let test_get_string_opt_empty_string () =
   let args = `Assoc [("agent_id", `String "")] in
   check (option string) "empty string returns None" None
-    (Tool_suspend.get_string_opt args "agent_id")
+    (Tool_args.get_string_opt args "agent_id")
 
 let test_get_string_opt_wrong_type () =
   let args = `Assoc [("agent_id", `Int 42)] in
   check (option string) "wrong type returns None" None
-    (Tool_suspend.get_string_opt args "agent_id")
+    (Tool_args.get_string_opt args "agent_id")
 
 let test_get_string_opt_non_assoc () =
   let args = `Null in
   check (option string) "non-assoc returns None" None
-    (Tool_suspend.get_string_opt args "agent_id")
+    (Tool_args.get_string_opt args "agent_id")
 
 (* ============================================================
    get_float Tests
@@ -100,27 +101,27 @@ let test_get_string_opt_non_assoc () =
 let test_get_float_from_float () =
   let args = `Assoc [("duration", `Float 2.5)] in
   check (float 0.001) "extracts float" 2.5
-    (Tool_suspend.get_float args "duration" 1.0)
+    (Tool_args.get_float args "duration" 1.0)
 
 let test_get_float_from_int () =
   let args = `Assoc [("duration", `Int 3)] in
   check (float 0.001) "converts int to float" 3.0
-    (Tool_suspend.get_float args "duration" 1.0)
+    (Tool_args.get_float args "duration" 1.0)
 
 let test_get_float_missing () =
   let args = `Assoc [] in
   check (float 0.001) "uses default" 1.0
-    (Tool_suspend.get_float args "duration" 1.0)
+    (Tool_args.get_float args "duration" 1.0)
 
 let test_get_float_wrong_type () =
   let args = `Assoc [("duration", `String "2.5")] in
   check (float 0.001) "uses default on string" 1.0
-    (Tool_suspend.get_float args "duration" 1.0)
+    (Tool_args.get_float args "duration" 1.0)
 
 let test_get_float_non_assoc () =
   let args = `Bool true in
   check (float 0.001) "uses default on non-assoc" 1.0
-    (Tool_suspend.get_float args "duration" 1.0)
+    (Tool_args.get_float args "duration" 1.0)
 
 (* ============================================================
    Blacklist Management Tests

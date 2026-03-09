@@ -1,6 +1,7 @@
 (** MCP tools for long-running team sessions (1h orchestration). *)
 
 open Types
+open Tool_args
 
 type 'a context = {
   config : Room.config;
@@ -11,47 +12,6 @@ type 'a context = {
 }
 
 type result = bool * string
-
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
-
-let get_string_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `String s ->
-      let t = String.trim s in
-      if t = "" then None else Some t
-  | _ -> None
-
-let get_int args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Int n -> n
-  | `Intlit s -> (try int_of_string s with _ -> default)
-  | _ -> default
-
-let get_float_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `Float v -> Some v
-  | `Int n -> Some (float_of_int n)
-  | `Intlit s -> (try Some (float_of_string s) with _ -> None)
-  | _ -> None
-
-let get_bool args key default =
-  match Yojson.Safe.Util.member key args with
-  | `Bool b -> b
-  | _ -> default
-
-let get_string_list args key =
-  match Yojson.Safe.Util.member key args with
-  | `List xs ->
-      xs
-      |> List.filter_map (function
-             | `String s ->
-                 let t = String.trim s in
-                 if t = "" then None else Some t
-             | _ -> None)
-  | _ -> []
 
 let json_error message =
   Yojson.Safe.to_string

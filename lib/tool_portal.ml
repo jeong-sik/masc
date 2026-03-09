@@ -1,15 +1,6 @@
 (** Portal tools - Agent-to-agent direct messaging *)
 
-(* Argument helpers *)
-let get_string args key default =
-  match Yojson.Safe.Util.member key args with
-  | `String s -> s
-  | _ -> default
-
-let get_string_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `String s when s <> "" -> Some s
-  | _ -> None
+open Tool_args
 
 (* Context required by portal tools *)
 type context = {

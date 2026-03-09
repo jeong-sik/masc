@@ -1,8 +1,5 @@
 (** Portal tools - Agent-to-agent direct messaging *)
 
-val get_string : Yojson.Safe.t -> string -> string -> string
-val get_string_opt : Yojson.Safe.t -> string -> string option
-
 type context = {
   config: Room.config;
   agent_name: string;

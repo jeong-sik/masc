@@ -111,36 +111,36 @@ let test_get_string () =
   cleanup ();
   let args = make_args [("key", `String "value")] in
   Alcotest.(check string) "get existing" "value"
-    (Tool_board.get_string args "key" "default");
+    (Tool_args.get_string args "key" "default");
   Alcotest.(check string) "get missing" "default"
-    (Tool_board.get_string args "missing" "default")
+    (Tool_args.get_string args "missing" "default")
 
 let test_get_string_opt () =
   Eio_main.run @@ fun _env ->
   cleanup ();
   let args = make_args [("key", `String "value")] in
   Alcotest.(check (option string)) "get existing" (Some "value")
-    (Tool_board.get_string_opt args "key");
+    (Tool_args.get_string_opt args "key");
   Alcotest.(check (option string)) "get missing" None
-    (Tool_board.get_string_opt args "missing")
+    (Tool_args.get_string_opt args "missing")
 
 let test_get_int () =
   Eio_main.run @@ fun _env ->
   cleanup ();
   let args = make_args [("n", `Int 42)] in
   Alcotest.(check int) "get existing" 42
-    (Tool_board.get_int args "n" 0);
+    (Tool_args.get_int args "n" 0);
   Alcotest.(check int) "get missing" 0
-    (Tool_board.get_int args "missing" 0)
+    (Tool_args.get_int args "missing" 0)
 
 let test_get_bool () =
   Eio_main.run @@ fun _env ->
   cleanup ();
   let args = make_args [("flag", `Bool true)] in
   Alcotest.(check bool) "get existing" true
-    (Tool_board.get_bool args "flag" false);
+    (Tool_args.get_bool args "flag" false);
   Alcotest.(check bool) "get missing" false
-    (Tool_board.get_bool args "missing" false)
+    (Tool_args.get_bool args "missing" false)
 
 (** {2 Group 3: Post Create / List / Get} *)
 

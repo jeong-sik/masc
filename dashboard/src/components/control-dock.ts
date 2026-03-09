@@ -42,6 +42,7 @@ const pokeResult = signal<LodgeTickResult | null>(null)
 const pokeError = signal<string | null>(null)
 const sending = signal(false)
 const creatingTask = signal(false)
+const joinedIdentity = signal<string | null>(null)
 const joining = signal(false)
 const leaving = signal(false)
 const pinging = signal(false)
@@ -112,6 +113,7 @@ async function joinRoom() {
     const resText = await joinDashboardAgent(agent)
     const joinedName = parseJoinedAgentName(resText)
     if (joinedName) persistAgentName(joinedName)
+    joinedIdentity.value = joinedName ?? agent
     joined.value = true
     await refreshDashboardState()
     showToast(`Joined as ${joinedName ?? agent}`, 'success')
@@ -125,11 +127,12 @@ async function joinRoom() {
 
 async function leaveRoom() {
   if (!joined.value) return
-  const agent = agentName.value.trim()
+  const agent = joinedIdentity.value ?? agentName.value.trim()
   if (!agent) return
   leaving.value = true
   try {
     await leaveDashboardAgent(agent)
+    joinedIdentity.value = null
     joined.value = false
     await refreshDashboardState()
     showToast(`Left room (${agent})`, 'success')
@@ -142,7 +145,7 @@ async function leaveRoom() {
 }
 
 async function resetIdentity() {
-  const prev = agentName.value.trim()
+  const prev = joinedIdentity.value ?? agentName.value.trim()
   if (prev) {
     try {
       await leaveDashboardAgent(prev)
@@ -151,6 +154,7 @@ async function resetIdentity() {
     }
   }
 
+  joinedIdentity.value = null
   localStorage.removeItem(AGENT_NAME_KEY)
   persistAgentName('dashboard')
   joined.value = false

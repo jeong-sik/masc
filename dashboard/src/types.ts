@@ -1420,6 +1420,20 @@ export interface CommandPlaneSwarmProviderSample {
 
 export interface CommandPlaneSwarmProvider {
   slot_url?: string | null
+  provider_base_url?: string | null
+  provider_reachable?: boolean | null
+  provider_status_code?: number | null
+  provider_model_id?: string | null
+  actual_model_id?: string | null
+  expected_slots?: number
+  actual_slots?: number
+  expected_ctx?: number
+  actual_ctx?: number
+  slot_reachable?: boolean | null
+  slot_status_code?: number | null
+  runtime_blocker?: string | null
+  detail?: string | null
+  checked_at?: string | null
   total_slots?: number
   ctx_per_slot?: number
   active_slots_now?: number

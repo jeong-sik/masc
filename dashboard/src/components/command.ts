@@ -1190,6 +1190,15 @@ function SwarmWorkerCard({ worker }: { worker: CommandPlaneSwarmWorker }) {
 function SwarmSurface() {
   const swarm = commandPlaneSwarm.value
   const runId = dashboardSwarmRunId()
+  const runtimeState = swarm?.provider?.runtime_blocker
+    ? 'blocked'
+    : swarm?.provider?.provider_reachable
+      ? 'ready'
+      : 'check'
+  const actualSlots = swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0
+  const expectedSlots = swarm?.provider?.expected_slots ?? 'n/a'
+  const actualCtx = swarm?.provider?.actual_ctx ?? swarm?.provider?.ctx_per_slot ?? 0
+  const expectedCtx = swarm?.provider?.expected_ctx ?? 'n/a'
   return html`
     <div class="command-surface-grid">
       <section class="card command-section">
@@ -1203,7 +1212,7 @@ function SwarmSurface() {
                   <div class="command-summary-grid">
                     <div class="monitor-stat-card"><span>Run</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room n/a'}</small></div>
                     <div class="monitor-stat-card"><span>Workers</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0} live · ${swarm.summary?.completed_workers ?? 0} completed</small></div>
-                    <div class="monitor-stat-card"><span>Runtime</span><strong>${swarm.provider?.active_slots_now ?? 0}/${swarm.provider?.total_slots ?? 0}</strong><small>peak ${swarm.summary?.peak_hot_slots ?? 0} · ctx ${swarm.provider?.ctx_per_slot ?? 0}</small></div>
+                    <div class="monitor-stat-card"><span>Runtime</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
                     <div class="monitor-stat-card"><span>Hot 10+</span><strong>${swarm.summary?.pass_hot_concurrency ? 'pass' : 'check'}</strong><small>${swarm.provider?.slot_url ?? 'slot n/a'}</small></div>
                     <div class="monitor-stat-card"><span>End to End</span><strong>${swarm.summary?.pass_end_to_end ? 'pass' : 'check'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
                   </div>
@@ -1213,6 +1222,7 @@ function SwarmSurface() {
                     <span>Detachment</span><span>${swarm.detachment?.detachment_id ?? 'none'}</span>
                     <span>Expected</span><span>${swarm.summary?.expected_workers ?? 0} workers</span>
                     <span>Final Markers</span><span>${swarm.summary?.final_markers_seen ?? 0}</span>
+                    <span>Runtime Blocker</span><span>${swarm.provider?.runtime_blocker ?? 'none'}</span>
                     <span>Recommended</span><span>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</span>
                   </div>
                   ${swarm.truth_notes.length > 0
@@ -1247,13 +1257,25 @@ function SwarmSurface() {
         ${swarm?.provider
           ? html`
               <div class="command-card-grid">
+                <span>Provider</span><span>${swarm.provider.provider_base_url ?? 'n/a'}</span>
+                <span>Provider Reachable</span><span>${swarm.provider.provider_reachable == null ? 'n/a' : swarm.provider.provider_reachable ? 'yes' : 'no'}</span>
+                <span>Requested Model</span><span>${swarm.provider.provider_model_id ?? 'n/a'}</span>
+                <span>Actual Model</span><span>${swarm.provider.actual_model_id ?? 'n/a'}</span>
                 <span>Slot URL</span><span>${swarm.provider.slot_url ?? 'n/a'}</span>
-                <span>Total Slots</span><span>${swarm.provider.total_slots ?? 0}</span>
+                <span>Expected Slots</span><span>${swarm.provider.expected_slots ?? 'n/a'}</span>
+                <span>Actual Slots</span><span>${swarm.provider.actual_slots ?? swarm.provider.total_slots ?? 0}</span>
+                <span>Expected Ctx</span><span>${swarm.provider.expected_ctx ?? 'n/a'}</span>
+                <span>Actual Ctx</span><span>${swarm.provider.actual_ctx ?? swarm.provider.ctx_per_slot ?? 0}</span>
                 <span>Active Now</span><span>${swarm.provider.active_slots_now ?? 0}</span>
                 <span>Peak Active</span><span>${swarm.provider.peak_active_slots ?? 0}</span>
                 <span>Sample Count</span><span>${swarm.provider.sample_count ?? 0}</span>
                 <span>Last Sample</span><span>${swarm.provider.last_sample_at ? relativeTime(swarm.provider.last_sample_at) : 'n/a'}</span>
+                <span>Runtime Blocker</span><span>${swarm.provider.runtime_blocker ?? 'none'}</span>
+                <span>Doctor Checked</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : 'n/a'}</span>
               </div>
+              ${swarm.provider.detail
+                ? html`<div class="command-card-sub">${swarm.provider.detail}</div>`
+                : null}
               ${swarm.provider.timeline.length > 0
                 ? html`<div class="command-trace-stack">
                     ${swarm.provider.timeline.slice(-12).map(sample => html`

@@ -922,6 +922,68 @@ let test_swarm_live_json_reads_custom_worker_count_from_operation_note () =
       Alcotest.(check int) "live workers from joined roster" 13
         (swarm |> member "summary" |> member "live_workers" |> to_int))
 
+let test_swarm_live_json_reads_runtime_doctor_and_blockers () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      let run_id = "swarm-live-runtime-doctor" in
+      let run_dir =
+        Filename.concat
+          (Filename.concat (Filename.concat (Room.masc_dir config) "control-plane") "swarm-live")
+          run_id
+      in
+      write_json_file (Filename.concat run_dir "swarm-live-summary.json")
+        (`Assoc
+          [
+            ("run_id", `String run_id);
+            ("worker_count", `Int 12);
+            ("required_final_markers", `Int 12);
+            ("completed_workers", `Int 0);
+            ("final_markers_seen", `Int 0);
+            ("pass_hot_concurrency", `Bool false);
+            ("pass_end_to_end", `Bool false);
+            ("pass", `Bool false);
+            ("min_hot_slots", `Int 10);
+          ]);
+      write_json_file (Filename.concat run_dir "runtime-doctor.json")
+        (`Assoc
+          [
+            ("checked_at", `String "2026-03-09T06:30:00Z");
+            ("provider_base_url", `String "http://127.0.0.1:3034");
+            ("provider_reachable", `Bool false);
+            ("provider_status_code", `Int 502);
+            ("provider_model_id", `String "qwen3.5-35b-a3b-ud-q8-xl");
+            ("actual_model_id", `String "qwen3.5-35b-a3b-ud-q8-xl");
+            ("slot_url", `String "http://127.0.0.1:8085");
+            ("slot_reachable", `Bool false);
+            ("slot_status_code", `Int 0);
+            ("expected_slots", `Int 12);
+            ("actual_slots", `Int 0);
+            ("expected_ctx", `Int 262144);
+            ("actual_ctx", `Int 0);
+            ("runtime_blocker", `String "provider_unreachable");
+            ("detail", `String "provider smoke request failed");
+          ]);
+      let swarm = Command_plane_v2.swarm_live_json config ~run_id () in
+      let open Yojson.Safe.Util in
+      Alcotest.(check bool) "provider reachable false" false
+        (swarm |> member "provider" |> member "provider_reachable" |> to_bool);
+      Alcotest.(check int) "expected slots from doctor" 12
+        (swarm |> member "provider" |> member "expected_slots" |> to_int);
+      Alcotest.(check int) "actual ctx from doctor" 0
+        (swarm |> member "provider" |> member "actual_ctx" |> to_int);
+      Alcotest.(check string) "runtime blocker surfaced" "provider_unreachable"
+        (swarm |> member "provider" |> member "runtime_blocker" |> to_string);
+      Alcotest.(check bool) "blocker list contains runtime issue" true
+        (swarm |> member "blockers" |> to_list
+       |> List.exists (fun row ->
+              String.equal
+                (row |> member "code" |> to_string)
+                "provider_unreachable")))
+
 let test_best_first_search_blocks_and_routes_research_pipeline () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1161,6 +1223,8 @@ let () =
             test_swarm_live_json_scopes_markers_to_sender;
           Alcotest.test_case "swarm live reads custom worker count from operation note" `Quick
             test_swarm_live_json_reads_custom_worker_count_from_operation_note;
+          Alcotest.test_case "swarm live reads runtime doctor and blockers" `Quick
+            test_swarm_live_json_reads_runtime_doctor_and_blockers;
           Alcotest.test_case "summary json omits heavy arrays" `Quick
             test_summary_json_omits_heavy_arrays_and_keeps_summaries;
           Alcotest.test_case "summary swarm proof prefers artifact" `Quick

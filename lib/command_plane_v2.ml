@@ -2247,6 +2247,25 @@ type slot_metrics = {
   captured_at : string option;
 }
 
+type runtime_doctor = {
+  checked_at : string option;
+  provider_base_url : string option;
+  provider_reachable : bool option;
+  provider_status_code : int option;
+  provider_error : string option;
+  provider_model_id : string option;
+  actual_model_id : string option;
+  slot_url : string option;
+  slot_reachable : bool option;
+  slot_status_code : int option;
+  expected_slots : int option;
+  actual_slots : int option;
+  expected_ctx : int option;
+  actual_ctx : int option;
+  runtime_blocker : string option;
+  detail : string option;
+}
+
 let latest_swarm_live_artifact config filename =
   let root = swarm_live_dir config in
   match Safe_ops.list_dir_safe root with
@@ -2322,6 +2341,34 @@ let read_slot_metrics run_dir =
     let samples_path = Filename.concat run_dir "slot-samples.jsonl" in
     if Sys.file_exists samples_path then read_slot_metrics_from_samples samples_path
     else None
+
+let read_runtime_doctor_json run_dir =
+  let doctor_path = Filename.concat run_dir "runtime-doctor.json" in
+  if not (Sys.file_exists doctor_path) then
+    None
+  else
+    match Safe_ops.read_json_file_safe doctor_path with
+    | Error _ -> None
+    | Ok json ->
+        Some
+          {
+            checked_at = get_string_opt json "checked_at";
+            provider_base_url = get_string_opt json "provider_base_url";
+            provider_reachable = U.member "provider_reachable" json |> U.to_bool_option;
+            provider_status_code = U.member "provider_status_code" json |> U.to_int_option;
+            provider_error = get_string_opt json "provider_error";
+            provider_model_id = get_string_opt json "provider_model_id";
+            actual_model_id = get_string_opt json "actual_model_id";
+            slot_url = get_string_opt json "slot_url";
+            slot_reachable = U.member "slot_reachable" json |> U.to_bool_option;
+            slot_status_code = U.member "slot_status_code" json |> U.to_int_option;
+            expected_slots = U.member "expected_slots" json |> U.to_int_option;
+            actual_slots = U.member "actual_slots" json |> U.to_int_option;
+            expected_ctx = U.member "expected_ctx" json |> U.to_int_option;
+            actual_ctx = U.member "actual_ctx" json |> U.to_int_option;
+            runtime_blocker = get_string_opt json "runtime_blocker";
+            detail = get_string_opt json "detail";
+          }
 
 let swarm_proof_json config =
   let workers_json
@@ -3050,6 +3097,13 @@ let swarm_live_json config ?run_id ?operation_id () =
   let slot_telemetry =
     find_swarm_live_artifact_json config effective_run_id "slot-telemetry.json"
   in
+  let runtime_doctor =
+    Option.bind
+      (find_swarm_live_artifact_path config effective_run_id "runtime-doctor.json")
+      (fun path ->
+        let run_dir = Filename.dirname path in
+        read_runtime_doctor_json run_dir)
+  in
   let live_slot_samples =
     match find_swarm_live_artifact_path config effective_run_id "slot-samples.jsonl" with
     | Some path when not (Option.is_some slot_telemetry) && Sys.file_exists path ->
@@ -3462,8 +3516,11 @@ let swarm_live_json config ?run_id ?operation_id () =
       (fun () -> live_last_sample_at)
   in
   let slot_url =
-    Option.bind slot_telemetry (fun json ->
-        U.member "slot_url" json |> U.to_string_option)
+    option_or_else
+      (Option.bind runtime_doctor (fun doctor -> doctor.slot_url))
+      (fun () ->
+         Option.bind slot_telemetry (fun json ->
+             U.member "slot_url" json |> U.to_string_option))
   in
   let telemetry_timeline =
     match slot_telemetry with
@@ -3472,6 +3529,74 @@ let swarm_live_json config ?run_id ?operation_id () =
         | `List rows -> rows
         | _ -> [])
     | None -> live_telemetry_timeline
+  in
+  let provider_base_url =
+    Option.bind runtime_doctor (fun doctor -> doctor.provider_base_url)
+  in
+  let provider_reachable =
+    option_or_else
+      (Option.bind runtime_doctor (fun doctor -> doctor.provider_reachable))
+      (fun () ->
+         if total_slots > 0 || sample_count > 0 then Some true else None)
+  in
+  let provider_status_code =
+    Option.bind runtime_doctor (fun doctor -> doctor.provider_status_code)
+  in
+  let provider_model_id =
+    Option.bind runtime_doctor (fun doctor -> doctor.provider_model_id)
+  in
+  let actual_model_id =
+    Option.bind runtime_doctor (fun doctor -> doctor.actual_model_id)
+  in
+  let expected_slots =
+    Option.bind runtime_doctor (fun doctor -> doctor.expected_slots)
+  in
+  let actual_slots =
+    option_or_else
+      (Option.bind runtime_doctor (fun doctor -> doctor.actual_slots))
+      (fun () -> Some total_slots)
+  in
+  let expected_ctx =
+    Option.bind runtime_doctor (fun doctor -> doctor.expected_ctx)
+  in
+  let actual_ctx =
+    option_or_else
+      (Option.bind runtime_doctor (fun doctor -> doctor.actual_ctx))
+      (fun () -> Some ctx_per_slot)
+  in
+  let slot_reachable =
+    Option.bind runtime_doctor (fun doctor -> doctor.slot_reachable)
+  in
+  let slot_status_code =
+    Option.bind runtime_doctor (fun doctor -> doctor.slot_status_code)
+  in
+  let runtime_detail =
+    option_or_else
+      (Option.bind runtime_doctor (fun doctor -> doctor.detail))
+      (fun () -> Option.bind runtime_doctor (fun doctor -> doctor.provider_error))
+  in
+  let runtime_checked_at =
+    Option.bind runtime_doctor (fun doctor -> doctor.checked_at)
+  in
+  let runtime_blocker =
+    option_or_else
+      (Option.bind runtime_doctor (fun doctor -> doctor.runtime_blocker))
+      (fun () ->
+         match provider_reachable with
+         | Some false -> Some "provider_unreachable"
+         | _ -> (
+             match provider_model_id, actual_model_id with
+             | Some expected, Some actual when not (String.equal expected actual) ->
+                 Some "provider_model_mismatch"
+             | _ -> (
+                 match expected_ctx, actual_ctx with
+                 | Some expected, Some actual when expected <> actual ->
+                     Some "ctx_mismatch"
+                 | _ -> (
+                     match expected_slots, actual_slots with
+                     | Some expected, Some actual when actual < expected ->
+                         Some "slot_count_insufficient"
+                     | _ -> None))))
   in
   let detachment_exists = matched_detachment <> None in
   let operation_ready =
@@ -3569,7 +3694,55 @@ let swarm_live_json config ?run_id ?operation_id () =
         ~detail:(Printf.sprintf "%d of %d workers have live or recorded run evidence." joined_workers expected_count)
         ~next_tool:"masc_join"
       :: !blockers;
-  if not pass_hot_concurrency then
+  (match runtime_blocker with
+  | Some "provider_unreachable" ->
+      blockers :=
+        blocker_item ~code:"provider_unreachable" ~severity:"bad"
+          ~title:"Provider is unreachable"
+          ~detail:
+            (Option.value runtime_detail
+               ~default:"Local provider proxy or llama runtime did not answer the smoke check.")
+          ~next_tool:"restart llama hot profile"
+        :: !blockers
+  | Some "provider_model_mismatch" ->
+      blockers :=
+        blocker_item ~code:"provider_model_mismatch" ~severity:"bad"
+          ~title:"Provider model does not match the requested hot profile"
+          ~detail:
+            (Printf.sprintf "expected=%s actual=%s"
+               (Option.value provider_model_id ~default:"unknown")
+               (Option.value actual_model_id ~default:"unknown"))
+          ~next_tool:"restart llama hot profile"
+        :: !blockers
+  | Some "slot_count_insufficient" ->
+      blockers :=
+        blocker_item ~code:"slot_count_insufficient" ~severity:"bad"
+          ~title:"Runtime exposed fewer slots than the hot profile requires"
+          ~detail:
+            (Printf.sprintf "expected_slots=%s actual_slots=%s"
+               (match expected_slots with Some value -> string_of_int value | None -> "n/a")
+               (match actual_slots with Some value -> string_of_int value | None -> "n/a"))
+          ~next_tool:"restart llama hot profile"
+        :: !blockers
+  | Some "ctx_mismatch" ->
+      blockers :=
+        blocker_item ~code:"ctx_mismatch" ~severity:"bad"
+          ~title:"Runtime context does not match the required hot profile"
+          ~detail:
+            (Printf.sprintf "expected_ctx=%s actual_ctx=%s"
+               (match expected_ctx with Some value -> string_of_int value | None -> "n/a")
+               (match actual_ctx with Some value -> string_of_int value | None -> "n/a"))
+          ~next_tool:"restart llama hot profile"
+        :: !blockers
+  | Some other ->
+      blockers :=
+        blocker_item ~code:other ~severity:"bad"
+          ~title:"Runtime verification failed"
+          ~detail:(Option.value runtime_detail ~default:"The hot runtime contract did not pass.")
+          ~next_tool:"restart llama hot profile"
+        :: !blockers
+  | None -> ());
+  if not pass_hot_concurrency && not (Option.is_some runtime_blocker) then
     blockers :=
       blocker_item ~code:"hot-slot-threshold" ~severity:"bad"
         ~title:"Hot concurrency target not reached"
@@ -3616,9 +3789,25 @@ let swarm_live_json config ?run_id ?operation_id () =
         ~next_tool:"masc_observe_traces"
       :: !blockers;
   let recommended_next_tool =
-    match !blockers with
-    | row :: _ -> json_event_field row "next_tool" |> Option.value ~default:"masc_observe_traces"
-    | [] -> if pass_end_to_end then "masc_operation_finalize" else "masc_observe_traces"
+    match runtime_blocker with
+    | Some _ -> "restart llama hot profile"
+    | None ->
+        if not operation_ready then
+          "masc_operation_start"
+        else if not detachment_exists then
+          "masc_dispatch_tick"
+        else if current_task_bound < expected_count then
+          "masc_plan_set_task"
+        else if fresh_heartbeats < expected_count then
+          "masc_heartbeat"
+        else if effective_final_markers_seen < required_final_markers then
+          "masc_observe_traces"
+        else if not pass_hot_concurrency then
+          "restart llama hot profile"
+        else if pass_end_to_end then
+          "masc_operation_finalize"
+        else
+          "masc_observe_traces"
   in
   `Assoc
     [
@@ -3657,6 +3846,20 @@ let swarm_live_json config ?run_id ?operation_id () =
         `Assoc
           [
             ("slot_url", match slot_url with Some value -> `String value | None -> `Null);
+            ("provider_base_url", match provider_base_url with Some value -> `String value | None -> `Null);
+            ("provider_reachable", match provider_reachable with Some value -> `Bool value | None -> `Null);
+            ("provider_status_code", match provider_status_code with Some value -> `Int value | None -> `Null);
+            ("provider_model_id", match provider_model_id with Some value -> `String value | None -> `Null);
+            ("actual_model_id", match actual_model_id with Some value -> `String value | None -> `Null);
+            ("expected_slots", match expected_slots with Some value -> `Int value | None -> `Null);
+            ("actual_slots", match actual_slots with Some value -> `Int value | None -> `Null);
+            ("expected_ctx", match expected_ctx with Some value -> `Int value | None -> `Null);
+            ("actual_ctx", match actual_ctx with Some value -> `Int value | None -> `Null);
+            ("slot_reachable", match slot_reachable with Some value -> `Bool value | None -> `Null);
+            ("slot_status_code", match slot_status_code with Some value -> `Int value | None -> `Null);
+            ("runtime_blocker", match runtime_blocker with Some value -> `String value | None -> `Null);
+            ("detail", match runtime_detail with Some value -> `String value | None -> `Null);
+            ("checked_at", match runtime_checked_at with Some value -> `String value | None -> `Null);
             ("total_slots", `Int total_slots);
             ("ctx_per_slot", `Int ctx_per_slot);
             ("active_slots_now", `Int active_slots_now);
@@ -3692,6 +3895,7 @@ let swarm_live_json config ?run_id ?operation_id () =
             `String "claim != planning current_task; this surface prefers live room agent state but falls back to run-scoped task ownership.";
             `String "dispatch tick must materialize the detachment before roster and heartbeat checks can pass.";
             `String "Hot concurrency proof comes from llama.cpp /slots telemetry captured by the live harness and stored under .masc/control-plane/swarm-live/<run_id>.";
+            `String "Runtime viability comes from runtime-doctor.json plus slot telemetry; hot-swarm pass never silently degrades ctx or slots.";
           ] );
     ]
 

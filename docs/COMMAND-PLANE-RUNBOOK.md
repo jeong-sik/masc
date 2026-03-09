@@ -125,6 +125,12 @@ scripts/harness_agent_swarm_live.sh
 LLAMA_PRESET=qwen35-hot ~/me/scripts/llama-server.sh restart
 ```
 
+hot runtime contract:
+
+- `qwen35-hot`는 `ctx=262144`를 유지한다.
+- startup은 `/health`, `/props`, `/slots`를 모두 확인한다.
+- slot 수나 ctx가 기대치보다 낮으면 자동 downgrade 없이 바로 실패한다.
+
 기본 프로파일:
 
 - 12 workers
@@ -141,12 +147,22 @@ LLAMA_PRESET=qwen35-hot ~/me/scripts/llama-server.sh restart
 - `fresh_heartbeats = 12`
 - `completed_workers = 12`
 - `final_markers_seen = 12`
+- `provider_reachable = true`
+- `actual_slots >= expected_slots`
+- `actual_ctx = expected_ctx = 262144`
 - `summary.pass = true`
 
 확인 위치:
 
 - `GET /api/v1/command-plane/swarm?run_id=<RUN_ID>&operation_id=<OP_ID>`
 - dashboard `Command Plane -> swarm`
+
+runtime blocker 예시:
+
+- `provider_unreachable`
+- `provider_model_mismatch`
+- `slot_count_insufficient`
+- `ctx_mismatch`
 
 ### 최소 HTTP 예시
 

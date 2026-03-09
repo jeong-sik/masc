@@ -353,31 +353,15 @@ let handle_council_status ctx _args =
   let json = Council.status ~config in
   (true, Yojson.Safe.pretty_to_string json)
 
-(** Archive a record (requires Eio context - placeholder) *)
+(** Archive a record.
+    Archive.save requires Eio ~sw ~env which this pure handler lacks.
+    Returns an explicit error until server-side Eio wiring is added. *)
 let handle_archive_save _ctx args =
-  let type_str = get_string args "type" "decision" in
   let content = get_string args "content" "" in
-  let agents = get_string_list args "agents" in
   if content = "" then
     (false, "Error: content is required")
   else
-    let record_type = match String.lowercase_ascii type_str with
-      | "debate" -> Archive.Debate
-      | "vote" -> Archive.Vote
-      | "post" -> Archive.Post
-      | _ -> Archive.Decision
-    in
-    let record = Archive.create_record ~type_:record_type ~content ~agents () in
-    (* Note: Actual save requires Eio context, done via server-side *)
-    let json = `Assoc [
-      ("id", `String record.Archive.id);
-      ("type", `String (Archive.record_type_to_string record.type_));
-      ("content", `String record.content);
-      ("agents", `List (List.map (fun a -> `String a) record.agents));
-      ("timestamp", `String record.timestamp);
-      ("note", `String "Record created. Neo4j save requires server context.");
-    ] in
-    (true, Yojson.Safe.pretty_to_string json)
+    (false, "Error: archive save not implemented (requires Eio server context for Neo4j/PostgreSQL persistence)")
 
 (** Execute decision after voting *)
 let handle_execute _ctx args =

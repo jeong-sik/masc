@@ -25,7 +25,10 @@ let default_metadata =
     allow_direct_call_when_hidden = false;
   }
 
-let placeholder_tool_names = [ "masc_archive_save" ]
+let unimplemented_tool_names = [ "masc_archive_save" ]
+
+(** Kept for backward compatibility; controls visibility of unimplemented tools. *)
+let placeholder_tool_names = unimplemented_tool_names
 
 let placeholder_tools_enabled () =
   match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
@@ -60,7 +63,7 @@ let metadata name =
         lifecycle = Active;
         canonical_name = None;
         replacement = None;
-        reason = Some "Placeholder tool hidden by default.";
+        reason = Some "Not implemented: requires Eio server context for persistence.";
         allow_direct_call_when_hidden = false;
       }
   | "masc_claim" | "masc_done" | "masc_release" | "masc_cancel_task" ->

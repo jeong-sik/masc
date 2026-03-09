@@ -86,8 +86,8 @@ val schemas : Types.tool_schema list
 (** MCP tool schemas for masc_tool_grant, masc_tool_revoke, masc_tool_list. *)
 
 val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
-(** Execute tool_shard MCP tools.
-    Note: grant/revoke are stubs pending agent state tracking. *)
+(** Execute tool_shard MCP tools (grant, revoke, list).
+    Agent shard state is tracked in-memory via [agent_shards] hashtable. *)
 
 val keeper_llm_tools : Llm_client.tool_def list
 (** Full tool set (all 11 tools) — backward compatible with existing code. *)

@@ -242,7 +242,7 @@ let tools_of_shards (shard_names : string list) : Llm_client.tool_def list =
 
 (** Grant a shard to an agent. Returns new active_shards list.
     Fails if shard doesn't exist or is already granted. *)
-let[@warning "-32"] grant_shard (active_shards : string list) (shard_name : string) :
+let grant_shard (active_shards : string list) (shard_name : string) :
   (string list, string) result =
   match Hashtbl.find_opt all_shards shard_name with
   | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
@@ -254,7 +254,7 @@ let[@warning "-32"] grant_shard (active_shards : string list) (shard_name : stri
 
 (** Revoke a shard from an agent. Returns new active_shards list.
     Fails if shard is not removable or not currently granted. *)
-let[@warning "-32"] revoke_shard (active_shards : string list) (shard_name : string) :
+let revoke_shard (active_shards : string list) (shard_name : string) :
   (string list, string) result =
   match Hashtbl.find_opt all_shards shard_name with
   | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
@@ -267,7 +267,7 @@ let[@warning "-32"] revoke_shard (active_shards : string list) (shard_name : str
       Ok (List.filter (fun n -> n <> shard_name) active_shards)
 
 (** List all available shards with their status *)
-let[@warning "-32"] list_all_shards () : (string * bool * int) list =
+let list_all_shards () : (string * bool * int) list =
   Hashtbl.fold (fun name (shard : shard) acc ->
     (name, shard.removable, List.length shard.tools) :: acc
   ) all_shards []

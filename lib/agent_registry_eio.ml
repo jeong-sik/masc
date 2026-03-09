@@ -55,69 +55,6 @@ let session_map_lock = Eio.Mutex.create ()
 
 let with_session_lock f = Eio.Mutex.use_rw ~protect:true session_map_lock (fun () -> f ())
 
-(** {1 SSH Key Binding} *)
-
-(** SSH fingerprint to agent_id binding (one key = one agent) *)
-let ssh_key_bindings : (string, string) Hashtbl.t = Hashtbl.create 64
-let ssh_binding_lock = Eio.Mutex.create ()
-
-let with_ssh_lock f = Eio.Mutex.use_rw ~protect:true ssh_binding_lock (fun () -> f ())
-
-(** Check if an SSH key is already bound to another agent *)
-let[@warning "-32"] is_key_bound fingerprint =
-  with_ssh_lock (fun () ->
-    Hashtbl.mem ssh_key_bindings fingerprint
-  )
-
-(** Get the agent bound to an SSH key *)
-let[@warning "-32"] get_key_binding fingerprint =
-  with_ssh_lock (fun () ->
-    Hashtbl.find_opt ssh_key_bindings fingerprint
-  )
-
-(** Bind an SSH key to an agent (Sybil prevention).
-    Returns Error if key is already bound to a different agent.
-
-    @param agent_id The agent to bind
-    @param fingerprint SSH key fingerprint (from MASC_AGENT_SSH_KEY env var)
-*)
-let bind_ssh_key ~agent_id ~fingerprint =
-  with_ssh_lock (fun () ->
-    match Hashtbl.find_opt ssh_key_bindings fingerprint with
-    | Some existing when existing <> agent_id ->
-        Error (Printf.sprintf "SSH key already bound to agent '%s'" existing)
-    | Some _ ->
-        (* Already bound to this agent - OK *)
-        Ok ()
-    | None ->
-        Hashtbl.add ssh_key_bindings fingerprint agent_id;
-        Log.Session.info "[AgentRegistry] SSH key bound: %s -> %s"
-          (String.sub fingerprint 0 (min 16 (String.length fingerprint))) agent_id;
-        Ok ()
-  )
-
-(** Try to bind SSH key from environment variable.
-    Called during identity creation. Non-binding if env var not set.
-*)
-let[@warning "-32"] try_bind_from_env ~agent_id =
-  match Sys.getenv_opt "MASC_AGENT_SSH_KEY" with
-  | None -> Ok ()  (* No binding required *)
-  | Some fingerprint ->
-      if String.length fingerprint < 8 then
-        Error "Invalid SSH key fingerprint (too short)"
-      else
-        bind_ssh_key ~agent_id ~fingerprint
-
-(** Remove SSH key binding (for cleanup) *)
-let[@warning "-32"] unbind_ssh_key ~agent_id =
-  with_ssh_lock (fun () ->
-    let to_remove = Hashtbl.fold (fun fp aid acc ->
-      if aid = agent_id then fp :: acc else acc
-    ) ssh_key_bindings [] in
-    List.iter (Hashtbl.remove ssh_key_bindings) to_remove;
-    List.length to_remove
-  )
-
 (** Get or create identity for an MCP request.
 
     Resolution order:

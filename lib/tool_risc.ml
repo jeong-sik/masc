@@ -362,7 +362,7 @@ let handle_cache_status args : result =
 (* ================================================================ *)
 
 (** Coherent read through MESI L1 cache.
-    L1 hit returns cached value; L1 miss probes L2 (stub for now). *)
+    L1 hit returns cached value; L1 miss returns None (L2 not connected). *)
 let handle_cache_read args : result =
   let agent_id = get_string args "agent_id" "" in
   let key = get_string args "key" "" in
@@ -370,7 +370,8 @@ let handle_cache_read args : result =
   else if key = "" then (false, "key is required")
   else begin
     Cache_coherence.register_agent global_coherence agent_id;
-    (* L2 fetch stub — future: wire to cache_eio.ml file-based cache *)
+    (* L2 not connected: cache_eio.ml requires Room_utils.config (base_path)
+       which tool_risc does not have. Returns None (cache miss). *)
     let l2_fetch _k = None in
     match Cache_coherence.coherent_read global_coherence ~agent_id ~key ~l2_fetch with
     | Some value ->
@@ -394,7 +395,8 @@ let handle_cache_read args : result =
 (* ================================================================ *)
 
 (** Coherent write through MESI L1 cache.
-    Updates L1, broadcasts invalidation to other agents, write-through to L2. *)
+    Updates L1 and broadcasts invalidation to other agents. L2 write-through
+    is a no-op (cache_eio requires Room_utils.config not available here). *)
 let handle_cache_write args : result =
   let agent_id = get_string args "agent_id" "" in
   let key = get_string args "key" "" in
@@ -403,7 +405,8 @@ let handle_cache_write args : result =
   else if key = "" then (false, "key is required")
   else begin
     Cache_coherence.register_agent global_coherence agent_id;
-    (* L2 write stub — future: wire to cache_eio.ml *)
+    (* L2 not connected: cache_eio.ml requires Room_utils.config (base_path)
+       which tool_risc does not have. Write is discarded (L1 only). *)
     let l2_write _k _v = () in
     Cache_coherence.coherent_write global_coherence ~agent_id ~key ~value ~l2_write;
     let state = Cache_coherence.get_line_state global_coherence ~agent_id ~key in

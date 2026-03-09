@@ -300,6 +300,26 @@ let test_context_manager () = group "Context Manager" (fun () ->
   assert_equal "restore:msg_count" 2 (List.length restored.messages);
   assert_equal "restore:max_tokens" 1000 restored.max_tokens;
 
+  (* 12b. Checkpoint restore repairs malformed UTF-8 from legacy storage *)
+  let dirty_serialized =
+    "{\"system_prompt\":\"test\",\"messages\":[{\"role\":\"user\",\"content\":\"hel\x80lo\"},{\"role\":\"assistant\",\"content\":\"wor\xFFld\"}],\"token_count\":2,\"max_tokens\":1000}"
+  in
+  let dirty_ckpt = { ckpt with serialized = dirty_serialized } in
+  let repaired = Context_manager.restore_checkpoint dirty_ckpt ~max_tokens:1000 in
+  assert_equal "restore:utf8_msg_count" 2 (List.length repaired.messages);
+  assert_true "restore:utf8_content_valid"
+    (List.for_all
+       (fun (msg : Llm_client.message) ->
+         let rec valid_from i =
+           if i >= String.length msg.content then true
+           else
+             let dec = String.get_utf_8_uchar msg.content i in
+             let dlen = Uchar.utf_decode_length dec in
+             dlen > 0 && Uchar.utf_decode_is_valid dec && valid_from (i + dlen)
+         in
+         valid_from 0)
+       repaired.messages);
+
   (* 13. DropLowImportance *)
   let ctx8 = Context_manager.append_many
     (Context_manager.create ~system_prompt:"test" ~max_tokens:10000) [

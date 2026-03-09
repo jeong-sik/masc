@@ -841,6 +841,10 @@ let load_agents_from_neo4j () =
   let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name preferredHours peakHour traits interests activityLevel personalityHint } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   Printf.eprintf "[Heartbeat] Loading agents via GraphQL (key=%d chars)...\n%!" (String.length api_key);
+  if String.trim api_key = "" then (
+    Eio.traceln "⚠️ [Heartbeat] GRAPHQL_API_KEY missing; using builtin core agents";
+    builtin_core_agents ())
+  else
   match graphql_request ~timeout_sec:5.0 gql_query with
   | Error err ->
       Eio.traceln "⚠️ [Heartbeat] GraphQL request failed: %s" err;
@@ -2125,21 +2129,27 @@ let tom_context_for_posts ~agent_name (posts : Board.post list) =
              (Lodge_tom.tom_prompt_section predictions)))
   |> String.concat "\n\n"
 
-let heartbeat_response_is_valid s =
+let heartbeat_response_is_valid ?(require_json = false) s =
   let len = String.length s in
   let s_lower = String.lowercase_ascii s in
-  len > 10
+  let base_valid =
+    len > 10
   && not (len >= 5 && String.sub s_lower 0 5 = "error")
   && not (len >= 14 && String.sub s 0 14 = "Empty response")
   && not (len >= 9 && String.sub s 0 9 = "{\"error\":")
   && not (String.length s_lower >= 19 && String.sub s_lower 0 19 = "you've hit your lim")
   && not (String.length s_lower >= 10 && String.sub s_lower 0 10 = "rate limit")
+  in
+  base_valid
+  && ((not require_json) || Lodge_decision.contains_json_object s)
 
-let heartbeat_response_accepted (resp : Llm_client.completion_response) =
-  heartbeat_response_is_valid resp.content
+let heartbeat_response_accepted ?(require_json = false)
+    (resp : Llm_client.completion_response) =
+  heartbeat_response_is_valid ~require_json resp.content
 
-let run_heartbeat_llm_once ~agent_name ~prompt =
+let run_heartbeat_llm_once ?(require_json = false) ~agent_name ~prompt () =
   let models = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
+  let heartbeat_max_tokens = 1200 in
   let started_at = Time_compat.now () in
   let result =
     if models = [] then (
@@ -2148,8 +2158,8 @@ let run_heartbeat_llm_once ~agent_name ~prompt =
       Error "no heartbeat model pool available")
     else
       Llm_client.run_prompt_cascade ~timeout_sec:60
-        ~accept:heartbeat_response_accepted ~model_specs:models ~max_tokens:4000
-        ~prompt ()
+        ~accept:(heartbeat_response_accepted ~require_json)
+        ~model_specs:models ~max_tokens:heartbeat_max_tokens ~prompt ()
   in
   let duration_ms =
     int_of_float ((Time_compat.now () -. started_at) *. 1000.0)
@@ -2165,12 +2175,14 @@ let run_heartbeat_llm_once ~agent_name ~prompt =
       Printf.printf "   ❌ [%s] Heartbeat cascade failed: %s\n%!" agent_name err;
       { Lodge_cascade.response = ""; llm_used = "none"; duration_ms }
 
-let run_heartbeat_llm_traced ~agent_name ~phase ~prompt =
+let run_heartbeat_llm_traced ?(require_json = false) ~agent_name ~phase ~prompt () =
   let tick_id =
     Printf.sprintf "%s-%d" agent_name
       (int_of_float (Time_compat.now () *. 1000.0) mod 1000000)
   in
-  let cascade_result = run_heartbeat_llm_once ~agent_name ~prompt in
+  let cascade_result =
+    run_heartbeat_llm_once ~require_json ~agent_name ~prompt ()
+  in
   save_trace
     {
       tick_id;
@@ -2245,6 +2257,29 @@ let checkin_result_of_completion ~agent_name (completion : Lodge_worker.completi
       Skipped
         (Option.value ~default:completion.summary completion.failure_reason)
 
+let fallback_tool_loop_assignment
+    ~agent_name
+    ~trigger_reason
+    ~sorted_posts:(sorted_posts : Board.post list) =
+  let target_post_id =
+    match sorted_posts with
+    | (post : Board.post) :: _ -> Some (Board.Post_id.to_string post.id)
+    | [] -> None
+  in
+  ({ agent_name;
+    target_post_id;
+    goal =
+      (match target_post_id with
+       | Some post_id ->
+           Printf.sprintf
+             "Inspect post %s and decide whether to comment, upvote, or skip using the allowed MCP tools directly."
+             post_id
+       | None ->
+           "No candidate post was selected by the planner. Inspect the current room and decide whether to post, comment, or skip using the allowed MCP tools directly.");
+    reason = "fallback selection after planner parse failure: " ^ trigger_reason;
+    confidence = 0.25;
+  } : Lodge_decision.assignment)
+
 let select_tool_loop_assignment ~agent_name ~trigger ~trigger_reason ~recent_posts =
   let profile = load_agent_profile ~agent_name in
   let signature = Lodge_reaction.get_or_compute_signature ~agent_name in
@@ -2280,7 +2315,8 @@ let select_tool_loop_assignment ~agent_name ~trigger ~trigger_reason ~recent_pos
       ~max_agents:1 ~allow_post:(List.mem "masc_board_post" allowed_tools)
   in
   let cascade_result =
-    run_heartbeat_llm_traced ~agent_name ~phase:"lodge_tool_assignment" ~prompt
+    run_heartbeat_llm_traced
+      ~require_json:true ~agent_name ~phase:"lodge_tool_assignment" ~prompt ()
   in
   match
     Lodge_decision.parse_selection_plan ~allowed_agents:[ agent_name ]
@@ -2291,7 +2327,12 @@ let select_tool_loop_assignment ~agent_name ~trigger ~trigger_reason ~recent_pos
   | Ok { assignments = assignment :: _; _ } ->
       Ok (assignment, identity_prompt, sorted_posts, allowed_tools)
   | Ok _ -> Error "selection returned no assignments"
-  | Error reason -> Error reason
+  | Error _reason ->
+      Ok
+        ( fallback_tool_loop_assignment ~agent_name ~trigger_reason ~sorted_posts,
+          identity_prompt,
+          sorted_posts,
+          allowed_tools )
 
 let run_agent_tool_loop ~agent_name ~trigger ~trigger_reason ~recent_posts =
   match select_tool_loop_assignment ~agent_name ~trigger ~trigger_reason ~recent_posts with
@@ -2363,7 +2404,8 @@ let decide_agent_action ~agent_name ~trigger ~trigger_reason ~recent_posts =
       ~allow_post:(trigger_allows_post trigger)
   in
   let cascade_result =
-    run_heartbeat_llm_traced ~agent_name ~phase:"lodge_decision" ~prompt
+    run_heartbeat_llm_traced
+      ~require_json:true ~agent_name ~phase:"lodge_decision" ~prompt ()
   in
   let llm_used = Some cascade_result.Lodge_cascade.llm_used in
   let response = cascade_result.Lodge_cascade.response in
@@ -2544,7 +2586,7 @@ let execute_agent_action ~agent_name ~action =
     Wraps the LLM cascade in a simple (prompt -> string) signature. *)
 let make_call_llm ~agent_name : (prompt:string -> string) =
   fun ~prompt ->
-    (run_heartbeat_llm_once ~agent_name ~prompt).Lodge_cascade.response
+    (run_heartbeat_llm_once ~agent_name ~prompt ()).Lodge_cascade.response
 
 (** {1 Plan-based Agent Selection} *)
 

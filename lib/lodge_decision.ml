@@ -62,12 +62,43 @@ let trim_opt = function
 
 let extract_json_object (response : string) : (string, string) result =
   let trimmed = String.trim response in
-  try
-    let start_idx = String.index trimmed '{' in
-    let end_idx = String.rindex trimmed '}' in
-    if end_idx < start_idx then Error "missing JSON object terminator"
-    else Ok (String.sub trimmed start_idx (end_idx - start_idx + 1))
-  with Not_found -> Error "missing JSON object"
+  let len = String.length trimmed in
+  let rec find_start i =
+    if i >= len then None
+    else if trimmed.[i] = '{' then Some i
+    else find_start (i + 1)
+  in
+  let rec find_end i depth in_string escaped =
+    if i >= len then None
+    else
+      let ch = trimmed.[i] in
+      if in_string then
+        if escaped then find_end (i + 1) depth true false
+        else if ch = '\\' then find_end (i + 1) depth true true
+        else if ch = '"' then find_end (i + 1) depth false false
+        else find_end (i + 1) depth true false
+      else
+        match ch with
+        | '"' -> find_end (i + 1) depth true false
+        | '{' -> find_end (i + 1) (depth + 1) false false
+        | '}' ->
+            if depth = 1 then Some i
+            else if depth > 1 then find_end (i + 1) (depth - 1) false false
+            else None
+        | _ -> find_end (i + 1) depth false false
+  in
+  match find_start 0 with
+  | None -> Error "missing JSON object"
+  | Some start_idx -> (
+      match find_end start_idx 0 false false with
+      | None -> Error "missing JSON object terminator"
+      | Some end_idx ->
+          Ok (String.sub trimmed start_idx (end_idx - start_idx + 1)))
+
+let contains_json_object response =
+  match extract_json_object response with
+  | Ok _ -> true
+  | Error _ -> false
 
 let parse_confidence json =
   match json with

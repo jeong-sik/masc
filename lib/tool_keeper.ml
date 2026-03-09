@@ -1380,6 +1380,57 @@ let model_specs_of_strings (model_strs : string list) : (Llm_client.model_spec l
   in
   go [] model_strs
 
+let env_present name =
+  match Sys.getenv_opt name with
+  | Some value -> String.trim value <> ""
+  | None -> false
+
+let ollama_port_listening () =
+  Sys.command "lsof -iTCP:11434 -sTCP:LISTEN -t >/dev/null 2>&1" = 0
+
+let model_spec_is_local_runtime (model : Llm_client.model_spec) =
+  match model.provider with
+  | Llm_client.Ollama | Llm_client.Llama -> true
+  | _ -> false
+
+let model_spec_is_available (model : Llm_client.model_spec) =
+  match model.provider with
+  | Llm_client.Ollama -> ollama_port_listening ()
+  | Llm_client.Llama -> true
+  | _ -> true
+
+let keeper_fallback_model_labels () =
+  let gemini_available =
+    match Provider_adapter.resolve_gemini_direct_auth () with
+    | Provider_adapter.Gemini_api_key
+    | Provider_adapter.Gemini_vertex_adc _ -> true
+    | Provider_adapter.Gemini_auth_missing _ -> false
+  in
+  let candidates =
+    [
+      (env_present "ZAI_API_KEY", "glm:glm-4.7");
+      (gemini_available, "gemini:gemini-2.5-pro");
+      (env_present "ANTHROPIC_API_KEY", "claude:claude-sonnet-4-5-20250929");
+    ]
+  in
+  candidates
+  |> List.filter_map (fun (enabled, label) -> if enabled then Some label else None)
+
+let maybe_append_keeper_fallback_models (models : string list) =
+  match model_specs_of_strings models with
+  | Error _ -> models
+  | Ok specs ->
+      let all_local = specs <> [] && List.for_all model_spec_is_local_runtime specs in
+      let any_available = List.exists model_spec_is_available specs in
+      if (not all_local) || any_available then
+        models
+      else
+        let extra =
+          keeper_fallback_model_labels ()
+          |> List.filter (fun label -> not (List.mem label models))
+        in
+        if extra = [] then models else models @ extra
+
 let ensure_api_keys (models : Llm_client.model_spec list) : (unit, string) result =
   let missing =
     List.filter_map (fun (m : Llm_client.model_spec) ->
@@ -7965,6 +8016,9 @@ let handle_keeper_msg ctx args : tool_result =
       let gate_config = Eval_gate.default_config in
       let effective_models =
         if inline_models <> [] then inline_models else meta.models
+      in
+      let effective_models =
+        maybe_append_keeper_fallback_models effective_models
       in
       (match model_specs_of_strings effective_models with
        | Error e -> (false, "❌ " ^ e)

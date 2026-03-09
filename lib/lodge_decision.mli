@@ -67,6 +67,7 @@ val parse_batch_outcome :
 val action_to_string : action -> string
 
 val extract_json_object : string -> (string, string) result
+val contains_json_object : string -> bool
 
 val selection_prompt :
   agent_name:string ->

@@ -22,9 +22,40 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+resolve_repo_env_root() {
+    if command -v git >/dev/null 2>&1; then
+        local common_dir
+        common_dir="$(git -C "$SCRIPT_DIR" rev-parse --git-common-dir 2>/dev/null || true)"
+        if [ -n "$common_dir" ]; then
+            if [[ "$common_dir" != /* ]]; then
+                common_dir="$SCRIPT_DIR/$common_dir"
+            fi
+            common_dir="$(cd "$(dirname "$common_dir")" && pwd)"
+            echo "$common_dir"
+            return
+        fi
+    fi
+    echo "$SCRIPT_DIR"
+}
+
+load_env_file() {
+    local path="$1"
+    if [ -f "$path" ]; then
+        set -a; source "$path" 2>/dev/null || true; set +a
+    fi
+}
+
+REPO_ENV_ROOT="$(resolve_repo_env_root)"
+
 # Load secrets from the user profile; tracked plist files must not embed them.
-if [ -f "$HOME/.zshenv" ]; then
-    set -a; source "$HOME/.zshenv" 2>/dev/null || true; set +a
+load_env_file "$HOME/.zshenv"
+
+# Load repo-local env for development overrides and secrets kept out of user shell.
+load_env_file "$REPO_ENV_ROOT/.env"
+load_env_file "$REPO_ENV_ROOT/.env.local"
+if [ "$REPO_ENV_ROOT" != "$SCRIPT_DIR" ]; then
+    load_env_file "$SCRIPT_DIR/.env"
+    load_env_file "$SCRIPT_DIR/.env.local"
 fi
 
 # Load Lodge heartbeat configuration (env vars override plist defaults)

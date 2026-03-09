@@ -181,21 +181,58 @@ function monitorLevelLabel(level?: string): string {
   return 'Unknown'
 }
 
+function deltaIndicator(delta?: number | null): string {
+  if (delta == null || delta === 0) return ''
+  return delta > 0 ? ` +${delta} ↑` : ` ${delta} ↓`
+}
+
+function deltaClass(delta?: number | null): string {
+  if (delta == null || delta === 0) return 'stat-delta neutral'
+  return delta > 0 ? 'stat-delta up' : 'stat-delta down'
+}
+
+function Sparkline({ data }: { data?: number[] }) {
+  if (!data || data.length < 2) return null
+  const max = Math.max(...data)
+  const min = Math.min(...data)
+  const range = max - min || 1
+  const w = 60
+  const h = 20
+  const points = data
+    .map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * h}`)
+    .join(' ')
+  return html`
+    <svg class="stat-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+      <polyline points=${points} fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  `
+}
+
 function StatCard({
   label,
   value,
   color,
   caption,
+  delta,
+  spark,
 }: {
   label: string
   value: string | number
   color?: string
   caption?: string
+  delta?: number | null
+  spark?: number[]
 }) {
   return html`
     <div class="stat-card">
       <div class="stat-label">${label}</div>
-      <div class="stat-value" style=${color ? `color: ${color}` : ''}>${value}</div>
+      <div class="stat-value-row">
+        <span class="stat-value" style=${color ? `color: ${color}` : ''}>${value}</span>
+        ${delta != null && delta !== 0
+          ? html`<span class=${deltaClass(delta)}>${deltaIndicator(delta)}</span>`
+          : null}
+        ${spark ? html`<${Sparkline} data=${spark} />` : null}
+      </div>
       ${caption ? html`<div class="monitor-stat-caption">${caption}</div>` : null}
     </div>
   `
@@ -601,55 +638,35 @@ export function Overview() {
     </div>
 
     <${Card} title="Room Health" class="section">
-      <div class="monitor-section-head">
-        <h2 class="monitor-headline">Operational health at a glance</h2>
-        <p class="monitor-subheadline">The Overview now prioritizes room state, feed freshness, and immediate intervention signals over full entity dumps.</p>
+      <div class="health-strip">
+        <span class="health-dot" style=${`color:${isLive ? '#4ade80' : '#fbbf24'}`} title=${`Live Feed: ${isLive ? 'Online' : 'Retrying'} · ${eventCount.value} events`}>● Live</span>
+        <span class="health-dot" style=${`color:${toneColor(monitorTone(boardMonitor?.alert_level))}`} title=${`Board: ${monitorLevelLabel(boardMonitor?.alert_level)} · Freshness ${formatDuration(boardMonitor?.last_activity_age_s)}`}>● Board</span>
+        <span class="health-dot" style=${`color:${toneColor(monitorTone(councilMonitor?.alert_level))}`} title=${`Council: ${monitorLevelLabel(councilMonitor?.alert_level)} · ${councilMonitor?.sessions_without_quorum ?? 0} sessions without quorum`}>● Council</span>
+        <span class="health-dot" style=${`color:${toneColor(roomTone)}`} title=${`Runtime: ${status?.paused ? 'Paused' : 'Stable'}`}>● Runtime</span>
+        <span class="health-uptime">Uptime ${formatUptime(status?.uptime_seconds ?? 0)}</span>
       </div>
-      <div class="overview-health-grid">
-        <div class="stat-card">
-          <div class="stat-label">Live Feed</div>
-          <div class="stat-value" style=${`color:${isLive ? '#4ade80' : '#fbbf24'}`}>${isLive ? 'Online' : 'Retrying'}</div>
-          <div class="monitor-stat-caption">${eventCount.value} events seen in this session</div>
+      <details class="runtime-collapsible">
+        <summary class="runtime-summary">Sync and tempo details</summary>
+        <div class="overview-note-stack">
+          <div class="overview-inline-note">
+            ${status?.data_quality?.last_sync_at
+              ? html`Last sync <${TimeAgo} timestamp=${status.data_quality.last_sync_at} />`
+              : html`No sync metadata yet`}
+          </div>
+          <div class="overview-inline-note">
+            ${status?.tempo ? `Tempo ${status.tempo}` : 'Tempo unavailable'}${status?.tempo_interval_s != null ? ` · ${status.tempo_interval_s}s interval` : ''}
+          </div>
+          <div class="overview-inline-note">${lodgeSummary(status?.lodge)}</div>
+          ${status?.lodge?.last_skip_reason
+            ? html`<div class="overview-inline-note">Last Lodge skip: ${status.lodge.last_skip_reason}</div>`
+            : null}
         </div>
-        <div class="stat-card">
-          <div class="stat-label">Board Feed</div>
-          <div class="stat-value" style=${`color:${toneColor(monitorTone(boardMonitor?.alert_level))}`}>${monitorLevelLabel(boardMonitor?.alert_level)}</div>
-          <div class="monitor-stat-caption">Freshness ${formatDuration(boardMonitor?.last_activity_age_s)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Council Feed</div>
-          <div class="stat-value" style=${`color:${toneColor(monitorTone(councilMonitor?.alert_level))}`}>${monitorLevelLabel(councilMonitor?.alert_level)}</div>
-          <div class="monitor-stat-caption">${councilMonitor?.sessions_without_quorum ?? 0} sessions without quorum</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Runtime</div>
-          <div class="stat-value" style=${`color:${toneColor(roomTone)}`}>${status?.paused ? 'Paused' : 'Stable'}</div>
-          <div class="monitor-stat-caption">Uptime ${formatUptime(status?.uptime_seconds ?? 0)}</div>
-        </div>
-      </div>
-      <div class="overview-note-stack">
-        <div class="overview-inline-note">
-          ${status?.data_quality?.last_sync_at
-            ? html`Last sync <${TimeAgo} timestamp=${status.data_quality.last_sync_at} />`
-            : html`No sync metadata yet`}
-        </div>
-        <div class="overview-inline-note">
-          ${status?.tempo ? `Tempo ${status.tempo}` : 'Tempo unavailable'}${status?.tempo_interval_s != null ? ` · ${status.tempo_interval_s}s interval` : ''}
-        </div>
-        <div class="overview-inline-note">${lodgeSummary(status?.lodge)}</div>
-        ${status?.lodge?.last_skip_reason
-          ? html`<div class="overview-inline-note">Last Lodge skip: ${status.lodge.last_skip_reason}</div>`
-          : null}
-      </div>
+      </details>
     <//>
 
     <div class="overview-workbench">
       <div class="overview-column">
         <${Card} title="Intervention Queue" class="section">
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">What needs intervention right now</h2>
-            <p class="monitor-subheadline">Room-level risks, stalled work, and keeper/agent drift are sorted into one operator-facing queue.</p>
-          </div>
           <div class="monitor-alert-list">
             ${interventionQueue.length === 0
               ? html`<div class="empty-state">No immediate intervention required</div>`
@@ -660,10 +677,6 @@ export function Overview() {
 
       <div class="overview-column">
         <${Card} title="Dispatch Window" class="section">
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">Who can pick up work next</h2>
-            <p class="monitor-subheadline">Fresh capacity stays visible here so dispatch does not require opening the full Agents tab.</p>
-          </div>
           <div class="monitor-list">
             ${dispatchableAgents.length === 0
               ? html`<div class="empty-state">No fully dispatchable agents right now</div>`
@@ -686,10 +699,6 @@ export function Overview() {
         <//>
 
         <${Card} title="Agent Watch" class="section">
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">Agents with drift or aging load</h2>
-            <p class="monitor-subheadline">This is the short list. Use the Agents tab when you need the full live monitor.</p>
-          </div>
           <div class="monitor-list">
             ${agentDrift.length === 0
               ? html`<div class="empty-state">No agent drift or stale load right now</div>`
@@ -720,10 +729,6 @@ export function Overview() {
 
       <div class="overview-column">
         <${Card} title="Keeper Pressure" class="section">
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">Long-running keepers under pressure</h2>
-            <p class="monitor-subheadline">Only keepers with real pressure stay in the Overview. The full keeper census still lives in the Agents tab.</p>
-          </div>
           <div class="monitor-list">
             ${keeperAlerts.length === 0
               ? html`<div class="empty-state">No keeper pressure signals right now</div>`
@@ -751,40 +756,35 @@ export function Overview() {
         <//>
 
         <${Card} title="Runtime Notes" class="section">
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">Secondary runtime context</h2>
-            <p class="monitor-subheadline">This column stays compact so operators can scan triage first and drill later.</p>
-          </div>
-          <div class="overview-note-stack">
-            <div class="overview-inline-note">
-              Room ${status?.room ?? 'default'}${status?.cluster ? ` · Cluster ${status.cluster}` : ''}${status?.project ? ` · Project ${status.project}` : ''}
+          <details class="runtime-collapsible">
+            <summary class="runtime-summary">Runtime context (${5 + (status?.lodge?.last_skip_reason ? 1 : 0)} items)</summary>
+            <div class="overview-note-stack">
+              <div class="overview-inline-note">
+                Room ${status?.room ?? 'default'}${status?.cluster ? ` · Cluster ${status.cluster}` : ''}${status?.project ? ` · Project ${status.project}` : ''}
+              </div>
+              <div class="overview-inline-note">
+                ${status?.version ? `Version ${status.version}` : 'Version unavailable'} · Active agents ${activeAgents.value.length} · Total tasks ${taskList.length}
+              </div>
+              <div class="overview-inline-note">
+                ${perpetualStatus.value
+                  ? `Perpetual runtime ${perpetualStatus.value.running ? 'running' : 'stopped'}${perpetualStatus.value.goal ? ` · ${limitText(perpetualStatus.value.goal, 120)}` : ''}`
+                  : 'Perpetual runtime unavailable'}
+              </div>
+              <div class="overview-inline-note">
+                Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}${status?.lodge?.last_skip_reason ? ` · Skip ${status.lodge.last_skip_reason}` : ''}
+              </div>
+              <div class="overview-inline-note">
+                ${keeperList.length > 0
+                  ? `Hot keepers: ${keeperAlerts.length} · Highest context ${formatTokens(Math.max(...keeperList.map(keeper => keeper.context_tokens ?? 0)))}`
+                  : 'No keepers registered'}
+              </div>
             </div>
-            <div class="overview-inline-note">
-              ${status?.version ? `Version ${status.version}` : 'Version unavailable'} · Active agents ${activeAgents.value.length} · Total tasks ${taskList.length}
-            </div>
-            <div class="overview-inline-note">
-              ${perpetualStatus.value
-                ? `Perpetual runtime ${perpetualStatus.value.running ? 'running' : 'stopped'}${perpetualStatus.value.goal ? ` · ${limitText(perpetualStatus.value.goal, 120)}` : ''}`
-                : 'Perpetual runtime unavailable'}
-            </div>
-            <div class="overview-inline-note">
-              Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}${status?.lodge?.last_skip_reason ? ` · Skip ${status.lodge.last_skip_reason}` : ''}
-            </div>
-            <div class="overview-inline-note">
-              ${keeperList.length > 0
-                ? `Hot keepers: ${keeperAlerts.length} · Highest context ${formatTokens(Math.max(...keeperList.map(keeper => keeper.context_tokens ?? 0)))}`
-                : 'No keepers registered'}
-            </div>
-          </div>
+          </details>
         <//>
       </div>
     </div>
 
     <${Card} title="Execution Pulse" class="section">
-        <div class="monitor-section-head">
-          <h2 class="monitor-headline">Priority work and ownership drift</h2>
-          <p class="monitor-subheadline">Urgent ready tasks and active execution issues stay visible without duplicating the full Execution surface.</p>
-        </div>
         <div class="monitor-list">
           ${taskPulses.length === 0
             ? html`<div class="empty-state">No active or ready tasks</div>`

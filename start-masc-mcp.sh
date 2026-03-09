@@ -22,7 +22,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Load API keys from user profile (launchd doesn't inherit shell env)
+# Load secrets from the user profile; tracked plist files must not embed them.
 if [ -f "$HOME/.zshenv" ]; then
     set -a; source "$HOME/.zshenv" 2>/dev/null || true; set +a
 fi

@@ -55,3 +55,8 @@ viewer/dist-build/
 
 # Local Claude session scratch
 .claude/
+
+# Local environment files
+.env
+.env.*
+!.env.example

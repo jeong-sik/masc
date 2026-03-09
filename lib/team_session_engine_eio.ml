@@ -64,6 +64,158 @@ let session_allows_actor ~(actor : string) (session : Team_session_types.session
   String.equal actor session.created_by
   || List.exists (String.equal actor) session.agent_names
 
+let hierarchy_lane_ids = [| "lane-a"; "lane-b"; "lane-c"; "lane-d" |]
+
+let controller_tree_json_of_session (session : Team_session_types.session) =
+  match session.control_profile with
+  | Team_session_types.Control_flat ->
+      `Assoc
+        [
+          ("profile", `String "flat");
+          ("root", `String "ctrl-root");
+          ("lanes", `List []);
+        ]
+  | Team_session_types.Control_hierarchical_quality_v1 ->
+      let lanes =
+        Array.to_list hierarchy_lane_ids
+        |> List.map (fun lane_id ->
+               `Assoc
+                 [
+                   ("lane_id", `String lane_id);
+                   ("lane_manager", `String (Printf.sprintf "ctrl-%s" lane_id));
+                   ( "quality_manager",
+                     `String (Printf.sprintf "ctrl-%s-quality" lane_id) );
+                   ( "knowledge_manager",
+                     `String (Printf.sprintf "ctrl-%s-knowledge" lane_id) );
+                 ])
+      in
+      `Assoc
+        [
+          ("profile", `String "hierarchical_quality_v1");
+          ("root", `String "ctrl-root");
+          ("global_metacog", `String "ctrl-global-metacog");
+          ("runtime_warden", `String "ctrl-runtime-warden");
+          ("lanes", `List lanes);
+        ]
+
+let controller_intervention_counts (config : Room.config) session_id =
+  let counts = Hashtbl.create 8 in
+  Team_session_store.read_events ~max_events:2000 config session_id
+  |> List.iter (fun json ->
+         match Yojson.Safe.Util.member "event_type" json with
+         | `String
+             ("controller_intervention" | "controller_escalation"
+             | "controller_reroute" | "controller_capsule"
+             | "controller_handoff" as kind) ->
+             let prev = Option.value ~default:0 (Hashtbl.find_opt counts kind) in
+             Hashtbl.replace counts kind (prev + 1)
+         | _ -> ());
+  Hashtbl.fold (fun key value acc -> (key, value) :: acc) counts []
+  |> Team_session_types.counts_to_json
+
+let confidence_heatmap_json (session : Team_session_types.session) =
+  let fold_lane acc (worker : Team_session_types.planned_worker) =
+    match (worker.lane_id, worker.routing_confidence) with
+    | Some lane, Some confidence ->
+        let total, count =
+          match List.assoc_opt lane acc with
+          | Some pair -> pair
+          | None -> (0.0, 0)
+        in
+        (lane, (total +. confidence, count + 1))
+        :: List.remove_assoc lane acc
+    | _ -> acc
+  in
+  session.planned_workers
+  |> List.fold_left fold_lane []
+  |> List.map (fun (lane, (total, count)) ->
+         let avg = if count = 0 then 0.0 else total /. float_of_int count in
+         (lane, `Float avg))
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+  |> fun fields -> `Assoc fields
+
+let context_pressure_by_lane_json (session : Team_session_types.session) =
+  let update lane delta acc =
+    let prev = Option.value ~default:0.0 (List.assoc_opt lane acc) in
+    (lane, min 1.0 (prev +. delta)) :: List.remove_assoc lane acc
+  in
+  session.planned_workers
+  |> List.fold_left
+       (fun acc (worker : Team_session_types.planned_worker) ->
+         match worker.lane_id with
+         | None -> acc
+         | Some lane ->
+             let acc =
+               if worker.routing_escalated then update lane 0.15 acc else acc
+             in
+             if Option.is_none worker.runtime_actor then update lane 0.10 acc
+             else acc)
+       []
+  |> List.map (fun (lane, pressure) -> (lane, `Float pressure))
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+  |> fun fields -> `Assoc fields
+
+let lane_health_json (config : Room.config) (session : Team_session_types.session) =
+  let events = Team_session_store.read_events ~max_events:2000 config session.session_id in
+  let failed_runtime_actors =
+    events
+    |> List.filter_map (fun json ->
+           match Yojson.Safe.Util.member "event_type" json with
+           | `String "team_step_spawn" -> (
+               match
+                 ( Yojson.Safe.Util.member "detail" json
+                   |> Yojson.Safe.Util.member "success",
+                   Yojson.Safe.Util.member "detail" json
+                   |> Yojson.Safe.Util.member "runtime_actor" )
+               with
+               | `Bool false, `String actor -> Some actor
+               | _ -> None)
+           | `String "session_agent_detached" -> (
+               match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "actor" with
+               | `String actor -> Some actor
+               | _ -> None)
+           | _ -> None)
+  in
+  let workers_by_lane =
+    session.planned_workers
+    |> List.fold_left
+         (fun acc (worker : Team_session_types.planned_worker) ->
+           match worker.lane_id with
+           | Some lane ->
+               let existing = Option.value ~default:[] (List.assoc_opt lane acc) in
+               (lane, worker :: existing) :: List.remove_assoc lane acc
+           | None -> acc)
+         []
+  in
+  workers_by_lane
+  |> List.map (fun (lane, workers) ->
+         let degraded =
+           List.exists
+             (fun (worker : Team_session_types.planned_worker) ->
+               match worker.runtime_actor with
+               | Some actor -> List.mem actor failed_runtime_actors
+               | None -> false)
+             workers
+         in
+         let status =
+           if degraded then "degraded"
+           else if
+             List.exists
+               (fun (worker : Team_session_types.planned_worker) ->
+                 worker.routing_escalated)
+               workers
+           then "warn"
+           else "ok"
+         in
+         ( lane,
+           `Assoc
+             [
+               ("status", `String status);
+               ("worker_count", `Int (List.length workers));
+             ] ))
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+  |> fun fields -> `Assoc fields
+
 let session_has_attached_actor ~(config : Room.config) ~(session_id : string)
     ~(actor : string) =
   let open Yojson.Safe.Util in
@@ -229,6 +381,18 @@ let summary_json_of_session (config : Room.config)
     Team_session_types.runtime_pool_counts session.planned_workers
     |> Team_session_types.counts_to_json
   in
+  let lane_counts =
+    Team_session_types.lane_counts session.planned_workers
+    |> Team_session_types.counts_to_json
+  in
+  let controller_counts =
+    Team_session_types.controller_level_counts session.planned_workers
+    |> Team_session_types.counts_to_json
+  in
+  let control_domain_counts =
+    Team_session_types.control_domain_counts session.planned_workers
+    |> Team_session_types.counts_to_json
+  in
   let tier_counts =
     Team_session_types.model_tier_counts session.planned_workers
     |> Team_session_types.counts_to_json
@@ -253,6 +417,7 @@ let summary_json_of_session (config : Room.config)
       ("done_delta_total", `Int done_total);
       ("done_delta_by_agent", Team_session_types.assoc_int_to_json deltas);
       ("scale_profile", `String (Team_session_types.scale_profile_to_string session.scale_profile));
+      ("control_profile", `String (Team_session_types.control_profile_to_string session.control_profile));
       ("active_agents", `List (List.map (fun a -> `String a) active_agents));
       ("planned_worker_count", `Int (List.length session.planned_workers));
       ( "planned_workers",
@@ -265,11 +430,19 @@ let summary_json_of_session (config : Room.config)
         `List (List.map (fun a -> `String a) planned_participants) );
       ("worker_class_counts", worker_class_counts);
       ("runtime_pool_counts", runtime_pool_counts);
+      ("lane_counts", lane_counts);
+      ("controller_counts", controller_counts);
+      ("control_domain_counts", control_domain_counts);
       ("tier_counts", tier_counts);
       ("task_profile_counts", task_profile_counts);
       ("escalation_count", `Int escalation_count);
       ( "routing_reason_summary",
         `List (List.map (fun reason -> `String reason) routing_reason_summary) );
+      ("controller_tree", controller_tree_json_of_session session);
+      ("lane_health", lane_health_json config session);
+      ("confidence_heatmap", confidence_heatmap_json session);
+      ("context_pressure_by_lane", context_pressure_by_lane_json session);
+      ("intervention_counters", controller_intervention_counts config session.session_id);
       ("room_active_agents", `List (List.map (fun a -> `String a) room_active_agents));
       ( "last_checkpoint_at",
         Option.fold ~none:`Null ~some:(fun v -> `Float v)
@@ -460,6 +633,144 @@ let maybe_add_fallback_task ~(config : Room.config)
 
 let apply_runtime_policy ~(config : Room.config)
     (session : Team_session_types.session) : Team_session_types.session =
+  let session =
+    if
+      session.control_profile
+      = Team_session_types.Control_hierarchical_quality_v1
+    then (
+      let now = Time_compat.now () in
+      let grace_elapsed =
+        now -. session.started_at >= 60.0
+      in
+      let events =
+        Team_session_store.read_events ~max_events:2000 config session.session_id
+      in
+      let has_turn_for_actor actor_name =
+        List.exists
+          (fun json ->
+            match
+              ( Yojson.Safe.Util.member "event_type" json,
+                Yojson.Safe.Util.member "detail" json
+                |> Yojson.Safe.Util.member "actor" )
+            with
+            | `String "team_turn", `String actor ->
+                String.equal (String.trim actor) actor_name
+            | _ -> false)
+          events
+      in
+      let no_turn_workers =
+        if grace_elapsed then
+          session.planned_workers
+          |> List.filter (fun (worker : Team_session_types.planned_worker) ->
+                 match worker.runtime_actor with
+                 | Some actor -> not (has_turn_for_actor actor)
+                 | None -> false)
+        else []
+      in
+      let low_confidence_workers =
+        session.planned_workers
+        |> List.filter (fun (worker : Team_session_types.planned_worker) ->
+               match worker.routing_confidence with
+               | Some value -> value < 0.72
+               | None -> false)
+      in
+      let spawn_failures =
+        List.fold_left
+          (fun acc json ->
+            match Yojson.Safe.Util.member "event_type" json with
+            | `String "team_step_spawn" -> (
+                match
+                  Yojson.Safe.Util.member "detail" json
+                  |> Yojson.Safe.Util.member "success"
+                with
+                | `Bool false -> acc + 1
+                | _ -> acc)
+            | _ -> acc)
+          0 events
+      in
+      let detached_count =
+        List.fold_left
+          (fun acc json ->
+            match Yojson.Safe.Util.member "event_type" json with
+            | `String "session_agent_detached" -> acc + 1
+            | _ -> acc)
+          0 events
+      in
+      Team_session_store.append_event config session.session_id
+        ~event_type:"controller_tick"
+        ~detail:
+          (`Assoc
+            [
+              ("control_profile", `String "hierarchical_quality_v1");
+              ("controller_tree", controller_tree_json_of_session session);
+              ("lane_health", lane_health_json config session);
+              ("confidence_heatmap", confidence_heatmap_json session);
+              ("context_pressure_by_lane", context_pressure_by_lane_json session);
+              ("spawn_failures", `Int spawn_failures);
+              ("detached_count", `Int detached_count);
+              ("no_turn_worker_count", `Int (List.length no_turn_workers));
+              ( "low_confidence_worker_count",
+                `Int (List.length low_confidence_workers) );
+              ("ts_iso", `String (now_iso ()));
+            ]);
+      if no_turn_workers <> [] then
+        Team_session_store.append_event config session.session_id
+          ~event_type:"controller_intervention"
+          ~detail:
+            (`Assoc
+              [
+                ("controller", `String "ctrl-root");
+                ("action", `String "reroute_candidates");
+                ( "actors",
+                  `List
+                    (List.filter_map
+                       (fun (worker : Team_session_types.planned_worker) ->
+                         Option.map (fun actor -> `String actor)
+                           worker.runtime_actor)
+                       no_turn_workers) );
+                ("ts_iso", `String (now_iso ()));
+              ]);
+      if spawn_failures > 0 || detached_count > 0 || low_confidence_workers <> [] then
+        Team_session_store.append_event config session.session_id
+          ~event_type:"controller_escalation"
+          ~detail:
+            (`Assoc
+              [
+                ("controller", `String "ctrl-root");
+                ("reason", `String "quality_or_runtime_signal");
+                ("spawn_failures", `Int spawn_failures);
+                ("detached_count", `Int detached_count);
+                ( "low_confidence_worker_count",
+                  `Int (List.length low_confidence_workers) );
+                ("ts_iso", `String (now_iso ()));
+              ]);
+      let controller_violations =
+        []
+        |> fun acc ->
+        let acc =
+          if no_turn_workers <> [] then
+            "controller:no_turn_workers" :: acc
+          else acc
+        in
+        let acc =
+          if spawn_failures > 0 then "controller:spawn_failures" :: acc else acc
+        in
+        let acc =
+          if detached_count > 0 then "controller:detached_workers" :: acc else acc
+        in
+        if low_confidence_workers <> [] then
+          "controller:low_confidence" :: acc
+        else acc
+      in
+      {
+        session with
+        policy_violations =
+          Team_session_types.dedup_strings
+            (session.policy_violations @ controller_violations);
+      })
+    else
+      session
+  in
   let active_agents = session_active_agent_names session in
   let active_count = List.length active_agents in
   let under_min_agents = active_count < session.min_agents in
@@ -685,6 +996,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     ~(execution_scope : Team_session_types.execution_scope)
     ~(checkpoint_interval_sec : int) ~(min_agents : int)
     ~(scale_profile : Team_session_types.scale_profile)
+    ~(control_profile : Team_session_types.control_profile)
     ~(orchestration_mode : Team_session_types.orchestration_mode)
     ~(communication_mode : Team_session_types.communication_mode)
     ~(model_cascade : string list)
@@ -729,6 +1041,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         checkpoint_interval_sec;
         min_agents;
         scale_profile;
+        control_profile;
         orchestration_mode;
         communication_mode;
         model_cascade;
@@ -779,6 +1092,9 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
             ( "scale_profile",
               `String
                 (Team_session_types.scale_profile_to_string scale_profile) );
+            ( "control_profile",
+              `String
+                (Team_session_types.control_profile_to_string control_profile) );
             ( "orchestration_mode",
               `String
                 (Team_session_types.orchestration_mode_to_string
@@ -797,6 +1113,15 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
                    instruction_profile) );
             ("alert_channel", `String (Team_session_types.alert_channel_to_string alert_channel));
           ]);
+    if control_profile = Team_session_types.Control_hierarchical_quality_v1 then
+      Team_session_store.append_event config session_id
+        ~event_type:"controller_tree_materialized"
+        ~detail:
+          (`Assoc
+            [
+              ("controller_tree", controller_tree_json_of_session session);
+              ("ts_iso", `String (now_iso ()));
+            ]);
     write_checkpoint config session;
     with_runtimes_lock (fun () ->
         Hashtbl.replace runtimes session_id
@@ -823,6 +1148,9 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
             `String
               (Team_session_types.communication_mode_to_string communication_mode)
           );
+          ( "control_profile",
+            `String
+              (Team_session_types.control_profile_to_string control_profile) );
           ("model_cascade", `List (List.map (fun m -> `String m) model_cascade));
         ])
   with exn -> Error (Printexc.to_string exn)

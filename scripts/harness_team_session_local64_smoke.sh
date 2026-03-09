@@ -77,34 +77,6 @@ if [ "$need_pool_start" = "true" ]; then
   POOL_STARTED="true"
 fi
 
-discovered_models_json=""
-if command -v jq >/dev/null 2>&1; then
-  if [ -n "${MASC_LLAMA_RUNTIMES_JSON:-}" ]; then
-    discovered_models_json="$(printf '%s' "$MASC_LLAMA_RUNTIMES_JSON" | jq -c '[.[] | .model // empty | select(type == "string" and . != "")]')"
-  else
-    model_probe_url="${LLAMA_SERVER_URL:-http://127.0.0.1:${SEED_PORT}}/v1/models"
-    model_probe_raw="$(curl -fsS --max-time 5 "$model_probe_url" 2>/dev/null || true)"
-    if [ -n "${model_probe_raw:-}" ]; then
-      discovered_models_json="$(printf '%s' "$model_probe_raw" | jq -c '[.data[]? | .id // empty | select(type == "string" and . != "")]' 2>/dev/null || true)"
-    fi
-  fi
-fi
-
-if command -v jq >/dev/null 2>&1 && [ -n "${discovered_models_json:-}" ]; then
-  if [ -z "${MASC_TEAM_SESSION_MODEL_35B:-}" ]; then
-    inferred_lead_model="$(printf '%s' "$discovered_models_json" | jq -r '.[0] // empty')"
-    if [ -n "${inferred_lead_model:-}" ]; then
-      export MASC_TEAM_SESSION_MODEL_35B="$inferred_lead_model"
-    fi
-  fi
-  if [ -z "${MASC_TEAM_SESSION_MODEL_9B:-}" ]; then
-    inferred_worker_model="$(printf '%s' "$discovered_models_json" | jq -r '[.[] | select(ascii_downcase | contains("9b"))] | .[0] // empty')"
-    if [ -n "${inferred_worker_model:-}" ]; then
-      export MASC_TEAM_SESSION_MODEL_9B="$inferred_worker_model"
-    fi
-  fi
-fi
-
 MCP_URL="${MCP_URL:-http://127.0.0.1:${PORT}/mcp}"
 if [ "$MCP_URL" = "http://127.0.0.1:${PORT}/mcp" ]; then
   if port_in_use; then
@@ -120,6 +92,7 @@ if [ "$MCP_URL" = "http://127.0.0.1:${PORT}/mcp" ]; then
     MASC_LLAMA_RUNTIME_COOLDOWN_SEC="${MASC_LLAMA_RUNTIME_COOLDOWN_SEC:-}" \
     MASC_LLAMA_RUNTIME_DEBUG="${MASC_LLAMA_RUNTIME_DEBUG:-}" \
     MASC_TEAM_SESSION_MODEL_35B="${MASC_TEAM_SESSION_MODEL_35B:-}" \
+    MASC_TEAM_SESSION_MODEL_27B="${MASC_TEAM_SESSION_MODEL_27B:-}" \
     MASC_TEAM_SESSION_MODEL_9B="${MASC_TEAM_SESSION_MODEL_9B:-}" \
     MASC_TEAM_SESSION_ROUTER_JUDGE="${MASC_TEAM_SESSION_ROUTER_JUDGE:-}" \
     MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL="${MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL:-}" \
@@ -141,7 +114,5 @@ if [ "$MCP_URL" = "http://127.0.0.1:${PORT}/mcp" ]; then
   fi
 fi
 
-export MASC_LOCAL64_SERVER_PID="${SERVER_PID:-}"
-export MASC_LOCAL64_LOG_FILE="${LOG_FILE:-}"
 export MCP_URL
 exec bash "$WORKLOAD_SCRIPT" "$@"

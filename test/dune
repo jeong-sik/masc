@@ -176,6 +176,12 @@
  (modules test_process_eio_coverage)
  (libraries masc_mcp alcotest eio_main))
 
+; Provider adapter registry tests
+(test
+ (name test_provider_adapter)
+ (modules test_provider_adapter)
+ (libraries masc_mcp alcotest unix))
+
 ; Local worker text-tool-call fallback coverage
 (test
  (name test_local_agent_eio_coverage)

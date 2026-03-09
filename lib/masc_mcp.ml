@@ -114,6 +114,7 @@ module Noosphere_eio = Noosphere_eio
 module Metrics_store_eio = Metrics_store_eio
 module Planning_eio = Planning_eio
 module Post_verifier = Post_verifier
+module Provider_adapter = Provider_adapter
 module Process_eio = Process_eio
 module Eio_context = Eio_context
 module Run_eio = Run_eio

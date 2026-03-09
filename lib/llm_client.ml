@@ -71,6 +71,7 @@ type provider =
   | Ollama
   | Llama
   | Claude
+  | OpenAI
   | Gemini
   | Glm_cloud
   | OpenRouter
@@ -140,6 +141,7 @@ let string_of_provider = function
   | Ollama -> "ollama"
   | Llama -> "llama"
   | Claude -> "claude"
+  | OpenAI -> "openai"
   | Gemini -> "gemini"
   | Glm_cloud -> "glm_cloud"
   | OpenRouter -> "openrouter"
@@ -203,6 +205,16 @@ let claude_sonnet = {
   api_key_env = Some "ANTHROPIC_API_KEY";
   cost_per_1k_input = 0.003;
   cost_per_1k_output = 0.015;
+}
+
+let openai_default = {
+  provider = OpenAI;
+  model_id = "gpt-5";
+  max_context = 400000;
+  api_url = "https://api.openai.com";
+  api_key_env = Some "OPENAI_API_KEY";
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
 }
 
 let glm_cloud = {
@@ -712,6 +724,83 @@ let get_api_key (spec : model_spec) : string =
   | Some env_var -> Sys.getenv_opt env_var |> Option.value ~default:""
   | None -> ""
 
+let fetch_vertex_adc_access_token () =
+  let manual_override = Sys.getenv_opt "MASC_VERTEX_ACCESS_TOKEN" |> Option.value ~default:"" |> String.trim in
+  if manual_override <> "" then Ok manual_override
+  else
+    let status, output =
+      Process_eio.run_argv_with_status
+        ~timeout_sec:15.0
+        [ "gcloud"; "auth"; "application-default"; "print-access-token" ]
+    in
+    match status with
+    | Unix.WEXITED 0 ->
+        let token = String.trim output in
+        if token = "" then
+          Error "Gemini Vertex ADC unavailable; run gcloud auth application-default login"
+        else Ok token
+    | _ ->
+        Error "Gemini Vertex ADC unavailable; run gcloud auth application-default login"
+
+let resolve_openai_compatible_endpoint (spec : model_spec) =
+  match spec.provider with
+  | Gemini -> (
+      match Provider_adapter.resolve_gemini_direct_auth () with
+      | Provider_adapter.Gemini_vertex_adc { project; location } -> (
+          match fetch_vertex_adc_access_token () with
+          | Ok access_token ->
+              Ok
+                ( Provider_adapter.gemini_vertex_openai_base_url ~project ~location,
+                  "/chat/completions",
+                  [ ("Authorization", sprintf "Bearer %s" access_token) ] )
+          | Error _ as e -> e)
+      | Provider_adapter.Gemini_api_key ->
+          let api_key = get_api_key spec in
+          if api_key = "" then
+            Error
+              "Gemini auth unavailable; set GOOGLE_CLOUD_PROJECT for Vertex ADC or GEMINI_API_KEY"
+          else
+            Ok
+              ( spec.api_url,
+                "/v1beta/openai/chat/completions",
+                [ ("Authorization", sprintf "Bearer %s" api_key) ] )
+      | Provider_adapter.Gemini_auth_missing message -> Error message)
+  | OpenAI ->
+      let api_key = get_api_key spec in
+      if api_key = "" then Error "OPENAI_API_KEY not set"
+      else
+        Ok
+          ( spec.api_url,
+            "/v1/chat/completions",
+            [ ("Authorization", sprintf "Bearer %s" api_key) ] )
+  | Glm_cloud ->
+      let api_key = get_api_key spec in
+      if api_key = "" then Error "ZAI_API_KEY not set"
+      else
+        Ok
+          ( spec.api_url,
+            "/api/coding/paas/v4/chat/completions",
+            [ ("Authorization", sprintf "Bearer %s" api_key) ] )
+  | OpenRouter ->
+      let api_key = get_api_key spec in
+      if api_key = "" then Error "OPENROUTER_API_KEY not set"
+      else
+        Ok
+          ( spec.api_url,
+            "/v1/chat/completions",
+            [ ("Authorization", sprintf "Bearer %s" api_key) ] )
+  | Claude ->
+      Error "Claude direct provider uses call_claude, not OpenAI-compatible transport"
+  | Ollama | Llama ->
+      Ok (spec.api_url, "/v1/chat/completions", [])
+  | Custom _ ->
+      let auth_headers =
+        match get_api_key spec with
+        | "" -> []
+        | api_key -> [ ("Authorization", sprintf "Bearer %s" api_key) ]
+      in
+      Ok (spec.api_url, "/v1/chat/completions", auth_headers)
+
 (** Run curl with body via stdin, return response string.
     Uses status-aware execution to distinguish timeout (exit 28)
     from connection failure (exit 7) and other errors. *)
@@ -843,30 +932,25 @@ let call_claude ?timeout_sec (req : completion_request) : (completion_response, 
     | Ok raw -> parse_claude_response raw
 
 let call_openai_compatible ?timeout_sec (req : completion_request) : (completion_response, string) result =
-  let api_key = get_api_key req.model in
-  let path = match req.model.provider with
-    | Gemini -> "/v1beta/openai/chat/completions"
-    | Glm_cloud -> "/api/coding/paas/v4/chat/completions"
-    | _ -> "/v1/chat/completions"
-  in
-  let url = sprintf "%s%s" req.model.api_url path in
-  let body = build_openai_body req in
-  Printf.eprintf "[llm_client] openai-compat req: model=%s max_tokens=%d tools=%d url=%s\n%!"
-    req.model.model_id req.max_tokens (List.length req.tools) url;
-  if req.tools <> [] then begin
-    let body_trunc = if String.length body > 1500 then String.sub body 0 1500 ^ "..." else body in
-    Printf.eprintf "[llm_client] openai-compat body (tools present, %d bytes): %s\n%!" (String.length body) body_trunc
-  end;
-  let headers = [("Content-Type", "application/json")] @
-    (if api_key <> "" then [("Authorization", sprintf "Bearer %s" api_key)] else [])
-  in
-  let timeout_sec = Option.value timeout_sec ~default:60 in
-  match curl_post ~url ~headers ~body ~timeout_sec with
+  match resolve_openai_compatible_endpoint req.model with
   | Error e -> Error e
-  | Ok raw ->
-    let trunc = if String.length raw > 500 then String.sub raw 0 500 ^ "..." else raw in
-    Printf.eprintf "[llm_client] openai-compat raw (%d bytes): %s\n%!" (String.length raw) trunc;
-    parse_openai_response raw
+  | Ok (base_url, path, auth_headers) ->
+      let url = sprintf "%s%s" base_url path in
+      let body = build_openai_body req in
+      Printf.eprintf "[llm_client] openai-compat req: model=%s provider=%s max_tokens=%d tools=%d url=%s\n%!"
+        req.model.model_id (string_of_provider req.model.provider) req.max_tokens (List.length req.tools) url;
+      if req.tools <> [] then begin
+        let body_trunc = if String.length body > 1500 then String.sub body 0 1500 ^ "..." else body in
+        Printf.eprintf "[llm_client] openai-compat body (tools present, %d bytes): %s\n%!" (String.length body) body_trunc
+      end;
+      let headers = [("Content-Type", "application/json")] @ auth_headers in
+      let timeout_sec = Option.value timeout_sec ~default:60 in
+      match curl_post ~url ~headers ~body ~timeout_sec with
+      | Error e -> Error e
+      | Ok raw ->
+          let trunc = if String.length raw > 500 then String.sub raw 0 500 ^ "..." else raw in
+          Printf.eprintf "[llm_client] openai-compat raw (%d bytes): %s\n%!" (String.length raw) trunc;
+          parse_openai_response raw
 
 (** GLM Cloud call with pool-based load balancing.
     Uses Glm_pool.with_model to select best available model and track usage. *)
@@ -955,7 +1039,7 @@ let complete ?timeout_sec ?ollama_timeout_sec (req : completion_request) : (comp
           | Llama -> call_openai_compatible ?timeout_sec req
           | Claude -> call_claude ?timeout_sec req
           | Glm_cloud -> call_glm_cloud_with_pool ?timeout_sec req
-          | Gemini | OpenRouter | Custom _ -> call_openai_compatible ?timeout_sec req
+          | OpenAI | Gemini | OpenRouter | Custom _ -> call_openai_compatible ?timeout_sec req
         in
         (match (cache_key, upstream_result) with
         | Some key, Ok resp -> (
@@ -1046,24 +1130,26 @@ let model_spec_of_string s =
       if model_id = "" then
         Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)
       else
-        match provider with
-        | "ollama" ->
+        match Provider_adapter.resolve_direct_adapter provider with
+        | Some adapter when adapter.canonical_name = "ollama" ->
           Ok { ollama_glm with model_id }
-        | "llama" | "llama.cpp" | "llamacpp" ->
+        | Some adapter when adapter.canonical_name = "llama" ->
           Ok { llama_default with model_id }
-        | "gemini" | "google" ->
+        | Some adapter when adapter.canonical_name = "gemini-api" ->
           if model_id = "pro" then Ok gemini_pro
           else if model_id = "flash" then
             Ok { gemini_pro with model_id = "gemini-3-flash-preview" }
           else
             Ok { gemini_pro with model_id }
-        | "claude" | "anthropic" ->
+        | Some adapter when adapter.canonical_name = "claude-api" ->
           if model_id = "opus" then Ok claude_opus
           else if model_id = "sonnet" then Ok claude_sonnet
           else Ok { claude_opus with model_id }
-        | "glm" | "glm_cloud" | "zai" ->
+        | Some adapter when adapter.canonical_name = "codex-api" ->
+          Ok { openai_default with model_id }
+        | Some adapter when adapter.canonical_name = "glm" ->
           Ok { glm_cloud with model_id }
-        | "openrouter" ->
+        | Some adapter when adapter.canonical_name = "openrouter" ->
           Ok {
             provider = OpenRouter;
             model_id;
@@ -1073,6 +1159,10 @@ let model_spec_of_string s =
             cost_per_1k_input = 0.001;
             cost_per_1k_output = 0.002;
           }
+        | Some _ ->
+          Error (sprintf "Cannot parse model spec: %s (unsupported direct adapter '%s')" s provider)
+        | None ->
+          match provider with
         | "mlx" ->
           Ok {
             provider = Custom "mlx";
@@ -1105,5 +1195,5 @@ let model_spec_of_string s =
         | _ ->
           Error
             (sprintf
-               "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, llama, claude, gemini, glm, openrouter, mlx, custom)"
+              "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, llama, claude, gemini, glm, openrouter, mlx, custom)"
                s provider)

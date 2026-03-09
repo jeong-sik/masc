@@ -70,6 +70,7 @@ let model_provider_label = function
   | Llm_client.Ollama -> "ollama"
   | Llm_client.Llama -> "llama"
   | Llm_client.Claude -> "claude"
+  | Llm_client.OpenAI -> "openai"
   | Llm_client.Gemini -> "gemini"
   | Llm_client.Glm_cloud -> "glm"
   | Llm_client.OpenRouter -> "openrouter"
@@ -82,6 +83,7 @@ let validate_model_spec (spec : Llm_client.model_spec) :
     (Llm_client.model_spec, string) result =
   match spec.provider with
   | Llm_client.Claude
+  | Llm_client.OpenAI
   | Llm_client.Gemini
   | Llm_client.Ollama
   | Llm_client.Llama
@@ -90,7 +92,7 @@ let validate_model_spec (spec : Llm_client.model_spec) :
   | Llm_client.Custom _ ->
       Error
         (sprintf
-           "MDAL strict worker does not support provider `%s`. Use claude, gemini, ollama, llama, or glm."
+           "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, ollama, llama, or glm."
            (model_provider_label spec.provider))
 
 let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
@@ -111,6 +113,8 @@ let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
       else
         match normalized with
         | "claude" -> Ok (Llm_client.claude_opus, model_label Llm_client.claude_opus)
+        | "openai" | "codex-api" ->
+            Ok (Llm_client.openai_default, model_label Llm_client.openai_default)
         | "gemini" -> Ok (Llm_client.gemini_pro, model_label Llm_client.gemini_pro)
         | "ollama" -> Ok (Llm_client.ollama_glm, model_label Llm_client.ollama_glm)
         | "glm" ->

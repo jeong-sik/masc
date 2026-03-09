@@ -54,6 +54,8 @@ let test_llm_client () = group "LLM Client" (fun () ->
     "llama" (Llm_client.string_of_provider Llama);
   assert_equal "provider_string:claude"
     "claude" (Llm_client.string_of_provider Claude);
+  assert_equal "provider_string:openai"
+    "openai" (Llm_client.string_of_provider OpenAI);
   assert_equal "provider_string:gemini"
     "gemini" (Llm_client.string_of_provider Gemini);
 
@@ -108,6 +110,27 @@ let test_llm_client () = group "LLM Client" (fun () ->
      assert_true "parse_model:google_alias_provider"
        (m.provider = Llm_client.Gemini)
    | Error _ -> assert_true "parse_model:google_alias" false);
+
+  (match Llm_client.model_spec_of_string "claude-api:sonnet" with
+   | Ok m ->
+     assert_equal "parse_model:claude_api_id" "claude-sonnet-4-5-20250929" m.model_id;
+     assert_true "parse_model:claude_api_provider"
+       (m.provider = Llm_client.Claude)
+   | Error _ -> assert_true "parse_model:claude_api" false);
+
+  (match Llm_client.model_spec_of_string "gemini-api:gemini-2.5-flash" with
+   | Ok m ->
+     assert_equal "parse_model:gemini_api_id" "gemini-2.5-flash" m.model_id;
+     assert_true "parse_model:gemini_api_provider"
+       (m.provider = Llm_client.Gemini)
+   | Error _ -> assert_true "parse_model:gemini_api" false);
+
+  (match Llm_client.model_spec_of_string "codex-api:gpt-5-mini" with
+   | Ok m ->
+     assert_equal "parse_model:codex_api_id" "gpt-5-mini" m.model_id;
+     assert_true "parse_model:codex_api_provider"
+       (m.provider = Llm_client.OpenAI)
+   | Error _ -> assert_true "parse_model:codex_api" false);
 
   (* 3. Invalid model spec *)
   (match Llm_client.model_spec_of_string "invalid" with
@@ -166,6 +189,8 @@ let test_llm_client () = group "LLM Client" (fun () ->
     (Llm_client.claude_opus.cost_per_1k_input > 0.0);
   assert_true "builtin:gemini_pro_provider"
     (Llm_client.gemini_pro.provider = Llm_client.Gemini);
+  assert_true "builtin:openai_default_provider"
+    (Llm_client.openai_default.provider = Llm_client.OpenAI);
   assert_true "builtin:llama_default_provider"
     (Llm_client.llama_default.provider = Llm_client.Llama);
 )

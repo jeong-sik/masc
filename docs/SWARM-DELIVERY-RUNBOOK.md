@@ -14,6 +14,7 @@
 - canonical benchmark / swarm: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 - supervised implementation loop: [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)
 - remote operator surface: [REMOTE-MCP-OPERATOR.md](./REMOTE-MCP-OPERATOR.md)
+- provider/runtime/auth matrix: [PROVIDER-ADAPTER-RUNBOOK.md](./PROVIDER-ADAPTER-RUNBOOK.md)
 
 ## When To Use This
 

@@ -479,12 +479,18 @@ let default_configs = [
 ]
 
 let get_config agent_name = 
-  List.assoc_opt agent_name default_configs
+  let canonical =
+    match Provider_adapter.resolve_cli_canonical_name agent_name with
+    | Some value -> value
+    | None -> agent_name
+  in
+  List.assoc_opt canonical default_configs
 
 (** Build MCP flags as argument list (no shell escaping needed) *)
 let build_mcp_args agent_name tools =
   if tools = [] then []
-  else match agent_name with
+  else
+    match Provider_adapter.resolve_cli_canonical_name agent_name |> Option.value ~default:agent_name with
   | "claude" -> 
     let tools_str = String.concat "," tools in 
     ["--allowedTools"; tools_str]
@@ -493,7 +499,7 @@ let build_mcp_args agent_name tools =
   | _ -> []
 
 let build_prompt_args agent_name prompt =
-  match agent_name with
+  match Provider_adapter.resolve_cli_canonical_name agent_name |> Option.value ~default:agent_name with
   | "gemini" -> ["-p"; prompt]
   | _ -> []
 

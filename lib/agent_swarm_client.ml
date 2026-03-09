@@ -83,13 +83,14 @@ let call_rpc ~sw t ~masc_method ~arguments =
       Cohttp_eio.Client.post ~sw client ~headers
         ~body:(Cohttp_eio.Body.of_string body_str) uri
     in
-    t.session_id <-
-      (let session_id =
-         Http.Header.get (Cohttp.Response.headers resp) "mcp-session-id"
-       in
-       session_id
-       |> Option.map String.trim
-       |> (function Some value when value <> "" -> Some value | _ -> None));
+    let response_session_id =
+      Http.Header.get (Cohttp.Response.headers resp) "mcp-session-id"
+      |> Option.map String.trim
+      |> (function Some value when value <> "" -> Some value | _ -> None)
+    in
+    (match response_session_id with
+    | Some value -> t.session_id <- Some value
+    | None -> ());
     match Cohttp.Response.status resp with
     | `OK ->
       let resp_str = Eio.Buf_read.(of_flow ~max_size:(10 * 1024 * 1024) body |> take_all) in

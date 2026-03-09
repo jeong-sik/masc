@@ -859,29 +859,57 @@ let status () : Yojson.Safe.t =
       ("shared_state_keys", `Int (List.length fed_config.shared_state));
     ]
 
-(** Discover remote organizations (placeholder for async HTTP)
+(** Discover remote organizations by fetching their agent card.
 
-    In production, this would:
-    1. Fetch /.well-known/agent-card.json from endpoint
-    2. Parse organization info
-    3. Initiate handshake
-
-    For now, returns placeholder for MCP clients to handle.
+    Fetches /.well-known/agent-card.json from the endpoint via curl
+    and returns the parsed agent card or an error.
 *)
 let discover_remote ~endpoint : Yojson.Safe.t =
-  `Assoc [
-    ("type", `String "remote_discovery");
-    ("endpoint", `String endpoint);
-    ("well_known_url", `String (endpoint ^ "/.well-known/agent-card.json"));
-    ("note", `String "Use HTTP client to fetch agent card from well_known_url");
-    ("next_steps", `List [
-      `String "1. Fetch agent card from well_known_url";
-      `String "2. Parse organization info";
-      `String "3. Call create_challenge() with organization";
-      `String "4. Send challenge to remote endpoint";
-      `String "5. Verify response with verify_response()";
-    ]);
-  ]
+  let well_known = endpoint ^ "/.well-known/agent-card.json" in
+  let argv = ["curl"; "-s"; "--max-time"; "10"; "--proto"; "=https,http";
+              "-H"; "Accept: application/json"; well_known] in
+  try
+    let (status, body) = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
+    match status with
+    | Unix.WEXITED 0 when String.length body > 0 ->
+      (try
+        let card_json = Yojson.Safe.from_string body in
+        `Assoc [
+          ("success", `Bool true);
+          ("type", `String "remote_discovery");
+          ("endpoint", `String endpoint);
+          ("agent_card", card_json);
+        ]
+      with Yojson.Json_error msg ->
+        `Assoc [
+          ("success", `Bool false);
+          ("error", `String (Printf.sprintf "Invalid JSON from %s: %s" well_known msg));
+        ])
+    | Unix.WEXITED 0 ->
+      `Assoc [
+        ("success", `Bool false);
+        ("error", `String (Printf.sprintf "Empty response from %s" well_known));
+      ]
+    | Unix.WEXITED code ->
+      `Assoc [
+        ("success", `Bool false);
+        ("error", `String (Printf.sprintf "HTTP fetch failed (exit %d): %s" code well_known));
+      ]
+    | Unix.WSIGNALED sig_num ->
+      `Assoc [
+        ("success", `Bool false);
+        ("error", `String (Printf.sprintf "Fetch killed by signal %d: %s" sig_num well_known));
+      ]
+    | Unix.WSTOPPED _ ->
+      `Assoc [
+        ("success", `Bool false);
+        ("error", `String (Printf.sprintf "Fetch stopped: %s" well_known));
+      ]
+  with exn ->
+    `Assoc [
+      ("success", `Bool false);
+      ("error", `String (Printf.sprintf "Remote discovery error: %s" (Printexc.to_string exn)));
+    ]
 
 (* ============================================ *)
 (* Cross-Room Communication                     *)
@@ -890,8 +918,8 @@ let discover_remote ~endpoint : Yojson.Safe.t =
 (** List rooms in a federated organization
 
     Returns room information for the specified organization.
-    For local org, reads from disk. For remote orgs, returns
-    placeholder for HTTP client to fetch.
+    For local org, reads from disk. For remote orgs, fetches
+    from the remote endpoint via curl.
 *)
 let list_org_rooms ~org_id : Yojson.Safe.t =
   match state.fed_config with
@@ -910,7 +938,6 @@ let list_org_rooms ~org_id : Yojson.Safe.t =
         ("source", `String "local");
       ]
     else
-      (* Remote org - return placeholder for HTTP client *)
       match find_member ~org_id with
       | None ->
         `Assoc [
@@ -919,14 +946,52 @@ let list_org_rooms ~org_id : Yojson.Safe.t =
         ]
       | Some member ->
         let endpoint = Option.value member.organization.endpoint ~default:"unknown" in
-        `Assoc [
-          ("success", `Bool true);
-          ("org_id", `String org_id);
-          ("type", `String "remote_room_list");
-          ("endpoint", `String endpoint);
-          ("rooms_url", `String (endpoint ^ "/api/rooms"));
-          ("note", `String "Use HTTP client to fetch rooms from rooms_url");
-        ]
+        let rooms_url = endpoint ^ "/api/rooms" in
+        let argv = ["curl"; "-s"; "--max-time"; "10"; "--proto"; "=https,http";
+                    "-H"; "Accept: application/json"; rooms_url] in
+        (try
+          let (status, body) = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
+          match status with
+          | Unix.WEXITED 0 when String.length body > 0 ->
+            (try
+              let rooms_json = Yojson.Safe.from_string body in
+              `Assoc [
+                ("success", `Bool true);
+                ("org_id", `String org_id);
+                ("rooms", rooms_json);
+                ("source", `String "remote");
+                ("endpoint", `String endpoint);
+              ]
+            with Yojson.Json_error msg ->
+              `Assoc [
+                ("success", `Bool false);
+                ("error", `String (Printf.sprintf "Invalid JSON from %s: %s" rooms_url msg));
+              ])
+          | Unix.WEXITED 0 ->
+            `Assoc [
+              ("success", `Bool false);
+              ("error", `String (Printf.sprintf "Empty response from %s" rooms_url));
+            ]
+          | Unix.WEXITED code ->
+            `Assoc [
+              ("success", `Bool false);
+              ("error", `String (Printf.sprintf "HTTP fetch failed (exit %d): %s" code rooms_url));
+            ]
+          | Unix.WSIGNALED sig_num ->
+            `Assoc [
+              ("success", `Bool false);
+              ("error", `String (Printf.sprintf "Fetch killed by signal %d: %s" sig_num rooms_url));
+            ]
+          | Unix.WSTOPPED _ ->
+            `Assoc [
+              ("success", `Bool false);
+              ("error", `String (Printf.sprintf "Fetch stopped: %s" rooms_url));
+            ]
+        with exn ->
+          `Assoc [
+            ("success", `Bool false);
+            ("error", `String (Printf.sprintf "Remote room list error: %s" (Printexc.to_string exn)));
+          ])
 
 (** Cross-room message type *)
 type cross_room_message = {

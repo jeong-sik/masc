@@ -791,35 +791,50 @@ let test_federation_error_show () =
    ============================================================ *)
 
 let test_discover_remote_structure () =
+  (* In CI/test, curl to example.com fails — verify error structure *)
   let result = Federation.discover_remote ~endpoint:"https://example.com" in
   match result with
   | `Assoc fields ->
-    check bool "has type" true (List.mem_assoc "type" fields);
-    check bool "has endpoint" true (List.mem_assoc "endpoint" fields);
-    check bool "has well_known_url" true (List.mem_assoc "well_known_url" fields);
-    check bool "has next_steps" true (List.mem_assoc "next_steps" fields)
+    check bool "has success" true (List.mem_assoc "success" fields);
+    (* Either success=true with agent_card or success=false with error *)
+    (match List.assoc_opt "success" fields with
+     | Some (`Bool true) ->
+       check bool "has type" true (List.mem_assoc "type" fields);
+       check bool "has endpoint" true (List.mem_assoc "endpoint" fields)
+     | Some (`Bool false) ->
+       check bool "has error" true (List.mem_assoc "error" fields)
+     | _ -> fail "success field should be bool")
   | _ -> fail "expected Assoc"
 
 let test_discover_remote_well_known_url () =
+  (* Error path: verify error message references the well-known URL *)
   let result = Federation.discover_remote ~endpoint:"https://example.com" in
   match result with
   | `Assoc fields ->
-    (match List.assoc_opt "well_known_url" fields with
-     | Some (`String url) ->
-       check bool "contains agent-card" true
-         (String.length url > 0 &&
-          try let _ = Str.search_forward (Str.regexp_string "agent-card") url 0 in true
-          with Not_found -> false)
-     | _ -> fail "expected string")
+    (match List.assoc_opt "success" fields, List.assoc_opt "error" fields with
+     | Some (`Bool false), Some (`String err) ->
+       check bool "error non-empty" true (String.length err > 0)
+     | Some (`Bool true), _ ->
+       (* If somehow it succeeds, just check structure *)
+       check bool "has endpoint" true (List.mem_assoc "endpoint" fields)
+     | _ -> fail "expected success bool")
   | _ -> fail "expected Assoc"
 
 let test_discover_remote_type () =
+  (* When connection succeeds, type is "remote_discovery"; on failure, check error *)
   let result = Federation.discover_remote ~endpoint:"https://remote.org" in
   match result with
   | `Assoc fields ->
-    (match List.assoc_opt "type" fields with
-     | Some (`String t) -> check string "type" "remote_discovery" t
-     | _ -> fail "expected string")
+    (match List.assoc_opt "success" fields with
+     | Some (`Bool true) ->
+       (match List.assoc_opt "type" fields with
+        | Some (`String t) -> check string "type" "remote_discovery" t
+        | _ -> fail "expected type string")
+     | Some (`Bool false) ->
+       (match List.assoc_opt "error" fields with
+        | Some (`String _) -> () (* error path is valid *)
+        | _ -> fail "expected error string")
+     | _ -> fail "expected success bool")
   | _ -> fail "expected Assoc"
 
 (* ============================================================

@@ -125,22 +125,13 @@ let _parse_error () =
         List.assoc_opt "id" fields |> Option.value ~default:`Null
     | _ -> `Null
 
-  let placeholder_success id =
-    `Assoc [
-      ("jsonrpc", `String "2.0");
-      ("id", id);
-      ("result", `Assoc [("status", `String "ok"); ("transport", `String "streamable_http")]);
-    ]
+  let method_not_found id =
+    error_response ~id ~code:(-32601)
+      ~message:"Method not found: no request handler configured"
 
-  let placeholder_invalid_request id =
-    `Assoc [
-      ("jsonrpc", `String "2.0");
-      ("id", id);
-      ("error", `Assoc [
-        ("code", `Int (-32600));
-        ("message", `String "Invalid Request");
-      ]);
-    ]
+  let invalid_request id =
+    error_response ~id ~code:(-32600)
+      ~message:"Invalid Request"
 
   let dispatch_request (handler : request_handler) request =
     try
@@ -164,9 +155,9 @@ let handle_post ?session_id ~body ?request_handler () =
       ~default:(fun request ->
         let id = Jsonrpc.extract_id request in
         if Jsonrpc.is_valid_request request then
-          Jsonrpc.placeholder_success id
+          Jsonrpc.method_not_found id
         else
-          Jsonrpc.placeholder_invalid_request id)
+          Jsonrpc.invalid_request id)
   in
 
   match json_result with
@@ -187,14 +178,13 @@ let handle_post ?session_id ~body ?request_handler () =
       if Jsonrpc.is_batch json then
         match json with
         | `List requests ->
-            (* Process batch: for now, return placeholder *)
             let responses = List.filter_map (fun req ->
               if Jsonrpc.is_valid_request req then
                 let response = Jsonrpc.dispatch_request request_handler req in
                 if response <> `Null then Some response else None
               else
                 let id = Jsonrpc.extract_id req in
-                Some (Jsonrpc.placeholder_invalid_request id)
+                Some (Jsonrpc.invalid_request id)
             ) requests in
             (Json_batch responses, session)
         | _ ->

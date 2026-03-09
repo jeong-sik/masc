@@ -643,48 +643,144 @@ export function Overview() {
       </div>
     <//>
 
-    <div class="grid-2col">
-      <${Card} title="Intervention Queue" class="section">
-        <div class="monitor-section-head">
-          <h2 class="monitor-headline">What needs intervention right now</h2>
-          <p class="monitor-subheadline">Room-level risks, stalled work, and keeper/agent drift are sorted into one operator-facing queue.</p>
-        </div>
-        <div class="monitor-alert-list">
-          ${interventionQueue.length === 0
-            ? html`<div class="empty-state">No immediate intervention required</div>`
-            : interventionQueue.map(item => html`<${AlertRow} key=${item.key} item=${item} />`)}
-        </div>
-      <//>
+    <div class="overview-workbench">
+      <div class="overview-column">
+        <${Card} title="Intervention Queue" class="section">
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">What needs intervention right now</h2>
+            <p class="monitor-subheadline">Room-level risks, stalled work, and keeper/agent drift are sorted into one operator-facing queue.</p>
+          </div>
+          <div class="monitor-alert-list">
+            ${interventionQueue.length === 0
+              ? html`<div class="empty-state">No immediate intervention required</div>`
+              : interventionQueue.map(item => html`<${AlertRow} key=${item.key} item=${item} />`)}
+          </div>
+        <//>
+      </div>
 
-      <${Card} title="Dispatch Window" class="section">
-        <div class="monitor-section-head">
-          <h2 class="monitor-headline">Who can pick up work next</h2>
-          <p class="monitor-subheadline">Fresh capacity stays visible here so dispatch does not require opening the full Agents tab.</p>
-        </div>
-        <div class="monitor-list">
-          ${dispatchableAgents.length === 0
-            ? html`<div class="empty-state">No fully dispatchable agents right now</div>`
-            : dispatchableAgents.slice(0, 5).map(row => html`
-                <${WatchRow}
-                  key=${row.agent.name}
-                  tone=${row.tone}
-                  title=${row.agent.name}
-                  subtitle=${row.note}
-                  meta=${[
-                    row.lastSignalAt ? `Signal ${new Date(row.lastSignalAt).toLocaleTimeString()}` : 'No recent signal',
-                    row.agent.model ?? 'model n/a',
-                    row.agent.koreanName ?? 'room agent',
-                  ]}
-                  focus=${row.focus}
-                  onClick=${() => openAgentDetail(row.agent.name)}
-                />
-              `)}
-        </div>
-      <//>
+      <div class="overview-column">
+        <${Card} title="Dispatch Window" class="section">
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">Who can pick up work next</h2>
+            <p class="monitor-subheadline">Fresh capacity stays visible here so dispatch does not require opening the full Agents tab.</p>
+          </div>
+          <div class="monitor-list">
+            ${dispatchableAgents.length === 0
+              ? html`<div class="empty-state">No fully dispatchable agents right now</div>`
+              : dispatchableAgents.slice(0, 5).map(row => html`
+                  <${WatchRow}
+                    key=${row.agent.name}
+                    tone=${row.tone}
+                    title=${row.agent.name}
+                    subtitle=${row.note}
+                    meta=${[
+                      row.lastSignalAt ? `Signal ${new Date(row.lastSignalAt).toLocaleTimeString()}` : 'No recent signal',
+                      row.agent.model ?? 'model n/a',
+                      row.agent.koreanName ?? 'room agent',
+                    ]}
+                    focus=${row.focus}
+                    onClick=${() => openAgentDetail(row.agent.name)}
+                  />
+                `)}
+          </div>
+        <//>
+
+        <${Card} title="Agent Watch" class="section">
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">Agents with drift or aging load</h2>
+            <p class="monitor-subheadline">This is the short list. Use the Agents tab when you need the full live monitor.</p>
+          </div>
+          <div class="monitor-list">
+            ${agentDrift.length === 0
+              ? html`<div class="empty-state">No agent drift or stale load right now</div>`
+              : agentDrift.slice(0, 4).map(row => html`
+                  <button class="monitor-row ${row.tone}" onClick=${() => openAgentDetail(row.agent.name)}>
+                    <div class="monitor-row-header">
+                      <div class="monitor-row-title">
+                        <div class="monitor-name-line">
+                          <span class="monitor-title">${row.agent.name}</span>
+                          ${row.agent.koreanName ? html`<span class="monitor-sub">${row.agent.koreanName}</span>` : null}
+                        </div>
+                        <div class="monitor-note">${row.note}</div>
+                      </div>
+                      <${StatusBadge} status=${row.agent.status} />
+                      <span class="monitor-pill ${row.tone}">${row.dispatchable ? 'Ready' : row.drift ? 'Drift' : 'Watch'}</span>
+                    </div>
+                    <div class="monitor-meta">
+                      ${row.lastSignalAt ? html`<span>Signal <${TimeAgo} timestamp=${row.lastSignalAt} /></span>` : html`<span>No recent signal</span>`}
+                      <span>${row.activeTaskCount > 0 ? `${row.activeTaskCount} active tasks` : 'No active tasks'}</span>
+                      ${row.agent.model ? html`<span>${row.agent.model}</span>` : null}
+                    </div>
+                    <div class="monitor-focus">${row.focus}</div>
+                  </button>
+                `)}
+          </div>
+        <//>
+      </div>
+
+      <div class="overview-column">
+        <${Card} title="Keeper Pressure" class="section">
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">Long-running keepers under pressure</h2>
+            <p class="monitor-subheadline">Only keepers with real pressure stay in the Overview. The full keeper census still lives in the Agents tab.</p>
+          </div>
+          <div class="monitor-list">
+            ${keeperAlerts.length === 0
+              ? html`<div class="empty-state">No keeper pressure signals right now</div>`
+              : keeperAlerts.slice(0, 4).map(row => html`
+                  <${WatchRow}
+                    key=${row.keeper.name}
+                    tone=${row.tone}
+                    title=${row.keeper.name}
+                    subtitle=${row.keeper.diagnostic?.health_state
+                      ? `${row.note} · ${row.keeper.diagnostic.health_state}`
+                      : row.note}
+                    meta=${[
+                      row.timestamp ? `Heartbeat ${new Date(row.timestamp).toLocaleTimeString()}` : 'No heartbeat',
+                      `Context ${typeof row.keeper.context_ratio === 'number' ? Math.round(row.keeper.context_ratio * 100) : 0}%`,
+                      row.keeper.model ? `Model ${row.keeper.model}` : 'model n/a',
+                      row.keeper.diagnostic
+                        ? `${quietReasonLabel(row.keeper.diagnostic.quiet_reason)} · next ${nextActionLabel(row.keeper.diagnostic.next_action_path)} · reply ${row.keeper.diagnostic.last_reply_status}`
+                        : 'Diagnostic unavailable',
+                    ]}
+                    focus=${row.focus}
+                    onClick=${() => openKeeperDetail(row.keeper)}
+                  />
+                `)}
+          </div>
+        <//>
+
+        <${Card} title="Runtime Notes" class="section">
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">Secondary runtime context</h2>
+            <p class="monitor-subheadline">This column stays compact so operators can scan triage first and drill later.</p>
+          </div>
+          <div class="overview-note-stack">
+            <div class="overview-inline-note">
+              Room ${status?.room ?? 'default'}${status?.cluster ? ` · Cluster ${status.cluster}` : ''}${status?.project ? ` · Project ${status.project}` : ''}
+            </div>
+            <div class="overview-inline-note">
+              ${status?.version ? `Version ${status.version}` : 'Version unavailable'} · Active agents ${activeAgents.value.length} · Total tasks ${taskList.length}
+            </div>
+            <div class="overview-inline-note">
+              ${perpetualStatus.value
+                ? `Perpetual runtime ${perpetualStatus.value.running ? 'running' : 'stopped'}${perpetualStatus.value.goal ? ` · ${limitText(perpetualStatus.value.goal, 120)}` : ''}`
+                : 'Perpetual runtime unavailable'}
+            </div>
+            <div class="overview-inline-note">
+              Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}${status?.lodge?.last_skip_reason ? ` · Skip ${status.lodge.last_skip_reason}` : ''}
+            </div>
+            <div class="overview-inline-note">
+              ${keeperList.length > 0
+                ? `Hot keepers: ${keeperAlerts.length} · Highest context ${formatTokens(Math.max(...keeperList.map(keeper => keeper.context_tokens ?? 0)))}`
+                : 'No keepers registered'}
+            </div>
+          </div>
+        <//>
+      </div>
     </div>
 
-    <div class="grid-2col">
-      <${Card} title="Execution Pulse" class="section">
+    <${Card} title="Execution Pulse" class="section">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">Priority work and ownership drift</h2>
           <p class="monitor-subheadline">Urgent ready tasks and active execution issues stay visible without duplicating the full Execution surface.</p>
@@ -708,100 +804,6 @@ export function Overview() {
                 />
               `)}
         </div>
-      <//>
-
-      <${Card} title="Keeper Pressure" class="section">
-        <div class="monitor-section-head">
-          <h2 class="monitor-headline">Long-running keepers under pressure</h2>
-          <p class="monitor-subheadline">Only keepers with real pressure stay in the Overview. The full keeper census still lives in the Agents tab.</p>
-        </div>
-        <div class="monitor-list">
-          ${keeperAlerts.length === 0
-            ? html`<div class="empty-state">No keeper pressure signals right now</div>`
-            : keeperAlerts.slice(0, 5).map(row => html`
-                <${WatchRow}
-                  key=${row.keeper.name}
-                  tone=${row.tone}
-                  title=${row.keeper.name}
-                  subtitle=${row.keeper.diagnostic?.health_state
-                    ? `${row.note} · ${row.keeper.diagnostic.health_state}`
-                    : row.note}
-                  meta=${[
-                    row.timestamp ? `Heartbeat ${new Date(row.timestamp).toLocaleTimeString()}` : 'No heartbeat',
-                    `Context ${typeof row.keeper.context_ratio === 'number' ? Math.round(row.keeper.context_ratio * 100) : 0}%`,
-                    row.keeper.model ? `Model ${row.keeper.model}` : 'model n/a',
-                    row.keeper.diagnostic
-                      ? `${quietReasonLabel(row.keeper.diagnostic.quiet_reason)} · next ${nextActionLabel(row.keeper.diagnostic.next_action_path)} · reply ${row.keeper.diagnostic.last_reply_status}`
-                      : 'Diagnostic unavailable',
-                  ]}
-                  focus=${row.focus}
-                  onClick=${() => openKeeperDetail(row.keeper)}
-                />
-              `)}
-        </div>
-      <//>
-    </div>
-
-    <div class="grid-2col">
-      <${Card} title="Agent Watch" class="section">
-        <div class="monitor-section-head">
-          <h2 class="monitor-headline">Agents with drift or aging load</h2>
-          <p class="monitor-subheadline">This is the short list. Use the Agents tab when you need the full live monitor.</p>
-        </div>
-        <div class="monitor-list">
-          ${agentDrift.length === 0
-            ? html`<div class="empty-state">No agent drift or stale load right now</div>`
-            : agentDrift.slice(0, 5).map(row => html`
-                <button class="monitor-row ${row.tone}" onClick=${() => openAgentDetail(row.agent.name)}>
-                  <div class="monitor-row-header">
-                    <div class="monitor-row-title">
-                      <div class="monitor-name-line">
-                        <span class="monitor-title">${row.agent.name}</span>
-                        ${row.agent.koreanName ? html`<span class="monitor-sub">${row.agent.koreanName}</span>` : null}
-                      </div>
-                      <div class="monitor-note">${row.note}</div>
-                    </div>
-                    <${StatusBadge} status=${row.agent.status} />
-                    <span class="monitor-pill ${row.tone}">${row.dispatchable ? 'Ready' : row.drift ? 'Drift' : 'Watch'}</span>
-                  </div>
-                  <div class="monitor-meta">
-                    ${row.lastSignalAt ? html`<span>Signal <${TimeAgo} timestamp=${row.lastSignalAt} /></span>` : html`<span>No recent signal</span>`}
-                    <span>${row.activeTaskCount > 0 ? `${row.activeTaskCount} active tasks` : 'No active tasks'}</span>
-                    ${row.agent.model ? html`<span>${row.agent.model}</span>` : null}
-                  </div>
-                  <div class="monitor-focus">${row.focus}</div>
-                </button>
-              `)}
-        </div>
-      <//>
-
-      <${Card} title="Runtime Notes" class="section">
-        <div class="monitor-section-head">
-          <h2 class="monitor-headline">Secondary runtime context</h2>
-          <p class="monitor-subheadline">This stays below the triage queue so operators can scan first and drill later.</p>
-        </div>
-        <div class="overview-note-stack">
-          <div class="overview-inline-note">
-            Room ${status?.room ?? 'default'}${status?.cluster ? ` · Cluster ${status.cluster}` : ''}${status?.project ? ` · Project ${status.project}` : ''}
-          </div>
-          <div class="overview-inline-note">
-            ${status?.version ? `Version ${status.version}` : 'Version unavailable'} · Active agents ${activeAgents.value.length} · Total tasks ${taskList.length}
-          </div>
-          <div class="overview-inline-note">
-            ${perpetualStatus.value
-              ? `Perpetual runtime ${perpetualStatus.value.running ? 'running' : 'stopped'}${perpetualStatus.value.goal ? ` · ${limitText(perpetualStatus.value.goal, 120)}` : ''}`
-              : 'Perpetual runtime unavailable'}
-          </div>
-          <div class="overview-inline-note">
-            Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}${status?.lodge?.last_skip_reason ? ` · Skip ${status.lodge.last_skip_reason}` : ''}
-          </div>
-          <div class="overview-inline-note">
-            ${keeperList.length > 0
-              ? `Hot keepers: ${keeperAlerts.length} · Highest context ${formatTokens(Math.max(...keeperList.map(keeper => keeper.context_tokens ?? 0)))}`
-              : 'No keepers registered'}
-          </div>
-        </div>
-      <//>
-    </div>`}
+    <//>`}
   `
 }

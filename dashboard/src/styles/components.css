@@ -1880,6 +1880,20 @@ button.monitor-row.bad {
   gap: 8px;
 }
 
+.overview-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.96fr) minmax(0, 0.96fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.overview-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
 .overview-inline-note {
   border: 1px solid rgba(138, 163, 211, 0.14);
   border-radius: 10px;
@@ -1916,6 +1930,10 @@ button.monitor-row.bad {
 }
 
 @media (max-width: 960px) {
+  .overview-workbench {
+    grid-template-columns: 1fr;
+  }
+
   .monitor-row-header {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -4797,4 +4815,16 @@ button.monitor-row.bad.state-quiet {
   margin-left: 6px;
   color: var(--text-muted);
   font-weight: 400;
+}
+
+.agents-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.96fr) minmax(0, 0.88fr);
+  gap: 16px;
+}
+
+@media (max-width: 1100px) {
+  .agents-workbench {
+    grid-template-columns: 1fr;
+  }
 }

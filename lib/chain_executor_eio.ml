@@ -1228,9 +1228,10 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     last_output = ref "";
   }) strategies;
 
-  (* Selection phase: traverse tree using UCB1/policy to find node to expand *)
-  let rec select (node : mcts_tree_node) : mcts_tree_node =
-    if node.children = [] || node.depth >= max_depth then node
+  (* Selection phase: traverse tree using UCB1/policy to find node to expand.
+     Returns (Ok node) on success, (Error msg) if tree is in an invalid state. *)
+  let rec select (node : mcts_tree_node) : (mcts_tree_node, string) result =
+    if node.children = [] || node.depth >= max_depth then Ok node
     else
       let parent_visits = max 1 node.visits in
       let selected = match policy with
@@ -1240,7 +1241,9 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
               (child, ucb1_value ~c:exploration_c parent_visits child)
             ) node.children in
             let sorted = List.sort (fun (_, s1) (_, s2) -> Float.compare s2 s1) with_scores in
-            (match sorted with (best, _) :: _ -> best | [] -> node)
+            (match sorted with
+             | (best, _) :: _ -> Ok best
+             | [] -> Error "MCTS select: leaf node has no children to expand (UCB1)")
         | Greedy ->
             (* Pure exploitation: pick highest average score *)
             let with_avg = List.map (fun child ->
@@ -1248,7 +1251,9 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
               (child, avg)
             ) node.children in
             let sorted = List.sort (fun (_, s1) (_, s2) -> Float.compare s2 s1) with_avg in
-            (match sorted with (best, _) :: _ -> best | [] -> node)
+            (match sorted with
+             | (best, _) :: _ -> Ok best
+             | [] -> Error "MCTS select: leaf node has no children to expand (Greedy)")
         | Softmax temp ->
             (* Softmax selection with temperature *)
             let scores = List.map (fun child ->
@@ -1261,18 +1266,23 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
             (* Sample from distribution - using fiber-safe RNG *)
             let r = Random.State.float executor_rng 1.0 in
             let rec sample acc = function
-              | [] -> (match list_hd_opt node.children with Some c -> c | None -> failwith "MCTS: no children to sample")
+              | [] ->
+                  (match list_hd_opt node.children with
+                   | Some c -> Ok c
+                   | None -> Error "MCTS select: empty candidate group (Softmax sampling exhausted)")
               | (child, prob) :: rest ->
                   let acc' = acc +. prob in
-                  if r < acc' then child else sample acc' rest
+                  if r < acc' then Ok child else sample acc' rest
             in
             sample 0.0 (List.combine node.children probs)
       in
-      select selected
+      match selected with
+      | Error _ as e -> e
+      | Ok s -> select s
   in
 
   (* Expansion phase: add new child nodes if visits exceed threshold *)
-  let expand (node : mcts_tree_node) : mcts_tree_node =
+  let expand (node : mcts_tree_node) : (mcts_tree_node, string) result =
     if node.visits >= expansion_threshold && node.depth < max_depth && node.children = [] then begin
       (* Create children by re-using all strategies (exploring different paths) *)
       node.children <- List.mapi (fun i _ -> {
@@ -1286,18 +1296,21 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       }) strategies;
       (* Return first unvisited child *)
       match node.children with
-      | first :: _ -> first
-      | [] -> node
+      | first :: _ -> Ok first
+      | [] -> Error "MCTS expand: empty candidate group (no strategies to expand)"
     end
-    else node
+    else Ok node
   in
 
   (* Simulation phase: execute strategy and simulation in clean context *)
   let simulate (node : mcts_tree_node) : float =
-    let strategy_node = match list_nth_opt strategies node.strategy_idx with
-      | Some n -> n
-      | None -> failwith (Printf.sprintf "MCTS: invalid strategy index %d" node.strategy_idx)
-    in
+    match list_nth_opt strategies node.strategy_idx with
+    | None ->
+        (* Invalid strategy index — treat as failed strategy *)
+        Eio.traceln "[MCTS] invalid strategy index %d (strategies=%d)"
+          node.strategy_idx (List.length strategies);
+        0.0
+    | Some strategy_node ->
     (* Execute strategy in current context first *)
     let strategy_result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec strategy_node in
     match strategy_result with
@@ -1397,10 +1410,17 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 
       Eio.Fiber.all (List.init parallel_sims (fun _ ->
         fun () ->
-          let selected = select root in
+          match select root with
+          | Error msg ->
+              Eio.traceln "[MCTS] select failed: %s" msg
+          | Ok selected ->
           (* Protect expand with tree_mutex to prevent race on node.children *)
-          let expanded = Eio.Mutex.use_rw tree_mutex ~protect:true (fun () ->
+          let expand_result = Eio.Mutex.use_rw tree_mutex ~protect:true (fun () ->
             expand selected) in
+          match expand_result with
+          | Error msg ->
+              Eio.traceln "[MCTS] expand failed: %s" msg
+          | Ok expanded ->
           let score = simulate expanded in
           Eio.Mutex.use_rw results_mutex ~protect:true (fun () ->
             sim_results := (expanded, score) :: !sim_results;
@@ -1942,7 +1962,9 @@ and execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~condition ~
 and execute_parallel_group ctx ~sw ~clock ~exec_fn ~tool_exec (group : string list) (node_map : (string, node) Hashtbl.t) : (string, string) result =
   if List.length group = 1 then
     (* Single node - execute directly *)
-    let node_id = match list_hd_opt group with Some id -> id | None -> failwith "Empty group" in
+    match list_hd_opt group with
+    | None -> Error "empty execution group: received single-element group with no elements"
+    | Some node_id ->
     match Hashtbl.find_opt node_map node_id with
     | Some node -> execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
     | None -> Error (Printf.sprintf "Node '%s' not found in subgraph" node_id)

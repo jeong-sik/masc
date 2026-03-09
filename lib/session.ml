@@ -321,7 +321,7 @@ let wait_for_message registry ~agent_name ~timeout =
       | Some msg ->
           Some msg
       | None ->
-          Eio.Time.sleep (Process_eio.get_clock ()) check_interval;
+          (match Process_eio.get_clock () with Ok clk -> Eio.Time.sleep clk check_interval | Error _ -> ());
           wait_loop ()
     end
   in

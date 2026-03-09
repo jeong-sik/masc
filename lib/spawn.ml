@@ -136,6 +136,106 @@ let parse_claude_json output =
     (* If JSON parsing fails, return raw output with no token info *)
     (Some output, None, None, None, None, None)
 
+(** Extract Gemini CLI response text from JSON output. *)
+let extract_gemini_response_text output =
+  try
+    let json = Yojson.Safe.from_string output in
+    let module U = Yojson.Safe.Util in
+    json |> U.member "response" |> U.to_string_option
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+    None
+
+(** Parse Gemini output for token tracking.
+    Supports both Gemini API usageMetadata and Gemini CLI JSON stats. *)
+let parse_gemini_output output =
+  try
+    let json = Yojson.Safe.from_string output in
+    let module U = Yojson.Safe.Util in
+    let usage_opt =
+      match json |> U.member "usageMetadata" with
+      | `Assoc _ as usage -> Some usage
+      | _ -> None
+    in
+    let stats_models_opt =
+      match json |> U.member "stats" with
+      | `Assoc _ as stats ->
+          (match stats |> U.member "models" with
+           | `Assoc entries -> Some entries
+           | _ -> None)
+      | _ -> None
+    in
+    let input_tokens =
+      match Option.bind usage_opt (fun usage -> usage |> U.member "promptTokenCount" |> U.to_int_option) with
+      | Some _ as value -> value
+      | None ->
+          (match stats_models_opt with
+           | None -> None
+           | Some entries ->
+               let sum_field field =
+                 entries
+                 |> List.fold_left (fun acc (_name, item) ->
+                        acc
+                        + (item |> U.member "tokens" |> U.member field |> U.to_int_option
+                          |> Option.value ~default:0))
+                      0
+               in
+               let input = sum_field "input" in
+               let prompt = sum_field "prompt" in
+               let chosen = if input > 0 then input else prompt in
+               if chosen > 0 then Some chosen else None)
+    in
+    let output_tokens =
+      match Option.bind usage_opt (fun usage -> usage |> U.member "candidatesTokenCount" |> U.to_int_option) with
+      | Some _ as value -> value
+      | None ->
+          (match stats_models_opt with
+           | None -> None
+           | Some entries ->
+               let total =
+                 entries
+                 |> List.fold_left (fun acc (_name, item) ->
+                        acc
+                        + (item |> U.member "tokens" |> U.member "candidates" |> U.to_int_option
+                          |> Option.value ~default:0))
+                      0
+               in
+               if total > 0 then Some total else None)
+    in
+    let cached_tokens =
+      match Option.bind usage_opt (fun usage -> usage |> U.member "cachedContentTokenCount" |> U.to_int_option) with
+      | Some _ as value -> value
+      | None ->
+          (match stats_models_opt with
+           | None -> None
+           | Some entries ->
+               let total =
+                 entries
+                 |> List.fold_left (fun acc (_name, item) ->
+                        acc
+                        + (item |> U.member "tokens" |> U.member "cached" |> U.to_int_option
+                          |> Option.value ~default:0))
+                      0
+               in
+               if total > 0 then Some total else None)
+    in
+    let cost =
+      match input_tokens, output_tokens, cached_tokens with
+      | Some inp, Some out, Some cached ->
+          let uncached = inp - cached in
+          Some
+            (float_of_int uncached *. 0.00015 /. 1000.0
+           +. float_of_int cached *. 0.000015 /. 1000.0
+           +. float_of_int out *. 0.0006 /. 1000.0)
+      | Some inp, Some out, None ->
+          Some
+            (float_of_int inp *. 0.00015 /. 1000.0
+           +. float_of_int out *. 0.0006 /. 1000.0)
+      | _ -> None
+    in
+    (input_tokens, output_tokens, cached_tokens, cost)
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+    (None, None, None, None)
+
 (** Default spawn configs for known agents *)
 let default_configs = [
   ("claude", {
@@ -147,7 +247,7 @@ let default_configs = [
   });
   ("gemini", {
     agent_name = "gemini";
-    command = "gemini --yolo";  (* Auto-approve tools for non-interactive *)
+    command = "gemini --yolo --output-format json";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;  (* Gemini: --allowed-mcp-server-names flag *)
@@ -191,6 +291,11 @@ let build_mcp_args agent_name tools =
     []
   | _ -> []
 
+let build_prompt_args agent_name prompt =
+  match agent_name with
+  | "gemini" -> ["-p"; prompt]
+  | _ -> []
+
 (** Parse command string into executable and arguments *)
 let parse_command cmd =
   let parts = String.split_on_char ' ' cmd in
@@ -216,10 +321,11 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let mcp_args = build_mcp_args agent_name config.mcp_tools in
   (* Auto-append MASC lifecycle protocol to prompt *)
   let augmented_prompt = prompt ^ masc_lifecycle_suffix in
+  let prompt_args = build_prompt_args agent_name augmented_prompt in
 
   (* Build command args - direct execution without shell *)
   let base_args = parse_command config.command in
-  let cmd_args = ["timeout"; string_of_int timeout] @ base_args @ mcp_args in
+  let cmd_args = ["timeout"; string_of_int timeout] @ base_args @ mcp_args @ prompt_args in
   let cmd_array = Array.of_list cmd_args in
 
   (* Change to working dir if specified *)
@@ -245,8 +351,9 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     Unix.close stdout_write;
     Unix.close stdin_read;
     
-    (* Write prompt to stdin and close *)
-    let _ = Unix.write_substring stdin_write augmented_prompt 0 (String.length augmented_prompt) in
+    (* Gemini CLI expects prompt via -p; other CLIs still read stdin. *)
+    let stdin_content = if agent_name = "gemini" then "" else augmented_prompt in
+    let _ = Unix.write_substring stdin_write stdin_content 0 (String.length stdin_content) in
     Unix.close stdin_write;
     
     (* Read output *)
@@ -272,6 +379,10 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
       if agent_name = "claude" then
         let (result_opt, inp, out, cache_c, cache_r, cost) = parse_claude_json raw_output in
         (Option.value result_opt ~default:raw_output, inp, out, cache_c, cache_r, cost)
+      else if agent_name = "gemini" then
+        let inp, out, cached, cost = parse_gemini_output raw_output in
+        let result_text = Option.value (extract_gemini_response_text raw_output) ~default:raw_output in
+        (result_text, inp, out, None, cached, cost)
       else
         (raw_output, None, None, None, None, None)
     in

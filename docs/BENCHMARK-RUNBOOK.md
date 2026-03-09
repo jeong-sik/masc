@@ -60,6 +60,12 @@ LLAMA_PRESET=qwen35-hot ~/me/scripts/llama-server.sh restart
 scripts/harness_agent_swarm_live.sh
 ```
 
+전제:
+
+- `qwen35-hot`는 `ctx=262144`를 유지한다.
+- `hot-swarm` track은 ctx 축소 fallback을 허용하지 않는다.
+- `provider smoke + slot contract + live harness`가 모두 지나야 성공으로 본다.
+
 이 harness는:
 
 - worker 12명 이상이 실제로 join/claim/current_task/heartbeat/done/final marker를 남기는지 확인한다
@@ -75,6 +81,9 @@ scripts/harness_agent_swarm_live.sh
 - fresh heartbeats = expected workers
 - completed workers = expected workers
 - final markers seen = expected workers
+- provider reachable = true
+- actual slots >= expected slots
+- actual ctx = expected ctx = 262144
 
 주의:
 
@@ -82,6 +91,7 @@ scripts/harness_agent_swarm_live.sh
 - `masc_dispatch_tick`을 안 돌리면 detachment가 생기지 않는다.
 - `hot 10+`는 orchestration proof와 별개다. `llama.cpp /slots` 샘플이 없으면 pass로 보지 않는다.
 - worker가 완료 후 leave해도 completed task ownership과 final marker가 있으면 swarm read model은 복원 가능해야 한다.
+- 실패 시 `provider_unreachable`, `provider_model_mismatch`, `slot_count_insufficient`, `ctx_mismatch` 같은 runtime blocker를 artifact와 dashboard에서 바로 읽을 수 있어야 한다.
 
 ## planner -> workers fleet mode
 

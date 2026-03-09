@@ -60,3 +60,7 @@ viewer/dist-build/
 .env
 .env.*
 !.env.example
+
+# Infrastructure secrets (launchd plist contains env vars with tokens)
+infrastructure/launchd/*.plist
+infrastructure/**/*.env

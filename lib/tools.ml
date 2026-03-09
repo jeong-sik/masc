@@ -3647,6 +3647,38 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
     ];
   };
 
+  {
+    name = "masc_room_strategy_get";
+    description = "Read the current room-level search and speculation defaults. Use this before changing routing behavior so you know whether best_first_v1 or speculation is already enabled for the room.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
+    name = "masc_room_strategy_set";
+    description = "Update room-level search and speculation defaults. Use this to set the default command-plane search strategy and to enable or disable speculative routing for the current room.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("search_strategy_default", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "legacy"; `String "best_first_v1"]);
+          ("description", `String "Optional room default for command-plane search strategy.");
+        ]);
+        ("speculation_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable or disable room-level speculative routing.");
+        ]);
+        ("speculation_budget", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Optional max number of candidates to speculate over when speculation is enabled.");
+        ]);
+      ]);
+    ];
+  };
+
   (* ============================================ *)
   (* Audit & Governance Tools (Trust Building)   *)
   (* ============================================ *)

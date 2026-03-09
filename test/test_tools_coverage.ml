@@ -338,6 +338,25 @@ let test_masc_operator_confirm_schema () =
             (List.mem (`String "confirm_token") reqs)
       | None -> Alcotest.fail "masc_operator_confirm missing required field"
 
+let test_masc_room_strategy_get_schema () =
+  match find_tool "masc_room_strategy_get" with
+  | None -> Alcotest.fail "masc_room_strategy_get not found"
+  | Some _ -> ()
+
+let test_masc_room_strategy_set_schema () =
+  match find_tool "masc_room_strategy_set" with
+  | None -> Alcotest.fail "masc_room_strategy_set not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has search_strategy_default" true
+            (List.mem_assoc "search_strategy_default" props);
+          Alcotest.(check bool) "has speculation_enabled" true
+            (List.mem_assoc "speculation_enabled" props);
+          Alcotest.(check bool) "has speculation_budget" true
+            (List.mem_assoc "speculation_budget" props)
+      | None -> Alcotest.fail "masc_room_strategy_set missing properties"
+
 
 
 
@@ -927,6 +946,8 @@ let () =
       Alcotest.test_case "remote_operator_action_strict" `Quick
         test_remote_operator_action_schema_is_strict;
       Alcotest.test_case "masc_operator_confirm" `Quick test_masc_operator_confirm_schema;
+      Alcotest.test_case "masc_room_strategy_get" `Quick test_masc_room_strategy_get_schema;
+      Alcotest.test_case "masc_room_strategy_set" `Quick test_masc_room_strategy_set_schema;
     ];
     "portal_tools", [
       Alcotest.test_case "portal_open" `Quick test_masc_portal_open_schema;

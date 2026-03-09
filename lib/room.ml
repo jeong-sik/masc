@@ -32,6 +32,9 @@ let read_state config =
       pause_reason = None;
       paused_by = None;
       paused_at = None;
+      search_strategy_default = None;
+      speculation_enabled = false;
+      speculation_budget = None;
     }
 
 (** Write room state — persists to both filesystem and PostgreSQL *)
@@ -239,6 +242,9 @@ let rec init config ~agent_name =
       pause_reason = None;
       paused_by = None;
       paused_at = None;
+      search_strategy_default = None;
+      speculation_enabled = false;
+      speculation_budget = None;
     } in
     write_json_root config (root_state_path config) (room_state_to_yojson root_state)
   end;
@@ -268,6 +274,9 @@ let rec init config ~agent_name =
       pause_reason = None;
       paused_by = None;
       paused_at = None;
+      search_strategy_default = None;
+      speculation_enabled = false;
+      speculation_budget = None;
     } in
     write_state config state;
 

@@ -133,7 +133,7 @@ let test_dispatch_plan_clear_task () =
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_plan.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================

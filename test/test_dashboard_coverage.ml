@@ -106,17 +106,17 @@ let test_parse_iso_timestamp_another () =
 
 let test_parse_iso_timestamp_invalid () =
   match Dashboard.parse_iso_timestamp "not-a-timestamp" with
-  | None -> check bool "none" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso_timestamp_empty () =
   match Dashboard.parse_iso_timestamp "" with
-  | None -> check bool "none" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso_timestamp_partial () =
   match Dashboard.parse_iso_timestamp "2024-01-15" with
-  | None -> check bool "none" true true
+  | None -> ()
   | Some _ -> fail "expected None for partial"
 
 (* ============================================================
@@ -256,7 +256,7 @@ let test_parse_worktrees_unexpected_structure () =
     let _result = Dashboard.parse_worktrees json in
     fail "expected Type_error"
   with
-  | Yojson.Safe.Util.Type_error _ -> check bool "raises Type_error" true true
+  | Yojson.Safe.Util.Type_error _ -> ()
   | _ -> fail "unexpected exception"
 
 (* ============================================================

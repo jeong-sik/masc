@@ -68,7 +68,7 @@ let test_context_without_logger_log () =
   let ctx = Tool_mitosis.make_context config in
   (* Should not raise - just no-op *)
   Tool_mitosis.log ctx "silent message";
-  check bool "no-op log works" true true
+  ()
 
 (* ============================================================
    Dispatch Tests
@@ -123,7 +123,7 @@ let test_dispatch_mitosis_prepare () =
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_mitosis.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================
@@ -143,7 +143,7 @@ let test_negative_context_ratio () =
   | Some (true, result) ->
       (* Should succeed with clamped ratio *)
       check bool "negative ratio clamped" true (String.length result > 0)
-  | Some (false, _) -> check bool "negative ratio handled" true true
+  | Some (false, _) -> ()
   | None -> fail "expected Some for mitosis_handoff"
 
 (* T2: context_ratio > 1.0 should be clamped to 1.0 *)
@@ -180,7 +180,7 @@ let test_mitosis_handoff_spawn_timeout_configurable () =
     ("verify", `Bool false);
   ] in
   match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
-  | Some (_, _result) -> check bool "custom timeout accepted" true true
+  | Some (_, _result) -> ()
   | None -> fail "expected Some for mitosis_handoff"
 
 (* ============================================================
@@ -351,7 +351,7 @@ let test_metrics_compare_no_data () =
   | Some (false, result) ->
       (* Should fail gracefully when no data *)
       check bool "no data error" true (try Str.search_forward (Str.regexp_string "Not enough data") result 0 >= 0 with Not_found -> false)
-  | Some (true, _) -> check bool "compare with no data" true true
+  | Some (true, _) -> ()
   | None -> fail "expected Some for metrics_compare"
 
 (* P0-2: Verify warning field surfaces in JSON when context_ratio = 0.0 *)
@@ -455,7 +455,7 @@ let test_log_state_transition_does_not_raise () =
     ~old_state:Mitosis.Active ~new_state:Mitosis.Prepared
     ~agent_name:"test-cell-01"
     ~reason:"DNA extraction at 50%";
-  check bool "no exception" true true
+  ()
 
 let test_log_state_transition_all_states () =
   (* Exercise all state combinations to verify formatting *)
@@ -468,7 +468,7 @@ let test_log_state_transition_all_states () =
         ~reason:"test";
     ) states
   ) states;
-  check bool "all state pairs logged" true true
+  ()
 
 let test_state_to_string () =
   check string "stem" "stem" (Mitosis.state_to_string Mitosis.Stem);
@@ -525,7 +525,7 @@ let test_validate_dna_valid () =
 let test_validate_dna_case_insensitive_markers () =
   let dna = "## OBJECTIVE\n- First item\n- Second item with enough content to pass length check" in
   match Tool_mitosis.validate_dna dna with
-  | Ok _ -> check bool "OBJECTIVE accepted" true true
+  | Ok _ -> ()
   | Error msg -> fail ("case-insensitive marker should pass: " ^ msg)
 
 (* ============================================================
@@ -566,8 +566,8 @@ let test_extract_dna_empty_context_validate () =
   let dna = Mitosis.extract_dna ~config ~parent_cell:parent ~full_context:"" in
   (* The header itself may or may not pass validation depending on markers *)
   match Tool_mitosis.validate_dna dna with
-  | Ok _ -> check bool "valid DNA even from empty context" true true
-  | Error _ -> check bool "empty context DNA fails validation (expected)" true true
+  | Ok _ -> ()
+  | Error _ -> ()
 
 let test_prepare_for_division_empty_context () =
   let config = Mitosis.default_config in

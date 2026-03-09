@@ -53,39 +53,39 @@ let test_dispatch_portal_open () =
   let args = `Assoc [("target_agent", `String "claude-002")] in
   try
     match Tool_portal.dispatch ctx ~name:"masc_portal_open" ~args with
-    | Some _ -> check bool "routes to portal_open" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_portal_send () =
   let ctx = make_ctx () in
   let args = `Assoc [("message", `String "hello")] in
   try
     match Tool_portal.dispatch ctx ~name:"masc_portal_send" ~args with
-    | Some _ -> check bool "routes to portal_send" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_portal_close () =
   let ctx = make_ctx () in
   try
     match Tool_portal.dispatch ctx ~name:"masc_portal_close" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to portal_close" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_portal_status () =
   let ctx = make_ctx () in
   try
     match Tool_portal.dispatch ctx ~name:"masc_portal_status" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to portal_status" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_portal.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================

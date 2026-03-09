@@ -700,7 +700,7 @@ let test_empty_payload_generation () =
    modified by other tests if run in sequence *)
 let test_get_latest_checkpoint_type () =
   let _ : Relay.checkpoint option = Relay.get_latest_checkpoint () in
-  check bool "returns option" true true
+  ()
 
 (* ============================================================
    Goal-aware handoff_payload Tests

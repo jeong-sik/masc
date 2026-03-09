@@ -211,7 +211,7 @@ let test_consensus_unanimous () =
     | Error _ -> Consensus.clear_sessions (); fail "get result failed"
     | Ok result ->
       (match result with
-       | Consensus.Unanimous Consensus.Approve -> check bool "unanimous approve" true true
+       | Consensus.Unanimous Consensus.Approve -> ()
        | _ -> fail "expected Unanimous Approve");
       Consensus.clear_sessions ()
 
@@ -226,7 +226,7 @@ let test_consensus_deadlock () =
     | Error _ -> Consensus.clear_sessions (); fail "get result failed"
     | Ok result ->
       (match result with
-       | Consensus.Deadlock -> check bool "deadlock" true true
+       | Consensus.Deadlock -> ()
        | _ -> fail "expected Deadlock");
       Consensus.clear_sessions ()
 
@@ -394,13 +394,13 @@ module Executor = Council.Executor
 
 let test_executor_find_action_pr () =
   match Executor.find_action "Merge PR #123" with
-  | Some _ -> check bool "found" true true
+  | Some _ -> ()
   | None -> fail "should find PR merge action"
 
 let test_executor_find_action_none () =
   match Executor.find_action "Random topic" with
   | Some _ -> fail "should not find action"
-  | None -> check bool "not found" true true
+  | None -> ()
 
 let test_executor_dry_run_approve () =
   let result = Consensus.Majority 2 in
@@ -475,7 +475,7 @@ let test_archive_neo4j_url_check () =
   (* This test checks if Neo4j URL is configured, doesn't require connection *)
   match Sys.getenv_opt "RAILWAY_NEO4J_URL" with
   | Some url -> check bool "has url" (String.length url > 0) true
-  | None -> check bool "no url configured" true true (* Skip gracefully *)
+  | None -> () (* Skip gracefully *)
 
 let archive_tests = [
   "record to json", `Quick, test_archive_record_to_json;

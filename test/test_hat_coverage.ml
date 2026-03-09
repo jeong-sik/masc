@@ -39,97 +39,97 @@ let test_to_string_custom () =
 
 let test_of_string_builder () =
   match Hat.of_string "builder" with
-  | Hat.Builder -> check bool "builder" true true
+  | Hat.Builder -> ()
   | _ -> fail "expected Builder"
 
 let test_of_string_build () =
   match Hat.of_string "build" with
-  | Hat.Builder -> check bool "build alias" true true
+  | Hat.Builder -> ()
   | _ -> fail "expected Builder"
 
 let test_of_string_impl () =
   match Hat.of_string "impl" with
-  | Hat.Builder -> check bool "impl alias" true true
+  | Hat.Builder -> ()
   | _ -> fail "expected Builder"
 
 let test_of_string_reviewer () =
   match Hat.of_string "reviewer" with
-  | Hat.Reviewer -> check bool "reviewer" true true
+  | Hat.Reviewer -> ()
   | _ -> fail "expected Reviewer"
 
 let test_of_string_review () =
   match Hat.of_string "review" with
-  | Hat.Reviewer -> check bool "review alias" true true
+  | Hat.Reviewer -> ()
   | _ -> fail "expected Reviewer"
 
 let test_of_string_researcher () =
   match Hat.of_string "researcher" with
-  | Hat.Researcher -> check bool "researcher" true true
+  | Hat.Researcher -> ()
   | _ -> fail "expected Researcher"
 
 let test_of_string_research () =
   match Hat.of_string "research" with
-  | Hat.Researcher -> check bool "research alias" true true
+  | Hat.Researcher -> ()
   | _ -> fail "expected Researcher"
 
 let test_of_string_explore () =
   match Hat.of_string "explore" with
-  | Hat.Researcher -> check bool "explore alias" true true
+  | Hat.Researcher -> ()
   | _ -> fail "expected Researcher"
 
 let test_of_string_tester () =
   match Hat.of_string "tester" with
-  | Hat.Tester -> check bool "tester" true true
+  | Hat.Tester -> ()
   | _ -> fail "expected Tester"
 
 let test_of_string_test () =
   match Hat.of_string "test" with
-  | Hat.Tester -> check bool "test alias" true true
+  | Hat.Tester -> ()
   | _ -> fail "expected Tester"
 
 let test_of_string_architect () =
   match Hat.of_string "architect" with
-  | Hat.Architect -> check bool "architect" true true
+  | Hat.Architect -> ()
   | _ -> fail "expected Architect"
 
 let test_of_string_arch () =
   match Hat.of_string "arch" with
-  | Hat.Architect -> check bool "arch alias" true true
+  | Hat.Architect -> ()
   | _ -> fail "expected Architect"
 
 let test_of_string_design () =
   match Hat.of_string "design" with
-  | Hat.Architect -> check bool "design alias" true true
+  | Hat.Architect -> ()
   | _ -> fail "expected Architect"
 
 let test_of_string_debugger () =
   match Hat.of_string "debugger" with
-  | Hat.Debugger -> check bool "debugger" true true
+  | Hat.Debugger -> ()
   | _ -> fail "expected Debugger"
 
 let test_of_string_debug () =
   match Hat.of_string "debug" with
-  | Hat.Debugger -> check bool "debug alias" true true
+  | Hat.Debugger -> ()
   | _ -> fail "expected Debugger"
 
 let test_of_string_fix () =
   match Hat.of_string "fix" with
-  | Hat.Debugger -> check bool "fix alias" true true
+  | Hat.Debugger -> ()
   | _ -> fail "expected Debugger"
 
 let test_of_string_documenter () =
   match Hat.of_string "documenter" with
-  | Hat.Documenter -> check bool "documenter" true true
+  | Hat.Documenter -> ()
   | _ -> fail "expected Documenter"
 
 let test_of_string_docs () =
   match Hat.of_string "docs" with
-  | Hat.Documenter -> check bool "docs alias" true true
+  | Hat.Documenter -> ()
   | _ -> fail "expected Documenter"
 
 let test_of_string_doc () =
   match Hat.of_string "doc" with
-  | Hat.Documenter -> check bool "doc alias" true true
+  | Hat.Documenter -> ()
   | _ -> fail "expected Documenter"
 
 let test_of_string_unknown () =
@@ -213,14 +213,14 @@ let test_roundtrip_builder () =
   let h = Hat.Builder in
   let s = Hat.to_string h in
   match Hat.of_string s with
-  | Hat.Builder -> check bool "roundtrip" true true
+  | Hat.Builder -> ()
   | _ -> fail "roundtrip failed"
 
 let test_roundtrip_reviewer () =
   let h = Hat.Reviewer in
   let s = Hat.to_string h in
   match Hat.of_string s with
-  | Hat.Reviewer -> check bool "roundtrip" true true
+  | Hat.Reviewer -> ()
   | _ -> fail "roundtrip failed"
 
 let test_roundtrip_all_hats () =

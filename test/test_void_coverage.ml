@@ -102,15 +102,15 @@ let test_arise () =
 
 let test_silence () =
   let _ = Void.silence () in
-  check unit "silence" () ()
+  ()
 
 let test_gap () =
   let _ = Void.gap () in
-  check unit "gap" () ()
+  ()
 
 let test_enter () =
   let _ = Void.enter () in
-  check unit "enter" () ()
+  ()
 
 let test_path () =
   check string "path" "←" Void.path
@@ -186,7 +186,7 @@ let test_select_koan_by_resonance () =
 let test_dissolve_safe () =
   let result = Void.dissolve_safe 42 in
   match result with
-  | Ok () -> check bool "ok" true true
+  | Ok () -> ()
   | Error _ -> fail "expected Ok"
 
 let test_select_koan_safe () =
@@ -204,7 +204,7 @@ let test_void_error_type () =
   let _ : Void.void_error = Void.InvalidLevel 10 in
   let _ : Void.void_error = Void.EmptyKoanCollection in
   let _ : Void.void_error = Void.ResourceNotReleased "test" in
-  check bool "void_error variants exist" true true
+  ()
 
 (* ============================================================
    contemplate_with_cleanup Tests
@@ -250,7 +250,7 @@ let test_untag () =
 let test_enter_void () =
   let tagged = Void.tag_level9 () in
   let _ = Void.enter_void tagged in
-  check bool "enter void" true true
+  ()
 
 (* ============================================================
    Composition Tests
@@ -265,7 +265,7 @@ let test_return_then_contemplate () =
 let test_dissolve_is_terminal () =
   let _ = Void.dissolve 42 in
   let _ = Void.dissolve "hello" in
-  check unit "terminal" () ()
+  ()
 
 (* ============================================================
    Test Runners

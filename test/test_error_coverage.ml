@@ -257,7 +257,7 @@ let test_string_of_severity_critical () =
 let test_of_string_creates_internal () =
   let e = Error.of_string "test message" in
   match e with
-  | Error.Internal _ -> check bool "internal" true true
+  | Error.Internal _ -> ()
   | _ -> fail "expected Internal"
 
 let test_of_string_preserves_message () =
@@ -272,20 +272,20 @@ let test_of_string_preserves_message () =
 let test_fail_returns_error () =
   let r = Error.fail (Error.Internal "test") in
   match r with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_ok_returns_ok () =
   let r = Error.ok 42 in
   match r with
-  | Ok 42 -> check bool "ok" true true
+  | Ok 42 -> ()
   | _ -> fail "expected Ok 42"
 
 let test_to_string_result_ok () =
   let r : int Error.result = Ok 42 in
   let sr = Error.to_string_result r in
   match sr with
-  | Ok 42 -> check bool "ok preserved" true true
+  | Ok 42 -> ()
   | _ -> fail "expected Ok 42"
 
 let test_to_string_result_error () =

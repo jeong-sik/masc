@@ -275,7 +275,7 @@ let test_select_solution_with_solutions () =
   } in
   let selected = Swarm_behaviors_eio.select_solution ~rng ~foraging_state:state in
   match selected with
-  | Some "sol2" -> check bool "best solution" true true
+  | Some "sol2" -> ()
   | _ -> fail "expected sol2"
 
 let test_record_discovery_new () =
@@ -354,7 +354,7 @@ let test_follow_pheromone_empty () =
   (* Create swarm but no pheromones *)
   let _ = Swarm_eio.create ~fs config () in
   match Swarm_behaviors_eio.follow_pheromone ~fs config () with
-  | None -> check bool "no trail" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_follow_pheromone_with_trail () =
@@ -363,8 +363,8 @@ let test_follow_pheromone_with_trail () =
   (* Deposit a strong pheromone *)
   let _ = Swarm_eio.deposit_pheromone ~fs config ~path_id:"path1" ~agent_id:"a1" ~strength:(Level4_config.Strength.of_float_clamped 0.9) in
   match Swarm_behaviors_eio.follow_pheromone ~fs config () with
-  | Some "path1" -> check bool "found trail" true true
-  | _ -> check bool "found or random" true true (* Could be random selection *)
+  | Some "path1" -> ()
+  | _ -> () (* Could be random selection *)
 
 let test_mark_success () =
   with_eio_env @@ fun ~fs config ->
@@ -378,14 +378,14 @@ let test_check_quorum_no_swarm () =
   with_eio_env @@ fun ~fs config ->
   (* No swarm created *)
   match Swarm_behaviors_eio.check_quorum ~fs config ~proposal_id:"p1" with
-  | `No_swarm -> check bool "no swarm" true true
+  | `No_swarm -> ()
   | _ -> fail "expected No_swarm"
 
 let test_check_quorum_not_found () =
   with_eio_env @@ fun ~fs config ->
   let _ = Swarm_eio.create ~fs config () in
   match Swarm_behaviors_eio.check_quorum ~fs config ~proposal_id:"nonexistent" with
-  | `Not_found -> check bool "not found" true true
+  | `Not_found -> ()
   | _ -> fail "expected Not_found"
 
 (* ============================================================

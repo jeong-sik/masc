@@ -36,7 +36,7 @@ let test_spawn_config_no_working_dir () =
     mcp_tools = [];
   } in
   match cfg.working_dir with
-  | None -> check bool "no dir" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_spawn_config_empty_tools () =
@@ -275,7 +275,7 @@ let test_get_config_ollama () =
 
 let test_get_config_unknown () =
   match Spawn.get_config "unknown-agent" with
-  | None -> check bool "returns none" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -631,7 +631,7 @@ let test_result_to_string_has_output () =
 let test_spawn_sync_is_spawn () =
   (* Just verify spawn_sync is the same function as spawn (alias test) *)
   let _ : (agent_name:string -> prompt:string -> ?timeout_seconds:int -> ?working_dir:string -> unit -> Spawn.spawn_result) = Spawn.spawn_sync in
-  check bool "spawn_sync exists" true true
+  ()
 
 (* ============================================================
    Test Runners

@@ -211,7 +211,7 @@ let test_bridge_not_set () =
   Subscriptions.set_session_push_fn (fun _event -> 0);
   (* This should not raise *)
   Subscriptions.push_event_to_sessions (make_event "masc/test");
-  check bool "no crash without bridge" true true
+  ()
 
 (* consume_notifications: partial consume (5 events, limit=3) *)
 let test_consume_partial () =

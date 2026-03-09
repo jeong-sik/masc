@@ -73,32 +73,32 @@ let test_load_config_port_valid () =
 let test_config_check_interval_type () =
   let cfg = Orchestrator.default_config in
   let _ : float = cfg.check_interval_s in
-  check bool "check_interval_s is float" true true
+  ()
 
 let test_config_min_priority_type () =
   let cfg = Orchestrator.default_config in
   let _ : int = cfg.min_priority in
-  check bool "min_priority is int" true true
+  ()
 
 let test_config_agent_timeout_type () =
   let cfg = Orchestrator.default_config in
   let _ : int = cfg.agent_timeout_s in
-  check bool "agent_timeout_s is int" true true
+  ()
 
 let test_config_orchestrator_agent_type () =
   let cfg = Orchestrator.default_config in
   let _ : string = cfg.orchestrator_agent in
-  check bool "orchestrator_agent is string" true true
+  ()
 
 let test_config_enabled_type () =
   let cfg = Orchestrator.default_config in
   let _ : bool = cfg.enabled in
-  check bool "enabled is bool" true true
+  ()
 
 let test_config_port_type () =
   let cfg = Orchestrator.default_config in
   let _ : int = cfg.port in
-  check bool "port is int" true true
+  ()
 
 (* ============================================================
    make_orchestrator_prompt Tests

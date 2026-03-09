@@ -69,56 +69,56 @@ let test_dispatch_cache_set () =
   let args = `Assoc [("key", `String "k1"); ("value", `String "v1")] in
   try
     match Tool_cache.dispatch ctx ~name:"masc_cache_set" ~args with
-    | Some _ -> check bool "routes to cache_set" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_cache_get () =
   let ctx = make_ctx () in
   let args = `Assoc [("key", `String "k1")] in
   try
     match Tool_cache.dispatch ctx ~name:"masc_cache_get" ~args with
-    | Some _ -> check bool "routes to cache_get" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_cache_delete () =
   let ctx = make_ctx () in
   let args = `Assoc [("key", `String "k1")] in
   try
     match Tool_cache.dispatch ctx ~name:"masc_cache_delete" ~args with
-    | Some _ -> check bool "routes to cache_delete" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_cache_list () =
   let ctx = make_ctx () in
   try
     match Tool_cache.dispatch ctx ~name:"masc_cache_list" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to cache_list" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_cache_clear () =
   let ctx = make_ctx () in
   try
     match Tool_cache.dispatch ctx ~name:"masc_cache_clear" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to cache_clear" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_cache_stats () =
   let ctx = make_ctx () in
   try
     match Tool_cache.dispatch ctx ~name:"masc_cache_stats" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to cache_stats" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_cache.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================

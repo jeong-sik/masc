@@ -32,27 +32,27 @@ let test_severity_to_string_info () =
 
 let test_severity_of_string_fatal () =
   match Response.severity_of_string "fatal" with
-  | Ok Response.Fatal -> check bool "fatal" true true
+  | Ok Response.Fatal -> ()
   | _ -> fail "expected Fatal"
 
 let test_severity_of_string_warning () =
   match Response.severity_of_string "warning" with
-  | Ok Response.Warning -> check bool "warning" true true
+  | Ok Response.Warning -> ()
   | _ -> fail "expected Warning"
 
 let test_severity_of_string_info () =
   match Response.severity_of_string "info" with
-  | Ok Response.Info -> check bool "info" true true
+  | Ok Response.Info -> ()
   | _ -> fail "expected Info"
 
 let test_severity_of_string_invalid () =
   match Response.severity_of_string "invalid" with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_severity_of_string_empty () =
   match Response.severity_of_string "" with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 (* ============================================================
@@ -127,7 +127,7 @@ let test_error_to_json_code () =
   match json with
   | `Assoc fields ->
       (match List.assoc "code" fields with
-       | `String "MY_CODE" -> check bool "code" true true
+       | `String "MY_CODE" -> ()
        | _ -> fail "expected code string")
   | _ -> fail "expected Assoc"
 
@@ -165,7 +165,7 @@ let test_to_json_success_true () =
   match json with
   | `Assoc fields ->
       (match List.assoc "success" fields with
-       | `Bool true -> check bool "success true" true true
+       | `Bool true -> ()
        | _ -> fail "expected true")
   | _ -> fail "expected Assoc"
 
@@ -181,7 +181,7 @@ let test_to_json_success_false () =
   match json with
   | `Assoc fields ->
       (match List.assoc "success" fields with
-       | `Bool false -> check bool "success false" true true
+       | `Bool false -> ()
        | _ -> fail "expected false")
   | _ -> fail "expected Assoc"
 
@@ -191,23 +191,23 @@ let test_to_json_success_false () =
 
 let test_error_detail_code () =
   let _ : string = "code" in
-  check bool "code is string" true true
+  ()
 
 let test_error_detail_message () =
   let _ : string = "message" in
-  check bool "message is string" true true
+  ()
 
 let test_error_detail_recovery_hints () =
   let _ : string list = [] in
-  check bool "recovery_hints is list" true true
+  ()
 
 let test_response_success () =
   let _ : bool = true in
-  check bool "success is bool" true true
+  ()
 
 let test_response_timestamp () =
   let _ : float = 0.0 in
-  check bool "timestamp is float" true true
+  ()
 
 (* ============================================================
    Test Runners

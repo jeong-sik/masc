@@ -141,7 +141,7 @@ let test_emergent_goal_emerging () =
     status = `Emerging;
   } in
   match g.status with
-  | `Emerging -> check bool "ok" true true
+  | `Emerging -> ()
   | _ -> fail "expected Emerging"
 
 let test_emergent_goal_active () =
@@ -154,7 +154,7 @@ let test_emergent_goal_active () =
     status = `Active;
   } in
   match g.status with
-  | `Active -> check bool "ok" true true
+  | `Active -> ()
   | _ -> fail "expected Active"
 
 let test_emergent_goal_fading () =
@@ -167,7 +167,7 @@ let test_emergent_goal_fading () =
     status = `Fading;
   } in
   match g.status with
-  | `Fading -> check bool "ok" true true
+  | `Fading -> ()
   | _ -> fail "expected Fading"
 
 let test_emergent_goal_dissolved () =
@@ -180,7 +180,7 @@ let test_emergent_goal_dissolved () =
     status = `Dissolved;
   } in
   match g.status with
-  | `Dissolved -> check bool "ok" true true
+  | `Dissolved -> ()
   | _ -> fail "expected Dissolved"
 
 let test_emergent_goal_to_json () =
@@ -211,7 +211,7 @@ let test_emergent_goal_of_json_emerging () =
   let g = Noosphere_eio.emergent_goal_of_json json in
   check string "id" "g1" g.id;
   match g.status with
-  | `Emerging -> check bool "ok" true true
+  | `Emerging -> ()
   | _ -> fail "expected Emerging"
 
 let test_emergent_goal_of_json_active () =
@@ -225,7 +225,7 @@ let test_emergent_goal_of_json_active () =
   ] in
   let g = Noosphere_eio.emergent_goal_of_json json in
   match g.status with
-  | `Active -> check bool "ok" true true
+  | `Active -> ()
   | _ -> fail "expected Active"
 
 let test_emergent_goal_of_json_fading () =
@@ -239,7 +239,7 @@ let test_emergent_goal_of_json_fading () =
   ] in
   let g = Noosphere_eio.emergent_goal_of_json json in
   match g.status with
-  | `Fading -> check bool "ok" true true
+  | `Fading -> ()
   | _ -> fail "expected Fading"
 
 let test_emergent_goal_of_json_dissolved () =
@@ -253,7 +253,7 @@ let test_emergent_goal_of_json_dissolved () =
   ] in
   let g = Noosphere_eio.emergent_goal_of_json json in
   match g.status with
-  | `Dissolved -> check bool "ok" true true
+  | `Dissolved -> ()
   | _ -> fail "expected Dissolved"
 
 let test_emergent_goal_of_json_unknown () =
@@ -340,7 +340,7 @@ let test_global_state_no_focus () =
     last_sync = 0.0;
   } in
   match s.focus_topic with
-  | None -> check bool "ok" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_global_state_to_json () =
@@ -497,13 +497,13 @@ let test_get_string_opt_some () =
 let test_get_string_opt_null () =
   let json = `Assoc [("opt", `Null)] in
   match Noosphere_eio.get_string_opt json "opt" with
-  | None -> check bool "ok" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_get_string_opt_missing () =
   let json = `Assoc [] in
   match Noosphere_eio.get_string_opt json "opt" with
-  | None -> check bool "ok" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -659,7 +659,7 @@ let test_pure_synthesize_insufficient_contributions () =
   let n = make_test_noosphere () in
   let result = Noosphere_eio.Pure.synthesize n ~topic:"test" ~contributions:["i1"] in
   match result with
-  | None -> check bool "ok" true true  (* Less than 2 contributions *)
+  | None -> ()  (* Less than 2 contributions *)
   | Some _ -> fail "expected None"
 
 let test_pure_synthesize_exactly_two () =
@@ -791,7 +791,7 @@ let test_emergent_goal_roundtrip () =
   check string "id" original.id decoded.id;
   check string "description" original.description decoded.description;
   (match decoded.status with
-   | `Active -> check bool "status active" true true
+   | `Active -> ()
    | _ -> fail "expected Active")
 
 let test_collective_insight_roundtrip () =

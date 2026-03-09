@@ -145,13 +145,13 @@ let test_retryable_case_insensitive () =
 let test_comparison_eq () =
   let c = Bounded.Eq (`String "test") in
   match c with
-  | Bounded.Eq _ -> check bool "eq" true true
+  | Bounded.Eq _ -> ()
   | _ -> fail "expected Eq"
 
 let test_comparison_neq () =
   let c = Bounded.Neq (`Int 42) in
   match c with
-  | Bounded.Neq _ -> check bool "neq" true true
+  | Bounded.Neq _ -> ()
   | _ -> fail "expected Neq"
 
 let test_comparison_lt () =

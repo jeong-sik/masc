@@ -62,32 +62,32 @@ let test_string_of_chunk_type_unknown () =
 
 let test_chunk_type_of_int_0 () =
   match Sctp.chunk_type_of_int 0 with
-  | Sctp.DATA -> check bool "data" true true
+  | Sctp.DATA -> ()
   | _ -> fail "expected DATA"
 
 let test_chunk_type_of_int_1 () =
   match Sctp.chunk_type_of_int 1 with
-  | Sctp.INIT -> check bool "init" true true
+  | Sctp.INIT -> ()
   | _ -> fail "expected INIT"
 
 let test_chunk_type_of_int_2 () =
   match Sctp.chunk_type_of_int 2 with
-  | Sctp.INIT_ACK -> check bool "init_ack" true true
+  | Sctp.INIT_ACK -> ()
   | _ -> fail "expected INIT_ACK"
 
 let test_chunk_type_of_int_3 () =
   match Sctp.chunk_type_of_int 3 with
-  | Sctp.SACK -> check bool "sack" true true
+  | Sctp.SACK -> ()
   | _ -> fail "expected SACK"
 
 let test_chunk_type_of_int_4 () =
   match Sctp.chunk_type_of_int 4 with
-  | Sctp.HEARTBEAT -> check bool "heartbeat" true true
+  | Sctp.HEARTBEAT -> ()
   | _ -> fail "expected HEARTBEAT"
 
 let test_chunk_type_of_int_unknown () =
   match Sctp.chunk_type_of_int 99 with
-  | Sctp.Unknown _ -> check bool "unknown" true true
+  | Sctp.Unknown _ -> ()
   | _ -> fail "expected Unknown"
 
 let test_int_of_chunk_type_data () =
@@ -182,32 +182,32 @@ let test_ppid_of_message_type_binary_empty () =
 
 let test_message_type_of_ppid_50 () =
   match Sctp.message_type_of_ppid 50l with
-  | Some Sctp.WebRTC_DCEP -> check bool "dcep" true true
+  | Some Sctp.WebRTC_DCEP -> ()
   | _ -> fail "expected Some WebRTC_DCEP"
 
 let test_message_type_of_ppid_51 () =
   match Sctp.message_type_of_ppid 51l with
-  | Some Sctp.WebRTC_String -> check bool "string" true true
+  | Some Sctp.WebRTC_String -> ()
   | _ -> fail "expected Some WebRTC_String"
 
 let test_message_type_of_ppid_53 () =
   match Sctp.message_type_of_ppid 53l with
-  | Some Sctp.WebRTC_Binary -> check bool "binary" true true
+  | Some Sctp.WebRTC_Binary -> ()
   | _ -> fail "expected Some WebRTC_Binary"
 
 let test_message_type_of_ppid_56 () =
   match Sctp.message_type_of_ppid 56l with
-  | Some Sctp.WebRTC_String_Empty -> check bool "string_empty" true true
+  | Some Sctp.WebRTC_String_Empty -> ()
   | _ -> fail "expected Some WebRTC_String_Empty"
 
 let test_message_type_of_ppid_57 () =
   match Sctp.message_type_of_ppid 57l with
-  | Some Sctp.WebRTC_Binary_Empty -> check bool "binary_empty" true true
+  | Some Sctp.WebRTC_Binary_Empty -> ()
   | _ -> fail "expected Some WebRTC_Binary_Empty"
 
 let test_message_type_of_ppid_unknown () =
   match Sctp.message_type_of_ppid 99l with
-  | None -> check bool "unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================

@@ -174,7 +174,7 @@ let test_unregister_if_current_no_match () =
 
 let test_unregister_if_current_nonexistent () =
   Sse.unregister_if_current "nonexistent_xyz" 123;
-  check bool "no error for nonexistent" true true
+  ()
 
 (* ============================================================
    update_last_event_id Tests
@@ -185,12 +185,12 @@ let test_update_last_event_id_exists () =
   let push _ = () in
   let (_id, _) = Sse.register session_id ~push ~last_event_id:0 in
   Sse.update_last_event_id session_id 42;
-  check bool "no error" true true;
+  ();
   Sse.unregister session_id
 
 let test_update_last_event_id_nonexistent () =
   Sse.update_last_event_id "nonexistent_xyz" 42;
-  check bool "no error for nonexistent" true true
+  ()
 
 (* ============================================================
    broadcast Tests
@@ -211,7 +211,7 @@ let test_broadcast_empty_clients () =
   Sse.unregister session_id;
   (* Broadcast should not error with no clients *)
   Sse.broadcast (`Assoc [("empty", `String "test")]);
-  check bool "no error" true true
+  ()
 
 (* ============================================================
    send_to Tests
@@ -228,7 +228,7 @@ let test_send_to_existing () =
 
 let test_send_to_nonexistent () =
   Sse.send_to "nonexistent_session_xyz" (`Assoc [("test", `String "value")]);
-  check bool "no error for nonexistent" true true
+  ()
 
 (* ============================================================
    Test Runners

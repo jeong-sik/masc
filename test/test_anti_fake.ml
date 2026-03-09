@@ -11,21 +11,21 @@ let float_eps = Alcotest.testable
 let score content =
   AF.score_content ~file_path:"<test>" content
 
-(* ── Test: vacuous assert true → fake ──────────────────────── *)
+(* ── Test: vacuous () → fake ──────────────────────── *)
 
 let test_assert_true_is_fake () =
   let content =
-    {|let test_a () = assert true
-let test_b () = assert true
-let test_c () = assert true|}
+    {|let test_a () = ()
+let test_b () = ()
+let test_c () = ()|}
   in
   let r = score content in
   Alcotest.(check string) "quality_tier" "fake" r.quality_tier;
   Alcotest.(check bool) "score < 0.3" true (r.final_score < 0.3);
-  (* 3 findings for "assert true" *)
+  (* 3 findings for "()" *)
   Alcotest.(check int) "findings count" 3 (List.length r.findings);
   List.iter (fun f ->
-    Alcotest.(check string) "pattern" "assert true" f.AF.pattern;
+    Alcotest.(check string) "pattern" "()" f.AF.pattern;
     match f.AF.severity with
     | AF.Critical -> ()
     | _ -> Alcotest.fail "expected Critical severity"
@@ -55,7 +55,7 @@ let test_tick () =
 
 let test_mixed_score () =
   let content =
-    {|let test_a () = assert true
+    {|let test_a () = ()
 let test_b () =
   Alcotest.(check int) "val" 42 (compute ())
 let test_c () =
@@ -115,8 +115,8 @@ let test_roundtrip_bonus () =
 
 let test_penalties_accumulate () =
   let content =
-    {|let test_a () = assert true
-let test_b () = assert true
+    {|let test_a () = ()
+let test_b () = ()
 let _ = something ()
 (* TODO: fix this test *)
 (* FIXME: broken *)|}
@@ -152,7 +152,7 @@ let test_summarize_empty () =
   Alcotest.(check (float_eps)) "avg" 0.0 s.avg_score
 
 let test_summarize_mixed () =
-  let r1 = score "assert true\nassert true\nassert true" in
+  let r1 = score "()\n()\n()" in
   let r2 = score "Alcotest.(check int) \"x\" 1 1" in
   let s = AF.summarize [r1; r2] in
   Alcotest.(check int) "total" 2 s.total_files;
@@ -195,11 +195,11 @@ let test_test_lines_count () =
     {|let x = 1
 Alcotest.(check int) "a" 1 1
 let y = 2
-assert true
+()
 let z = 3|}
   in
   let r = score content in
-  (* line 2: Alcotest.check, line 4: assert true → 2 test lines *)
+  (* line 2: Alcotest.check, line 4: () → 2 test lines *)
   Alcotest.(check int) "test_lines" 2 r.test_lines
 
 (* ── Test: property-based testing patterns ─────────────────── *)
@@ -220,7 +220,7 @@ let test_property_bonus () =
 let () =
   Alcotest.run "Anti_fake" [
     "scoring", [
-      Alcotest.test_case "assert true is fake" `Quick test_assert_true_is_fake;
+      Alcotest.test_case "() is fake" `Quick test_assert_true_is_fake;
       Alcotest.test_case "Alcotest.check is good" `Quick test_alcotest_check_is_good;
       Alcotest.test_case "mixed score" `Quick test_mixed_score;
       Alcotest.test_case "empty file" `Quick test_empty_file;

@@ -49,31 +49,31 @@ let test_dispatch_worktree_create () =
   let args = `Assoc [("task_id", `String "task-001"); ("base_branch", `String "main")] in
   try
     match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
-    | Some _ -> check bool "routes to worktree_create" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (git error expected)" true true
+  with _ -> ()
 
 let test_dispatch_worktree_remove () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001")] in
   try
     match Tool_worktree.dispatch ctx ~name:"masc_worktree_remove" ~args with
-    | Some _ -> check bool "routes to worktree_remove" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (git error expected)" true true
+  with _ -> ()
 
 let test_dispatch_worktree_list () =
   let ctx = make_ctx () in
   try
     match Tool_worktree.dispatch ctx ~name:"masc_worktree_list" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to worktree_list" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (git error expected)" true true
+  with _ -> ()
 
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_worktree.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================

@@ -133,13 +133,13 @@ let test_safe_sub_bytes_exact () =
 let test_safe_sub_bytes_too_long () =
   let buf = Bytes.of_string "short" in
   match Webrtc_common.safe_sub_bytes buf 0 10 with
-  | None -> check bool "none" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_safe_sub_bytes_offset_overflow () =
   let buf = Bytes.of_string "test" in
   match Webrtc_common.safe_sub_bytes buf 3 5 with
-  | None -> check bool "overflow" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_safe_sub_bytes_zero_length () =

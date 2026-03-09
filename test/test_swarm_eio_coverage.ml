@@ -31,25 +31,25 @@ let expect_ok label = function
 let test_swarm_behavior_flocking () =
   let b = Swarm_eio.Flocking in
   match b with
-  | Swarm_eio.Flocking -> check bool "flocking" true true
+  | Swarm_eio.Flocking -> ()
   | _ -> fail "expected Flocking"
 
 let test_swarm_behavior_foraging () =
   let b = Swarm_eio.Foraging in
   match b with
-  | Swarm_eio.Foraging -> check bool "foraging" true true
+  | Swarm_eio.Foraging -> ()
   | _ -> fail "expected Foraging"
 
 let test_swarm_behavior_stigmergy () =
   let b = Swarm_eio.Stigmergy in
   match b with
-  | Swarm_eio.Stigmergy -> check bool "stigmergy" true true
+  | Swarm_eio.Stigmergy -> ()
   | _ -> fail "expected Stigmergy"
 
 let test_swarm_behavior_quorum () =
   let b = Swarm_eio.Quorum_sensing in
   match b with
-  | Swarm_eio.Quorum_sensing -> check bool "quorum_sensing" true true
+  | Swarm_eio.Quorum_sensing -> ()
   | _ -> fail "expected Quorum_sensing"
 
 (* ============================================================
@@ -108,7 +108,7 @@ let test_quorum_proposal_pending () =
   check int "votes_for" 2 (List.length q.votes_for);
   check int "votes_against" 1 (List.length q.votes_against);
   match q.status with
-  | `Pending -> check bool "pending" true true
+  | `Pending -> ()
   | _ -> fail "expected Pending"
 
 let test_quorum_proposal_passed () =
@@ -124,7 +124,7 @@ let test_quorum_proposal_passed () =
     status = `Passed;
   } in
   match q.status with
-  | `Passed -> check bool "passed" true true
+  | `Passed -> ()
   | _ -> fail "expected Passed"
 
 (* ============================================================
@@ -403,7 +403,7 @@ let test_pure_join_agent_already_member () =
   match Swarm_eio.Pure.join_agent swarm ~agent_id:"a1" ~agent_name:"claude" ~now:2000.0 with
   | Swarm_eio.Pure.Joined s1 ->
       (match Swarm_eio.Pure.join_agent s1 ~agent_id:"a1" ~agent_name:"claude" ~now:2001.0 with
-       | Swarm_eio.Pure.Already_member _ -> check bool "already member" true true
+       | Swarm_eio.Pure.Already_member _ -> ()
        | _ -> fail "expected Already_member")
   | _ -> fail "expected Joined first"
 
@@ -422,7 +422,7 @@ let test_pure_join_agent_swarm_full () =
   match Swarm_eio.Pure.join_agent swarm ~agent_id:"a1" ~agent_name:"c1" ~now:2000.0 with
   | Swarm_eio.Pure.Joined s1 ->
       (match Swarm_eio.Pure.join_agent s1 ~agent_id:"a2" ~agent_name:"c2" ~now:2001.0 with
-       | Swarm_eio.Pure.Swarm_full -> check bool "swarm full" true true
+       | Swarm_eio.Pure.Swarm_full -> ()
        | _ -> fail "expected Swarm_full")
   | _ -> fail "expected first join"
 

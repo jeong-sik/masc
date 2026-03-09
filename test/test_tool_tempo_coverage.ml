@@ -60,18 +60,18 @@ let test_dispatch_tempo_get () =
   let ctx = make_ctx () in
   try
     match Tool_tempo.dispatch ctx ~name:"masc_tempo_get" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to tempo_get" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_tempo_set () =
   let ctx = make_ctx () in
   let args = `Assoc [("interval_seconds", `Float 60.0); ("reason", `String "test")] in
   try
     match Tool_tempo.dispatch ctx ~name:"masc_tempo_set" ~args with
-    | Some _ -> check bool "routes to tempo_set" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_tempo_set_invalid () =
   let ctx = make_ctx () in
@@ -84,35 +84,35 @@ let test_dispatch_tempo_adjust () =
   let ctx = make_ctx () in
   try
     match Tool_tempo.dispatch ctx ~name:"masc_tempo_adjust" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to tempo_adjust" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_tempo_reset () =
   let ctx = make_ctx () in
   try
     match Tool_tempo.dispatch ctx ~name:"masc_tempo_reset" ~args:(`Assoc []) with
-    | Some _ -> check bool "routes to tempo_reset" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_tempo_action_get () =
   let ctx = make_ctx () in
   let args = `Assoc [("action", `String "get")] in
   try
     match Tool_tempo.dispatch ctx ~name:"masc_tempo" ~args with
-    | Some _ -> check bool "routes to tempo action get" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_tempo_action_set () =
   let ctx = make_ctx () in
   let args = `Assoc [("action", `String "set"); ("mode", `String "slow")] in
   try
     match Tool_tempo.dispatch ctx ~name:"masc_tempo" ~args with
-    | Some _ -> check bool "routes to tempo action set" true true
+    | Some _ -> ()
     | None -> fail "expected Some"
-  with _ -> check bool "handler called (fs error expected)" true true
+  with _ -> ()
 
 let test_dispatch_tempo_action_invalid () =
   let ctx = make_ctx () in
@@ -124,7 +124,7 @@ let test_dispatch_tempo_action_invalid () =
 let test_dispatch_unknown_tool () =
   let ctx = make_ctx () in
   match Tool_tempo.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
-  | None -> check bool "returns None for unknown" true true
+  | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================

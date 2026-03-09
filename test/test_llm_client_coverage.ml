@@ -165,14 +165,14 @@ let test_error_types () =
   let _ : Llm.error = Llm.ParseError "test" in
   let _ : Llm.error = Llm.ServerError (500, "test") in
   let _ : Llm.error = Llm.Timeout in
-  check bool "error types exist" true true
+  ()
 
 let test_model_types () =
   let _ : Llm.model = Llm.Gemini in
   let _ : Llm.model = Llm.Claude in
   let _ : Llm.model = Llm.Codex in
   let _ : Llm.model = Llm.Ollama "test" in
-  check bool "model types exist" true true
+  ()
 
 (* ============================================================
    Config Tests

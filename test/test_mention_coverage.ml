@@ -83,43 +83,43 @@ let test_is_nickname_four_parts () =
 
 let test_parse_broadcast () =
   match Mention.parse "Hello @@ollama world" with
-  | Mention.Broadcast "ollama" -> check bool "broadcast" true true
+  | Mention.Broadcast "ollama" -> ()
   | _ -> fail "expected Broadcast"
 
 let test_parse_stateful () =
   match Mention.parse "Hello @claude-gentle-gecko" with
-  | Mention.Stateful "claude-gentle-gecko" -> check bool "stateful" true true
+  | Mention.Stateful "claude-gentle-gecko" -> ()
   | _ -> fail "expected Stateful"
 
 let test_parse_stateless () =
   match Mention.parse "Hello @claude" with
-  | Mention.Stateless "claude" -> check bool "stateless" true true
+  | Mention.Stateless "claude" -> ()
   | _ -> fail "expected Stateless"
 
 let test_parse_none () =
   match Mention.parse "Hello world" with
-  | Mention.None -> check bool "none" true true
+  | Mention.None -> ()
   | _ -> fail "expected None"
 
 let test_parse_broadcast_priority () =
   (* Broadcast should take priority over other mentions *)
   match Mention.parse "@@ollama @claude" with
-  | Mention.Broadcast "ollama" -> check bool "broadcast priority" true true
+  | Mention.Broadcast "ollama" -> ()
   | _ -> fail "expected Broadcast"
 
 let test_parse_two_part_stateful () =
   match Mention.parse "Hello @claude-code" with
-  | Mention.Stateful "claude-code" -> check bool "two part stateful" true true
+  | Mention.Stateful "claude-code" -> ()
   | _ -> fail "expected Stateful"
 
 let test_parse_underscore () =
   match Mention.parse "Hello @agent_name" with
-  | Mention.Stateless "agent_name" -> check bool "underscore" true true
+  | Mention.Stateless "agent_name" -> ()
   | _ -> fail "expected Stateless with underscore"
 
 let test_parse_number () =
   match Mention.parse "Hello @agent123" with
-  | Mention.Stateless "agent123" -> check bool "number" true true
+  | Mention.Stateless "agent123" -> ()
   | _ -> fail "expected Stateless with number"
 
 (* ============================================================
@@ -128,22 +128,22 @@ let test_parse_number () =
 
 let test_extract_broadcast () =
   match Mention.extract "Hello @@ollama" with
-  | Some "ollama" -> check bool "broadcast" true true
+  | Some "ollama" -> ()
   | _ -> fail "expected Some ollama"
 
 let test_extract_stateful () =
   match Mention.extract "@claude-gentle-gecko test" with
-  | Some "claude-gentle-gecko" -> check bool "stateful" true true
+  | Some "claude-gentle-gecko" -> ()
   | _ -> fail "expected Some"
 
 let test_extract_stateless () =
   match Mention.extract "@claude test" with
-  | Some "claude" -> check bool "stateless" true true
+  | Some "claude" -> ()
   | _ -> fail "expected Some"
 
 let test_extract_none () =
   match Mention.extract "no mention here" with
-  | None -> check bool "none" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -152,13 +152,13 @@ let test_extract_none () =
 
 let test_parse_at_end () =
   match Mention.parse "message @agent" with
-  | Mention.Stateless "agent" -> check bool "at end" true true
+  | Mention.Stateless "agent" -> ()
   | _ -> fail "expected Stateless"
 
 let test_parse_multiple_mentions () =
   (* First mention wins *)
   match Mention.parse "@first @second" with
-  | Mention.Stateless "first" -> check bool "first wins" true true
+  | Mention.Stateless "first" -> ()
   | _ -> fail "expected first"
 
 let test_parse_email_like () =

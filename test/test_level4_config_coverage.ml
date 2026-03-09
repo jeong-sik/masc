@@ -172,32 +172,32 @@ let test_is_finite_nan () =
 
 let test_fitness_of_float_valid () =
   match Level4_config.Fitness.of_float 0.5 with
-  | Some _ -> check bool "valid" true true
+  | Some _ -> ()
   | None -> fail "expected Some"
 
 let test_fitness_of_float_zero () =
   match Level4_config.Fitness.of_float 0.0 with
-  | Some _ -> check bool "zero valid" true true
+  | Some _ -> ()
   | None -> fail "expected Some"
 
 let test_fitness_of_float_one () =
   match Level4_config.Fitness.of_float 1.0 with
-  | Some _ -> check bool "one valid" true true
+  | Some _ -> ()
   | None -> fail "expected Some"
 
 let test_fitness_of_float_negative () =
   match Level4_config.Fitness.of_float (-0.5) with
-  | None -> check bool "negative invalid" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_fitness_of_float_above_one () =
   match Level4_config.Fitness.of_float 1.5 with
-  | None -> check bool "above one invalid" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_fitness_of_float_nan () =
   match Level4_config.Fitness.of_float nan with
-  | None -> check bool "nan invalid" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_fitness_of_float_clamped_valid () =
@@ -291,12 +291,12 @@ let test_fitness_of_json_int () =
 
 let test_fitness_of_json_invalid () =
   match Level4_config.Fitness.of_json (`String "invalid") with
-  | None -> check bool "invalid json" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_fitness_of_json_out_of_range () =
   match Level4_config.Fitness.of_json (`Float 2.0) with
-  | None -> check bool "out of range" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -305,12 +305,12 @@ let test_fitness_of_json_out_of_range () =
 
 let test_ensure_rng_init_no_error () =
   Level4_config.ensure_rng_init ();
-  check bool "no error" true true
+  ()
 
 let test_ensure_rng_init_idempotent () =
   Level4_config.ensure_rng_init ();
   Level4_config.ensure_rng_init ();
-  check bool "idempotent" true true
+  ()
 
 (* ============================================================
    Test Runners

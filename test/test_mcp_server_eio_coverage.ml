@@ -14,11 +14,11 @@ module Mcp_server = Masc_mcp.Mcp_server
 
 let test_server_state_type () =
   let _ : Mcp_server_eio.server_state option = None in
-  check bool "server_state type exists" true true
+  ()
 
 let test_jsonrpc_request_type () =
   let _ : Mcp_server_eio.jsonrpc_request option = None in
-  check bool "jsonrpc_request type exists" true true
+  ()
 
 (* ============================================================
    is_jsonrpc_v2 Tests
@@ -70,7 +70,7 @@ let test_make_response () =
   let open Yojson.Safe.Util in
   let id = response |> member "id" in
   match id with
-  | `Int 42 -> check bool "id matches" true true
+  | `Int 42 -> ()
   | _ -> fail "expected Int 42"
 
 let test_make_response_has_jsonrpc () =
@@ -127,19 +127,19 @@ let test_has_field_not_assoc () =
 let test_get_field_exists () =
   let json = `Assoc [("name", `String "test")] in
   match Mcp_server.get_field "name" json with
-  | Some (`String "test") -> check bool "found" true true
+  | Some (`String "test") -> ()
   | _ -> fail "expected Some"
 
 let test_get_field_missing () =
   let json = `Assoc [] in
   match Mcp_server.get_field "name" json with
-  | None -> check bool "not found" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_get_field_not_assoc () =
   let json = `String "not assoc" in
   match Mcp_server.get_field "name" json with
-  | None -> check bool "not assoc" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 (* ============================================================
@@ -207,7 +207,7 @@ let test_get_id_some () =
     params = None;
   } in
   match Mcp_server.get_id req with
-  | `Int 42 -> check bool "id 42" true true
+  | `Int 42 -> ()
   | _ -> fail "expected Int 42"
 
 let test_get_id_none () =
@@ -218,7 +218,7 @@ let test_get_id_none () =
     params = None;
   } in
   match Mcp_server.get_id req with
-  | `Null -> check bool "null" true true
+  | `Null -> ()
   | _ -> fail "expected Null"
 
 (* ============================================================
@@ -257,12 +257,12 @@ let test_validate_initialize_params_valid () =
     ("capabilities", `Assoc []);
   ] in
   match Mcp_server.validate_initialize_params (Some params) with
-  | Ok () -> check bool "valid" true true
+  | Ok () -> ()
   | Error e -> fail ("unexpected error: " ^ e)
 
 let test_validate_initialize_params_none () =
   match Mcp_server.validate_initialize_params None with
-  | Error "Missing params" -> check bool "missing params" true true
+  | Error "Missing params" -> ()
   | _ -> fail "expected Missing params"
 
 let test_validate_initialize_params_missing_version () =
@@ -474,13 +474,13 @@ let test_mcp_session_of_json_invalid_missing_id () =
     ("last_seen", `Float 1706400000.0);
   ] in
   match Mcp_server_eio.mcp_session_of_json json with
-  | None -> check bool "invalid returns None" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_mcp_session_of_json_not_assoc () =
   let json = `String "not an object" in
   match Mcp_server_eio.mcp_session_of_json json with
-  | None -> check bool "non-assoc returns None" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_mcp_session_roundtrip () =

@@ -51,13 +51,13 @@ let test_decode_header_valid () =
 let test_decode_header_too_short () =
   let data = Bytes.of_string "short" in
   match Datachannel.Compression.decode_header data with
-  | None -> check bool "too short" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_decode_header_wrong_magic () =
   let data = Bytes.of_string "XXXX\x00\x00\x00\x10data" in
   match Datachannel.Compression.decode_header data with
-  | None -> check bool "wrong magic" true true
+  | None -> ()
   | Some _ -> fail "expected None"
 
 let test_compress_small_data () =
@@ -101,27 +101,27 @@ let test_string_of_channel_type_partial_timed () =
 
 let test_channel_type_of_int_reliable_ordered () =
   match Datachannel.channel_type_of_int 0x00 with
-  | Datachannel.Reliable_ordered -> check bool "match" true true
+  | Datachannel.Reliable_ordered -> ()
   | _ -> fail "expected Reliable_ordered"
 
 let test_channel_type_of_int_reliable_unordered () =
   match Datachannel.channel_type_of_int 0x80 with
-  | Datachannel.Reliable_unordered -> check bool "match" true true
+  | Datachannel.Reliable_unordered -> ()
   | _ -> fail "expected Reliable_unordered"
 
 let test_channel_type_of_int_unreliable_ordered () =
   match Datachannel.channel_type_of_int 0x01 with
-  | Datachannel.Unreliable_ordered -> check bool "match" true true
+  | Datachannel.Unreliable_ordered -> ()
   | _ -> fail "expected Unreliable_ordered"
 
 let test_channel_type_of_int_partial_rexmit () =
   match Datachannel.channel_type_of_int ~param:10 0x02 with
-  | Datachannel.Partial_reliable_rexmit 10 -> check bool "match" true true
+  | Datachannel.Partial_reliable_rexmit 10 -> ()
   | _ -> fail "expected Partial_reliable_rexmit"
 
 let test_channel_type_of_int_unknown () =
   match Datachannel.channel_type_of_int 0xFF with
-  | Datachannel.Reliable_ordered -> check bool "default" true true
+  | Datachannel.Reliable_ordered -> ()
   | _ -> fail "expected default Reliable_ordered"
 
 let test_int_of_channel_type_reliable_ordered () =
@@ -282,7 +282,7 @@ let test_encode_open_message_roundtrip () =
 let test_decode_open_message_too_short () =
   let short = Bytes.of_string "short" in
   match Datachannel.decode_open_message short with
-  | Error _ -> check bool "error" true true
+  | Error _ -> ()
   | Ok _ -> fail "expected error"
 
 (* ============================================================

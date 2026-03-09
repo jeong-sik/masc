@@ -169,6 +169,30 @@ function formatElapsed(value?: number | null): string {
   return `${Math.round(value / 3600)}h`
 }
 
+function clampPercent(value?: number | null): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(100, value))
+}
+
+function ratioPercent(part?: number | null, whole?: number | null): number {
+  if (
+    typeof part !== 'number'
+    || !Number.isFinite(part)
+    || typeof whole !== 'number'
+    || !Number.isFinite(whole)
+    || whole <= 0
+  ) {
+    return 0
+  }
+  return clampPercent((part / whole) * 100)
+}
+
+function gaugeStyle(percent: number, color: string): string {
+  const safePercent = clampPercent(percent)
+  const angle = Math.max(10, Math.round((safePercent / 100) * 360))
+  return `--gauge-angle:${angle}deg;--gauge-color:${color};`
+}
+
 function historySummary(history?: ChainHistoryEventSummary | null): string {
   if (!history) return 'No recent chain history'
   const pieces = [history.event]
@@ -178,11 +202,30 @@ function historySummary(history?: ChainHistoryEventSummary | null): string {
   return pieces.join(' · ')
 }
 
-const COMMAND_SURFACES: CommandPlaneSurface[] = ['operations', 'chains', 'topology', 'alerts', 'trace', 'control']
+const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: string }> = [
+  { id: 'summary', label: '요약' },
+  { id: 'swarm', label: '스웜' },
+  { id: 'operations', label: '작전' },
+  { id: 'chains', label: '체인' },
+  { id: 'topology', label: '토폴로지' },
+  { id: 'alerts', label: '알림' },
+  { id: 'trace', label: '트레이스' },
+  { id: 'control', label: '제어' },
+]
+const COMMAND_SURFACES: CommandPlaneSurface[] = COMMAND_SURFACE_META.map(item => item.id)
 const CHAIN_SSE_EVENT_TYPES = ['chain_start', 'node_start', 'node_complete', 'chain_complete', 'chain_error']
 
 function isCommandSurface(value: string | undefined): value is CommandPlaneSurface {
   return !!value && COMMAND_SURFACES.includes(value as CommandPlaneSurface)
+}
+
+function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
+  if (surface === 'summary') return {}
+  if (surface === 'chains') {
+    const operationId = commandPlaneChainFocusOperationId.value
+    return operationId ? { surface, operation: operationId } : { surface }
+  }
+  return { surface }
 }
 
 function chainEventsUrl(): string {
@@ -216,6 +259,173 @@ function actionDisabled(key: string): boolean {
 
 function currentCommandPlaneSummary() {
   return commandPlaneSummary.value
+}
+
+function GraphicGauge({
+  label,
+  value,
+  subtext,
+  percent,
+  color,
+}: {
+  label: string
+  value: string
+  subtext: string
+  percent: number
+  color: string
+}) {
+  return html`
+    <article class="command-gauge-card">
+      <div class="command-gauge-ring" style=${gaugeStyle(percent, color)}>
+        <div class="command-gauge-core">
+          <strong>${value}</strong>
+          <span>${Math.round(clampPercent(percent))}%</span>
+        </div>
+      </div>
+      <div class="command-gauge-copy">
+        <span>${label}</span>
+        <small>${subtext}</small>
+      </div>
+    </article>
+  `
+}
+
+function SignalRail({
+  label,
+  value,
+  detail,
+  percent,
+  tone,
+}: {
+  label: string
+  value: string
+  detail: string
+  percent: number
+  tone: string
+}) {
+  return html`
+    <article class="command-signal-rail ${toneClass(tone)}">
+      <div class="command-signal-copy">
+        <span>${label}</span>
+        <strong>${value}</strong>
+      </div>
+      <div class="command-signal-bar">
+        <span class="${toneClass(tone)}" style=${`width: ${Math.max(8, Math.round(clampPercent(percent)))}%`}></span>
+      </div>
+      <small>${detail}</small>
+    </article>
+  `
+}
+
+function SummaryHero() {
+  const summary = currentCommandPlaneSummary()
+  const topology = summary?.topology.summary
+  const ops = summary?.operations.summary
+  const detachments = summary?.detachments.summary
+  const decisions = summary?.decisions.summary
+  const alerts = summary?.alerts.summary
+  const swarmOverview = summary?.swarm_status?.overview
+  const proof = summary?.swarm_proof
+  const microarch = summary?.operations.microarch
+  const managedUnits = topology?.managed_unit_count ?? 0
+  const totalUnits = topology?.total_units ?? 0
+  const activeOps = ops?.active ?? 0
+  const activeDetachments = detachments?.active ?? 0
+  const movingLanes = swarmOverview?.moving_lanes ?? 0
+  const activeLanes = swarmOverview?.active_lanes ?? 0
+  const proofDone = proof?.workers.done ?? 0
+  const proofExpected = proof?.workers.expected ?? 0
+  const badAlerts = alerts?.bad ?? 0
+  const warnAlerts = alerts?.warn ?? 0
+  const pendingApprovals = decisions?.pending ?? 0
+  const totalApprovals = decisions?.total ?? 0
+  const readyFootprint = activeOps + activeDetachments
+  const cacheHit = microarch?.cache?.l1_hit_rate ?? microarch?.signals?.cache_contention?.l1_hit_rate ?? 0
+  const headline =
+    activeOps > 0 || activeDetachments > 0
+      ? '지휘면이 실제로 움직이고 있습니다'
+      : '계층은 준비됐지만 실행은 아직 잠복 상태입니다'
+  const subcopy =
+    activeOps > 0 || movingLanes > 0
+      ? '무거운 상세 탭으로 들어가기 전에, 여기서 먼저 압력과 이동감, 운영 부채를 읽을 수 있어야 합니다.'
+      : '이 화면은 체크리스트보다 계기판에 가까워야 합니다. 아래 게이지가 지금 어디가 살아 있는지 먼저 보여줍니다.'
+
+  return html`
+    <section class="command-hero command-hero-summary">
+      <div class="command-hero-copy">
+        <span class="command-hero-kicker">현재 지휘 상태</span>
+        <h3>${headline}</h3>
+        <p>${subcopy}</p>
+        <div class="command-hero-badges">
+        <span class="command-chip ${toneClass(activeOps > 0 ? 'ok' : 'warn')}">활성 작전 ${activeOps}</span>
+          <span class="command-chip ${toneClass(movingLanes > 0 ? 'ok' : activeLanes > 0 ? 'warn' : 'warn')}">이동 레인 ${movingLanes}/${Math.max(activeLanes, movingLanes)}</span>
+          <span class="command-chip ${toneClass(badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok')}">치명 알림 ${badAlerts}</span>
+          <span class="command-chip ${toneClass(pendingApprovals > 0 ? 'warn' : 'ok')}">승인 대기 ${pendingApprovals}</span>
+        </div>
+      </div>
+
+      <div class="command-gauge-grid">
+        <${GraphicGauge}
+          label="관리 단위 범위"
+          value=${`${managedUnits}/${Math.max(totalUnits, managedUnits)}`}
+          subtext=${totalUnits > 0 ? `${totalUnits - managedUnits}개 단위는 아직 명시 정책 바깥에 있습니다` : '토폴로지 요약이 아직 없습니다'}
+          percent=${ratioPercent(managedUnits, Math.max(totalUnits, managedUnits))}
+          color="#67e8f9"
+        />
+        <${GraphicGauge}
+          label="실행 열도"
+          value=${String(readyFootprint)}
+          subtext=${`${activeOps}개 작전 + ${activeDetachments}개 실행체가 실제 부하를 들고 있습니다`}
+          percent=${ratioPercent(readyFootprint, Math.max(managedUnits, readyFootprint || 1))}
+          color="#4ade80"
+        />
+        <${GraphicGauge}
+          label="스웜 이동감"
+          value=${`${movingLanes}/${Math.max(activeLanes, movingLanes)}`}
+          subtext=${swarmOverview?.last_movement_at ? `마지막 이동 ${relativeTime(swarmOverview.last_movement_at)}` : '최근 스웜 이동이 아직 없습니다'}
+          percent=${ratioPercent(movingLanes, Math.max(activeLanes, movingLanes || 1))}
+          color="#fbbf24"
+        />
+        <${GraphicGauge}
+          label="증거 수집률"
+          value=${`${proofDone}/${Math.max(proofExpected, proofDone)}`}
+          subtext=${proof?.status ? `증거 소스 ${proof.source} · ${proof.status}` : '스웜 증거 아티팩트가 아직 없습니다'}
+          percent=${ratioPercent(proofDone, Math.max(proofExpected, proofDone || 1))}
+          color="#f472b6"
+        />
+      </div>
+    </section>
+    <div class="command-signal-grid">
+      <${SignalRail}
+        label="승인 대기열"
+        value=${`${pendingApprovals}건 대기`}
+        detail=${`현재 정책 창에서 ${totalApprovals}개 결정을 추적 중입니다`}
+        percent=${ratioPercent(pendingApprovals, Math.max(totalApprovals, pendingApprovals || 1))}
+        tone=${pendingApprovals > 0 ? 'warn' : 'ok'}
+      />
+      <${SignalRail}
+        label="알림 압력"
+        value=${`${badAlerts} bad / ${warnAlerts} warn`}
+        detail=${badAlerts > 0 ? '치명 신호가 이미 요약면에서 보입니다' : '보드를 지배하는 hard-stop 알림은 아직 없습니다'}
+        percent=${ratioPercent(badAlerts * 2 + warnAlerts, Math.max((badAlerts + warnAlerts) * 2, 1))}
+        tone=${badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok'}
+      />
+      <${SignalRail}
+        label="디스패치 점유"
+          value=${`${activeDetachments}개 가동`}
+        detail=${managedUnits > 0 ? `${managedUnits}개 관리 단위가 작업을 받을 수 있습니다` : '관리 단위 토폴로지가 아직 없습니다'}
+        percent=${ratioPercent(activeDetachments, Math.max(managedUnits, activeDetachments || 1))}
+        tone=${activeDetachments > 0 ? 'ok' : 'warn'}
+      />
+      <${SignalRail}
+        label="캐시 신뢰도"
+        value=${cacheHit ? formatPercent(cacheHit) : 'n/a'}
+        detail=${cacheHit ? 'microarch 캐시 텔레메트리에서 집계한 L1 hit rate' : '캐시 텔레메트리가 아직 집계되지 않았습니다'}
+        percent=${clampPercent((cacheHit ?? 0) * 100)}
+        tone=${cacheHit >= 0.75 ? 'ok' : cacheHit >= 0.4 ? 'warn' : 'bad'}
+      />
+    </div>
+  `
 }
 
 function dashboardActorName(): string | null {
@@ -281,22 +491,21 @@ function SummaryCards() {
   const chainSummary = commandPlaneChainSummary.value
   const topology = summary?.topology.summary
   const ops = summary?.operations.summary
+  const swarm = summary?.swarm_status?.overview
   const microarch = summary?.operations.microarch
   const decisions = summary?.decisions.summary
   const alerts = summary?.alerts.summary
-  const routing = microarch?.signals?.routing_confidence
   const issuePressure = microarch?.signals?.issue_pressure
-  const search = microarch?.search_fabric
   const cache = microarch?.cache
   return html`
     <div class="command-summary-grid">
-      <div class="monitor-stat-card"><span>Units</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0} managed</small></div>
-      <div class="monitor-stat-card"><span>Ops</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0} detachments</small></div>
-      <div class="monitor-stat-card"><span>Approvals</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0} tracked</small></div>
-      <div class="monitor-stat-card"><span>Alerts</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0} warn</small></div>
-      <div class="monitor-stat-card"><span>Chains</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0} linked</small></div>
-      <div class="monitor-stat-card"><span>Routing</span><strong>${search?.best_first_operations ?? 0}</strong><small>${routing?.tone ?? 'n/a'} · score ${search?.avg_best_score?.toFixed(1) ?? '0.0'}</small></div>
-      <div class="monitor-stat-card"><span>Microarch</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 hit` : 'no cache data'} · ${issuePressure?.tone ?? 'n/a'}</small></div>
+      <div class="monitor-stat-card"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
+      <div class="monitor-stat-card"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
+      <div class="monitor-stat-card"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
+      <div class="monitor-stat-card"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 warn</small></div>
+      <div class="monitor-stat-card"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
+      <div class="monitor-stat-card"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
+      <div class="monitor-stat-card"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 hit` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? 'n/a'}</small></div>
     </div>
   `
 }
@@ -355,7 +564,7 @@ function SwarmWorkerGrid({ total }: { total: number }) {
     <div class="swarm-worker-grid">
       ${dots.map(() => html`<span class="swarm-worker-dot present"></span>`)}
       ${overflow > 0 ? html`<span class="swarm-worker-count">+${overflow}</span>` : null}
-      <span class="swarm-worker-count">(${total} workers)</span>
+      <span class="swarm-worker-count">(워커 ${total})</span>
     </div>
   `
 }
@@ -367,19 +576,34 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
   const ops = counts.operations ?? 0
   const dets = counts.detachments ?? 0
   const totalOps = ops + dets
+  const progressPercent =
+    lane.motion_state === 'moving'
+      ? 84
+      : lane.motion_state === 'waiting'
+        ? 58
+        : lane.motion_state === 'terminal'
+          ? 100
+          : 26
 
   return html`
     <article class="swarm-lane-strip ${toneClass(tone)}">
       <div class="swarm-lane-head">
         <div class="swarm-lane-head-left">
           <span class="swarm-motion-dot ${lane.motion_state}"></span>
-          <strong>${lane.label}</strong>
+          <div>
+            <span class="swarm-lane-kicker">${lane.kind} · ${lane.source_of_truth}</span>
+            <strong>${lane.label}</strong>
+          </div>
         </div>
         <div class="command-tag-row">
           <span class="command-chip ${toneClass(tone)}">${lane.phase}</span>
           <span class="command-chip ${toneClass(tone)}">${lane.motion_state}</span>
           <span class="command-chip">${relativeTime(lane.last_movement_at)}</span>
         </div>
+      </div>
+      <p class="swarm-lane-reason">${lane.movement_reason}</p>
+      <div class="swarm-lane-track">
+        <span class="${toneClass(tone)}" style=${`width:${progressPercent}%`}></span>
       </div>
       <div class="swarm-lane-details">
         <div class="swarm-lane-row">
@@ -389,7 +613,7 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
         ${totalWorkers > 0
           ? html`
               <div class="swarm-lane-row">
-                <span class="swarm-lane-row-label">Workers</span>
+                <span class="swarm-lane-row-label">워커</span>
                 <${SwarmWorkerGrid} total=${totalWorkers} />
               </div>
             `
@@ -397,17 +621,17 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
         ${totalOps > 0
           ? html`
               <div class="swarm-lane-row">
-                <span class="swarm-lane-row-label">Ops</span>
+                <span class="swarm-lane-row-label">흐름</span>
                 <div class="swarm-mini-bar">
                   <div class="swarm-mini-bar-fill" style="width: ${totalOps > 0 ? Math.round((ops / totalOps) * 100) : 0}%; background: var(--${tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'ok'})"></div>
                 </div>
-                <span class="swarm-worker-count">${ops} ops · ${dets} dets</span>
+                <span class="swarm-worker-count">작전 ${ops} · 실행체 ${dets}</span>
               </div>
             `
           : null}
       </div>
       ${lane.blockers.length > 0
-        ? html`<div class="swarm-lane-blockers">Blockers: ${lane.blockers.join(' · ')}</div>`
+        ? html`<div class="swarm-lane-blockers">막힘: ${lane.blockers.join(' · ')}</div>`
         : null}
       ${lane.hard_flags.length > 0
         ? html`
@@ -417,6 +641,37 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           `
         : null}
     </article>
+  `
+}
+
+function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
+  const featured = lanes.slice(0, 4)
+  if (featured.length === 0) return null
+  return html`
+    <div class="swarm-storyboard">
+      ${featured.map(lane => {
+        const tone = swarmLaneTone(lane)
+        const workers = lane.counts.workers ?? 0
+        const operations = lane.counts.operations ?? 0
+        const detachments = lane.counts.detachments ?? 0
+        return html`
+          <article class="swarm-story-card ${toneClass(tone)}">
+            <div class="swarm-story-topline">
+              <span class="command-chip ${toneClass(tone)}">${lane.motion_state}</span>
+              <span class="command-chip">${lane.phase}</span>
+            </div>
+            <strong>${lane.label}</strong>
+            <p>${lane.current_step}</p>
+            <div class="swarm-story-strip">
+              <span>워커 ${workers}</span>
+              <span>작전 ${operations}</span>
+              <span>실행체 ${detachments}</span>
+            </div>
+            <small>${lane.movement_reason}</small>
+          </article>
+        `
+      })}
+    </div>
   `
 }
 
@@ -458,20 +713,20 @@ function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
           : 'warn'
   return html`
     <div class="command-guide-card ${toneClass(tone)}">
-      <div class="command-guide-head">
-        <strong>Hot Proof</strong>
-        <span class="command-chip ${toneClass(tone)}">${proof?.status ?? 'missing'}</span>
-      </div>
+        <div class="command-guide-head">
+          <strong>Hot Proof / 가동 증거</strong>
+          <span class="command-chip ${toneClass(tone)}">${proof?.status ?? 'missing'}</span>
+        </div>
       ${proof
         ? html`
             <div class="command-card-grid">
-              <span>Source</span><span>${proof.source}</span>
-              <span>Run</span><span>${proof.run_id ?? 'n/a'}</span>
-              <span>Captured</span><span>${relativeTime(proof.captured_at)}</span>
-              <span>Pass</span><span>${proof.pass == null ? 'n/a' : proof.pass ? 'yes' : 'no'}</span>
-              <span>Peak Hot Slots</span><span>${proof.peak_hot_slots ?? 'n/a'}</span>
+              <span>소스</span><span>${proof.source}</span>
+              <span>런</span><span>${proof.run_id ?? 'n/a'}</span>
+              <span>수집 시각</span><span>${relativeTime(proof.captured_at)}</span>
+              <span>통과</span><span>${proof.pass == null ? 'n/a' : proof.pass ? '예' : '아니오'}</span>
+              <span>최대 Hot Slots</span><span>${proof.peak_hot_slots ?? 'n/a'}</span>
               <span>Ctx / Slot</span><span>${proof.ctx_per_slot ?? 'n/a'}</span>
-              <span>Workers</span><span>${proof.workers.expected ?? 'n/a'} expected · ${proof.workers.done ?? 'n/a'} done · ${proof.workers.final ?? 'n/a'} final</span>
+              <span>워커 증거</span><span>${proof.workers.expected ?? 'n/a'} 예상 · ${proof.workers.done ?? 'n/a'} 완료 · ${proof.workers.final ?? 'n/a'} 최종</span>
             </div>
             ${proof.artifact_ref
               ? html`<div class="command-card-foot">${proof.artifact_ref}</div>`
@@ -480,7 +735,7 @@ function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
               ? html`<p>${proof.missing_reason}</p>`
               : null}
           `
-        : html`<p>No swarm proof is available yet.</p>`}
+        : html`<p>아직 스웜 증거가 수집되지 않았습니다.</p>`}
     </div>
   `
 }
@@ -494,35 +749,37 @@ function SwarmPanel() {
   const timeline = swarm?.timeline.slice(0, 8) ?? []
   const overview = swarm?.overview
   const recommendation = swarm?.recommended_next_action
+  const compactLayout = lanes.length <= 1
 
   return html`
     <section class="card command-section">
-      <div class="card-title">Swarm</div>
+      <div class="card-title">스웜</div>
       ${swarm
         ? html`
+            <${SwarmStoryboard} lanes=${lanes} />
             <div class="command-summary-grid command-swarm-summary">
-              <div class="monitor-stat-card"><span>Active Lanes</span><strong>${overview?.active_lanes ?? 0}</strong><small>${overview?.moving_lanes ?? 0} moving</small></div>
-              <div class="monitor-stat-card"><span>Stalled</span><strong>${overview?.stalled_lanes ?? 0}</strong><small>${overview?.projected_lanes ?? 0} projected</small></div>
-              <div class="monitor-stat-card"><span>Last Movement</span><strong>${relativeTime(overview?.last_movement_at)}</strong><small>${swarm.generated_at ? `snapshot ${relativeTime(swarm.generated_at)}` : 'snapshot now'}</small></div>
-              <div class="monitor-stat-card"><span>Next Action</span><strong>${recommendation?.label ?? 'Observe operator state'}</strong><small>${recommendation?.tool ?? 'masc_operator_snapshot'}</small></div>
+              <div class="monitor-stat-card"><span>활성 레인</span><strong>${overview?.active_lanes ?? 0}</strong><small>${overview?.moving_lanes ?? 0}개 이동 중</small></div>
+              <div class="monitor-stat-card"><span>정체</span><strong>${overview?.stalled_lanes ?? 0}</strong><small>${overview?.projected_lanes ?? 0}개 예상 레인</small></div>
+              <div class="monitor-stat-card"><span>마지막 이동</span><strong>${relativeTime(overview?.last_movement_at)}</strong><small>${swarm.generated_at ? `스냅샷 ${relativeTime(swarm.generated_at)}` : '방금 스냅샷'}</small></div>
+              <div class="monitor-stat-card"><span>다음 액션</span><strong>${recommendation?.label ?? '운영자 상태 확인'}</strong><small>${recommendation?.tool ?? 'masc_operator_snapshot'}</small></div>
             </div>
 
             ${lanes.length > 0 ? html`<${SwarmHealthBar} lanes=${lanes} />` : null}
 
-            <div class="command-swarm-layout">
+            <div class="command-swarm-layout ${compactLayout ? 'compact' : ''}">
               <div class="command-card-stack">
                 ${lanes.length > 0
                   ? lanes.map(lane => html`<${SwarmLaneStrip} lane=${lane} />`)
-                  : html`<div class="empty-state">No active swarm lanes.</div>`}
+                  : html`<div class="empty-state">활성 스웜 레인이 없습니다.</div>`}
               </div>
 
               <div class="command-card-stack">
                 <div class="command-guide-card highlight">
                   <div class="command-guide-head">
-                    <strong>${recommendation?.label ?? 'Observe operator state'}</strong>
-                    <span class="command-chip">${recommendation?.lane_id ?? 'global'}</span>
+                    <strong>${recommendation?.label ?? '운영자 상태 확인'}</strong>
+                    <span class="command-chip">${recommendation?.lane_id ?? '전체'}</span>
                   </div>
-                  <p>${recommendation?.reason ?? 'No active swarm lane is visible yet.'}</p>
+                  <p>${recommendation?.reason ?? '보이는 활성 스웜 레인이 아직 없습니다.'}</p>
                   <div class="command-card-foot">${recommendation?.tool ?? 'masc_operator_snapshot'}</div>
                 </div>
 
@@ -530,27 +787,27 @@ function SwarmPanel() {
 
                 <div class="command-guide-card ${gaps.length > 0 ? 'warn' : 'ok'}">
                   <div class="command-guide-head">
-                    <strong>Hard Gaps</strong>
+                    <strong>핵심 공백</strong>
                     <span class="command-chip ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
                   </div>
                   ${gaps.length > 0
                     ? html`<div class="swarm-event-rail">${gaps.slice(0, 4).map(gap => html`<${SwarmGapDot} gap=${gap} />`)}</div>`
-                    : html`<p>No hard gaps are currently visible.</p>`}
+                    : html`<p>지금 보이는 핵심 공백은 없습니다.</p>`}
                 </div>
 
                 <div class="command-guide-card">
                   <div class="command-guide-head">
-                    <strong>Movement Timeline</strong>
+                    <strong>이동 타임라인</strong>
                     <span class="command-chip">${timeline.length}</span>
                   </div>
                   ${timeline.length > 0
                     ? html`<div class="swarm-event-rail">${timeline.map(event => html`<${SwarmEventNode} event=${event} />`)}</div>`
-                    : html`<p>No recent movement events are attached yet.</p>`}
+                    : html`<p>붙어 있는 최근 이동 이벤트가 아직 없습니다.</p>`}
                 </div>
               </div>
             </div>
           `
-        : html`<div class="empty-state">Swarm status is unavailable.</div>`}
+        : html`<div class="empty-state">스웜 상태를 아직 불러오지 못했습니다.</div>`}
     </section>
   `
 }
@@ -558,12 +815,15 @@ function SwarmPanel() {
 function SurfaceTabs() {
   return html`
     <div class="command-surface-tabs">
-      ${COMMAND_SURFACES.map(surface => html`
+      ${COMMAND_SURFACE_META.map(surface => html`
         <button
-          class="command-surface-tab ${commandPlaneSurface.value === surface ? 'active' : ''}"
-          onClick=${() => setCommandPlaneSurface(surface)}
+          class="command-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
+          onClick=${() => {
+            setCommandPlaneSurface(surface.id)
+            navigate('command', surfaceRouteParams(surface.id))
+          }}
         >
-          ${surface}
+          ${surface.label}
         </button>
       `)}
     </div>
@@ -594,103 +854,103 @@ function GuidedPanel() {
   const readiness = [
     roomReady
       ? {
-          title: 'Room readiness',
+          title: 'Room 준비도',
           tone: 'ok',
           detail: `${status?.room ?? status?.project ?? 'unknown'} · base ${status?.room_base_path ?? 'n/a'}`,
           tool: 'masc_status',
         }
       : {
-          title: 'Room readiness',
+          title: 'Room 준비도',
           tone: 'bad',
-          detail: 'No room snapshot yet. Set room to repo root before joining.',
+          detail: '아직 room snapshot이 없습니다. 조인 전에 room을 repo root로 맞추세요.',
           tool: 'masc_set_room',
         },
     !actorName
       ? {
-          title: 'Task readiness',
+          title: 'Task 준비도',
           tone: 'warn',
-          detail: 'No ?agent= query param. Dashboard can show room health but not agent-specific next steps.',
+          detail: '?agent= 쿼리가 없습니다. room health는 보이지만 agent 단위 다음 단계는 비어 있습니다.',
           tool: 'masc_join',
         }
       : !actor
         ? {
-            title: 'Task readiness',
+            title: 'Task 준비도',
             tone: 'bad',
-            detail: `${actorName} is not visible in the room roster.`,
+            detail: `${actorName} 이 room roster에 보이지 않습니다.`,
             tool: 'masc_join',
           }
         : actorTasks.length === 0
           ? {
-              title: 'Task readiness',
+              title: 'Task 준비도',
               tone: 'warn',
-              detail: `${actorName} has no claimed task. Claim one or create one first.`,
+              detail: `${actorName} 에게 배정된 claimed task가 없습니다. 먼저 claim 하거나 만들어야 합니다.`,
               tool: tasks.value.length > 0 ? 'masc_claim' : 'masc_add_task',
             }
           : !currentTask
             ? {
-                title: 'Task readiness',
+                title: 'Task 준비도',
                 tone: 'bad',
-                detail: `${actorName} has a claimed task but no session current_task binding.`,
+                detail: `${actorName} 에 claimed task는 있지만 session current_task binding이 없습니다.`,
                 tool: 'masc_plan_set_task',
               }
             : heartbeatFresh === false
               ? {
-                  title: 'Task readiness',
+                  title: 'Task 준비도',
                   tone: 'warn',
-                  detail: `${actorName} current_task=${currentTask}, but heartbeat is stale (${lastSeenAge}s).`,
+                  detail: `${actorName} current_task=${currentTask} 이지만 heartbeat가 stale 합니다 (${lastSeenAge}s).`,
                   tool: 'masc_heartbeat',
                 }
               : {
-                  title: 'Task readiness',
+                  title: 'Task 준비도',
                   tone: 'ok',
-                  detail: `${actorName} current_task=${currentTask}${lastSeenAge != null ? ` · last seen ${lastSeenAge}s ago` : ''}`,
+                  detail: `${actorName} current_task=${currentTask}${lastSeenAge != null ? ` · 마지막 활동 ${lastSeenAge}s 전` : ''}`,
                   tool: 'masc_plan_get_task',
                 },
     !summary || (summary.topology.summary?.managed_unit_count ?? 0) === 0
       ? {
-          title: 'Operation readiness',
+          title: '작전 준비도',
           tone: 'warn',
-          detail: 'No managed units defined yet. CPv2 benchmark cannot start before hierarchy exists.',
+          detail: '관리 단위가 아직 정의되지 않았습니다. hierarchy가 있어야 CPv2 benchmark를 시작할 수 있습니다.',
           tool: 'masc_unit_define',
         }
       : activeOps === 0
         ? {
-            title: 'Operation readiness',
+            title: '작전 준비도',
             tone: 'warn',
-            detail: `${summary.topology.summary?.managed_unit_count ?? 0} managed units are ready, but there is no active operation.`,
+            detail: `${summary.topology.summary?.managed_unit_count ?? 0}개 관리 단위는 준비됐지만 활성 작전은 없습니다.`,
             tool: 'masc_operation_start',
           }
         : {
-            title: 'Operation readiness',
+            title: '작전 준비도',
             tone: 'ok',
-            detail: `${activeOps} active operation(s) across ${summary.topology.summary?.managed_unit_count ?? 0} managed unit(s).`,
+            detail: `${summary.topology.summary?.managed_unit_count ?? 0}개 관리 단위 위에서 ${activeOps}개 활성 작전이 돌고 있습니다.`,
             tool: 'masc_observe_operations',
           },
     pendingDecisions > 0
       ? {
-          title: 'Dispatch readiness',
+          title: '디스패치 준비도',
           tone: 'warn',
-          detail: `${pendingDecisions} pending approval(s) are blocking strict actions.`,
+          detail: `${pendingDecisions}개의 pending approval이 strict action을 막고 있습니다.`,
           tool: 'masc_policy_approve',
         }
       : activeOps > 0 && detachments === 0
         ? {
-            title: 'Dispatch readiness',
+            title: '디스패치 준비도',
             tone: 'bad',
-            detail: 'Active operation exists but no detachment has been materialized yet.',
+            detail: 'active operation은 있지만 detachment가 아직 materialize 되지 않았습니다.',
             tool: 'masc_dispatch_tick',
           }
         : stalledDetachment || badAlert
           ? {
-              title: 'Dispatch readiness',
+              title: '디스패치 준비도',
               tone: 'warn',
-              detail: `Dispatch needs reconciliation${stalledDetachment ? ` · detachment ${stalledDetachment.detachment.detachment_id} is stalled` : ''}${badAlert ? ` · alert ${badAlert.title ?? badAlert.alert_id}` : ''}${!snapshot && !stalledDetachment && !badAlert ? ' · open a detail tab to inspect the exact source.' : ''}.`,
+              detail: `dispatch 재정렬이 필요합니다${stalledDetachment ? ` · detachment ${stalledDetachment.detachment.detachment_id} 가 stalled 상태입니다` : ''}${badAlert ? ` · alert ${badAlert.title ?? badAlert.alert_id}` : ''}${!snapshot && !stalledDetachment && !badAlert ? ' · 정확한 원인은 detail 탭에서 확인하세요.' : ''}.`,
               tool: pendingDecisions > 0 ? 'masc_policy_approve' : 'masc_dispatch_tick',
             }
           : {
-              title: 'Dispatch readiness',
+              title: '디스패치 준비도',
               tone: 'ok',
-              detail: `${detachments} detachment(s) visible and no strict approval backlog${!snapshot ? ' · detail panes stay lazy until opened.' : ''}.`,
+              detail: `${detachments}개 detachment가 보이고 strict approval backlog도 없습니다${!snapshot ? ' · detail pane은 열릴 때만 로드됩니다.' : ''}.`,
               tool: 'masc_detachment_list',
             },
   ]
@@ -742,13 +1002,13 @@ function GuidedPanel() {
   return html`
     <div class="command-guided-layout">
       <section class="card command-section">
-        <div class="card-title">Immediate Actions</div>
+        <div class="card-title">즉시 조치</div>
         <div class="command-guide-card highlight command-next-step-card">
           <div class="command-guide-head">
             <strong>${nextStep?.title ?? nextTool}</strong>
             <span class="command-chip ok">${nextTool}</span>
           </div>
-          <p>${nextStep?.summary ?? 'Use the next tool in the canonical flow to remove the current blocker.'}</p>
+          <p>${nextStep?.summary ?? '지금 막고 있는 병목을 풀기 위해 canonical flow의 다음 tool부터 실행합니다.'}</p>
           ${nextStep?.success_signals?.length
             ? html`<div class="command-tag-row">
                 ${nextStep.success_signals.map(signal => html`<span class="command-tag ok">${signal}</span>`)}
@@ -775,7 +1035,7 @@ function GuidedPanel() {
           ? html`
               <div class="command-guide-card warn">
                 <div class="command-guide-head">
-                  <strong>Common Pitfalls</strong>
+                  <strong>자주 막히는 지점</strong>
                   <span class="command-chip warn">${pitfalls.length}</span>
                 </div>
                 <div class="command-guide-list">
@@ -783,7 +1043,7 @@ function GuidedPanel() {
                     <article class="command-guide-inline">
                       <strong>${pitfall.title}</strong>
                       <div>${pitfall.symptom}</div>
-                      <div class="command-card-sub">Fix with ${pitfall.fix_tool}: ${pitfall.fix_summary}</div>
+                      <div class="command-card-sub">${pitfall.fix_tool} 로 해결: ${pitfall.fix_summary}</div>
                     </article>
                   `)}
                 </div>
@@ -793,9 +1053,9 @@ function GuidedPanel() {
       </section>
 
       <section class="card command-section">
-        <div class="card-title">Operating Paths</div>
+        <div class="card-title">운영 경로</div>
         ${commandPlaneHelpLoading.value
-          ? html`<div class="empty-state">Loading CPv2 runbook…</div>`
+          ? html`<div class="empty-state">CPv2 runbook 불러오는 중…</div>`
           : commandPlaneHelpError.value
             ? html`<div class="empty-state error">${commandPlaneHelpError.value}</div>`
             : html`
@@ -832,22 +1092,20 @@ function GuidedPanel() {
 
 function SummarySurface() {
   return html`
+    <${SummaryHero} />
     <${SummaryCards} />
-    <div class="command-primary-layout">
-      <${SwarmPanel} />
-      <${GuidedPanel} />
-    </div>
+    <${GuidedPanel} />
   `
 }
 
 function DetailLoadingState() {
   if (commandPlaneDetailLoading.value) {
-    return html`<div class="empty-state">Loading command-plane detail…</div>`
+    return html`<div class="empty-state">command-plane detail 불러오는 중…</div>`
   }
   if (commandPlaneDetailError.value) {
     return html`<div class="empty-state error">${commandPlaneDetailError.value}</div>`
   }
-  return html`<div class="empty-state">Select a surface to load command-plane detail.</div>`
+  return html`<div class="empty-state">surface를 선택하면 command-plane detail을 로드합니다.</div>`
 }
 
 function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?: number }) {
@@ -1275,138 +1533,141 @@ function SwarmSurface() {
   const actualCtx = swarm?.provider?.actual_ctx ?? swarm?.provider?.ctx_per_slot ?? 0
   const expectedCtx = swarm?.provider?.expected_ctx ?? 'n/a'
   return html`
-    <div class="command-surface-grid">
-      <section class="card command-section">
-        <div class="card-title">Swarm Live Run</div>
-        ${commandPlaneSwarmLoading.value
-          ? html`<div class="empty-state">Loading swarm live state…</div>`
-          : commandPlaneSwarmError.value
-            ? html`<div class="empty-state error">${commandPlaneSwarmError.value}</div>`
-            : swarm
-              ? html`
-                  <div class="command-summary-grid">
-                    <div class="monitor-stat-card"><span>Run</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room n/a'}</small></div>
-                    <div class="monitor-stat-card"><span>Workers</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0} live · ${swarm.summary?.completed_workers ?? 0} completed</small></div>
-                    <div class="monitor-stat-card"><span>Runtime</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
-                    <div class="monitor-stat-card"><span>Hot 10+</span><strong>${swarm.summary?.pass_hot_concurrency ? 'pass' : 'check'}</strong><small>${swarm.provider?.slot_url ?? 'slot n/a'}</small></div>
-                    <div class="monitor-stat-card"><span>End to End</span><strong>${swarm.summary?.pass_end_to_end ? 'pass' : 'check'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
-                  </div>
-                  <div class="command-card-grid">
-                    <span>Operation</span><span>${swarm.operation?.operation_id ?? 'none'}</span>
-                    <span>Squad</span><span>${swarm.squad?.label ?? 'none'}</span>
-                    <span>Detachment</span><span>${swarm.detachment?.detachment_id ?? 'none'}</span>
-                    <span>Expected</span><span>${swarm.summary?.expected_workers ?? 0} workers</span>
-                    <span>Final Markers</span><span>${swarm.summary?.final_markers_seen ?? 0}</span>
-                    <span>Runtime Blocker</span><span>${swarm.provider?.runtime_blocker ?? 'none'}</span>
-                    <span>Recommended</span><span>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</span>
-                  </div>
-                  ${swarm.truth_notes.length > 0
-                    ? html`<div class="command-tag-row">
-                        ${swarm.truth_notes.map(note => html`<span class="command-tag">${note}</span>`)}
-                      </div>`
-                    : null}
-                `
-              : html`<div class="empty-state">No swarm read-model yet.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Checklist</div>
-        ${swarm && swarm.checklist.length > 0
-          ? html`<div class="command-card-stack">
-              ${swarm.checklist.map(item => html`<${SwarmChecklistCard} item=${item} />`)}
-            </div>`
-          : html`<div class="empty-state">No checklist yet.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Workers</div>
-        ${swarm && swarm.workers.length > 0
-          ? html`<div class="command-card-stack">
-              ${swarm.workers.map(worker => html`<${SwarmWorkerCard} worker=${worker} />`)}
-            </div>`
-          : html`<div class="empty-state">No worker rows yet.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Runtime</div>
-        ${swarm?.provider
-          ? html`
-              <div class="command-card-grid">
-                <span>Provider</span><span>${swarm.provider.provider_base_url ?? 'n/a'}</span>
-                <span>Provider Reachable</span><span>${swarm.provider.provider_reachable == null ? 'n/a' : swarm.provider.provider_reachable ? 'yes' : 'no'}</span>
-                <span>Requested Model</span><span>${swarm.provider.provider_model_id ?? 'n/a'}</span>
-                <span>Actual Model</span><span>${swarm.provider.actual_model_id ?? 'n/a'}</span>
-                <span>Slot URL</span><span>${swarm.provider.slot_url ?? 'n/a'}</span>
-                <span>Expected Slots</span><span>${swarm.provider.expected_slots ?? 'n/a'}</span>
-                <span>Actual Slots</span><span>${swarm.provider.actual_slots ?? swarm.provider.total_slots ?? 0}</span>
-                <span>Expected Ctx</span><span>${swarm.provider.expected_ctx ?? 'n/a'}</span>
-                <span>Actual Ctx</span><span>${swarm.provider.actual_ctx ?? swarm.provider.ctx_per_slot ?? 0}</span>
-                <span>Active Now</span><span>${swarm.provider.active_slots_now ?? 0}</span>
-                <span>Peak Active</span><span>${swarm.provider.peak_active_slots ?? 0}</span>
-                <span>Sample Count</span><span>${swarm.provider.sample_count ?? 0}</span>
-                <span>Last Sample</span><span>${swarm.provider.last_sample_at ? relativeTime(swarm.provider.last_sample_at) : 'n/a'}</span>
-                <span>Runtime Blocker</span><span>${swarm.provider.runtime_blocker ?? 'none'}</span>
-                <span>Doctor Checked</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : 'n/a'}</span>
-              </div>
-              ${swarm.provider.detail
-                ? html`<div class="command-card-sub">${swarm.provider.detail}</div>`
-                : null}
-              ${swarm.provider.timeline.length > 0
-                ? html`<div class="command-trace-stack">
-                    ${swarm.provider.timeline.slice(-12).map(sample => html`
-                      <article class="command-trace-row">
-                        <div class="command-trace-main">
-                          <div class="command-trace-head">
-                            <strong>${sample.active_slots} active</strong>
-                            <span class="command-chip">${relativeTime(sample.timestamp)}</span>
-                          </div>
-                          <div class="command-card-sub">slots ${sample.active_slot_ids.join(', ') || 'none'}</div>
-                        </div>
-                      </article>
-                    `)}
-                  </div>`
-                : html`<div class="empty-state">No slot telemetry captured yet.</div>`}
-            `
-          : html`<div class="empty-state">No runtime telemetry yet.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Blockers</div>
-        ${swarm && swarm.blockers.length > 0
-          ? html`<div class="command-card-stack">
-              ${swarm.blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)}
-            </div>`
-          : html`<div class="empty-state">No blockers. Use ${swarm?.recommended_next_tool ?? 'masc_observe_traces'} for the next action.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Recent Messages</div>
-        ${swarm && swarm.recent_messages.length > 0
-          ? html`<div class="command-trace-stack">
-              ${swarm.recent_messages.map(message => html`
-                <article class="command-trace-row">
-                  <div class="command-trace-main">
-                    <div class="command-trace-head">
-                      <strong>${message.from}</strong>
-                      <span class="command-chip">${relativeTime(message.timestamp)}</span>
+    <div class="command-section-stack">
+      <${SwarmPanel} />
+      <div class="command-surface-grid">
+        <section class="card command-section">
+          <div class="card-title">스웜 라이브 런</div>
+          ${commandPlaneSwarmLoading.value
+            ? html`<div class="empty-state">Loading swarm live state…</div>`
+            : commandPlaneSwarmError.value
+              ? html`<div class="empty-state error">${commandPlaneSwarmError.value}</div>`
+              : swarm
+                ? html`
+                    <div class="command-summary-grid">
+                      <div class="monitor-stat-card"><span>실행 런</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room 정보 없음'}</small></div>
+                      <div class="monitor-stat-card"><span>워커</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0}개 가동 · ${swarm.summary?.completed_workers ?? 0}개 완료</small></div>
+                      <div class="monitor-stat-card"><span>런타임</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
+                      <div class="monitor-stat-card"><span>고동시성</span><strong>${swarm.summary?.pass_hot_concurrency ? '통과' : '확인 필요'}</strong><small>${swarm.provider?.slot_url ?? 'slot 정보 없음'}</small></div>
+                      <div class="monitor-stat-card"><span>종단 점검</span><strong>${swarm.summary?.pass_end_to_end ? '통과' : '확인 필요'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
                     </div>
-                    <div class="command-card-sub">seq ${message.seq}</div>
-                  </div>
-                  <pre class="command-trace-detail">${message.content}</pre>
-                </article>
-              `)}
-            </div>`
-          : html`<div class="empty-state">No run-scoped broadcasts captured yet.</div>`}
-      </section>
+                    <div class="command-card-grid">
+                      <span>작전</span><span>${swarm.operation?.operation_id ?? '없음'}</span>
+                      <span>분대</span><span>${swarm.squad?.label ?? '없음'}</span>
+                      <span>실행체</span><span>${swarm.detachment?.detachment_id ?? '없음'}</span>
+                      <span>예상 워커</span><span>${swarm.summary?.expected_workers ?? 0}명</span>
+                      <span>최종 마커</span><span>${swarm.summary?.final_markers_seen ?? 0}</span>
+                      <span>런타임 막힘</span><span>${swarm.provider?.runtime_blocker ?? '없음'}</span>
+                      <span>추천 도구</span><span>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</span>
+                    </div>
+                    ${swarm.truth_notes.length > 0
+                      ? html`<div class="command-tag-row">
+                          ${swarm.truth_notes.map(note => html`<span class="command-tag">${note}</span>`)}
+                        </div>`
+                      : null}
+                  `
+                : html`<div class="empty-state">스웜 read-model이 아직 없습니다.</div>`}
+        </section>
 
-      <section class="card command-section">
-        <div class="card-title">Recent Trace Events</div>
-        ${swarm && swarm.recent_trace_events.length > 0
-          ? html`<div class="command-trace-stack">
-              ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
-            </div>`
-          : html`<div class="empty-state">No run-scoped trace events captured yet.</div>`}
-      </section>
+        <section class="card command-section">
+          <div class="card-title">체크리스트</div>
+          ${swarm && swarm.checklist.length > 0
+            ? html`<div class="command-card-stack">
+                ${swarm.checklist.map(item => html`<${SwarmChecklistCard} item=${item} />`)}
+              </div>`
+            : html`<div class="empty-state">체크리스트가 아직 없습니다.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">워커</div>
+          ${swarm && swarm.workers.length > 0
+            ? html`<div class="command-card-stack">
+                ${swarm.workers.map(worker => html`<${SwarmWorkerCard} worker=${worker} />`)}
+              </div>`
+            : html`<div class="empty-state">워커 행이 아직 없습니다.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">런타임</div>
+          ${swarm?.provider
+            ? html`
+                <div class="command-card-grid">
+                  <span>Provider</span><span>${swarm.provider.provider_base_url ?? 'n/a'}</span>
+                  <span>Provider Reachable</span><span>${swarm.provider.provider_reachable == null ? 'n/a' : swarm.provider.provider_reachable ? 'yes' : 'no'}</span>
+                  <span>Requested Model</span><span>${swarm.provider.provider_model_id ?? 'n/a'}</span>
+                  <span>Actual Model</span><span>${swarm.provider.actual_model_id ?? 'n/a'}</span>
+                  <span>Slot URL</span><span>${swarm.provider.slot_url ?? 'n/a'}</span>
+                  <span>Expected Slots</span><span>${swarm.provider.expected_slots ?? 'n/a'}</span>
+                  <span>Actual Slots</span><span>${swarm.provider.actual_slots ?? swarm.provider.total_slots ?? 0}</span>
+                  <span>Expected Ctx</span><span>${swarm.provider.expected_ctx ?? 'n/a'}</span>
+                  <span>Actual Ctx</span><span>${swarm.provider.actual_ctx ?? swarm.provider.ctx_per_slot ?? 0}</span>
+                  <span>Active Now</span><span>${swarm.provider.active_slots_now ?? 0}</span>
+                  <span>Peak Active</span><span>${swarm.provider.peak_active_slots ?? 0}</span>
+                  <span>Sample Count</span><span>${swarm.provider.sample_count ?? 0}</span>
+                  <span>Last Sample</span><span>${swarm.provider.last_sample_at ? relativeTime(swarm.provider.last_sample_at) : 'n/a'}</span>
+                  <span>런타임 막힘</span><span>${swarm.provider.runtime_blocker ?? 'none'}</span>
+                  <span>Doctor Checked</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : 'n/a'}</span>
+                </div>
+                ${swarm.provider.detail
+                  ? html`<div class="command-card-sub">${swarm.provider.detail}</div>`
+                  : null}
+                ${swarm.provider.timeline.length > 0
+                  ? html`<div class="command-trace-stack">
+                      ${swarm.provider.timeline.slice(-12).map(sample => html`
+                        <article class="command-trace-row">
+                          <div class="command-trace-main">
+                            <div class="command-trace-head">
+                              <strong>${sample.active_slots} active</strong>
+                              <span class="command-chip">${relativeTime(sample.timestamp)}</span>
+                            </div>
+                            <div class="command-card-sub">slots ${sample.active_slot_ids.join(', ') || 'none'}</div>
+                          </div>
+                        </article>
+                      `)}
+                    </div>`
+                  : html`<div class="empty-state">slot telemetry가 아직 없습니다.</div>`}
+              `
+            : html`<div class="empty-state">런타임 telemetry가 아직 없습니다.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">막힘 요인</div>
+          ${swarm && swarm.blockers.length > 0
+            ? html`<div class="command-card-stack">
+                ${swarm.blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)}
+              </div>`
+            : html`<div class="empty-state">막힘 요인은 없습니다. 다음 액션은 ${swarm?.recommended_next_tool ?? 'masc_observe_traces'} 입니다.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">최근 메시지</div>
+          ${swarm && swarm.recent_messages.length > 0
+            ? html`<div class="command-trace-stack">
+                ${swarm.recent_messages.map(message => html`
+                  <article class="command-trace-row">
+                    <div class="command-trace-main">
+                      <div class="command-trace-head">
+                        <strong>${message.from}</strong>
+                        <span class="command-chip">${relativeTime(message.timestamp)}</span>
+                      </div>
+                      <div class="command-card-sub">seq ${message.seq}</div>
+                    </div>
+                    <pre class="command-trace-detail">${message.content}</pre>
+                  </article>
+                `)}
+              </div>`
+            : html`<div class="empty-state">run 범위 메시지가 아직 없습니다.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">최근 트레이스 이벤트</div>
+          ${swarm && swarm.recent_trace_events.length > 0
+            ? html`<div class="command-trace-stack">
+                ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
+              </div>`
+            : html`<div class="empty-state">run 범위 trace event가 아직 없습니다.</div>`}
+        </section>
+      </div>
     </div>
   `
 }
@@ -1654,12 +1915,13 @@ function SurfaceBody() {
   if (commandPlaneSurface.value === 'summary') {
     return html`<${SummarySurface} />`
   }
+  if (commandPlaneSurface.value === 'swarm') {
+    return html`<${SwarmSurface} />`
+  }
   if (!commandPlaneSnapshot.value) {
     return html`<${DetailLoadingState} />`
   }
   switch (commandPlaneSurface.value) {
-    case 'swarm':
-      return html`<${SwarmSurface} />`
     case 'chains':
       return html`<${ChainsSurface} />`
     case 'topology':
@@ -1690,6 +1952,9 @@ export function Command() {
     const requestedOperation = route.value.params.operation
     if (isCommandSurface(requestedSurface)) {
       setCommandPlaneSurface(requestedSurface)
+    }
+    else if (!requestedSurface) {
+      setCommandPlaneSurface('summary')
     }
     if (requestedOperation) {
       focusCommandPlaneChainOperation(requestedOperation)
@@ -1732,7 +1997,7 @@ export function Command() {
     <section class="dashboard-panel command-plane-view">
       <div class="panel-header">
         <div>
-          <h2>Command Plane</h2>
+          <h2>지휘면 / Command Plane</h2>
           <p>Operations-first command surface for company → platoon → squad → agent orchestration, approvals, alerts, and traceability.</p>
         </div>
         <div class="panel-actions">

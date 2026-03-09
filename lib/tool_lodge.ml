@@ -1800,7 +1800,7 @@ let lodge_auto_chain ~net (args : Yojson.Safe.t) =
       (* Continue with probability *)
       if Random.float 1.0 < chain_prob then begin
         add (Printf.sprintf "🎲 Continuing (roll < %.2f)..." chain_prob);
-        Eio.Time.sleep (Process_eio.get_clock ()) 0.5;
+        (match Process_eio.get_clock () with Ok clk -> Eio.Time.sleep clk 0.5 | Error _ -> ());
         loop (count + 1)
       end else begin
         add (Printf.sprintf "🎲 Stopping (roll >= %.2f)" chain_prob);
@@ -2621,7 +2621,7 @@ let autonomous_loop ~net args =
       results := Printf.sprintf "───── 진행: %d/%d (%.0f%%) ─────" i iterations (100.0 *. float_of_int i /. float_of_int iterations) :: !results;
 
     (* Delay between iterations - minimum 1s to prevent spam *)
-    if i < iterations then Eio.Time.sleep (Process_eio.get_clock ()) (max 1.0 (float_of_int delay_ms /. 1000.0))
+    if i < iterations then (match Process_eio.get_clock () with Ok clk -> Eio.Time.sleep clk (max 1.0 (float_of_int delay_ms /. 1000.0)) | Error _ -> ())
   done;
 
   loop_status := None;

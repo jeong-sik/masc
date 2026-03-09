@@ -29,16 +29,31 @@ let init () =
     end
   )
 
-(** Get the global registry. Initializes if needed (must be in Eio context). *)
-let get_registry () =
+(** Raised when the agent registry cannot be initialized.
+    Contains the step name and detail of the failure. *)
+exception Registry_init_failed of string
+
+(** Get the global registry. Initializes if needed (must be in Eio context).
+    Returns [Error msg] if initialization fails instead of raising. *)
+let get_registry () : (Agent_identity.Registry.registry, string) result =
   match !global_registry with
-  | Some reg -> reg
+  | Some reg -> Ok reg
   | None ->
       (* Lazy init - must be in Eio context *)
       init ();
       match !global_registry with
-      | Some reg -> reg
-      | None -> failwith "Agent registry initialization failed"
+      | Some reg -> Ok reg
+      | None ->
+          Error "agent registry initialization failed at step: lazy_init \
+                 (global_registry is None after init() — \
+                 possible Eio.Mutex contention or ref corruption)"
+
+(** Get the registry, raising [Registry_init_failed] on failure.
+    Used by internal callers that cannot change their return type. *)
+let get_registry_exn () =
+  match get_registry () with
+  | Ok reg -> reg
+  | Error msg -> raise (Registry_init_failed msg)
 
 (** Reset registry for testing *)
 let reset_for_testing () =
@@ -130,7 +145,7 @@ let[@warning "-32"] unbind_ssh_key ~agent_id =
     @return Agent identity for this request
 *)
 let get_or_create_identity ?mcp_session_id params =
-  let reg = get_registry () in
+  let reg = get_registry_exn () in
 
   (* Try to find existing identity by MCP session ID *)
   let existing_by_session =
@@ -178,56 +193,65 @@ let get_or_create_identity ?mcp_session_id params =
 
 (** Get identity by agent name (for backward compatibility) *)
 let get_by_name agent_name =
-  let reg = get_registry () in
-  Agent_identity.Registry.find_by_name reg agent_name
+  match get_registry () with
+  | Ok reg -> Agent_identity.Registry.find_by_name reg agent_name
+  | Error _ -> None
 
 (** Get identity by session key *)
 let get_by_session session_key =
-  let reg = get_registry () in
-  Agent_identity.Registry.find_by_session reg session_key
+  match get_registry () with
+  | Ok reg -> Agent_identity.Registry.find_by_session reg session_key
+  | Error _ -> None
 
 (** {1 Statistics} *)
 
 (** Get count of active agents *)
 let active_count ?(within_seconds = 300.0) () =
-  let reg = get_registry () in
-  List.length (Agent_identity.Registry.list_active reg ~within_seconds)
+  match get_registry () with
+  | Ok reg -> List.length (Agent_identity.Registry.list_active reg ~within_seconds)
+  | Error _ -> 0
 
 (** Get total registered count *)
 let total_count () =
-  let reg = get_registry () in
-  Agent_identity.Registry.count reg
+  match get_registry () with
+  | Ok reg -> Agent_identity.Registry.count reg
+  | Error _ -> 0
 
 (** List all active identities *)
 let list_active ?(within_seconds = 300.0) () =
-  let reg = get_registry () in
-  Agent_identity.Registry.list_active reg ~within_seconds
+  match get_registry () with
+  | Ok reg -> Agent_identity.Registry.list_active reg ~within_seconds
+  | Error _ -> []
 
 (** {1 Cleanup} *)
 
 (** Clean up stale session mappings *)
 let cleanup_stale_sessions () =
-  let reg = get_registry () in
-  with_session_lock (fun () ->
-    let to_remove = ref [] in
-    Hashtbl.iter (fun sid session_key ->
-      match Agent_identity.Registry.find_by_session reg session_key with
-      | None -> to_remove := sid :: !to_remove
-      | Some _ -> ()
-    ) session_identity_map;
-    List.iter (fun sid -> Hashtbl.remove session_identity_map sid) !to_remove;
-    List.length !to_remove
-  )
+  match get_registry () with
+  | Error _ -> 0
+  | Ok reg ->
+    with_session_lock (fun () ->
+      let to_remove = ref [] in
+      Hashtbl.iter (fun sid session_key ->
+        match Agent_identity.Registry.find_by_session reg session_key with
+        | None -> to_remove := sid :: !to_remove
+        | Some _ -> ()
+      ) session_identity_map;
+      List.iter (fun sid -> Hashtbl.remove session_identity_map sid) !to_remove;
+      List.length !to_remove
+    )
 
 (** Unregister an identity *)
 let unregister session_key =
-  let reg = get_registry () in
-  Agent_identity.Registry.unregister reg session_key;
-  (* Also clean up session map *)
-  with_session_lock (fun () ->
-    let to_remove = ref [] in
-    Hashtbl.iter (fun sid sk ->
-      if sk = session_key then to_remove := sid :: !to_remove
-    ) session_identity_map;
-    List.iter (fun sid -> Hashtbl.remove session_identity_map sid) !to_remove
-  )
+  match get_registry () with
+  | Error _ -> ()
+  | Ok reg ->
+    Agent_identity.Registry.unregister reg session_key;
+    (* Also clean up session map *)
+    with_session_lock (fun () ->
+      let to_remove = ref [] in
+      Hashtbl.iter (fun sid sk ->
+        if sk = session_key then to_remove := sid :: !to_remove
+      ) session_identity_map;
+      List.iter (fun sid -> Hashtbl.remove session_identity_map sid) !to_remove
+    )

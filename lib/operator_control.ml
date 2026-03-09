@@ -2061,16 +2061,26 @@ let default_target_type_for action_type =
   | _ -> ""
 
 let generate_confirm_token config =
+  let max_attempts = 10 in
   let rec loop attempts =
-    if attempts > 8 then
-      failwith "failed to generate unique confirm token"
+    if attempts >= max_attempts then
+      Error (Printf.sprintf
+        "failed to generate unique confirm token after %d attempts \
+         (token space may be exhausted; %d pending confirms)"
+        max_attempts
+        (List.length (raw_pending_confirms config)))
     else
       let token = "opc_" ^ String.sub (Auth.generate_token ()) 0 32 in
       let exists =
         raw_pending_confirms config
         |> List.exists (fun entry -> String.equal entry.token token)
       in
-      if exists then loop (attempts + 1) else token
+      if exists then begin
+        (* Exponential backoff: 1ms, 2ms, 4ms, ... up to ~512ms *)
+        let backoff_us = 1000 * (1 lsl (min attempts 9)) in
+        ignore (Unix.select [] [] [] (float_of_int backoff_us /. 1_000_000.0));
+        loop (attempts + 1)
+      end else Ok token
   in
   loop 0
 
@@ -2757,9 +2767,10 @@ let action_json ?actor_hint (ctx : 'a context) args =
   let started_at = Unix.gettimeofday () in
   if confirm_required request.action_type then (
     let expires_at = iso_of_unix (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
+    let* token = generate_confirm_token ctx.config in
     let entry =
       {
-        token = generate_confirm_token ctx.config;
+        token;
         trace_id;
         actor = request.actor;
         action_type = request.action_type;

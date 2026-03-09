@@ -24,13 +24,13 @@ let is_initialized () = Option.is_some !_proc_mgr
 
 let get_proc_mgr () =
   match !_proc_mgr with
-  | Some pm -> pm
-  | None -> failwith "Process_eio.init not called"
+  | Some pm -> Ok pm
+  | None -> Error "Process_eio.get_proc_mgr: init not called"
 
 let get_clock () =
   match !_clock with
-  | Some c -> c
-  | None -> failwith "Process_eio.init not called"
+  | Some c -> Ok c
+  | None -> Error "Process_eio.get_clock: init not called"
 
 (** ── Unix fallback for tests (when Eio not initialized) ──────────── *)
 
@@ -103,21 +103,20 @@ let with_unix_capture ?env ?stdin_content (argv : string list)
                  in
                  write_all 0)
          | _ -> ());
-         let stdout_r =
-           match !stdout_r_ref with
-           | Some fd ->
-               stdout_r_ref := None;
-               fd
-           | None -> failwith "stdout pipe already consumed"
-         in
-         let ic = Unix.in_channel_of_descr stdout_r in
-         let output =
-           Fun.protect
-             ~finally:(fun () -> In_channel.close ic)
-             (fun () -> In_channel.input_all ic)
-         in
-         let (_pid, status) = Unix.waitpid [] pid in
-         on_success status output
+         (match !stdout_r_ref with
+         | None ->
+             (* stdout pipe already consumed — treat as error *)
+             on_error ()
+         | Some stdout_r ->
+             stdout_r_ref := None;
+             let ic = Unix.in_channel_of_descr stdout_r in
+             let output =
+               Fun.protect
+                 ~finally:(fun () -> In_channel.close ic)
+                 (fun () -> In_channel.input_all ic)
+             in
+             let (_pid, status) = Unix.waitpid [] pid in
+             on_success status output)
        with _exn ->
          Option.iter close_quietly !stdin_r_ref;
          stdin_r_ref := None;
@@ -156,7 +155,9 @@ let run_unix_argv_with_stdin_and_status_fallback
 let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
   if not (is_initialized ()) then run_unix_argv_fallback ?env argv
   else
-    let pm = get_proc_mgr () and clk = get_clock () in
+    match get_proc_mgr (), get_clock () with
+    | Error _, _ | _, Error _ -> run_unix_argv_fallback ?env argv
+    | Ok pm, Ok clk ->
     let cwd = !_cwd_default in
     let buf = Buffer.create 1024 in
     let label = String.concat " " (List.map Filename.quote argv) in
@@ -183,7 +184,10 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
   if not (is_initialized ()) then
     run_unix_argv_with_stdin_fallback ?env ~stdin_content argv
   else
-    let pm = get_proc_mgr () and clk = get_clock () in
+    match get_proc_mgr (), get_clock () with
+    | Error _, _ | _, Error _ ->
+        run_unix_argv_with_stdin_fallback ?env ~stdin_content argv
+    | Ok pm, Ok clk ->
     let cwd = !_cwd_default in
     let buf = Buffer.create 1024 in
     let label = String.concat " " (List.map Filename.quote argv) in
@@ -217,7 +221,10 @@ let run_argv_with_stdin_and_status
   if not (is_initialized ()) then
     run_unix_argv_with_stdin_and_status_fallback ?env ~stdin_content argv
   else
-    let pm = get_proc_mgr () and clk = get_clock () in
+    match get_proc_mgr (), get_clock () with
+    | Error _, _ | _, Error _ ->
+        run_unix_argv_with_stdin_and_status_fallback ?env ~stdin_content argv
+    | Ok pm, Ok clk ->
     let cwd = !_cwd_default in
     let buf = Buffer.create 1024 in
     let label = String.concat " " (List.map Filename.quote argv) in
@@ -255,7 +262,9 @@ let run_argv_with_stdin_and_status
 let run_argv_with_status ?(timeout_sec = 60.0) ?env (argv : string list) : Unix.process_status * string =
   if not (is_initialized ()) then run_unix_argv_with_status_fallback ?env argv
   else
-    let pm = get_proc_mgr () and clk = get_clock () in
+    match get_proc_mgr (), get_clock () with
+    | Error _, _ | _, Error _ -> run_unix_argv_with_status_fallback ?env argv
+    | Ok pm, Ok clk ->
     let cwd = !_cwd_default in
     let buf = Buffer.create 1024 in
     let label = String.concat " " (List.map Filename.quote argv) in

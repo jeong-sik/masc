@@ -400,7 +400,19 @@ export function Agents() {
         </div>
       <//>
 
-      <div class="grid-2col">
+      <div class="agents-workbench">
+        <${Card} title="Active Agents" class="section">
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">Short-horizon execution monitor</h2>
+            <p class="monitor-subheadline">Live agents stay grouped here first so execution drift is visible before you scan offline history.</p>
+          </div>
+          <div class="monitor-list">
+            ${aliveRows.length === 0
+              ? html`<div class="empty-state">No active agents visible</div>`
+              : aliveRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
+          </div>
+        <//>
+
         <${Card} title="Keeper Watch" class="section">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">Long-running keeper health</h2>
@@ -413,28 +425,15 @@ export function Agents() {
           </div>
         <//>
 
-        <${Card} title="Agent Watch" class="section">
+        <${Card} title="Offline Agents" class="section">
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">Short-horizon execution monitor</h2>
-            <p class="monitor-subheadline">Current task, recent signal, and quiet drift are surfaced together.</p>
+            <h2 class="monitor-headline">Who dropped out of the live loop</h2>
+            <p class="monitor-subheadline">Offline rows are separated so they do not drown the active execution monitor.</p>
           </div>
           <div class="monitor-list">
-            ${agentRows.length === 0
-              ? html`<div class="empty-state">No agents registered</div>`
-              : html`
-                ${aliveRows.length > 0 ? html`
-                  <div class="agent-group-header">
-                    Active <span class="group-count">${aliveRows.length}</span>
-                  </div>
-                  ${aliveRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
-                ` : null}
-                ${offlineRows.length > 0 ? html`
-                  <div class="agent-group-header">
-                    Offline <span class="group-count">${offlineRows.length}</span>
-                  </div>
-                  ${offlineRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
-                ` : null}
-              `}
+            ${offlineRows.length === 0
+              ? html`<div class="empty-state">No offline agents right now</div>`
+              : offlineRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
           </div>
         <//>
       </div>

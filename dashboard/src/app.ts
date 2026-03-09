@@ -2,7 +2,7 @@
 // Sticky app shell with tab routing and live status rail
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { route, initRouter, navigate } from './router'
 import { connected, eventCount, connectSSE, disconnectSSE } from './sse'
 import {
@@ -19,7 +19,7 @@ import {
   tasks,
   keepers,
 } from './store'
-import { Overview } from './components/overview'
+import { Mission } from './components/mission'
 import { Command } from './components/command'
 import { Ops } from './components/ops'
 import { Board } from './components/board'
@@ -27,12 +27,12 @@ import { Activity } from './components/activity'
 import { Agents } from './components/agents'
 import { Goals } from './components/goals'
 import { Trpg } from './components/trpg'
-import { ControlDock } from './components/control-dock'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
-import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
+import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
+import { refreshMissionSnapshot } from './mission-store'
 import {
   commandPlaneSurface,
   refreshCommandPlaneChainSummary,
@@ -40,8 +40,6 @@ import {
   refreshCommandPlaneSwarm,
 } from './command-store'
 import { activityPanelOpen, closeActivityPanel, toggleActivityPanel } from './activity-panel'
-
-const QUICK_ACTIONS_OPEN_KEY = 'masc_dashboard_quick_actions_open'
 
 function ConnectionStatus() {
   const isConnected = connected.value
@@ -96,7 +94,10 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
                 refreshCommandPlaneSwarm()
               }
             }
-            if (currentTab === 'ops') {
+            if (currentTab === 'mission' || currentTab === 'overview') {
+              refreshMissionSnapshot()
+            }
+            if (currentTab === 'intervene' || currentTab === 'ops') {
               refreshOperatorSnapshot()
               refreshOperatorRoomDigest()
             }
@@ -110,8 +111,55 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
         >
           Refresh Now
         </button>
-        <button class="rail-secondary-btn" onClick=${() => navigate('ops')}>
-          Open Ops
+        <button class="rail-secondary-btn" onClick=${() => navigate('intervene')}>
+          Open Intervene
+        </button>
+      </div>
+    </section>
+  `
+}
+
+function InterveneRailCard() {
+  const snapshot = operatorSnapshot.value
+  const pendingConfirms = snapshot?.pending_confirms.length ?? 0
+  const sessionCount = snapshot?.sessions.length ?? 0
+  const keeperCount = snapshot?.keepers.length ?? 0
+  return html`
+    <section class="rail-card">
+      <div class="rail-card-head">
+        <h3>개입 바로가기</h3>
+        <span class="rail-section-chip ${pendingConfirms > 0 ? 'warn' : 'ok'}">${pendingConfirms > 0 ? '확인 필요' : '준비됨'}</span>
+      </div>
+      <div class="rail-snapshot-copy">
+        <span>구조화된 개입은 전용 화면에서 처리합니다</span>
+        <span>rail은 요약만, 실제 조작은 Intervene에서</span>
+      </div>
+      <div class="rail-stat-grid">
+        <div class="rail-stat-card">
+          <span>확인 대기</span>
+          <strong>${pendingConfirms}</strong>
+        </div>
+        <div class="rail-stat-card">
+          <span>세션</span>
+          <strong>${sessionCount}</strong>
+        </div>
+        <div class="rail-stat-card">
+          <span>keepers</span>
+          <strong>${keeperCount}</strong>
+        </div>
+      </div>
+      <div class="rail-inline-actions">
+        <button
+          class="rail-refresh-btn"
+          onClick=${() => {
+            refreshOperatorSnapshot()
+            refreshOperatorRoomDigest()
+          }}
+        >
+          개입 데이터 갱신
+        </button>
+        <button class="rail-secondary-btn" onClick=${() => navigate('intervene')}>
+          개입 열기
         </button>
       </div>
     </section>
@@ -122,16 +170,6 @@ function SideRail() {
   const current = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === current)
   const currentSection = DASHBOARD_NAV_SECTIONS.find(section => section.id === currentView?.group)
-  const [quickActionsOpen, setQuickActionsOpen] = useState(() => {
-    const stored = localStorage.getItem(QUICK_ACTIONS_OPEN_KEY)
-    if (stored === '0') return false
-    if (stored === '1') return true
-    return true
-  })
-
-  useEffect(() => {
-    localStorage.setItem(QUICK_ACTIONS_OPEN_KEY, quickActionsOpen ? '1' : '0')
-  }, [quickActionsOpen])
 
   return html`
     <aside class="dashboard-rail">
@@ -170,20 +208,7 @@ function SideRail() {
       </section>
 
       <${SnapshotCard} currentTab=${current} currentSectionLabel=${currentSection?.label ?? 'Observe'} />
-
-      <section class="rail-card fold-card">
-        <div class="rail-card-head">
-          <h3>Quick Actions</h3>
-          <span class="rail-section-chip">${quickActionsOpen ? 'Open' : 'Closed'}</span>
-        </div>
-        <button class="fold-toggle" onClick=${() => setQuickActionsOpen((open: boolean) => !open)}>
-          <span>${quickActionsOpen ? 'Hide inline actions' : 'Show inline actions'}</span>
-          <span class="fold-toggle-meta">Join, broadcast, keeper DM, lodge poke</span>
-        </button>
-        ${quickActionsOpen
-          ? html`<div class="rail-fold-body"><${ControlDock} /></div>`
-          : html`<div class="rail-fold-hint">Use inline actions for quick room nudges. Open the Ops tab for structured intervention work.</div>`}
-      </section>
+      <${InterveneRailCard} />
     </aside>
   `
 }
@@ -192,10 +217,14 @@ function TabContent() {
   const tab = route.value.tab
 
   switch (tab) {
+    case 'mission':
+      return html`<${Mission} />`
+    case 'intervene':
+      return html`<${Ops} />`
     case 'command':
       return html`<${Command} />`
     case 'overview':
-      return html`<${Overview} />`
+      return html`<${Mission} />`
     case 'ops':
       return html`<${Ops} />`
     case 'board':
@@ -207,7 +236,7 @@ function TabContent() {
     case 'trpg':
       return html`<${Trpg} />`
     default:
-      return html`<${Overview} />`
+      return html`<${Mission} />`
   }
 }
 
@@ -243,7 +272,10 @@ export function App() {
           void refreshCommandPlaneSwarm()
         }
       }
-      else if (tab === 'ops') {
+      else if (tab === 'mission' || tab === 'overview') {
+        void refreshMissionSnapshot()
+      }
+      else if (tab === 'intervene' || tab === 'ops') {
         void refreshOperatorSnapshot()
         void refreshOperatorRoomDigest()
       }
@@ -270,7 +302,10 @@ export function App() {
         refreshCommandPlaneSwarm()
       }
     }
-    if (tab === 'ops') {
+    if (tab === 'mission' || tab === 'overview') {
+      refreshMissionSnapshot()
+    }
+    if (tab === 'intervene' || tab === 'ops') {
       refreshOperatorSnapshot()
       refreshOperatorRoomDigest()
     }

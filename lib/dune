@@ -32,6 +32,7 @@
    config
    context_router
    dashboard
+   dashboard_mission
    web_dashboard
    credits_dashboard
    cp_microarch_summary

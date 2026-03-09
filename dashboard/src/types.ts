@@ -628,6 +628,49 @@ export interface DashboardData {
   perpetual: PerpetualStatus
 }
 
+export interface DashboardMissionSummary {
+  room_health?: string
+  cluster?: string
+  project?: string
+  current_room?: string | null
+  paused?: boolean
+  tempo_interval_s?: number
+  active_agents?: number
+  keeper_pressure?: number
+  active_operations?: number
+  pending_approvals?: number
+  incident_count?: number
+  recommended_action_count?: number
+  top_attention?: OperatorAttentionItem | null
+  top_action?: OperatorRecommendedAction | null
+}
+
+export interface DashboardMissionCommandFocus {
+  health?: string
+  active_operations?: number
+  pending_approvals?: number
+  swarm_overview?: CommandPlaneSwarmStatus['overview']
+  top_attention?: OperatorAttentionItem | null
+  top_action?: OperatorRecommendedAction | null
+  session_cards: OperatorSessionCard[]
+}
+
+export interface DashboardMissionTargets {
+  sessions: OperatorSessionSnapshot[]
+  keepers: OperatorKeeperSnapshot[]
+  pending_confirms: PendingConfirmation[]
+  available_actions: OperatorActionDescriptor[]
+}
+
+export interface DashboardMissionResponse {
+  generated_at?: string
+  summary: DashboardMissionSummary
+  incidents: OperatorAttentionItem[]
+  recommended_actions: OperatorRecommendedAction[]
+  command_focus: DashboardMissionCommandFocus
+  operator_targets: DashboardMissionTargets
+}
+
 export interface OperatorRoomSnapshot {
   room_id?: string
   current_room?: string
@@ -1697,6 +1740,8 @@ export interface RouteState {
 }
 
 export type TabId =
+  | 'mission'
+  | 'intervene'
   | 'command'
   | 'overview'
   | 'board'
@@ -1706,6 +1751,8 @@ export type TabId =
   | 'trpg'
 
 export const VALID_TABS: TabId[] = [
+  'mission',
+  'intervene',
   'command',
   'overview',
   'board',

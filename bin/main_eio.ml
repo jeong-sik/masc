@@ -21,6 +21,7 @@ module Tool_keeper = Masc_mcp.Tool_keeper
 module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
 module Command_plane_v2 = Masc_mcp.Command_plane_v2
+module Dashboard_mission = Masc_mcp.Dashboard_mission
 module Tool_audit = Masc_mcp.Tool_audit
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
@@ -5484,6 +5485,11 @@ let operator_digest_http_json ~state ~sw ~clock request =
   Operator_control.digest_json ?actor:(operator_actor_hint request)
     ?target_type ?target_id ?include_workers ctx
 
+let dashboard_mission_http_json ~state ~sw ~clock request =
+  Dashboard_mission.json ?actor:(operator_actor_hint request)
+    ~config:state.Mcp_server.room_config ~sw ~clock
+    ~proc_mgr:state.Mcp_server.proc_mgr ()
+
 let operator_action_http_json ~state ~sw ~clock request ~args =
   let ctx : _ Operator_control.context =
     {
@@ -8663,6 +8669,11 @@ let make_routes ~port ~host ~sw ~clock =
          let json = dashboard_batch_json ~compact config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/mission" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = dashboard_mission_http_json ~state ~sw ~clock req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
 
   |> Http.Router.get "/api/v1/mdal/loops" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -10021,6 +10032,11 @@ let run_server ~sw ~env ~port ~base_path =
           let config = state.Mcp_server.room_config in
           let compact = dashboard_compact_mode httpun_request in
           let json = dashboard_batch_json ~compact config in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/mission" ->
+          let state = get_server_state () in
+          let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/mdal/loops" ->

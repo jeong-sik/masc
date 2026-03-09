@@ -372,19 +372,16 @@ let ollama_is_light () =
 (** Call CLI tool with prompt - uses stdin to avoid shell escaping issues *)
 let cli_generate provider ~system prompt =
   let full_prompt = Printf.sprintf "%s\n\n%s" system prompt in
-  let cli_cmd = match provider with
-    | Gemini_cli -> "gemini"
-    | Claude_cli -> "claude"
-    | Codex_cli -> "codex"
-    | _ -> failwith "Not a CLI provider"
+  let cli_and_argv = match provider with
+    | Gemini_cli -> Ok ("gemini", ["gemini"])
+    | Claude_cli -> Ok ("claude", ["claude"; "-p"; "-"])
+    | Codex_cli -> Ok ("codex", ["codex"; "exec"; "-"])
+    | _ -> Error (Printf.sprintf "unsupported CLI provider: %s" (string_of_provider provider))
   in
+  match cli_and_argv with
+  | Error msg -> Error (Printf.sprintf "❌ LLM: %s" msg)
+  | Ok (cli_cmd, argv) ->
   try
-    let argv = match provider with
-      | Gemini_cli -> ["gemini"]
-      | Claude_cli -> ["claude"; "-p"; "-"]
-      | Codex_cli -> ["codex"; "exec"; "-"]
-      | _ -> failwith "Not a CLI provider"
-    in
     let (status, content) =
       Process_eio.run_argv_with_stdin_and_status
         ~timeout_sec:120.0
@@ -413,8 +410,26 @@ let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
         Printf.eprintf "[LLM] %s failed (%s), trying ollama-fast\n%!" (string_of_provider cli) e1;
         (* Will use ollama_generate below *)
         Error e1
-  end else
-    Error "❌ LLM: prefer_fast=false not implemented"
+  end else begin
+    (* prefer_fast=false: try CLI rotation with second attempt before giving up *)
+    Printf.eprintf "[LLM] prefer_fast=false: trying CLI providers with retry\n%!";
+    let cli = next_cli_provider () in
+    match cli_generate cli ~system prompt with
+    | Ok response ->
+        Printf.eprintf "[LLM] Used %s\n%!" (string_of_provider cli);
+        Ok response
+    | Error e1 ->
+        Printf.eprintf "[LLM] %s failed (%s), trying next CLI provider\n%!" (string_of_provider cli) e1;
+        let cli2 = next_cli_provider () in
+        (match cli_generate cli2 ~system prompt with
+        | Ok response ->
+            Printf.eprintf "[LLM] Used %s (second attempt)\n%!" (string_of_provider cli2);
+            Ok response
+        | Error e2 ->
+            Printf.eprintf "[LLM] %s also failed (%s)\n%!" (string_of_provider cli2) e2;
+            Error (Printf.sprintf "all CLI providers failed: %s=%s, %s=%s"
+              (string_of_provider cli) e1 (string_of_provider cli2) e2))
+  end
 
 (** Call GLM API directly — Z.ai cloud API, 200K context, no VRAM.
     Uses Llm_direct.call_glm for direct API calls (no proxy). *)

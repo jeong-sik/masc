@@ -228,6 +228,30 @@ let test_parse_gemini_output_invalid () =
   check (option int) "cached None" None cached;
   check (option (float 0.01)) "cost None" None cost
 
+let test_extract_gemini_response_text_cli_json () =
+  let json = {|{"response":"hello from gemini","session_id":"sess-1","stats":{"models":{}}}|} in
+  check (option string) "response field"
+    (Some "hello from gemini")
+    (Spawn_eio.extract_gemini_response_text json)
+
+let test_parse_gemini_output_cli_json () =
+  let json = {|
+    {
+      "response":"hello",
+      "stats":{
+        "models":{
+          "gemini-2.5-flash-lite":{"tokens":{"input":1001,"prompt":1001,"candidates":50,"cached":0}},
+          "gemini-3-flash-preview":{"tokens":{"input":14768,"prompt":14768,"candidates":35,"cached":0}}
+        }
+      }
+    }
+  |} in
+  let (input, output, cached, cost) = Spawn_eio.parse_gemini_output json in
+  check (option int) "input" (Some 15769) input;
+  check (option int) "output" (Some 85) output;
+  check (option int) "cached" None cached;
+  check bool "has cost" true (Option.is_some cost)
+
 (* ============================================================
    parse_ollama_output Tests
    ============================================================ *)
@@ -413,6 +437,17 @@ let test_default_configs_has_codex () =
 let test_default_configs_has_llama () =
   check bool "has llama" true (List.mem_assoc "llama" Spawn_eio.default_configs)
 
+let test_default_configs_gemini_json_output () =
+  match Spawn_eio.get_config "gemini" with
+  | Some cfg ->
+      check bool "includes json output" true
+        (String.contains cfg.command '-' &&
+         try
+           let _ = Str.search_forward (Str.regexp_string "--output-format json") cfg.command 0 in
+           true
+         with Not_found -> false)
+  | None -> fail "expected gemini config"
+
 (* ============================================================
    get_config Tests
    ============================================================ *)
@@ -471,6 +506,14 @@ let test_build_mcp_args_other () =
   let flags = Spawn_eio.build_mcp_args "codex" ["tool1"] in
   check (list string) "empty for other" [] flags
 
+let test_build_prompt_args_gemini () =
+  let flags = Spawn_eio.build_prompt_args "gemini" "hello" in
+  check (list string) "gemini prompt args" ["-p"; "hello"] flags
+
+let test_build_prompt_args_other () =
+  let flags = Spawn_eio.build_prompt_args "claude" "hello" in
+  check (list string) "other prompt args" [] flags
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -519,6 +562,8 @@ let () =
     "parse_gemini_output", [
       test_case "success" `Quick test_parse_gemini_output_success;
       test_case "with cache" `Quick test_parse_gemini_output_with_cache;
+      test_case "extract response from cli json" `Quick test_extract_gemini_response_text_cli_json;
+      test_case "cli json stats" `Quick test_parse_gemini_output_cli_json;
       test_case "invalid" `Quick test_parse_gemini_output_invalid;
     ];
     "parse_ollama_output", [
@@ -553,6 +598,7 @@ let () =
       test_case "not empty" `Quick test_default_configs_not_empty;
       test_case "has claude" `Quick test_default_configs_has_claude;
       test_case "has gemini" `Quick test_default_configs_has_gemini;
+      test_case "gemini json output" `Quick test_default_configs_gemini_json_output;
       test_case "has codex" `Quick test_default_configs_has_codex;
       test_case "has llama" `Quick test_default_configs_has_llama;
     ];
@@ -567,6 +613,8 @@ let () =
       test_case "empty" `Quick test_build_mcp_args_empty;
       test_case "claude" `Quick test_build_mcp_args_claude;
       test_case "gemini" `Quick test_build_mcp_args_gemini;
+      test_case "gemini prompt args" `Quick test_build_prompt_args_gemini;
+      test_case "other prompt args" `Quick test_build_prompt_args_other;
       test_case "other" `Quick test_build_mcp_args_other;
     ];
   ]

@@ -239,6 +239,16 @@ let test_default_configs_gemini_command () =
        with Not_found -> false)
   | None -> fail "no gemini config"
 
+let test_default_configs_gemini_json_output () =
+  match List.assoc_opt "gemini" Spawn.default_configs with
+  | Some cfg ->
+      check bool "has json output" true
+        (try
+           let _ = Str.search_forward (Str.regexp_string "--output-format json") cfg.command 0 in
+           true
+         with Not_found -> false)
+  | None -> fail "no gemini config"
+
 (* ============================================================
    get_config Tests
    ============================================================ *)
@@ -309,6 +319,14 @@ let test_build_mcp_args_unknown () =
   let flags = Spawn.build_mcp_args "unknown" ["tool1"] in
   check (list string) "unknown empty" [] flags
 
+let test_build_prompt_args_gemini () =
+  let flags = Spawn.build_prompt_args "gemini" "hello" in
+  check (list string) "gemini prompt args" ["-p"; "hello"] flags
+
+let test_build_prompt_args_other () =
+  let flags = Spawn.build_prompt_args "claude" "hello" in
+  check (list string) "other prompt args" [] flags
+
 (* ============================================================
    parse_claude_json Tests
    ============================================================ *)
@@ -343,6 +361,56 @@ let test_parse_claude_json_missing_fields () =
   let (_result, input, output, _cache_c, _cache_r, _cost) = Spawn.parse_claude_json json_str in
   check (option int) "no input" None input;
   check (option int) "no output" None output
+
+(* ============================================================
+   parse_gemini_output Tests
+   ============================================================ *)
+
+let test_extract_gemini_response_text_cli_json () =
+  let json = {|{"response":"hello from gemini","session_id":"sess-1","stats":{"models":{}}}|} in
+  check (option string) "response field"
+    (Some "hello from gemini")
+    (Spawn.extract_gemini_response_text json)
+
+let test_parse_gemini_output_success () =
+  let json = {|{"usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 100}}|} in
+  let (input, output, cached, _) = Spawn.parse_gemini_output json in
+  check (option int) "input" (Some 50) input;
+  check (option int) "output" (Some 100) output;
+  check (option int) "cached" None cached
+
+let test_parse_gemini_output_with_cache () =
+  let json = {|{"usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 50, "cachedContentTokenCount": 80}}|} in
+  let (input, output, cached, cost) = Spawn.parse_gemini_output json in
+  check (option int) "input" (Some 100) input;
+  check (option int) "output" (Some 50) output;
+  check (option int) "cached" (Some 80) cached;
+  check bool "has cost" true (Option.is_some cost)
+
+let test_parse_gemini_output_cli_json () =
+  let json = {|
+    {
+      "response":"hello",
+      "stats":{
+        "models":{
+          "gemini-2.5-flash-lite":{"tokens":{"input":1001,"prompt":1001,"candidates":50,"cached":0}},
+          "gemini-3-flash-preview":{"tokens":{"input":14768,"prompt":14768,"candidates":35,"cached":0}}
+        }
+      }
+    }
+  |} in
+  let (input, output, cached, cost) = Spawn.parse_gemini_output json in
+  check (option int) "input" (Some 15769) input;
+  check (option int) "output" (Some 85) output;
+  check (option int) "cached" None cached;
+  check bool "has cost" true (Option.is_some cost)
+
+let test_parse_gemini_output_invalid () =
+  let (input, output, cached, cost) = Spawn.parse_gemini_output "invalid" in
+  check (option int) "input None" None input;
+  check (option int) "output None" None output;
+  check (option int) "cached None" None cached;
+  check (option (float 0.01)) "cost None" None cost
 
 (* ============================================================
    int_opt_to_json / float_opt_to_json Tests
@@ -616,6 +684,7 @@ let () =
       test_case "has ollama" `Quick test_default_configs_has_ollama;
       test_case "claude command" `Quick test_default_configs_claude_command;
       test_case "gemini command" `Quick test_default_configs_gemini_command;
+      test_case "gemini json output" `Quick test_default_configs_gemini_json_output;
       test_case "timeout from env_config" `Quick test_default_configs_timeout_from_env_config;
       test_case "timeout is 600" `Quick test_default_configs_timeout_is_600;
     ];
@@ -631,6 +700,8 @@ let () =
       test_case "claude" `Quick test_build_mcp_args_claude;
       test_case "gemini" `Quick test_build_mcp_args_gemini;
       test_case "gemini allowed tools" `Quick test_build_mcp_args_gemini_allowed_tools;
+      test_case "gemini prompt args" `Quick test_build_prompt_args_gemini;
+      test_case "other prompt args" `Quick test_build_prompt_args_other;
       test_case "codex" `Quick test_build_mcp_args_codex;
       test_case "ollama" `Quick test_build_mcp_args_ollama;
       test_case "unknown" `Quick test_build_mcp_args_unknown;
@@ -640,6 +711,13 @@ let () =
       test_case "with cache" `Quick test_parse_claude_json_with_cache;
       test_case "invalid" `Quick test_parse_claude_json_invalid;
       test_case "missing fields" `Quick test_parse_claude_json_missing_fields;
+    ];
+    "parse_gemini_output", [
+      test_case "extract response from cli json" `Quick test_extract_gemini_response_text_cli_json;
+      test_case "success" `Quick test_parse_gemini_output_success;
+      test_case "with cache" `Quick test_parse_gemini_output_with_cache;
+      test_case "cli json stats" `Quick test_parse_gemini_output_cli_json;
+      test_case "invalid" `Quick test_parse_gemini_output_invalid;
     ];
     "int_opt_to_json", [
       test_case "some" `Quick test_int_opt_to_json_some;

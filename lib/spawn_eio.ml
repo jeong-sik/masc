@@ -131,16 +131,84 @@ let parse_claude_json output =
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (Some output, None, None, None, None, None)
 
+(** Extract Gemini CLI response text from JSON output. *)
+let extract_gemini_response_text output =
+  try
+    let json = Yojson.Safe.from_string output in
+    let open Yojson.Safe.Util in
+    json |> member "response" |> to_string_option
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+    None
+
 (** Parse Gemini output for token tracking
-    Format: {"usageMetadata": {"promptTokenCount": N, "candidatesTokenCount": M, "cachedContentTokenCount": C}} *)
+    Supports both:
+    - Gemini API style: {"usageMetadata": {"promptTokenCount": N, "candidatesTokenCount": M, "cachedContentTokenCount": C}}
+    - Gemini CLI JSON: {"response": "...", "stats": {"models": {"...": {"tokens": {...}}}}} *)
 let parse_gemini_output output =
   try
     let json = Yojson.Safe.from_string output in
     let open Yojson.Safe.Util in
-    let usage = json |> member "usageMetadata" in
-    let input_tokens = usage |> member "promptTokenCount" |> to_int_option in
-    let output_tokens = usage |> member "candidatesTokenCount" |> to_int_option in
-    let cached_tokens = usage |> member "cachedContentTokenCount" |> to_int_option in
+    let usage_opt =
+      match json |> member "usageMetadata" with
+      | `Assoc _ as usage -> Some usage
+      | _ -> None
+    in
+    let stats_models_opt =
+      match json |> member "stats" with
+      | `Assoc _ as stats ->
+          (match stats |> member "models" with
+           | `Assoc entries -> Some entries
+           | _ -> None)
+      | _ -> None
+    in
+    let input_tokens =
+      match Option.bind usage_opt (fun usage -> usage |> member "promptTokenCount" |> to_int_option) with
+      | Some _ as value -> value
+      | None ->
+          (match stats_models_opt with
+           | None -> None
+           | Some entries ->
+               let sum_field field =
+                 entries
+                 |> List.fold_left (fun acc (_name, item) ->
+                     acc + (item |> member "tokens" |> member field |> to_int_option |> Option.value ~default:0)
+                   ) 0
+               in
+               let input = sum_field "input" in
+               let prompt = sum_field "prompt" in
+               let chosen = if input > 0 then input else prompt in
+               if chosen > 0 then Some chosen else None)
+    in
+    let output_tokens =
+      match Option.bind usage_opt (fun usage -> usage |> member "candidatesTokenCount" |> to_int_option) with
+      | Some _ as value -> value
+      | None ->
+          (match stats_models_opt with
+           | None -> None
+           | Some entries ->
+               let total =
+                 entries
+                 |> List.fold_left (fun acc (_name, item) ->
+                     acc + (item |> member "tokens" |> member "candidates" |> to_int_option |> Option.value ~default:0)
+                   ) 0
+               in
+               if total > 0 then Some total else None)
+    in
+    let cached_tokens =
+      match Option.bind usage_opt (fun usage -> usage |> member "cachedContentTokenCount" |> to_int_option) with
+      | Some _ as value -> value
+      | None ->
+          (match stats_models_opt with
+           | None -> None
+           | Some entries ->
+               let total =
+                 entries
+                 |> List.fold_left (fun acc (_name, item) ->
+                     acc + (item |> member "tokens" |> member "cached" |> to_int_option |> Option.value ~default:0)
+                   ) 0
+               in
+               if total > 0 then Some total else None)
+    in
     (* Gemini 2.5: cached tokens are 90% cheaper *)
     let cost = match input_tokens, output_tokens, cached_tokens with
       | Some inp, Some out, Some cached ->
@@ -372,7 +440,7 @@ let default_configs = [
   });
   ("gemini", {
     agent_name = "gemini";
-    command = "gemini --yolo";
+    command = "gemini --yolo --output-format json";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;
@@ -413,14 +481,19 @@ let get_config agent_name =
   List.assoc_opt agent_name default_configs
 
 (** Build MCP flags as argument list (no shell escaping needed) *)
-let build_mcp_args agent_name tools = 
+let build_mcp_args agent_name tools =
   if tools = [] then []
-  else match agent_name with 
+  else match agent_name with
   | "claude" -> 
     let tools_str = String.concat "," tools in 
     ["--allowedTools"; tools_str]
   | "gemini" -> 
     ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"] @ tools
+  | _ -> []
+
+let build_prompt_args agent_name prompt =
+  match agent_name with
+  | "gemini" -> ["-p"; prompt]
   | _ -> []
 
 (** Parse command string into executable and arguments *)
@@ -831,8 +904,10 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
   else
     (* Build command arguments outside the chdir critical section *)
     let base_args = parse_command config.command in
-    let cmd_args = base_args @ mcp_args in
+    let prompt_args = build_prompt_args agent_name augmented_prompt in
+    let cmd_args = base_args @ mcp_args @ prompt_args in
     let full_args = ["timeout"; string_of_int timeout] @ cmd_args in
+    let stdin_content = if agent_name = "gemini" then "" else augmented_prompt in
 
     (* Serialize chdir + fork under mutex. Sys.chdir is process-global;
        without this, concurrent Eio fibers would race on the CWD. *)
@@ -844,7 +919,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
           let buf = Buffer.create 4096 in
           let proc =
             Eio.Process.spawn ~sw proc_mgr
-              ~stdin:(Eio.Flow.string_source augmented_prompt)
+              ~stdin:(Eio.Flow.string_source stdin_content)
               ~stdout:(Eio.Flow.buffer_sink buf)
               full_args
           in
@@ -870,7 +945,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
               (Option.value result_opt ~default:raw_output, inp, out, cache_c, cache_r, cost)
           | "gemini" ->
               let inp, out, cached, cost = parse_gemini_output raw_output in
-              (raw_output, inp, out, cached, None, cost)
+              let result_text = Option.value (extract_gemini_response_text raw_output) ~default:raw_output in
+              (result_text, inp, out, cached, None, cost)
           | "ollama" ->
               let inp, out, cost = parse_ollama_output raw_output in
               (raw_output, inp, out, None, None, cost)

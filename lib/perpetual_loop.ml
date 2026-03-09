@@ -86,8 +86,7 @@ type loop_state = {
 (* ================================================================ *)
 
 let default_config ~goal ~models ?verifier ?session_dir () =
-  let me_root = Sys.getenv_opt "ME_ROOT"
-                |> Option.value ~default:"/Users/dancer/me" in
+  let me_root = Env_config.me_root () in
   let verifier_model = match verifier with
     | Some v -> v
     | None -> Llm_client.ollama_lfm  (* Cheapest available *)

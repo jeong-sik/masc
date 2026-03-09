@@ -77,34 +77,25 @@ Heartbeat의 LLM 호출 순서:
 2. **Gemini** (fallback)
 3. Skip (둘 다 실패 시)
 
-## launchd 서비스
+## 로컬 실행
 
-| Service | Label | Port |
-|---------|-------|------|
-| MASC MCP | `com.jeong-sik.masc-mcp` | 8935 |
-| Cloudflare Tunnel | `com.jeongsik.masc-cloudflared` | — |
+기본 운영 경로는 script-based workflow다. `launchctl`/LaunchAgent는 기본 경로가 아니다.
 
-### launchd 환경변수 필수
-- 비밀값은 tracked plist에 넣지 않는다.
-- `start-masc-mcp.sh`가 launchd 시작 시 `~/.zshenv`를 읽어서 `GRAPHQL_API_KEY`와 각종 OAuth/API 토큰을 주입한다.
-- plist `EnvironmentVariables`에는 비밀이 아닌 기본값만 둔다.
-- 유지해야 하는 plist 기본값:
-  - `SSL_CERT_FILE` — TLS 인증서 경로
-  - `MASC_ORCHESTRATOR_ENABLED=0` — Orchestrator 비활성화 (EADDRINUSE 방지)
-  - `MASC_MCP_PORT`, `MASC_BASE_PATH`, `PATH` — launchd 런타임 기본값
-
-### 관리 명령
+### 권장 명령
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.jeong-sik.masc-mcp  # 재시작
-launchctl unload ~/Library/LaunchAgents/com.jeong-sik.masc-mcp.plist  # 중지
-launchctl load ~/Library/LaunchAgents/com.jeong-sik.masc-mcp.plist    # 시작
+./start-masc-mcp.sh --http --port 8935
+curl http://127.0.0.1:8935/health
 ```
+
+### 환경변수
+- `GRAPHQL_API_KEY` — GraphQL 인증
+- `SSL_CERT_FILE` — TLS 인증서 경로
+- `MASC_ORCHESTRATOR_ENABLED=0` — Orchestrator 비활성화 (EADDRINUSE 방지)
+- `ME_ROOT` — repo 루트. 미지정 시 `$HOME/me`를 우선 사용
+- `MASC_DASHBOARD_PROXY_TARGET` — dashboard dev server가 프록시할 API origin
 
 ### 로그
-```
-~/me/logs/masc-mcp-launchd.out.log  # stdout (heartbeat 결과)
-~/me/logs/masc-mcp-launchd.err.log  # stderr (에러, 진단)
-```
+script-based 실행에서는 표준 출력/표준 오류를 현재 셸 또는 호출 스크립트에서 직접 관리한다.
 
 ## Cloudflare Tunnel
 

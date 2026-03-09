@@ -1,20 +1,30 @@
 import { signal } from '@preact/signals'
-import { confirmOperatorAction, fetchOperatorSnapshot, runOperatorAction } from './api'
+import { confirmOperatorAction, fetchOperatorDigest, fetchOperatorSnapshot, runOperatorAction } from './api'
 import type {
   Message,
   OperatorActionLogEntry,
   OperatorActionRequest,
   OperatorActionResult,
+  OperatorAttentionItem,
+  OperatorDigest,
   OperatorKeeperSnapshot,
+  OperatorRecommendedAction,
   OperatorSessionSnapshot,
+  OperatorSessionCard,
   OperatorSnapshot,
   OperatorRoomSnapshot,
   PendingConfirmation,
+  OperatorWorkerCard,
 } from './types'
+import { registerOperatorRefresh } from './store'
 
 export const operatorSnapshot = signal<OperatorSnapshot | null>(null)
+export const operatorRoomDigest = signal<OperatorDigest | null>(null)
+export const operatorSessionDigest = signal<OperatorDigest | null>(null)
 export const operatorLoading = signal(false)
 export const operatorError = signal<string | null>(null)
+export const operatorDigestLoading = signal(false)
+export const operatorDigestError = signal<string | null>(null)
 export const operatorActionBusy = signal(false)
 export const operatorActionLog = signal<OperatorActionLogEntry[]>([])
 
@@ -88,6 +98,115 @@ function normalizeStringRecord(raw: unknown): Record<string, string> | undefined
     })
     .filter((entry): entry is [string, string] => entry !== null)
   return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}
+
+function normalizeAttentionItem(raw: unknown): OperatorAttentionItem | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const summary = asString(raw.summary)
+  const targetType = asString(raw.target_type)
+  if (!kind || !summary || !targetType) return null
+  return {
+    kind,
+    severity: asString(raw.severity) ?? 'warn',
+    summary,
+    target_type: targetType,
+    target_id: asString(raw.target_id) ?? null,
+    actor: asString(raw.actor) ?? null,
+    evidence: raw.evidence,
+  }
+}
+
+function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAction | null {
+  if (!isRecord(raw)) return null
+  const actionType = asString(raw.action_type)
+  const targetType = asString(raw.target_type)
+  const reason = asString(raw.reason)
+  if (!actionType || !targetType || !reason) return null
+  return {
+    action_type: actionType,
+    target_type: targetType,
+    target_id: asString(raw.target_id) ?? null,
+    severity: asString(raw.severity) ?? 'warn',
+    reason,
+    confirm_required: asBoolean(raw.confirm_required),
+    suggested_payload: raw.suggested_payload,
+    preview: raw.preview,
+  }
+}
+
+function normalizeWorkerCard(raw: unknown): OperatorWorkerCard | null {
+  if (!isRecord(raw)) return null
+  return {
+    actor: asString(raw.actor) ?? null,
+    spawn_agent: asString(raw.spawn_agent) ?? null,
+    spawn_role: asString(raw.spawn_role) ?? null,
+    spawn_model: asString(raw.spawn_model) ?? null,
+    worker_class: asString(raw.worker_class) ?? null,
+    parent_actor: asString(raw.parent_actor) ?? null,
+    capsule_mode: asString(raw.capsule_mode) ?? null,
+    runtime_pool: asString(raw.runtime_pool) ?? null,
+    lane_id: asString(raw.lane_id) ?? null,
+    controller_level: asString(raw.controller_level) ?? null,
+    control_domain: asString(raw.control_domain) ?? null,
+    supervisor_actor: asString(raw.supervisor_actor) ?? null,
+    model_tier: asString(raw.model_tier) ?? null,
+    task_profile: asString(raw.task_profile) ?? null,
+    risk_level: asString(raw.risk_level) ?? null,
+    routing_confidence: asNumber(raw.routing_confidence) ?? null,
+    routing_reason: asString(raw.routing_reason) ?? null,
+    status: asString(raw.status) ?? 'unknown',
+    turn_count: asNumber(raw.turn_count) ?? 0,
+    empty_note_turn_count: asNumber(raw.empty_note_turn_count) ?? 0,
+    has_turn: asBoolean(raw.has_turn) ?? false,
+    last_turn_ts_iso: asString(raw.last_turn_ts_iso) ?? null,
+  }
+}
+
+function normalizeSessionCard(raw: unknown): OperatorSessionCard | null {
+  if (!isRecord(raw)) return null
+  const sessionId = asString(raw.session_id)
+  if (!sessionId) return null
+  return {
+    session_id: sessionId,
+    goal: asString(raw.goal),
+    status: asString(raw.status),
+    health: asString(raw.health),
+    scale_profile: asString(raw.scale_profile),
+    control_profile: asString(raw.control_profile),
+    planned_worker_count: asNumber(raw.planned_worker_count),
+    active_agent_count: asNumber(raw.active_agent_count),
+    last_turn_age_sec: asNumber(raw.last_turn_age_sec) ?? null,
+    attention_count: asNumber(raw.attention_count),
+    recommended_action_count: asNumber(raw.recommended_action_count),
+    top_attention: normalizeAttentionItem(raw.top_attention),
+    top_recommendation: normalizeRecommendedAction(raw.top_recommendation),
+  }
+}
+
+function normalizeOperatorDigest(raw: unknown): OperatorDigest {
+  const root = isRecord(raw) ? raw : {}
+  return {
+    trace_id: asString(root.trace_id),
+    target_type: asString(root.target_type) ?? 'room',
+    target_id: asString(root.target_id) ?? null,
+    health: asString(root.health),
+    swarm_status: isRecord(root.swarm_status)
+      ? (root.swarm_status as unknown as OperatorDigest['swarm_status'])
+      : undefined,
+    attention_items: extractArray(root.attention_items)
+      .map(normalizeAttentionItem)
+      .filter((item): item is OperatorAttentionItem => item !== null),
+    recommended_actions: extractArray(root.recommended_actions)
+      .map(normalizeRecommendedAction)
+      .filter((item): item is OperatorRecommendedAction => item !== null),
+    session_cards: extractArray(root.session_cards)
+      .map(normalizeSessionCard)
+      .filter((item): item is OperatorSessionCard => item !== null),
+    worker_cards: extractArray(root.worker_cards)
+      .map(normalizeWorkerCard)
+      .filter((item): item is OperatorWorkerCard => item !== null),
+  }
 }
 
 function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
@@ -234,6 +353,41 @@ export async function refreshOperatorSnapshot(): Promise<void> {
   }
 }
 
+export async function refreshOperatorRoomDigest(): Promise<void> {
+  operatorDigestLoading.value = true
+  operatorDigestError.value = null
+  try {
+    const raw = await fetchOperatorDigest({ targetType: 'room' })
+    operatorRoomDigest.value = normalizeOperatorDigest(raw)
+  } catch (err) {
+    operatorDigestError.value = err instanceof Error ? err.message : 'Failed to load operator digest'
+  } finally {
+    operatorDigestLoading.value = false
+  }
+}
+
+export async function refreshOperatorSessionDigest(sessionId: string | null): Promise<void> {
+  if (!sessionId) {
+    operatorSessionDigest.value = null
+    return
+  }
+
+  operatorDigestLoading.value = true
+  operatorDigestError.value = null
+  try {
+    const raw = await fetchOperatorDigest({
+      targetType: 'team_session',
+      targetId: sessionId,
+      includeWorkers: true,
+    })
+    operatorSessionDigest.value = normalizeOperatorDigest(raw)
+  } catch (err) {
+    operatorDigestError.value = err instanceof Error ? err.message : 'Failed to load session digest'
+  } finally {
+    operatorDigestLoading.value = false
+  }
+}
+
 export async function dispatchOperatorAction(request: OperatorActionRequest): Promise<OperatorActionResult> {
   operatorActionBusy.value = true
   operatorError.value = null
@@ -248,6 +402,10 @@ export async function dispatchOperatorAction(request: OperatorActionRequest): Pr
       delegated_tool: result.delegated_tool,
     })
     await refreshOperatorSnapshot()
+    await refreshOperatorRoomDigest()
+    if (operatorSessionDigest.value?.target_id) {
+      await refreshOperatorSessionDigest(operatorSessionDigest.value.target_id)
+    }
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Operator action failed'
@@ -279,6 +437,10 @@ export async function confirmOperatorPendingAction(actor: string, confirmToken: 
       delegated_tool: result.delegated_tool,
     })
     await refreshOperatorSnapshot()
+    await refreshOperatorRoomDigest()
+    if (operatorSessionDigest.value?.target_id) {
+      await refreshOperatorSessionDigest(operatorSessionDigest.value.target_id)
+    }
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Operator confirmation failed'
@@ -295,3 +457,11 @@ export async function confirmOperatorPendingAction(actor: string, confirmToken: 
     operatorActionBusy.value = false
   }
 }
+
+registerOperatorRefresh(() => {
+  void refreshOperatorSnapshot()
+  void refreshOperatorRoomDigest()
+  if (operatorSessionDigest.value?.target_id) {
+    void refreshOperatorSessionDigest(operatorSessionDigest.value.target_id)
+  }
+})

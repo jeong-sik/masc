@@ -785,6 +785,11 @@ let _refreshCommandPlaneFn: (() => void) | null = null
 export function registerCommandPlaneRefresh(fn: () => void): void {
   _refreshCommandPlaneFn = fn
 }
+
+let _refreshOperatorFn: (() => void) | null = null
+export function registerOperatorRefresh(fn: () => void): void {
+  _refreshOperatorFn = fn
+}
 // --- SSE event reaction ---
 // When lastEvent changes, route to the minimal refresh needed.
 
@@ -824,6 +829,7 @@ export function setupSSEReaction(): () => void {
         _fetchDebounce = setTimeout(() => {
           refreshDashboard()
           _refreshCommandPlaneFn?.()
+          _refreshOperatorFn?.()
           _fetchDebounce = null
         }, 500)
       }

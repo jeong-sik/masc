@@ -217,8 +217,11 @@ type trace_entry = {
 
 (** Ensure directory exists *)
 let ensure_trace_dir ~agent_name =
-  let me_root = Sys.getenv_opt "ME_ROOT"
-    |> Option.value ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp") in
+  let me_root =
+    match Env_config.me_root_opt () with
+    | Some root -> root
+    | None -> Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp"
+  in
   let trace_dir = Filename.concat me_root (Printf.sprintf ".masc/traces/%s" agent_name) in
   if not (Sys.file_exists trace_dir) then begin
     let parent = Filename.concat me_root ".masc/traces" in
@@ -413,12 +416,9 @@ let cleanup_inactive_lodge_agents () =
 (** {1 External CLI helpers (argv-based, no shell)} *)
 
 let sb_path () =
-  match Sys.getenv_opt "ME_ROOT" with
-  | Some root -> Printf.sprintf "%s/scripts/sb" root
-  | None -> (
-      match Sys.getenv_opt "HOME" with
-      | Some home -> Printf.sprintf "%s/me/scripts/sb" home
-      | None -> "./scripts/sb")
+  match Env_config.sb_path_opt () with
+  | Some path -> path
+  | None -> "./scripts/sb"
 
 (** Use local GraphQL by default for local MCP runs.
     Set GRAPHQL_URL explicitly to force remote endpoint. *)
@@ -1687,7 +1687,7 @@ let default_lodge_config = {
 }
 
 let load_lodge_config () =
-  let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
+  let me_root = Env_config.me_root () in
   let config_path = Filename.concat me_root ".masc/config.json" in
   try
     let json_str = In_channel.with_open_text config_path In_channel.input_all in

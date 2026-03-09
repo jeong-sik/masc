@@ -64,15 +64,7 @@ let allowed_tools ~allow_post ?(extra = []) () =
   uniq (default_allowed_tools ~allow_post @ extra)
 
 let mcp_base_url () =
-  match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
-  | Some raw when String.trim raw <> "" -> String.trim raw
-  | _ ->
-      let port =
-        match Sys.getenv_opt "MASC_HTTP_PORT" with
-        | Some raw when String.trim raw <> "" -> String.trim raw
-        | _ -> "8935"
-      in
-      sprintf "http://127.0.0.1:%s" port
+  Env_config.masc_http_base_url ()
 
 let worker_model_spec () =
   let explicit =

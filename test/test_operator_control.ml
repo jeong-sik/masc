@@ -201,6 +201,29 @@ let test_digest_team_session_shape () =
          | `List _ -> true
          | _ -> false))
 
+let test_digest_team_session_can_skip_workers () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let ctx = operator_ctx env sw config "dashboard" in
+      let digest =
+        match
+          Operator_control.digest_json ~actor:"dashboard"
+            ~target_type:"team_session" ~target_id:session_id ~include_workers:false ctx
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check int) "worker_cards skipped" 0
+        Yojson.Safe.Util.(digest |> member "worker_cards" |> to_list |> List.length))
+
 let test_snapshot_and_digest_expose_role_runtime_census () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -991,6 +1014,8 @@ let () =
             test_digest_room_exposes_pending_confirm_attention;
           Alcotest.test_case "digest team session shape" `Quick
             test_digest_team_session_shape;
+          Alcotest.test_case "digest team session can skip workers" `Quick
+            test_digest_team_session_can_skip_workers;
           Alcotest.test_case "snapshot and digest expose role runtime census" `Quick
             test_snapshot_and_digest_expose_role_runtime_census;
           Alcotest.test_case "task inject confirm flow" `Quick

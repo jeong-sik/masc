@@ -1,15 +1,22 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { showToast } from './common/toast'
-import type { OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
+import type { OperatorAttentionItem, OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
 import {
   confirmOperatorPendingAction,
   dispatchOperatorAction,
   operatorActionBusy,
+  operatorDigestError,
+  operatorDigestLoading,
   operatorActionLog,
   operatorError,
   operatorLoading,
+  operatorRoomDigest,
+  operatorSessionDigest,
   operatorSnapshot,
+  refreshOperatorRoomDigest,
+  refreshOperatorSessionDigest,
   refreshOperatorSnapshot,
 } from '../operator-store'
 
@@ -81,6 +88,7 @@ function normalizeStatus(value: unknown): string {
 function sessionPriorityTone(session: OperatorSessionSnapshot): OpsPriorityTone {
   const status = normalizeStatus(session.status)
   if (status === 'paused') return 'bad'
+  if (status === '' || status === 'unknown') return 'warn'
   const health = normalizeStatus(session.team_health?.status)
   if (health && health !== 'ok' && health !== 'healthy' && health !== 'green') return 'warn'
   if (status && status !== 'active' && status !== 'running' && status !== 'ended') return 'warn'
@@ -90,9 +98,26 @@ function sessionPriorityTone(session: OperatorSessionSnapshot): OpsPriorityTone 
 function keeperPriorityTone(keeper: OperatorKeeperSnapshot): OpsPriorityTone {
   const status = normalizeStatus(keeper.status)
   if (status === 'offline' || status === 'inactive' || status === 'error') return 'bad'
+  if (status === '' || status === 'unknown') return 'warn'
   if ((keeper.context_ratio ?? 0) >= 0.8) return 'warn'
+  if (keeper.context_ratio == null) return 'warn'
+  if (keeper.last_turn_ago_s == null) return 'warn'
   if ((keeper.last_turn_ago_s ?? 0) >= 3600) return 'warn'
   return 'ok'
+}
+
+function attentionTone(items: OperatorAttentionItem[]): OpsPriorityTone {
+  if (items.some(item => normalizeStatus(item.severity) === 'bad')) return 'bad'
+  if (items.length > 0) return 'warn'
+  return 'ok'
+}
+
+function isSessionAttention(item: OperatorAttentionItem): boolean {
+  return item.target_type === 'team_session'
+}
+
+function isKeeperAttention(item: OperatorAttentionItem): boolean {
+  return item.target_type === 'keeper'
 }
 
 async function executeAction(input: {
@@ -254,6 +279,8 @@ async function confirmPending(confirmToken: string) {
 
 export function Ops() {
   const snapshot = operatorSnapshot.value
+  const roomDigest = operatorRoomDigest.value
+  const sessionDigest = operatorSessionDigest.value
   const room = snapshot?.room ?? {}
   const sessions = snapshot?.sessions ?? []
   const keepers = snapshot?.keepers ?? []
@@ -261,9 +288,22 @@ export function Ops() {
   const recentMessages = snapshot?.recent_messages ?? []
   const selectedSession = sessions.find(session => session.session_id === selectedSessionId.value) ?? sessions[0] ?? null
   const selectedKeeper = keepers.find(keeper => keeper.name === selectedKeeperName.value) ?? keepers[0] ?? null
+  const roomAttention = roomDigest?.attention_items ?? []
+  const sessionAttention = roomAttention.filter(isSessionAttention)
+  const keeperAttention = roomAttention.filter(isKeeperAttention)
   const flaggedSessions = sessions.filter(session => sessionPriorityTone(session) !== 'ok')
   const flaggedKeepers = keepers.filter(keeper => keeperPriorityTone(keeper) !== 'ok')
   const roomFeed = recentMessages.slice(0, 5)
+
+  useEffect(() => {
+    void refreshOperatorRoomDigest()
+  }, [])
+
+  useEffect(() => {
+    const sessionId = selectedSession?.session_id ?? null
+    void refreshOperatorSessionDigest(sessionId)
+  }, [selectedSession?.session_id])
+
   const priorityCards: OpsPriorityCardData[] = [
     {
       key: 'room',
@@ -286,20 +326,24 @@ export function Ops() {
     {
       key: 'session',
       label: 'Session Risk',
-      value: flaggedSessions.length,
-      detail: flaggedSessions.length > 0
-        ? 'Team sessions need steering, stop, or checkpoint attention'
-        : 'Team sessions look healthy from the operator snapshot',
-      tone: flaggedSessions.some(session => normalizeStatus(session.status) === 'paused') ? 'bad' : flaggedSessions.length > 0 ? 'warn' : 'ok',
+      value: sessionAttention.length > 0 ? sessionAttention.length : sessions.length,
+      detail: sessionAttention.length > 0
+        ? sessionAttention[0]?.summary ?? 'Team sessions need steering, stop, or checkpoint attention'
+        : sessions.length === 0
+          ? 'No supervised team session is active right now'
+          : 'No session-level attention items are currently active',
+      tone: sessionAttention.length > 0 ? attentionTone(sessionAttention) : sessions.length === 0 ? 'warn' : flaggedSessions.some(session => normalizeStatus(session.status) === 'paused') ? 'bad' : flaggedSessions.length > 0 ? 'warn' : 'ok',
     },
     {
       key: 'keeper',
       label: 'Keeper Pressure',
-      value: flaggedKeepers.length,
-      detail: flaggedKeepers.length > 0
-        ? 'At least one keeper is stale, offline, or running hot'
-        : 'Keepers are available for direct intervention',
-      tone: flaggedKeepers.some(keeper => keeperPriorityTone(keeper) === 'bad') ? 'bad' : flaggedKeepers.length > 0 ? 'warn' : 'ok',
+      value: keeperAttention.length > 0 ? keeperAttention.length : flaggedKeepers.length,
+      detail: keeperAttention.length > 0
+        ? keeperAttention[0]?.summary ?? 'At least one keeper needs direct intervention'
+        : flaggedKeepers.length > 0
+          ? 'At least one keeper is stale, offline, or missing telemetry'
+          : 'Keepers are available for direct intervention',
+      tone: keeperAttention.length > 0 ? attentionTone(keeperAttention) : flaggedKeepers.some(keeper => keeperPriorityTone(keeper) === 'bad') ? 'bad' : flaggedKeepers.length > 0 ? 'warn' : 'ok',
     },
   ]
 
@@ -322,7 +366,15 @@ export function Ops() {
             value=${actorName.value}
             onInput=${(event: Event) => persistActorName((event.target as HTMLInputElement).value)}
           />
-          <button class="control-btn ghost" onClick=${() => { void refreshOperatorSnapshot() }} disabled=${operatorLoading.value || operatorActionBusy.value}>
+          <button
+            class="control-btn ghost"
+            onClick=${() => {
+              void refreshOperatorSnapshot()
+              void refreshOperatorRoomDigest()
+              void refreshOperatorSessionDigest(selectedSession?.session_id ?? null)
+            }}
+            disabled=${operatorLoading.value || operatorActionBusy.value}
+          >
             ${operatorLoading.value ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
@@ -330,6 +382,9 @@ export function Ops() {
 
       ${operatorError.value ? html`
         <section class="ops-banner error">${operatorError.value}</section>
+      ` : null}
+      ${operatorDigestError.value ? html`
+        <section class="ops-banner error">${operatorDigestError.value}</section>
       ` : null}
 
       <section class="card">
@@ -346,6 +401,29 @@ export function Ops() {
             </div>
           `)}
         </div>
+      </section>
+
+      <section class="card ops-panel">
+        <div class="card-title">Recommended Actions</div>
+        <p class="ops-context-note">Digest-backed recommendations are the smallest next interventions the backend currently suggests.</p>
+        ${operatorDigestLoading.value && !roomDigest ? html`
+          <div class="ops-empty">Loading operator digest…</div>
+        ` : roomDigest && roomDigest.recommended_actions.length > 0 ? html`
+          <div class="ops-log-list">
+            ${roomDigest.recommended_actions.map(item => html`
+              <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="ops-log-entry ${item.severity}">
+                <div class="ops-log-head">
+                  <strong>${item.action_type}</strong>
+                  <span>${item.target_type}${item.target_id ? `:${item.target_id}` : ''}</span>
+                  <span>${item.confirm_required ? 'confirm' : 'direct'}</span>
+                </div>
+                <div class="ops-log-body">${item.reason}</div>
+              </article>
+            `)}
+          </div>
+        ` : html`
+          <div class="ops-empty">No digest recommendations are active right now.</div>
+        `}
       </section>
 
       ${pendingConfirms.length > 0 ? html`
@@ -462,6 +540,38 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel">
+            <div class="card-title">Session Digest</div>
+            <p class="ops-context-note">Worker cards and attention items come from operator digest, not the lighter snapshot.</p>
+            ${selectedSession && sessionDigest ? html`
+              <div class="ops-log-list">
+                ${sessionDigest.attention_items.length > 0 ? sessionDigest.attention_items.map(item => html`
+                  <article key=${`${item.kind}:${item.target_id ?? 'session'}`} class="ops-log-entry ${item.severity}">
+                    <div class="ops-log-head">
+                      <strong>${item.kind}</strong>
+                      <span>${item.target_type}${item.target_id ? `:${item.target_id}` : ''}</span>
+                    </div>
+                    <div class="ops-log-body">${item.summary}</div>
+                  </article>
+                `) : html`<div class="ops-empty">No session-specific attention items.</div>`}
+                ${sessionDigest.worker_cards.length > 0 ? sessionDigest.worker_cards.map(card => html`
+                  <article key=${`${card.actor ?? card.spawn_role ?? 'worker'}:${card.spawn_agent ?? 'runtime'}`} class="ops-log-entry">
+                    <div class="ops-log-head">
+                      <strong>${card.actor ?? card.spawn_role ?? 'worker'}</strong>
+                      <span>${card.status}</span>
+                      <span>${card.spawn_agent ?? card.runtime_pool ?? 'runtime n/a'}</span>
+                    </div>
+                    <div class="ops-log-body">
+                      ${(card.worker_class ?? 'worker')}${card.lane_id ? ` · ${card.lane_id}` : ''}${card.routing_reason ? ` · ${card.routing_reason}` : ''}
+                    </div>
+                  </article>
+                `) : null}
+              </div>
+            ` : html`
+              <div class="ops-empty">Select a team session to load digest-backed worker cards.</div>
+            `}
+          </section>
+
+          <section class="card ops-panel">
             <div class="card-title">Keeper Queue</div>
             <p class="ops-context-note">Keepers are long-lived operators. Pick one when you need recovery, course correction, or a direct probe.</p>
             <div class="ops-entity-list">
@@ -482,6 +592,25 @@ export function Ops() {
                   </div>
                 </button>
               `)}
+            </div>
+          </section>
+
+          <section class="card ops-panel">
+            <div class="card-title">Available Actions</div>
+            <p class="ops-context-note">These are the actions the backend currently advertises, even if they are not all wired into inline controls yet.</p>
+            <div class="ops-log-list">
+              ${snapshot?.available_actions?.length
+                ? snapshot.available_actions.map(action => html`
+                    <article key=${`${action.action_type}:${action.target_type}`} class="ops-log-entry">
+                      <div class="ops-log-head">
+                        <strong>${action.action_type}</strong>
+                        <span>${action.target_type}</span>
+                        <span>${action.confirm_required ? 'confirm' : 'direct'}</span>
+                      </div>
+                      <div class="ops-log-body">${action.description ?? 'No description'}</div>
+                    </article>
+                  `)
+                : html`<div class="ops-empty">No available action descriptors.</div>`}
             </div>
           </section>
         </div>

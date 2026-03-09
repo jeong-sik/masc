@@ -81,15 +81,7 @@ let inject_prompt_full_context ~(prompt : string) ~(tool_name : string)
   | _ -> args
 
 let masc_http_base_url () =
-  match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
-  | Some raw when String.trim raw <> "" -> String.trim raw
-  | _ ->
-      let port =
-        match Sys.getenv_opt "MASC_HTTP_PORT" with
-        | Some raw when String.trim raw <> "" -> String.trim raw
-        | _ -> "8935"
-      in
-      sprintf "http://127.0.0.1:%s" port
+  Env_config.masc_http_base_url ()
 
 let mcp_endpoint_url ~(auth_token : string option) =
   let base = masc_http_base_url () ^ "/mcp" in

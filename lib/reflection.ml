@@ -27,7 +27,7 @@ let default_threshold =
 let last_reflections : (string, float) Hashtbl.t = Hashtbl.create 10
 
 let me_root () =
-  Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me"
+  Env_config.me_root ()
 
 let meta_path ~agent_name =
   sprintf "%s/.masc/memory/%s/reflection_meta.json" (me_root ()) agent_name

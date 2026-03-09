@@ -437,10 +437,31 @@ function dashboardActorName(): string | null {
   return trimmed === '' ? null : trimmed
 }
 
+function dashboardLocationParams(): URLSearchParams {
+  if (typeof window === 'undefined') return new URLSearchParams()
+  const search = new URLSearchParams(window.location.search)
+  const hash = window.location.hash.replace(/^#/, '')
+  const queryIdx = hash.indexOf('?')
+  if (queryIdx >= 0) {
+    const hashSearch = new URLSearchParams(hash.slice(queryIdx + 1))
+    hashSearch.forEach((value, key) => {
+      if (!search.has(key)) search.set(key, value)
+    })
+  }
+  return search
+}
+
 function dashboardSwarmRunId(): string | null {
-  if (typeof window === 'undefined') return null
-  const params = new URLSearchParams(window.location.search)
+  const params = dashboardLocationParams()
   const value = params.get('run_id')
+  if (!value) return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+function dashboardSwarmOperationId(): string | null {
+  const params = dashboardLocationParams()
+  const value = params.get('operation_id')
   if (!value) return null
   const trimmed = value.trim()
   return trimmed === '' ? null : trimmed
@@ -1244,6 +1265,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
   const resumeKey = `resume:${op.operation_id}`
   const recallKey = `recall:${op.operation_id}`
   const chain = op.chain
+  const runId = chain?.run_id ?? null
   return html`
     <article class="command-card">
       <div class="command-card-head">
@@ -1275,6 +1297,19 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
         ? html`<div class="command-card-foot">Checkpoint ${op.checkpoint_ref}</div>`
         : null}
       <div class="command-action-row">
+        <button
+          class="control-btn ghost"
+          onClick=${() => {
+            setCommandPlaneSurface('swarm')
+            navigate('command', {
+              surface: 'swarm',
+              operation_id: op.operation_id,
+              ...(runId ? { run_id: runId } : {}),
+            })
+          }}
+        >
+          Swarm Live
+        </button>
         ${chain
           ? html`
               <button
@@ -1523,6 +1558,7 @@ function SwarmWorkerCard({ worker }: { worker: CommandPlaneSwarmWorker }) {
 function SwarmSurface() {
   const swarm = commandPlaneSwarm.value
   const runId = dashboardSwarmRunId()
+  const operationId = dashboardSwarmOperationId()
   const runtimeState = swarm?.provider?.runtime_blocker
     ? 'blocked'
     : swarm?.provider?.provider_reachable
@@ -1552,7 +1588,7 @@ function SwarmSurface() {
                       <div class="monitor-stat-card"><span>종단 점검</span><strong>${swarm.summary?.pass_end_to_end ? '통과' : '확인 필요'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
                     </div>
                     <div class="command-card-grid">
-                      <span>작전</span><span>${swarm.operation?.operation_id ?? '없음'}</span>
+                      <span>작전</span><span>${swarm.operation?.operation_id ?? operationId ?? '없음'}</span>
                       <span>분대</span><span>${swarm.squad?.label ?? '없음'}</span>
                       <span>실행체</span><span>${swarm.detachment?.detachment_id ?? '없음'}</span>
                       <span>예상 워커</span><span>${swarm.summary?.expected_workers ?? 0}명</span>
@@ -1959,7 +1995,10 @@ export function Command() {
     if (requestedOperation) {
       focusCommandPlaneChainOperation(requestedOperation)
     }
-  }, [route.value.tab, route.value.params.surface, route.value.params.operation])
+    if (requestedSurface === 'swarm') {
+      void refreshCommandPlaneSwarm()
+    }
+  }, [route.value.tab, route.value.params.surface, route.value.params.operation, route.value.params.operation_id, route.value.params.run_id])
 
   useEffect(() => {
     let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
@@ -1969,6 +2008,9 @@ export function Command() {
         refreshTimer = null
         void refreshCommandPlaneCurrentSurface()
         void refreshCommandPlaneChainSummary()
+        if (commandPlaneSurface.value === 'swarm') {
+          void refreshCommandPlaneSwarm()
+        }
       }, 250)
     }
 
@@ -2010,7 +2052,15 @@ export function Command() {
           >
             ${actionDisabled('dispatch:tick') ? 'Reconciling…' : 'Run Tick'}
           </button>
-          <button class="control-btn ghost" onClick=${() => { void refreshCommandPlaneCurrentSurface(); void refreshCommandPlaneChainSummary() }} disabled=${commandPlaneLoading.value}>
+          <button
+            class="control-btn ghost"
+            onClick=${() => {
+              void refreshCommandPlaneCurrentSurface()
+              void refreshCommandPlaneChainSummary()
+              void refreshCommandPlaneSwarm()
+            }}
+            disabled=${commandPlaneLoading.value}
+          >
             ${commandPlaneLoading.value ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>

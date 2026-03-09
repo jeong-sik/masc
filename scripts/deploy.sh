@@ -9,8 +9,8 @@
 #   Prod: 8945 (this script, Cloudflare tunnel target)
 #
 # Management modes:
-#   launchd: if com.jeong-sik.masc-mcp-prod is loaded, uses launchctl
-#   manual:  otherwise, uses nohup + PID file
+#   manual: preferred default, uses nohup + PID file
+#   launchd: optional legacy mode if com.jeong-sik.masc-mcp-prod is already loaded
 
 set -euo pipefail
 
@@ -20,8 +20,8 @@ RELEASE_DIR="$REPO_DIR/releases"
 PID_FILE="$REPO_DIR/masc-prod.pid"
 PROD_PORT=8945
 HEALTH_URL="http://127.0.0.1:$PROD_PORT/health"
-BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-/Users/dancer/me}}"
-LOG_DIR="${ME_ROOT:-/Users/dancer/me}/logs"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-${HOME}/me}}"
+LOG_DIR="${ME_ROOT:-${HOME}/me}/logs"
 LAUNCHD_LABEL="com.jeong-sik.masc-mcp-prod"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 

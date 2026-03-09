@@ -105,8 +105,9 @@ type message_callback = int -> string -> int -> unit ptr -> unit
 (** {1 Library loading} *)
 
 let lib_path =
-  let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/Users/dancer" in
-  home ^ "/local/lib/libdatachannel.dylib"
+  match Env_config.libdatachannel_path_opt () with
+  | Some path -> path
+  | None -> "libdatachannel.dylib"
 
 let lib =
   try Some (Dl.dlopen ~filename:lib_path ~flags:[Dl.RTLD_NOW; Dl.RTLD_GLOBAL])

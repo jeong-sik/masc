@@ -118,10 +118,29 @@ function asStringArray(value: unknown): string[] {
     .filter(Boolean)
 }
 
+function currentLocationParams(): URLSearchParams {
+  if (typeof window === 'undefined') return new URLSearchParams()
+  const search = new URLSearchParams(window.location.search)
+  const hash = window.location.hash.replace(/^#/, '')
+  const queryIdx = hash.indexOf('?')
+  if (queryIdx >= 0) {
+    const hashSearch = new URLSearchParams(hash.slice(queryIdx + 1))
+    hashSearch.forEach((value, key) => {
+      if (!search.has(key)) search.set(key, value)
+    })
+  }
+  return search
+}
+
 function currentSwarmRunId(): string | undefined {
-  if (typeof window === 'undefined') return undefined
-  const params = new URLSearchParams(window.location.search)
+  const params = currentLocationParams()
   const value = params.get('run_id') ?? undefined
+  return value && value.trim() !== '' ? value.trim() : undefined
+}
+
+function currentSwarmOperationId(): string | undefined {
+  const params = currentLocationParams()
+  const value = params.get('operation_id') ?? undefined
   return value && value.trim() !== '' ? value.trim() : undefined
 }
 
@@ -1369,11 +1388,14 @@ export async function refreshCommandPlaneHelp(): Promise<void> {
   }
 }
 
-export async function refreshCommandPlaneSwarm(runId = currentSwarmRunId()): Promise<void> {
+export async function refreshCommandPlaneSwarm(
+  runId = currentSwarmRunId(),
+  operationId = currentSwarmOperationId(),
+): Promise<void> {
   commandPlaneSwarmLoading.value = true
   commandPlaneSwarmError.value = null
   try {
-    const raw = await fetchCommandPlaneSwarm(runId)
+    const raw = await fetchCommandPlaneSwarm(runId, operationId)
     commandPlaneSwarm.value = normalizeSwarm(raw)
   } catch (err) {
     commandPlaneSwarmError.value =
@@ -1457,5 +1479,9 @@ export function toggleCommandPlaneKillSwitch(unitId: string, enabled: boolean): 
 }
 
 registerCommandPlaneRefresh(() => {
-  void refreshCommandPlaneSummary()
+  void refreshCommandPlaneCurrentSurface()
+  void refreshCommandPlaneChainSummary()
+  if (commandPlaneSurface.value === 'swarm' || commandPlaneSwarm.value !== null) {
+    void refreshCommandPlaneSwarm()
+  }
 })

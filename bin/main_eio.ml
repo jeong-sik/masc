@@ -5477,11 +5477,12 @@ let operator_digest_http_json ~state ~sw ~clock request =
   let target_id = query_param request "target_id" in
   let include_workers =
     match query_param request "include_workers" with
-    | Some ("0" | "false" | "no") -> false
-    | _ -> true
+    | Some ("0" | "false" | "no") -> Some false
+    | Some ("1" | "true" | "yes") -> Some true
+    | _ -> None
   in
-  Operator_control.digest_json ?actor:(operator_actor_hint request) ?target_type
-    ?target_id ~include_workers ctx
+  Operator_control.digest_json ?actor:(operator_actor_hint request)
+    ?target_type ?target_id ?include_workers ctx
 
 let operator_action_http_json ~state ~sw ~clock request ~args =
   let ctx : _ Operator_control.context =
@@ -9152,8 +9153,7 @@ let make_routes ~port ~host ~sw ~clock =
        with_public_read (fun state req reqd ->
          match operator_digest_http_json ~state ~sw ~clock req with
          | Ok json ->
-             Http.Response.json ~compress:true ~request:req
-               (Yojson.Safe.to_string json) reqd
+             Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
          | Error message ->
              respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (operator_error_json message))
@@ -10155,27 +10155,23 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/operator/digest" ->
           let state = get_server_state () in
           let path = Http.Request.path httpun_request in
+          let respond_digest () =
+            match operator_digest_http_json ~state ~sw ~clock httpun_request with
+            | Ok json ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+            | Error message ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (operator_error_json message))
+                  ~status:`Bad_request ~extra_headers:cors
+          in
           if http_auth_strict_enabled () && not (is_public_read_path path) then
             (match authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request with
              | Error err ->
                  let status = http_status_of_auth_error err in
                  h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
-             | Ok () ->
-                 (match operator_digest_http_json ~state ~sw ~clock httpun_request with
-                  | Ok json ->
-                      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-                  | Error message ->
-                      h2_respond_json h2_reqd
-                        (Yojson.Safe.to_string (operator_error_json message))
-                        ~status:`Bad_request ~extra_headers:cors))
+             | Ok () -> respond_digest ())
           else
-            (match operator_digest_http_json ~state ~sw ~clock httpun_request with
-             | Ok json ->
-                 h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-             | Error message ->
-                 h2_respond_json h2_reqd
-                   (Yojson.Safe.to_string (operator_error_json message))
-                   ~status:`Bad_request ~extra_headers:cors)
+            respond_digest ()
       | `GET, "/api/v1/status" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in

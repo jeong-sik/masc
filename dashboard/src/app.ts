@@ -32,10 +32,12 @@ import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
-import { refreshOperatorSnapshot } from './operator-store'
+import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import {
+  commandPlaneSurface,
   refreshCommandPlaneChainSummary,
   refreshCommandPlaneCurrentSurface,
+  refreshCommandPlaneSwarm,
 } from './command-store'
 import { activityPanelOpen, closeActivityPanel, toggleActivityPanel } from './activity-panel'
 
@@ -90,8 +92,14 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
             if (currentTab === 'command') {
               refreshCommandPlaneCurrentSurface()
               refreshCommandPlaneChainSummary()
+              if (commandPlaneSurface.value === 'swarm') {
+                refreshCommandPlaneSwarm()
+              }
             }
-            if (currentTab === 'ops') refreshOperatorSnapshot()
+            if (currentTab === 'ops') {
+              refreshOperatorSnapshot()
+              refreshOperatorRoomDigest()
+            }
             if (currentTab === 'board') refreshBoard()
             if (currentTab === 'trpg') refreshTrpg()
             if (currentTab === 'goals') {
@@ -231,8 +239,14 @@ export function App() {
       if (tab === 'command') {
         void refreshCommandPlaneCurrentSurface()
         void refreshCommandPlaneChainSummary()
+        if (commandPlaneSurface.value === 'swarm') {
+          void refreshCommandPlaneSwarm()
+        }
       }
-      else if (tab === 'ops') void refreshOperatorSnapshot()
+      else if (tab === 'ops') {
+        void refreshOperatorSnapshot()
+        void refreshOperatorRoomDigest()
+      }
       else if (tab === 'board') void refreshBoard()
       else if (tab === 'trpg') void refreshTrpg()
       else if (tab === 'goals') {
@@ -252,8 +266,14 @@ export function App() {
     if (tab === 'command') {
       refreshCommandPlaneCurrentSurface()
       refreshCommandPlaneChainSummary()
+      if (commandPlaneSurface.value === 'swarm') {
+        refreshCommandPlaneSwarm()
+      }
     }
-    if (tab === 'ops') refreshOperatorSnapshot()
+    if (tab === 'ops') {
+      refreshOperatorSnapshot()
+      refreshOperatorRoomDigest()
+    }
     if (tab === 'board') refreshBoard()
     if (tab === 'trpg') refreshTrpg()
     if (tab === 'goals') {

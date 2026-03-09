@@ -18,6 +18,7 @@ import type {
   BoardSortMode,
   OperatorActionRequest,
   OperatorActionResult,
+  OperatorDigest,
   OperatorSnapshot,
   CommandPlaneHelpResponse,
   CommandPlaneChainRunResponse,
@@ -351,6 +352,19 @@ export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
   return get('/api/v1/operator')
 }
 
+export function fetchOperatorDigest(options: {
+  targetType?: 'room' | 'team_session'
+  targetId?: string
+  includeWorkers?: boolean
+} = {}): Promise<OperatorDigest> {
+  const params = new URLSearchParams()
+  if (options.targetType) params.set('target_type', options.targetType)
+  if (options.targetId) params.set('target_id', options.targetId)
+  if (options.includeWorkers != null) params.set('include_workers', options.includeWorkers ? 'true' : 'false')
+  const query = params.toString()
+  return get(`/api/v1/operator/digest${query ? `?${query}` : ''}`)
+}
+
 export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {
   return get('/api/v1/command-plane')
 }
@@ -370,9 +384,13 @@ export function fetchCommandPlaneHelp(): Promise<CommandPlaneHelpResponse> {
   return get('/api/v1/command-plane/help')
 }
 
-export function fetchCommandPlaneSwarm(runId?: string): Promise<CommandPlaneSwarmResponse> {
+export function fetchCommandPlaneSwarm(
+  runId?: string,
+  operationId?: string,
+): Promise<CommandPlaneSwarmResponse> {
   const params = new URLSearchParams()
   if (runId) params.set('run_id', runId)
+  if (operationId) params.set('operation_id', operationId)
   const query = params.toString()
   return get(`/api/v1/command-plane/swarm${query ? `?${query}` : ''}`)
 }

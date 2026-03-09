@@ -345,20 +345,17 @@ function SwarmHealthBar({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
   `
 }
 
-function SwarmWorkerGrid({ workers, total }: { workers: number; total: number }) {
+function SwarmWorkerGrid({ total }: { total: number }) {
   const maxDots = 20
-  const active = Math.min(workers, maxDots)
-  const idle = Math.max(0, Math.min(total - workers, maxDots - active))
+  const present = Math.min(total, maxDots)
   const overflow = total > maxDots ? total - maxDots : 0
-  const dots: Array<{ active: boolean }> = []
-  for (let i = 0; i < active; i++) dots.push({ active: true })
-  for (let i = 0; i < idle; i++) dots.push({ active: false })
+  const dots = Array.from({ length: present })
 
   return html`
     <div class="swarm-worker-grid">
-      ${dots.map(d => html`<span class="swarm-worker-dot ${d.active ? 'active' : 'idle'}"></span>`)}
+      ${dots.map(() => html`<span class="swarm-worker-dot present"></span>`)}
       ${overflow > 0 ? html`<span class="swarm-worker-count">+${overflow}</span>` : null}
-      <span class="swarm-worker-count">(${workers}/${total})</span>
+      <span class="swarm-worker-count">(${total} workers)</span>
     </div>
   `
 }
@@ -367,7 +364,6 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
   const counts = lane.counts ?? {}
   const tone = swarmLaneTone(lane)
   const totalWorkers = counts.workers ?? 0
-  const activeWorkers = Math.max(0, totalWorkers - (counts.alerts ?? 0))
   const ops = counts.operations ?? 0
   const dets = counts.detachments ?? 0
   const totalOps = ops + dets
@@ -394,7 +390,7 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           ? html`
               <div class="swarm-lane-row">
                 <span class="swarm-lane-row-label">Workers</span>
-                <${SwarmWorkerGrid} workers=${activeWorkers} total=${totalWorkers} />
+                <${SwarmWorkerGrid} total=${totalWorkers} />
               </div>
             `
           : null}

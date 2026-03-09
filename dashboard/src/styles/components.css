@@ -4336,8 +4336,7 @@ button.council-row.selected {
   height: 8px;
   border-radius: 50%;
 }
-.swarm-worker-dot.active { background: var(--ok); }
-.swarm-worker-dot.idle { background: rgba(134,160,207,0.25); }
+.swarm-worker-dot.present { background: rgba(134,160,207,0.7); }
 .swarm-worker-count {
   font-size: 0.72rem;
   color: var(--text-dim, rgba(255,255,255,0.5));

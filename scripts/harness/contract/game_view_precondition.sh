@@ -1,46 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 SESSION_ID="${SESSION_ID:-harness-gv-$(date +%s)-$$}"
 CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
-CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
+export CURL_RETRY_COUNT
 
-curl_post_mcp() {
-  local body="$1"
-  local attempt=1
-  while [ "$attempt" -le "$CURL_RETRY_COUNT" ]; do
-    local raw
-    if raw="$(curl -sS -m 20 -X POST "$MCP_URL" \
-      -H 'Content-Type: application/json' \
-      -H 'Accept: application/json, text/event-stream' \
-      -d "$body")"; then
-      printf "%s" "$raw"
-      return 0
-    fi
-    if [ "$attempt" -lt "$CURL_RETRY_COUNT" ]; then
-      sleep "$CURL_RETRY_DELAY_SEC"
-    fi
-    attempt=$((attempt + 1))
-  done
-  return 1
-}
-
-call_tool() {
-  local id="$1"
-  local name="$2"
-  local args_json="$3"
-  local raw
-  local sse_data
-  raw="$(curl_post_mcp "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"
-
-  sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p' | tail -n1)"
-  if [ -n "$sse_data" ]; then
-    printf "%s" "$sse_data"
-  else
-    printf "%s" "$raw"
-  fi
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/test_framework.sh"
 
 echo "[1/5] experiment.start without decision.finalize => expect PRECONDITION_REQUIRED"
 r1="$(call_tool 1001 "experiment.start" "{\"session_id\":\"$SESSION_ID\",\"hypothesis\":\"h\"}")"

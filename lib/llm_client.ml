@@ -153,6 +153,35 @@ let string_of_role = function
   | Assistant -> "assistant"
   | Tool -> "tool"
 
+let sanitize_text_utf8 (s : string) : string =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len then ()
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then (
+        Buffer.add_substring buf s i dlen;
+        loop (i + dlen))
+      else (
+        Buffer.add_string buf "\xEF\xBF\xBD";
+        loop (i + 1))
+  in
+  loop 0;
+  Buffer.contents buf
+
+let sanitize_message_utf8 (m : message) : message =
+  {
+    m with
+    content = sanitize_text_utf8 m.content;
+    name = Option.map sanitize_text_utf8 m.name;
+    tool_call_id = Option.map sanitize_text_utf8 m.tool_call_id;
+  }
+
+let sanitize_messages_utf8 (msgs : message list) : message list =
+  List.map sanitize_message_utf8 msgs
+
 (* ================================================================ *)
 (* Built-in Model Specs                                             *)
 (* ================================================================ *)
@@ -271,6 +300,7 @@ let string_opt_to_json = function
   | None -> `Null
 
 let message_fingerprint_json (m : message) : Yojson.Safe.t =
+  let m = sanitize_message_utf8 m in
   `Assoc
     [
       ("role", `String (string_of_role m.role));
@@ -458,7 +488,9 @@ let tool_def_to_openai_json (td : tool_def) : Yojson.Safe.t =
     Gemini's OpenAI-compat endpoint uses [max_completion_tokens] (thinking models
     consume internal tokens from this budget, so [max_tokens] alone under-allocates). *)
 let build_openai_body (req : completion_request) : string =
-  let messages_json = List.map message_to_openai_json req.messages in
+  let messages_json =
+    req.messages |> sanitize_messages_utf8 |> List.map message_to_openai_json
+  in
   let max_token_fields = match req.model.provider with
     | Gemini ->
       (* Gemini 2.5+ thinking models consume internal thinking tokens from the
@@ -487,11 +519,12 @@ let build_openai_body (req : completion_request) : string =
 
 (** Build Anthropic Messages API request body. *)
 let build_claude_body (req : completion_request) : string =
+  let sanitized_messages = sanitize_messages_utf8 req.messages in
   (* Claude uses separate system parameter *)
   let system_text = List.fold_left (fun acc m ->
     match m.role with System -> acc ^ m.content ^ "\n" | _ -> acc
-  ) "" req.messages |> String.trim in
-  let non_system = List.filter (fun m -> m.role <> System) req.messages in
+  ) "" sanitized_messages |> String.trim in
+  let non_system = List.filter (fun m -> m.role <> System) sanitized_messages in
   let messages_json = List.map (fun m ->
     `Assoc [
       ("role", `String (string_of_role m.role));
@@ -860,7 +893,9 @@ let curl_post ~url ~headers ~body ~timeout_sec : (string, string) result =
     Uses the same message format as OpenAI but adds Ollama-specific fields.
     Includes tools when provided - Ollama supports OpenAI-compatible tool format. *)
 let build_ollama_chat_body (req : completion_request) : string =
-  let messages_json = List.map message_to_openai_json req.messages in
+  let messages_json =
+    req.messages |> sanitize_messages_utf8 |> List.map message_to_openai_json
+  in
   let base = [
     ("model", `String req.model.model_id);
     ("messages", `List messages_json);
@@ -893,6 +928,7 @@ let call_ollama_chat ?timeout_sec (req : completion_request) : (completion_respo
 (** Ollama fallback: /api/generate for models without chat support. *)
 let call_ollama_generate ?timeout_sec (req : completion_request) : (completion_response, string) result =
   let url = sprintf "%s/api/generate" req.model.api_url in
+  let sanitized_messages = sanitize_messages_utf8 req.messages in
   let prompt = List.fold_left (fun acc m ->
     match m.role with
     | System -> sprintf "%s[System] %s\n" acc m.content
@@ -900,7 +936,7 @@ let call_ollama_generate ?timeout_sec (req : completion_request) : (completion_r
     | Assistant -> sprintf "%s[Assistant] %s\n" acc m.content
     | Tool -> sprintf "%s[Tool:%s] %s\n" acc
                 (Option.value ~default:"" m.name) m.content
-  ) "" req.messages in
+  ) "" sanitized_messages in
   let body = Yojson.Safe.to_string (`Assoc [
     ("model", `String req.model.model_id);
     ("prompt", `String prompt);

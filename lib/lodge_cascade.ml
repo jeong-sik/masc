@@ -41,14 +41,25 @@ let load_json_file path =
   | exn -> Error (Printexc.to_string exn)
 
 let default_config_path () =
-  let me =
-    Sys.getenv_opt "ME_ROOT"
-    |> Option.value
-         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
+  let candidates =
+    let cwd_candidate =
+      Filename.concat (Sys.getcwd ()) "config/llm_cascade.json"
+    in
+    let me_root_candidate =
+      let me =
+        Sys.getenv_opt "ME_ROOT"
+        |> Option.value
+             ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
+      in
+      Filename.concat
+        (Filename.concat me "workspace/yousleepwhen/masc-mcp")
+        "config/llm_cascade.json"
+    in
+    [ cwd_candidate; me_root_candidate ]
   in
-  Filename.concat
-    (Filename.concat me "workspace/yousleepwhen/masc-mcp")
-    "config/llm_cascade.json"
+  match List.find_opt Sys.file_exists candidates with
+  | Some path -> path
+  | None -> List.hd candidates
 
 let default_model_strings ~cascade_name =
   match cascade_name with

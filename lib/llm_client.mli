@@ -154,6 +154,15 @@ val user_msg : string -> message
 val assistant_msg : string -> message
 val tool_msg : name:string -> call_id:string -> string -> message
 
+(** Repair malformed UTF-8 in arbitrary text. *)
+val sanitize_text_utf8 : string -> string
+
+(** Repair malformed UTF-8 in a single message before request serialization. *)
+val sanitize_message_utf8 : message -> message
+
+(** Repair malformed UTF-8 across a message list before request serialization. *)
+val sanitize_messages_utf8 : message list -> message list
+
 (** Estimate token count for a message list (heuristic: ~4 chars per token). *)
 val estimate_tokens : message list -> int
 

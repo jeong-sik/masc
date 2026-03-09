@@ -137,6 +137,20 @@ let test_parse_selection_plan_rejects_duplicate_agents () =
   | Error err ->
       check bool "duplicate error surfaced" true (String.length err > 0)
 
+let test_extract_json_object_from_fenced_block () =
+  let response =
+    "Planner output:\n```json\n{\"assignments\":[{\"agent_name\":\"dreamer\",\"target_post_id\":\"p-1\",\"goal\":\"comment\",\"reason\":\"best match\",\"confidence\":0.8}]}\n```"
+  in
+  match Lodge_decision.extract_json_object response with
+  | Ok json ->
+      check bool "contains assignments"
+        true (String.contains json '{' && String.contains json '}')
+  | Error err -> failf "expected fenced json extraction, got %s" err
+
+let test_contains_json_object_rejects_plain_text () =
+  let response = "dreamer should probably comment on the latest post" in
+  check bool "no json object" false (Lodge_decision.contains_json_object response)
+
 let () =
   run "Lodge decision"
     [
@@ -154,5 +168,9 @@ let () =
             test_parse_selection_plan_valid;
           test_case "selection plan rejects duplicate agents" `Quick
             test_parse_selection_plan_rejects_duplicate_agents;
+          test_case "extract json from fenced block" `Quick
+            test_extract_json_object_from_fenced_block;
+          test_case "reject plain text json extraction" `Quick
+            test_contains_json_object_rejects_plain_text;
         ] );
     ]

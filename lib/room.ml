@@ -316,7 +316,30 @@ and join config ~agent_name ?(agent_type_override=None) ~capabilities
       Nickname.generate agent_type  (* Generate new nickname *)
   in
 
-  (* Collect metadata *)
+  (* Dedup: if agent already joined, update last_seen and return early *)
+  let agent_file_dedup = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
+  let already_joined =
+    if is_pg_backend config then
+      let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
+      backend_exists config ~key:agent_key || Sys.file_exists agent_file_dedup
+    else
+      Sys.file_exists agent_file_dedup
+  in
+  if already_joined then begin
+    let existing_json = read_json config agent_file_dedup in
+    (match agent_of_yojson existing_json with
+     | Ok existing_agent ->
+       let updated = { existing_agent with last_seen = now_iso () } in
+       write_json config agent_file_dedup (agent_to_yojson updated);
+       if is_pg_backend config then begin
+         let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
+         let _ = backend_set config ~key:agent_key
+                   ~value:(Yojson.Safe.to_string (agent_to_yojson updated)) in ()
+       end
+     | Error _ -> ());
+    Printf.sprintf "✅ %s already in room (last_seen updated)" nickname
+  end else begin
+    (* Collect metadata *)
   let session_id = generate_session_id () in
   let meta : agent_meta = {
     session_id;
@@ -391,6 +414,7 @@ and join config ~agent_name ?(agent_type_override=None) ~capabilities
 • "✅ [작업] 완료!"
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 |} nickname nickname agent_type session_id
+  end
 
 (** Leave room *)
 and leave config ~agent_name =

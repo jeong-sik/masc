@@ -34,7 +34,6 @@ export const DASHBOARD_NAV_SECTIONS: DashboardNavSection[] = [
   },
 ]
 
-// Primary IA for the side rail navigation.
 export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
   {
     id: 'mission',

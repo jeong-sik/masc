@@ -35,36 +35,47 @@ let net_initialized : bool ref = ref false
 (** Eio clock reference for async sleep *)
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
 
+(** Mutex protecting global network/clock refs from concurrent fiber access.
+    Required because parallel MCP calls spawn fibers that read/write these refs. *)
+let global_ctx_mutex = Eio.Mutex.create ()
+
 (** Set the Eio network reference. Called from main_eio.ml. *)
 let set_net net =
-  current_net := Some (net :> eio_net);
-  net_initialized := true
+  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
+    current_net := Some (net :> eio_net);
+    net_initialized := true)
 
 (** Set the Eio clock reference. Called from main_eio.ml. *)
-let set_clock clock = current_clock := Some clock
+let set_clock clock =
+  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
+    current_clock := Some clock)
 
 (** Get the Eio clock reference optionally. *)
-let get_clock_opt () = !current_clock
+let get_clock_opt () =
+  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_clock)
 
 (** Get the Eio clock reference. Raises if not set. *)
 let get_clock () =
-  match !current_clock with
-  | Some clock -> clock
-  | None -> invalid_arg "Eio clock not initialized"
+  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+    match !current_clock with
+    | Some clock -> clock
+    | None -> invalid_arg "Eio clock not initialized")
 
 (** Get the Eio network reference optionally - for graceful handling *)
-let get_net_opt () : eio_net option = !current_net
+let get_net_opt () : eio_net option =
+  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_net)
 
 (** Get the Eio network reference. Raises if not set.
     @raise Failure if set_net was not called *)
 let get_net () : eio_net =
-  match !current_net with
-  | Some net -> net
-  | None ->
-    if !net_initialized then
-      invalid_arg "Eio net was set but is now None (unexpected state)"
-    else
-      invalid_arg "Eio net not initialized - ensure set_net is called during server startup"
+  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+    match !current_net with
+    | Some net -> net
+    | None ->
+      if !net_initialized then
+        invalid_arg "Eio net was set but is now None (unexpected state)"
+      else
+        invalid_arg "Eio net not initialized - ensure set_net is called during server startup")
 
 (** Re-export pure functions from Mcp_server *)
 let create_state ?test_mode:_ ~base_path () =

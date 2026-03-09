@@ -38,6 +38,7 @@ import type {
   CommandPlaneDetachmentRecord,
   CommandPlaneOperationCard,
   CommandPlaneOperationRecord,
+  CommandPlaneMicroarchSummary,
   CommandPlaneOperationsResponse,
   CommandPlanePolicyEnvelope,
   CommandPlaneSnapshot,
@@ -271,6 +272,110 @@ function normalizeOperationCard(raw: unknown): CommandPlaneOperationCard | null 
   }
 }
 
+function normalizeMicroarchSignal(raw: unknown) {
+  if (!isRecord(raw)) return undefined
+  return {
+    tone: asString(raw.tone),
+    pending_ops: asNumber(raw.pending_ops),
+    blocked_ops: asNumber(raw.blocked_ops),
+    in_flight_ops: asNumber(raw.in_flight_ops),
+    pipeline_stalls: asNumber(raw.pipeline_stalls),
+    bus_traffic: asNumber(raw.bus_traffic),
+    l1_hit_rate: asNumber(raw.l1_hit_rate),
+    invalidation_count: asNumber(raw.invalidation_count),
+    current_pending: asNumber(raw.current_pending),
+    current_in_flight: asNumber(raw.current_in_flight),
+    cdb_wakeups: asNumber(raw.cdb_wakeups),
+    total_stolen: asNumber(raw.total_stolen),
+    avg_best_score: asNumber(raw.avg_best_score),
+    avg_candidate_count: asNumber(raw.avg_candidate_count),
+    best_first_operations: asNumber(raw.best_first_operations),
+    active_sessions: asNumber(raw.active_sessions),
+    commit_rate: asNumber(raw.commit_rate),
+    total_speculations: asNumber(raw.total_speculations),
+  }
+}
+
+function normalizeMicroarch(raw: unknown): CommandPlaneMicroarchSummary | undefined {
+  if (!isRecord(raw)) return undefined
+  const pipeline = isRecord(raw.pipeline) ? raw.pipeline : undefined
+  const cache = isRecord(raw.cache) ? raw.cache : undefined
+  const ooo = isRecord(raw.ooo) ? raw.ooo : undefined
+  const speculative = isRecord(raw.speculative) ? raw.speculative : undefined
+  const search = isRecord(raw.search_fabric) ? raw.search_fabric : undefined
+  const signals = isRecord(raw.signals) ? raw.signals : undefined
+  return {
+    pipeline: pipeline
+      ? {
+          total_ops: asNumber(pipeline.total_ops),
+          completed_ops: asNumber(pipeline.completed_ops),
+          stalled_cycles: asNumber(pipeline.stalled_cycles),
+          hazards_detected: asNumber(pipeline.hazards_detected),
+          forwarding_used: asNumber(pipeline.forwarding_used),
+          pipeline_flushes: asNumber(pipeline.pipeline_flushes),
+          ipc: asNumber(pipeline.ipc),
+        }
+      : undefined,
+    cache: cache
+      ? {
+          total_reads: asNumber(cache.total_reads),
+          total_writes: asNumber(cache.total_writes),
+          l1_hit_rate: asNumber(cache.l1_hit_rate),
+          invalidation_count: asNumber(cache.invalidation_count),
+          writeback_count: asNumber(cache.writeback_count),
+          bus_traffic: asNumber(cache.bus_traffic),
+        }
+      : undefined,
+    ooo: ooo
+      ? {
+          agent_count: asNumber(ooo.agent_count),
+          total_added: asNumber(ooo.total_added),
+          total_issued: asNumber(ooo.total_issued),
+          total_completed: asNumber(ooo.total_completed),
+          total_stolen: asNumber(ooo.total_stolen),
+          cdb_wakeups: asNumber(ooo.cdb_wakeups),
+          stall_cycles: asNumber(ooo.stall_cycles),
+          global_cdb_events: asNumber(ooo.global_cdb_events),
+          current_pending: asNumber(ooo.current_pending),
+          current_in_flight: asNumber(ooo.current_in_flight),
+        }
+      : undefined,
+    speculative: speculative
+      ? {
+          total_speculations: asNumber(speculative.total_speculations),
+          total_commits: asNumber(speculative.total_commits),
+          total_aborts: asNumber(speculative.total_aborts),
+          commit_rate: asNumber(speculative.commit_rate),
+          total_fast_calls: asNumber(speculative.total_fast_calls),
+          total_cost_usd: asNumber(speculative.total_cost_usd),
+          active_sessions: asNumber(speculative.active_sessions),
+        }
+      : undefined,
+    search_fabric: search
+      ? {
+          total_operations: asNumber(search.total_operations),
+          best_first_operations: asNumber(search.best_first_operations),
+          legacy_operations: asNumber(search.legacy_operations),
+          blocked_operations: asNumber(search.blocked_operations),
+          ready_operations: asNumber(search.ready_operations),
+          research_pipeline_operations: asNumber(search.research_pipeline_operations),
+          avg_candidate_count: asNumber(search.avg_candidate_count),
+          avg_best_score: asNumber(search.avg_best_score),
+          top_stage: asString(search.top_stage) ?? null,
+        }
+      : undefined,
+    signals: signals
+      ? {
+          issue_pressure: normalizeMicroarchSignal(signals.issue_pressure),
+          cache_contention: normalizeMicroarchSignal(signals.cache_contention),
+          scheduler_efficiency: normalizeMicroarchSignal(signals.scheduler_efficiency),
+          routing_confidence: normalizeMicroarchSignal(signals.routing_confidence),
+          speculative_posture: normalizeMicroarchSignal(signals.speculative_posture),
+        }
+      : undefined,
+  }
+}
+
 function normalizeOperations(raw: unknown): CommandPlaneOperationsResponse {
   const root = isRecord(raw) ? raw : {}
   const summary = isRecord(root.summary) ? root.summary : undefined
@@ -286,6 +391,7 @@ function normalizeOperations(raw: unknown): CommandPlaneOperationsResponse {
           projected: asNumber(summary.projected),
         }
       : undefined,
+    microarch: normalizeMicroarch(root.microarch),
     operations: Array.isArray(root.operations)
       ? root.operations
           .map(normalizeOperationCard)
@@ -681,6 +787,7 @@ function normalizeSummarySnapshot(raw: unknown): CommandPlaneSummarySnapshot {
       version: operations.version,
       generated_at: operations.generated_at,
       summary: operations.summary,
+      microarch: operations.microarch,
     },
     detachments: {
       version: detachments.version,

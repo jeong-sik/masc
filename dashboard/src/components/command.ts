@@ -281,8 +281,13 @@ function SummaryCards() {
   const chainSummary = commandPlaneChainSummary.value
   const topology = summary?.topology.summary
   const ops = summary?.operations.summary
+  const microarch = summary?.operations.microarch
   const decisions = summary?.decisions.summary
   const alerts = summary?.alerts.summary
+  const routing = microarch?.signals?.routing_confidence
+  const issuePressure = microarch?.signals?.issue_pressure
+  const search = microarch?.search_fabric
+  const cache = microarch?.cache
   return html`
     <div class="command-summary-grid">
       <div class="monitor-stat-card"><span>Units</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0} managed</small></div>
@@ -290,6 +295,8 @@ function SummaryCards() {
       <div class="monitor-stat-card"><span>Approvals</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0} tracked</small></div>
       <div class="monitor-stat-card"><span>Alerts</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0} warn</small></div>
       <div class="monitor-stat-card"><span>Chains</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0} linked</small></div>
+      <div class="monitor-stat-card"><span>Routing</span><strong>${search?.best_first_operations ?? 0}</strong><small>${routing?.tone ?? 'n/a'} · score ${search?.avg_best_score?.toFixed(1) ?? '0.0'}</small></div>
+      <div class="monitor-stat-card"><span>Microarch</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 hit` : 'no cache data'} · ${issuePressure?.tone ?? 'n/a'}</small></div>
     </div>
   `
 }

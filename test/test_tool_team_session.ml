@@ -31,6 +31,18 @@ let unwrap_ok = function
   | Ok v -> v
   | Error e -> failwith e
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+  | Some v -> Unix.putenv name v
+  | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 let get_session_id response_json =
   response_json |> result_field |> Yojson.Safe.Util.member "session_id"
   |> Yojson.Safe.Util.to_string
@@ -136,6 +148,7 @@ let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
       orchestration_mode = Team_session_types.Assist;
       communication_mode = Team_session_types.Comm_broadcast;
       scale_profile = Team_session_types.Scale_standard;
+      control_profile = Team_session_types.Control_flat;
       model_cascade;
       fallback_policy;
       instruction_profile = Team_session_types.Profile_strict;
@@ -312,6 +325,7 @@ let test_recover_elapsed_session () =
       orchestration_mode = Team_session_types.Assist;
       communication_mode = Team_session_types.Comm_broadcast;
       scale_profile = Team_session_types.Scale_standard;
+      control_profile = Team_session_types.Control_flat;
       model_cascade = [ "glm:glm-5" ];
       fallback_policy = Team_session_types.Fallback_cascade_then_task;
       instruction_profile = Team_session_types.Profile_standard;
@@ -717,6 +731,16 @@ let test_proof_exposes_spawn_selection_rationale () =
                    parent_actor = None;
                    capsule_mode = None;
                    runtime_pool = None;
+                   lane_id = None;
+                   controller_level = None;
+                   control_domain = None;
+                   supervisor_actor = None;
+                   model_tier = Some Team_session_types.Tier_35b;
+                   task_profile = Some Team_session_types.Profile_decide;
+                   risk_level = Some Team_session_types.Risk_high;
+                   routing_confidence = Some 0.97;
+                   routing_reason = Some "explicit:lead";
+                   routing_escalated = false;
                  };
                ];
            updated_at_iso = Types.now_iso ();
@@ -771,6 +795,14 @@ let test_proof_exposes_spawn_selection_rationale () =
     evidence |> Yojson.Safe.Util.member "unique_spawn_runtime_actors_count"
     |> Yojson.Safe.Util.to_int
   in
+  let tier_35b_count =
+    evidence |> Yojson.Safe.Util.member "tier_counts" |> Yojson.Safe.Util.member "35b"
+    |> Yojson.Safe.Util.to_int
+  in
+  let decide_count =
+    evidence |> Yojson.Safe.Util.member "task_profile_counts"
+    |> Yojson.Safe.Util.member "decide" |> Yojson.Safe.Util.to_int
+  in
   let recorded_models =
     evidence |> Yojson.Safe.Util.member "spawn_models"
     |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string
@@ -778,6 +810,8 @@ let test_proof_exposes_spawn_selection_rationale () =
   Alcotest.(check string) "selection note summary" selection_note recorded_note;
   Alcotest.(check int) "planned worker count" 1 planned_worker_count;
   Alcotest.(check int) "runtime actor count" 1 runtime_actor_count;
+  Alcotest.(check int) "proof tier count" 1 tier_35b_count;
+  Alcotest.(check int) "proof decide count" 1 decide_count;
   Alcotest.(check bool) "spawn model included" true
     (List.mem spawn_model recorded_models);
   let proof_md_path =
@@ -1239,8 +1273,27 @@ let test_step_spawn_llama_requires_spawn_model () =
     detail |> Yojson.Safe.Util.member "spawn_selection_note"
     |> Yojson.Safe.Util.to_string_option
   in
-  Alcotest.(check (option string)) "selection note recorded in failure event"
-    (Some selection_note) recorded_selection_note;
+  let recorded_selection_note =
+    match recorded_selection_note with
+    | Some value -> value
+    | None -> Alcotest.fail "selection note missing in failure event"
+  in
+  Alcotest.(check bool) "selection note preserved in failure event" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string selection_note)
+           recorded_selection_note 0
+       in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "routing summary appended in failure event" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "[routing]")
+           recorded_selection_note 0
+       in
+       true
+     with Not_found -> false);
   cleanup_dir base_dir
 
 let test_step_spawn_batch_records_planned_workers () =
@@ -1319,6 +1372,121 @@ let test_step_spawn_batch_records_planned_workers () =
   Alcotest.(check int) "planned worker event recorded" 1
     (List.length planned_events);
   cleanup_dir base_dir
+
+let test_step_spawn_batch_applies_hybrid_routing () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let ctx : _ Tool_team_session.context =
+        {
+          config;
+          agent_name = "owner";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = None;
+        }
+      in
+      with_env "MASC_TEAM_SESSION_MODEL_35B" (Some "qwen35-lead") @@ fun () ->
+      with_env "MASC_TEAM_SESSION_MODEL_9B" (Some "qwen9-worker") @@ fun () ->
+      with_env "MASC_TEAM_SESSION_ROUTER_JUDGE" (Some "false") @@ fun () ->
+      let session_id =
+        start_session_exn ctx ~goal:"hybrid-router-step" |> get_session_id
+      in
+      let step_ok, step_body =
+        dispatch_exn ctx ~name:"masc_team_session_step"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String session_id);
+                ( "spawn_batch",
+                  `List
+                    [
+                      `Assoc
+                        [
+                          ("spawn_agent", `String "llama");
+                          ("spawn_role", `String "normalizer");
+                          ("spawn_prompt", `String "normalize evidence into strict JSON schema");
+                        ];
+                      `Assoc
+                        [
+                          ("spawn_agent", `String "llama");
+                          ("spawn_role", `String "final-writer");
+                          ("spawn_prompt", `String "final architecture decision and synthesize the proposal");
+                        ];
+                    ] );
+              ])
+      in
+      Alcotest.(check bool) "batch step fails without proc manager" false step_ok;
+      let message =
+        parse_json_exn step_body |> Yojson.Safe.Util.member "message"
+        |> Yojson.Safe.Util.to_string
+      in
+      Alcotest.(check bool) "proc manager error surfaced" true
+        (try
+           let _ =
+             Str.search_forward
+               (Str.regexp_string "process manager unavailable")
+               message 0
+           in
+           true
+         with Not_found -> false);
+      let session =
+        Team_session_store.load_session config session_id |> Option.get
+      in
+      Alcotest.(check int) "planned workers recorded" 2
+        (List.length session.planned_workers);
+      let normalizer =
+        List.find
+          (fun worker -> worker.Team_session_types.spawn_role = Some "normalizer")
+          session.planned_workers
+      in
+      Alcotest.(check (option string)) "normalizer model" (Some "qwen9-worker")
+        normalizer.spawn_model;
+      Alcotest.(check (option string)) "normalizer tier" (Some "9b")
+        (Option.map Team_session_types.model_tier_to_string normalizer.model_tier);
+      Alcotest.(check (option string)) "normalizer profile" (Some "normalize")
+        (Option.map Team_session_types.task_profile_to_string
+           normalizer.task_profile);
+      Alcotest.(check (option string)) "normalizer risk" (Some "low")
+        (Option.map Team_session_types.risk_level_to_string normalizer.risk_level);
+      let final_writer =
+        List.find
+          (fun worker -> worker.Team_session_types.spawn_role = Some "final-writer")
+          session.planned_workers
+      in
+      Alcotest.(check (option string)) "final writer model" (Some "qwen35-lead")
+        final_writer.spawn_model;
+      Alcotest.(check (option string)) "final writer tier" (Some "35b")
+        (Option.map Team_session_types.model_tier_to_string
+           final_writer.model_tier);
+      Alcotest.(check (option string)) "final writer profile" (Some "synthesize")
+        (Option.map Team_session_types.task_profile_to_string
+           final_writer.task_profile);
+      Alcotest.(check (option string)) "final writer risk" (Some "high")
+        (Option.map Team_session_types.risk_level_to_string
+           final_writer.risk_level);
+      let status_ok, status_body =
+        dispatch_exn ctx ~name:"masc_team_session_status"
+          ~args:(`Assoc [ ("session_id", `String session_id) ])
+      in
+      Alcotest.(check bool) "status ok" true status_ok;
+      let summary =
+        parse_json_exn status_body |> result_field |> Yojson.Safe.Util.member "summary"
+      in
+      Alcotest.(check int) "summary 35b count" 1
+        Yojson.Safe.Util.(summary |> member "tier_counts" |> member "35b" |> to_int);
+      Alcotest.(check int) "summary 9b count" 1
+        Yojson.Safe.Util.(summary |> member "tier_counts" |> member "9b" |> to_int);
+      Alcotest.(check int) "summary normalize count" 1
+        Yojson.Safe.Util.(summary |> member "task_profile_counts" |> member "normalize" |> to_int);
+      Alcotest.(check int) "summary synthesize count" 1
+        Yojson.Safe.Util.(summary |> member "task_profile_counts" |> member "synthesize" |> to_int))
 
 let test_reconcile_failed_spawn_actor_detaches_without_turn () =
   let base_dir = temp_dir () in
@@ -1932,6 +2100,8 @@ let () =
             test_step_spawn_llama_requires_spawn_model;
           Alcotest.test_case "step-spawn-batch-records-planned-workers"
             `Quick test_step_spawn_batch_records_planned_workers;
+          Alcotest.test_case "step-spawn-batch-applies-hybrid-routing"
+            `Quick test_step_spawn_batch_applies_hybrid_routing;
           Alcotest.test_case "reconcile-failed-spawn-actor-detaches-without-turn"
             `Quick test_reconcile_failed_spawn_actor_detaches_without_turn;
           Alcotest.test_case "reconcile-failed-spawn-actor-retains-after-turn"

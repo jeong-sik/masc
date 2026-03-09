@@ -278,14 +278,37 @@ let discover config ?(endpoint : string option) ?(capability : string option) ()
     : (Yojson.Safe.t, string) result =
   match endpoint with
   | Some url ->
-    (* Remote discovery - fetch agent card from URL *)
-    (* For now, return a placeholder since we can't do HTTP in sync *)
-    Ok (`Assoc [
-      ("type", `String "remote_discovery");
-      ("endpoint", `String url);
-      ("note", `String "Remote discovery requires async HTTP. Use the endpoint directly.");
-      ("well_known_url", `String (url ^ "/.well-known/agent-card.json"));
-    ])
+    (* Remote discovery - fetch agent card from well-known URL via curl *)
+    let well_known = url ^ "/.well-known/agent-card.json" in
+    let argv = ["curl"; "-s"; "--max-time"; "10";
+                "-H"; "Accept: application/json"; well_known] in
+    (try
+      let (status, body) = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
+      match status with
+      | Unix.WEXITED 0 when String.length body > 0 ->
+        (try
+          let card_json = Yojson.Safe.from_string body in
+          Ok (`Assoc [
+            ("type", `String "remote_discovery");
+            ("endpoint", `String url);
+            ("agent_card", card_json);
+          ])
+        with Yojson.Json_error msg ->
+          Error (Printf.sprintf "Invalid JSON from %s: %s" well_known msg))
+      | Unix.WEXITED 0 ->
+        Error (Printf.sprintf "Empty response from %s" well_known)
+      | Unix.WEXITED 7 ->
+        Error (Printf.sprintf "Connection refused: %s" well_known)
+      | Unix.WEXITED 28 ->
+        Error (Printf.sprintf "Request timed out: %s" well_known)
+      | Unix.WEXITED code ->
+        Error (Printf.sprintf "HTTP fetch failed (exit %d): %s" code well_known)
+      | Unix.WSIGNALED sig_num ->
+        Error (Printf.sprintf "Fetch killed by signal %d: %s" sig_num well_known)
+      | Unix.WSTOPPED _ ->
+        Error (Printf.sprintf "Fetch stopped: %s" well_known)
+    with exn ->
+      Error (Printf.sprintf "Remote discovery error: %s" (Printexc.to_string exn)))
   | None ->
     (* Local discovery - list agents in room *)
     let agents = Room.get_agents_raw config in

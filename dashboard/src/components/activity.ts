@@ -242,6 +242,7 @@ export function Activity() {
           ${(['all', 'messages', 'board', 'tasks', 'keepers', 'system'] as ActivityFilter[]).map(filter => html`
             <button
               class="goal-filter-btn ${activityFilter.value === filter ? 'active' : ''}"
+              aria-pressed="${activityFilter.value === filter}"
               onClick=${() => { activityFilter.value = filter }}
             >
               ${FILTER_LABELS[filter]}

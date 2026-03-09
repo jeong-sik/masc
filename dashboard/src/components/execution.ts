@@ -436,14 +436,14 @@ export function Execution() {
   return html`
     <div class="agents-monitor">
       <div class="stats-grid">
-        <${ExecutionStat} label="Active work 진행중" value=${activeRows.length} color="#fbbf24" caption="할당됨 + 진행중" />
-        <${ExecutionStat} label="Needs intervention 개입 필요" value=${interventionItems.length} color=${interventionItems.length > 0 ? '#fb7185' : '#4ade80'} caption="정체 또는 드리프트 감지" />
+        <${ExecutionStat} label="Active work 진행 중" value=${activeRows.length} color="#fbbf24" caption="할당됨 + 진행 중" />
+        <${ExecutionStat} label="Needs intervention 개입 건수" value=${interventionItems.length} color=${interventionItems.length > 0 ? '#fb7185' : '#4ade80'} caption="정체 또는 드리프트 감지" />
         <${ExecutionStat} label="Ownership gaps 담당자 공백" value=${ownershipGaps.length} color=${ownershipGaps.length > 0 ? '#fb7185' : '#4ade80'} caption="활성 담당자 없는 작업" />
         <${ExecutionStat} label="Dispatchable agents 배치 가능" value=${dispatchableAgents.length} color="#22d3ee" caption="부하 없는 대기 에이전트" />
         <${ExecutionStat} label="Quiet execution 조용한 실행" value=${quietExecution.length} color=${quietExecution.length > 0 ? '#fbbf24' : '#4ade80'} caption="오래된 신호의 활성 작업" />
       </div>
 
-      <${Card} title="Intervention Queue 개입 필요" class="section">
+      <${Card} title="Intervention Queue 개입 대기열" class="section">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">What needs a nudge right now</h2>
           <p class="monitor-subheadline">Severity comes first, then the freshest evidence we have about the stall or drift.</p>

@@ -4275,6 +4275,9 @@ button.council-row.selected {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  line-height: 1.3;
 }
 
 .monitor-stat-card strong {

@@ -612,10 +612,10 @@ export function Overview() {
         caption="P1/P2 우선순위 대기 작업"
       />
       <${StatCard}
-        label="Active Work 진행중"
+        label="Active Work 진행 중"
         value=${byStatus.inProgress.length}
         color="#fbbf24"
-        caption="할당됨 + 진행중인 작업"
+        caption="할당됨 + 진행 중인 작업"
       />
       <${StatCard}
         label="Dispatchable 배치 가능"
@@ -666,7 +666,7 @@ export function Overview() {
 
     <div class="overview-workbench">
       <div class="overview-column">
-        <${Card} title="Intervention Queue 개입 필요" class="section">
+        <${Card} title="Intervention Queue 개입 대기열" class="section">
           <div class="monitor-alert-list">
             ${interventionQueue.length === 0
               ? html`<div class="empty-state">No immediate intervention required</div>`

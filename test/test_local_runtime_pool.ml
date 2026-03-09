@@ -35,7 +35,7 @@ let test_acquire_and_release () =
   Local_runtime_pool.reset ();
   let json =
     {|[
-      {"id":"local-a","base_url":"http://127.0.0.1:8085","model":"qwen-a","max_concurrency":2},
+      {"id":"local-a","base_url":"http://127.0.0.1:8085","max_concurrency":2},
       {"id":"local-b","base_url":"http://127.0.0.1:8086","model":"qwen-b","max_concurrency":2}
     ]|}
   in
@@ -60,6 +60,45 @@ let test_acquire_and_release () =
   in
   Alcotest.(check int) "active slots released" 0 snapshot.active_slots;
   Alcotest.(check int) "success count recorded" 1 snapshot.total_success
+
+let test_acquire_prefers_exact_model_match () =
+  Local_runtime_pool.reset ();
+  let json =
+    {|[
+      {"id":"generic","base_url":"http://127.0.0.1:8185","max_concurrency":2},
+      {"id":"lead","base_url":"http://127.0.0.1:8186","model":"qwen35-lead","max_concurrency":2},
+      {"id":"worker","base_url":"http://127.0.0.1:8187","model":"qwen9-worker","max_concurrency":2}
+    ]|}
+  in
+  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  let assignment =
+    match Local_runtime_pool.acquire ~model_name:(Some "qwen9-worker") () with
+    | Ok assignment -> assignment
+    | Error err -> failwith err
+  in
+  Alcotest.(check string) "exact runtime selected" "worker" assignment.runtime_id;
+  Alcotest.(check string) "requested model preserved" "qwen9-worker"
+    assignment.model_name;
+  Local_runtime_pool.release assignment.lease ~success:true ()
+
+let test_acquire_rejects_mismatched_preferred_model_pool () =
+  Local_runtime_pool.reset ();
+  let json =
+    {|[
+      {"id":"lead","base_url":"http://127.0.0.1:8285","model":"qwen35-lead","max_concurrency":2},
+      {"id":"worker","base_url":"http://127.0.0.1:8286","model":"qwen9-worker","max_concurrency":2}
+    ]|}
+  in
+  with_env "MASC_LLAMA_RUNTIMES_JSON" (Some json) @@ fun () ->
+  match
+    Local_runtime_pool.acquire ~preferred_pool:"lead"
+      ~model_name:(Some "qwen9-worker") ()
+  with
+  | Ok _ -> Alcotest.fail "preferred pool with mismatched model should fail"
+  | Error message ->
+      Alcotest.(check string) "mismatch error"
+        "no local llama runtime configured for model qwen9-worker in runtime pool lead"
+        message
 
 let test_select_runtime_from_empty_returns_error () =
   match Local_runtime_pool.select_runtime_from [] () with
@@ -128,6 +167,10 @@ let () =
         [
           Alcotest.test_case "parse runtime env" `Quick test_parse_runtime_env;
           Alcotest.test_case "acquire and release" `Quick test_acquire_and_release;
+          Alcotest.test_case "acquire prefers exact model match" `Quick
+            test_acquire_prefers_exact_model_match;
+          Alcotest.test_case "acquire rejects mismatched preferred model pool"
+            `Quick test_acquire_rejects_mismatched_preferred_model_pool;
           Alcotest.test_case "empty runtime set returns error" `Quick
             test_select_runtime_from_empty_returns_error;
           Alcotest.test_case "acquire requires explicit model when runtime omits it"

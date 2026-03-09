@@ -152,6 +152,18 @@ let recent_event_lines events limit =
              Some (Printf.sprintf "- %s | %s" ts_iso event_type)
          | _ -> None)
 
+let count_assoc_lines json =
+  match json with
+  | `Assoc fields ->
+      fields
+      |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+      |> List.filter_map (fun (key, value) ->
+             match value with
+             | `Int count -> Some (Printf.sprintf "- %s: %d" key count)
+             | `Intlit raw -> Some (Printf.sprintf "- %s: %s" key raw)
+             | _ -> None)
+  | _ -> []
+
 let turn_counts_by_agent events =
   let tbl = Hashtbl.create 16 in
   List.iter
@@ -367,6 +379,20 @@ let markdown_of_report ~(session : Team_session_types.session)
     | `List xs -> xs
     | _ -> []
   in
+  let tier_counts = summary_json |> member "tier_counts" in
+  let task_profile_counts = summary_json |> member "task_profile_counts" in
+  let escalation_count =
+    summary_json |> member "escalation_count" |> to_int_option
+    |> Option.value ~default:0
+  in
+  let routing_reason_summary =
+    match summary_json |> member "routing_reason_summary" with
+    | `List xs ->
+        xs
+        |> List.filter_map Yojson.Safe.Util.to_string_option
+        |> List.filter (fun value -> String.trim value <> "")
+    | _ -> []
+  in
   let health_required =
     team_health_json |> member "required_agents" |> to_int_option
     |> Option.value ~default:0
@@ -517,6 +543,8 @@ let markdown_of_report ~(session : Team_session_types.session)
            item |> to_string_option |> Option.value ~default:"(unknown)")
     |> List.map (fun actor -> Printf.sprintf "- %s" actor)
   in
+  let tier_count_lines = count_assoc_lines tier_counts in
+  let task_profile_count_lines = count_assoc_lines task_profile_counts in
   let policy_lines =
     [
       Printf.sprintf "- Orchestration mode: %s"
@@ -605,6 +633,19 @@ let markdown_of_report ~(session : Team_session_types.session)
       Printf.sprintf "- LLM cache bypass/errors: %d/%d" llm_cache_bypass
         llm_cache_errors;
       Printf.sprintf "- LLM cache hit rate: %.3f" llm_cache_hit_rate;
+      "";
+      "## Routing Distribution";
+      Printf.sprintf "- Escalation count: %d" escalation_count;
+      (if tier_count_lines = [] then "- Model tiers: (not recorded)"
+       else String.concat "\n" tier_count_lines);
+      (if task_profile_count_lines = [] then "- Task profiles: (not recorded)"
+       else String.concat "\n" task_profile_count_lines);
+      (if routing_reason_summary = [] then "- Routing rationale summary: (not recorded)"
+       else
+         String.concat "\n"
+           (List.map
+              (fun reason -> Printf.sprintf "- %s" reason)
+              routing_reason_summary));
       "";
       "## Team Activity Timeline";
       (if event_lines = [] then
@@ -717,6 +758,22 @@ let generate config (session : Team_session_types.session) :
                 ("spawn_failure_count", `Int spawn_failure_count);
                 ("detached_agent_count", `Int detached_agent_count);
                 ("empty_note_turn_count", `Int empty_note_turn_count);
+                ( "tier_counts",
+                  match Yojson.Safe.Util.member "tier_counts" summary_json with
+                  | `Assoc _ as json -> json
+                  | _ -> `Assoc [] );
+                ( "task_profile_counts",
+                  match Yojson.Safe.Util.member "task_profile_counts" summary_json with
+                  | `Assoc _ as json -> json
+                  | _ -> `Assoc [] );
+                ( "escalation_count",
+                  match Yojson.Safe.Util.member "escalation_count" summary_json with
+                  | `Int _ as json -> json
+                  | _ -> `Int 0 );
+                ( "routing_reason_summary",
+                  match Yojson.Safe.Util.member "routing_reason_summary" summary_json with
+                  | `List _ as json -> json
+                  | _ -> `List [] );
               ] );
         ]
     in
@@ -1235,8 +1292,34 @@ let proof_markdown ~(session : Team_session_types.session)
              Option.value ~default:"(pending)"
                (Option.map String.trim worker.Team_session_types.runtime_actor)
            in
-           Printf.sprintf "- %s | role=%s | model=%s | runtime_actor=%s"
-             worker.Team_session_types.spawn_agent role model actor)
+           let tier =
+             Option.value ~default:"(unspecified)"
+               (Option.map Team_session_types.model_tier_to_string
+                  worker.Team_session_types.model_tier)
+           in
+           let profile =
+             Option.value ~default:"(unspecified)"
+               (Option.map Team_session_types.task_profile_to_string
+                  worker.Team_session_types.task_profile)
+           in
+           let risk =
+             Option.value ~default:"(unspecified)"
+               (Option.map Team_session_types.risk_level_to_string
+                  worker.Team_session_types.risk_level)
+           in
+           let confidence =
+             match worker.Team_session_types.routing_confidence with
+             | Some value -> Printf.sprintf "%.2f" value
+             | None -> "(unspecified)"
+           in
+           let reason =
+             Option.value ~default:"(not recorded)"
+               worker.Team_session_types.routing_reason
+           in
+           Printf.sprintf
+             "- %s | role=%s | model=%s | runtime_actor=%s | tier=%s | profile=%s | risk=%s | confidence=%s | reason=%s"
+             worker.Team_session_types.spawn_agent role model actor tier
+             profile risk confidence reason)
   in
   let failed_spawn_lines =
     failed_spawn_roster
@@ -1312,10 +1395,28 @@ let proof_markdown ~(session : Team_session_types.session)
       Printf.sprintf "- Failed spawn events: %d" spawn_failure_count;
       Printf.sprintf "- Detached failed actors: %d" detached_agent_count;
       Printf.sprintf "- Empty note turns: %d" empty_note_turn_count;
+      Printf.sprintf "- Escalations: %d"
+        (Team_session_types.escalation_count planned_workers);
       Printf.sprintf "- Spawn models: %s"
         (match spawn_models with
         | [] -> "(not recorded)"
-        | xs -> String.concat ", " xs);
+       | xs -> String.concat ", " xs);
+      Printf.sprintf "- Model tier counts: %s"
+        (let pairs = Team_session_types.model_tier_counts planned_workers in
+         if pairs = [] then
+           "(not recorded)"
+         else
+           pairs
+           |> List.map (fun (key, count) -> Printf.sprintf "%s=%d" key count)
+           |> String.concat ", ");
+      Printf.sprintf "- Task profile counts: %s"
+        (let pairs = Team_session_types.task_profile_counts planned_workers in
+         if pairs = [] then
+           "(not recorded)"
+         else
+           pairs
+           |> List.map (fun (key, count) -> Printf.sprintf "%s=%d" key count)
+           |> String.concat ", ");
       Printf.sprintf "- Model selection rationale: %s"
         (match spawn_selection_note_summary with
         | Some note -> note
@@ -1507,6 +1608,21 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ( "spawn_selection_note_summary",
                   Option.fold ~none:`Null ~some:(fun note -> `String note)
                     spawn_selection_note_summary );
+                ( "tier_counts",
+                  Team_session_types.model_tier_counts session.planned_workers
+                  |> Team_session_types.counts_to_json );
+                ( "task_profile_counts",
+                  Team_session_types.task_profile_counts session.planned_workers
+                  |> Team_session_types.counts_to_json );
+                ( "escalation_count",
+                  `Int
+                    (Team_session_types.escalation_count session.planned_workers) );
+                ( "routing_reason_summary",
+                  `List
+                    (List.map
+                       (fun reason -> `String reason)
+                       (Team_session_types.routing_reason_summary
+                          session.planned_workers)) );
                 ("detached_agent_count", `Int detached_agent_count);
                 ("detached_actor_roster", `List detached_actor_roster);
                 ("vote_events", `Int vote_events);

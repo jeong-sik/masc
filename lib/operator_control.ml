@@ -150,6 +150,11 @@ type worker_card = {
   parent_actor : string option;
   capsule_mode : string option;
   runtime_pool : string option;
+  model_tier : string option;
+  task_profile : string option;
+  risk_level : string option;
+  routing_confidence : float option;
+  routing_reason : string option;
   status : string;
   turn_count : int;
   empty_note_turn_count : int;
@@ -168,6 +173,9 @@ type session_digest = {
   last_turn_age_sec : int option;
   worker_class_counts : Yojson.Safe.t;
   runtime_pool_counts : Yojson.Safe.t;
+  tier_counts : Yojson.Safe.t;
+  task_profile_counts : Yojson.Safe.t;
+  escalation_count : int;
   local_runtime : Yojson.Safe.t;
   attention_items : attention_item list;
   recommended_actions : recommended_action list;
@@ -663,6 +671,12 @@ let worker_card_to_yojson (card : worker_card) =
       ("parent_actor", string_option_to_json card.parent_actor);
       ("capsule_mode", string_option_to_json card.capsule_mode);
       ("runtime_pool", string_option_to_json card.runtime_pool);
+      ("model_tier", string_option_to_json card.model_tier);
+      ("task_profile", string_option_to_json card.task_profile);
+      ("risk_level", string_option_to_json card.risk_level);
+      ( "routing_confidence",
+        option_to_json (fun value -> `Float value) card.routing_confidence );
+      ("routing_reason", string_option_to_json card.routing_reason);
       ("status", `String card.status);
       ("turn_count", `Int card.turn_count);
       ("empty_note_turn_count", `Int card.empty_note_turn_count);
@@ -729,6 +743,24 @@ let spawn_batch_stub_of_cards (cards : worker_card list) =
                      ("runtime_pool", `String runtime_pool) :: fields
                  | _ -> fields
                in
+               let fields =
+                 match card.model_tier with
+                 | Some model_tier when String.trim model_tier <> "" ->
+                     ("model_tier", `String model_tier) :: fields
+                 | _ -> fields
+               in
+               let fields =
+                 match card.task_profile with
+                 | Some task_profile when String.trim task_profile <> "" ->
+                     ("task_profile", `String task_profile) :: fields
+                 | _ -> fields
+               in
+               let fields =
+                 match card.risk_level with
+                 | Some risk_level when String.trim risk_level <> "" ->
+                     ("risk_level", `String risk_level) :: fields
+                 | _ -> fields
+               in
                Some (`Assoc (List.rev fields)))
   in
   `Assoc [ ("spawn_batch", `List items) ]
@@ -744,6 +776,23 @@ let aggregate_runtime_pool_counts (sessions : Team_session_types.session list) =
   |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
   |> Team_session_types.runtime_pool_counts
   |> Team_session_types.counts_to_json
+
+let aggregate_tier_counts (sessions : Team_session_types.session list) =
+  sessions
+  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
+  |> Team_session_types.model_tier_counts
+  |> Team_session_types.counts_to_json
+
+let aggregate_task_profile_counts (sessions : Team_session_types.session list) =
+  sessions
+  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
+  |> Team_session_types.task_profile_counts
+  |> Team_session_types.counts_to_json
+
+let aggregate_escalation_count (sessions : Team_session_types.session list) =
+  sessions
+  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
+  |> Team_session_types.escalation_count
 
 let aggregated_local_runtime_json (sessions : Team_session_types.session list) =
   if
@@ -777,6 +826,9 @@ let session_card_to_yojson ~actor (digest : session_digest) =
       ("last_turn_age_sec", option_to_json (fun v -> `Int v) digest.last_turn_age_sec);
       ("worker_class_counts", digest.worker_class_counts);
       ("runtime_pool_counts", digest.runtime_pool_counts);
+      ("tier_counts", digest.tier_counts);
+      ("task_profile_counts", digest.task_profile_counts);
+      ("escalation_count", `Int digest.escalation_count);
       ("local_runtime", digest.local_runtime);
       ("attention_count", `Int (List.length digest.attention_items));
       ("top_attention", option_to_json attention_item_to_yojson top_attention);
@@ -941,14 +993,36 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
                worker.parent_actor,
                Option.map Team_session_types.capsule_mode_to_string
                  worker.capsule_mode,
-               worker.runtime_pool ))
+               worker.runtime_pool,
+               Option.map Team_session_types.model_tier_to_string
+                 worker.model_tier,
+               Option.map Team_session_types.task_profile_to_string
+                 worker.task_profile,
+               Option.map Team_session_types.risk_level_to_string
+                 worker.risk_level,
+               worker.routing_confidence,
+               worker.routing_reason ))
     else
       session.agent_names
-      |> List.map (fun actor -> (Some actor, None, None, None, None, None, None, None))
+      |> List.map (fun actor ->
+             (Some actor, None, None, None, None, None, None, None, None, None, None, None, None))
   in
   worker_keys
-  |> List.map (fun (actor, spawn_agent, spawn_role, spawn_model, worker_class,
-                    parent_actor, capsule_mode, runtime_pool) ->
+  |> List.map
+       (fun
+         ( actor,
+           spawn_agent,
+           spawn_role,
+           spawn_model,
+           worker_class,
+           parent_actor,
+           capsule_mode,
+           runtime_pool,
+           model_tier,
+           task_profile,
+           risk_level,
+           routing_confidence,
+           routing_reason ) ->
          let turn_count =
            match actor with
            | Some value -> turn_count_by_actor events value
@@ -983,6 +1057,11 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            parent_actor;
            capsule_mode;
            runtime_pool;
+           model_tier;
+           task_profile;
+           risk_level;
+           routing_confidence;
+           routing_reason;
            status;
            turn_count;
            empty_note_turn_count;
@@ -1371,6 +1450,23 @@ let build_session_digest config (session : Team_session_types.session) ~now =
       | _ ->
           Team_session_types.runtime_pool_counts session.planned_workers
           |> Team_session_types.counts_to_json);
+    tier_counts =
+      (match U.member "tier_counts" summary with
+      | `Assoc _ as json -> json
+      | _ ->
+          Team_session_types.model_tier_counts session.planned_workers
+          |> Team_session_types.counts_to_json);
+    task_profile_counts =
+      (match U.member "task_profile_counts" summary with
+      | `Assoc _ as json -> json
+      | _ ->
+          Team_session_types.task_profile_counts session.planned_workers
+          |> Team_session_types.counts_to_json);
+    escalation_count =
+      (match U.member "escalation_count" summary with
+      | `Int value -> value
+      | `Intlit raw -> (try int_of_string raw with _ -> 0)
+      | _ -> Team_session_types.escalation_count session.planned_workers);
     local_runtime =
       (match U.member "local_runtime" status_json with
       | `Assoc _ as json -> json
@@ -1496,6 +1592,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
        ("swarm_status", swarm_status_json);
        ("role_census", aggregate_worker_class_counts tracked_sessions);
        ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
+       ("model_tiers", aggregate_tier_counts tracked_sessions);
+       ("task_profiles", aggregate_task_profile_counts tracked_sessions);
+       ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
        ("local_runtime", aggregated_local_runtime_json tracked_sessions);
        ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
        ("pending_confirms", pending_confirms_json ?actor config);
@@ -1561,6 +1660,9 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
               ("swarm_status", swarm_status_json);
               ("role_census", aggregate_worker_class_counts tracked_sessions);
               ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
+              ("model_tiers", aggregate_tier_counts tracked_sessions);
+              ("task_profiles", aggregate_task_profile_counts tracked_sessions);
+              ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
               ("local_runtime", aggregated_local_runtime_json tracked_sessions);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ( "recommended_actions",

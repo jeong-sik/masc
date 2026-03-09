@@ -179,7 +179,7 @@ type gc_result = {
 (** Run GC for all agents with memory streams.
     Returns summary of pruning and consolidation. *)
 let run_gc () : gc_result =
-  let me = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
+  let me = Env_config.me_root () in
   let memory_base = Printf.sprintf "%s/.masc/memory" me in
   if not (Sys.file_exists memory_base) then
     { prune_results = []; consolidation_results = [];

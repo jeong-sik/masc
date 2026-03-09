@@ -25,7 +25,7 @@ let get_mode () =
 let is_enabled () = get_mode () <> Disabled
 
 let activity_log_file () =
-  match Sys.getenv_opt "ME_ROOT" with
+  match Env_config.me_root_opt () with
   | Some root -> root ^ "/logs/auto-responder.log"
   | None -> "/tmp/auto-responder.log"
 
@@ -183,8 +183,7 @@ let call_llm_direct_sync ~agent_type ~prompt =
     "no response"
 
 let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
-  let masc_port = match Sys.getenv_opt "MASC_HTTP_PORT" with Some p -> p | None -> "8935" in
-  let uri = Uri.of_string (Printf.sprintf "http://127.0.0.1:%s/mcp" masc_port) in
+  let uri = Uri.of_string (Env_config.masc_http_base_url () ^ "/mcp") in
   let body =
     `Assoc [
       ("jsonrpc", `String "2.0");

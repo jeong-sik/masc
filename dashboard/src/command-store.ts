@@ -125,6 +125,13 @@ function currentSwarmRunId(): string | undefined {
   return value && value.trim() !== '' ? value.trim() : undefined
 }
 
+function currentSwarmOperationId(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+  const params = new URLSearchParams(window.location.search)
+  const value = params.get('operation_id') ?? undefined
+  return value && value.trim() !== '' ? value.trim() : undefined
+}
+
 function normalizePolicy(raw: unknown): CommandPlanePolicyEnvelope | undefined {
   if (!isRecord(raw)) return undefined
   return {
@@ -1369,11 +1376,14 @@ export async function refreshCommandPlaneHelp(): Promise<void> {
   }
 }
 
-export async function refreshCommandPlaneSwarm(runId = currentSwarmRunId()): Promise<void> {
+export async function refreshCommandPlaneSwarm(
+  runId = currentSwarmRunId(),
+  operationId = currentSwarmOperationId(),
+): Promise<void> {
   commandPlaneSwarmLoading.value = true
   commandPlaneSwarmError.value = null
   try {
-    const raw = await fetchCommandPlaneSwarm(runId)
+    const raw = await fetchCommandPlaneSwarm(runId, operationId)
     commandPlaneSwarm.value = normalizeSwarm(raw)
   } catch (err) {
     commandPlaneSwarmError.value =
@@ -1457,5 +1467,9 @@ export function toggleCommandPlaneKillSwitch(unitId: string, enabled: boolean): 
 }
 
 registerCommandPlaneRefresh(() => {
-  void refreshCommandPlaneSummary()
+  void refreshCommandPlaneCurrentSurface()
+  void refreshCommandPlaneChainSummary()
+  if (commandPlaneSurface.value === 'swarm' || commandPlaneSwarm.value !== null) {
+    void refreshCommandPlaneSwarm()
+  }
 })

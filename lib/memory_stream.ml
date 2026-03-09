@@ -45,7 +45,7 @@ let max_entries = 1000
 (* ---------- Paths ---------- *)
 
 let me_root () =
-  Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me"
+  Env_config.me_root ()
 
 let memory_dir ~agent_name =
   sprintf "%s/.masc/memory/%s" (me_root ()) agent_name

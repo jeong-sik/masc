@@ -94,6 +94,27 @@ function extractJsonObject(text) {
     pass: (await page.locator('body').innerText()).includes('Overview'),
   });
 
+  await gotoHash(page, '#command', 'Command Plane');
+  const commandBody = await page.locator('body').innerText();
+  checks.push({
+    name: 'command summary shows command surfaces',
+    pass: commandBody.includes('summary') && commandBody.includes('swarm') && commandBody.includes('Run Tick'),
+  });
+
+  await gotoHash(page, '#command?surface=swarm', 'Swarm Live Run');
+  const swarmBody = await page.locator('body').innerText();
+  checks.push({
+    name: 'swarm surface is reachable from dashboard route',
+    pass: swarmBody.includes('Swarm Live Run') && swarmBody.includes('Checklist'),
+  });
+
+  await gotoHash(page, '#ops', 'Operator Control');
+  const opsBody = await page.locator('body').innerText();
+  checks.push({
+    name: 'ops shows digest-backed recommendations',
+    pass: opsBody.includes('Recommended Actions') && opsBody.includes('Available Actions'),
+  });
+
   await gotoHash(page, '#board', 'Board');
   const toggle = page.getByRole('button', { name: /hide auto reports/i });
   if (await toggle.count()) {

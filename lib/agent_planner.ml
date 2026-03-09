@@ -31,7 +31,7 @@ let act_threshold = 0.3
 (* ---------- Paths ---------- *)
 
 let me_root () =
-  Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me"
+  Env_config.me_root ()
 
 let plans_dir ~agent_name =
   sprintf "%s/.masc/plans/%s" (me_root ()) agent_name

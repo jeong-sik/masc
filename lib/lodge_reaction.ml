@@ -81,7 +81,7 @@ let reaction_decay_factor = 0.95
 
 (** Resolve ME_ROOT consistently *)
 let me_root () =
-  Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me"
+  Env_config.me_root ()
 
 (** Path to reaction history JSONL file *)
 let reaction_history_path () =

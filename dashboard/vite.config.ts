@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
 import preact from '@preact/preset-vite'
 
+const proxyTarget = process.env.MASC_DASHBOARD_PROXY_TARGET || 'http://localhost:8935'
+
 export default defineConfig({
   plugins: [preact()],
   base: '/dashboard/',
@@ -17,9 +19,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8935',
+      '/api': proxyTarget,
       '/sse': {
-        target: 'http://localhost:8935',
+        target: proxyTarget,
         // SSE needs no WebSocket upgrade
       },
     },

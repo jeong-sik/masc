@@ -27,7 +27,7 @@ type experience = {
 
 (** Resolve ME_ROOT consistently *)
 let me_root () =
-  Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me"
+  Env_config.me_root ()
 
 (** {1 Council Thread Access (direct, no Lodge_heartbeat dependency)} *)
 

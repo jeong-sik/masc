@@ -689,6 +689,80 @@ export interface OperatorActionDescriptor {
   confirm_required?: boolean
 }
 
+export interface OperatorAttentionItem {
+  kind: string
+  severity: string
+  summary: string
+  target_type: string
+  target_id?: string | null
+  actor?: string | null
+  evidence?: unknown
+}
+
+export interface OperatorRecommendedAction {
+  action_type: string
+  target_type: string
+  target_id?: string | null
+  severity: string
+  reason: string
+  confirm_required?: boolean
+  suggested_payload?: unknown
+  preview?: unknown
+}
+
+export interface OperatorWorkerCard {
+  actor?: string | null
+  spawn_agent?: string | null
+  spawn_role?: string | null
+  spawn_model?: string | null
+  worker_class?: string | null
+  parent_actor?: string | null
+  capsule_mode?: string | null
+  runtime_pool?: string | null
+  lane_id?: string | null
+  controller_level?: string | null
+  control_domain?: string | null
+  supervisor_actor?: string | null
+  model_tier?: string | null
+  task_profile?: string | null
+  risk_level?: string | null
+  routing_confidence?: number | null
+  routing_reason?: string | null
+  status: string
+  turn_count: number
+  empty_note_turn_count: number
+  has_turn: boolean
+  last_turn_ts_iso?: string | null
+}
+
+export interface OperatorSessionCard {
+  session_id: string
+  goal?: string
+  status?: string
+  health?: string
+  scale_profile?: string
+  control_profile?: string
+  planned_worker_count?: number
+  active_agent_count?: number
+  last_turn_age_sec?: number | null
+  attention_count?: number
+  recommended_action_count?: number
+  top_attention?: OperatorAttentionItem | null
+  top_recommendation?: OperatorRecommendedAction | null
+}
+
+export interface OperatorDigest {
+  trace_id?: string
+  target_type: 'room' | 'team_session' | string
+  target_id?: string | null
+  health?: string
+  swarm_status?: CommandPlaneSwarmStatus
+  attention_items: OperatorAttentionItem[]
+  recommended_actions: OperatorRecommendedAction[]
+  session_cards: OperatorSessionCard[]
+  worker_cards: OperatorWorkerCard[]
+}
+
 export interface KeeperProbeResult {
   status?: unknown
   diagnostic?: KeeperDiagnostic | null

@@ -33,6 +33,95 @@ let get_bool ~default name =
        | _ -> default)
   | None -> default
 
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let strip_trailing_slashes value =
+  let rec loop idx =
+    if idx <= 0 then ""
+    else if value.[idx - 1] = '/' then loop (idx - 1)
+    else String.sub value 0 idx
+  in
+  loop (String.length value)
+
+let existing_dir path =
+  Sys.file_exists path && Sys.is_directory path
+
+let existing_file path =
+  Sys.file_exists path && not (Sys.is_directory path)
+
+let home_dir_opt () =
+  Sys.getenv_opt "HOME" |> trim_opt
+
+let home_me_root_opt () =
+  match home_dir_opt () with
+  | Some home ->
+      let candidate = Filename.concat home "me" in
+      if existing_dir candidate then Some candidate else None
+  | None -> None
+
+let me_root_opt () =
+  match Sys.getenv_opt "ME_ROOT" |> trim_opt with
+  | Some path -> Some path
+  | None -> home_me_root_opt ()
+
+let me_root () =
+  match me_root_opt () with
+  | Some path -> path
+  | None -> failwith "ME_ROOT is not set and $HOME/me does not exist"
+
+let sb_path_opt () =
+  match me_root_opt () with
+  | Some root ->
+      let path = Filename.concat root "scripts/sb" in
+      if existing_file path then Some path else None
+  | None -> None
+
+let sb_path () =
+  match sb_path_opt () with
+  | Some path -> path
+  | None -> failwith "Unable to resolve scripts/sb. Set ME_ROOT or create $HOME/me/scripts/sb."
+
+let masc_http_port () =
+  match Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt with
+  | Some port -> port
+  | None -> (
+      match Sys.getenv_opt "MASC_PORT" |> trim_opt with
+      | Some port -> port
+      | None -> "8935")
+
+let masc_http_base_url () =
+  match Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt with
+  | Some base -> strip_trailing_slashes base
+  | None -> Printf.sprintf "http://127.0.0.1:%s" (masc_http_port ())
+
+let libdatachannel_path_candidates () =
+  let env_path =
+    Sys.getenv_opt "LIBDATACHANNEL_PATH" |> trim_opt |> Option.to_list
+  in
+  let common =
+    [
+      "/usr/local/lib/libdatachannel.dylib";
+      "/opt/homebrew/lib/libdatachannel.dylib";
+      "/usr/lib/libdatachannel.dylib";
+      "/usr/local/lib/libdatachannel.so";
+      "/usr/lib/libdatachannel.so";
+    ]
+  in
+  let home_local =
+    match home_dir_opt () with
+    | Some home -> [ Filename.concat home "local/lib/libdatachannel.dylib" ]
+    | None -> []
+  in
+  env_path @ common @ home_local
+
+let libdatachannel_path_opt () =
+  libdatachannel_path_candidates ()
+  |> List.find_opt existing_file
+
 (** {1 Zombie Detection / Cleanup Configuration} *)
 
 module Zombie = struct

@@ -14,13 +14,7 @@ type result = bool * string
 
 (** Read Lodge config from .masc/config.json *)
 let read_lodge_config () =
-  let me_root = match Sys.getenv_opt "ME_ROOT" with
-    | Some r -> r
-    | None -> match Sys.getenv_opt "HOME" with
-      | Some h -> h ^ "/me"
-      | None -> "."
-  in
-  let config_path = me_root ^ "/.masc/config.json" in
+  let config_path = Filename.concat (Env_config.me_root ()) ".masc/config.json" in
   try
     let ic = open_in config_path in
     let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
@@ -56,13 +50,7 @@ let language_instruction () =
 
 (** Get sb script path from ME_ROOT env var (portable) *)
 let sb_path () =
-  match Sys.getenv_opt "ME_ROOT" with
-  | Some root -> Printf.sprintf "%s/scripts/sb" root
-  | None -> (
-    match Sys.getenv_opt "HOME" with
-    | Some home -> Printf.sprintf "%s/me/scripts/sb" home
-    | None -> "/Users/dancer/me/scripts/sb"  (* legacy fallback *)
-  )
+  Env_config.sb_path ()
 
 (** {1 Types} *)
 
@@ -810,13 +798,7 @@ let agent_cache_mu = Mutex.create ()
 
 (** Get .masc directory path *)
 let get_masc_dir () =
-  let me_root = match Sys.getenv_opt "ME_ROOT" with
-    | Some r -> r
-    | None -> match Sys.getenv_opt "HOME" with
-      | Some h -> h ^ "/me"
-      | None -> "."
-  in
-  me_root ^ "/.masc"
+  Filename.concat (Env_config.me_root ()) ".masc"
 
 (** Agent cache file path *)
 let agent_file_cache_path () =

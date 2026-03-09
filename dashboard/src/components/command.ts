@@ -178,11 +178,30 @@ function historySummary(history?: ChainHistoryEventSummary | null): string {
   return pieces.join(' · ')
 }
 
-const COMMAND_SURFACES: CommandPlaneSurface[] = ['operations', 'chains', 'topology', 'alerts', 'trace', 'control']
+const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: string }> = [
+  { id: 'summary', label: 'Summary' },
+  { id: 'swarm', label: 'Swarm' },
+  { id: 'operations', label: 'Operations' },
+  { id: 'chains', label: 'Chains' },
+  { id: 'topology', label: 'Topology' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'trace', label: 'Trace' },
+  { id: 'control', label: 'Control' },
+]
+const COMMAND_SURFACES: CommandPlaneSurface[] = COMMAND_SURFACE_META.map(item => item.id)
 const CHAIN_SSE_EVENT_TYPES = ['chain_start', 'node_start', 'node_complete', 'chain_complete', 'chain_error']
 
 function isCommandSurface(value: string | undefined): value is CommandPlaneSurface {
   return !!value && COMMAND_SURFACES.includes(value as CommandPlaneSurface)
+}
+
+function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
+  if (surface === 'summary') return {}
+  if (surface === 'chains') {
+    const operationId = commandPlaneChainFocusOperationId.value
+    return operationId ? { surface, operation: operationId } : { surface }
+  }
+  return { surface }
 }
 
 function chainEventsUrl(): string {
@@ -281,12 +300,11 @@ function SummaryCards() {
   const chainSummary = commandPlaneChainSummary.value
   const topology = summary?.topology.summary
   const ops = summary?.operations.summary
+  const swarm = summary?.swarm_status?.overview
   const microarch = summary?.operations.microarch
   const decisions = summary?.decisions.summary
   const alerts = summary?.alerts.summary
-  const routing = microarch?.signals?.routing_confidence
   const issuePressure = microarch?.signals?.issue_pressure
-  const search = microarch?.search_fabric
   const cache = microarch?.cache
   return html`
     <div class="command-summary-grid">
@@ -295,7 +313,7 @@ function SummaryCards() {
       <div class="monitor-stat-card"><span>Approvals</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0} tracked</small></div>
       <div class="monitor-stat-card"><span>Alerts</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0} warn</small></div>
       <div class="monitor-stat-card"><span>Chains</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0} linked</small></div>
-      <div class="monitor-stat-card"><span>Routing</span><strong>${search?.best_first_operations ?? 0}</strong><small>${routing?.tone ?? 'n/a'} · score ${search?.avg_best_score?.toFixed(1) ?? '0.0'}</small></div>
+      <div class="monitor-stat-card"><span>Swarm</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0} stalled · ${relativeTime(swarm.last_movement_at)}` : 'no lane snapshot'}</small></div>
       <div class="monitor-stat-card"><span>Microarch</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 hit` : 'no cache data'} · ${issuePressure?.tone ?? 'n/a'}</small></div>
     </div>
   `
@@ -494,6 +512,7 @@ function SwarmPanel() {
   const timeline = swarm?.timeline.slice(0, 8) ?? []
   const overview = swarm?.overview
   const recommendation = swarm?.recommended_next_action
+  const compactLayout = lanes.length <= 1
 
   return html`
     <section class="card command-section">
@@ -509,7 +528,7 @@ function SwarmPanel() {
 
             ${lanes.length > 0 ? html`<${SwarmHealthBar} lanes=${lanes} />` : null}
 
-            <div class="command-swarm-layout">
+            <div class="command-swarm-layout ${compactLayout ? 'compact' : ''}">
               <div class="command-card-stack">
                 ${lanes.length > 0
                   ? lanes.map(lane => html`<${SwarmLaneStrip} lane=${lane} />`)
@@ -558,12 +577,15 @@ function SwarmPanel() {
 function SurfaceTabs() {
   return html`
     <div class="command-surface-tabs">
-      ${COMMAND_SURFACES.map(surface => html`
+      ${COMMAND_SURFACE_META.map(surface => html`
         <button
-          class="command-surface-tab ${commandPlaneSurface.value === surface ? 'active' : ''}"
-          onClick=${() => setCommandPlaneSurface(surface)}
+          class="command-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
+          onClick=${() => {
+            setCommandPlaneSurface(surface.id)
+            navigate('command', surfaceRouteParams(surface.id))
+          }}
         >
-          ${surface}
+          ${surface.label}
         </button>
       `)}
     </div>
@@ -833,10 +855,7 @@ function GuidedPanel() {
 function SummarySurface() {
   return html`
     <${SummaryCards} />
-    <div class="command-primary-layout">
-      <${SwarmPanel} />
-      <${GuidedPanel} />
-    </div>
+    <${GuidedPanel} />
   `
 }
 
@@ -1275,138 +1294,141 @@ function SwarmSurface() {
   const actualCtx = swarm?.provider?.actual_ctx ?? swarm?.provider?.ctx_per_slot ?? 0
   const expectedCtx = swarm?.provider?.expected_ctx ?? 'n/a'
   return html`
-    <div class="command-surface-grid">
-      <section class="card command-section">
-        <div class="card-title">Swarm Live Run</div>
-        ${commandPlaneSwarmLoading.value
-          ? html`<div class="empty-state">Loading swarm live state…</div>`
-          : commandPlaneSwarmError.value
-            ? html`<div class="empty-state error">${commandPlaneSwarmError.value}</div>`
-            : swarm
-              ? html`
-                  <div class="command-summary-grid">
-                    <div class="monitor-stat-card"><span>Run</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room n/a'}</small></div>
-                    <div class="monitor-stat-card"><span>Workers</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0} live · ${swarm.summary?.completed_workers ?? 0} completed</small></div>
-                    <div class="monitor-stat-card"><span>Runtime</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
-                    <div class="monitor-stat-card"><span>Hot 10+</span><strong>${swarm.summary?.pass_hot_concurrency ? 'pass' : 'check'}</strong><small>${swarm.provider?.slot_url ?? 'slot n/a'}</small></div>
-                    <div class="monitor-stat-card"><span>End to End</span><strong>${swarm.summary?.pass_end_to_end ? 'pass' : 'check'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
-                  </div>
-                  <div class="command-card-grid">
-                    <span>Operation</span><span>${swarm.operation?.operation_id ?? 'none'}</span>
-                    <span>Squad</span><span>${swarm.squad?.label ?? 'none'}</span>
-                    <span>Detachment</span><span>${swarm.detachment?.detachment_id ?? 'none'}</span>
-                    <span>Expected</span><span>${swarm.summary?.expected_workers ?? 0} workers</span>
-                    <span>Final Markers</span><span>${swarm.summary?.final_markers_seen ?? 0}</span>
-                    <span>Runtime Blocker</span><span>${swarm.provider?.runtime_blocker ?? 'none'}</span>
-                    <span>Recommended</span><span>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</span>
-                  </div>
-                  ${swarm.truth_notes.length > 0
-                    ? html`<div class="command-tag-row">
-                        ${swarm.truth_notes.map(note => html`<span class="command-tag">${note}</span>`)}
-                      </div>`
-                    : null}
-                `
-              : html`<div class="empty-state">No swarm read-model yet.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Checklist</div>
-        ${swarm && swarm.checklist.length > 0
-          ? html`<div class="command-card-stack">
-              ${swarm.checklist.map(item => html`<${SwarmChecklistCard} item=${item} />`)}
-            </div>`
-          : html`<div class="empty-state">No checklist yet.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Workers</div>
-        ${swarm && swarm.workers.length > 0
-          ? html`<div class="command-card-stack">
-              ${swarm.workers.map(worker => html`<${SwarmWorkerCard} worker=${worker} />`)}
-            </div>`
-          : html`<div class="empty-state">No worker rows yet.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Runtime</div>
-        ${swarm?.provider
-          ? html`
-              <div class="command-card-grid">
-                <span>Provider</span><span>${swarm.provider.provider_base_url ?? 'n/a'}</span>
-                <span>Provider Reachable</span><span>${swarm.provider.provider_reachable == null ? 'n/a' : swarm.provider.provider_reachable ? 'yes' : 'no'}</span>
-                <span>Requested Model</span><span>${swarm.provider.provider_model_id ?? 'n/a'}</span>
-                <span>Actual Model</span><span>${swarm.provider.actual_model_id ?? 'n/a'}</span>
-                <span>Slot URL</span><span>${swarm.provider.slot_url ?? 'n/a'}</span>
-                <span>Expected Slots</span><span>${swarm.provider.expected_slots ?? 'n/a'}</span>
-                <span>Actual Slots</span><span>${swarm.provider.actual_slots ?? swarm.provider.total_slots ?? 0}</span>
-                <span>Expected Ctx</span><span>${swarm.provider.expected_ctx ?? 'n/a'}</span>
-                <span>Actual Ctx</span><span>${swarm.provider.actual_ctx ?? swarm.provider.ctx_per_slot ?? 0}</span>
-                <span>Active Now</span><span>${swarm.provider.active_slots_now ?? 0}</span>
-                <span>Peak Active</span><span>${swarm.provider.peak_active_slots ?? 0}</span>
-                <span>Sample Count</span><span>${swarm.provider.sample_count ?? 0}</span>
-                <span>Last Sample</span><span>${swarm.provider.last_sample_at ? relativeTime(swarm.provider.last_sample_at) : 'n/a'}</span>
-                <span>Runtime Blocker</span><span>${swarm.provider.runtime_blocker ?? 'none'}</span>
-                <span>Doctor Checked</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : 'n/a'}</span>
-              </div>
-              ${swarm.provider.detail
-                ? html`<div class="command-card-sub">${swarm.provider.detail}</div>`
-                : null}
-              ${swarm.provider.timeline.length > 0
-                ? html`<div class="command-trace-stack">
-                    ${swarm.provider.timeline.slice(-12).map(sample => html`
-                      <article class="command-trace-row">
-                        <div class="command-trace-main">
-                          <div class="command-trace-head">
-                            <strong>${sample.active_slots} active</strong>
-                            <span class="command-chip">${relativeTime(sample.timestamp)}</span>
-                          </div>
-                          <div class="command-card-sub">slots ${sample.active_slot_ids.join(', ') || 'none'}</div>
-                        </div>
-                      </article>
-                    `)}
-                  </div>`
-                : html`<div class="empty-state">No slot telemetry captured yet.</div>`}
-            `
-          : html`<div class="empty-state">No runtime telemetry yet.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Blockers</div>
-        ${swarm && swarm.blockers.length > 0
-          ? html`<div class="command-card-stack">
-              ${swarm.blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)}
-            </div>`
-          : html`<div class="empty-state">No blockers. Use ${swarm?.recommended_next_tool ?? 'masc_observe_traces'} for the next action.</div>`}
-      </section>
-
-      <section class="card command-section">
-        <div class="card-title">Recent Messages</div>
-        ${swarm && swarm.recent_messages.length > 0
-          ? html`<div class="command-trace-stack">
-              ${swarm.recent_messages.map(message => html`
-                <article class="command-trace-row">
-                  <div class="command-trace-main">
-                    <div class="command-trace-head">
-                      <strong>${message.from}</strong>
-                      <span class="command-chip">${relativeTime(message.timestamp)}</span>
+    <div class="command-section-stack">
+      <${SwarmPanel} />
+      <div class="command-surface-grid">
+        <section class="card command-section">
+          <div class="card-title">Swarm Live Run</div>
+          ${commandPlaneSwarmLoading.value
+            ? html`<div class="empty-state">Loading swarm live state…</div>`
+            : commandPlaneSwarmError.value
+              ? html`<div class="empty-state error">${commandPlaneSwarmError.value}</div>`
+              : swarm
+                ? html`
+                    <div class="command-summary-grid">
+                      <div class="monitor-stat-card"><span>Run</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room n/a'}</small></div>
+                      <div class="monitor-stat-card"><span>Workers</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0} live · ${swarm.summary?.completed_workers ?? 0} completed</small></div>
+                      <div class="monitor-stat-card"><span>Runtime</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
+                      <div class="monitor-stat-card"><span>Hot 10+</span><strong>${swarm.summary?.pass_hot_concurrency ? 'pass' : 'check'}</strong><small>${swarm.provider?.slot_url ?? 'slot n/a'}</small></div>
+                      <div class="monitor-stat-card"><span>End to End</span><strong>${swarm.summary?.pass_end_to_end ? 'pass' : 'check'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
                     </div>
-                    <div class="command-card-sub">seq ${message.seq}</div>
-                  </div>
-                  <pre class="command-trace-detail">${message.content}</pre>
-                </article>
-              `)}
-            </div>`
-          : html`<div class="empty-state">No run-scoped broadcasts captured yet.</div>`}
-      </section>
+                    <div class="command-card-grid">
+                      <span>Operation</span><span>${swarm.operation?.operation_id ?? 'none'}</span>
+                      <span>Squad</span><span>${swarm.squad?.label ?? 'none'}</span>
+                      <span>Detachment</span><span>${swarm.detachment?.detachment_id ?? 'none'}</span>
+                      <span>Expected</span><span>${swarm.summary?.expected_workers ?? 0} workers</span>
+                      <span>Final Markers</span><span>${swarm.summary?.final_markers_seen ?? 0}</span>
+                      <span>Runtime Blocker</span><span>${swarm.provider?.runtime_blocker ?? 'none'}</span>
+                      <span>Recommended</span><span>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</span>
+                    </div>
+                    ${swarm.truth_notes.length > 0
+                      ? html`<div class="command-tag-row">
+                          ${swarm.truth_notes.map(note => html`<span class="command-tag">${note}</span>`)}
+                        </div>`
+                      : null}
+                  `
+                : html`<div class="empty-state">No swarm read-model yet.</div>`}
+        </section>
 
-      <section class="card command-section">
-        <div class="card-title">Recent Trace Events</div>
-        ${swarm && swarm.recent_trace_events.length > 0
-          ? html`<div class="command-trace-stack">
-              ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
-            </div>`
-          : html`<div class="empty-state">No run-scoped trace events captured yet.</div>`}
-      </section>
+        <section class="card command-section">
+          <div class="card-title">Checklist</div>
+          ${swarm && swarm.checklist.length > 0
+            ? html`<div class="command-card-stack">
+                ${swarm.checklist.map(item => html`<${SwarmChecklistCard} item=${item} />`)}
+              </div>`
+            : html`<div class="empty-state">No checklist yet.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">Workers</div>
+          ${swarm && swarm.workers.length > 0
+            ? html`<div class="command-card-stack">
+                ${swarm.workers.map(worker => html`<${SwarmWorkerCard} worker=${worker} />`)}
+              </div>`
+            : html`<div class="empty-state">No worker rows yet.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">Runtime</div>
+          ${swarm?.provider
+            ? html`
+                <div class="command-card-grid">
+                  <span>Provider</span><span>${swarm.provider.provider_base_url ?? 'n/a'}</span>
+                  <span>Provider Reachable</span><span>${swarm.provider.provider_reachable == null ? 'n/a' : swarm.provider.provider_reachable ? 'yes' : 'no'}</span>
+                  <span>Requested Model</span><span>${swarm.provider.provider_model_id ?? 'n/a'}</span>
+                  <span>Actual Model</span><span>${swarm.provider.actual_model_id ?? 'n/a'}</span>
+                  <span>Slot URL</span><span>${swarm.provider.slot_url ?? 'n/a'}</span>
+                  <span>Expected Slots</span><span>${swarm.provider.expected_slots ?? 'n/a'}</span>
+                  <span>Actual Slots</span><span>${swarm.provider.actual_slots ?? swarm.provider.total_slots ?? 0}</span>
+                  <span>Expected Ctx</span><span>${swarm.provider.expected_ctx ?? 'n/a'}</span>
+                  <span>Actual Ctx</span><span>${swarm.provider.actual_ctx ?? swarm.provider.ctx_per_slot ?? 0}</span>
+                  <span>Active Now</span><span>${swarm.provider.active_slots_now ?? 0}</span>
+                  <span>Peak Active</span><span>${swarm.provider.peak_active_slots ?? 0}</span>
+                  <span>Sample Count</span><span>${swarm.provider.sample_count ?? 0}</span>
+                  <span>Last Sample</span><span>${swarm.provider.last_sample_at ? relativeTime(swarm.provider.last_sample_at) : 'n/a'}</span>
+                  <span>Runtime Blocker</span><span>${swarm.provider.runtime_blocker ?? 'none'}</span>
+                  <span>Doctor Checked</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : 'n/a'}</span>
+                </div>
+                ${swarm.provider.detail
+                  ? html`<div class="command-card-sub">${swarm.provider.detail}</div>`
+                  : null}
+                ${swarm.provider.timeline.length > 0
+                  ? html`<div class="command-trace-stack">
+                      ${swarm.provider.timeline.slice(-12).map(sample => html`
+                        <article class="command-trace-row">
+                          <div class="command-trace-main">
+                            <div class="command-trace-head">
+                              <strong>${sample.active_slots} active</strong>
+                              <span class="command-chip">${relativeTime(sample.timestamp)}</span>
+                            </div>
+                            <div class="command-card-sub">slots ${sample.active_slot_ids.join(', ') || 'none'}</div>
+                          </div>
+                        </article>
+                      `)}
+                    </div>`
+                  : html`<div class="empty-state">No slot telemetry captured yet.</div>`}
+              `
+            : html`<div class="empty-state">No runtime telemetry yet.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">Blockers</div>
+          ${swarm && swarm.blockers.length > 0
+            ? html`<div class="command-card-stack">
+                ${swarm.blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)}
+              </div>`
+            : html`<div class="empty-state">No blockers. Use ${swarm?.recommended_next_tool ?? 'masc_observe_traces'} for the next action.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">Recent Messages</div>
+          ${swarm && swarm.recent_messages.length > 0
+            ? html`<div class="command-trace-stack">
+                ${swarm.recent_messages.map(message => html`
+                  <article class="command-trace-row">
+                    <div class="command-trace-main">
+                      <div class="command-trace-head">
+                        <strong>${message.from}</strong>
+                        <span class="command-chip">${relativeTime(message.timestamp)}</span>
+                      </div>
+                      <div class="command-card-sub">seq ${message.seq}</div>
+                    </div>
+                    <pre class="command-trace-detail">${message.content}</pre>
+                  </article>
+                `)}
+              </div>`
+            : html`<div class="empty-state">No run-scoped broadcasts captured yet.</div>`}
+        </section>
+
+        <section class="card command-section">
+          <div class="card-title">Recent Trace Events</div>
+          ${swarm && swarm.recent_trace_events.length > 0
+            ? html`<div class="command-trace-stack">
+                ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
+              </div>`
+            : html`<div class="empty-state">No run-scoped trace events captured yet.</div>`}
+        </section>
+      </div>
     </div>
   `
 }
@@ -1654,12 +1676,13 @@ function SurfaceBody() {
   if (commandPlaneSurface.value === 'summary') {
     return html`<${SummarySurface} />`
   }
+  if (commandPlaneSurface.value === 'swarm') {
+    return html`<${SwarmSurface} />`
+  }
   if (!commandPlaneSnapshot.value) {
     return html`<${DetailLoadingState} />`
   }
   switch (commandPlaneSurface.value) {
-    case 'swarm':
-      return html`<${SwarmSurface} />`
     case 'chains':
       return html`<${ChainsSurface} />`
     case 'topology':
@@ -1690,6 +1713,9 @@ export function Command() {
     const requestedOperation = route.value.params.operation
     if (isCommandSurface(requestedSurface)) {
       setCommandPlaneSurface(requestedSurface)
+    }
+    else if (!requestedSurface) {
+      setCommandPlaneSurface('summary')
     }
     if (requestedOperation) {
       focusCommandPlaneChainOperation(requestedOperation)

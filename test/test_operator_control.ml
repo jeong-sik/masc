@@ -140,8 +140,14 @@ let test_digest_room_exposes_pending_confirm_attention () =
       in
       Alcotest.(check string) "target_type" "room"
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
-      Alcotest.(check string) "health" "warn"
+      Alcotest.(check string) "health" "bad"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
+      Alcotest.(check bool) "command_plane present" true
+        (Yojson.Safe.Util.member "command_plane" digest <> `Null);
+      Alcotest.(check bool) "command_plane microarch present" true
+        (Yojson.Safe.Util.(digest |> member "command_plane" |> member "operations"
+         |> member "microarch")
+         <> `Null);
       Alcotest.(check bool) "swarm_status present" true
         (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
       let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
@@ -150,7 +156,15 @@ let test_digest_room_exposes_pending_confirm_attention () =
            (fun item ->
              Yojson.Safe.Util.(item |> member "kind" |> to_string)
              = "pending_confirm_waiting")
-           attention_items))
+           attention_items);
+      Alcotest.(check bool) "command attention present" true
+        (List.exists
+           (fun item ->
+             String.starts_with
+               ~prefix:"command_"
+               Yojson.Safe.Util.(item |> member "kind" |> to_string))
+           attention_items)
+    )
 
 let test_digest_team_session_shape () =
   Eio_main.run @@ fun env ->
@@ -178,6 +192,8 @@ let test_digest_team_session_shape () =
         Yojson.Safe.Util.(digest |> member "target_id" |> to_string);
       Alcotest.(check bool) "swarm_status present" true
         (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
+      Alcotest.(check bool) "command_plane present" true
+        (Yojson.Safe.Util.member "command_plane" digest <> `Null);
       Alcotest.(check int) "single session card" 1
         Yojson.Safe.Util.(digest |> member "session_cards" |> to_list |> List.length);
       Alcotest.(check bool) "worker_cards list" true

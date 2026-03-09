@@ -767,7 +767,7 @@ function normalizeSnapshot(raw: unknown): CommandPlaneSnapshot {
   }
 }
 
-function normalizeSummarySnapshot(raw: unknown): CommandPlaneSummarySnapshot {
+export function normalizeSummarySnapshot(raw: unknown): CommandPlaneSummarySnapshot {
   const root = isRecord(raw) ? raw : {}
   const topology = normalizeTopology(root.topology)
   const operations = normalizeOperations(root.operations)

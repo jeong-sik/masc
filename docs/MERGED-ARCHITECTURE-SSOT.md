@@ -30,6 +30,7 @@
 
 - 대상: planner / implementer / supervisor workflow
 - 핵심 도구: `masc_team_session_*`, `masc_operator_*`
+- operator-facing digest는 command-plane/search/microarch 신호를 번역해 노출하는 canonical intervention surface다.
 - SSOT 문서:
   - [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)
   - [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)

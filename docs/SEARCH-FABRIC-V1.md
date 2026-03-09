@@ -59,6 +59,10 @@
 - `search.candidates`
 - `search.dependency_blockers`
 
+Operator-facing 요약은 `masc_operator_digest`와 dashboard `Ops`에서 번역된 signal로 본다.
+기본 surface는 `routing confidence`, `issue pressure`, `scheduler efficiency`, `cache contention` 같은 운영 의미를 사용하고,
+`RISC/MESI/MCTS` raw 용어는 detail/diagnostic에서만 본다.
+
 ## Benchmark
 
 Synthetic comparison executable:

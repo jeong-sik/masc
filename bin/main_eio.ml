@@ -5462,6 +5462,27 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
   Operator_control.snapshot_json ?actor:(operator_actor_hint request)
     ~include_messages ~include_sessions ~include_keepers ctx
 
+let operator_digest_http_json ~state ~sw ~clock request =
+  let ctx : _ Operator_control.context =
+    {
+      config = state.Mcp_server.room_config;
+      agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
+      sw;
+      clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
+      mcp_session_id = None;
+    }
+  in
+  let target_type = query_param request "target_type" in
+  let target_id = query_param request "target_id" in
+  let include_workers =
+    match query_param request "include_workers" with
+    | Some ("0" | "false" | "no") -> false
+    | _ -> true
+  in
+  Operator_control.digest_json ?actor:(operator_actor_hint request) ?target_type
+    ?target_id ~include_workers ctx
+
 let operator_action_http_json ~state ~sw ~clock request ~args =
   let ctx : _ Operator_control.context =
     {
@@ -9127,6 +9148,17 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/operator/digest" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         match operator_digest_http_json ~state ~sw ~clock req with
+         | Ok json ->
+             Http.Response.json ~compress:true ~request:req
+               (Yojson.Safe.to_string json) reqd
+         | Error message ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (operator_error_json message))
+       ) request reqd)
+
   |> Http.Router.post "/api/v1/operator/action" (fun request reqd ->
        with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
@@ -10120,6 +10152,30 @@ let run_server ~sw ~env ~port ~base_path =
           else
             let json = operator_snapshot_http_json ~state ~sw ~clock httpun_request in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+      | `GET, "/api/v1/operator/digest" ->
+          let state = get_server_state () in
+          let path = Http.Request.path httpun_request in
+          if http_auth_strict_enabled () && not (is_public_read_path path) then
+            (match authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request with
+             | Error err ->
+                 let status = http_status_of_auth_error err in
+                 h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+             | Ok () ->
+                 (match operator_digest_http_json ~state ~sw ~clock httpun_request with
+                  | Ok json ->
+                      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+                  | Error message ->
+                      h2_respond_json h2_reqd
+                        (Yojson.Safe.to_string (operator_error_json message))
+                        ~status:`Bad_request ~extra_headers:cors))
+          else
+            (match operator_digest_http_json ~state ~sw ~clock httpun_request with
+             | Ok json ->
+                 h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+             | Error message ->
+                 h2_respond_json h2_reqd
+                   (Yojson.Safe.to_string (operator_error_json message))
+                   ~status:`Bad_request ~extra_headers:cors)
       | `GET, "/api/v1/status" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in

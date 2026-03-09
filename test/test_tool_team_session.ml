@@ -1519,6 +1519,207 @@ let test_parse_step_spawn_specs_applies_top_level_batch_timeout () =
         second.spawn_timeout_seconds
   | _ -> Alcotest.fail "expected exactly two parsed spawn specs"
 
+let test_step_spawn_batch_infers_exact_env_model_tiers () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Local_runtime_pool.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let ctx : _ Tool_team_session.context =
+        {
+          config;
+          agent_name = "owner";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = None;
+        }
+      in
+      with_env "MASC_TEAM_SESSION_MODEL_35B" (Some "lead-model-exact") @@ fun () ->
+      with_env "MASC_TEAM_SESSION_MODEL_27B" (Some "middle-model-exact") @@ fun () ->
+      with_env "MASC_TEAM_SESSION_MODEL_9B" (Some "worker-model-exact") @@ fun () ->
+      with_env "MASC_TEAM_SESSION_ROUTER_JUDGE" (Some "false") @@ fun () ->
+      Local_runtime_pool.reset ();
+      let session_id =
+        start_session_exn ctx ~goal:"infer exact env model tiers"
+        |> get_session_id
+      in
+      let step_ok, _step_body =
+        dispatch_exn ctx ~name:"masc_team_session_step"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String session_id);
+                ( "spawn_batch",
+                  `List
+                    [
+                      `Assoc
+                        [
+                          ("spawn_agent", `String "llama");
+                          ("spawn_role", `String "exact-lead");
+                          ("spawn_model", `String "lead-model-exact");
+                          ( "spawn_prompt",
+                            `String
+                              "final architecture decision and synthesize the proposal" );
+                        ];
+                      `Assoc
+                        [
+                          ("spawn_agent", `String "llama");
+                          ("spawn_role", `String "exact-middle");
+                          ("spawn_model", `String "middle-model-exact");
+                          ( "spawn_prompt",
+                            `String
+                              "verify the retrieved evidence and highlight contradictions" );
+                        ];
+                    ] );
+              ])
+      in
+      Alcotest.(check bool) "batch step fails without proc manager" false step_ok;
+      let session =
+        Team_session_store.load_session config session_id |> Option.get
+      in
+      let exact_lead =
+        List.find
+          (fun worker -> worker.Team_session_types.spawn_role = Some "exact-lead")
+          session.planned_workers
+      in
+      Alcotest.(check (option string)) "exact lead model kept"
+        (Some "lead-model-exact") exact_lead.spawn_model;
+      Alcotest.(check (option string)) "exact lead tier inferred as 35b"
+        (Some "35b")
+        (Option.map Team_session_types.model_tier_to_string exact_lead.model_tier);
+      let exact_middle =
+        List.find
+          (fun worker -> worker.Team_session_types.spawn_role = Some "exact-middle")
+          session.planned_workers
+      in
+      Alcotest.(check (option string)) "exact middle model kept"
+        (Some "middle-model-exact") exact_middle.spawn_model;
+      Alcotest.(check (option string)) "exact middle tier inferred as 27b"
+        (Some "27b")
+        (Option.map Team_session_types.model_tier_to_string
+           exact_middle.model_tier))
+
+let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let ctx : _ Tool_team_session.context =
+        {
+          config;
+          agent_name = "owner";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = None;
+        }
+      in
+      let start_ok, start_body =
+        dispatch_exn ctx ~name:"masc_team_session_start"
+          ~args:
+            (`Assoc
+              [
+                ("goal", `String "preserve explicit hierarchical assignments");
+                ("duration_seconds", `Int 90);
+                ("checkpoint_interval_sec", `Int 10);
+                ("min_agents", `Int 1);
+                ("orchestration_mode", `String "assist");
+                ("communication_mode", `String "hybrid");
+                ("scale_profile", `String "local64");
+                ("model_cascade", `List [ `String "glm:glm-5" ]);
+                ("fallback_policy", `String "strict_local_only");
+                ("instruction_profile", `String "strict");
+                ("alert_channel", `String "both");
+                ("report_formats", `List [ `String "markdown"; `String "json" ]);
+                ("agents", `List []);
+              ])
+      in
+      Alcotest.(check bool) "start ok" true start_ok;
+      let session_id = parse_json_exn start_body |> get_session_id in
+      let step_ok, _step_body =
+        dispatch_exn ctx ~name:"masc_team_session_step"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String session_id);
+                ( "spawn_batch",
+                  `List
+                    [
+                      `Assoc
+                        [
+                          ("spawn_agent", `String "llama");
+                          ("spawn_role", `String "explicit-manager");
+                          ("worker_class", `String "manager");
+                          ("spawn_model", `String "manager-explicit");
+                          ("model_tier", `String "35b");
+                          ("lane_id", `String "lane-z");
+                          ("control_domain", `String "quality");
+                          ("supervisor_actor", `String "ctrl-custom");
+                          ( "spawn_prompt",
+                            `String "final architecture decision and synthesize proposal" );
+                        ];
+                      `Assoc
+                        [
+                          ("spawn_agent", `String "llama");
+                          ("spawn_role", `String "explicit-worker");
+                          ("worker_class", `String "executor");
+                          ("spawn_model", `String "worker-explicit");
+                          ("model_tier", `String "9b");
+                          ("lane_id", `String "lane-q");
+                          ("control_domain", `String "execution");
+                          ("supervisor_actor", `String "ctrl-worker-custom");
+                          ("spawn_prompt", `String "normalize evidence into strict JSON schema");
+                        ];
+                    ] );
+              ])
+      in
+      Alcotest.(check bool) "batch step fails without proc manager" false step_ok;
+      let session =
+        Team_session_store.load_session config session_id |> Option.get
+      in
+      let explicit_manager =
+        List.find
+          (fun worker ->
+            worker.Team_session_types.spawn_role = Some "explicit-manager")
+          session.planned_workers
+      in
+      Alcotest.(check (option string)) "manager keeps explicit model"
+        (Some "manager-explicit") explicit_manager.spawn_model;
+      Alcotest.(check (option string)) "manager keeps explicit tier"
+        (Some "35b")
+        (Option.map Team_session_types.model_tier_to_string
+           explicit_manager.model_tier);
+      Alcotest.(check (option string)) "manager keeps explicit lane"
+        (Some "lane-z") explicit_manager.lane_id;
+      Alcotest.(check (option string)) "manager keeps explicit supervisor"
+        (Some "ctrl-custom") explicit_manager.supervisor_actor;
+      let explicit_worker =
+        List.find
+          (fun worker ->
+            worker.Team_session_types.spawn_role = Some "explicit-worker")
+          session.planned_workers
+      in
+      Alcotest.(check (option string)) "worker keeps explicit model"
+        (Some "worker-explicit") explicit_worker.spawn_model;
+      Alcotest.(check (option string)) "worker keeps explicit tier"
+        (Some "9b")
+        (Option.map Team_session_types.model_tier_to_string
+           explicit_worker.model_tier);
+      Alcotest.(check (option string)) "worker keeps explicit lane"
+        (Some "lane-q") explicit_worker.lane_id;
+      Alcotest.(check (option string)) "worker keeps explicit supervisor"
+        (Some "ctrl-worker-custom") explicit_worker.supervisor_actor)
+
 let test_reconcile_failed_spawn_actor_detaches_without_turn () =
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -2135,6 +2336,11 @@ let () =
             `Quick test_step_spawn_batch_applies_hybrid_routing;
           Alcotest.test_case "parse-step-spawn-specs-applies-top-level-batch-timeout"
             `Quick test_parse_step_spawn_specs_applies_top_level_batch_timeout;
+          Alcotest.test_case "step-spawn-batch-infers-exact-env-model-tiers"
+            `Quick test_step_spawn_batch_infers_exact_env_model_tiers;
+          Alcotest.test_case
+            "step-spawn-batch-preserves-explicit-hierarchical-assignments"
+            `Quick test_step_spawn_batch_preserves_explicit_hierarchical_assignments;
           Alcotest.test_case "reconcile-failed-spawn-actor-detaches-without-turn"
             `Quick test_reconcile_failed_spawn_actor_detaches_without_turn;
           Alcotest.test_case "reconcile-failed-spawn-actor-retains-after-turn"

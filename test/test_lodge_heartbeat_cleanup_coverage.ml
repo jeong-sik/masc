@@ -151,6 +151,20 @@ let test_lodge_heartbeat_public_memory_helpers_removed () =
     false
     (file_contains_pattern "lib/lodge_heartbeat.mli" "ActionPropose")
 
+let test_lodge_heartbeat_keeper_owned_reactive_path () =
+  check bool "heartbeat consults reactive keepers"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Tool_keeper.list_reactive_keepers");
+  check bool "heartbeat enqueues keeper inbox items"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Tool_keeper.enqueue_keeper_inbox_items");
+  check bool "manual lodge probe becomes keeper inbox item"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "manual-probe:");
+  check bool "legacy loop still present as fallback only"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "run_agent_tool_loop")
+
 let () =
   run "Lodge heartbeat cleanup coverage"
     [
@@ -164,5 +178,7 @@ let () =
           test_case "ToM context used" `Quick test_lodge_heartbeat_uses_tom_context;
           test_case "no heuristic fallback policy locked" `Quick test_lodge_heartbeat_no_heuristic_fallback_policy;
           test_case "legacy public surface removed" `Quick test_lodge_heartbeat_public_memory_helpers_removed;
+          test_case "keeper-owned reactive path present" `Quick
+            test_lodge_heartbeat_keeper_owned_reactive_path;
         ]);
     ]

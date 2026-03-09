@@ -1487,6 +1487,155 @@ let build_activity_report ~current_hour ~(checkins : (string * checkin_trigger *
       Printf.sprintf "[%02d:00 KST] %s → %s" current_hour name action_str
     ) |> String.concat "\n"
 
+let keeper_inbox_item_of_post (post : Board.post) : Tool_keeper.keeper_inbox_item =
+  let post_id = Board.Post_id.to_string post.id in
+  {
+    event_id =
+      Printf.sprintf "board-post:%s:%.0f" post_id post.updated_at;
+    source = "board_post";
+    created_at = post.updated_at;
+    summary =
+      Printf.sprintf "Board activity on %s by %s: %s" post_id
+        (Board.Agent_id.to_string post.author)
+        (utf8_truncate post.content 180);
+    payload =
+      `Assoc
+        [
+          ("post_id", `String post_id);
+          ("author", `String (Board.Agent_id.to_string post.author));
+          ("content", `String (utf8_truncate post.content 600));
+          ("created_at", `Float post.created_at);
+          ("updated_at", `Float post.updated_at);
+        ];
+  }
+
+let keeper_manual_probe_item ~(recent_posts : Board.post list) :
+    Tool_keeper.keeper_inbox_item =
+  let now_ts = Time_compat.now () in
+  let top_posts =
+    recent_posts
+    |> List.filteri (fun idx _ -> idx < 3)
+    |> List.map (fun (post : Board.post) ->
+           `Assoc
+             [
+               ("post_id", `String (Board.Post_id.to_string post.id));
+               ("author", `String (Board.Agent_id.to_string post.author));
+               ("content", `String (utf8_truncate post.content 240));
+               ("updated_at", `Float post.updated_at);
+             ])
+  in
+  {
+    event_id = Printf.sprintf "manual-probe:%.0f" now_ts;
+    source = "manual_probe";
+    created_at = now_ts;
+    summary =
+      (if top_posts = []
+       then "Manual lodge probe: no recent board activity, decide whether any visible action is warranted."
+       else "Manual lodge probe: review the most recent board activity and decide whether a direct reaction is warranted.");
+    payload = `Assoc [ ("recent_posts", `List top_posts) ];
+  }
+
+let seed_keeper_reactive_cursor room_config (meta : Tool_keeper.keeper_meta)
+    ~(recent_posts : Board.post list) =
+  if meta.last_handled_event_ts > 0.0 then meta
+  else
+    match recent_posts with
+    | [] -> meta
+    | latest :: _ ->
+        let seeded =
+          {
+            meta with
+            updated_at = Types.now_iso ();
+            last_handled_event_id =
+              Printf.sprintf "board-post:%s:%.0f"
+                (Board.Post_id.to_string latest.id)
+                latest.updated_at;
+            last_handled_event_ts = latest.updated_at;
+          }
+        in
+        (match Tool_keeper.write_meta room_config seeded with
+         | Ok () -> ()
+         | Error msg ->
+             Printf.eprintf "[lodge] failed to seed keeper cursor for %s: %s\n%!"
+               meta.name msg);
+        seeded
+
+let tick_keeper_reactive ~room_config ~pending_triggers =
+  let timestamp = Time_compat.now () in
+  let current_hour = current_hour_kst () in
+  let reactive_keepers = Tool_keeper.list_reactive_keepers room_config in
+  let store = Board.global () in
+  let recent_posts =
+    Board.list_posts store ~limit:20 ()
+    |> List.filter (fun (post : Board.post) ->
+           Board.Agent_id.to_string post.author <> "lodge-system")
+    |> List.sort (fun (left : Board.post) (right : Board.post) ->
+           Float.compare right.updated_at left.updated_at)
+  in
+  let has_manual_probe =
+    List.exists
+      (fun (_, trigger) -> match trigger with ManualTrigger -> true | _ -> false)
+      pending_triggers
+  in
+  let checkins =
+    reactive_keepers
+    |> List.map (fun (keeper : Tool_keeper.keeper_meta) ->
+           let inbox_items =
+             match Tool_keeper.read_keeper_inbox room_config keeper.name with
+             | Ok items -> items
+             | Error _ -> []
+           in
+           let keeper =
+             if keeper.last_handled_event_ts <= 0.0 && inbox_items = [] && not has_manual_probe
+             then seed_keeper_reactive_cursor room_config keeper ~recent_posts
+             else keeper
+           in
+           let since_ts =
+             max keeper.last_handled_event_ts
+               (match Tool_keeper.keeper_inbox_latest_item inbox_items with
+                | Some item -> item.created_at
+                | None -> 0.0)
+           in
+           let board_items =
+             recent_posts
+             |> List.filter (fun (post : Board.post) -> post.updated_at > since_ts)
+             |> List.map keeper_inbox_item_of_post
+             |> List.rev
+           in
+           let items =
+             if has_manual_probe
+             then board_items @ [ keeper_manual_probe_item ~recent_posts ]
+             else board_items
+           in
+           let trigger = if has_manual_probe then ManualTrigger else Scheduled in
+           if items = [] then
+             (keeper.name, trigger, Passed "keeper_reactive_no_new_events")
+           else
+             match
+               Tool_keeper.enqueue_keeper_inbox_items room_config ~keeper_name:keeper.name
+                 ~items
+             with
+             | Ok 0 -> (keeper.name, trigger, Passed "keeper_reactive_no_new_events")
+             | Ok fresh_count ->
+                 ( keeper.name,
+                   trigger,
+                   Passed (Printf.sprintf "keeper_inbox_enqueued:%d" fresh_count) )
+             | Error msg ->
+                 ( keeper.name,
+                   trigger,
+                   Skipped ("keeper_inbox_enqueue_failed:" ^ msg) ))
+  in
+  let activity_report = build_activity_report ~current_hour ~checkins in
+  {
+    timestamp;
+    current_hour;
+    agents_checked = List.length reactive_keepers;
+    checkins;
+    agents_woken = [];
+    encounter_rolled = None;
+    activity_report;
+  }
+
 let post_activity_report ~(result : heartbeat_result) =
   if result.checkins = [] then ()
   else
@@ -2725,7 +2874,11 @@ let select_agents_by_plan ~ignore_quiet_hours
 (** Perform one check-in tick: select agents via plan priority,
     run LLM decisions, execute actions, trigger reflections.
     Returns a heartbeat_result with all checkin outcomes. *)
-let tick ~ignore_quiet_hours ~config ~pending_triggers =
+let tick ~ignore_quiet_hours ~room_config ~config ~pending_triggers =
+  let reactive_keepers = Tool_keeper.list_reactive_keepers room_config in
+  if reactive_keepers <> [] then
+    tick_keeper_reactive ~room_config ~pending_triggers
+  else begin
   let timestamp = Time_compat.now () in
   let current_hour = current_hour_kst () in
   let agents = get_agents () in
@@ -2831,6 +2984,7 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
     encounter_rolled = None;
     activity_report;
   }
+  end
 
 (* ── Pulse helpers ─────────────────────────────────────────── *)
 
@@ -2858,7 +3012,9 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
         last_tick_time := Time_compat.now ();
 
         (* Run the tick — plan-based selection + LLM decisions + reflection *)
-        let result = tick ~ignore_quiet_hours:false ~config ~pending_triggers in
+        let result =
+          tick ~ignore_quiet_hours:false ~room_config ~config ~pending_triggers
+        in
 
         (* Record observable state *)
         record_tick_result result;
@@ -2978,7 +3134,9 @@ let run_manual_heartbeat room_config =
   let pending_triggers = List.map (fun (a : agent) ->
     (a.name, ManualTrigger)
   ) agents in
-  let result = tick ~ignore_quiet_hours:true ~config ~pending_triggers in
+  let result =
+    tick ~ignore_quiet_hours:true ~room_config ~config ~pending_triggers
+  in
   record_tick_result result;
 
   List.iter (fun (name, _trigger, _checkin) ->

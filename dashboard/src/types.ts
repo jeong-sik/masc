@@ -259,6 +259,7 @@ export interface Keeper {
   presence_keepalive_sec?: number
   keepalive_running?: boolean
   proactive_enabled?: boolean
+  reactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
   // Autonomy fields (Phase 2)
@@ -275,6 +276,16 @@ export interface Keeper {
   last_compaction_ago_s?: number
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
+  last_successful_reaction_at?: string | null
+  last_successful_reaction_summary?: string | null
+  last_handled_event_id?: string | null
+  last_handled_event_ts?: string | null
+  pending_reactive_items?: number
+  inbox_latest_summary?: string | null
+  continuity_summary?: string | null
+  timeout_streak?: number
+  recent_provider_failures?: number
+  recent_fallback_rate?: number
   last_drift_reason?: string | null
   drift_count_total?: number
   generation?: number

@@ -104,6 +104,10 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
           ("type", `String "boolean");
           ("description", `String "If true, keeper can send proactive check-ins after idle periods (default: true).");
         ]);
+        ("reactive_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, keeper owns reactive board/event continuity and consumes inbox items from Lodge trigger collection (default: false).");
+        ]);
         ("proactive_idle_sec", `Assoc [
           ("type", `String "integer");
           ("description", `String "Idle seconds before proactive check-in is allowed (default: 900).");
@@ -991,6 +995,9 @@ let keeper_dir (config : Room.config) =
 let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
+let keeper_inbox_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".inbox.json")
+
 let session_base_dir (config : Room.config) =
   (* Cluster-independent, consistent with Perpetual_loop.default_config. *)
   Filename.concat (Filename.concat config.base_path ".masc") "perpetual"
@@ -1061,11 +1068,24 @@ type keeper_meta = {
   last_compaction_decision: string;
   last_continuity_update_ts: float;
   continuity_summary: string;
+  reactive_enabled: bool;
+  last_handled_event_id: string;
+  last_handled_event_ts: float;
+  last_successful_reaction_at: float;
+  last_successful_reaction_summary: string;
   (* Autonomy fields (Phase 2: Keeper Autonomy Engine) *)
   autonomy_level: string;  (** L1_Reactive..L5_Independent, stored as string for JSON compat *)
   active_goal_ids: string list;  (** goal_store goal IDs this keeper pursues *)
   last_autonomous_action_at: string;  (** ISO timestamp of last autonomous action *)
   autonomous_action_count: int;  (** total autonomous actions taken *)
+}
+
+type keeper_inbox_item = {
+  event_id: string;
+  source: string;
+  created_at: float;
+  summary: string;
+  payload: Yojson.Safe.t;
 }
 
 let now_iso () = Types.now_iso ()
@@ -1133,6 +1153,11 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ("last_compaction_decision", `String m.last_compaction_decision);
     ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
     ("continuity_summary", `String m.continuity_summary);
+    ("reactive_enabled", `Bool m.reactive_enabled);
+    ("last_handled_event_id", `String m.last_handled_event_id);
+    ("last_handled_event_ts", `Float m.last_handled_event_ts);
+    ("last_successful_reaction_at", `Float m.last_successful_reaction_at);
+    ("last_successful_reaction_summary", `String m.last_successful_reaction_summary);
     ("autonomy_level", `String m.autonomy_level);
     ("active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids));
     ("last_autonomous_action_at", `String m.last_autonomous_action_at);
@@ -1259,6 +1284,15 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string ~default:"uninitialized" "last_compaction_decision" json
     in
     let continuity_summary = Safe_ops.json_string ~default:"" "continuity_summary" json in
+    let reactive_enabled = Safe_ops.json_bool ~default:false "reactive_enabled" json in
+    let last_handled_event_id = Safe_ops.json_string ~default:"" "last_handled_event_id" json in
+    let last_handled_event_ts = Safe_ops.json_float ~default:0.0 "last_handled_event_ts" json in
+    let last_successful_reaction_at =
+      Safe_ops.json_float ~default:0.0 "last_successful_reaction_at" json
+    in
+    let last_successful_reaction_summary =
+      Safe_ops.json_string ~default:"" "last_successful_reaction_summary" json
+    in
     let last_continuity_update_ts =
       let parsed_ts = Safe_ops.json_float ~default:0.0 "last_continuity_update_ts" json in
       if parsed_ts <= 0.0 && String.trim continuity_summary <> "" then
@@ -1337,6 +1371,11 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         last_compaction_decision;
         last_continuity_update_ts;
         continuity_summary;
+        reactive_enabled;
+        last_handled_event_id;
+        last_handled_event_ts;
+        last_successful_reaction_at;
+        last_successful_reaction_summary;
         autonomy_level;
         active_goal_ids;
         last_autonomous_action_at;
@@ -1367,8 +1406,191 @@ let read_meta config name : (keeper_meta option, string) result =
     | Error e -> Error e
     | Ok json ->
       (match meta_of_json json with
-       | Ok m -> Ok (Some m)
+    | Ok m -> Ok (Some m)
        | Error e -> Error e)
+
+let inbox_item_to_json (item : keeper_inbox_item) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("event_id", `String item.event_id);
+      ("source", `String item.source);
+      ("created_at", `Float item.created_at);
+      ("summary", `String item.summary);
+      ("payload", item.payload);
+    ]
+
+let inbox_item_of_json (json : Yojson.Safe.t) : (keeper_inbox_item, string) result =
+  try
+    let event_id = Safe_ops.json_string ~default:"" "event_id" json in
+    let source = Safe_ops.json_string ~default:"board" "source" json in
+    let created_at = Safe_ops.json_float ~default:0.0 "created_at" json in
+    let summary = Safe_ops.json_string ~default:"" "summary" json in
+    let payload =
+      match Yojson.Safe.Util.member "payload" json with
+      | `Assoc _ as payload -> payload
+      | _ -> `Assoc []
+    in
+    if String.trim event_id = "" then Error "invalid keeper inbox item (missing event_id)"
+    else
+      Ok { event_id; source; created_at; summary; payload }
+  with exn ->
+    Error (Printf.sprintf "keeper inbox parse error: %s" (Printexc.to_string exn))
+
+let read_keeper_inbox config name : (keeper_inbox_item list, string) result =
+  let path = keeper_inbox_path config name in
+  if not (Sys.file_exists path) then
+    Ok []
+  else
+    match Safe_ops.read_json_file_safe path with
+    | Error e -> Error e
+    | Ok (`List items) ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | json :: rest -> (
+              match inbox_item_of_json json with
+              | Ok item -> loop (item :: acc) rest
+              | Error e -> Error e)
+        in
+        loop [] items
+    | Ok _ -> Error "keeper inbox file must be a JSON array"
+
+let write_keeper_inbox config name (items : keeper_inbox_item list) : (unit, string) result =
+  let path = keeper_inbox_path config name in
+  let content =
+    `List (List.map inbox_item_to_json items) |> Yojson.Safe.pretty_to_string
+  in
+  try
+    let oc = open_out path in
+    Common.protect ~module_name:"tool_keeper" ~finally_label:"close_out"
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc content);
+    Ok ()
+  with exn ->
+    Error (Printf.sprintf "failed to write keeper inbox %s: %s" path (Printexc.to_string exn))
+
+let keeper_inbox_latest_item items =
+  List.fold_left
+    (fun acc item ->
+      match acc with
+      | Some best when best.created_at >= item.created_at -> acc
+      | _ -> Some item)
+    None items
+
+let enqueue_keeper_inbox_items config ~keeper_name ~(items : keeper_inbox_item list) :
+    (int, string) result =
+  match read_keeper_inbox config keeper_name with
+  | Error e -> Error e
+  | Ok existing ->
+      let existing_ids =
+        existing |> List.map (fun item -> item.event_id) |> List.sort_uniq String.compare
+      in
+      let fresh =
+        items
+        |> List.filter (fun item -> not (List.mem item.event_id existing_ids))
+        |> List.sort (fun left right -> String.compare left.event_id right.event_id)
+        |> List.sort_uniq (fun left right -> String.compare left.event_id right.event_id)
+      in
+      if fresh = [] then Ok 0
+      else
+        let updated =
+          List.sort
+            (fun left right -> Float.compare left.created_at right.created_at)
+            (existing @ fresh)
+        in
+        (match write_keeper_inbox config keeper_name updated with
+         | Ok () -> Ok (List.length fresh)
+         | Error e -> Error e)
+
+let take_keeper_inbox_items config ~keeper_name ~max_items :
+    ((keeper_inbox_item list * keeper_inbox_item list), string) result =
+  let max_items = max 0 max_items in
+  match read_keeper_inbox config keeper_name with
+  | Error e -> Error e
+  | Ok items ->
+      let rec split acc n rest =
+        if n <= 0 then (List.rev acc, rest)
+        else
+          match rest with
+          | [] -> (List.rev acc, [])
+          | item :: tl -> split (item :: acc) (n - 1) tl
+      in
+      Ok (split [] max_items items)
+
+let ack_keeper_inbox_items config ~keeper_name ~(event_ids : string list) :
+    (int, string) result =
+  let event_ids =
+    event_ids
+    |> List.filter (fun id -> String.trim id <> "")
+    |> List.sort_uniq String.compare
+  in
+  if event_ids = [] then
+    Ok 0
+  else
+    match read_keeper_inbox config keeper_name with
+    | Error e -> Error e
+    | Ok items ->
+        let retained =
+          items
+          |> List.filter (fun item -> not (List.mem item.event_id event_ids))
+        in
+        let removed = List.length items - List.length retained in
+        (match write_keeper_inbox config keeper_name retained with
+         | Ok () -> Ok removed
+         | Error e -> Error e)
+
+let list_reactive_keepers config : keeper_meta list =
+  match Safe_ops.list_dir_safe (keeper_dir config) with
+  | Error _ -> []
+  | Ok files ->
+      files
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.map Filename.remove_extension
+      |> List.filter validate_name
+      |> List.filter_map (fun name ->
+             match read_meta config name with
+             | Ok (Some meta) when meta.reactive_enabled -> Some meta
+             | _ -> None)
+      |> List.sort (fun left right -> String.compare left.name right.name)
+
+let keeper_inbox_summary items =
+  match keeper_inbox_latest_item items with
+  | None -> None
+  | Some latest ->
+      let trimmed = String.trim latest.summary in
+      if trimmed = "" then None else Some trimmed
+
+let build_reactive_turn_message (items : keeper_inbox_item list) : string =
+  let bullet_lines =
+    items
+    |> List.mapi (fun idx item ->
+           let payload =
+             match item.payload with
+             | `Assoc _ ->
+                 item.payload |> Yojson.Safe.pretty_to_string |> short_preview ~max_len:500
+             | _ -> "{}"
+           in
+           Printf.sprintf
+             "%d. [%s] %s\n   event_id=%s\n   payload=%s"
+             (idx + 1)
+             item.source
+             item.summary
+             item.event_id
+             payload)
+  in
+  Printf.sprintf
+    "Reactive inbox update.\n\nYou own continuity for these board/activity signals. Review them using your short-term inbox, mid-term commitments, and long-term memory.\nChoose one of:\n- react visibly on the board if warranted\n- leave a triage note if follow-up is needed\n- do nothing, but make the no-op explicit and explain why\n\nPending items:\n%s"
+    (String.concat "\n" bullet_lines)
+
+type reactive_emitter = {
+  emit: 'a. 'a context -> keeper_meta -> keeper_meta;
+}
+
+let maybe_emit_reactive_impl : reactive_emitter option ref = ref None
+
+let maybe_emit_reactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
+  match !maybe_emit_reactive_impl with
+  | Some emitter -> emitter.emit ctx meta
+  | None -> meta
 
 let model_specs_of_strings (model_strs : string list) : (Llm_client.model_spec list, string) result =
   let rec go acc = function
@@ -4873,8 +5095,13 @@ let string_contains_ci haystack needle =
   let needle = String.lowercase_ascii needle in
   needle <> "" && contains_ci haystack needle
 
+let current_hour_kst () =
+  let now = Time_compat.now () in
+  let tm = Unix.gmtime now in
+  (tm.Unix.tm_hour + 9) mod 24
+
 let quiet_hours_active () =
-  let current_hour = Lodge_heartbeat.current_hour_kst () in
+  let current_hour = current_hour_kst () in
   let quiet_start = Env_config.LodgeV2.quiet_start in
   let quiet_end = Env_config.LodgeV2.quiet_end in
   quiet_start < quiet_end
@@ -4951,6 +5178,64 @@ let keeper_error_hint ~agent_status ~meta =
            match drift_reason with
            | Some reason when looks_error_like reason -> Some reason
            | _ -> None)
+
+type provider_health_summary = {
+  timeout_streak: int;
+  recent_provider_failures: int;
+  recent_fallback_rate: float;
+}
+
+let provider_error_like text =
+  List.exists (string_contains_ci text)
+    [ "timeout"; "timed out"; "llm"; "model"; "provider"; "ollama"; "glm"; "gemini"; "openai"; "graphql" ]
+
+let provider_timeout_like text =
+  List.exists (string_contains_ci text)
+    [ "timeout"; "timed out"; "curl code 28"; "deadline" ]
+
+let provider_health_summary_of_metrics ~meta ~agent_status ~(metrics_lines : string list) :
+    provider_health_summary =
+  let interaction_count = ref 0 in
+  let fallback_count = ref 0 in
+  List.iter
+    (fun line ->
+      try
+        let json = Yojson.Safe.from_string line in
+        let channel = Safe_ops.json_string ~default:"turn" "channel" json in
+        let interaction = String.equal channel "turn" || String.equal channel "proactive" in
+        if interaction then begin
+          incr interaction_count;
+          let fallback_applied =
+            Safe_ops.json_bool ~default:false "fallback_applied" json
+          in
+          let memory_check = Yojson.Safe.Util.member "memory_check" json in
+          let prompt_fallback =
+            Safe_ops.json_bool ~default:false "prompt_fallback_applied" memory_check
+          in
+          let recall_fallback =
+            Safe_ops.json_bool ~default:false "recall_fallback_applied" memory_check
+            || Safe_ops.json_bool ~default:false "deterministic_fallback_applied" memory_check
+          in
+          if fallback_applied || prompt_fallback || recall_fallback then incr fallback_count
+        end
+      with _ -> ())
+    metrics_lines;
+  let error_hint = keeper_error_hint ~agent_status ~meta in
+  let recent_provider_failures =
+    match error_hint with
+    | Some reason when provider_error_like reason -> 1
+    | _ -> 0
+  in
+  let timeout_streak =
+    match error_hint with
+    | Some reason when provider_timeout_like reason -> 1
+    | _ -> 0
+  in
+  let recent_fallback_rate =
+    if !interaction_count = 0 then 0.0
+    else float_of_int !fallback_count /. float_of_int !interaction_count
+  in
+  { timeout_streak; recent_provider_failures; recent_fallback_rate }
 
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts =
   let quiet_active = quiet_hours_active () in
@@ -6854,10 +7139,21 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             proactive_warmup_sec <= 0
             || now_ts -. keepalive_started_ts >= float_of_int proactive_warmup_sec
           in
+          let meta_after_reactive =
+            try maybe_emit_reactive ctx meta_current
+            with exn ->
+              Printf.eprintf "[keeper] reactive emission failed: %s\n%!"
+                (Printexc.to_string exn);
+              meta_current
+          in
           let meta_after_proactive =
             if proactive_warmup_elapsed
-            then (try maybe_emit_proactive ctx meta_current with exn -> Printf.eprintf "[keeper] proactive emission failed: %s\n%!" (Printexc.to_string exn); meta_current)
-            else meta_current
+            then
+              (try maybe_emit_proactive ctx meta_after_reactive with exn ->
+                 Printf.eprintf "[keeper] proactive emission failed: %s\n%!"
+                   (Printexc.to_string exn);
+                 meta_after_reactive)
+            else meta_after_reactive
           in
           let base = float_of_int (max 30 (min 300 meta_after_proactive.presence_keepalive_sec)) in
           let jitter = base *. 0.2 *. Random.float 1.0 in
@@ -6900,6 +7196,7 @@ let handle_keeper_up ctx args : tool_result =
     let presence_keepalive_opt = get_bool_opt args "presence_keepalive" in
     let presence_keepalive_sec_opt = Safe_ops.json_int_opt "presence_keepalive_sec" args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
+    let reactive_enabled_opt = get_bool_opt args "reactive_enabled" in
     let proactive_idle_sec_opt = Safe_ops.json_int_opt "proactive_idle_sec" args in
     let proactive_cooldown_sec_opt = Safe_ops.json_int_opt "proactive_cooldown_sec" args in
     let drift_enabled_opt = get_bool_opt args "drift_enabled" in
@@ -6945,6 +7242,9 @@ let handle_keeper_up ctx args : tool_result =
         else
         let proactive_enabled =
           Option.value ~default:default_proactive_enabled proactive_enabled_opt
+        in
+        let reactive_enabled =
+          Option.value ~default:false reactive_enabled_opt
         in
         let proactive_idle_sec =
           Option.value ~default:default_proactive_idle_sec proactive_idle_sec_opt
@@ -7084,14 +7384,19 @@ let handle_keeper_up ctx args : tool_result =
                last_compaction_decision = "initialized";
                proactive_count_total = 0;
                last_proactive_ts = 0.0;
-                last_proactive_reason = "";
-                last_proactive_preview = "";
-                last_continuity_update_ts = now_ts;
-                continuity_summary = "";
-                autonomy_level = "l1_reactive";
-                active_goal_ids = [];
-                last_autonomous_action_at = "";
-                autonomous_action_count = 0;
+               last_proactive_reason = "";
+               last_proactive_preview = "";
+               last_continuity_update_ts = now_ts;
+               continuity_summary = "";
+               reactive_enabled;
+               last_handled_event_id = "";
+               last_handled_event_ts = 0.0;
+               last_successful_reaction_at = 0.0;
+               last_successful_reaction_summary = "";
+               autonomy_level = "l1_reactive";
+               active_goal_ids = [];
+               last_autonomous_action_at = "";
+               autonomous_action_count = 0;
              } in
              match write_meta ctx.config meta with
              | Error e -> (false, "❌ " ^ e)
@@ -7115,6 +7420,7 @@ let handle_keeper_up ctx args : tool_result =
                  ("presence_keepalive", `Bool meta.presence_keepalive);
                  ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
                  ("proactive_enabled", `Bool meta.proactive_enabled);
+                 ("reactive_enabled", `Bool meta.reactive_enabled);
                  ("proactive_idle_sec", `Int meta.proactive_idle_sec);
                  ("proactive_cooldown_sec", `Int meta.proactive_cooldown_sec);
                  ("drift_enabled", `Bool meta.drift_enabled);
@@ -7177,6 +7483,7 @@ let handle_keeper_up ctx args : tool_result =
         presence_keepalive = Option.value ~default:old.presence_keepalive presence_keepalive_opt;
         presence_keepalive_sec = Option.value ~default:old.presence_keepalive_sec presence_keepalive_sec_opt;
         proactive_enabled = Option.value ~default:old.proactive_enabled proactive_enabled_opt;
+        reactive_enabled = Option.value ~default:old.reactive_enabled reactive_enabled_opt;
         proactive_idle_sec =
           Option.value ~default:old.proactive_idle_sec proactive_idle_sec_opt
           |> normalize_proactive_idle_sec;
@@ -7270,6 +7577,15 @@ let handle_keeper_status ctx args : tool_result =
                ]
          in
          let keepalive_running = keeper_keepalive_running m.name in
+         let inbox_items =
+           match read_keeper_inbox ctx.config m.name with
+           | Ok items -> items
+           | Error _ -> []
+         in
+         let pending_reactive_items = List.length inbox_items in
+         let inbox_latest_summary =
+           keeper_inbox_summary inbox_items
+         in
          let agent_status = parse_agent_status ctx.config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =
@@ -7333,6 +7649,12 @@ let handle_keeper_status ctx args : tool_result =
                ~default_generation:m.generation
            else
              empty_metrics_summary
+         in
+         let provider_health =
+           provider_health_summary_of_metrics
+             ~meta:m
+             ~agent_status
+             ~metrics_lines:metrics_window_lines
          in
          let last_skill_route =
            if not include_metrics_overview then
@@ -7585,6 +7907,26 @@ let handle_keeper_status ctx args : tool_result =
              ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
            ]);
            ("keepalive_running", `Bool keepalive_running);
+           ("reactive_enabled", `Bool m.reactive_enabled);
+           ("pending_reactive_items", `Int pending_reactive_items);
+           ( "inbox_latest_summary",
+             match inbox_latest_summary with
+             | Some summary -> `String summary
+             | None -> `Null );
+           ("last_handled_event_id", `String m.last_handled_event_id);
+           ( "last_handled_event_ts",
+             if m.last_handled_event_ts > 0.0 then `Float m.last_handled_event_ts else `Null );
+           ( "last_successful_reaction_at",
+             if m.last_successful_reaction_at > 0.0
+             then `Float m.last_successful_reaction_at
+             else `Null );
+           ( "last_successful_reaction_summary",
+             if String.trim m.last_successful_reaction_summary = ""
+             then `Null
+             else `String m.last_successful_reaction_summary );
+           ("timeout_streak", `Int provider_health.timeout_streak);
+           ("recent_provider_failures", `Int provider_health.recent_provider_failures);
+           ("recent_fallback_rate", `Float provider_health.recent_fallback_rate);
            ("agent", agent_status);
            ("diagnostic", diagnostic);
            ("keeper_age_s", `Float keeper_age_s);
@@ -7647,6 +7989,11 @@ let handle_keeper_status ctx args : tool_result =
 	           ("context", ctx_stats);
 	           ("skill_route", match last_skill_route with Some v -> v | None -> `Null);
 	           ("metrics_overview", metrics_summary_to_json metrics_overview);
+	           ("provider_health", `Assoc [
+	             ("timeout_streak", `Int provider_health.timeout_streak);
+	             ("recent_provider_failures", `Int provider_health.recent_provider_failures);
+	             ("recent_fallback_rate", `Float provider_health.recent_fallback_rate);
+	           ]);
 	           ("memory_bank", memory_summary_to_json memory_bank_summary);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);
@@ -7662,6 +8009,7 @@ let handle_keeper_status ctx args : tool_result =
            ("compaction_history_count", `Int (snd compaction_history_tail));
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path ctx.config m.name));
+             ("inbox", `String (keeper_inbox_path ctx.config m.name));
              ("metrics", `String metrics_path);
              ("memory_bank", `String memory_bank_path);
              ("session_dir", `String session_dir);
@@ -7823,6 +8171,11 @@ let handle_keeper_msg ctx args : tool_result =
             last_proactive_preview = "";
             last_continuity_update_ts = now_ts;
             continuity_summary = "";
+            reactive_enabled = false;
+            last_handled_event_id = "";
+            last_handled_event_ts = 0.0;
+            last_successful_reaction_at = 0.0;
+            last_successful_reaction_summary = "";
             autonomy_level = "l1_reactive";
             active_goal_ids = [];
             last_autonomous_action_at = "";
@@ -9119,6 +9472,95 @@ let handle_keeper_msg ctx args : tool_result =
                 (true, Yojson.Safe.pretty_to_string json)
               end))
 
+let () =
+  maybe_emit_reactive_impl :=
+    Some
+      {
+        emit =
+          (fun ctx meta ->
+        if not meta.reactive_enabled then meta
+        else
+          match take_keeper_inbox_items ctx.config ~keeper_name:meta.name ~max_items:3 with
+          | Error msg ->
+              Printf.eprintf "[keeper] reactive inbox load failed for %s: %s\n%!" meta.name msg;
+              meta
+          | Ok ([], _) -> meta
+          | Ok (items, _) ->
+              let turn_message = build_reactive_turn_message items in
+              let args =
+                `Assoc
+                  [
+                    ("name", `String meta.name);
+                    ("message", `String turn_message);
+                    ("require_existing", `Bool true);
+                    ( "turn_instructions",
+                      `String
+                        "This is a reactive continuity turn. Prefer direct board action only when warranted by the inbox items. If action is unnecessary, make the no-op explicit instead of inventing work." );
+                  ]
+              in
+              (match handle_keeper_msg ctx args with
+               | false, msg ->
+                   Printf.eprintf "[keeper] reactive emission failed for %s: %s\n%!" meta.name msg;
+                   meta
+               | true, body ->
+                   let consumed_ids = List.map (fun item -> item.event_id) items in
+                   (match
+                      ack_keeper_inbox_items ctx.config ~keeper_name:meta.name
+                        ~event_ids:consumed_ids
+                    with
+                   | Ok _ -> ()
+                   | Error msg ->
+                       Printf.eprintf "[keeper] reactive inbox ack failed for %s: %s\n%!"
+                         meta.name msg);
+                   let newest_item =
+                     items
+                     |> List.sort (fun left right -> Float.compare right.created_at left.created_at)
+                     |> function
+                     | latest :: _ -> latest
+                     | [] ->
+                         {
+                           event_id = "";
+                           source = "";
+                           created_at = 0.0;
+                           summary = "";
+                           payload = `Assoc [];
+                         }
+                   in
+                   let reply_preview =
+                     try
+                       let json = Yojson.Safe.from_string body in
+                       match Safe_ops.json_string_opt "reply" json with
+                       | Some reply when String.trim reply <> "" -> short_preview reply
+                       | _ -> short_preview turn_message
+                     with _ -> short_preview turn_message
+                   in
+                   let latest_meta =
+                     match read_meta ctx.config meta.name with
+                     | Ok (Some current) -> current
+                     | _ -> meta
+                   in
+                   let now_ts = Time_compat.now () in
+                   let updated_meta =
+                     {
+                       latest_meta with
+                       updated_at = now_iso ();
+                       last_handled_event_id =
+                         (if newest_item.event_id = "" then latest_meta.last_handled_event_id
+                          else newest_item.event_id);
+                       last_handled_event_ts =
+                         max latest_meta.last_handled_event_ts newest_item.created_at;
+                       last_successful_reaction_at = now_ts;
+                       last_successful_reaction_summary = reply_preview;
+                     }
+                   in
+                   (match write_meta ctx.config updated_meta with
+                   | Ok () -> ()
+                   | Error msg ->
+                       Printf.eprintf "[keeper] reactive meta write failed for %s: %s\n%!"
+                         meta.name msg);
+                   updated_meta));
+      }
+
 let handle_keeper_down ctx args : tool_result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -9213,8 +9655,17 @@ let handle_keeper_list ctx args : tool_result =
 	              | line :: _ -> (try Some (Yojson.Safe.from_string line) with _ -> None)
 	              | [] -> None
 	            in
-	            let metrics_overview =
+            let metrics_overview =
 	              summarize_metrics_lines metrics_window_lines ~default_generation:m.generation
+	            in
+	            let agent_status =
+	              parse_agent_status ctx.config ~agent_name:m.agent_name
+	            in
+	            let provider_health =
+	              provider_health_summary_of_metrics
+	                ~meta:m
+	                ~agent_status
+	                ~metrics_lines:metrics_window_lines
 	            in
 	            let last_skill_metrics =
 	              let rec find_latest = function
@@ -9237,6 +9688,13 @@ let handle_keeper_list ctx args : tool_result =
                 ~max_lines:180
                 ~recent_limit:3
             in
+            let inbox_items =
+              match read_keeper_inbox ctx.config m.name with
+              | Ok items -> items
+              | Error _ -> []
+            in
+            let pending_reactive_items = List.length inbox_items in
+            let inbox_latest_summary = keeper_inbox_summary inbox_items in
             let memory_recent_note =
               match memory_bank_summary.recent_notes with
               | row :: _ -> Some row.text
@@ -9321,6 +9779,12 @@ let handle_keeper_list ctx args : tool_result =
               ("compaction_message_gate", `Int compact_message_gate);
               ("compaction_token_gate", `Int compact_token_gate);
               ("proactive_enabled", `Bool m.proactive_enabled);
+              ("reactive_enabled", `Bool m.reactive_enabled);
+              ("pending_reactive_items", `Int pending_reactive_items);
+              ("inbox_latest_summary",
+                match inbox_latest_summary with
+                | Some text -> `String text
+                | None -> `Null);
               ("proactive_idle_sec", `Int m.proactive_idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive_cooldown_sec);
               ("proactive_count_total", `Int m.proactive_count_total);
@@ -9337,6 +9801,20 @@ let handle_keeper_list ctx args : tool_result =
                 if String.trim m.last_proactive_preview = ""
                 then `Null
                 else `String m.last_proactive_preview);
+              ("last_handled_event_id", `String m.last_handled_event_id);
+              ("last_handled_event_ts",
+                if m.last_handled_event_ts > 0.0 then `Float m.last_handled_event_ts else `Null);
+              ("last_successful_reaction_at",
+                if m.last_successful_reaction_at > 0.0
+                then `Float m.last_successful_reaction_at
+                else `Null);
+              ("last_successful_reaction_summary",
+                if String.trim m.last_successful_reaction_summary = ""
+                then `Null
+                else `String m.last_successful_reaction_summary);
+              ("timeout_streak", `Int provider_health.timeout_streak);
+              ("recent_provider_failures", `Int provider_health.recent_provider_failures);
+              ("recent_fallback_rate", `Float provider_health.recent_fallback_rate);
               ("continuity_summary",
                 if String.trim m.continuity_summary = ""
                 then `Null
@@ -9364,9 +9842,15 @@ let handle_keeper_list ctx args : tool_result =
 	              ("context", context_json);
 	              ("skill_route", skill_route_json);
 	              ("metrics_overview", metrics_summary_to_json metrics_overview);
+	              ("provider_health", `Assoc [
+	                ("timeout_streak", `Int provider_health.timeout_streak);
+	                ("recent_provider_failures", `Int provider_health.recent_provider_failures);
+	                ("recent_fallback_rate", `Float provider_health.recent_fallback_rate);
+	              ]);
 	              ("memory_bank", memory_summary_to_json memory_bank_summary);
               ("storage_paths", `Assoc [
                 ("meta", `String (keeper_meta_path ctx.config m.name));
+                ("inbox", `String (keeper_inbox_path ctx.config m.name));
                 ("metrics", `String metrics_path);
                 ("memory_bank", `String (keeper_memory_bank_path ctx.config m.name));
                 ("session_dir", `String (keeper_session_dir ctx.config m.trace_id));

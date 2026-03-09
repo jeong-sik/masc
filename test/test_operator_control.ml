@@ -97,6 +97,8 @@ let test_snapshot_has_expected_sections () =
          |> Yojson.Safe.Util.member "name" |> Yojson.Safe.Util.to_string);
       Alcotest.(check bool) "attention summary present" true
         (Yojson.Safe.Util.member "attention_summary" json <> `Null);
+      Alcotest.(check bool) "keeper attention present" true
+        (Yojson.Safe.Util.member "keeper_attention" json <> `Null);
       Alcotest.(check bool) "recommendation summary present" true
         (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
       Alcotest.(check bool) "recent_actions list present" true
@@ -930,6 +932,198 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       Alcotest.(check bool) "summary present" true
         (String.length Yojson.Safe.Util.(diagnostic |> member "summary" |> to_string) > 0))
 
+let test_keeper_status_and_list_expose_reactive_fields () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let keeper_name = "reactive-keeper" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Own reactive continuity");
+                ("models", `List [ `String "ollama:glm-4.7-flash" ]);
+                ("presence_keepalive", `Bool false);
+                ("proactive_enabled", `Bool false);
+                ("reactive_enabled", `Bool true);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let inbox_item : Tool_keeper.keeper_inbox_item =
+        {
+          event_id = "board-post:p-1:10";
+          source = "board_post";
+          created_at = 10.0;
+          summary = "Recent board activity";
+          payload = `Assoc [ ("post_id", `String "p-1") ];
+        }
+      in
+      (match
+         Tool_keeper.enqueue_keeper_inbox_items config ~keeper_name ~items:[ inbox_item ]
+       with
+      | Error msg -> Alcotest.fail msg
+      | Ok fresh -> Alcotest.(check int) "enqueued one inbox item" 1 fresh);
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("fast", `Bool false);
+                ("include_context", `Bool false);
+                ("include_metrics_overview", `Bool false);
+                ("include_memory_bank", `Bool false);
+                ("include_history_tail", `Bool false);
+                ("include_compaction_history", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper status ok" true ok;
+      let status = parse_json_exn body in
+      Alcotest.(check bool) "reactive_enabled" true
+        Yojson.Safe.Util.(status |> member "reactive_enabled" |> to_bool);
+      Alcotest.(check int) "pending_reactive_items" 1
+        Yojson.Safe.Util.(status |> member "pending_reactive_items" |> to_int);
+      Alcotest.(check string) "inbox_latest_summary" "Recent board activity"
+        Yojson.Safe.Util.(status |> member "inbox_latest_summary" |> to_string);
+      let ok, list_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_list"
+          ~args:(`Assoc [ ("detailed", `Bool true) ])
+      in
+      Alcotest.(check bool) "keeper list ok" true ok;
+      let keeper_row =
+        parse_json_exn list_body
+        |> Yojson.Safe.Util.member "keepers"
+        |> Yojson.Safe.Util.to_list
+        |> List.find (fun row ->
+             Yojson.Safe.Util.(row |> member "name" |> to_string) = keeper_name)
+      in
+      Alcotest.(check bool) "reactive_enabled in list" true
+        Yojson.Safe.Util.(keeper_row |> member "reactive_enabled" |> to_bool);
+      Alcotest.(check int) "pending_reactive_items in list" 1
+        Yojson.Safe.Util.(keeper_row |> member "pending_reactive_items" |> to_int))
+
+let test_room_digest_surfaces_keeper_backlog_and_recover_action () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let keeper_name = "recover-keeper" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Own reactive continuity");
+                ("models", `List [ `String "ollama:glm-4.7-flash" ]);
+                ("presence_keepalive", `Bool false);
+                ("proactive_enabled", `Bool false);
+                ("reactive_enabled", `Bool true);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let inbox_item : Tool_keeper.keeper_inbox_item =
+        {
+          event_id = "board-post:p-1:20";
+          source = "board_post";
+          created_at = 20.0;
+          summary = "Board needs a reply";
+          payload = `Assoc [ ("post_id", `String "p-1") ];
+        }
+      in
+      (match
+         Tool_keeper.enqueue_keeper_inbox_items config ~keeper_name
+           ~items:[ inbox_item ]
+       with
+      | Error msg -> Alcotest.fail msg
+      | Ok _ -> ());
+      let ctx = operator_ctx env sw config "operator" in
+      let digest =
+        match Operator_control.digest_json ~actor:"operator" ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
+      Alcotest.(check bool) "offline backlog attention present" true
+        (List.exists
+           (fun item ->
+             Yojson.Safe.Util.(item |> member "kind" |> to_string)
+             = "keeper_offline_with_backlog")
+           attention_items);
+      let recommended_actions =
+        Yojson.Safe.Util.(digest |> member "recommended_actions" |> to_list)
+      in
+      Alcotest.(check bool) "keeper recover recommendation present" true
+        (List.exists
+           (fun item ->
+             Yojson.Safe.Util.(item |> member "action_type" |> to_string)
+             = "keeper_recover")
+           recommended_actions);
+      let keeper_attention = Yojson.Safe.Util.(digest |> member "keeper_attention") in
+      Alcotest.(check int) "backlog count" 1
+        Yojson.Safe.Util.(keeper_attention |> member "keeper_backlog_count" |> to_int);
+      Alcotest.(check int) "offline backlog keeper count" 1
+        Yojson.Safe.Util.(keeper_attention |> member "keepers_offline_with_backlog" |> to_int))
+
+let test_room_digest_ignores_parked_keeper_without_backlog () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let keeper_name = "parked-keeper" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Stay parked");
+                ("models", `List [ `String "ollama:glm-4.7-flash" ]);
+                ("presence_keepalive", `Bool false);
+                ("proactive_enabled", `Bool false);
+                ("reactive_enabled", `Bool true);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let ctx = operator_ctx env sw config "operator" in
+      let digest =
+        match Operator_control.digest_json ~actor:"operator" ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
+      Alcotest.(check bool) "no keeper alert for parked empty keeper" false
+        (List.exists
+           (fun item ->
+             match Yojson.Safe.Util.(item |> member "target_type" |> to_string_option) with
+             | Some "keeper" -> true
+             | _ -> false)
+           attention_items))
+
 let test_manual_lodge_tick_updates_observable_state () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -997,6 +1191,12 @@ let () =
             test_select_checkin_agents_manual_override_quiet_hours;
           Alcotest.test_case "keeper status exposes summary and recoverable" `Quick
             test_keeper_status_exposes_summary_and_recoverable;
+          Alcotest.test_case "keeper status and list expose reactive fields" `Quick
+            test_keeper_status_and_list_expose_reactive_fields;
+          Alcotest.test_case "room digest surfaces keeper backlog and recover action" `Quick
+            test_room_digest_surfaces_keeper_backlog_and_recover_action;
+          Alcotest.test_case "room digest ignores parked keeper without backlog" `Quick
+            test_room_digest_ignores_parked_keeper_without_backlog;
           Alcotest.test_case "manual lodge tick updates observable state" `Quick
             test_manual_lodge_tick_updates_observable_state;
           Alcotest.test_case "expired confirmation rejected" `Quick

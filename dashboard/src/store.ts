@@ -451,6 +451,8 @@ function normalizeKeepers(raw: unknown, serverStatusValue?: ServerStatus | null)
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
         proactive_enabled:
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
+        reactive_enabled:
+          typeof row.reactive_enabled === 'boolean' ? row.reactive_enabled : undefined,
         proactive_idle_sec: asNumber(row.proactive_idle_sec),
         proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
         last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),
@@ -461,6 +463,23 @@ function normalizeKeepers(raw: unknown, serverStatusValue?: ServerStatus | null)
         last_handoff_ago_s: asNumber(row.last_handoff_ago_s),
         last_compaction_ago_s: asNumber(row.last_compaction_ago_s),
         last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
+        last_successful_reaction_at:
+          toIsoTimestamp(row.last_successful_reaction_at)
+          ?? asString(row.last_successful_reaction_at)
+          ?? null,
+        last_successful_reaction_summary:
+          asString(row.last_successful_reaction_summary) ?? null,
+        last_handled_event_id: asString(row.last_handled_event_id) ?? null,
+        last_handled_event_ts:
+          toIsoTimestamp(row.last_handled_event_ts)
+          ?? asString(row.last_handled_event_ts)
+          ?? null,
+        pending_reactive_items: asNumber(row.pending_reactive_items),
+        inbox_latest_summary: asString(row.inbox_latest_summary) ?? null,
+        continuity_summary: asString(row.continuity_summary) ?? null,
+        timeout_streak: asNumber(row.timeout_streak),
+        recent_provider_failures: asNumber(row.recent_provider_failures),
+        recent_fallback_rate: asNumber(row.recent_fallback_rate),
         context_ratio: contextRatio,
         context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
         context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),

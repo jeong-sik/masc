@@ -367,12 +367,25 @@ export function Overview() {
       const isStale = staleKeepers.value.has(keeper.name)
       const ratio = keeper.context_ratio ?? 0
       const diagnostic = keeper.diagnostic ?? null
+      const pendingReactiveItems = keeper.pending_reactive_items ?? 0
+      const keepaliveRunning = keeper.keepalive_running ?? false
+      const timeoutStreak = keeper.timeout_streak ?? 0
+      const providerFailures = keeper.recent_provider_failures ?? 0
 
       let tone: MonitorTone = 'ok'
       let note = 'Healthy keeper'
-      if (
+      if (pendingReactiveItems > 0 && !keepaliveRunning) {
+        tone = 'bad'
+        note = `Reactive inbox blocked (${pendingReactiveItems})`
+      } else if (pendingReactiveItems > 0) {
+        tone = 'warn'
+        note = `Reactive inbox ${pendingReactiveItems}`
+      } else if (keepaliveRunning && (timeoutStreak > 0 || providerFailures > 0)) {
+        tone = 'warn'
+        note = timeoutStreak > 0 ? `Provider timeout ${timeoutStreak}` : 'Provider failures'
+      } else if (
         isStale
-        || keeper.status === 'offline'
+        || (keepaliveRunning && keeper.status === 'offline')
         || lifecycle === 'handoff-imminent'
         || diagnostic?.health_state === 'offline'
         || diagnostic?.health_state === 'degraded'
@@ -405,6 +418,9 @@ export function Overview() {
         note,
         focus:
           limitText(diagnostic?.summary, 120)
+          ?? limitText(keeper.inbox_latest_summary)
+          ?? limitText(keeper.last_successful_reaction_summary)
+          ?? limitText(keeper.continuity_summary)
           ?? limitText(keeper.agent?.current_task)
           ?? keeper.skill_primary
           ?? keeper.last_proactive_reason

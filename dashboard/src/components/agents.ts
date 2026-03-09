@@ -102,7 +102,10 @@ function formatContext(value?: number | null): string {
 }
 
 function keeperFocus(keeper: Keeper): string {
-  return keeper.agent?.current_task
+  return keeper.inbox_latest_summary
+    ?? keeper.last_successful_reaction_summary
+    ?? keeper.continuity_summary
+    ?? keeper.agent?.current_task
     ?? keeper.skill_primary
     ?? keeper.last_proactive_reason
     ?? keeper.memory_recent_note
@@ -175,12 +178,34 @@ function buildKeeperRow(keeper: Keeper): KeeperMonitorRow {
   const lifecycle = keeperLifecycles.value.get(keeper.name) ?? 'idle'
   const isStale = staleKeepers.value.has(keeper.name)
   const ratio = keeper.context_ratio ?? 0
+  const pendingReactiveItems = keeper.pending_reactive_items ?? 0
+  const keepaliveRunning = keeper.keepalive_running ?? false
+  const timeoutStreak = keeper.timeout_streak ?? 0
+  const providerFailures = keeper.recent_provider_failures ?? 0
 
   let state: KeeperMonitorState = 'healthy'
   let tone: MonitorTone = 'ok'
-  let note = 'Heartbeat and context look healthy'
+  let note = 'Keeper continuity looks healthy'
 
-  if (keeper.status === 'offline' || isStale || lifecycle === 'handoff-imminent') {
+  if (pendingReactiveItems > 0 && !keepaliveRunning) {
+    state = 'critical'
+    tone = 'bad'
+    note = 'Reactive inbox is backed up while the keeper is offline'
+  } else if (pendingReactiveItems > 0) {
+    state = 'warning'
+    tone = 'warn'
+    note =
+      pendingReactiveItems > 1
+        ? `Reactive inbox backlog (${pendingReactiveItems})`
+        : 'Reactive inbox waiting for a keeper turn'
+  } else if (keepaliveRunning && (timeoutStreak > 0 || providerFailures > 0)) {
+    state = 'warning'
+    tone = 'warn'
+    note =
+      timeoutStreak > 0
+        ? `Provider timeout detected (${timeoutStreak})`
+        : 'Recent provider failures detected'
+  } else if (keepaliveRunning && (keeper.status === 'offline' || isStale || lifecycle === 'handoff-imminent')) {
     state = 'critical'
     tone = 'bad'
     note = isStale
@@ -188,6 +213,12 @@ function buildKeeperRow(keeper: Keeper): KeeperMonitorRow {
       : lifecycle === 'handoff-imminent'
         ? 'Handoff imminent'
         : 'Keeper offline'
+  } else if (!keepaliveRunning) {
+    state = 'healthy'
+    tone = 'ok'
+    note = keeper.reactive_enabled
+      ? 'Reactive keeper is parked with no backlog'
+      : 'Keeper is parked'
   } else if (
     lifecycle === 'preparing'
     || lifecycle === 'compacting'
@@ -290,6 +321,7 @@ function AgentWatchRow({ row }: { row: AgentMonitorRow }) {
 
 function KeeperWatchRow({ row }: { row: KeeperMonitorRow }) {
   const { keeper } = row
+  const fallbackRate = keeper.recent_fallback_rate ?? 0
 
   return html`
     <button class="monitor-row ${row.tone} state-${row.state}" onClick=${() => openKeeperDetail(keeper)}>
@@ -312,11 +344,20 @@ function KeeperWatchRow({ row }: { row: KeeperMonitorRow }) {
         <span>${keeperContinuity(keeper)}</span>
         <span>Lifecycle ${row.lifecycle}</span>
         <span>Context ${formatContext(keeper.context_ratio)}</span>
+        ${typeof keeper.pending_reactive_items === 'number'
+          ? html`<span>${keeper.pending_reactive_items} inbox</span>`
+          : null}
         ${keeper.model ? html`<span>${keeper.model}</span>` : null}
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
-      ${keeper.skill_reason ? html`<div class="monitor-footnote">Skill route: ${keeper.skill_reason}</div>` : null}
+      ${keeper.last_successful_reaction_at
+        ? html`<div class="monitor-footnote">Last reaction <${TimeAgo} timestamp=${keeper.last_successful_reaction_at} /></div>`
+        : fallbackRate > 0
+          ? html`<div class="monitor-footnote">Recent fallback rate ${(fallbackRate * 100).toFixed(0)}%</div>`
+        : keeper.skill_reason
+          ? html`<div class="monitor-footnote">Skill route: ${keeper.skill_reason}</div>`
+          : null}
     </button>
   `
 }

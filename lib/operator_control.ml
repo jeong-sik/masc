@@ -441,65 +441,146 @@ let recent_messages_json config =
   |> List.map Types.message_to_yojson
   |> fun rows -> `List rows
 
-let keepers_json config =
+type keeper_room_row = {
+  meta : Tool_keeper.keeper_meta;
+  agent_json : Yojson.Safe.t;
+  keepalive_running : bool;
+  diagnostic : Yojson.Safe.t;
+  pending_reactive_items : int;
+  inbox_latest_summary : string option;
+  timeout_streak : int;
+  recent_provider_failures : int;
+  recent_fallback_rate : float;
+}
+
+let keeper_names config =
   let dir = Tool_keeper.keeper_dir config in
-  let names =
-    if not (Sys.file_exists dir) then
-      []
-    else
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (fun file -> Filename.check_suffix file ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter Tool_keeper.validate_name
-      |> List.sort String.compare
-  in
+  if not (Sys.file_exists dir) then
+    []
+  else
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun file -> Filename.check_suffix file ".json")
+    |> List.map Filename.remove_extension
+    |> List.filter Tool_keeper.validate_name
+    |> List.sort String.compare
+
+let build_keeper_room_rows config =
+  let now_ts = Time_compat.now () in
+  keeper_names config
+  |> List.filter_map (fun name ->
+         match Tool_keeper.read_meta config name with
+         | Error _ | Ok None -> None
+         | Ok (Some meta) ->
+             let inbox_items =
+               match Tool_keeper.read_keeper_inbox config meta.name with
+               | Ok items -> items
+               | Error _ -> []
+             in
+             let pending_reactive_items = List.length inbox_items in
+             let inbox_latest_summary = Tool_keeper.keeper_inbox_summary inbox_items in
+             let keepalive_running = Tool_keeper.keeper_keepalive_running meta.name in
+             let agent_json =
+               Tool_keeper.parse_agent_status config ~agent_name:meta.agent_name
+             in
+             let metrics_path = Tool_keeper.keeper_metrics_path config meta.name in
+             let metrics_lines =
+               Tool_keeper.read_file_tail_lines metrics_path ~max_bytes:120000 ~max_lines:120
+             in
+             let provider_health =
+               Tool_keeper.provider_health_summary_of_metrics
+                 ~meta
+                 ~agent_status:agent_json
+                 ~metrics_lines
+             in
+             let diagnostic =
+               Tool_keeper.keeper_diagnostic_json
+                 ~meta
+                 ~agent_status:agent_json
+                 ~keepalive_running
+                 ~history_items:[]
+                 ~now_ts
+             in
+             Some
+               {
+                 meta;
+                 agent_json;
+                 keepalive_running;
+                 diagnostic;
+                 pending_reactive_items;
+                 inbox_latest_summary;
+                 timeout_streak = provider_health.timeout_streak;
+                 recent_provider_failures = provider_health.recent_provider_failures;
+                 recent_fallback_rate = provider_health.recent_fallback_rate;
+               })
+
+let keepers_json config =
+  let rows_data = build_keeper_room_rows config in
   let rows =
-    List.filter_map
-      (fun name ->
-        match Tool_keeper.read_meta config name with
-        | Error _ | Ok None -> None
-        | Ok (Some meta) ->
-            let agent_json =
-              Tool_keeper.parse_agent_status config ~agent_name:meta.agent_name
-            in
-            let agent_status =
-              match agent_json |> U.member "status" with
-              | `String status -> status
-              | _ -> "unknown"
-            in
-            Some
-              (`Assoc
-                [
-                  ("name", `String meta.name);
-                  ("agent_name", `String meta.agent_name);
-                  ("trace_id", `String meta.trace_id);
-                  ("goal", `String meta.goal);
-                  ("short_goal", `String meta.short_goal);
-                  ("mid_goal", `String meta.mid_goal);
-                  ("long_goal", `String meta.long_goal);
-                  ("status", `String agent_status);
-                  ("generation", `Int meta.generation);
-                  ("turn_count", `Int meta.total_turns);
-                  ("context_ratio", `Null);
-                  ("context_tokens", `Int meta.last_total_tokens);
-                  ("last_model_used", `String meta.last_model_used);
-                  ("active_model", `String (Tool_keeper.active_model_of_meta meta));
-                  ( "next_model_hint",
-                    string_option_to_json (Tool_keeper.next_model_hint_of_meta meta)
-                  );
-                  ("autonomy_level", `String meta.autonomy_level);
-                  ( "active_goal_ids",
-                    `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-                  );
-                  ( "last_autonomous_action_at",
-                    if String.trim meta.last_autonomous_action_at = "" then `Null
-                    else `String meta.last_autonomous_action_at );
-                  ("autonomous_action_count", `Int meta.autonomous_action_count);
-                  ("updated_at", `String meta.updated_at);
-                  ("created_at", `String meta.created_at);
-                ]))
-      names
+    rows_data
+    |> List.map (fun row ->
+           let meta = row.meta in
+           let agent_status =
+             match row.agent_json |> U.member "status" with
+             | `String status -> status
+             | _ -> "unknown"
+           in
+           `Assoc
+             [
+               ("name", `String meta.name);
+               ("agent_name", `String meta.agent_name);
+               ("trace_id", `String meta.trace_id);
+               ("goal", `String meta.goal);
+               ("short_goal", `String meta.short_goal);
+               ("mid_goal", `String meta.mid_goal);
+               ("long_goal", `String meta.long_goal);
+               ("status", `String agent_status);
+               ("generation", `Int meta.generation);
+               ("turn_count", `Int meta.total_turns);
+               ("context_ratio", `Null);
+               ("context_tokens", `Int meta.last_total_tokens);
+               ("last_model_used", `String meta.last_model_used);
+               ("active_model", `String (Tool_keeper.active_model_of_meta meta));
+               ("reactive_enabled", `Bool meta.reactive_enabled);
+               ("keepalive_running", `Bool row.keepalive_running);
+               ("pending_reactive_items", `Int row.pending_reactive_items);
+               ( "inbox_latest_summary",
+                 match row.inbox_latest_summary with
+                 | Some summary -> `String summary
+                 | None -> `Null );
+               ("last_handled_event_id", `String meta.last_handled_event_id);
+               ( "last_handled_event_ts",
+                 if meta.last_handled_event_ts > 0.0
+                 then `Float meta.last_handled_event_ts
+                 else `Null );
+               ( "last_successful_reaction_at",
+                 if meta.last_successful_reaction_at > 0.0
+                 then `Float meta.last_successful_reaction_at
+                 else `Null );
+               ( "last_successful_reaction_summary",
+                 if String.trim meta.last_successful_reaction_summary = ""
+                 then `Null
+                 else `String meta.last_successful_reaction_summary );
+               ( "continuity_summary",
+                 if String.trim meta.continuity_summary = ""
+                 then `Null
+                 else `String meta.continuity_summary );
+               ("timeout_streak", `Int row.timeout_streak);
+               ("recent_provider_failures", `Int row.recent_provider_failures);
+               ("recent_fallback_rate", `Float row.recent_fallback_rate);
+               ("diagnostic", row.diagnostic);
+               ("next_model_hint",
+                 string_option_to_json (Tool_keeper.next_model_hint_of_meta meta));
+               ("autonomy_level", `String meta.autonomy_level);
+               ( "active_goal_ids",
+                 `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) );
+               ( "last_autonomous_action_at",
+                 if String.trim meta.last_autonomous_action_at = "" then `Null
+                 else `String meta.last_autonomous_action_at );
+               ("autonomous_action_count", `Int meta.autonomous_action_count);
+               ("updated_at", `String meta.updated_at);
+               ("created_at", `String meta.created_at);
+             ])
   in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
@@ -1677,25 +1758,224 @@ let build_session_digest config (session : Team_session_types.session) ~now =
     worker_cards;
   }
 
-let build_room_attention_items config =
-  let pending_confirms = read_pending_confirms config in
-  if pending_confirms = [] then []
-  else
+let keeper_health_state_of_row (row : keeper_room_row) =
+  match row.diagnostic |> U.member "health_state" with
+  | `String state -> state
+  | _ -> "unknown"
+
+let keeper_diagnostic_summary_of_row (row : keeper_room_row) =
+  match row.diagnostic |> U.member "summary" with
+  | `String summary when String.trim summary <> "" -> summary
+  | _ ->
+      match row.inbox_latest_summary with
+      | Some summary when String.trim summary <> "" -> summary
+      | _ -> row.meta.name
+
+let max_keeper_timestamp rows ~select =
+  rows
+  |> List.fold_left
+       (fun acc row ->
+         let value = select row in
+         if value > acc then value else acc)
+       0.0
+
+let room_keeper_counts rows =
+  let keeper_backlog_count =
+    rows |> List.fold_left (fun acc row -> acc + row.pending_reactive_items) 0
+  in
+  let keepers_with_pending_reactive_items =
+    rows
+    |> List.fold_left
+         (fun acc row -> acc + if row.pending_reactive_items > 0 then 1 else 0)
+         0
+  in
+  let keepers_offline_with_backlog =
+    rows
+    |> List.fold_left
+         (fun acc row ->
+           let health = keeper_health_state_of_row row in
+           acc
+           + if row.pending_reactive_items > 0
+                && ((not row.keepalive_running) || String.equal health "offline")
+             then 1
+             else 0)
+         0
+  in
+  let keepers_stale_running =
+    rows
+    |> List.fold_left
+         (fun acc row ->
+           let health = keeper_health_state_of_row row in
+           acc
+           + if row.keepalive_running
+                && row.pending_reactive_items = 0
+                && (String.equal health "stale" || String.equal health "degraded")
+             then 1
+             else 0)
+         0
+  in
+  let keeper_last_successful_reaction_at =
+    max_keeper_timestamp rows ~select:(fun row -> row.meta.last_successful_reaction_at)
+  in
+  let keeper_last_handled_event_at =
+    max_keeper_timestamp rows ~select:(fun row -> row.meta.last_handled_event_ts)
+  in
+  `Assoc
     [
-      {
-        kind = "pending_confirm_waiting";
-        severity = "warn";
-        summary =
-          Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
-            (List.length pending_confirms);
-        target_type = "room";
-        target_id = None;
-        actor = None;
-        evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
-      };
+      ("keeper_backlog_count", `Int keeper_backlog_count);
+      ("keepers_with_pending_reactive_items", `Int keepers_with_pending_reactive_items);
+      ("keepers_offline_with_backlog", `Int keepers_offline_with_backlog);
+      ("keepers_stale_running", `Int keepers_stale_running);
+      ( "keeper_last_successful_reaction_at",
+        if keeper_last_successful_reaction_at > 0.0
+        then `String (iso_of_unix keeper_last_successful_reaction_at)
+        else `Null );
+      ( "keeper_last_handled_event_at",
+        if keeper_last_handled_event_at > 0.0
+        then `String (iso_of_unix keeper_last_handled_event_at)
+        else `Null );
     ]
 
-let room_recommendations _config = []
+let build_room_attention_items config =
+  let pending_confirms = read_pending_confirms config in
+  let keeper_rows = build_keeper_room_rows config in
+  let base =
+    if pending_confirms = [] then []
+    else
+      [
+        {
+          kind = "pending_confirm_waiting";
+          severity = "warn";
+          summary =
+            Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
+              (List.length pending_confirms);
+          target_type = "room";
+          target_id = None;
+          actor = None;
+          evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
+        };
+      ]
+  in
+  let keeper_items =
+    keeper_rows
+    |> List.concat_map (fun row ->
+           let health = keeper_health_state_of_row row in
+           let summary = keeper_diagnostic_summary_of_row row in
+           let backlog = row.pending_reactive_items in
+           let items = ref [] in
+           if backlog > 0 && ((not row.keepalive_running) || String.equal health "offline") then
+             items :=
+               {
+                 kind = "keeper_offline_with_backlog";
+                 severity = "bad";
+                 summary =
+                   Printf.sprintf "%s has %d pending reactive item(s) but is offline"
+                     row.meta.name backlog;
+                 target_type = "keeper";
+                 target_id = Some row.meta.name;
+                 actor = Some row.meta.agent_name;
+                 evidence =
+                   `Assoc
+                     [
+                       ("pending_reactive_items", `Int backlog);
+                       ("health_state", `String health);
+                       ("diagnostic_summary", `String summary);
+                     ];
+               }
+               :: !items;
+           if backlog > 0 && row.keepalive_running && not (String.equal health "offline") then
+             items :=
+               {
+                 kind = "keeper_inbox_backlog";
+                 severity = "warn";
+                 summary =
+                   Printf.sprintf "%s has %d pending reactive item(s)"
+                     row.meta.name backlog;
+                 target_type = "keeper";
+                 target_id = Some row.meta.name;
+                 actor = Some row.meta.agent_name;
+                 evidence =
+                   `Assoc
+                     [
+                       ("pending_reactive_items", `Int backlog);
+                       ( "inbox_latest_summary",
+                         match row.inbox_latest_summary with
+                         | Some text -> `String text
+                         | None -> `Null );
+                     ];
+               }
+               :: !items;
+           if backlog = 0 && row.keepalive_running
+              && (String.equal health "stale" || String.equal health "degraded")
+           then
+             items :=
+               {
+                 kind = "keeper_stale_running";
+                 severity = "warn";
+                 summary =
+                   Printf.sprintf "%s is running but %s" row.meta.name
+                     (if String.equal health "stale" then "has stale heartbeat" else "is degraded");
+                 target_type = "keeper";
+                 target_id = Some row.meta.name;
+                 actor = Some row.meta.agent_name;
+                 evidence =
+                   `Assoc
+                     [
+                       ("health_state", `String health);
+                       ("diagnostic_summary", `String summary);
+                     ];
+               }
+               :: !items;
+           if row.timeout_streak > 0 || row.recent_provider_failures > 0 then
+             items :=
+               {
+                 kind = "keeper_provider_timeout_streak";
+                 severity = "warn";
+                 summary =
+                   Printf.sprintf "%s has recent provider trouble (timeouts=%d, failures=%d)"
+                     row.meta.name row.timeout_streak row.recent_provider_failures;
+                 target_type = "keeper";
+                 target_id = Some row.meta.name;
+                 actor = Some row.meta.agent_name;
+                 evidence =
+                   `Assoc
+                     [
+                       ("timeout_streak", `Int row.timeout_streak);
+                       ("recent_provider_failures", `Int row.recent_provider_failures);
+                       ("recent_fallback_rate", `Float row.recent_fallback_rate);
+                     ];
+               }
+               :: !items;
+           List.rev !items)
+  in
+  (base @ keeper_items) |> List.sort compare_attention
+
+let room_recommendations config =
+  build_room_attention_items config
+  |> List.filter_map (fun (item : attention_item) ->
+         match item.kind with
+         | "keeper_offline_with_backlog" ->
+             Some
+               {
+                 action_type = "keeper_recover";
+                 target_type = "keeper";
+                 target_id = item.target_id;
+                 severity = item.severity;
+                 reason = item.summary;
+                 suggested_payload = `Assoc [];
+               }
+         | "keeper_inbox_backlog" | "keeper_stale_running"
+         | "keeper_provider_timeout_streak" ->
+             Some
+               {
+                 action_type = "keeper_probe";
+                 target_type = "keeper";
+                 target_id = item.target_id;
+                 severity = item.severity;
+                 reason = item.summary;
+                 suggested_payload = `Assoc [];
+               }
+         | _ -> None)
 
 type snapshot_view =
   | Summary
@@ -1721,6 +2001,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   let tracked_sessions =
     if initialized then Team_session_store.list_sessions config else []
   in
+  let keeper_rows = if initialized then build_keeper_room_rows config else [] in
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
   let view = parse_snapshot_view view in
@@ -1765,6 +2046,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
         ("attention_summary", summary_of_attention_items room_attention);
         ( "recommendation_summary",
           summary_of_recommendations ~actor:actor_name room_recommendation_items );
+        ("keeper_attention", room_keeper_counts keeper_rows);
       ]
     else []
   in
@@ -1818,6 +2100,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
           ("target_id", `Null);
           ("health", `String "ok");
           ("swarm_status", Swarm_status.empty_json);
+          ("keeper_attention", room_keeper_counts []);
           ("attention_items", `List []);
           ("recommended_actions", `List []);
           ("session_cards", `List []);
@@ -1828,6 +2111,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
     let* target_type = normalize_digest_target_type target_type in
     let now = Time_compat.now () in
     let tracked_sessions = Team_session_store.list_sessions config in
+    let keeper_rows = build_keeper_room_rows config in
     let command_plane_json = Command_plane_v2.snapshot_json config in
     let swarm_status_json =
       Swarm_status.build_json_from_snapshot config command_plane_json
@@ -1861,6 +2145,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
               ("swarm_status", swarm_status_json);
+              ("keeper_attention", room_keeper_counts keeper_rows);
               ("role_census", aggregate_worker_class_counts tracked_sessions);
               ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
               ("lane_census", aggregate_lane_counts tracked_sessions);

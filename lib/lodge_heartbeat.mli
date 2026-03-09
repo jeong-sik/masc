@@ -104,6 +104,7 @@ val select_agents_by_plan :
 
 val tick :
   ignore_quiet_hours:bool ->
+  room_config:Room.config ->
   config:config ->
   pending_triggers:(string * checkin_trigger) list ->
   heartbeat_result

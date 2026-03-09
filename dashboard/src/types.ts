@@ -872,6 +872,86 @@ export interface CommandPlaneOperationCard {
   assigned_unit_label?: string
 }
 
+export interface CommandPlaneMicroarchSignal {
+  tone?: 'ok' | 'warn' | 'bad' | string
+  pending_ops?: number
+  blocked_ops?: number
+  in_flight_ops?: number
+  pipeline_stalls?: number
+  bus_traffic?: number
+  l1_hit_rate?: number
+  invalidation_count?: number
+  current_pending?: number
+  current_in_flight?: number
+  cdb_wakeups?: number
+  total_stolen?: number
+  avg_best_score?: number
+  avg_candidate_count?: number
+  best_first_operations?: number
+  active_sessions?: number
+  commit_rate?: number
+  total_speculations?: number
+}
+
+export interface CommandPlaneMicroarchSummary {
+  pipeline?: {
+    total_ops?: number
+    completed_ops?: number
+    stalled_cycles?: number
+    hazards_detected?: number
+    forwarding_used?: number
+    pipeline_flushes?: number
+    ipc?: number
+  }
+  cache?: {
+    total_reads?: number
+    total_writes?: number
+    l1_hit_rate?: number
+    invalidation_count?: number
+    writeback_count?: number
+    bus_traffic?: number
+  }
+  ooo?: {
+    agent_count?: number
+    total_added?: number
+    total_issued?: number
+    total_completed?: number
+    total_stolen?: number
+    cdb_wakeups?: number
+    stall_cycles?: number
+    global_cdb_events?: number
+    current_pending?: number
+    current_in_flight?: number
+  }
+  speculative?: {
+    total_speculations?: number
+    total_commits?: number
+    total_aborts?: number
+    commit_rate?: number
+    total_fast_calls?: number
+    total_cost_usd?: number
+    active_sessions?: number
+  }
+  search_fabric?: {
+    total_operations?: number
+    best_first_operations?: number
+    legacy_operations?: number
+    blocked_operations?: number
+    ready_operations?: number
+    research_pipeline_operations?: number
+    avg_candidate_count?: number
+    avg_best_score?: number
+    top_stage?: string | null
+  }
+  signals?: {
+    issue_pressure?: CommandPlaneMicroarchSignal
+    cache_contention?: CommandPlaneMicroarchSignal
+    scheduler_efficiency?: CommandPlaneMicroarchSignal
+    routing_confidence?: CommandPlaneMicroarchSignal
+    speculative_posture?: CommandPlaneMicroarchSignal
+  }
+}
+
 export interface CommandPlaneOperationsResponse {
   version?: string
   generated_at?: string
@@ -879,9 +959,10 @@ export interface CommandPlaneOperationsResponse {
     total?: number
     active?: number
     paused?: number
-    managed?: number
-    projected?: number
-  }
+      managed?: number
+      projected?: number
+    }
+  microarch?: CommandPlaneMicroarchSummary
   operations: CommandPlaneOperationCard[]
 }
 
@@ -1125,6 +1206,7 @@ export interface CommandPlaneSummarySnapshot {
     version?: string
     generated_at?: string
     summary?: CommandPlaneOperationsResponse['summary']
+    microarch?: CommandPlaneMicroarchSummary
   }
   detachments: {
     version?: string

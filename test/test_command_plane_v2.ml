@@ -1092,7 +1092,18 @@ let test_best_first_search_blocks_and_routes_research_pipeline () =
         (verify_status |> Yojson.Safe.Util.member "result"
        |> Yojson.Safe.Util.member "search"
        |> Yojson.Safe.Util.member "strategy"
-       |> Yojson.Safe.Util.to_string))
+       |> Yojson.Safe.Util.to_string);
+      let operations_overview =
+        Command_plane_v2.list_operations_json config
+      in
+      Alcotest.(check bool) "operations overview exposes microarch summary" true
+        (operations_overview |> Yojson.Safe.Util.member "microarch" <> `Null);
+      Alcotest.(check bool) "microarch exposes search fabric summary" true
+        (operations_overview |> Yojson.Safe.Util.member "microarch"
+       |> Yojson.Safe.Util.member "search_fabric" <> `Null);
+      Alcotest.(check bool) "microarch exposes operator signals" true
+        (operations_overview |> Yojson.Safe.Util.member "microarch"
+       |> Yojson.Safe.Util.member "signals" <> `Null))
 
 let test_invalid_search_strategy_is_rejected () =
   let base_dir = temp_dir () in

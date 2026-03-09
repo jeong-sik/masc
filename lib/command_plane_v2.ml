@@ -2520,6 +2520,62 @@ let topology_summary_json_from_state (state : snapshot_state) =
     ]
 
 let operations_summary_json_from_state (state : snapshot_state) =
+  let search_store = read_search_stats state.config in
+  let readiness_of_operation (operation : operation_record) =
+    let blockers =
+      operation.depends_on_operation_ids
+      |> List.filter_map (fun dep_id ->
+             match operation_by_id state.operations dep_id with
+             | Some upstream when upstream.status = Completed -> None
+             | Some upstream when Option.is_some upstream.checkpoint_ref -> None
+             | Some _upstream ->
+                 Some
+                   {
+                     Cp_microarch_summary.strategy = operation.search_strategy;
+                     readiness = "blocked";
+                     candidate_count = 0;
+                     best_score = None;
+                     workload_profile = operation_workload_profile operation;
+                     stage = operation.stage;
+                   }
+             | None ->
+                 Some
+                   {
+                     Cp_microarch_summary.strategy = operation.search_strategy;
+                     readiness = "blocked";
+                     candidate_count = 0;
+                     best_score = None;
+                     workload_profile = operation_workload_profile operation;
+                     stage = operation.stage;
+                   })
+    in
+    if blockers = [] then "ready" else "blocked"
+  in
+  let search_rows =
+    List.map
+      (fun (operation : operation_record) ->
+        let stats =
+          Cp_search_fabric.lookup_stats search_store
+            ~unit_id:operation.assigned_unit_id
+            ~stage:(operation_stage_key operation)
+        in
+        {
+          Cp_microarch_summary.strategy = operation.search_strategy;
+          readiness = readiness_of_operation operation;
+          candidate_count =
+            (match operation_search_strategy operation with
+            | Cp_search_fabric.Best_first_v1 -> 1
+            | Cp_search_fabric.Legacy -> 0);
+          best_score =
+            (match operation_search_strategy operation with
+            | Cp_search_fabric.Best_first_v1 ->
+                Some (Cp_search_fabric.posterior_mean stats *. 100.0)
+            | Cp_search_fabric.Legacy -> None);
+          workload_profile = operation_workload_profile operation;
+          stage = operation.stage;
+        })
+      state.operations
+  in
   let managed_count =
     List.length
       (List.filter
@@ -2538,6 +2594,7 @@ let operations_summary_json_from_state (state : snapshot_state) =
          (fun (operation : operation_record) -> operation.status = Paused)
          state.operations)
   in
+  let microarch = Cp_microarch_summary.summary_json ~search_rows in
   `Assoc
     [
       ("version", `String "cp-v2");
@@ -2551,6 +2608,7 @@ let operations_summary_json_from_state (state : snapshot_state) =
             ("managed", `Int managed_count);
             ("projected", `Int (List.length state.operations - managed_count));
           ] );
+      ("microarch", microarch);
     ]
 
 let detachments_summary_json_from_state (state : snapshot_state) =
@@ -4125,6 +4183,10 @@ let list_operations_json_from_state ?operation_id (state : snapshot_state) =
       (List.filter (fun (operation : operation_record) -> operation.source = "managed") operations)
   in
   let projected_count = List.length operations - managed_count in
+  let microarch =
+    operations_summary_json_from_state { state with operations }
+    |> U.member "microarch"
+  in
   `Assoc
     [
       ("version", `String "cp-v2");
@@ -4148,6 +4210,7 @@ let list_operations_json_from_state ?operation_id (state : snapshot_state) =
             ("managed", `Int managed_count);
             ("projected", `Int projected_count);
           ] );
+      ("microarch", microarch);
       ( "operations",
         `List
           (List.map

@@ -34,6 +34,7 @@
    dashboard
    web_dashboard
    credits_dashboard
+   cp_microarch_summary
    cp_search_fabric
    lodge_dashboard
    datachannel

@@ -52,9 +52,66 @@ function ConnectionStatus() {
   `
 }
 
+function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string; currentSectionLabel: string }) {
+  const liveConnected = connected.value
+  return html`
+    <section class="rail-card">
+      <div class="rail-card-head">
+        <h3>Snapshot</h3>
+        <span class="rail-section-chip ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? 'Live' : 'Offline'}</span>
+      </div>
+      <div class="rail-stat-grid">
+        <div class="rail-stat-card">
+          <span>Agents</span>
+          <strong>${agents.value.length}</strong>
+        </div>
+        <div class="rail-stat-card">
+          <span>Keepers</span>
+          <strong>${keepers.value.length}</strong>
+        </div>
+        <div class="rail-stat-card">
+          <span>Tasks</span>
+          <strong>${tasks.value.length}</strong>
+        </div>
+        <div class="rail-stat-card">
+          <span>Events</span>
+          <strong>${eventCount.value}</strong>
+        </div>
+      </div>
+      <div class="rail-snapshot-copy">
+        <span>Connection ${liveConnected ? 'healthy' : 'recovering'}</span>
+        <span>${currentSectionLabel} workspace active</span>
+      </div>
+      <div class="rail-inline-actions">
+        <button
+          class="rail-refresh-btn"
+          onClick=${() => {
+            refreshDashboard()
+            if (currentTab === 'command') {
+              refreshCommandPlaneCurrentSurface()
+              refreshCommandPlaneChainSummary()
+            }
+            if (currentTab === 'ops') refreshOperatorSnapshot()
+            if (currentTab === 'board') refreshBoard()
+            if (currentTab === 'trpg') refreshTrpg()
+            if (currentTab === 'goals') {
+              refreshGoals()
+              refreshMdal()
+            }
+          }}
+        >
+          Refresh Now
+        </button>
+        <button class="rail-secondary-btn" onClick=${() => navigate('ops')}>
+          Open Ops
+        </button>
+      </div>
+    </section>
+  `
+}
+
 function SideRail() {
   const current = route.value.tab
-  const liveConnected = connected.value
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === current)
   const currentSection = DASHBOARD_NAV_SECTIONS.find(section => section.id === currentView?.group)
   const [quickActionsOpen, setQuickActionsOpen] = useState(() => {
@@ -104,58 +161,7 @@ function SideRail() {
         </div>
       </section>
 
-      <section class="rail-card">
-        <div class="rail-card-head">
-          <h3>Snapshot</h3>
-          <span class="rail-section-chip ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? 'Live' : 'Offline'}</span>
-        </div>
-        <div class="rail-stat-grid">
-          <div class="rail-stat-card">
-            <span>Agents</span>
-            <strong>${agents.value.length}</strong>
-          </div>
-          <div class="rail-stat-card">
-            <span>Keepers</span>
-            <strong>${keepers.value.length}</strong>
-          </div>
-          <div class="rail-stat-card">
-            <span>Tasks</span>
-            <strong>${tasks.value.length}</strong>
-          </div>
-          <div class="rail-stat-card">
-            <span>Events</span>
-            <strong>${eventCount.value}</strong>
-          </div>
-        </div>
-        <div class="rail-snapshot-copy">
-          <span>Connection ${liveConnected ? 'healthy' : 'recovering'}</span>
-          <span>${currentSection?.label ?? 'Observe'} workspace active</span>
-        </div>
-        <div class="rail-inline-actions">
-          <button
-            class="rail-refresh-btn"
-            onClick=${() => {
-              refreshDashboard()
-              if (current === 'command') {
-                refreshCommandPlaneCurrentSurface()
-                refreshCommandPlaneChainSummary()
-              }
-              if (current === 'ops') refreshOperatorSnapshot()
-              if (current === 'board') refreshBoard()
-              if (current === 'trpg') refreshTrpg()
-              if (current === 'goals') {
-                refreshGoals()
-                refreshMdal()
-              }
-            }}
-          >
-            Refresh Now
-          </button>
-          <button class="rail-secondary-btn" onClick=${() => navigate('ops')}>
-            Open Ops
-          </button>
-        </div>
-      </section>
+      <${SnapshotCard} currentTab=${current} currentSectionLabel=${currentSection?.label ?? 'Observe'} />
 
       <section class="rail-card fold-card">
         <div class="rail-card-head">

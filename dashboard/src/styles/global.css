@@ -607,7 +607,6 @@ a:hover {
   border-radius: var(--radius-md);
   background: var(--card);
   padding: 15px 14px;
-  min-width: 120px;
 }
 
 .stat-label {

@@ -689,42 +689,6 @@ export interface OperatorActionDescriptor {
   confirm_required?: boolean
 }
 
-export interface OperatorAttentionItem {
-  kind: string
-  severity?: string
-  summary?: string
-  target_type?: string
-  target_id?: string | null
-  actor?: string | null
-  evidence?: unknown
-}
-
-export interface OperatorRecommendationSummary {
-  count?: number
-  top_action?: unknown
-}
-
-export interface OperatorAttentionSummary {
-  count?: number
-  bad_count?: number
-  warn_count?: number
-  top_item?: OperatorAttentionItem | null
-}
-
-export interface OperatorDigest {
-  target_type?: string
-  target_id?: string | null
-  health?: string
-  swarm_status?: CommandPlaneSwarmStatus
-  command_plane?: CommandPlaneSummarySnapshot
-  attention_items: OperatorAttentionItem[]
-  attention_summary?: OperatorAttentionSummary
-  recommended_actions: unknown[]
-  recommendation_summary?: OperatorRecommendationSummary
-  session_cards: Record<string, unknown>[]
-  worker_cards: Record<string, unknown>[]
-}
-
 export interface KeeperProbeResult {
   status?: unknown
   diagnostic?: KeeperDiagnostic | null

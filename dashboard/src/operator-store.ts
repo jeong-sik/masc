@@ -1,14 +1,10 @@
 import { signal } from '@preact/signals'
-import { confirmOperatorAction, fetchOperatorDigest, fetchOperatorSnapshot, runOperatorAction } from './api'
-import { normalizeSummarySnapshot } from './command-store'
+import { confirmOperatorAction, fetchOperatorSnapshot, runOperatorAction } from './api'
 import type {
-  CommandPlaneSummarySnapshot,
   Message,
   OperatorActionLogEntry,
   OperatorActionRequest,
   OperatorActionResult,
-  OperatorAttentionItem,
-  OperatorDigest,
   OperatorKeeperSnapshot,
   OperatorSessionSnapshot,
   OperatorSnapshot,
@@ -17,7 +13,6 @@ import type {
 } from './types'
 
 export const operatorSnapshot = signal<OperatorSnapshot | null>(null)
-export const operatorDigest = signal<OperatorDigest | null>(null)
 export const operatorLoading = signal(false)
 export const operatorError = signal<string | null>(null)
 export const operatorActionBusy = signal(false)
@@ -191,64 +186,6 @@ function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
   }
 }
 
-function normalizeAttentionItem(raw: unknown): OperatorAttentionItem | null {
-  if (!isRecord(raw)) return null
-  const kind = asString(raw.kind)
-  if (!kind) return null
-  return {
-    kind,
-    severity: asString(raw.severity),
-    summary: asString(raw.summary),
-    target_type: asString(raw.target_type),
-    target_id: asString(raw.target_id) ?? null,
-    actor: asString(raw.actor) ?? null,
-    evidence: raw.evidence,
-  }
-}
-
-function normalizeAttentionSummary(raw: unknown) {
-  if (!isRecord(raw)) return undefined
-  return {
-    count: asNumber(raw.count),
-    bad_count: asNumber(raw.bad_count),
-    warn_count: asNumber(raw.warn_count),
-    top_item: normalizeAttentionItem(raw.top_item),
-  }
-}
-
-function normalizeRecommendationSummary(raw: unknown) {
-  if (!isRecord(raw)) return undefined
-  return {
-    count: asNumber(raw.count),
-    top_action: raw.top_action,
-  }
-}
-
-function normalizeCommandPlaneSummary(raw: unknown): CommandPlaneSummarySnapshot | undefined {
-  if (!isRecord(raw)) return undefined
-  return normalizeSummarySnapshot(raw)
-}
-
-function normalizeOperatorDigest(raw: unknown): OperatorDigest {
-  const root = isRecord(raw) ? raw : {}
-  return {
-    target_type: asString(root.target_type),
-    target_id: asString(root.target_id) ?? null,
-    health: asString(root.health),
-    swarm_status: isRecord(root.swarm_status)
-      ? (root.swarm_status as unknown as OperatorDigest['swarm_status'])
-      : undefined,
-    command_plane: normalizeCommandPlaneSummary(root.command_plane),
-    attention_items: extractArray(root.attention_items).map(normalizeAttentionItem)
-      .filter((item): item is OperatorAttentionItem => item !== null),
-    attention_summary: normalizeAttentionSummary(root.attention_summary),
-    recommended_actions: extractArray(root.recommended_actions),
-    recommendation_summary: normalizeRecommendationSummary(root.recommendation_summary),
-    session_cards: extractArray(root.session_cards).filter(isRecord),
-    worker_cards: extractArray(root.worker_cards).filter(isRecord),
-  }
-}
-
 function stringifyUnknown(value: unknown): string {
   if (typeof value === 'string') return value
   if (value === null || value === undefined) return ''
@@ -288,12 +225,8 @@ export async function refreshOperatorSnapshot(): Promise<void> {
   operatorLoading.value = true
   operatorError.value = null
   try {
-    const [snapshotRaw, digestRaw] = await Promise.all([
-      fetchOperatorSnapshot(),
-      fetchOperatorDigest(),
-    ])
-    operatorSnapshot.value = normalizeOperatorSnapshot(snapshotRaw)
-    operatorDigest.value = normalizeOperatorDigest(digestRaw)
+    const raw = await fetchOperatorSnapshot()
+    operatorSnapshot.value = normalizeOperatorSnapshot(raw)
   } catch (err) {
     operatorError.value = err instanceof Error ? err.message : 'Failed to load operator snapshot'
   } finally {

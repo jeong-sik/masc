@@ -436,14 +436,14 @@ export function Execution() {
   return html`
     <div class="agents-monitor">
       <div class="stats-grid">
-        <${ExecutionStat} label="Active work 진행중" value=${activeRows.length} color="#fbbf24" caption="할당됨 + 진행중" />
-        <${ExecutionStat} label="Needs intervention 개입 필요" value=${interventionItems.length} color=${interventionItems.length > 0 ? '#fb7185' : '#4ade80'} caption="드리프트 또는 오래된 신호" />
-        <${ExecutionStat} label="Ownership gaps 담당자 공백" value=${ownershipGaps.length} color=${ownershipGaps.length > 0 ? '#fb7185' : '#4ade80'} caption="활성 담당자 없는 작업" />
-        <${ExecutionStat} label="Dispatchable agents 배치 가능" value=${dispatchableAgents.length} color="#22d3ee" caption="부하 없는 대기 에이전트" />
-        <${ExecutionStat} label="Quiet execution 조용한 실행" value=${quietExecution.length} color=${quietExecution.length > 0 ? '#fbbf24' : '#4ade80'} caption="긴급 작업 없음" />
+        <${ExecutionStat} label="Active work" value=${activeRows.length} color="#fbbf24" caption="claimed + in progress" />
+        <${ExecutionStat} label="Needs intervention" value=${interventionItems.length} color=${interventionItems.length > 0 ? '#fb7185' : '#4ade80'} caption="stalled or drifting now" />
+        <${ExecutionStat} label="Ownership gaps" value=${ownershipGaps.length} color=${ownershipGaps.length > 0 ? '#fb7185' : '#4ade80'} caption="missing or unavailable owners" />
+        <${ExecutionStat} label="Dispatchable agents" value=${dispatchableAgents.length} color="#22d3ee" caption="fresh signal, no active load" />
+        <${ExecutionStat} label="Quiet execution" value=${quietExecution.length} color=${quietExecution.length > 0 ? '#fbbf24' : '#4ade80'} caption="active tasks with aging signals" />
       </div>
 
-      <${Card} title="Intervention Queue 개입 필요" class="section">
+      <${Card} title="Intervention Queue" class="section">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">What needs a nudge right now</h2>
           <p class="monitor-subheadline">Severity comes first, then the freshest evidence we have about the stall or drift.</p>
@@ -456,7 +456,7 @@ export function Execution() {
       <//>
 
       <div class="grid-2col">
-        <${Card} title="Ready Queue 대기열" class="section">
+        <${Card} title="Ready Queue" class="section">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">Ready work, sorted by dispatch risk</h2>
             <p class="monitor-subheadline">Ownerless or owner-unavailable items float to the top before healthy assigned queue items.</p>
@@ -468,7 +468,7 @@ export function Execution() {
           </div>
         <//>
 
-        <${Card} title="Dispatch Window 배치 현황" class="section">
+        <${Card} title="Dispatch Window" class="section">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">Who can pick up work next</h2>
             <p class="monitor-subheadline">Fresh capacity appears first. Task-state drift stays visible so owners can clean up metadata fast.</p>
@@ -481,7 +481,7 @@ export function Execution() {
         <//>
       </div>
 
-      <${Card} title="Active Execution Watch 실행 감시" class="section">
+      <${Card} title="Active Execution Watch" class="section">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">Claimed and in-progress work</h2>
           <p class="monitor-subheadline">Rows are sorted by risk first, then by the freshest operator signal tied to each task.</p>

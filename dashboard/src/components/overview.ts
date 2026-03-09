@@ -600,40 +600,40 @@ export function Overview() {
       ? html`<${Execution} />`
       : html`<div class="stats-grid">
       <${StatCard}
-        label="Room State"
+        label="Room State 방 상태"
         value=${status?.paused ? 'Paused' : 'Running'}
         color=${toneColor(roomTone)}
         caption=${status?.room ?? status?.project ?? 'default room'}
       />
       <${StatCard}
-        label="Urgent Queue"
+        label="Urgent Queue 긴급 대기"
         value=${urgentReady.length}
         color=${urgentReady.length > 0 ? '#fb7185' : '#4ade80'}
-        caption="todo tasks at P1/P2"
+        caption="P1/P2 우선순위 대기 작업"
       />
       <${StatCard}
-        label="Active Work"
+        label="Active Work 진행중"
         value=${byStatus.inProgress.length}
         color="#fbbf24"
-        caption="claimed + in progress"
+        caption="할당됨 + 진행중인 작업"
       />
       <${StatCard}
-        label="Dispatchable"
+        label="Dispatchable 배치 가능"
         value=${dispatchableAgents.length}
         color="#22d3ee"
-        caption="fresh agents with no load"
+        caption="부하 없는 대기 에이전트"
       />
       <${StatCard}
-        label="Keeper Pressure"
+        label="Keeper Pressure 키퍼 부하"
         value=${keeperAlerts.length}
         color=${keeperAlerts.length > 0 ? '#fbbf24' : '#4ade80'}
-        caption="stale or high-context keepers"
+        caption="오래되거나 컨텍스트 과부하 키퍼"
       />
       <${StatCard}
-        label="Owner Gaps"
+        label="Owner Gaps 담당자 공백"
         value=${ownerGapCount}
         color=${ownerGapCount > 0 ? '#fb7185' : '#4ade80'}
-        caption="tasks missing a live owner"
+        caption="활성 담당자 없는 작업"
       />
     </div>
 
@@ -666,7 +666,7 @@ export function Overview() {
 
     <div class="overview-workbench">
       <div class="overview-column">
-        <${Card} title="Intervention Queue" class="section">
+        <${Card} title="Intervention Queue 개입 필요" class="section">
           <div class="monitor-alert-list">
             ${interventionQueue.length === 0
               ? html`<div class="empty-state">No immediate intervention required</div>`
@@ -676,7 +676,7 @@ export function Overview() {
       </div>
 
       <div class="overview-column">
-        <${Card} title="Dispatch Window" class="section">
+        <${Card} title="Dispatch Window 배치 현황" class="section">
           <div class="monitor-list">
             ${dispatchableAgents.length === 0
               ? html`<div class="empty-state">No fully dispatchable agents right now</div>`
@@ -698,7 +698,7 @@ export function Overview() {
           </div>
         <//>
 
-        <${Card} title="Agent Watch" class="section">
+        <${Card} title="Agent Watch 에이전트 감시" class="section">
           <div class="monitor-list">
             ${agentDrift.length === 0
               ? html`<div class="empty-state">No agent drift or stale load right now</div>`
@@ -728,7 +728,7 @@ export function Overview() {
       </div>
 
       <div class="overview-column">
-        <${Card} title="Keeper Pressure" class="section">
+        <${Card} title="Keeper Pressure 키퍼 부하" class="section">
           <div class="monitor-list">
             ${keeperAlerts.length === 0
               ? html`<div class="empty-state">No keeper pressure signals right now</div>`
@@ -755,7 +755,7 @@ export function Overview() {
           </div>
         <//>
 
-        <${Card} title="Runtime Notes" class="section">
+        <${Card} title="Runtime Notes 런타임 메모" class="section">
           <details class="runtime-collapsible">
             <summary class="runtime-summary">Runtime context (${5 + (status?.lodge?.last_skip_reason ? 1 : 0)} items)</summary>
             <div class="overview-note-stack">

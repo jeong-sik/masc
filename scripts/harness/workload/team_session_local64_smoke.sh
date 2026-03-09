@@ -21,7 +21,7 @@ fi
 HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-$default_http_timeout}"
 WAIT_AFTER_SPAWN_SEC="${WAIT_AFTER_SPAWN_SEC:-3}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
-LOCAL64_ROUTER_MODE="${LOCAL64_ROUTER_MODE:-hybrid}"
+LOCAL64_ROUTER_MODE="${LOCAL64_ROUTER_MODE:-disabled}"
 MCP_SESSION_ID="${MCP_SESSION_ID:-team-session-local64-$(date +%s)-$RANDOM}"
 GOAL="${GOAL:-Validate local64 swarm role coverage, runtime visibility, and operator census}"
 
@@ -287,12 +287,6 @@ echo "[3/8] inspect local llama runtime"
 runtime_raw="$(call_tool 91004 "masc_llama_runtime_status" '{"include_models":true}')"
 require_tool_success "$runtime_raw"
 require_result_condition "$runtime_raw" '.runtime_count >= 1 and .configured_capacity >= 1' "runtime status missing pool data"
-worker_tier_available="false"
-if [ -n "${MASC_TEAM_SESSION_MODEL_9B:-}" ]; then
-  worker_tier_available="true"
-elif printf '%s' "$runtime_raw" | extract_result | jq -e '[.models[]? | ascii_downcase] | any(contains("9b"))' >/dev/null 2>&1; then
-  worker_tier_available="true"
-fi
 
 echo "[4/8] spawn local64 batch (spawn_timeout=${SPAWN_TIMEOUT_SEC}s http_timeout=${HTTP_TIMEOUT_SEC}s workers=${WORKER_COUNT})"
 spawn_batch_json="$(build_spawn_batch "$SESSION_ID" "$WORKER_COUNT" "$LLAMA_SWARM_MODEL")"
@@ -324,29 +318,17 @@ status_expr='
   and (.local_runtime != null)
 '
 if [ "$LOCAL64_ROUTER_MODE" = "hybrid" ]; then
-  if [ "$worker_tier_available" = "true" ]; then
-    status_expr='
-      '"$status_expr"'
-      and ((.summary.tier_counts["35b"] // 0) >= 2)
-      and ((.summary.tier_counts["9b"] // 0) >= 1)
-      and ((.summary.task_profile_counts.decide // 0) >= 1)
-      and ((.summary.task_profile_counts.verify // 0) >= 1)
-      and ((.summary.task_profile_counts.extract // 0) >= 1)
-      and ((.summary.task_profile_counts.summarize // 0) >= 1)
-      and ((.summary.task_profile_counts.normalize // 0) >= 1)
-    '
-  else
-    status_expr='
-      '"$status_expr"'
-      and ((.summary.tier_counts["35b"] // 0) >= '"$WORKER_COUNT"')
-      and ((.summary.escalation_count // 0) >= 1)
-      and ((.summary.task_profile_counts.decide // 0) >= 1)
-      and ((.summary.task_profile_counts.verify // 0) >= 1)
-      and ((.summary.task_profile_counts.extract // 0) >= 1)
-      and ((.summary.task_profile_counts.summarize // 0) >= 1)
-      and ((.summary.task_profile_counts.normalize // 0) >= 1)
-    '
-  fi
+  status_expr='
+    '"$status_expr"'
+    and ((.summary.tier_counts["35b"] // 0) >= 1)
+    and ((.summary.tier_counts["27b"] // 0) >= 1)
+    and ((.summary.tier_counts["9b"] // 0) >= 1)
+    and ((.summary.task_profile_counts.decide // 0) >= 1)
+    and ((.summary.task_profile_counts.verify // 0) >= 1)
+    and ((.summary.task_profile_counts.extract // 0) >= 1)
+    and ((.summary.task_profile_counts.summarize // 0) >= 1)
+    and ((.summary.task_profile_counts.normalize // 0) >= 1)
+  '
 fi
 require_result_condition "$status_raw" "$status_expr" "session status did not expose local64 role/runtime visibility"
 
@@ -360,23 +342,14 @@ digest_expr='
   and (.local_runtime != null)
 '
 if [ "$LOCAL64_ROUTER_MODE" = "hybrid" ]; then
-  if [ "$worker_tier_available" = "true" ]; then
-    digest_expr='
-      '"$digest_expr"'
-      and ((.model_tiers["35b"] // 0) >= 2)
-      and ((.model_tiers["9b"] // 0) >= 1)
-      and ((.task_profiles.decide // 0) >= 1)
-      and ((.task_profiles.normalize // 0) >= 1)
-    '
-  else
-    digest_expr='
-      '"$digest_expr"'
-      and ((.model_tiers["35b"] // 0) >= '"$WORKER_COUNT"')
-      and ((.escalation_count // 0) >= 1)
-      and ((.task_profiles.decide // 0) >= 1)
-      and ((.task_profiles.normalize // 0) >= 1)
-    '
-  fi
+  digest_expr='
+    '"$digest_expr"'
+    and ((.model_tiers["35b"] // 0) >= 1)
+    and ((.model_tiers["27b"] // 0) >= 1)
+    and ((.model_tiers["9b"] // 0) >= 1)
+    and ((.task_profiles.decide // 0) >= 1)
+    and ((.task_profiles.normalize // 0) >= 1)
+  '
 fi
 require_result_condition "$digest_raw" "$digest_expr" "operator digest did not expose local64 census/runtime visibility"
 

@@ -83,6 +83,20 @@ let parse_scale_profile args =
   | "local64" -> Team_session_types.Scale_local64
   | _ -> Team_session_types.Scale_standard
 
+let parse_control_profile ~scale_profile args =
+  match get_string_opt args "control_profile" with
+  | Some raw -> (
+      match
+        Team_session_types.control_profile_of_string
+          (String.lowercase_ascii (String.trim raw))
+      with
+      | profile -> profile)
+  | None -> (
+      match scale_profile with
+      | Team_session_types.Scale_local64 ->
+          Team_session_types.Control_hierarchical_quality_v1
+      | Team_session_types.Scale_standard -> Team_session_types.Control_flat)
+
 let parse_fallback_policy args =
   match String.lowercase_ascii (get_string args "fallback_policy" "cascade_then_task") with
   | "none" -> Team_session_types.Fallback_none
@@ -228,6 +242,7 @@ let handle_start ctx args : result =
     let checkpoint_interval_sec = get_int args "checkpoint_interval_sec" 60 in
     let min_agents = get_int args "min_agents" 2 in
     let scale_profile = parse_scale_profile args in
+    let control_profile = parse_control_profile ~scale_profile args in
     let auto_resume = get_bool args "auto_resume" true in
     let report_formats = parse_report_formats args in
     let execution_scope = parse_execution_scope args in
@@ -242,7 +257,7 @@ let handle_start ctx args : result =
       Team_session_engine_eio.start_session ~sw:ctx.sw ~clock:ctx.clock
         ~config:ctx.config ~created_by:ctx.agent_name ~goal ~duration_seconds
         ~execution_scope ~checkpoint_interval_sec ~min_agents
-        ~scale_profile
+        ~scale_profile ~control_profile
         ~orchestration_mode ~communication_mode ~model_cascade ~fallback_policy
         ~instruction_profile ~alert_channel ~auto_resume ~report_formats
         ~agent_names:agents
@@ -376,6 +391,9 @@ type spawn_spec = {
   parent_actor : string option;
   capsule_mode : Team_session_types.capsule_mode option;
   runtime_pool : string option;
+  lane_id : string option;
+  control_domain : Team_session_types.control_domain option;
+  supervisor_actor : string option;
   model_tier : Team_session_types.model_tier option;
   task_profile : Team_session_types.task_profile option;
   risk_level : Team_session_types.risk_level option;
@@ -444,12 +462,8 @@ let runtime_inventory_models () =
          trim_opt runtime.model)
   |> Team_session_types.dedup_strings
 
-let first_runtime_inventory_model () =
-  match runtime_inventory_models () with
-  | model :: _ -> Some model
-  | [] -> None
-
 let explicit_lead_model () = env_trim_opt "MASC_TEAM_SESSION_MODEL_35B"
+let explicit_middle_model () = env_trim_opt "MASC_TEAM_SESSION_MODEL_27B"
 let explicit_worker_model () = env_trim_opt "MASC_TEAM_SESSION_MODEL_9B"
 
 let inferred_lead_model () =
@@ -459,10 +473,15 @@ let inferred_lead_model () =
       match env_trim_opt "LLAMA_SWARM_MODEL" with
       | Some _ as env_model -> env_model
       | None ->
-          let inventory = runtime_inventory_models () in
-          match List.find_opt (fun model -> contains_ci model "35b") inventory with
-          | Some _ as matched -> matched
-          | None -> first_runtime_inventory_model ())
+          runtime_inventory_models ()
+          |> List.find_opt (fun model -> contains_ci model "35b"))
+
+let inferred_middle_model () =
+  match explicit_middle_model () with
+  | Some _ as explicit -> explicit
+  | None ->
+      runtime_inventory_models ()
+      |> List.find_opt (fun model -> contains_ci model "27b")
 
 let inferred_worker_model () =
   match explicit_worker_model () with
@@ -478,9 +497,12 @@ let infer_model_tier_from_model_name model_name =
       match inferred_worker_model (), inferred_lead_model () with
       | Some worker_model, _ when String.equal worker_model model_name ->
           Some Team_session_types.Tier_9b
+      | _, Some middle_model when String.equal middle_model model_name ->
+          Some Team_session_types.Tier_27b
       | _, Some lead_model when String.equal lead_model model_name ->
           Some Team_session_types.Tier_35b
       | _ when contains_ci model_name "35b" -> Some Team_session_types.Tier_35b
+      | _ when contains_ci model_name "27b" -> Some Team_session_types.Tier_27b
       | _ when contains_ci model_name "9b" -> Some Team_session_types.Tier_9b
       | _ -> None)
 
@@ -511,6 +533,9 @@ let default_tier_for_profile ~risk_level = function
     | Team_session_types.Profile_summarize)
     when risk_level <> Team_session_types.Risk_high ->
       Team_session_types.Tier_9b
+  | (Team_session_types.Profile_verify | Team_session_types.Profile_synthesize)
+    when risk_level <> Team_session_types.Risk_high ->
+      Team_session_types.Tier_27b
   | _ -> Team_session_types.Tier_35b
 
 let normalized_spawn_text ~spawn_prompt ~spawn_role =
@@ -717,10 +742,11 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
         Printf.sprintf
           "Classify the worker task for a quality-first 2-tier swarm router.\n\
            Return strict JSON only with keys: model_tier, task_profile, risk_level, confidence, reason, escalate_if.\n\
-           model_tier must be one of [\"35b\",\"9b\"].\n\
+           model_tier must be one of [\"35b\",\"27b\",\"9b\"].\n\
            task_profile must be one of [\"extract\",\"normalize\",\"summarize\",\"verify\",\"decide\",\"synthesize\"].\n\
            risk_level must be one of [\"low\",\"medium\",\"high\"].\n\
-           Use 35b for final judgment, ambiguous work, open-ended synthesis, architecture, or high-risk outputs.\n\
+           Use 35b for root judgment, final arbitration, or high-risk outputs.\n\
+           Use 27b for lane managers, quality review, knowledge review, and medium-risk synthesis.\n\
            Use 9b only for low-risk, machine-checkable, or strict-template subtasks.\n\
            worker_class=%s\n\
            spawn_role=%s\n\
@@ -780,18 +806,17 @@ let merge_selection_note selection_note routing_note =
   | Some note, Some routing when String.equal note routing -> Some note
   | Some note, Some routing -> Some (note ^ " | " ^ routing)
 
-let fallback_model_for_tier = function
-  | Some Team_session_types.Tier_9b -> (
-      match inferred_worker_model () with
-      | Some _ as worker -> worker
-      | None -> inferred_lead_model ())
-  | Some Team_session_types.Tier_35b -> inferred_lead_model ()
-  | None -> inferred_lead_model ()
-
 let finalize_routing_decision ~spawn_model ~(decision : routing_decision) =
   let resolved_model, escalated, reason =
     match decision.model_tier with
     | Team_session_types.Tier_35b -> (inferred_lead_model (), decision.escalated, decision.reason)
+    | Team_session_types.Tier_27b -> (
+        match inferred_middle_model () with
+        | Some model -> (Some model, decision.escalated, decision.reason)
+        | None ->
+            ( inferred_lead_model (),
+              true,
+              decision.reason ^ "; fallback:27b_unavailable->35b" ))
     | Team_session_types.Tier_9b -> (
         match inferred_worker_model () with
         | Some model -> (Some model, decision.escalated, decision.reason)
@@ -897,6 +922,111 @@ let resolve_routing_for_spec (spec : spawn_spec) =
         merge_selection_note spec.spawn_selection_note routing_note;
     }
 
+let hierarchy_lane_ids = [| "lane-a"; "lane-b"; "lane-c"; "lane-d" |]
+
+let hierarchy_lane_id_of_index index =
+  hierarchy_lane_ids.(index mod Array.length hierarchy_lane_ids)
+
+let inferred_control_domain_of_spec (spec : spawn_spec) =
+  match spec.control_domain with
+  | Some domain -> Some domain
+  | None -> (
+      match (spec.worker_class, spec.task_profile) with
+      | Some Team_session_types.Worker_metacog, _ ->
+          Some Team_session_types.Domain_meta
+      | Some Team_session_types.Worker_scout, _
+      | Some Team_session_types.Worker_librarian, _ ->
+          Some Team_session_types.Domain_knowledge
+      | _, Some Team_session_types.Profile_verify ->
+          Some Team_session_types.Domain_quality
+      | _, Some Team_session_types.Profile_extract
+      | _, Some Team_session_types.Profile_summarize ->
+          Some Team_session_types.Domain_knowledge
+      | _ -> Some Team_session_types.Domain_execution)
+
+let inferred_controller_level_of_spec (spec : spawn_spec) =
+  match spec.worker_class with
+  | Some Team_session_types.Worker_manager -> Some Team_session_types.Controller_lane
+  | Some Team_session_types.Worker_metacog
+  | Some Team_session_types.Worker_scout
+  | Some Team_session_types.Worker_librarian ->
+      Some Team_session_types.Controller_submanager
+  | _ -> Some Team_session_types.Controller_worker
+
+let inferred_lane_id_of_spec ~index (spec : spawn_spec) =
+  match spec.lane_id with
+  | Some lane -> Some lane
+  | None -> (
+      match spec.worker_class with
+      | Some Team_session_types.Worker_metacog -> Some "global"
+      | _ -> Some (hierarchy_lane_id_of_index index))
+
+let inferred_supervisor_actor_of_spec ~lane_id ~control_domain (spec : spawn_spec)
+    =
+  match spec.supervisor_actor with
+  | Some actor -> Some actor
+  | None -> (
+      match spec.worker_class with
+      | Some Team_session_types.Worker_manager -> Some "ctrl-root"
+      | _ -> (
+          match (lane_id, control_domain) with
+          | _, Some Team_session_types.Domain_meta -> Some "ctrl-global-metacog"
+          | _, Some Team_session_types.Domain_runtime -> Some "ctrl-runtime-warden"
+          | Some "global", _ -> Some "ctrl-root"
+          | Some lane, Some Team_session_types.Domain_quality ->
+              Some (Printf.sprintf "ctrl-%s-quality" lane)
+          | Some lane, Some Team_session_types.Domain_knowledge ->
+              Some (Printf.sprintf "ctrl-%s-knowledge" lane)
+          | Some lane, _ -> Some (Printf.sprintf "ctrl-%s" lane)
+          | None, _ -> Some "ctrl-root"))
+
+let controller_target_tier_of_spec ~control_domain (spec : spawn_spec) =
+  match control_domain with
+  | Some Team_session_types.Domain_meta -> Team_session_types.Tier_35b
+  | Some Team_session_types.Domain_quality
+  | Some Team_session_types.Domain_knowledge -> Team_session_types.Tier_27b
+  | _ -> (
+      match spec.worker_class with
+      | Some Team_session_types.Worker_manager -> Team_session_types.Tier_27b
+      | _ ->
+          Option.value
+            ~default:(Option.value ~default:Team_session_types.Tier_9b spec.model_tier)
+            spec.model_tier)
+
+let annotate_control_hierarchy_for_session
+    (session : Team_session_types.session) (specs : spawn_spec list) =
+  if
+    session.control_profile <> Team_session_types.Control_hierarchical_quality_v1
+  then
+    specs
+  else
+    List.mapi
+      (fun index spec ->
+        let lane_id = inferred_lane_id_of_spec ~index spec in
+        let control_domain = inferred_control_domain_of_spec spec in
+        let supervisor_actor =
+          inferred_supervisor_actor_of_spec ~lane_id ~control_domain spec
+        in
+        let model_tier =
+          Some (controller_target_tier_of_spec ~control_domain spec)
+        in
+        let spawn_model =
+          match model_tier with
+          | Some Team_session_types.Tier_35b -> inferred_lead_model ()
+          | Some Team_session_types.Tier_27b -> inferred_middle_model ()
+          | Some Team_session_types.Tier_9b -> inferred_worker_model ()
+          | None -> spec.spawn_model
+        in
+        {
+          spec with
+          spawn_model;
+          lane_id;
+          control_domain;
+          supervisor_actor;
+          model_tier;
+        })
+      specs
+
 let parse_spawn_spec_from_object batch_index json =
   let open Yojson.Safe.Util in
   let get_required_string key =
@@ -954,6 +1084,13 @@ let parse_spawn_spec_from_object batch_index json =
         Team_session_types.capsule_mode_of_string
           (String.lowercase_ascii (String.trim raw)))
   in
+  let get_optional_control_domain key =
+    Option.bind
+      (get_optional_string key)
+      (fun raw ->
+        Team_session_types.control_domain_of_string
+          (String.lowercase_ascii (String.trim raw)))
+  in
   let get_optional_float key =
     match member key json with
     | `Float value -> Some value
@@ -979,6 +1116,9 @@ let parse_spawn_spec_from_object batch_index json =
           parent_actor = get_optional_string "parent_actor";
           capsule_mode = get_optional_capsule_mode "capsule_mode";
           runtime_pool = get_optional_string "runtime_pool";
+          lane_id = get_optional_string "lane_id";
+          control_domain = get_optional_control_domain "control_domain";
+          supervisor_actor = get_optional_string "supervisor_actor";
           model_tier = get_optional_model_tier "model_tier";
           task_profile = get_optional_task_profile "task_profile";
           risk_level = get_optional_risk_level "risk_level";
@@ -1042,6 +1182,14 @@ let parse_step_spawn_specs args =
                         Team_session_types.capsule_mode_of_string
                           (String.lowercase_ascii (String.trim raw)));
                   runtime_pool = get_string_opt args "runtime_pool";
+                  lane_id = get_string_opt args "lane_id";
+                  control_domain =
+                    Option.bind
+                      (get_string_opt args "control_domain")
+                      (fun raw ->
+                        Team_session_types.control_domain_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  supervisor_actor = get_string_opt args "supervisor_actor";
                   model_tier =
                     Option.bind
                       (get_string_opt args "model_tier")
@@ -1078,6 +1226,10 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
     parent_actor = spec.parent_actor;
     capsule_mode = spec.capsule_mode;
     runtime_pool = spec.runtime_pool;
+    lane_id = spec.lane_id;
+    controller_level = inferred_controller_level_of_spec spec;
+    control_domain = spec.control_domain;
+    supervisor_actor = spec.supervisor_actor;
     model_tier = spec.model_tier;
     task_profile = spec.task_profile;
     risk_level = spec.risk_level;
@@ -1114,6 +1266,15 @@ let register_planned_workers config session_id workers =
                 |> Team_session_types.counts_to_json );
               ( "runtime_pool_counts",
                 Team_session_types.runtime_pool_counts updated.planned_workers
+                |> Team_session_types.counts_to_json );
+              ( "lane_counts",
+                Team_session_types.lane_counts updated.planned_workers
+                |> Team_session_types.counts_to_json );
+              ( "controller_counts",
+                Team_session_types.controller_level_counts updated.planned_workers
+                |> Team_session_types.counts_to_json );
+              ( "control_domain_counts",
+                Team_session_types.control_domain_counts updated.planned_workers
                 |> Team_session_types.counts_to_json );
               ( "tier_counts",
                 Team_session_types.model_tier_counts updated.planned_workers
@@ -1221,7 +1382,13 @@ let handle_step ctx args : result =
           let spawn_specs_result = parse_step_spawn_specs args in
           match spawn_specs_result with
           | Error e -> (false, json_error e)
-          | Ok spawn_specs ->
+          | Ok raw_spawn_specs ->
+              let spawn_specs =
+                match Team_session_store.load_session ctx.config session_id with
+                | Some session ->
+                    annotate_control_hierarchy_for_session session raw_spawn_specs
+                | None -> raw_spawn_specs
+              in
               let turn_kind_result =
                 if spawn_specs <> [] then parse_turn_kind_opt args
                 else
@@ -1244,7 +1411,8 @@ let handle_step ctx args : result =
               let task_priority = get_int args "task_priority" 3 in
               let append_spawn_event ?spawn_agent ?runtime_actor ?spawn_role
                   ?spawn_model ?worker_class ?parent_actor ?capsule_mode
-                  ?runtime_pool ?model_tier ?task_profile ?risk_level
+                  ?runtime_pool ?lane_id ?controller_level ?control_domain
+                  ?supervisor_actor ?model_tier ?task_profile ?risk_level
                   ?routing_confidence ?routing_reason ?assigned_runtime
                   ?spawn_selection_note ~success ?exit_code
                   ?elapsed_ms ?output_preview ?error () =
@@ -1282,6 +1450,26 @@ let handle_step ctx args : result =
                       ( "runtime_pool",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           runtime_pool );
+                      ( "lane_id",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          lane_id );
+                      ( "controller_level",
+                        Option.fold ~none:`Null
+                          ~some:(fun level ->
+                            `String
+                              (Team_session_types.controller_level_to_string
+                                 level))
+                          controller_level );
+                      ( "control_domain",
+                        Option.fold ~none:`Null
+                          ~some:(fun domain ->
+                            `String
+                              (Team_session_types.control_domain_to_string
+                                 domain))
+                          control_domain );
+                      ( "supervisor_actor",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          supervisor_actor );
                       ( "model_tier",
                         Option.fold ~none:`Null
                           ~some:(fun tier ->
@@ -1348,12 +1536,7 @@ let handle_step ctx args : result =
                 in
                 let runtime_model =
                   if String.equal spec.spawn_agent "llama" then
-                    let resolved_spawn_model =
-                      match spec.spawn_model with
-                      | Some _ as explicit -> explicit
-                      | None -> fallback_model_for_tier spec.model_tier
-                    in
-                    match resolved_spawn_model with
+                    match spec.spawn_model with
                     | None ->
                         Error
                           "spawn_model is required when spawn_agent=llama"
@@ -1365,21 +1548,20 @@ let handle_step ctx args : result =
                         with
                         | Ok assignment ->
                             Ok
-                              ( { spec with spawn_model = Some assignment.model_name },
-                                Local_runtime_pool.model_spec_of_assignment
+                              ( Local_runtime_pool.model_spec_of_assignment
                                   assignment,
                                 Some assignment.lease,
                                 Some assignment.runtime_id )
                         | Error err -> Error err)
                   else
-                    Ok (spec, Llm_client.ollama_glm, None, None)
+                    Ok (Llm_client.ollama_glm, None, None)
                 in
                 match runtime_model with
                 | Error e -> Error (spec, runtime_actor_name, e)
-                | Ok (resolved_spec, runtime_model, runtime_lease, assigned_runtime) ->
+                | Ok (runtime_model, runtime_lease, assigned_runtime) ->
                     Ok
                       {
-                        spec = resolved_spec;
+                        spec;
                         runtime_actor_name;
                         runtime_model;
                         runtime_lease;
@@ -1402,6 +1584,10 @@ let handle_step ctx args : result =
                             ?parent_actor:failed_spec.parent_actor
                             ?capsule_mode:failed_spec.capsule_mode
                             ?runtime_pool:failed_spec.runtime_pool
+                            ?lane_id:failed_spec.lane_id
+                            ?controller_level:(inferred_controller_level_of_spec failed_spec)
+                            ?control_domain:failed_spec.control_domain
+                            ?supervisor_actor:failed_spec.supervisor_actor
                             ?model_tier:failed_spec.model_tier
                             ?task_profile:failed_spec.task_profile
                             ?risk_level:failed_spec.risk_level
@@ -1449,6 +1635,10 @@ let handle_step ctx args : result =
                               ?parent_actor:prepared.spec.parent_actor
                               ?capsule_mode:prepared.spec.capsule_mode
                               ?runtime_pool:prepared.spec.runtime_pool
+                              ?lane_id:prepared.spec.lane_id
+                              ?controller_level:(inferred_controller_level_of_spec prepared.spec)
+                              ?control_domain:prepared.spec.control_domain
+                              ?supervisor_actor:prepared.spec.supervisor_actor
                               ?model_tier:prepared.spec.model_tier
                               ?task_profile:prepared.spec.task_profile
                               ?risk_level:prepared.spec.risk_level
@@ -1479,6 +1669,10 @@ let handle_step ctx args : result =
                                   ?parent_actor:prepared.spec.parent_actor
                                   ?capsule_mode:prepared.spec.capsule_mode
                                   ?runtime_pool:prepared.spec.runtime_pool
+                                  ?lane_id:prepared.spec.lane_id
+                                  ?controller_level:(inferred_controller_level_of_spec prepared.spec)
+                                  ?control_domain:prepared.spec.control_domain
+                                  ?supervisor_actor:prepared.spec.supervisor_actor
                                   ?model_tier:prepared.spec.model_tier
                                   ?task_profile:prepared.spec.task_profile
                                   ?risk_level:prepared.spec.risk_level
@@ -1520,6 +1714,10 @@ let handle_step ctx args : result =
                                        ?parent_actor:prepared.spec.parent_actor
                                        ?capsule_mode:prepared.spec.capsule_mode
                                        ?runtime_pool:prepared.spec.runtime_pool
+                                       ?lane_id:prepared.spec.lane_id
+                                       ?controller_level:(inferred_controller_level_of_spec prepared.spec)
+                                       ?control_domain:prepared.spec.control_domain
+                                       ?supervisor_actor:prepared.spec.supervisor_actor
                                        ?model_tier:prepared.spec.model_tier
                                        ?task_profile:prepared.spec.task_profile
                                        ?risk_level:prepared.spec.risk_level
@@ -1577,6 +1775,15 @@ let handle_step ctx args : result =
                                           ?parent_actor:prepared.spec.parent_actor
                                           ?capsule_mode:prepared.spec.capsule_mode
                                           ?runtime_pool:prepared.spec.runtime_pool
+                                          ?lane_id:prepared.spec.lane_id
+                                          ?controller_level:(inferred_controller_level_of_spec prepared.spec)
+                                          ?control_domain:prepared.spec.control_domain
+                                          ?supervisor_actor:prepared.spec.supervisor_actor
+                                          ?model_tier:prepared.spec.model_tier
+                                          ?task_profile:prepared.spec.task_profile
+                                          ?risk_level:prepared.spec.risk_level
+                                          ?routing_confidence:prepared.spec.routing_confidence
+                                          ?routing_reason:prepared.spec.routing_reason
                                           ?assigned_runtime:prepared.assigned_runtime
                                           ?spawn_selection_note:
                                             prepared.spec.spawn_selection_note
@@ -1632,6 +1839,29 @@ let handle_step ctx args : result =
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
                                                     prepared.spec.runtime_pool );
+                                                ( "lane_id",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun s -> `String s)
+                                                    prepared.spec.lane_id );
+                                                ( "controller_level",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun level ->
+                                                      `String
+                                                        (Team_session_types.controller_level_to_string
+                                                           level))
+                                                    (inferred_controller_level_of_spec
+                                                       prepared.spec) );
+                                                ( "control_domain",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun domain ->
+                                                      `String
+                                                        (Team_session_types.control_domain_to_string
+                                                           domain))
+                                                    prepared.spec.control_domain );
+                                                ( "supervisor_actor",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun s -> `String s)
+                                                    prepared.spec.supervisor_actor );
                                                 ( "model_tier",
                                                   Option.fold ~none:`Null
                                                     ~some:(fun tier ->
@@ -2129,6 +2359,12 @@ let schemas : tool_schema list =
 	                        ("type", `String "string");
 	                        ("enum", `List [ `String "standard"; `String "local64" ]);
 	                      ] );
+	                  ( "control_profile",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ("enum", `List [ `String "flat"; `String "hierarchical_quality_v1" ]);
+	                      ] );
 	                  ( "model_cascade",
 	                    `Assoc
 	                      [
@@ -2281,11 +2517,27 @@ let schemas : tool_schema list =
 	                            ] );
 	                      ] );
 	                  ("runtime_pool", `Assoc [ ("type", `String "string") ]);
+	                  ("lane_id", `Assoc [ ("type", `String "string") ]);
+	                  ( "control_domain",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ( "enum",
+	                          `List
+	                            [
+	                              `String "execution";
+	                              `String "quality";
+	                              `String "knowledge";
+	                              `String "runtime";
+	                              `String "meta";
+	                            ] );
+	                      ] );
+	                  ("supervisor_actor", `Assoc [ ("type", `String "string") ]);
 	                  ( "model_tier",
 	                    `Assoc
 	                      [
 	                        ("type", `String "string");
-	                        ("enum", `List [ `String "35b"; `String "9b" ]);
+	                        ("enum", `List [ `String "35b"; `String "27b"; `String "9b" ]);
 	                      ] );
 	                  ( "task_profile",
 	                    `Assoc
@@ -2361,11 +2613,27 @@ let schemas : tool_schema list =
 	                                              ] );
 	                                        ] );
 	                                    ("runtime_pool", `Assoc [ ("type", `String "string") ]);
+	                                    ("lane_id", `Assoc [ ("type", `String "string") ]);
+	                                    ( "control_domain",
+	                                      `Assoc
+	                                        [
+	                                          ("type", `String "string");
+	                                          ( "enum",
+	                                            `List
+	                                              [
+	                                                `String "execution";
+	                                                `String "quality";
+	                                                `String "knowledge";
+	                                                `String "runtime";
+	                                                `String "meta";
+	                                              ] );
+	                                        ] );
+	                                    ("supervisor_actor", `Assoc [ ("type", `String "string") ]);
 	                                    ( "model_tier",
 	                                      `Assoc
 	                                        [
 	                                          ("type", `String "string");
-	                                          ("enum", `List [ `String "35b"; `String "9b" ]);
+	                                          ("enum", `List [ `String "35b"; `String "27b"; `String "9b" ]);
 	                                        ] );
 	                                    ( "task_profile",
 	                                      `Assoc

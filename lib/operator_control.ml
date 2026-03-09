@@ -150,6 +150,10 @@ type worker_card = {
   parent_actor : string option;
   capsule_mode : string option;
   runtime_pool : string option;
+  lane_id : string option;
+  controller_level : string option;
+  control_domain : string option;
+  supervisor_actor : string option;
   model_tier : string option;
   task_profile : string option;
   risk_level : string option;
@@ -171,11 +175,20 @@ type session_digest = {
   planned_worker_count : int;
   active_agent_count : int;
   last_turn_age_sec : int option;
+  control_profile : string;
   worker_class_counts : Yojson.Safe.t;
   runtime_pool_counts : Yojson.Safe.t;
+  lane_counts : Yojson.Safe.t;
+  controller_counts : Yojson.Safe.t;
+  control_domain_counts : Yojson.Safe.t;
   tier_counts : Yojson.Safe.t;
   task_profile_counts : Yojson.Safe.t;
   escalation_count : int;
+  controller_tree : Yojson.Safe.t;
+  lane_health : Yojson.Safe.t;
+  confidence_heatmap : Yojson.Safe.t;
+  context_pressure_by_lane : Yojson.Safe.t;
+  intervention_counters : Yojson.Safe.t;
   local_runtime : Yojson.Safe.t;
   attention_items : attention_item list;
   recommended_actions : recommended_action list;
@@ -671,6 +684,10 @@ let worker_card_to_yojson (card : worker_card) =
       ("parent_actor", string_option_to_json card.parent_actor);
       ("capsule_mode", string_option_to_json card.capsule_mode);
       ("runtime_pool", string_option_to_json card.runtime_pool);
+      ("lane_id", string_option_to_json card.lane_id);
+      ("controller_level", string_option_to_json card.controller_level);
+      ("control_domain", string_option_to_json card.control_domain);
+      ("supervisor_actor", string_option_to_json card.supervisor_actor);
       ("model_tier", string_option_to_json card.model_tier);
       ("task_profile", string_option_to_json card.task_profile);
       ("risk_level", string_option_to_json card.risk_level);
@@ -744,6 +761,24 @@ let spawn_batch_stub_of_cards (cards : worker_card list) =
                  | _ -> fields
                in
                let fields =
+                 match card.lane_id with
+                 | Some lane_id when String.trim lane_id <> "" ->
+                     ("lane_id", `String lane_id) :: fields
+                 | _ -> fields
+               in
+               let fields =
+                 match card.control_domain with
+                 | Some control_domain when String.trim control_domain <> "" ->
+                     ("control_domain", `String control_domain) :: fields
+                 | _ -> fields
+               in
+               let fields =
+                 match card.supervisor_actor with
+                 | Some supervisor_actor when String.trim supervisor_actor <> "" ->
+                     ("supervisor_actor", `String supervisor_actor) :: fields
+                 | _ -> fields
+               in
+               let fields =
                  match card.model_tier with
                  | Some model_tier when String.trim model_tier <> "" ->
                      ("model_tier", `String model_tier) :: fields
@@ -775,6 +810,24 @@ let aggregate_runtime_pool_counts (sessions : Team_session_types.session list) =
   sessions
   |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
   |> Team_session_types.runtime_pool_counts
+  |> Team_session_types.counts_to_json
+
+let aggregate_lane_counts (sessions : Team_session_types.session list) =
+  sessions
+  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
+  |> Team_session_types.lane_counts
+  |> Team_session_types.counts_to_json
+
+let aggregate_controller_counts (sessions : Team_session_types.session list) =
+  sessions
+  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
+  |> Team_session_types.controller_level_counts
+  |> Team_session_types.counts_to_json
+
+let aggregate_control_domain_counts (sessions : Team_session_types.session list) =
+  sessions
+  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
+  |> Team_session_types.control_domain_counts
   |> Team_session_types.counts_to_json
 
 let aggregate_tier_counts (sessions : Team_session_types.session list) =
@@ -821,14 +874,23 @@ let session_card_to_yojson ~actor (digest : session_digest) =
       ("status", `String digest.status);
       ("health", `String digest.health);
       ("scale_profile", `String digest.scale_profile);
+      ("control_profile", `String digest.control_profile);
       ("planned_worker_count", `Int digest.planned_worker_count);
       ("active_agent_count", `Int digest.active_agent_count);
       ("last_turn_age_sec", option_to_json (fun v -> `Int v) digest.last_turn_age_sec);
       ("worker_class_counts", digest.worker_class_counts);
       ("runtime_pool_counts", digest.runtime_pool_counts);
+      ("lane_counts", digest.lane_counts);
+      ("controller_counts", digest.controller_counts);
+      ("control_domain_counts", digest.control_domain_counts);
       ("tier_counts", digest.tier_counts);
       ("task_profile_counts", digest.task_profile_counts);
       ("escalation_count", `Int digest.escalation_count);
+      ("controller_tree", digest.controller_tree);
+      ("lane_health", digest.lane_health);
+      ("confidence_heatmap", digest.confidence_heatmap);
+      ("context_pressure_by_lane", digest.context_pressure_by_lane);
+      ("intervention_counters", digest.intervention_counters);
       ("local_runtime", digest.local_runtime);
       ("attention_count", `Int (List.length digest.attention_items));
       ("top_attention", option_to_json attention_item_to_yojson top_attention);
@@ -994,6 +1056,12 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
                Option.map Team_session_types.capsule_mode_to_string
                  worker.capsule_mode,
                worker.runtime_pool,
+               worker.lane_id,
+               Option.map Team_session_types.controller_level_to_string
+                 worker.controller_level,
+               Option.map Team_session_types.control_domain_to_string
+                 worker.control_domain,
+               worker.supervisor_actor,
                Option.map Team_session_types.model_tier_to_string
                  worker.model_tier,
                Option.map Team_session_types.task_profile_to_string
@@ -1005,7 +1073,23 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
     else
       session.agent_names
       |> List.map (fun actor ->
-             (Some actor, None, None, None, None, None, None, None, None, None, None, None, None))
+             ( Some actor,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None,
+               None ))
   in
   worker_keys
   |> List.map
@@ -1018,6 +1102,10 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            parent_actor,
            capsule_mode,
            runtime_pool,
+           lane_id,
+           controller_level,
+           control_domain,
+           supervisor_actor,
            model_tier,
            task_profile,
            risk_level,
@@ -1057,6 +1145,10 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            parent_actor;
            capsule_mode;
            runtime_pool;
+           lane_id;
+           controller_level;
+           control_domain;
+           supervisor_actor;
            model_tier;
            task_profile;
            risk_level;
@@ -1075,6 +1167,20 @@ let session_attention_items ~(session : Team_session_types.session)
   let spawn_failure_count = count_spawn_failures events in
   let detached_actor_count = count_detached_actors events in
   let empty_note_actors = empty_note_turn_actors events in
+  let low_confidence_cards =
+    worker_cards
+    |> List.filter (fun (card : worker_card) ->
+           match card.routing_confidence with
+           | Some value -> value < 0.72
+           | None -> false)
+  in
+  let escalated_worker_count =
+    session.planned_workers
+    |> List.fold_left
+         (fun acc (worker : Team_session_types.planned_worker) ->
+           if worker.routing_escalated then acc + 1 else acc)
+         0
+  in
   let local64_missing_roles =
     if
       session.scale_profile = Team_session_types.Scale_local64
@@ -1090,6 +1196,47 @@ let session_attention_items ~(session : Team_session_types.session)
     else []
   in
   let base = [] in
+  let base =
+    if low_confidence_cards <> [] then
+      {
+        kind = "low_confidence_routing";
+        severity = "warn";
+        summary =
+          Printf.sprintf "%d worker(s) have low routing confidence"
+            (List.length low_confidence_cards);
+        target_type = "team_session";
+        target_id = Some session.session_id;
+        actor = None;
+        evidence =
+          `Assoc
+            [
+              ( "actors",
+                `List
+                  (List.filter_map
+                     (fun (card : worker_card) ->
+                       Option.map (fun actor -> `String actor) card.actor)
+                     low_confidence_cards) );
+            ];
+      }
+      :: base
+    else base
+  in
+  let base =
+    if escalated_worker_count > 0 then
+      {
+        kind = "routing_escalation_present";
+        severity = "warn";
+        summary =
+          Printf.sprintf "%d worker(s) were escalated to a higher tier"
+            escalated_worker_count;
+        target_type = "team_session";
+        target_id = Some session.session_id;
+        actor = None;
+        evidence = `Assoc [ ("count", `Int escalated_worker_count) ];
+      }
+      :: base
+    else base
+  in
   let base =
     if spawn_failure_count > 0 then
       {
@@ -1331,7 +1478,7 @@ let session_recommendations ~(session : Team_session_types.session)
                    suggested_payload =
                        spawn_batch_stub_of_cards no_turn_worker_cards;
                    }
-	           | "local64_role_gap" ->
+           | "local64_role_gap" ->
 	               let missing_roles =
 	                 match item.evidence |> U.member "missing_roles" with
 	                 | `List xs ->
@@ -1376,6 +1523,38 @@ let session_recommendations ~(session : Team_session_types.session)
 	                   reason = item.summary;
 	                   suggested_payload = `Assoc [ ("spawn_batch", `List spawn_batch) ];
 	                 }
+           | "low_confidence_routing" ->
+               Some
+                 {
+                   action_type = "team_note";
+                   target_type = "team_session";
+                   target_id = Some session.session_id;
+                   severity = item.severity;
+                   reason = item.summary;
+                   suggested_payload =
+                     `Assoc
+                       [
+                         ( "message",
+                           `String
+                             "[operator] Low-confidence routing detected. Re-check ambiguous workers and escalate disputed outputs to 35B." );
+                       ];
+                 }
+           | "routing_escalation_present" ->
+               Some
+                 {
+                   action_type = "team_note";
+                   target_type = "team_session";
+                   target_id = Some session.session_id;
+                   severity = item.severity;
+                   reason = item.summary;
+                   suggested_payload =
+                     `Assoc
+                       [
+                         ( "message",
+                           `String
+                             "[operator] Tier escalation is active. Audit the escalated workers and keep final judgment on 35B." );
+                       ];
+                 }
 	           | _ -> None)
   in
   dedup_recommendations suggestions
@@ -1435,6 +1614,11 @@ let build_session_digest config (session : Team_session_types.session) ~now =
       (match U.member "scale_profile" summary with
       | `String value -> value
       | _ -> Team_session_types.scale_profile_to_string session.scale_profile);
+    control_profile =
+      (match U.member "control_profile" summary with
+      | `String value -> value
+      | _ ->
+          Team_session_types.control_profile_to_string session.control_profile);
     planned_worker_count = List.length session.planned_workers;
     active_agent_count;
     last_turn_age_sec;
@@ -1449,6 +1633,24 @@ let build_session_digest config (session : Team_session_types.session) ~now =
       | `Assoc _ as json -> json
       | _ ->
           Team_session_types.runtime_pool_counts session.planned_workers
+          |> Team_session_types.counts_to_json);
+    lane_counts =
+      (match U.member "lane_counts" summary with
+      | `Assoc _ as json -> json
+      | _ ->
+          Team_session_types.lane_counts session.planned_workers
+          |> Team_session_types.counts_to_json);
+    controller_counts =
+      (match U.member "controller_counts" summary with
+      | `Assoc _ as json -> json
+      | _ ->
+          Team_session_types.controller_level_counts session.planned_workers
+          |> Team_session_types.counts_to_json);
+    control_domain_counts =
+      (match U.member "control_domain_counts" summary with
+      | `Assoc _ as json -> json
+      | _ ->
+          Team_session_types.control_domain_counts session.planned_workers
           |> Team_session_types.counts_to_json);
     tier_counts =
       (match U.member "tier_counts" summary with
@@ -1467,6 +1669,26 @@ let build_session_digest config (session : Team_session_types.session) ~now =
       | `Int value -> value
       | `Intlit raw -> (try int_of_string raw with _ -> 0)
       | _ -> Team_session_types.escalation_count session.planned_workers);
+    controller_tree =
+      (match U.member "controller_tree" summary with
+      | `Assoc _ as json -> json
+      | _ -> `Assoc []);
+    lane_health =
+      (match U.member "lane_health" summary with
+      | `Assoc _ as json -> json
+      | _ -> `Assoc []);
+    confidence_heatmap =
+      (match U.member "confidence_heatmap" summary with
+      | `Assoc _ as json -> json
+      | _ -> `Assoc []);
+    context_pressure_by_lane =
+      (match U.member "context_pressure_by_lane" summary with
+      | `Assoc _ as json -> json
+      | _ -> `Assoc []);
+    intervention_counters =
+      (match U.member "intervention_counters" summary with
+      | `Assoc _ as json -> json
+      | _ -> `Assoc []);
     local_runtime =
       (match U.member "local_runtime" status_json with
       | `Assoc _ as json -> json
@@ -1592,6 +1814,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
        ("swarm_status", swarm_status_json);
        ("role_census", aggregate_worker_class_counts tracked_sessions);
        ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
+       ("lane_census", aggregate_lane_counts tracked_sessions);
+       ("controller_census", aggregate_controller_counts tracked_sessions);
+       ("control_domains", aggregate_control_domain_counts tracked_sessions);
        ("model_tiers", aggregate_tier_counts tracked_sessions);
        ("task_profiles", aggregate_task_profile_counts tracked_sessions);
        ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
@@ -1660,6 +1885,9 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
               ("swarm_status", swarm_status_json);
               ("role_census", aggregate_worker_class_counts tracked_sessions);
               ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
+              ("lane_census", aggregate_lane_counts tracked_sessions);
+              ("controller_census", aggregate_controller_counts tracked_sessions);
+              ("control_domains", aggregate_control_domain_counts tracked_sessions);
               ("model_tiers", aggregate_tier_counts tracked_sessions);
               ("task_profiles", aggregate_task_profile_counts tracked_sessions);
               ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));

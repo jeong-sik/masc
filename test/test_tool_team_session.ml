@@ -148,6 +148,7 @@ let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
       orchestration_mode = Team_session_types.Assist;
       communication_mode = Team_session_types.Comm_broadcast;
       scale_profile = Team_session_types.Scale_standard;
+      control_profile = Team_session_types.Control_flat;
       model_cascade;
       fallback_policy;
       instruction_profile = Team_session_types.Profile_strict;
@@ -324,6 +325,7 @@ let test_recover_elapsed_session () =
       orchestration_mode = Team_session_types.Assist;
       communication_mode = Team_session_types.Comm_broadcast;
       scale_profile = Team_session_types.Scale_standard;
+      control_profile = Team_session_types.Control_flat;
       model_cascade = [ "glm:glm-5" ];
       fallback_policy = Team_session_types.Fallback_cascade_then_task;
       instruction_profile = Team_session_types.Profile_standard;
@@ -729,6 +731,10 @@ let test_proof_exposes_spawn_selection_rationale () =
                    parent_actor = None;
                    capsule_mode = None;
                    runtime_pool = None;
+                   lane_id = None;
+                   controller_level = None;
+                   control_domain = None;
+                   supervisor_actor = None;
                    model_tier = Some Team_session_types.Tier_35b;
                    task_profile = Some Team_session_types.Profile_decide;
                    risk_level = Some Team_session_types.Risk_high;
@@ -1482,127 +1488,6 @@ let test_step_spawn_batch_applies_hybrid_routing () =
       Alcotest.(check int) "summary synthesize count" 1
         Yojson.Safe.Util.(summary |> member "task_profile_counts" |> member "synthesize" |> to_int))
 
-let test_step_spawn_batch_escalates_to_inventory_lead_model () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Local_runtime_pool.reset ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
-      let ctx : _ Tool_team_session.context =
-        {
-          config;
-          agent_name = "owner";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = None;
-        }
-      in
-      let runtimes_json =
-        {|[
-          {"id":"local64-a","base_url":"http://127.0.0.1:8185","model":"qwen-generic","max_concurrency":8}
-        ]|}
-      in
-      with_env "MASC_LLAMA_RUNTIMES_JSON" (Some runtimes_json) @@ fun () ->
-      with_env "MASC_TEAM_SESSION_MODEL_35B" None @@ fun () ->
-      with_env "MASC_TEAM_SESSION_MODEL_9B" None @@ fun () ->
-      with_env "MASC_TEAM_SESSION_ROUTER_JUDGE" (Some "false") @@ fun () ->
-      Local_runtime_pool.reset ();
-      let session_id =
-        start_session_exn ctx ~goal:"hybrid-router-escalates-to-inventory-lead"
-        |> get_session_id
-      in
-      let step_ok, step_body =
-        dispatch_exn ctx ~name:"masc_team_session_step"
-          ~args:
-            (`Assoc
-              [
-                ("session_id", `String session_id);
-                ( "spawn_batch",
-                  `List
-                    [
-                      `Assoc
-                        [
-                          ("spawn_agent", `String "llama");
-                          ("spawn_role", `String "normalizer");
-                          ("spawn_prompt", `String "normalize evidence into strict JSON schema");
-                        ];
-                      `Assoc
-                        [
-                          ("spawn_agent", `String "llama");
-                          ("spawn_role", `String "final-writer");
-                          ("spawn_prompt", `String "final architecture decision and synthesize the proposal");
-                        ];
-                    ] );
-              ])
-      in
-      Alcotest.(check bool) "batch step fails without proc manager" false step_ok;
-      let message =
-        parse_json_exn step_body |> Yojson.Safe.Util.member "message"
-        |> Yojson.Safe.Util.to_string
-      in
-      Alcotest.(check bool) "proc manager error surfaced" true
-        (try
-           let _ =
-             Str.search_forward
-               (Str.regexp_string "process manager unavailable")
-               message 0
-           in
-           true
-         with Not_found -> false);
-      let session =
-        Team_session_store.load_session config session_id |> Option.get
-      in
-      let normalizer =
-        List.find
-          (fun worker -> worker.Team_session_types.spawn_role = Some "normalizer")
-          session.planned_workers
-      in
-      Alcotest.(check (option string)) "normalizer escalated model"
-        (Some "qwen-generic") normalizer.spawn_model;
-      Alcotest.(check (option string)) "normalizer escalated tier" (Some "35b")
-        (Option.map Team_session_types.model_tier_to_string normalizer.model_tier);
-      Alcotest.(check bool) "normalizer reason records escalation" true
-        (match normalizer.routing_reason with
-        | Some reason -> String.contains reason ';'
-                         && (try
-                               let _ =
-                                 Str.search_forward
-                                   (Str.regexp_string "9b_unavailable->35b")
-                                   reason 0
-                               in
-                               true
-                             with Not_found -> false)
-        | None -> false);
-      let final_writer =
-        List.find
-          (fun worker -> worker.Team_session_types.spawn_role = Some "final-writer")
-          session.planned_workers
-      in
-      Alcotest.(check (option string)) "final writer inventory model"
-        (Some "qwen-generic") final_writer.spawn_model;
-      Alcotest.(check (option string)) "final writer tier remains lead"
-        (Some "35b")
-        (Option.map Team_session_types.model_tier_to_string
-           final_writer.model_tier);
-      let status_ok, status_body =
-        dispatch_exn ctx ~name:"masc_team_session_status"
-          ~args:(`Assoc [ ("session_id", `String session_id) ])
-      in
-      Alcotest.(check bool) "status ok" true status_ok;
-      let summary =
-        parse_json_exn status_body |> result_field |> Yojson.Safe.Util.member "summary"
-      in
-      Alcotest.(check int) "summary escalations recorded" 1
-        Yojson.Safe.Util.(summary |> member "escalation_count" |> to_int);
-      Alcotest.(check int) "summary 35b count after escalation" 2
-        Yojson.Safe.Util.(summary |> member "tier_counts" |> member "35b" |> to_int))
-
 let test_reconcile_failed_spawn_actor_detaches_without_turn () =
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -2217,8 +2102,6 @@ let () =
             `Quick test_step_spawn_batch_records_planned_workers;
           Alcotest.test_case "step-spawn-batch-applies-hybrid-routing"
             `Quick test_step_spawn_batch_applies_hybrid_routing;
-          Alcotest.test_case "step-spawn-batch-escalates-to-inventory-lead-model"
-            `Quick test_step_spawn_batch_escalates_to_inventory_lead_model;
           Alcotest.test_case "reconcile-failed-spawn-actor-detaches-without-turn"
             `Quick test_reconcile_failed_spawn_actor_detaches_without_turn;
           Alcotest.test_case "reconcile-failed-spawn-actor-retains-after-turn"

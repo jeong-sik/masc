@@ -28,6 +28,10 @@ type scale_profile =
   | Scale_standard
   | Scale_local64
 
+type control_profile =
+  | Control_flat
+  | Control_hierarchical_quality_v1
+
 type fallback_policy =
   | Fallback_none
   | Fallback_cascade_then_task
@@ -66,6 +70,7 @@ type worker_class =
 
 type model_tier =
   | Tier_35b
+  | Tier_27b
   | Tier_9b
 
 type task_profile =
@@ -86,6 +91,19 @@ type capsule_mode =
   | Capsule_inherit
   | Capsule_capsule
 
+type controller_level =
+  | Controller_root
+  | Controller_lane
+  | Controller_submanager
+  | Controller_worker
+
+type control_domain =
+  | Domain_execution
+  | Domain_quality
+  | Domain_knowledge
+  | Domain_runtime
+  | Domain_meta
+
 type planned_worker = {
   spawn_agent : string;
   runtime_actor : string option;
@@ -95,6 +113,10 @@ type planned_worker = {
   parent_actor : string option;
   capsule_mode : capsule_mode option;
   runtime_pool : string option;
+  lane_id : string option;
+  controller_level : controller_level option;
+  control_domain : control_domain option;
+  supervisor_actor : string option;
   model_tier : model_tier option;
   task_profile : task_profile option;
   risk_level : risk_level option;
@@ -114,6 +136,7 @@ type session = {
   checkpoint_interval_sec : int;
   min_agents : int;
   scale_profile : scale_profile;
+  control_profile : control_profile;
   orchestration_mode : orchestration_mode;
   communication_mode : communication_mode;
   model_cascade : string list;
@@ -221,6 +244,14 @@ let scale_profile_of_string = function
   | "local64" -> Scale_local64
   | _ -> Scale_standard
 
+let control_profile_to_string = function
+  | Control_flat -> "flat"
+  | Control_hierarchical_quality_v1 -> "hierarchical_quality_v1"
+
+let control_profile_of_string = function
+  | "hierarchical_quality_v1" -> Control_hierarchical_quality_v1
+  | _ -> Control_flat
+
 let fallback_policy_to_string = function
   | Fallback_none -> "none"
   | Fallback_cascade_then_task -> "cascade_then_task"
@@ -308,10 +339,12 @@ let worker_class_of_string = function
 
 let model_tier_to_string = function
   | Tier_35b -> "35b"
+  | Tier_27b -> "27b"
   | Tier_9b -> "9b"
 
 let model_tier_of_string = function
   | "35b" -> Some Tier_35b
+  | "27b" -> Some Tier_27b
   | "9b" -> Some Tier_9b
   | _ -> None
 
@@ -354,6 +387,34 @@ let capsule_mode_of_string = function
   | "capsule" -> Some Capsule_capsule
   | _ -> None
 
+let controller_level_to_string = function
+  | Controller_root -> "root"
+  | Controller_lane -> "lane"
+  | Controller_submanager -> "submanager"
+  | Controller_worker -> "worker"
+
+let controller_level_of_string = function
+  | "root" -> Some Controller_root
+  | "lane" -> Some Controller_lane
+  | "submanager" -> Some Controller_submanager
+  | "worker" -> Some Controller_worker
+  | _ -> None
+
+let control_domain_to_string = function
+  | Domain_execution -> "execution"
+  | Domain_quality -> "quality"
+  | Domain_knowledge -> "knowledge"
+  | Domain_runtime -> "runtime"
+  | Domain_meta -> "meta"
+
+let control_domain_of_string = function
+  | "execution" -> Some Domain_execution
+  | "quality" -> Some Domain_quality
+  | "knowledge" -> Some Domain_knowledge
+  | "runtime" -> Some Domain_runtime
+  | "meta" -> Some Domain_meta
+  | _ -> None
+
 let dedup_strings xs =
   let rec loop acc = function
     | [] -> List.rev acc
@@ -378,6 +439,17 @@ let planned_worker_key (w : planned_worker) =
               (Option.map worker_class_to_string w.worker_class);
           "pool:"
           ^ Option.value ~default:"" (Option.map String.trim w.runtime_pool);
+          "lane:"
+          ^ Option.value ~default:"" (Option.map String.trim w.lane_id);
+          "level:"
+          ^ Option.value ~default:""
+              (Option.map controller_level_to_string w.controller_level);
+          "domain:"
+          ^ Option.value ~default:""
+              (Option.map control_domain_to_string w.control_domain);
+          "supervisor:"
+          ^ Option.value ~default:""
+              (Option.map String.trim w.supervisor_actor);
           "tier:"
           ^ Option.value ~default:""
               (Option.map model_tier_to_string w.model_tier);
@@ -497,6 +569,45 @@ let runtime_pool_counts workers =
     workers;
   Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
 
+let lane_counts workers =
+  let tbl = Hashtbl.create 8 in
+  List.iter
+    (fun (worker : planned_worker) ->
+      match worker.lane_id with
+      | Some lane when String.trim lane <> "" ->
+          let key = String.trim lane in
+          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
+          Hashtbl.replace tbl key (prev + 1)
+      | _ -> ())
+    workers;
+  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+
+let controller_level_counts workers =
+  let tbl = Hashtbl.create 4 in
+  List.iter
+    (fun (worker : planned_worker) ->
+      match worker.controller_level with
+      | Some level ->
+          let key = controller_level_to_string level in
+          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
+          Hashtbl.replace tbl key (prev + 1)
+      | None -> ())
+    workers;
+  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+
+let control_domain_counts workers =
+  let tbl = Hashtbl.create 8 in
+  List.iter
+    (fun (worker : planned_worker) ->
+      match worker.control_domain with
+      | Some domain ->
+          let key = control_domain_to_string domain in
+          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
+          Hashtbl.replace tbl key (prev + 1)
+      | None -> ())
+    workers;
+  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+
 let model_tier_counts workers =
   let tbl = Hashtbl.create 4 in
   List.iter
@@ -564,6 +675,18 @@ let planned_worker_to_yojson (w : planned_worker) =
           ~some:(fun mode -> `String (capsule_mode_to_string mode))
           w.capsule_mode );
       ("runtime_pool", Option.fold ~none:`Null ~some:(fun s -> `String s) w.runtime_pool);
+      ("lane_id", Option.fold ~none:`Null ~some:(fun s -> `String s) w.lane_id);
+      ( "controller_level",
+        Option.fold ~none:`Null
+          ~some:(fun level -> `String (controller_level_to_string level))
+          w.controller_level );
+      ( "control_domain",
+        Option.fold ~none:`Null
+          ~some:(fun domain -> `String (control_domain_to_string domain))
+          w.control_domain );
+      ( "supervisor_actor",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          w.supervisor_actor );
       ( "model_tier",
         Option.fold ~none:`Null
           ~some:(fun tier -> `String (model_tier_to_string tier))
@@ -612,6 +735,21 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
                   capsule_mode_of_string
                     (String.lowercase_ascii (String.trim value)));
             runtime_pool = member "runtime_pool" json |> to_string_option;
+            lane_id = member "lane_id" json |> to_string_option;
+            controller_level =
+              Option.bind
+                (member "controller_level" json |> to_string_option)
+                (fun value ->
+                  controller_level_of_string
+                    (String.lowercase_ascii (String.trim value)));
+            control_domain =
+              Option.bind
+                (member "control_domain" json |> to_string_option)
+                (fun value ->
+                  control_domain_of_string
+                    (String.lowercase_ascii (String.trim value)));
+            supervisor_actor =
+              member "supervisor_actor" json |> to_string_option;
             model_tier =
               Option.bind
                 (member "model_tier" json |> to_string_option)
@@ -658,6 +796,7 @@ let session_to_yojson (s : session) =
       ("checkpoint_interval_sec", `Int s.checkpoint_interval_sec);
       ("min_agents", `Int s.min_agents);
       ("scale_profile", `String (scale_profile_to_string s.scale_profile));
+      ("control_profile", `String (control_profile_to_string s.control_profile));
       ("orchestration_mode", `String (orchestration_mode_to_string s.orchestration_mode));
       ("communication_mode", `String (communication_mode_to_string s.communication_mode));
       ("model_cascade", `List (List.map (fun m -> `String m) s.model_cascade));
@@ -728,6 +867,10 @@ let session_of_yojson json =
           json |> member "scale_profile" |> to_string_option
           |> Option.value ~default:"standard"
           |> scale_profile_of_string;
+        control_profile =
+          json |> member "control_profile" |> to_string_option
+          |> Option.value ~default:"flat"
+          |> control_profile_of_string;
         orchestration_mode =
           json |> member "orchestration_mode" |> to_string_option
           |> Option.value ~default:"assist"

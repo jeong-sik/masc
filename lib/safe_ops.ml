@@ -128,7 +128,10 @@ let json_string ?(default = "") key json =
 
 let json_int ?(default = 0) key json =
   let open Yojson.Safe.Util in
-  try json |> member key |> to_int
+  try
+    match json |> member key with
+    | `Float f -> int_of_float f
+    | j -> to_int j
   with Type_error _ -> default
 
 let json_float ?(default = 0.0) key json =

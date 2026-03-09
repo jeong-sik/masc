@@ -77,15 +77,8 @@ let assoc_fields_or_empty = function
   | `Assoc fields -> fields
   | _ -> []
 
-let get_string_opt key json =
-  match json |> member key with
-  | `String s -> Some s
-  | _ -> None
-
-let get_int_opt key json =
-  match json |> member key with
-  | `Int i -> Some i
-  | _ -> None
+let get_string_opt = Safe_ops.json_string_opt
+let get_int_opt = Safe_ops.json_int_opt
 
 let append_to_list key value state =
   match state with

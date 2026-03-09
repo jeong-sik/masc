@@ -685,3 +685,15 @@
  (name test_reservation_station)
  (modules test_reservation_station)
  (libraries masc_mcp yojson unix))
+
+; SWARM-RISC Phase 4: MCTS tree (UCB1 selection + backpropagation)
+(test
+ (name test_mcts)
+ (modules test_mcts)
+ (libraries masc_mcp yojson unix))
+
+; SWARM-RISC Phase 4: Speculative engine (fast/slow LLM + semantic guard)
+(test
+ (name test_speculative)
+ (modules test_speculative)
+ (libraries masc_mcp yojson unix str))

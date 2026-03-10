@@ -1,5 +1,8 @@
 let cache_ttl_sec = 300.0
 
+let no_model_reason =
+  "No dashboard briefing model is available in the current environment."
+
 let briefing_timeout_sec () =
   match Sys.getenv_opt "MASC_DASHBOARD_BRIEFING_TIMEOUT_SEC" with
   | Some raw -> (
@@ -13,6 +16,8 @@ type cache_state = {
   mutex : Mutex.t;
   mutable cached_at : float;
   mutable cached_json : Yojson.Safe.t option;
+  mutable refresh_in_flight : bool;
+  mutable last_error : string option;
 }
 
 let cache =
@@ -20,7 +25,13 @@ let cache =
     mutex = Mutex.create ();
     cached_at = 0.0;
     cached_json = None;
+    refresh_in_flight = false;
+    last_error = None;
   }
+
+let with_cache_lock f =
+  Mutex.lock cache.mutex;
+  Fun.protect f ~finally:(fun () -> Mutex.unlock cache.mutex)
 
 let has_nonempty_env name =
   match Sys.getenv_opt name with
@@ -95,6 +106,9 @@ let mission_briefing_criteria =
     "use_unclear_when_evidence_is_thin";
     "hide_raw_chain_of_thought";
   ]
+
+let criteria_json () =
+  `List (List.map (fun item -> `String item) mission_briefing_criteria)
 
 let prompt_for_facts (facts_json : Yojson.Safe.t) =
   Printf.sprintf
@@ -212,12 +226,16 @@ let unavailable_json ~now ~reason =
     [
       ("generated_at", `String now);
       ("cached", `Bool false);
+      ("stale", `Bool false);
+      ("refreshing", `Bool false);
       ("status", `String "unavailable");
+      ("summary", `String reason);
       ("model", `Null);
       ("ttl_sec", `Int (int_of_float cache_ttl_sec));
-      ("criteria", `List (List.map (fun item -> `String item) mission_briefing_criteria));
+      ("criteria", criteria_json ());
       ("sections", `List []);
       ("error", `String reason);
+      ("last_error", `Null);
     ]
 
 let error_json ~now ~reason =
@@ -225,24 +243,52 @@ let error_json ~now ~reason =
     [
       ("generated_at", `String now);
       ("cached", `Bool false);
+      ("stale", `Bool false);
+      ("refreshing", `Bool false);
       ("status", `String "error");
+      ("summary", `String "Mission briefing refresh failed. Retry to request a fresh judgment.");
       ("model", `Null);
       ("ttl_sec", `Int (int_of_float cache_ttl_sec));
-      ("criteria", `List (List.map (fun item -> `String item) mission_briefing_criteria));
+      ("criteria", criteria_json ());
       ("sections", `List []);
       ("error", `String reason);
+      ("last_error", option_string_json (Some reason));
     ]
 
-let with_cached_flag json cached =
+let pending_json ~now ~last_error =
+  `Assoc
+    [
+      ("generated_at", `String now);
+      ("cached", `Bool false);
+      ("stale", `Bool false);
+      ("refreshing", `Bool true);
+      ("status", `String "pending");
+      ("summary", `String "Generating mission briefing from the latest snapshot.");
+      ("model", `Null);
+      ("ttl_sec", `Int (int_of_float cache_ttl_sec));
+      ("criteria", criteria_json ());
+      ("sections", `List []);
+      ("error", `Null);
+      ("last_error", option_string_json last_error);
+    ]
+
+let with_cached_flag cached json =
   match json with
   | `Assoc fields ->
       `Assoc (("cached", `Bool cached) :: List.remove_assoc "cached" fields)
   | other -> other
 
-let json_status json =
-  match member_assoc "status" json with
-  | `String value -> String.trim value
-  | _ -> ""
+let upsert_field key value json =
+  match json with
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | other -> other
+
+let annotate_delivery_state json ~cached ~stale ~refreshing ~last_error =
+  json
+  |> with_cached_flag cached
+  |> upsert_field "stale" (`Bool stale)
+  |> upsert_field "refreshing" (`Bool refreshing)
+  |> upsert_field "last_error" (option_string_json last_error)
 
 let response_accepts_json (response : Llm_client.completion_response) =
   try
@@ -250,227 +296,280 @@ let response_accepts_json (response : Llm_client.completion_response) =
     true
   with _ -> false
 
-let rec json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
-  let now_ts = Unix.gettimeofday () in
-  if not force then (
-    Mutex.lock cache.mutex;
-    let cached =
-      match cache.cached_json with
-      | Some json when now_ts -. cache.cached_at < cache_ttl_sec -> Some json
-      | _ -> None
+let compute_briefing_json ~actor_name ~models ~config ~sw ~clock ~proc_mgr () =
+  if models = [] then
+    Ok (unavailable_json ~now:(Types.now_iso ()) ~reason:no_model_reason)
+  else
+    let mission_json =
+      Dashboard_mission.json ~actor:actor_name ~config ~sw ~clock ~proc_mgr ()
     in
-    Mutex.unlock cache.mutex;
-    match cached with
-    | Some json -> with_cached_flag json true
-    | None ->
-        let actor_name =
-          match actor with
-          | Some value when String.trim value <> "" -> String.trim value
-          | _ -> "dashboard"
-        in
-        let ctx : _ Operator_control.context =
+    let ctx : _ Operator_control.context =
+      {
+        config;
+        agent_name = actor_name;
+        sw;
+        clock;
+        proc_mgr;
+        mcp_session_id = None;
+      }
+    in
+    let snapshot_json =
+      Operator_control.snapshot_json ~actor:actor_name ~view:"summary"
+        ~include_messages:true ~include_sessions:true ~include_keepers:true ctx
+    in
+    let sessions =
+      match snapshot_json |> member_assoc "sessions" |> member_assoc "items" with
+      | `List items -> items
+      | _ -> []
+    in
+    let keepers =
+      match snapshot_json |> member_assoc "keepers" |> member_assoc "items" with
+      | `List items -> items
+      | _ -> []
+    in
+    let agents_json =
+      Room.get_agents_raw config
+      |> List.map (fun (agent : Types.agent) ->
+             `Assoc
+               [
+                 ("name", `String agent.name);
+                 ("agent_type", `String agent.agent_type);
+                 ("status", `String (Types.string_of_agent_status agent.status));
+                 ("current_task", option_string_json agent.current_task);
+                 ("joined_at", `String agent.joined_at);
+                 ("last_seen", `String agent.last_seen);
+                 ("capabilities", `List (List.map (fun item -> `String item) agent.capabilities));
+               ])
+    in
+    let messages_json =
+      Room.get_messages_raw config ~since_seq:0 ~limit:12
+      |> List.map (fun (message : Types.message) ->
+             `Assoc
+               [
+                 ("from", `String message.from_agent);
+                 ("content", `String (compact_text ~max_len:120 message.content));
+                 ("timestamp", `String message.timestamp);
+               ])
+    in
+    let mission_summary_json =
+      let summary = member_assoc "summary" mission_json in
+      `Assoc
+        [
+          ("room_health", member_assoc "room_health" summary);
+          ("current_room", member_assoc "current_room" summary);
+          ("active_agents", member_assoc "active_agents" summary);
+          ("keeper_pressure", member_assoc "keeper_pressure" summary);
+          ("active_operations", member_assoc "active_operations" summary);
+          ("incident_count", member_assoc "incident_count" summary);
+          ("recommended_action_count", member_assoc "recommended_action_count" summary);
+          ( "top_attention_summary",
+            match member_assoc "top_attention" summary |> member_assoc "summary" with
+            | `String value -> `String (compact_text value)
+            | other -> other );
+          ( "top_action_reason",
+            match member_assoc "top_action" summary |> member_assoc "reason" with
+            | `String value -> `String (compact_text value)
+            | other -> other );
+        ]
+    in
+    let facts_json =
+      `Assoc
+        [
+          ("mission", mission_summary_json);
+          ("room", member_assoc "room" snapshot_json);
+          ("sessions", `List (take 5 (List.map compact_session_json sessions)));
+          ("keepers", `List (take 6 (List.map compact_keeper_json keepers)));
+          ("agents", `List (take 12 agents_json));
+          ("recent_messages", `List messages_json);
+        ]
+    in
+    let prompt = prompt_for_facts facts_json in
+    let requests =
+      List.map
+        (fun (model : Llm_client.model_spec) ->
           {
-            config;
-            agent_name = actor_name;
-            sw;
-            clock;
-            proc_mgr;
-            mcp_session_id = None;
-          }
-        in
-        let mission_json =
-          Dashboard_mission.json ~actor:actor_name ~config ~sw ~clock ~proc_mgr ()
-        in
-        let snapshot_json =
-          Operator_control.snapshot_json
-            ~actor:actor_name
-            ~view:"summary"
-            ~include_messages:true
-            ~include_sessions:true
-            ~include_keepers:true
-            ctx
-        in
-        let sessions =
-          match snapshot_json |> member_assoc "sessions" |> member_assoc "items" with
-          | `List items -> items
-          | _ -> []
-        in
-        let keepers =
-          match snapshot_json |> member_assoc "keepers" |> member_assoc "items" with
-          | `List items -> items
-          | _ -> []
-        in
-        let agents_json =
-          Room.get_agents_raw config
-          |> List.map (fun (agent : Types.agent) ->
-                 `Assoc
-                   [
-                     ("name", `String agent.name);
-                     ("agent_type", `String agent.agent_type);
-                     ("status", `String (Types.string_of_agent_status agent.status));
-                     ("current_task", option_string_json agent.current_task);
-                     ("joined_at", `String agent.joined_at);
-                     ("last_seen", `String agent.last_seen);
-                     ("capabilities", `List (List.map (fun item -> `String item) agent.capabilities));
-                   ])
-        in
-        let messages_json =
-          Room.get_messages_raw config ~since_seq:0 ~limit:12
-          |> List.map (fun (message : Types.message) ->
-                 `Assoc
-                   [
-                     ("from", `String message.from_agent);
-                     ("content", `String (compact_text ~max_len:120 message.content));
-                     ("timestamp", `String message.timestamp);
-                   ])
-        in
-        let mission_summary_json =
-          let summary = member_assoc "summary" mission_json in
-          `Assoc
-            [
-              ("room_health", member_assoc "room_health" summary);
-              ("current_room", member_assoc "current_room" summary);
-              ("active_agents", member_assoc "active_agents" summary);
-              ("keeper_pressure", member_assoc "keeper_pressure" summary);
-              ("active_operations", member_assoc "active_operations" summary);
-              ("incident_count", member_assoc "incident_count" summary);
-              ("recommended_action_count", member_assoc "recommended_action_count" summary);
-              ( "top_attention_summary",
-                match member_assoc "top_attention" summary |> member_assoc "summary" with
-                | `String value -> `String (compact_text value)
-                | other -> other );
-              ( "top_action_reason",
-                match member_assoc "top_action" summary |> member_assoc "reason" with
-                | `String value -> `String (compact_text value)
-                | other -> other );
-            ]
-        in
-        let facts_json =
-          `Assoc
-            [
-              ("mission", mission_summary_json);
-              ("room", member_assoc "room" snapshot_json);
-              ("sessions", `List (take 5 (List.map compact_session_json sessions)));
-              ("keepers", `List (take 6 (List.map compact_keeper_json keepers)));
-              ("agents", `List (take 12 agents_json));
-              ("recent_messages", `List messages_json);
-            ]
-        in
-        let models = mission_briefing_models () in
-        let now_iso = Types.now_iso () in
-        if models = [] then
-          unavailable_json ~now:now_iso
-            ~reason:"No dashboard briefing model is available in the current environment."
-        else
-          let prompt = prompt_for_facts facts_json in
-          let requests =
-            List.map
-              (fun (model : Llm_client.model_spec) ->
-                {
-                  Llm_client.model;
-                  messages =
-                    [
-                      Llm_client.system_msg
-                        "You are a dashboard briefing judge. Output strict JSON only.";
-                      Llm_client.user_msg prompt;
-                    ];
-                  temperature = 0.0;
-                  max_tokens = 420;
-                  tools = [];
-                  response_format = `Json;
-                })
-              models
+            Llm_client.model;
+            messages =
+              [
+                Llm_client.system_msg
+                  "You are a dashboard briefing judge. Output strict JSON only.";
+                Llm_client.user_msg prompt;
+              ];
+            temperature = 0.0;
+            max_tokens = 420;
+            tools = [];
+            response_format = `Json;
+          })
+        models
+    in
+    match
+      Llm_client.cascade ~timeout_sec:(briefing_timeout_sec ())
+        ~accept:response_accepts_json requests
+    with
+    | Error reason -> Error reason
+    | Ok response -> (
+        try
+          let parsed = Yojson.Safe.from_string response.content in
+          let communication_status =
+            string_field ~default:"unclear" "communication_status" parsed
+            |> fun raw ->
+            normalize_status raw
+              ~allowed:[ "healthy"; "watch"; "risk"; "unclear" ]
+              ~fallback:"unclear"
           in
-          let result_json =
-            match
-              Llm_client.cascade ~timeout_sec:(briefing_timeout_sec ())
-                ~accept:response_accepts_json
-                requests
-            with
-            | Error reason -> error_json ~now:now_iso ~reason
-            | Ok response -> (
-                try
-                  let parsed = Yojson.Safe.from_string response.content in
-                  let communication_status =
-                    string_field ~default:"unclear" "communication_status" parsed
-                    |> fun raw ->
-                    normalize_status raw
-                      ~allowed:[ "healthy"; "watch"; "risk"; "unclear" ]
-                      ~fallback:"unclear"
-                  in
-                  let alignment_status =
-                    string_field ~default:"unclear" "alignment_status" parsed
-                    |> fun raw ->
-                    normalize_status raw
-                      ~allowed:[ "aligned"; "watch"; "risk"; "unclear" ]
-                      ~fallback:"unclear"
-                  in
-                  let watch_status =
-                    string_field ~default:"unclear" "watch_status" parsed
-                    |> fun raw ->
-                    normalize_status raw
-                      ~allowed:[ "ok"; "watch"; "risk"; "unclear" ]
-                      ~fallback:"unclear"
-                  in
-                  let evidence_json = member_assoc "evidence" parsed in
+          let alignment_status =
+            string_field ~default:"unclear" "alignment_status" parsed
+            |> fun raw ->
+            normalize_status raw
+              ~allowed:[ "aligned"; "watch"; "risk"; "unclear" ]
+              ~fallback:"unclear"
+          in
+          let watch_status =
+            string_field ~default:"unclear" "watch_status" parsed
+            |> fun raw ->
+            normalize_status raw
+              ~allowed:[ "ok"; "watch"; "risk"; "unclear" ]
+              ~fallback:"unclear"
+          in
+          let communication_summary =
+            string_field
+              ~default:"Evidence is insufficient to judge communication."
+              "communication_summary" parsed
+          in
+          let alignment_summary =
+            string_field
+              ~default:"Evidence is insufficient to judge alignment."
+              "alignment_summary" parsed
+          in
+          let watch_summary =
+            string_field ~default:"No operator watch item was produced."
+              "watch_summary" parsed
+          in
+          let evidence_json = member_assoc "evidence" parsed in
+          let now_iso = Types.now_iso () in
+          Ok
+            (`Assoc
+              [
+                ("generated_at", `String now_iso);
+                ("cached", `Bool false);
+                ("stale", `Bool false);
+                ("refreshing", `Bool false);
+                ("status", `String "ok");
+                ("summary", `String watch_summary);
+                ("model", `String response.model_used);
+                ("ttl_sec", `Int (int_of_float cache_ttl_sec));
+                ("criteria", criteria_json ());
+                ( "basis",
                   `Assoc
                     [
-                      ("generated_at", `String now_iso);
-                      ("cached", `Bool false);
-                      ("status", `String "ok");
-                      ("model", `String response.model_used);
-                      ("ttl_sec", `Int (int_of_float cache_ttl_sec));
-                      ("criteria", `List (List.map (fun item -> `String item) mission_briefing_criteria));
-                      ( "basis",
-                        `Assoc
-                          [
-                            ( "current_room",
-                              member_assoc "summary" mission_json
-                              |> member_assoc "current_room" );
-                            ("crew_count", `Int (List.length sessions));
-                            ("agent_count", `Int (List.length agents_json));
-                            ("keeper_count", `Int (List.length keepers));
-                          ] );
-                      ( "sections",
-                        `List
-                          [
-                            section_json
-                              ~id:"communication"
-                              ~label:"Communication"
-                              ~status:communication_status
-                              ~summary:
-                                (string_field ~default:"Evidence is insufficient to judge communication." "communication_summary" parsed)
-                              ~evidence:(parse_string_list evidence_json "communication");
-                            section_json
-                              ~id:"alignment"
-                              ~label:"Alignment"
-                              ~status:alignment_status
-                              ~summary:
-                                (string_field ~default:"Evidence is insufficient to judge alignment." "alignment_summary" parsed)
-                              ~evidence:(parse_string_list evidence_json "alignment");
-                            section_json
-                              ~id:"watch"
-                              ~label:"Watch Next"
-                              ~status:watch_status
-                              ~summary:
-                                (string_field ~default:"No operator watch item was produced." "watch_summary" parsed)
-                              ~evidence:(parse_string_list evidence_json "watch");
-                          ] );
-                    ]
-                with _ ->
-                  error_json ~now:now_iso
-                    ~reason:"Mission briefing model returned invalid JSON." )
-          in
-          if not (String.equal (json_status result_json) "error") then (
-            Mutex.lock cache.mutex;
-            cache.cached_json <- Some result_json;
-            cache.cached_at <- Unix.gettimeofday ();
-            Mutex.unlock cache.mutex
-          );
-          result_json)
-  else (
-    Mutex.lock cache.mutex;
-    cache.cached_json <- None;
-    cache.cached_at <- 0.0;
-    Mutex.unlock cache.mutex;
-    json ?actor ~force:false ~config ~sw ~clock ~proc_mgr ())
+                      ( "current_room",
+                        member_assoc "summary" mission_json
+                        |> member_assoc "current_room" );
+                      ("crew_count", `Int (List.length sessions));
+                      ("agent_count", `Int (List.length agents_json));
+                      ("keeper_count", `Int (List.length keepers));
+                    ] );
+                ( "sections",
+                  `List
+                    [
+                      section_json ~id:"communication" ~label:"Communication"
+                        ~status:communication_status ~summary:communication_summary
+                        ~evidence:(parse_string_list evidence_json "communication");
+                      section_json ~id:"alignment" ~label:"Alignment"
+                        ~status:alignment_status ~summary:alignment_summary
+                        ~evidence:(parse_string_list evidence_json "alignment");
+                      section_json ~id:"watch" ~label:"Watch Next"
+                        ~status:watch_status ~summary:watch_summary
+                        ~evidence:(parse_string_list evidence_json "watch");
+                    ] );
+                ("error", `Null);
+                ("last_error", `Null);
+              ])
+        with _ -> Error "Mission briefing model returned invalid JSON." )
+
+let start_async_refresh ~actor_name ~models ~config ~sw ~clock ~proc_mgr () =
+  let should_start =
+    with_cache_lock (fun () ->
+        if cache.refresh_in_flight then
+          false
+        else (
+          cache.refresh_in_flight <- true;
+          true))
+  in
+  let refresh_sw =
+    match Eio_context.get_switch_opt () with
+    | Some server_sw -> server_sw
+    | None -> sw
+  in
+  if should_start then
+    Eio.Fiber.fork_daemon ~sw:refresh_sw (fun () ->
+        (try
+           match
+             compute_briefing_json ~actor_name ~models ~config ~sw:refresh_sw ~clock
+               ~proc_mgr ()
+           with
+           | Ok result_json ->
+               with_cache_lock (fun () ->
+                   cache.cached_json <- Some result_json;
+                   cache.cached_at <- Unix.gettimeofday ();
+                   cache.refresh_in_flight <- false;
+                   cache.last_error <- None)
+           | Error reason ->
+               with_cache_lock (fun () ->
+                   cache.refresh_in_flight <- false;
+                   cache.last_error <- Some reason)
+         with exn ->
+           with_cache_lock (fun () ->
+               cache.refresh_in_flight <- false;
+               cache.last_error <- Some (Printexc.to_string exn)));
+        `Stop_daemon)
+
+let actor_name = function
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> "dashboard"
+
+let json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
+  let now_ts = Unix.gettimeofday () in
+  let now_iso = Types.now_iso () in
+  let models = mission_briefing_models () in
+  let actor_name = actor_name actor in
+  let cached_json, is_fresh, refresh_in_flight, last_error =
+    with_cache_lock (fun () ->
+        let cached_json = cache.cached_json in
+        let is_fresh =
+          match cached_json with
+          | Some _ -> now_ts -. cache.cached_at < cache_ttl_sec
+          | None -> false
+        in
+        (cached_json, is_fresh, cache.refresh_in_flight, cache.last_error))
+  in
+  match cached_json with
+  | Some cached_json ->
+      let stale = force || not is_fresh in
+      let started_refresh =
+        if stale && models <> [] && not refresh_in_flight then (
+          start_async_refresh ~actor_name ~models ~config ~sw ~clock ~proc_mgr ();
+          true)
+        else
+          false
+      in
+      let refreshing =
+        refresh_in_flight || started_refresh
+      in
+      let delivery_error =
+        if stale && models = [] then Some no_model_reason else last_error
+      in
+      annotate_delivery_state cached_json ~cached:true ~stale
+        ~refreshing ~last_error:delivery_error
+  | None ->
+      if models = [] then
+        unavailable_json ~now:now_iso ~reason:no_model_reason
+      else if refresh_in_flight then
+        pending_json ~now:now_iso ~last_error
+      else (
+        match (force, last_error) with
+        | false, Some reason -> error_json ~now:now_iso ~reason
+        | _ ->
+        if not refresh_in_flight then
+          start_async_refresh ~actor_name ~models ~config ~sw ~clock ~proc_mgr ();
+        pending_json ~now:now_iso ~last_error)

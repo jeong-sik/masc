@@ -23,6 +23,23 @@ export const missionBriefing = signal<DashboardMissionBriefingResponse | null>(n
 export const missionBriefingLoading = signal(false)
 export const missionBriefingError = signal<string | null>(null)
 
+let missionBriefingPollTimer: number | null = null
+
+function clearMissionBriefingPoll(): void {
+  if (missionBriefingPollTimer !== null) {
+    window.clearTimeout(missionBriefingPollTimer)
+    missionBriefingPollTimer = null
+  }
+}
+
+function scheduleMissionBriefingPoll(delayMs = 1500): void {
+  if (missionBriefingPollTimer !== null) return
+  missionBriefingPollTimer = window.setTimeout(() => {
+    missionBriefingPollTimer = null
+    void refreshMissionBriefing(false)
+  }, delayMs)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -319,13 +336,19 @@ function normalizeMissionBriefing(raw: unknown): DashboardMissionBriefingRespons
   const basis = isRecord(root.basis) ? root.basis : {}
   const statusRaw = asString(root.status) ?? 'error'
   const status =
-    statusRaw === 'ok' || statusRaw === 'unavailable' || statusRaw === 'error'
+    statusRaw === 'ok'
+      || statusRaw === 'pending'
+      || statusRaw === 'unavailable'
+      || statusRaw === 'error'
       ? statusRaw
       : 'error'
   return {
     generated_at: asString(root.generated_at),
     cached: asBoolean(root.cached),
+    stale: asBoolean(root.stale),
+    refreshing: asBoolean(root.refreshing),
     status,
+    summary: asString(root.summary) ?? null,
     model: asString(root.model) ?? null,
     ttl_sec: asNumber(root.ttl_sec),
     criteria: extractArray(root.criteria)
@@ -341,6 +364,7 @@ function normalizeMissionBriefing(raw: unknown): DashboardMissionBriefingRespons
       .map(normalizeBriefingSection)
       .filter((item): item is DashboardMissionBriefingSection => item !== null),
     error: asString(root.error) ?? null,
+    last_error: asString(root.last_error) ?? null,
   }
 }
 
@@ -362,9 +386,16 @@ export async function refreshMissionBriefing(force = false): Promise<void> {
   missionBriefingError.value = null
   try {
     const raw = await fetchDashboardMissionBriefing(force)
-    missionBriefing.value = normalizeMissionBriefing(raw)
+    const normalized = normalizeMissionBriefing(raw)
+    missionBriefing.value = normalized
+    if (normalized.refreshing || normalized.status === 'pending') {
+      scheduleMissionBriefingPoll()
+    } else {
+      clearMissionBriefingPoll()
+    }
   } catch (err) {
     missionBriefingError.value = err instanceof Error ? err.message : 'Failed to load mission briefing'
+    clearMissionBriefingPoll()
   } finally {
     missionBriefingLoading.value = false
   }

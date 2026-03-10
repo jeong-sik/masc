@@ -30,7 +30,7 @@ export const DASHBOARD_NAV_SECTIONS: DashboardNavSection[] = [
   {
     id: 'command',
     label: '통제',
-    description: '개입과 지휘를 실행하는 통제 표면',
+    description: '개입과 지휘를 직접 실행하는 화면',
   },
 ]
 
@@ -54,7 +54,7 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     label: '지휘',
     icon: '\uD83E\uDDED',
     group: 'command',
-    description: '유닛 계층, 작전 체인, 추적 이력을 보는 상세 화면',
+    description: '유닛 계층, 작전 체인, 승인, 추적 이력을 보는 상세 화면',
   },
   {
     id: 'agents',

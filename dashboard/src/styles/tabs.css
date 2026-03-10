@@ -1,0 +1,29 @@
+/* MASC Dashboard — Component Styles */
+
+/* ── Tab Navigation ────────────────────────────────────────── */
+.main-tab-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 10px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  flex-wrap: wrap;
+}
+.main-tab-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+.main-tab-btn:hover { background: rgba(255,255,255,0.05); color: #ccc; }
+.main-tab-btn.active {
+  background: rgba(74,222,128,0.15);
+  color: #4ade80;
+}
+

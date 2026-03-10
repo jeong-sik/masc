@@ -1,0 +1,524 @@
+import type {
+  ChainHistoryEventSummary,
+  CommandPlaneHelpPath,
+  CommandPlaneHelpPitfall,
+  CommandPlaneHelpStep,
+  CommandPlaneSurface,
+  OperatorSessionSnapshot,
+  Task,
+} from '../../types'
+import {
+  commandPlaneActionBusy,
+  commandPlaneChainFocusOperationId,
+  commandPlaneChainSummary,
+  commandPlaneHelp,
+  commandPlaneSummary,
+  commandPlaneSwarm,
+} from '../../command-store'
+import { operatorSnapshot } from '../../operator-store'
+import { route } from '../../router'
+import type { DashboardWorkflowContext } from '../../workflow-context'
+
+// ── Pure helpers ──────────────────────────────
+
+export function prettyJson(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+export function relativeTime(iso?: string | null): string {
+  if (!iso) return 'n/a'
+  const ts = Date.parse(iso)
+  if (Number.isNaN(ts)) return iso
+  const deltaSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
+  if (deltaSec < 60) return `${deltaSec}s ago`
+  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}m ago`
+  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}h ago`
+  return `${Math.round(deltaSec / 86400)}d ago`
+}
+
+export function expiryTone(iso?: string | null): string {
+  if (!iso) return 'warn'
+  const ts = Date.parse(iso)
+  if (Number.isNaN(ts)) return 'warn'
+  return ts <= Date.now() ? 'bad' : 'ok'
+}
+
+export function deadlineLabel(iso?: string | null): string {
+  if (!iso) return 'n/a'
+  const ts = Date.parse(iso)
+  if (Number.isNaN(ts)) return iso
+  const deltaSec = Math.round((ts - Date.now()) / 1000)
+  if (deltaSec <= 0) return 'expired'
+  if (deltaSec < 60) return `in ${deltaSec}s`
+  if (deltaSec < 3600) return `in ${Math.round(deltaSec / 60)}m`
+  if (deltaSec < 86400) return `in ${Math.round(deltaSec / 3600)}h`
+  return `in ${Math.round(deltaSec / 86400)}d`
+}
+
+export function toneClass(tone?: string | null): string {
+  if (tone === 'bad') return 'bad'
+  if (tone === 'warn' || tone === 'pending') return 'warn'
+  return 'ok'
+}
+
+type MermaidApi = typeof import('mermaid')['default']
+
+let mermaidConfigured = false
+export let mermaidRenderCount = 0
+
+export function incrementMermaidRenderCount(): number {
+  return ++mermaidRenderCount
+}
+
+let mermaidPromise: Promise<MermaidApi> | null = null
+
+export async function getMermaid(): Promise<MermaidApi> {
+  if (!mermaidPromise) {
+    mermaidPromise = import('mermaid').then(module => module.default)
+  }
+  const mermaid = await mermaidPromise
+  if (mermaidConfigured) return mermaid
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    securityLevel: 'loose',
+  })
+  mermaidConfigured = true
+  return mermaid
+}
+
+export function chainStatusTone(status?: string | null): string {
+  if (!status) return 'warn'
+  const lowered = status.toLowerCase()
+  if (
+    lowered.includes('failed')
+    || lowered.includes('error')
+    || lowered.includes('disconnected')
+    || lowered.includes('stopped')
+  ) {
+    return 'bad'
+  }
+  if (
+    lowered.includes('running')
+    || lowered.includes('active')
+    || lowered.includes('degraded')
+    || lowered.includes('pending')
+  ) {
+    return 'warn'
+  }
+  return 'ok'
+}
+
+export function formatPercent(value?: number | null): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a'
+  return `${Math.round(value * 100)}%`
+}
+
+export function formatElapsed(value?: number | null): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a'
+  if (value < 60) return `${Math.round(value)}s`
+  if (value < 3600) return `${Math.round(value / 60)}m`
+  return `${Math.round(value / 3600)}h`
+}
+
+export function clampPercent(value?: number | null): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(100, value))
+}
+
+export function ratioPercent(part?: number | null, whole?: number | null): number {
+  if (
+    typeof part !== 'number'
+    || !Number.isFinite(part)
+    || typeof whole !== 'number'
+    || !Number.isFinite(whole)
+    || whole <= 0
+  ) {
+    return 0
+  }
+  return clampPercent((part / whole) * 100)
+}
+
+export function gaugeStyle(percent: number, color: string): string {
+  const safePercent = clampPercent(percent)
+  const angle = Math.max(10, Math.round((safePercent / 100) * 360))
+  return `--gauge-angle:${angle}deg;--gauge-color:${color};`
+}
+
+export function historySummary(history?: ChainHistoryEventSummary | null): string {
+  if (!history) return 'No recent chain history'
+  const pieces = [history.event]
+  if (typeof history.duration_ms === 'number') pieces.push(`${history.duration_ms}ms`)
+  if (typeof history.tokens === 'number') pieces.push(`${history.tokens} tokens`)
+  if (history.message) pieces.push(history.message)
+  return pieces.join(' · ')
+}
+
+// ── Constants ─────────────────────────────────
+
+export type CommandSurfaceGroup = 'status' | 'history' | 'control'
+
+export const COMMAND_SURFACE_GROUPS: Array<{ id: CommandSurfaceGroup; label: string }> = [
+  { id: 'status', label: '현황' },
+  { id: 'history', label: '이력' },
+  { id: 'control', label: '통제' },
+]
+
+export const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: string; group: CommandSurfaceGroup }> = [
+  { id: 'warroom', label: '워룸', group: 'status' },
+  { id: 'summary', label: '요약', group: 'status' },
+  { id: 'topology', label: '토폴로지', group: 'status' },
+  { id: 'swarm', label: '스웜', group: 'status' },
+  { id: 'operations', label: '작전', group: 'history' },
+  { id: 'trace', label: '트레이스', group: 'history' },
+  { id: 'chains', label: '체인', group: 'history' },
+  { id: 'control', label: '제어', group: 'control' },
+  { id: 'alerts', label: '알림', group: 'control' },
+]
+const COMMAND_SURFACES: CommandPlaneSurface[] = COMMAND_SURFACE_META.map(item => item.id)
+export const CHAIN_SSE_EVENT_TYPES = ['chain_start', 'node_start', 'node_complete', 'chain_complete', 'chain_error']
+
+export const COMMAND_SURFACE_GUIDE: Record<CommandPlaneSurface, { title: string; description: string }> = {
+  warroom: {
+    title: '라이브 워룸',
+    description: '실제 run, worker, message, trace를 한 화면에서 따라가는 기본 진입 표면입니다.',
+  },
+  operations: {
+    title: '현재 작전 상세',
+    description: '활성 operation, detachment, dependency를 먼저 읽는 기본 진입 표면입니다.',
+  },
+  swarm: {
+    title: '스웜 실행 흐름',
+    description: 'lane 이동, worker 결속, blocker를 따라가며 현장감 있게 보는 표면입니다.',
+  },
+  chains: {
+    title: '체인 런타임',
+    description: '체인 연결 상태와 operation별 실행 그래프를 확인하는 표면입니다.',
+  },
+  topology: {
+    title: '지휘 계층',
+    description: 'company에서 agent까지 지휘 계층과 live roster를 확인합니다.',
+  },
+  alerts: {
+    title: '경보 모음',
+    description: '지금 개입을 밀어올리는 alert만 모아서 보는 표면입니다.',
+  },
+  trace: {
+    title: '최근 트레이스',
+    description: 'operation, actor, unit 단위 이벤트를 시간순으로 보는 표면입니다.',
+  },
+  control: {
+    title: '승인과 제어',
+    description: 'decision 승인과 unit 제어를 실제로 수행하는 표면입니다.',
+  },
+  summary: {
+    title: '지휘 요약',
+    description: '전체 지휘면을 한 번에 훑는 계기판 성격의 요약 표면입니다.',
+  },
+}
+
+export function isCommandSurface(value: string | undefined): value is CommandPlaneSurface {
+  return !!value && COMMAND_SURFACES.includes(value as CommandPlaneSurface)
+}
+
+// ── Route helpers (signal-dependent) ──────────
+
+function inheritedMissionRouteParams(): Record<string, string> {
+  const params = route.value.params
+  if (params.source !== 'mission') return {}
+  return {
+    source: 'mission',
+    ...(params.action_type ? { action_type: params.action_type } : {}),
+    ...(params.target_type ? { target_type: params.target_type } : {}),
+    ...(params.target_id ? { target_id: params.target_id } : {}),
+    ...(params.focus_kind ? { focus_kind: params.focus_kind } : {}),
+  }
+}
+
+export function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
+  const inherited = inheritedMissionRouteParams()
+  if (surface === 'operations') return inherited
+  if (surface === 'chains') {
+    const operationId = commandPlaneChainFocusOperationId.value
+    return operationId ? { ...inherited, surface, operation: operationId } : { ...inherited, surface }
+  }
+  return { ...inherited, surface }
+}
+
+export function chainEventsUrl(): string {
+  const query = new URLSearchParams(window.location.search)
+  const params = new URLSearchParams()
+  const agent = query.get('agent') ?? query.get('agent_name')
+  const token = query.get('token')
+  if (agent) params.set('agent', agent)
+  if (token) params.set('token', token)
+  return params.toString() ? `/api/v1/chains/events?${params.toString()}` : '/api/v1/chains/events'
+}
+
+export function unitKindLabel(kind: string): string {
+  switch (kind) {
+    case 'company':
+      return '중대 / Company'
+    case 'platoon':
+      return '소대 / Platoon'
+    case 'squad':
+      return '분대 / Squad'
+    case 'agent':
+      return '에이전트 / Agent'
+    default:
+      return kind
+  }
+}
+
+export function actionDisabled(key: string): boolean {
+  return commandPlaneActionBusy.value === key
+}
+
+export function currentCommandPlaneSummary() {
+  return commandPlaneSummary.value
+}
+
+export function currentSurfaceRecommendation(surface: CommandPlaneSurface): {
+  tool: string
+  reason: string
+} {
+  const summary = commandPlaneSummary.value
+  const swarm = commandPlaneSwarm.value
+  const chainSummary = commandPlaneChainSummary.value
+
+  switch (surface) {
+    case 'warroom':
+      return {
+        tool: 'masc_observe_operations',
+        reason: 'live run, worker, message, trace를 한 화면에서 보고 필요한 detail 표면으로 바로 점프합니다.',
+      }
+    case 'operations':
+      return {
+        tool: 'masc_operation_status',
+        reason: `활성 작전 ${summary?.operations.summary?.active ?? 0}개와 dependency를 먼저 확인합니다.`,
+      }
+    case 'swarm':
+      return {
+        tool: swarm?.recommended_next_tool ?? summary?.swarm_status?.recommended_next_action?.tool ?? 'masc_observe_traces',
+        reason: summary?.swarm_status?.recommended_next_action?.reason ?? 'lane 이동과 blocker를 보고 다음 probe 도구를 고릅니다.',
+      }
+    case 'chains':
+      return {
+        tool: chainSummary?.operations[0]?.preview_run?.chain_id ? 'masc_chain_run_get' : 'masc_chain_snapshot',
+        reason: '체인 연결 상태와 최근 run 그래프를 함께 보면 병목을 빨리 좁힐 수 있습니다.',
+      }
+    case 'topology':
+      return {
+        tool: 'masc_observe_topology',
+        reason: '지휘 계층과 live roster를 같이 봐야 빈 squad나 고립 unit을 놓치지 않습니다.',
+      }
+    case 'alerts':
+      return {
+        tool: 'masc_observe_alerts',
+        reason: '경보에서 먼저 문제가 된 unit과 operation을 고릅니다.',
+      }
+    case 'trace':
+      return {
+        tool: 'masc_observe_traces',
+        reason: 'trace 흐름으로 원인 이벤트를 바로 따라갈 수 있습니다.',
+      }
+    case 'control':
+      return {
+        tool: 'masc_operator_action',
+        reason: '승인이나 kill switch 같은 실제 조작은 control 표면과 operator action이 이어집니다.',
+      }
+    case 'summary':
+    default:
+      return {
+        tool: 'masc_observe_operations',
+        reason: '요약을 본 뒤에는 현재 작전 표면으로 내려가 실제 움직임을 확인하는 게 가장 빠릅니다.',
+      }
+  }
+}
+
+export function summaryHighlightKey(context: DashboardWorkflowContext | null): string | null {
+  const focus = context?.focus_kind?.toLowerCase() ?? ''
+  if (!focus) return null
+  if (focus.includes('artifact_scope') || focus.includes('routing_confidence') || focus.includes('cache_contention')) {
+    return 'microarch'
+  }
+  if (focus.includes('leader_offline') || focus.includes('roster_offline')) {
+    return 'alerts'
+  }
+  if (focus.includes('stale_data')) {
+    return 'swarm'
+  }
+  return null
+}
+
+export function swarmFocusKey(context: DashboardWorkflowContext | null): string | null {
+  const focus = context?.focus_kind?.toLowerCase() ?? ''
+  if (!focus) return null
+  if (focus.includes('stale_data') || focus.includes('leader_offline') || focus.includes('roster_offline') || focus.includes('managed')) {
+    return 'recommendation'
+  }
+  if (focus.includes('gap')) return 'gaps'
+  return null
+}
+
+// ── Dashboard location helpers ────────────────
+
+export function dashboardActorName(): string | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  const value = params.get('agent') ?? params.get('agent_name')
+  if (!value) return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+export function dashboardLocationParams(): URLSearchParams {
+  if (typeof window === 'undefined') return new URLSearchParams()
+  const search = new URLSearchParams(window.location.search)
+  const hash = window.location.hash.replace(/^#/, '')
+  const queryIdx = hash.indexOf('?')
+  if (queryIdx >= 0) {
+    const hashSearch = new URLSearchParams(hash.slice(queryIdx + 1))
+    hashSearch.forEach((value, key) => {
+      if (!search.has(key)) search.set(key, value)
+    })
+  }
+  return search
+}
+
+export function dashboardSwarmRunId(): string | null {
+  const params = dashboardLocationParams()
+  const value = params.get('run_id')
+  if (!value) return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+export function dashboardSwarmOperationId(): string | null {
+  const params = dashboardLocationParams()
+  const value = params.get('operation_id')
+  if (!value) return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+export function lastSeenAgeSeconds(iso?: string | null): number | null {
+  if (!iso) return null
+  const ts = Date.parse(iso)
+  if (Number.isNaN(ts)) return null
+  return Math.max(0, Math.round((Date.now() - ts) / 1000))
+}
+
+export function isActiveTask(task: Task): boolean {
+  return task.status === 'claimed' || task.status === 'in_progress'
+}
+
+export function findHelpStep(toolName: string): CommandPlaneHelpStep | null {
+  const help = commandPlaneHelp.value
+  if (!help) return null
+  for (const path of help.golden_paths) {
+    const matched = path.steps.find(step => step.tool === toolName)
+    if (matched) return matched
+  }
+  return null
+}
+
+export function findHelpPath(pathId: string): CommandPlaneHelpPath | null {
+  return commandPlaneHelp.value?.golden_paths.find(path => path.id === pathId) ?? null
+}
+
+export function relevantPitfalls(ids: string[]): CommandPlaneHelpPitfall[] {
+  const help = commandPlaneHelp.value
+  if (!help) return []
+  const wanted = new Set(ids)
+  return help.pitfalls.filter(pitfall => wanted.has(pitfall.id))
+}
+
+export async function fire(action: () => Promise<void>) {
+  try {
+    await action()
+  } catch {
+    // Error state is already captured in the store.
+  }
+}
+
+export function normalizedStatus(value?: string | null): string {
+  return value?.trim().toLowerCase() ?? ''
+}
+
+export function sessionStatusTone(status?: string | null): string {
+  const normalized = normalizedStatus(status)
+  if (
+    normalized.includes('failed')
+    || normalized.includes('error')
+    || normalized.includes('stopped')
+    || normalized === 'paused'
+  ) {
+    return 'bad'
+  }
+  if (
+    normalized.includes('active')
+    || normalized.includes('running')
+    || normalized.includes('healthy')
+    || normalized.includes('ok')
+  ) {
+    return 'ok'
+  }
+  return 'warn'
+}
+
+export function displayStatus(status?: string | null): string {
+  const normalized = normalizedStatus(status)
+  if (!normalized) return '확인 필요'
+  if (normalized === 'active' || normalized === 'running') return '진행 중'
+  if (normalized === 'paused') return '일시정지'
+  if (normalized === 'done' || normalized === 'ended' || normalized === 'completed') return '완료'
+  if (normalized === 'failed' || normalized === 'error' || normalized === 'stopped') return '문제'
+  return status?.trim() || '확인 필요'
+}
+
+export function hasSwarmActivity(): boolean {
+  const swarm = commandPlaneSwarm.value
+  if (!swarm) return false
+  return Boolean(
+    swarm.run_id
+    || swarm.operation?.operation_id
+    || swarm.detachment?.detachment_id
+    || (swarm.summary?.expected_workers ?? 0) > 0
+    || swarm.workers.length > 0
+    || swarm.recent_messages.length > 0
+    || swarm.recent_trace_events.length > 0,
+  )
+}
+
+export function isSessionLive(session: OperatorSessionSnapshot): boolean {
+  const normalized = normalizedStatus(session.status)
+  return normalized === 'active' || normalized === 'running'
+}
+
+export function pickWarRoomSession(): OperatorSessionSnapshot | null {
+  const sessions = operatorSnapshot.value?.sessions ?? []
+  const swarm = commandPlaneSwarm.value
+  const linkedSessionId = swarm?.detachment?.session_id ?? null
+  if (linkedSessionId) {
+    const linked = sessions.find(session => session.session_id === linkedSessionId)
+    if (linked) return linked
+  }
+  const operationId = swarm?.operation?.operation_id ?? dashboardSwarmOperationId()
+  if (operationId) {
+    const operationLinked = sessions.find(session => session.command_plane_operation_id === operationId)
+    if (operationLinked) return operationLinked
+  }
+  const detachmentId = swarm?.detachment?.detachment_id ?? null
+  if (detachmentId) {
+    const detachmentLinked = sessions.find(session => session.command_plane_detachment_id === detachmentId)
+    if (detachmentLinked) return detachmentLinked
+  }
+  return sessions.find(isSessionLive) ?? sessions[0] ?? null
+}

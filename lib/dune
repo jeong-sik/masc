@@ -28,6 +28,13 @@
    checkpoint_types
    common
    command_plane_v2
+   cp_types
+   cp_paths
+   cp_serde
+   cp_io
+   cp_unit
+   cp_snapshot
+   cp_lifecycle
    compression_dict
    config
    context_router

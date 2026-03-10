@@ -116,34 +116,46 @@ function extractJsonObject(text) {
   });
 
   await gotoHash(page, '#board', 'Board');
-  const toggle = page.getByRole('button', { name: /hide auto reports/i });
-  if (await toggle.count()) {
-    await toggle.click().catch(() => {});
+  const autoReportsToggle = page.getByRole('button', { name: /show auto reports/i });
+  if (await autoReportsToggle.count()) {
+    await autoReportsToggle.click().catch(() => {});
   }
   await wait(500);
 
   const postResult = await mcpCall('masc_board_post', {
-    author: 'dashboard-smoke-bot',
+    author: 'dashboard-harness-bot',
     content: unique,
-    hearth: 'dashboard',
+    hearth: 'dashboard-harness',
     visibility: 'internal',
-    ttl_hours: 24,
+    ttl_hours: 1,
   });
   const postText = postResult.content?.[0]?.text || postResult.resultEnvelope?.summary || '';
   const postJson = extractJsonObject(postText) || {};
   const postId = postJson.id || 'unknown';
 
-  await page.waitForFunction(expected => document.body.innerText.includes(expected), unique, { timeout: 10000 });
+  await wait(1200);
   const boardBody = await page.locator('body').innerText();
   checks.push({
-    name: 'board auto-refreshes with author and post preview',
-    pass: boardBody.includes('dashboard-smoke-bot') && boardBody.includes(unique),
+    name: 'board hides automation hearth by default',
+    pass: !boardBody.includes(unique),
+    postId,
+  });
+
+  const automationToggle = page.getByRole('button', { name: /hiding automation posts/i });
+  if (await automationToggle.count()) {
+    await automationToggle.click().catch(() => {});
+  }
+  await page.waitForFunction(expected => document.body.innerText.includes(expected), unique, { timeout: 10000 });
+  const boardBodyAfterReveal = await page.locator('body').innerText();
+  checks.push({
+    name: 'board reveals automation post after toggle',
+    pass: boardBodyAfterReveal.includes('dashboard-harness-bot') && boardBodyAfterReveal.includes(unique),
     postId,
   });
 
   const commentText = `${unique}-comment`;
   const commentResult = await mcpCall('masc_board_comment', {
-    author: 'dashboard-smoke-bot',
+    author: 'dashboard-harness-bot',
     post_id: postId,
     content: commentText,
   });
@@ -154,7 +166,7 @@ function extractJsonObject(text) {
   const activityBody = await page.locator('body').innerText();
   checks.push({
     name: 'activity shows labeled board post preview',
-    pass: activityBody.includes('dashboard-smoke-bot') && activityBody.includes(`Post: ${unique}`),
+    pass: activityBody.includes('dashboard-harness-bot') && activityBody.includes(`Post: ${unique}`),
   });
   checks.push({
     name: 'activity shows labeled board comment preview',

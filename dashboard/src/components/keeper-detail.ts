@@ -9,7 +9,8 @@ import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper, KeeperMetricPoint, TrpgCharacterStats, AutonomyLevel } from '../types'
-import { invalidateDashboardCache, refreshDashboard } from '../store'
+import { invalidateDashboardCache, refreshDashboard, serverStatus } from '../store'
+import { operatorSnapshot } from '../operator-store'
 import { normalizeLodgeTickResult, selectKeeper } from '../keeper-runtime'
 import {
   KeeperConversationPanel,
@@ -96,6 +97,38 @@ function formatTokens(n: number | undefined): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(n)
+}
+
+function actionDescriptorLabel(actionType?: string): string {
+  switch (actionType) {
+    case 'keeper_message':
+      return 'message'
+    case 'keeper_probe':
+      return 'probe'
+    case 'keeper_recover':
+      return 'recover'
+    case 'broadcast':
+      return 'broadcast'
+    case 'room_pause':
+      return 'pause'
+    case 'room_resume':
+      return 'resume'
+    case 'lodge_tick':
+      return 'lodge'
+    default:
+      return actionType?.trim() || 'action'
+  }
+}
+
+function keeperRecentTools(keeper: Keeper): string[] {
+  if (keeper.recent_tool_names && keeper.recent_tool_names.length > 0) {
+    return keeper.recent_tool_names
+  }
+  const metrics = keeper.metrics_window
+  const topTools = Array.isArray(metrics?.top_tools) ? metrics.top_tools : []
+  return topTools
+    .map(item => (typeof item === 'object' && item !== null && 'tool' in item && typeof item.tool === 'string' ? item.tool : null))
+    .filter((item): item is string => item !== null)
 }
 
 function KpiGrid({ keeper }: { keeper: Keeper }) {
@@ -384,6 +417,67 @@ function RuntimeSignals({ keeper }: { keeper: Keeper }) {
   `
 }
 
+function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
+  const room = operatorSnapshot.value?.room ?? {}
+  const actions = (operatorSnapshot.value?.available_actions ?? [])
+    .filter(action => action.target_type === 'keeper' || action.target_type === 'room')
+    .slice(0, 8)
+  const tools = keeperRecentTools(keeper)
+  const capabilities = keeper.agent?.capabilities ?? []
+  const roomName = room.current_room ?? room.room_id ?? serverStatus.value?.room ?? 'default'
+  const project = room.project ?? serverStatus.value?.project ?? '확인 없음'
+  const cluster = room.cluster ?? serverStatus.value?.cluster ?? '확인 없음'
+
+  return html`
+    <div class="keeper-signal-list">
+      <div class="keeper-signal-row">
+        <span>Room</span>
+        <strong>${roomName}</strong>
+      </div>
+      <div class="keeper-signal-row">
+        <span>Project</span>
+        <strong>${project}</strong>
+      </div>
+      <div class="keeper-signal-row">
+        <span>Cluster</span>
+        <strong>${cluster}</strong>
+      </div>
+      <div class="keeper-signal-row">
+        <span>Current task</span>
+        <strong>${keeper.agent?.current_task ?? '없음'}</strong>
+      </div>
+      <div class="keeper-signal-row">
+        <span>Skill route</span>
+        <strong>${keeper.skill_primary ?? '미확인'}</strong>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+        <span style="font-size:12px; color:#888;">Recent tools</span>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${tools.length > 0
+            ? tools.map(tool => html`<span class="pill">${tool}</span>`)
+            : html`<span style="font-size:12px; color:#888;">도구 텔레메트리 없음</span>`}
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+        <span style="font-size:12px; color:#888;">Capabilities</span>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${capabilities.length > 0
+            ? capabilities.map(capability => html`<span class="pill">${capability}</span>`)
+            : html`<span style="font-size:12px; color:#888;">등록된 capability 없음</span>`}
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+        <span style="font-size:12px; color:#888;">Available actions nearby</span>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${actions.length > 0
+            ? actions.map(action => html`<span class="pill">${actionDescriptorLabel(action.action_type)}</span>`)
+            : html`<span style="font-size:12px; color:#888;">operator action 광고 없음</span>`}
+        </div>
+      </div>
+    </div>
+  `
+}
+
 // ── Main Detail Overlay ───────────────────────────────────
 
 function currentOperatorActor(): string {
@@ -551,6 +645,10 @@ export function KeeperDetailOverlay() {
 
           <${Card} title="Runtime Signals">
             <${RuntimeSignals} keeper=${keeper} />
+          <//>
+
+          <${Card} title="Neighborhood & Tools">
+            <${KeeperNeighborhood} keeper=${keeper} />
           <//>
 
           <${Card} title="Memory & Context">

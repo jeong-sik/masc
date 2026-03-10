@@ -22,9 +22,9 @@ import { navigate, navigateToPost, route } from '../router'
 import type { BoardComment, BoardPost, BoardSortMode } from '../types'
 
 const SORT_MODES: { id: BoardSortMode; label: string }[] = [
+  { id: 'recent', label: 'Latest' },
   { id: 'hot', label: 'Hot' },
   { id: 'trending', label: 'Trending' },
-  { id: 'recent', label: 'Recent' },
   { id: 'updated', label: 'Updated' },
   { id: 'discussed', label: 'Discussed' },
 ]
@@ -35,6 +35,7 @@ const detailLoading = signal(false)
 const detailPostId = signal<string | null>(null)
 const commentText = signal('')
 const commentSubmitting = signal(false)
+const hideAutomationPosts = signal(true)
 
 function defaultCommentAuthor(): string {
   const params = new URLSearchParams(window.location.search)
@@ -58,6 +59,26 @@ function previewText(content: string): string {
 
 function isUpdated(post: BoardPost): boolean {
   return post.updated_at !== post.created_at
+}
+
+function isLikelyTestPost(post: BoardPost): boolean {
+  const haystack = `${post.title} ${post.tags.join(' ')} ${post.flair ?? ''}`.toLowerCase()
+  return /\b(test|smoke|harness|sandbox|dummy|sample|tmp|qa|e2e)\b/.test(haystack)
+    || haystack.includes('테스트')
+    || haystack.includes('실험')
+}
+
+function isAutomationBoardPost(post: BoardPost): boolean {
+  const author = post.author.toLowerCase()
+  const hearth = (post.hearth ?? '').toLowerCase()
+  if (author === 'mdal' || author.includes('smoke-bot') || author.includes('harness')) return true
+  if (hearth.startsWith('mdal') || hearth.includes('harness')) return true
+  return false
+}
+
+function visiblePosts(posts: BoardPost[]): BoardPost[] {
+  if (!hideAutomationPosts.value) return posts
+  return posts.filter(post => !isAutomationBoardPost(post) && !isLikelyTestPost(post))
 }
 
 async function loadPostDetail(postId: string) {
@@ -114,6 +135,7 @@ async function submitComment(postId: string) {
 
 function SortBar() {
   const current = boardSortMode.value
+  const hideLabel = hideAutomationPosts.value ? 'Hiding automation posts' : 'Show automation posts'
   return html`
     <div class="board-toolbar">
       <div class="board-controls">
@@ -130,6 +152,14 @@ function SortBar() {
         `)}
       </div>
       <div class="board-toolbar-actions">
+        <button
+          class="control-btn ghost ${hideAutomationPosts.value ? 'is-active' : ''}"
+          onClick=${() => {
+            hideAutomationPosts.value = !hideAutomationPosts.value
+          }}
+        >
+          ${hideLabel}
+        </button>
         <button
           class="control-btn ghost ${boardExcludeSystem.value ? 'is-active' : ''}"
           onClick=${() => {
@@ -149,15 +179,21 @@ function SortBar() {
 
 function MemorySummary() {
   const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
+  const filtered = visiblePosts(boardPosts.value)
+  const hiddenCount = boardPosts.value.length - filtered.length
   return html`
     <div class="board-summary-strip">
       <div class="board-summary-item">
         <span class="board-summary-label">Visible posts</span>
-        <strong>${boardPosts.value.length}</strong>
+        <strong>${filtered.length}</strong>
       </div>
       <div class="board-summary-item">
         <span class="board-summary-label">Sort</span>
         <strong>${sortLabel}</strong>
+      </div>
+      <div class="board-summary-item">
+        <span class="board-summary-label">Noise filter</span>
+        <strong>${hideAutomationPosts.value ? `automation ${hiddenCount} hidden` : 'full feed'}</strong>
       </div>
       <div class="board-summary-item">
         <span class="board-summary-label">Noise policy</span>
@@ -191,12 +227,14 @@ function PostCard({ post }: { post: BoardPost }) {
       </div>
       <div class="post-content">
         <div class="post-head">
-          <div class="post-title-row">
-            <div class="post-title">${post.title}</div>
-            <div class="post-chip-row">
-              ${isUpdated(post) ? html`<span class="board-meta-chip">Updated</span>` : null}
+            <div class="post-title-row">
+              <div class="post-title">${post.title}</div>
+              <div class="post-chip-row">
+                ${isUpdated(post) ? html`<span class="board-meta-chip">Updated</span>` : null}
+                ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
+                ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
+              </div>
             </div>
-          </div>
           <div class="post-meta">
             <span>By ${post.author}</span>
             <span><${TimeAgo} timestamp=${post.created_at} /></span>
@@ -295,7 +333,7 @@ function PostDetail({ post }: { post: BoardPost }) {
 }
 
 export function Memory() {
-  const posts = boardPosts.value
+  const posts = visiblePosts(boardPosts.value)
   const postId = route.value.params.post ?? null
   const post = postId
     ? posts.find(row => row.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)

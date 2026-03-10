@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+import os
 import sys
 import urllib.error
 import urllib.request
 
 
 class ProxyHandler(SimpleHTTPRequestHandler):
-    BACKEND = "http://127.0.0.1:8935"
+    BACKEND = ""
 
     def _cors_origin(self):
         origin = self.headers.get("Origin")
@@ -104,6 +105,10 @@ class ProxyHandler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+    backend = (sys.argv[2] if len(sys.argv) > 2 else os.getenv("MASC_WEB_BACKEND_URL", "")).rstrip("/")
+    if not backend:
+        raise SystemExit("MASC_WEB_BACKEND_URL or <backend-url> is required")
+    ProxyHandler.BACKEND = backend
     print(f"Proxy server on http://localhost:{port}")
-    print("Proxying /api, /sse, /mcp to http://127.0.0.1:8935")
+    print(f"Proxying /api, /sse, /mcp to {backend}")
     HTTPServer(("", port), ProxyHandler).serve_forever()

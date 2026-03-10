@@ -1022,10 +1022,14 @@ end = struct
   let acquire_lock t ~key ~ttl_seconds ~owner =
     let nkey = namespaced_key t.namespace ("lock:" ^ key) in
     (* Clean up expired locks first *)
-    let _ = Caqti_eio.Pool.use (fun conn ->
+    (match Caqti_eio.Pool.use (fun conn ->
       let module C = (val conn : Caqti_eio.CONNECTION) in
       C.exec cleanup_expired_q ()
-    ) t.pool in
+    ) t.pool with
+    | Ok () -> ()
+    | Error err ->
+      Printf.eprintf "[WARN] [backend] expired lock cleanup failed: %s\n%!"
+        (Caqti_error.show err));
     (* Try to acquire lock *)
     match Caqti_eio.Pool.use (fun conn ->
       let module C = (val conn : Caqti_eio.CONNECTION) in

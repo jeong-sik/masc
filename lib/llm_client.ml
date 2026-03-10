@@ -657,9 +657,9 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
     (* Parse usage *)
     let usage_json = json |> member "usage" in
     let usage = {
-      input_tokens = (try usage_json |> member "prompt_tokens" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (prompt_tokens): %s\n%!" (Printexc.to_string exn); 0);
-      output_tokens = (try usage_json |> member "completion_tokens" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (completion_tokens): %s\n%!" (Printexc.to_string exn); 0);
-      total_tokens = (try usage_json |> member "total_tokens" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (total_tokens): %s\n%!" (Printexc.to_string exn); 0);
+      input_tokens = Safe_ops.json_int "prompt_tokens" usage_json;
+      output_tokens = Safe_ops.json_int "completion_tokens" usage_json;
+      total_tokens = Safe_ops.json_int "total_tokens" usage_json;
       cache_creation_input_tokens = 0;
       cache_read_input_tokens = 0;
     } in
@@ -700,10 +700,10 @@ let parse_claude_response (json_str : string) : (completion_response, string) re
     ) content_blocks in
     (* Parse usage *)
     let usage_json = json |> member "usage" in
-    let input_tokens = try usage_json |> member "input_tokens" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (input_tokens): %s\n%!" (Printexc.to_string exn); 0 in
-    let output_tokens = try usage_json |> member "output_tokens" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (output_tokens): %s\n%!" (Printexc.to_string exn); 0 in
-    let cache_creation = try usage_json |> member "cache_creation_input_tokens" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (cache_creation_input_tokens): %s\n%!" (Printexc.to_string exn); 0 in
-    let cache_read = try usage_json |> member "cache_read_input_tokens" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (cache_read_input_tokens): %s\n%!" (Printexc.to_string exn); 0 in
+    let input_tokens = Safe_ops.json_int "input_tokens" usage_json in
+    let output_tokens = Safe_ops.json_int "output_tokens" usage_json in
+    let cache_creation = Safe_ops.json_int "cache_creation_input_tokens" usage_json in
+    let cache_read = Safe_ops.json_int "cache_read_input_tokens" usage_json in
     let usage = {
       input_tokens;
       output_tokens;
@@ -723,8 +723,8 @@ let parse_ollama_generate_response (json_str : string) : (completion_response, s
     let json = Yojson.Safe.from_string json_str in
     let open Yojson.Safe.Util in
     let content = json |> member "response" |> to_string in
-    let eval_count = try json |> member "eval_count" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (eval_count): %s\n%!" (Printexc.to_string exn); 0 in
-    let prompt_eval_count = try json |> member "prompt_eval_count" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (prompt_eval_count): %s\n%!" (Printexc.to_string exn); 0 in
+    let eval_count = Safe_ops.json_int "eval_count" json in
+    let prompt_eval_count = Safe_ops.json_int "prompt_eval_count" json in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
     let usage = {
@@ -748,8 +748,8 @@ let parse_ollama_chat_response (json_str : string) : (completion_response, strin
     let msg = json |> member "message" in
     let content = msg |> member "content" |> to_string_option
                   |> Option.value ~default:"" in
-    let eval_count = try json |> member "eval_count" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (eval_count): %s\n%!" (Printexc.to_string exn); 0 in
-    let prompt_eval_count = try json |> member "prompt_eval_count" |> to_int with exn -> Printf.eprintf "[llm] token count parse failed (prompt_eval_count): %s\n%!" (Printexc.to_string exn); 0 in
+    let eval_count = Safe_ops.json_int "eval_count" json in
+    let prompt_eval_count = Safe_ops.json_int "prompt_eval_count" json in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
     let usage = {

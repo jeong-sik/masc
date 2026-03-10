@@ -1853,7 +1853,6 @@ and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : n
 and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~consensus ~weights (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
   let start = Time_compat.now () in
-  let _ = (sw, clock, exec_fn, tool_exec) in  (* suppress unused warnings *)
 
   (* Collect results from already-executed nodes or ChainRef lookups *)
   let successes = ref [] in

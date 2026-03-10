@@ -643,6 +643,8 @@ module Sentinel = struct
   let keeper_health_interval_sec = get_float ~default:300.0 "MASC_SENTINEL_KEEPER_HEALTH_SEC"
   let task_stuck_threshold_sec = get_float ~default:600.0 "MASC_SENTINEL_TASK_STUCK_SEC"
   let task_stale_threshold_sec = get_float ~default:1800.0 "MASC_SENTINEL_TASK_STALE_SEC"
+  let llm_enabled = get_bool ~default:true "MASC_SENTINEL_LLM_ENABLED"
+  let llm_timeout_sec = get_int ~default:30 "MASC_SENTINEL_LLM_TIMEOUT_SEC"
 end
 
 (** Print configuration summary for debugging *)

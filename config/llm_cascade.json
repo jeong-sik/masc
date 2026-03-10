@@ -4,5 +4,14 @@
   ],
   "heartbeat_wake_models": [
     "glm:glm-4.7"
+  ],
+  "sentinel_board_models": [
+    "glm:glm-4.7"
+  ],
+  "sentinel_task_models": [
+    "glm:glm-4.7"
+  ],
+  "sentinel_keeper_models": [
+    "glm:glm-4.7"
   ]
 }

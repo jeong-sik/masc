@@ -51,6 +51,8 @@ type stats_entry = {
 type score_breakdown = {
   capability_match : float;
   artifact_locality : float;
+  intent_successor : float;
+  verification_readiness : float;
   runtime_fit : float;
   posterior_success : float;
   capacity_headroom : float;
@@ -231,6 +233,8 @@ let breakdown_to_json (breakdown : score_breakdown) =
     [
       ("capability_match", `Float breakdown.capability_match);
       ("artifact_locality", `Float breakdown.artifact_locality);
+      ("intent_successor", `Float breakdown.intent_successor);
+      ("verification_readiness", `Float breakdown.verification_readiness);
       ("runtime_fit", `Float breakdown.runtime_fit);
       ("posterior_success", `Float breakdown.posterior_success);
       ("capacity_headroom", `Float breakdown.capacity_headroom);
@@ -542,6 +546,8 @@ let candidate_breakdown ~store ~(operation : operation_descriptor)
     {
       capability_match = capability_score operation candidate;
       artifact_locality = artifact_locality_score operation candidate;
+      intent_successor = 0.0;
+      verification_readiness = 0.0;
       runtime_fit = runtime_fit_score operation candidate;
       posterior_success = posterior_mean stats *. 15.0;
       capacity_headroom = capacity_score candidate;
@@ -554,6 +560,8 @@ let candidate_breakdown ~store ~(operation : operation_descriptor)
   let total =
     breakdown.capability_match
     +. breakdown.artifact_locality
+    +. breakdown.intent_successor
+    +. breakdown.verification_readiness
     +. breakdown.runtime_fit
     +. breakdown.posterior_success
     +. breakdown.capacity_headroom

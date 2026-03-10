@@ -67,6 +67,7 @@ type chain_record = {
 type operation_record = {
   operation_id : string;
   objective : string;
+  intent_id : string option;
   assigned_unit_id : string;
   autonomy_level : string;
   policy_class : string;
@@ -85,6 +86,38 @@ type operation_record = {
   source : string;
   status : operation_status;
   chain : chain_record option;
+  created_at : string;
+  updated_at : string;
+}
+
+type intent_state =
+  | Adopted
+  | Active_intent
+  | Blocked_intent
+  | Suspended_intent
+  | Handoff_ready
+  | Completed_intent
+  | Dropped_intent
+
+type intent_focus = {
+  stage : string option;
+  artifact_scope : string list;
+  unit_id : string option;
+  verification_state : string option;
+}
+
+type intent_record = {
+  intent_id : string;
+  title : string;
+  owner : string;
+  workload_profile : string;
+  success_metric : Yojson.Safe.t option;
+  invariants : string list;
+  artifact_priors : string list;
+  state : intent_state;
+  current_focus : intent_focus;
+  checkpoint_ref : string option;
+  source : string;
   created_at : string;
   updated_at : string;
 }
@@ -163,6 +196,9 @@ let units_path config =
 
 let operations_path config =
   Filename.concat (control_plane_dir config) "operations.json"
+
+let intents_path config =
+  Filename.concat (control_plane_dir config) "intents.json"
 
 let events_path config =
   Filename.concat (control_plane_dir config) "events.jsonl"
@@ -333,13 +369,13 @@ let get_string_list json key =
       |> dedup_strings
   | _ -> []
 
-let operation_workload_profile operation =
+let operation_workload_profile (operation : operation_record) =
   Cp_search_fabric.normalized_workload_profile operation.workload_profile
 
-let operation_search_strategy operation =
+let operation_search_strategy (operation : operation_record) =
   Cp_search_fabric.strategy_of_string (Some operation.search_strategy)
 
-let operation_stage_key operation =
+let operation_stage_key (operation : operation_record) =
   Cp_search_fabric.normalized_stage operation.stage
 
 let validate_workload_profile raw =
@@ -414,6 +450,45 @@ let operation_status_of_string = function
   | "cancelled" -> Some Cancelled
   | "failed" -> Some Failed
   | _ -> None
+
+let string_of_intent_state = function
+  | Adopted -> "adopted"
+  | Active_intent -> "active"
+  | Blocked_intent -> "blocked"
+  | Suspended_intent -> "suspended"
+  | Handoff_ready -> "handoff_ready"
+  | Completed_intent -> "completed"
+  | Dropped_intent -> "dropped"
+
+let intent_state_of_string = function
+  | "adopted" -> Some Adopted
+  | "active" -> Some Active_intent
+  | "blocked" -> Some Blocked_intent
+  | "suspended" -> Some Suspended_intent
+  | "handoff_ready" -> Some Handoff_ready
+  | "completed" -> Some Completed_intent
+  | "dropped" -> Some Dropped_intent
+  | _ -> None
+
+let intent_focus_to_json (focus : intent_focus) =
+  `Assoc
+    [
+      ("stage", match focus.stage with Some value -> `String value | None -> `Null);
+      ("artifact_scope", json_list_of_strings focus.artifact_scope);
+      ("unit_id", match focus.unit_id with Some value -> `String value | None -> `Null);
+      ( "verification_state",
+        match focus.verification_state with
+        | Some value -> `String value
+        | None -> `Null );
+    ]
+
+let intent_focus_of_json json =
+  {
+    stage = get_string_opt json "stage";
+    artifact_scope = get_string_list json "artifact_scope";
+    unit_id = get_string_opt json "unit_id";
+    verification_state = get_string_opt json "verification_state";
+  }
 
 let kind_order = function
   | Company -> 0
@@ -611,6 +686,7 @@ let operation_to_json (operation : operation_record) =
     [
       ("operation_id", `String operation.operation_id);
       ("objective", `String operation.objective);
+      ("intent_id", match operation.intent_id with Some value -> `String value | None -> `Null);
       ("assigned_unit_id", `String operation.assigned_unit_id);
       ("autonomy_level", `String operation.autonomy_level);
       ("policy_class", `String operation.policy_class);
@@ -685,6 +761,7 @@ let operation_of_json json =
           {
             operation_id;
             objective;
+            intent_id = get_string_opt json "intent_id";
             assigned_unit_id;
             autonomy_level = get_string_default json "autonomy_level" "L4_Autonomous";
             policy_class = get_string_default json "policy_class" "strict";
@@ -711,6 +788,68 @@ let operation_of_json json =
             created_at = get_string_default json "created_at" (Types.now_iso ());
             updated_at = get_string_default json "updated_at" (Types.now_iso ());
           }
+
+let intent_to_json (intent : intent_record) =
+  `Assoc
+    [
+      ("intent_id", `String intent.intent_id);
+      ("title", `String intent.title);
+      ("owner", `String intent.owner);
+      ("workload_profile", `String intent.workload_profile);
+      ( "success_metric",
+        match intent.success_metric with Some value -> value | None -> `Null );
+      ("invariants", json_list_of_strings intent.invariants);
+      ("artifact_priors", json_list_of_strings intent.artifact_priors);
+      ("state", `String (string_of_intent_state intent.state));
+      ("current_focus", intent_focus_to_json intent.current_focus);
+      ("checkpoint_ref", match intent.checkpoint_ref with Some value -> `String value | None -> `Null);
+      ("source", `String intent.source);
+      ("created_at", `String intent.created_at);
+      ("updated_at", `String intent.updated_at);
+    ]
+
+let intent_of_json json =
+  match
+    get_string_opt json "intent_id",
+    get_string_opt json "title",
+    get_string_opt json "owner",
+    get_string_opt json "workload_profile",
+    get_string_opt json "state"
+  with
+  | Some intent_id, Some title, Some owner, Some workload_profile, Some state_raw -> (
+      match intent_state_of_string state_raw with
+      | Some state ->
+          Some
+            {
+              intent_id;
+              title;
+              owner;
+              workload_profile =
+                Cp_search_fabric.normalized_workload_profile workload_profile;
+              success_metric =
+                (match U.member "success_metric" json with
+                | `Null -> None
+                | value -> Some value);
+              invariants = get_string_list json "invariants";
+              artifact_priors = get_string_list json "artifact_priors";
+              state;
+              current_focus =
+                (match U.member "current_focus" json with
+                | `Assoc _ as value -> intent_focus_of_json value
+                | _ ->
+                    {
+                      stage = None;
+                      artifact_scope = [];
+                      unit_id = None;
+                      verification_state = None;
+                    });
+              checkpoint_ref = get_string_opt json "checkpoint_ref";
+              source = get_string_default json "source" "managed";
+              created_at = get_string_default json "created_at" (Types.now_iso ());
+              updated_at = get_string_default json "updated_at" (Types.now_iso ());
+            }
+      | None -> None)
+  | _ -> None
 
 let event_to_json (event : event_record) =
   `Assoc
@@ -964,6 +1103,29 @@ let write_policy_decisions config decisions =
         ("decisions", `List (List.map policy_decision_to_json decisions));
       ])
 
+let read_intents config =
+  ensure_dirs config;
+  if not (Room_utils.path_exists config (intents_path config)) then
+    []
+  else
+    match Room_utils.read_json_opt config (intents_path config) with
+    | Some (`Assoc fields) -> (
+        match List.assoc_opt "intents" fields with
+        | Some (`List rows) -> List.filter_map intent_of_json rows
+        | _ -> [])
+    | Some (`List rows) -> List.filter_map intent_of_json rows
+    | _ -> []
+
+let write_intents config intents =
+  ensure_dirs config;
+  Room_utils.write_json config (intents_path config)
+    (`Assoc
+      [
+        ("version", `String "cp-v2");
+        ("updated_at", `String (Types.now_iso ()));
+        ("intents", `List (List.map intent_to_json intents));
+      ])
+
 let read_events config =
   ensure_dirs config;
   if not (Room_utils.path_exists config (events_path config)) then
@@ -1006,6 +1168,9 @@ let next_event_id prefix =
 
 let next_operation_id () =
   next_event_id "op"
+
+let next_intent_id () =
+  next_event_id "intent"
 
 let next_trace_id () =
   next_event_id "trace"
@@ -1476,6 +1641,7 @@ let projected_team_session_operations config units managed_operations =
          {
            operation_id = "detachment-" ^ session.session_id;
            objective = session.goal;
+           intent_id = None;
            assigned_unit_id;
            autonomy_level =
              Team_session_types.orchestration_mode_to_string session.orchestration_mode;
@@ -1540,6 +1706,7 @@ let projected_swarm_operations config units managed_operations =
           {
             operation_id;
             objective = Printf.sprintf "Swarm %s (%s) generation %d" swarm_name behavior generation;
+            intent_id = None;
             assigned_unit_id;
             autonomy_level = "L5_Independent";
             policy_class = "swarm";
@@ -1849,6 +2016,7 @@ type snapshot_state = {
   managed_units : unit_record list;
   units : unit_record list;
   source : string;
+  intents : intent_record list;
   operations : operation_record list;
   detachments : detachment_record list;
   decisions : policy_decision_record list;
@@ -1860,6 +2028,7 @@ type snapshot_state = {
 
 let build_snapshot_state config =
   let agents, managed_units, units, source = topology_units config in
+  let intents = read_intents config in
   let operations = all_operations config units in
   let detachments = all_detachments config units operations in
   let decisions = all_policy_decisions config in
@@ -1873,6 +2042,7 @@ let build_snapshot_state config =
     managed_units;
     units;
     source;
+    intents;
     operations;
     detachments;
     decisions;
@@ -2747,6 +2917,27 @@ let detachments_summary_json_from_state (state : snapshot_state) =
           ] );
     ]
 
+let intents_summary_json_from_state (state : snapshot_state) =
+  let count_state target =
+    state.intents
+    |> List.filter (fun (intent : intent_record) -> intent.state = target)
+    |> List.length
+  in
+  `Assoc
+    [
+      ("version", `String "cp-v2");
+      ("generated_at", `String (Types.now_iso ()));
+      ( "summary",
+        `Assoc
+          [
+            ("total", `Int (List.length state.intents));
+            ("active", `Int (count_state Active_intent));
+            ("blocked", `Int (count_state Blocked_intent));
+            ("handoff_ready", `Int (count_state Handoff_ready));
+          ] );
+      ("intents", `List (List.map intent_to_json state.intents));
+    ]
+
 let summary_json config =
   let state = build_snapshot_state config in
   let alerts =
@@ -2762,6 +2953,7 @@ let summary_json config =
       ("version", `String "cp-v2");
       ("generated_at", `String (Types.now_iso ()));
       ("topology", topology_summary_json_from_state state);
+      ("intents", intents_summary_json_from_state state);
       ("operations", operations_summary_json_from_state state);
       ("detachments", detachments_summary_json_from_state state);
       ("alerts", `Assoc [ ("summary", alerts) ]);
@@ -4090,6 +4282,169 @@ let replace_detachment detachments (updated : detachment_record) =
          not (String.equal detachment.detachment_id updated.detachment_id))
        detachments
 
+let lookup_intent intents intent_id =
+  List.find_opt
+    (fun (intent : intent_record) -> String.equal intent.intent_id intent_id)
+    intents
+
+let replace_intent intents (updated : intent_record) =
+  updated
+  :: List.filter
+       (fun (intent : intent_record) ->
+         not (String.equal intent.intent_id updated.intent_id))
+       intents
+
+let empty_intent_focus =
+  {
+    stage = None;
+    artifact_scope = [];
+    unit_id = None;
+    verification_state = None;
+  }
+
+let verification_state_of_operation (operation : operation_record) =
+  match operation.status, operation.stage with
+  | Failed, _ -> Some "failed"
+  | Cancelled, _ -> Some "cancelled"
+  | Completed, Some "review" -> Some "reviewed"
+  | Completed, Some "verify" -> Some "verified"
+  | Completed, Some "implement" -> Some "implemented"
+  | _, Some "review" -> Some "reviewing"
+  | _, Some "verify" -> Some "verifying"
+  | _, Some "implement" -> Some "implementing"
+  | _ -> None
+
+let focus_of_operation (operation : operation_record) =
+  {
+    stage = operation.stage;
+    artifact_scope = operation.artifact_scope;
+    unit_id = Some operation.assigned_unit_id;
+    verification_state = verification_state_of_operation operation;
+  }
+
+let touch_intent_from_operation config ~actor (operation : operation_record)
+    ~state =
+  match operation.intent_id with
+  | None -> ()
+  | Some intent_id -> (
+      match lookup_intent (read_intents config) intent_id with
+      | None -> ()
+      | Some intent ->
+          let linked_operations =
+            let operations : operation_record list = read_operations config in
+            let filtered =
+              List.filter
+                (fun (linked_operation : operation_record) ->
+                  match linked_operation.intent_id with
+                  | Some current -> String.equal current intent_id
+                  | None -> false)
+                operations
+            in
+            List.sort
+              (fun (left : operation_record) (right : operation_record) ->
+                String.compare right.updated_at left.updated_at)
+              filtered
+          in
+          let aggregated_state =
+            if
+              List.exists
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Failed)
+                linked_operations
+            then
+              Blocked_intent
+            else if
+              List.exists
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Active
+                  || linked_operation.status = Planned)
+                linked_operations
+            then
+              Active_intent
+            else if
+              List.exists
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Paused)
+                linked_operations
+            then
+              Suspended_intent
+            else if
+              linked_operations <> []
+              &&
+              List.for_all
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Completed)
+                linked_operations
+            then
+              Completed_intent
+            else if
+              linked_operations <> []
+              &&
+              List.for_all
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Cancelled)
+                linked_operations
+            then
+              Dropped_intent
+            else
+              state
+          in
+          let updated =
+            {
+              intent with
+              state = aggregated_state;
+              current_focus = focus_of_operation operation;
+              checkpoint_ref =
+                option_first_some operation.checkpoint_ref intent.checkpoint_ref;
+              updated_at = Types.now_iso ();
+            }
+          in
+          write_intents config (replace_intent (read_intents config) updated);
+          append_event config
+            {
+              event_id = next_event_id "evt";
+              trace_id = next_trace_id ();
+              event_type = "intent_synced_from_operation";
+              operation_id = Some operation.operation_id;
+              unit_id = None;
+              actor = Some actor;
+              source = "control_plane";
+              ts = Types.now_iso ();
+              detail =
+                `Assoc
+                  [
+                    ("intent_id", `String updated.intent_id);
+                    ("intent_state", `String (string_of_intent_state updated.state));
+                  ];
+            })
+
+let with_intent config intent_id f =
+  let intents = read_intents config in
+  match lookup_intent intents intent_id with
+  | None -> Error (Printf.sprintf "intent not found: %s" intent_id)
+  | Some intent -> f intents intent
+
+let stage_order_for_workload = function
+  | "coding_task" -> [ "decompose"; "inspect"; "implement"; "verify"; "review" ]
+  | "research_pipeline" -> [ "normalize"; "verify"; "curate"; "rank"; "audit" ]
+  | _ -> []
+
+let next_stage_for workload_profile stage =
+  let order = stage_order_for_workload workload_profile in
+  match stage with
+  | None ->
+      List.nth_opt order 0
+  | Some current -> (
+      match List.find_opt (fun stage_name -> String.equal stage_name current) order with
+      | None -> None
+      | Some stage_name ->
+          let rec loop = function
+            | [] | [ _ ] -> None
+            | head :: next :: _ when String.equal head stage_name -> Some next
+            | _ :: rest -> loop rest
+          in
+          loop order)
+
 let append_cp_event config ~trace_id ~event_type ?operation_id ?unit_id ~actor detail =
   append_event config
     {
@@ -4459,12 +4814,136 @@ let search_candidates_for_operation config units operations
                    current_assignment = String.equal unit.unit_id operation.assigned_unit_id;
                  })
 
+let candidate_matches_scope candidate scope =
+  let haystack =
+    String.concat " "
+      [ candidate.Cp_search_fabric.unit_id; candidate.label; candidate.routing_reason ]
+    |> String.lowercase_ascii
+  in
+  let terms =
+    scope
+    |> List.concat_map (fun raw ->
+           raw
+           |> String.split_on_char '/'
+           |> List.concat_map (String.split_on_char '.'))
+    |> List.map String.trim
+    |> List.filter (fun value -> String.length value >= 3)
+  in
+  List.exists
+    (fun term ->
+      let term = String.lowercase_ascii term in
+      let len_term = String.length term in
+      let len_haystack = String.length haystack in
+      let rec loop idx =
+        if idx > len_haystack - len_term then false
+        else if String.sub haystack idx len_term = term then true
+        else loop (idx + 1)
+      in
+      len_haystack >= len_term && loop 0)
+    terms
+
+let apply_intent_forecast_bias config (operations : operation_record list)
+    (operation : operation_record)
+    (candidates : Cp_search_fabric.scored_candidate list) =
+  match operation.intent_id with
+  | None -> candidates
+  | Some intent_id -> (
+      match lookup_intent (read_intents config) intent_id with
+      | None -> candidates
+      | Some intent ->
+          let unresolved_for_operation (current_operation : operation_record) =
+            current_operation.depends_on_operation_ids
+            |> List.filter_map (fun dep_id ->
+                   match operation_by_id operations dep_id with
+                   | Some upstream when upstream.status = Completed -> None
+                   | Some upstream when Option.is_some upstream.checkpoint_ref -> None
+                   | Some upstream -> Some upstream.operation_id
+                   | None -> Some dep_id)
+          in
+          let linked : operation_record list =
+            let filtered =
+              List.filter
+                (fun (linked_operation : operation_record) ->
+                  match linked_operation.intent_id with
+                  | Some current -> String.equal current intent_id
+                  | None -> false)
+                operations
+            in
+            List.sort
+              (fun (left : operation_record) (right : operation_record) ->
+                String.compare right.updated_at left.updated_at)
+              filtered
+          in
+          let latest_operation = List.nth_opt linked 0 in
+          let recommended_stage =
+            match latest_operation with
+            | Some latest when latest.status = Completed ->
+                next_stage_for intent.workload_profile latest.stage
+            | Some latest -> latest.stage
+            | None ->
+                option_first_some (next_stage_for intent.workload_profile intent.current_focus.stage)
+                  intent.current_focus.stage
+          in
+          let recommended_scope =
+            match latest_operation with
+            | Some latest when latest.artifact_scope <> [] -> latest.artifact_scope
+            | _ ->
+                if intent.current_focus.artifact_scope <> [] then
+                  intent.current_focus.artifact_scope
+                else
+                  intent.artifact_priors
+          in
+          let verification_ready =
+            match normalize_stage operation.stage with
+            | Some ("verify" | "review") -> unresolved_for_operation operation = []
+            | _ -> true
+          in
+          candidates
+          |> List.map (fun (candidate : Cp_search_fabric.scored_candidate) ->
+                 let intent_successor =
+                   (if recommended_stage = operation.stage then 10.0 else 0.0)
+                   +. if candidate_matches_scope candidate recommended_scope then 5.0 else 0.0
+                 in
+                 let verification_readiness =
+                   match normalize_stage operation.stage with
+                   | Some "verify" ->
+                       if verification_ready then 10.0 else 0.0
+                   | Some "review" ->
+                       if verification_ready then 10.0 else 0.0
+                   | _ -> 0.0
+                 in
+                 let breakdown =
+                   {
+                     candidate.breakdown with
+                     intent_successor;
+                     verification_readiness;
+                     total =
+                       candidate.breakdown.total
+                       +. intent_successor +. verification_readiness;
+                   }
+                 in
+                 {
+                   candidate with
+                   breakdown;
+                   routing_reason =
+                     Printf.sprintf "%s intent=%.1f verify=%.1f"
+                       candidate.routing_reason intent_successor
+                       verification_readiness;
+                 })
+          |> List.sort (fun left right ->
+                 let left : Cp_search_fabric.scored_candidate = left in
+                 let right : Cp_search_fabric.scored_candidate = right in
+                 compare
+                   (right.breakdown.total, right.breakdown.capability_match, right.label)
+                   (left.breakdown.total, left.breakdown.capability_match, left.label)))
+
 let operation_search_candidates config units operations
     (operation : operation_record) =
   let stats = read_search_stats config in
   Cp_search_fabric.score_candidates ~store:stats
     ~operation:(search_operation_descriptor operation)
     ~candidates:(search_candidates_for_operation config units operations operation)
+  |> apply_intent_forecast_bias config operations operation
 
 let take_list n xs =
   let rec loop acc remaining count =
@@ -4591,10 +5070,24 @@ let operation_card_json config units operations (operation : operation_record) =
     |> Option.map (fun (unit : unit_record) -> unit.label)
     |> Option.value ~default:operation.assigned_unit_id
   in
+  let intent_json =
+    match operation.intent_id with
+    | Some intent_id -> (
+        match lookup_intent (read_intents config) intent_id with
+        | Some intent -> intent_to_json intent
+        | None ->
+            `Assoc
+              [
+                ("status", `String "error");
+                ("message", `String (Printf.sprintf "intent not found: %s" intent_id));
+              ])
+    | None -> `Null
+  in
   `Assoc
     [
       ("operation", operation_to_json operation);
       ("assigned_unit_label", `String unit_label);
+      ("intent", intent_json);
       ("search", operation_search_json config units operations operation);
     ]
 
@@ -4652,9 +5145,289 @@ let list_operations_json_from_state ?operation_id (state : snapshot_state) =
 let list_operations_json ?operation_id config =
   list_operations_json_from_state ?operation_id (build_snapshot_state config)
 
+let linked_operations_for_intent config intent_id =
+  let operations : operation_record list = read_operations config in
+  let filtered =
+    List.filter
+      (fun (operation : operation_record) ->
+        match operation.intent_id with
+        | Some current -> String.equal current intent_id
+        | None -> false)
+      operations
+  in
+  List.sort
+    (fun (left : operation_record) (right : operation_record) ->
+      String.compare right.updated_at left.updated_at)
+    filtered
+
+let intent_focus_json focus = intent_focus_to_json focus
+
+let unresolved_dependencies operations (operation : operation_record) =
+  operation.depends_on_operation_ids
+  |> List.filter_map (fun dep_id ->
+         match operation_by_id operations dep_id with
+         | Some upstream when upstream.status = Completed -> None
+         | Some upstream when Option.is_some upstream.checkpoint_ref -> None
+         | Some upstream -> Some upstream.operation_id
+         | None -> Some dep_id)
+
+let intent_forecast_json config intent_id ?(limit = 3) () =
+  with_intent config intent_id (fun _ intent ->
+      let operations = linked_operations_for_intent config intent_id in
+      let latest_operation = List.nth_opt operations 0 in
+      let base_focus =
+        match latest_operation with
+        | Some operation -> focus_of_operation operation
+        | None ->
+            {
+              intent.current_focus with
+              artifact_scope =
+                if intent.current_focus.artifact_scope <> [] then
+                  intent.current_focus.artifact_scope
+                else
+                  intent.artifact_priors;
+            }
+      in
+      let risk_flags =
+        let flags = ref [] in
+        (match latest_operation with
+        | None -> flags := "no_linked_operations" :: !flags
+        | Some operation ->
+            if operation.status = Failed then
+              flags := "failed_operation_present" :: !flags;
+            if
+              String.equal intent.workload_profile "coding_task"
+              && base_focus.artifact_scope = []
+              &&
+              match base_focus.stage with
+              | Some "decompose" | None -> false
+              | _ -> true
+            then
+              flags := "missing_artifact_scope" :: !flags;
+            if
+              match normalize_stage operation.stage with
+              | Some ("verify" | "review") ->
+                  unresolved_dependencies operations operation <> []
+              | _ -> false
+            then
+              flags := "verification_gap" :: !flags);
+        List.rev !flags
+      in
+      let blocked_by =
+        match latest_operation with
+        | Some operation -> unresolved_dependencies operations operation
+        | None -> []
+      in
+      let candidate_focuses =
+        let artifact_scope =
+          if base_focus.artifact_scope <> [] then base_focus.artifact_scope
+          else intent.artifact_priors
+        in
+        let make_candidate ~stage ~score ~reason =
+          let verification_state =
+            match stage with
+            | Some "verify" -> Some "needs_implement_checkpoint"
+            | Some "review" -> Some "needs_verify_checkpoint"
+            | Some "implement" -> Some "code_change_pending"
+            | _ -> base_focus.verification_state
+          in
+          `Assoc
+            [
+              ("stage", match stage with Some value -> `String value | None -> `Null);
+              ("artifact_scope", json_list_of_strings artifact_scope);
+              ("unit_id", match base_focus.unit_id with Some value -> `String value | None -> `Null);
+              ( "verification_state",
+                match verification_state with Some value -> `String value | None -> `Null );
+              ("successor_score", `Float score);
+              ("reason", `String reason);
+            ]
+        in
+        match latest_operation with
+        | None ->
+            [ make_candidate ~stage:(next_stage_for intent.workload_profile None)
+                ~score:0.9 ~reason:"bootstrap from adopted intent" ]
+        | Some operation -> (
+            let next_stage = next_stage_for intent.workload_profile operation.stage in
+            match operation.status with
+            | Completed ->
+                [
+                  make_candidate ~stage:next_stage ~score:0.92
+                    ~reason:"advance to successor stage after completed operation";
+                  make_candidate ~stage:operation.stage ~score:0.35
+                    ~reason:"keep recent focus warm for follow-up";
+                ]
+            | Active | Planned | Paused ->
+                [
+                  make_candidate ~stage:operation.stage ~score:0.78
+                    ~reason:"continue active focus";
+                  make_candidate ~stage:next_stage ~score:0.58
+                    ~reason:"prepare successor stage in parallel";
+                ]
+            | Failed | Cancelled ->
+                [
+                  make_candidate ~stage:operation.stage ~score:0.25
+                    ~reason:"recover failed focus before advancing";
+                ])
+      in
+      let candidate_focuses =
+        candidate_focuses
+        |> List.filteri (fun idx _ -> idx < limit)
+      in
+      let recommended_focus =
+        match candidate_focuses with
+        | (`Assoc _ as focus) :: _ -> focus
+        | _ -> intent_focus_json base_focus
+      in
+      Ok
+        (`Assoc
+          [
+            ("intent", intent_to_json intent);
+            ("current_focus", intent_focus_json base_focus);
+            ("candidate_next_states", `List candidate_focuses);
+            ("risk_flags", json_list_of_strings risk_flags);
+            ("blocked_by", json_list_of_strings blocked_by);
+            ("recommended_focus", recommended_focus);
+          ]))
+
+let list_intents_json ?intent_id config =
+  let intents = read_intents config in
+  let rows =
+    intents
+    |> List.filter (fun (intent : intent_record) ->
+           match intent_id with
+           | Some value -> String.equal intent.intent_id value
+           | None -> true)
+  in
+  let state_count state =
+    rows
+    |> List.filter (fun (intent : intent_record) -> intent.state = state)
+    |> List.length
+  in
+  `Assoc
+    [
+      ("version", `String "cp-v2");
+      ("generated_at", `String (Types.now_iso ()));
+      ( "summary",
+        `Assoc
+          [
+            ("total", `Int (List.length rows));
+            ("active", `Int (state_count Active_intent));
+            ("blocked", `Int (state_count Blocked_intent));
+            ("handoff_ready", `Int (state_count Handoff_ready));
+          ] );
+      ("intents", `List (List.map intent_to_json rows));
+    ]
+
+let create_intent_json config ~(actor : string) json =
+  let title =
+    match get_string_opt json "title" with
+    | Some value -> value
+    | None -> invalid_arg "title is required"
+  in
+  let workload_profile_raw =
+    get_string_default json "workload_profile" "coding_task"
+  in
+  let* workload_profile = validate_workload_profile workload_profile_raw in
+  let current_focus =
+    match U.member "current_focus" json with
+    | `Assoc _ as value -> intent_focus_of_json value
+    | _ -> empty_intent_focus
+  in
+  let intent =
+    {
+      intent_id = next_intent_id ();
+      title;
+      owner = get_string_default json "owner" actor;
+      workload_profile;
+      success_metric =
+        (match U.member "success_metric" json with
+        | `Null -> None
+        | value -> Some value);
+      invariants = get_string_list json "invariants";
+      artifact_priors = get_string_list json "artifact_priors";
+      state =
+        (match get_string_opt json "state" with
+        | Some value -> (
+            match intent_state_of_string value with
+            | Some state -> state
+            | None -> Adopted)
+        | None -> Adopted);
+      current_focus;
+      checkpoint_ref = get_string_opt json "checkpoint_ref";
+      source = "managed";
+      created_at = Types.now_iso ();
+      updated_at = Types.now_iso ();
+    }
+  in
+  let intents = read_intents config in
+  write_intents config (intent :: intents);
+  append_cp_event config ~trace_id:(next_trace_id ()) ~event_type:"intent_created"
+    ~actor (`Assoc [ ("intent_id", `String intent.intent_id) ]);
+  Ok intent
+
+let update_intent_json config ~(actor : string) json =
+  let intent_id =
+    match get_string_opt json "intent_id" with
+    | Some value -> value
+    | None -> invalid_arg "intent_id is required"
+  in
+  with_intent config intent_id (fun intents intent ->
+      let workload_profile =
+        match get_string_opt json "workload_profile" with
+        | Some value -> validate_workload_profile value
+        | None -> Ok intent.workload_profile
+      in
+      let* workload_profile = workload_profile in
+      let current_focus =
+        match U.member "current_focus" json with
+        | `Assoc _ as value -> intent_focus_of_json value
+        | _ -> intent.current_focus
+      in
+      let state =
+        match get_string_opt json "state" with
+        | Some value -> (
+            match intent_state_of_string value with
+            | Some state -> state
+            | None ->
+                invalid_arg
+                  (Printf.sprintf "unsupported intent state: %s" value))
+        | None -> intent.state
+      in
+      let updated =
+        {
+          intent with
+          title = get_string_default json "title" intent.title;
+          owner = get_string_default json "owner" intent.owner;
+          workload_profile;
+          success_metric =
+            (match U.member "success_metric" json with
+            | `Null -> intent.success_metric
+            | value -> Some value);
+          invariants =
+            (match U.member "invariants" json with
+            | `List _ -> get_string_list json "invariants"
+            | _ -> intent.invariants);
+          artifact_priors =
+            (match U.member "artifact_priors" json with
+            | `List _ -> get_string_list json "artifact_priors"
+            | _ -> intent.artifact_priors);
+          state;
+          current_focus;
+          checkpoint_ref =
+            option_first_some (get_string_opt json "checkpoint_ref")
+              intent.checkpoint_ref;
+          updated_at = Types.now_iso ();
+        }
+      in
+      write_intents config (replace_intent intents updated);
+      append_cp_event config ~trace_id:(next_trace_id ()) ~event_type:"intent_updated"
+        ~actor (`Assoc [ ("intent_id", `String updated.intent_id) ]);
+      Ok updated)
+
 let snapshot_json config =
   let state = build_snapshot_state config in
   let topology = topology_json_from_state state in
+  let intents = intents_summary_json_from_state state in
   let operations = list_operations_json_from_state state in
   let detachments = list_detachments_json_from_state state in
   let alerts = list_alerts_json_from_state config state in
@@ -4666,6 +5439,7 @@ let snapshot_json config =
       ("version", `String "cp-v2");
       ("generated_at", `String (Types.now_iso ()));
       ("topology", topology);
+      ("intents", intents);
       ("operations", operations);
       ("detachments", detachments);
       ("alerts", alerts);
@@ -4753,6 +5527,7 @@ let apply_operation_assignment config ~(actor : string) (operation : operation_r
       write_operations config (replace_operation operations updated);
       let _, _, units, _ = topology_units config in
       let _ = sync_managed_detachments config units updated in
+      touch_intent_from_operation config ~actor updated ~state:Active_intent;
       append_cp_event config ~trace_id:updated.trace_id ~event_type
         ~operation_id:updated.operation_id ~unit_id:updated.assigned_unit_id ~actor
         (`Assoc
@@ -4793,6 +5568,15 @@ let update_operation_status config ~(actor : string) ~operation_id ~status ~note
       write_operations config (replace_operation operations updated);
       let _, _, units, _ = topology_units config in
       let _ = sync_managed_detachments config units updated in
+      let intent_state =
+        match status with
+        | Planned | Active -> Active_intent
+        | Paused -> Suspended_intent
+        | Completed -> Completed_intent
+        | Cancelled -> Dropped_intent
+        | Failed -> Blocked_intent
+      in
+      touch_intent_from_operation config ~actor updated ~state:intent_state;
       append_cp_event config ~trace_id:updated.trace_id ~event_type
         ~operation_id:updated.operation_id ~unit_id:updated.assigned_unit_id ~actor
         (`Assoc [ ("status", `String (string_of_operation_status status)) ]);
@@ -4889,12 +5673,31 @@ let start_operation config ~(actor : string) json =
         get_string_default json "search_strategy" (room_search_strategy_default config)
       in
       let depends_on_operation_ids = get_string_list json "depends_on_operation_ids" in
-      let artifact_scope = get_string_list json "artifact_scope" in
+      let requested_intent_id = get_string_opt json "intent_id" in
+      let raw_artifact_scope = get_string_list json "artifact_scope" in
       let* workload_profile = validate_workload_profile workload_profile_raw in
       let* stage =
         validate_stage_for_workload ~workload_profile (get_string_opt json "stage")
       in
       let* search_strategy = validate_search_strategy search_strategy_raw in
+      let* intent_binding =
+        match requested_intent_id with
+        | None -> Ok None
+        | Some intent_id ->
+            with_intent config intent_id (fun _ intent ->
+                if not (String.equal intent.workload_profile workload_profile) then
+                  Error
+                    (Printf.sprintf
+                       "intent workload_profile mismatch: intent=%s operation=%s"
+                       intent.workload_profile workload_profile)
+                else
+                  Ok (Some intent))
+      in
+      let artifact_scope =
+        match intent_binding with
+        | Some intent when raw_artifact_scope = [] -> intent.artifact_priors
+        | _ -> raw_artifact_scope
+      in
       let* () =
         match workload_profile, stage with
         | "coding_task", Some ("verify" | "review" as stage_name) ->
@@ -4942,6 +5745,7 @@ let start_operation config ~(actor : string) json =
         {
           operation_id = next_operation_id ();
           objective;
+          intent_id = Option.map (fun (intent : intent_record) -> intent.intent_id) intent_binding;
           assigned_unit_id;
           autonomy_level = get_string_default json "autonomy_level" "L4_Autonomous";
           policy_class = get_string_default json "policy_class" "strict";
@@ -4979,11 +5783,13 @@ let start_operation config ~(actor : string) json =
         | Cp_search_fabric.Legacy -> sync_managed_detachments config units operation
         | Cp_search_fabric.Best_first_v1 -> []
       in
+      touch_intent_from_operation config ~actor operation ~state:Active_intent;
       append_cp_event config ~trace_id:operation.trace_id ~event_type:"operation_started"
         ~operation_id:operation.operation_id ~unit_id:operation.assigned_unit_id ~actor
         (`Assoc
           [
             ("objective", `String operation.objective);
+            ("intent_id", match operation.intent_id with Some value -> `String value | None -> `Null);
             ("autonomy_level", `String operation.autonomy_level);
             ("policy_class", `String operation.policy_class);
             ("workload_profile", `String (operation_workload_profile operation));
@@ -5030,6 +5836,7 @@ let checkpoint_operation config ~(actor : string) json =
       write_operations config next_operations;
       let _, _, units, _ = topology_units config in
       let _ = sync_managed_detachments config units updated in
+      touch_intent_from_operation config ~actor updated ~state:Active_intent;
       if operation_search_strategy updated = Cp_search_fabric.Best_first_v1 then
         update_search_stats_for_operation config updated ~outcome:`Success;
       append_cp_event config ~trace_id:updated.trace_id ~event_type:"operation_checkpointed"

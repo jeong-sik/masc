@@ -675,7 +675,7 @@ export function Ops() {
             `}
           </section>
 
-          <section class="card ops-panel">
+          <section class="card ops-panel ops-pending-section">
             <div class="card-title-row">
               <div class="card-title">승인 대기</div>
               <${PanelSemanticDetails} panelId="intervene.pending_confirmations" compact=${true} />
@@ -885,7 +885,7 @@ export function Ops() {
         </div>
 
         <div class="ops-column">
-          <section class="card ops-panel ops-lane-panel">
+          <section class="card ops-panel ops-lane-panel ops-keeper-section">
             <div class="card-title-row">
               <div class="card-title">Keeper 개입</div>
               <${PanelSemanticDetails} panelId="intervene.keeper_queue" compact=${true} />

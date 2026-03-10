@@ -269,7 +269,7 @@ module Request = struct
     let stop () =
       if not !stopped then begin
         stopped := true;
-        (try Httpun.Body.Reader.close body with exn -> ignore (Printexc.to_string exn))
+        (try Httpun.Body.Reader.close body with exn -> ignore exn)
       end
     in
     (match content_length with

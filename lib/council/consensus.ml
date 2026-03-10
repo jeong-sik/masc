@@ -111,9 +111,9 @@ let write_json path json =
   let oc = open_out tmp_path in
   let closed = ref false in
   Fun.protect ~finally:(fun () ->
-    if not !closed then (try close_out oc with _ -> ());
+    if not !closed then (try close_out oc with Sys_error _ -> ());
     if Sys.file_exists tmp_path then
-      try Sys.remove tmp_path with _ -> ()
+      try Sys.remove tmp_path with Sys_error _ -> ()
   ) (fun () ->
     output_string oc content;
     flush oc;
@@ -160,7 +160,7 @@ let vote_of_yojson (json : Yojson.Safe.t) : (vote, string) result =
     | Ok decision ->
         let reason = json |> member "reason" |> to_string in
         let timestamp = json |> member "timestamp" |> to_float in
-        let weight = (try json |> member "weight" |> to_float with _ -> 1.0) in
+        let weight = (try json |> member "weight" |> to_float with Yojson.Safe.Util.Type_error _ -> 1.0) in
         let archetype = match json |> member "archetype" with
           | `String s -> Some s
           | _ -> None
@@ -223,7 +223,7 @@ let save_session (s : session) =
     ensure_dir dir;
     let path = session_path base s.id in
     (try write_json path (full_session_to_yojson s)
-     with _ -> ())  (* Best-effort: don't fail mutation on I/O error *)
+     with Sys_error _ -> ())  (* Best-effort: don't fail mutation on I/O error *)
 
 (** Load all sessions from disk into memory *)
 let load_sessions base =
@@ -243,7 +243,7 @@ let load_sessions base =
                    match full_session_of_yojson json with
                    | Ok session -> Hashtbl.replace sessions session.id session
                    | Error _ -> ()
-                 with _ -> ())
+                 with Yojson.Json_error _ | Failure _ -> ())
         ) files
 
 (** Initialize consensus with file persistence *)

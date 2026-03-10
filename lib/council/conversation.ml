@@ -259,9 +259,9 @@ let write_json path json =
   let oc = open_out tmp_path in
   let closed = ref false in
   Fun.protect ~finally:(fun () ->
-    if not !closed then (try close_out oc with _ -> ());
+    if not !closed then (try close_out oc with Sys_error _ -> ());
     if Sys.file_exists tmp_path then
-      try Sys.remove tmp_path with _ -> ()
+      try Sys.remove tmp_path with Sys_error _ -> ()
   ) (fun () ->
     output_string oc content;
     flush oc;

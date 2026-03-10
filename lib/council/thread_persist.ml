@@ -451,7 +451,7 @@ let search_by_topic ~(query : string) ?(room : string option) ?(limit = 10) ()
               first |> member "data" |> to_list
               |> List.filter_map (fun row ->
                   try Some (row |> member "row" |> to_list |> List.hd |> to_string)
-                  with _ -> None)
+                  with Yojson.Safe.Util.Type_error _ | Failure _ -> None)
         in
         Ok ids
       with e ->

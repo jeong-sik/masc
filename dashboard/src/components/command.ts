@@ -68,6 +68,14 @@ import {
 import { agents, serverStatus, tasks } from '../store'
 import { navigate, route } from '../router'
 import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
+import {
+  commandSurfaceForContext,
+  workflowActionLabel,
+  workflowCommandSurfaceLabel,
+  workflowContextForRoute,
+  workflowTargetLabel,
+  type DashboardWorkflowContext,
+} from '../workflow-context'
 
 function prettyJson(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -255,13 +263,26 @@ function isCommandSurface(value: string | undefined): value is CommandPlaneSurfa
   return !!value && COMMAND_SURFACES.includes(value as CommandPlaneSurface)
 }
 
+function inheritedMissionRouteParams(): Record<string, string> {
+  const params = route.value.params
+  if (params.source !== 'mission') return {}
+  return {
+    source: 'mission',
+    ...(params.action_type ? { action_type: params.action_type } : {}),
+    ...(params.target_type ? { target_type: params.target_type } : {}),
+    ...(params.target_id ? { target_id: params.target_id } : {}),
+    ...(params.focus_kind ? { focus_kind: params.focus_kind } : {}),
+  }
+}
+
 function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
-  if (surface === 'operations') return {}
+  const inherited = inheritedMissionRouteParams()
+  if (surface === 'operations') return inherited
   if (surface === 'chains') {
     const operationId = commandPlaneChainFocusOperationId.value
-    return operationId ? { surface, operation: operationId } : { surface }
+    return operationId ? { ...inherited, surface, operation: operationId } : { ...inherited, surface }
   }
-  return { surface }
+  return { ...inherited, surface }
 }
 
 function chainEventsUrl(): string {
@@ -348,6 +369,50 @@ function currentSurfaceRecommendation(surface: CommandPlaneSurface): {
         reason: '요약을 본 뒤에는 현재 작전 표면으로 내려가 실제 움직임을 확인하는 게 가장 빠릅니다.',
       }
   }
+}
+
+function summaryHighlightKey(context: DashboardWorkflowContext | null): string | null {
+  const focus = context?.focus_kind?.toLowerCase() ?? ''
+  if (!focus) return null
+  if (focus.includes('artifact_scope') || focus.includes('routing_confidence') || focus.includes('cache_contention')) {
+    return 'microarch'
+  }
+  if (focus.includes('leader_offline') || focus.includes('roster_offline')) {
+    return 'alerts'
+  }
+  if (focus.includes('stale_data')) {
+    return 'swarm'
+  }
+  return null
+}
+
+function swarmFocusKey(context: DashboardWorkflowContext | null): string | null {
+  const focus = context?.focus_kind?.toLowerCase() ?? ''
+  if (!focus) return null
+  if (focus.includes('stale_data') || focus.includes('leader_offline') || focus.includes('roster_offline') || focus.includes('managed')) {
+    return 'recommendation'
+  }
+  if (focus.includes('gap')) return 'gaps'
+  return null
+}
+
+function CommandWorkflowBanner() {
+  const context = workflowContextForRoute(route.value)
+  if (!context) return null
+  return html`
+    <section class="command-focus-banner">
+      <div class="command-focus-head">
+        <strong>${context.source_label}</strong>
+        <span class="command-chip">${workflowActionLabel(context.action_type)}</span>
+        <span class="command-chip">${workflowTargetLabel(context)}</span>
+        <span class="command-chip">${workflowCommandSurfaceLabel(route.value.params.surface ?? 'operations')}</span>
+      </div>
+      <div class="command-focus-body">${context.summary}</div>
+      ${context.payload_preview
+        ? html`<div class="command-focus-preview">${context.payload_preview}</div>`
+        : null}
+    </section>
+  `
 }
 
 function CommandEntryStrip() {
@@ -620,6 +685,8 @@ async function fire(action: () => Promise<void>) {
 function SummaryCards() {
   const summary = currentCommandPlaneSummary()
   const chainSummary = commandPlaneChainSummary.value
+  const workflowContext = workflowContextForRoute(route.value)
+  const highlightKey = summaryHighlightKey(workflowContext)
   const topology = summary?.topology.summary
   const ops = summary?.operations.summary
   const swarm = summary?.swarm_status?.overview
@@ -633,10 +700,10 @@ function SummaryCards() {
       <div class="monitor-stat-card"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
       <div class="monitor-stat-card"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
       <div class="monitor-stat-card"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
-      <div class="monitor-stat-card"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 warn</small></div>
+      <div class="monitor-stat-card ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 warn</small></div>
       <div class="monitor-stat-card"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
-      <div class="monitor-stat-card"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
-      <div class="monitor-stat-card"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 hit` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? 'n/a'}</small></div>
+      <div class="monitor-stat-card ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
+      <div class="monitor-stat-card ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 hit` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? 'n/a'}</small></div>
     </div>
   `
 }
@@ -873,6 +940,8 @@ function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
 
 function SwarmPanel() {
   const summary = currentCommandPlaneSummary()
+  const workflowContext = workflowContextForRoute(route.value)
+  const focusKey = swarmFocusKey(workflowContext)
   const swarm = summary?.swarm_status
   const proof = summary?.swarm_proof
   const lanes = swarm?.lanes.filter(lane => lane.present) ?? []
@@ -908,7 +977,7 @@ function SwarmPanel() {
               </div>
 
               <div class="command-card-stack">
-                <div class="command-guide-card highlight">
+                <div class="command-guide-card highlight ${focusKey === 'recommendation' ? 'focus' : ''}">
                   <div class="command-guide-head">
                     <strong>${recommendation?.label ?? '운영자 상태 확인'}</strong>
                     <span class="command-chip">${recommendation?.lane_id ?? '전체'}</span>
@@ -919,7 +988,7 @@ function SwarmPanel() {
 
                 <${SwarmProofPanel} proof=${proof} />
 
-                <div class="command-guide-card ${gaps.length > 0 ? 'warn' : 'ok'}">
+                <div class="command-guide-card ${gaps.length > 0 ? 'warn' : 'ok'} ${focusKey === 'gaps' ? 'focus' : ''}">
                   <div class="command-guide-head">
                     <strong>핵심 공백</strong>
                     <span class="command-chip ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
@@ -2153,8 +2222,15 @@ export function Command() {
     if (route.value.tab !== 'command') return
     const requestedSurface = route.value.params.surface
     const requestedOperation = route.value.params.operation
+    const workflowContext = workflowContextForRoute(route.value)
     if (isCommandSurface(requestedSurface)) {
       setCommandPlaneSurface(requestedSurface)
+    }
+    else if (workflowContext) {
+      const suggestedSurface = commandSurfaceForContext(workflowContext)
+      if (isCommandSurface(suggestedSurface)) {
+        setCommandPlaneSurface(suggestedSurface)
+      }
     }
     else if (!requestedSurface) {
       setCommandPlaneSurface('operations')
@@ -2165,7 +2241,18 @@ export function Command() {
     if (requestedSurface === 'swarm') {
       void refreshCommandPlaneSwarm()
     }
-  }, [route.value.tab, route.value.params.surface, route.value.params.operation, route.value.params.operation_id, route.value.params.run_id])
+  }, [
+    route.value.tab,
+    route.value.params.surface,
+    route.value.params.operation,
+    route.value.params.operation_id,
+    route.value.params.run_id,
+    route.value.params.source,
+    route.value.params.action_type,
+    route.value.params.target_type,
+    route.value.params.target_id,
+    route.value.params.focus_kind,
+  ])
 
   useEffect(() => {
     let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
@@ -2240,6 +2327,7 @@ export function Command() {
         ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
         : null}
       <${SurfaceSemanticIntro} surfaceId="command" />
+      <${CommandWorkflowBanner} />
       <${CommandEntryStrip} />
       <${SurfaceTabs} />
       <${SurfaceBody} />

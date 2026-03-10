@@ -746,3 +746,8 @@
  (modules test_context_router_demo)
  (libraries masc_mcp yojson))
 
+; Tool Registry — in-memory call counters (P0: tool profile system)
+(test
+ (name test_tool_registry)
+ (modules test_tool_registry)
+ (libraries masc_mcp alcotest yojson))

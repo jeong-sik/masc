@@ -243,6 +243,7 @@ module Tool_room = Tool_room
 module Tool_control = Tool_control
 module Tool_verification = Tool_verification
 module Tool_misc = Tool_misc
+module Tool_registry = Tool_registry
 module Tool_llama = Tool_llama
 module Tool_board = Tool_board
 module Tool_command_plane = Tool_command_plane

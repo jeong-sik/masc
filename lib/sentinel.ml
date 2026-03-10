@@ -3,11 +3,15 @@
     Ensures at least one agent is always alive when the server runs.
     Integrates Guardian's zombie/gc consumers and adds:
     - Self-heartbeat (room presence)
-    - Board patrol (stale post detection, daily status)
-    - Task hygiene (orphaned/stuck task warnings)
-    - Keeper health monitoring
+    - Board patrol (stale post detection, daily status) — LLM-enhanced
+    - Task hygiene (orphaned/stuck task warnings) — LLM-enhanced
+    - Keeper health monitoring — LLM-enhanced
 
-    Opt-out via MASC_SENTINEL_ENABLED=false. *)
+    Phase 2: LLM judgment layer via Prompt_registry + Lodge_cascade.
+    LLM failure falls back to Phase 1 heuristics.
+
+    Opt-out via MASC_SENTINEL_ENABLED=false.
+    LLM layer opt-out via MASC_SENTINEL_LLM_ENABLED=false. *)
 
 open Printf
 
@@ -20,6 +24,54 @@ let log msg =
     so that unparseable timestamps are treated as maximally stale. *)
 let parse_iso_or_epoch s =
   Resilience.Time.parse_iso8601_opt s |> Option.value ~default:0.0
+
+(* ── LLM Helper ───────────────────────────────────────────── *)
+
+(** Try to parse a JSON value from an LLM response string.
+    Handles both raw JSON and markdown code-fenced JSON. *)
+let parse_llm_json_safe s =
+  try Some (Yojson.Safe.from_string s)
+  with Yojson.Json_error _ ->
+    let re = Str.regexp "```json?[\n\r]+\\([^`]+\\)```" in
+    if Str.string_match re s 0 then
+      (try Some (Yojson.Safe.from_string (Str.matched_group 1 s))
+       with _ -> None)
+    else None
+
+(** Call sentinel LLM via cascade: render prompt from registry, run through
+    model specs from Lodge_cascade. Returns parsed JSON or None on failure. *)
+let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
+  if not Env_config.Sentinel.llm_enabled then None
+  else
+    match Prompt_registry.render ~id:prompt_id ~vars () with
+    | Error msg ->
+        log (sprintf "prompt %s render failed: %s" prompt_id msg);
+        None
+    | Ok prompt ->
+        let specs = Lodge_cascade.get_cascade ~cascade_name () in
+        if specs = [] then (
+          log (sprintf "no models available for cascade %s" cascade_name);
+          None)
+        else
+          let timeout = Env_config.Sentinel.llm_timeout_sec in
+          let max_tokens = 800 in
+          match Llm_client.run_prompt_cascade
+                  ~temperature:0.3
+                  ~timeout_sec:timeout
+                  ~model_specs:specs
+                  ~max_tokens
+                  ~prompt () with
+          | Ok resp ->
+              if String.length resp.content > 5 then (
+                log (sprintf "LLM response from %s (%d chars)" resp.model_used
+                       (String.length resp.content));
+                parse_llm_json_safe resp.content)
+              else (
+                log (sprintf "LLM response too short from %s" resp.model_used);
+                None)
+          | Error err ->
+              log (sprintf "LLM cascade %s failed: %s" cascade_name err);
+              None
 
 (* ── Sentinel-specific Pulse Consumers ─────────────────────── *)
 
@@ -38,7 +90,8 @@ let make_heartbeat_consumer config : (module Pulse.Consumer) =
         Error msg
   end)
 
-(** Board patrol consumer: posts a daily status summary. *)
+(** Board patrol consumer: posts a daily status summary.
+    Phase 2: LLM generates context-aware summary; heuristic fallback on failure. *)
 let make_board_patrol_consumer config : (module Pulse.Consumer) =
   let last_daily_post = ref 0 in (* day-of-year of last post *)
   (module struct
@@ -62,9 +115,34 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
         let today = tm.Unix.tm_yday in
         if today <> !last_daily_post then begin
           last_daily_post := today;
-          let content = sprintf
-            "[Sentinel Daily] agents=%d tasks=%d (pending=%d in_progress=%d) paused=%b"
-            agent_count task_count pending in_progress state.paused
+
+          (* LLM-first: ask LLM for a context-aware daily summary *)
+          let agent_names = String.concat ", " state.active_agents in
+          let llm_content = call_sentinel_llm
+            ~cascade_name:"sentinel_board"
+            ~prompt_id:"sentinel-board-patrol"
+            ~vars:[
+              ("total_posts", string_of_int task_count);
+              ("stale_count", string_of_int 0);
+              ("latest_post_age", "unknown");
+              ("active_agents", agent_names);
+            ] () in
+          let content = match llm_content with
+            | Some json ->
+                let open Yojson.Safe.Util in
+                let summary = json |> member "daily_summary" |> to_string_option
+                              |> Option.value ~default:"" in
+                if String.length summary > 10 then (
+                  log "daily status via LLM";
+                  sprintf "[Sentinel Daily/LLM] %s" summary)
+                else (
+                  log "LLM summary too short, using heuristic";
+                  sprintf "[Sentinel Daily] agents=%d tasks=%d (pending=%d in_progress=%d) paused=%b"
+                    agent_count task_count pending in_progress state.paused)
+            | None ->
+                (* Heuristic fallback *)
+                sprintf "[Sentinel Daily] agents=%d tasks=%d (pending=%d in_progress=%d) paused=%b"
+                  agent_count task_count pending in_progress state.paused
           in
           (match Board_dispatch.create_post
                    ~author:agent_name ~content
@@ -80,7 +158,8 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
         Error msg
   end)
 
-(** Task hygiene consumer: detects orphaned/stuck tasks and broadcasts warnings. *)
+(** Task hygiene consumer: detects orphaned/stuck tasks and broadcasts warnings.
+    Phase 2: LLM assesses each stuck task for action priority; heuristic fallback. *)
 let make_task_hygiene_consumer config : (module Pulse.Consumer) =
   (module struct
     let name = "sentinel-task-hygiene"
@@ -92,34 +171,72 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
         let stuck_threshold = Env_config.Sentinel.task_stuck_threshold_sec in
         let stale_threshold = Env_config.Sentinel.task_stale_threshold_sec in
 
-        let warnings = ref [] in
+        (* Collect candidate stuck/stale tasks *)
+        let candidates = ref [] in
         List.iter (fun (t : Types.task) ->
           match t.task_status with
           | Types.Claimed { assignee; claimed_at } ->
-              (* Check if the claiming agent still exists *)
               let is_alive = Room.is_agent_joined config ~agent_name:assignee in
               let age = now_f -. (parse_iso_or_epoch claimed_at) in
               if (not is_alive) || age > stuck_threshold then
-                warnings := sprintf "task %s may be stuck (claimed by %s, %.0fs ago, agent_alive=%b)"
-                  t.id assignee age is_alive :: !warnings
+                candidates := (t.id, assignee, age, is_alive, "claimed") :: !candidates
           | Types.InProgress { assignee; started_at } ->
               let age = now_f -. (parse_iso_or_epoch started_at) in
               if age > stale_threshold then
-                warnings := sprintf "task %s may be stale (in_progress by %s, %.0fs ago)"
-                  t.id assignee age :: !warnings
+                candidates := (t.id, assignee, age, true, "in_progress") :: !candidates
           | _ -> ()
         ) backlog.tasks;
 
-        if !warnings <> [] then begin
-          let msg = sprintf "[sentinel] %d task warning(s): %s"
-            (List.length !warnings) (String.concat "; " !warnings) in
-          log msg;
-          Sse.broadcast (`Assoc [
-            ("type", `String "sentinel_warning");
-            ("source", `String agent_name);
-            ("warnings", `List (List.map (fun w -> `String w) !warnings));
-            ("ts", `String (Types.now_iso ()));
-          ])
+        if !candidates <> [] then begin
+          (* Build task list string for LLM *)
+          let task_lines = List.map (fun (id, assignee, age, alive, status) ->
+            sprintf "- %s: %s by %s, %.0fs ago, agent_alive=%b"
+              id status assignee age alive
+          ) !candidates in
+          let task_list_str = String.concat "\n" task_lines in
+
+          (* LLM-first: let LLM assess each task *)
+          let llm_result = call_sentinel_llm
+            ~cascade_name:"sentinel_task"
+            ~prompt_id:"sentinel-task-hygiene"
+            ~vars:[("task_list", task_list_str)] () in
+
+          let warnings = match llm_result with
+            | Some (`List items) ->
+                log (sprintf "task hygiene LLM assessed %d tasks" (List.length items));
+                List.filter_map (fun item ->
+                  let open Yojson.Safe.Util in
+                  let action = item |> member "action" |> to_string_option
+                               |> Option.value ~default:"ignore" in
+                  if action = "ignore" then None
+                  else
+                    let task_id = item |> member "task_id" |> to_string_option
+                                  |> Option.value ~default:"?" in
+                    let reason = item |> member "reason" |> to_string_option
+                                 |> Option.value ~default:"" in
+                    let priority = item |> member "priority" |> to_string_option
+                                   |> Option.value ~default:"medium" in
+                    Some (sprintf "task %s: %s [%s] %s" task_id action priority reason)
+                ) items
+            | _ ->
+                (* Heuristic fallback: warn about all candidates *)
+                List.map (fun (id, assignee, age, alive, status) ->
+                  sprintf "task %s may be stuck (%s by %s, %.0fs ago, agent_alive=%b)"
+                    id status assignee age alive
+                ) !candidates
+          in
+
+          if warnings <> [] then begin
+            let msg = sprintf "[sentinel] %d task warning(s): %s"
+              (List.length warnings) (String.concat "; " warnings) in
+            log msg;
+            Sse.broadcast (`Assoc [
+              ("type", `String "sentinel_warning");
+              ("source", `String agent_name);
+              ("warnings", `List (List.map (fun w -> `String w) warnings));
+              ("ts", `String (Types.now_iso ()));
+            ])
+          end
         end;
         Ok ()
       with exn ->
@@ -128,7 +245,8 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
         Error msg
   end)
 
-(** Keeper health consumer: detects stale keepers via bootstrap stats. *)
+(** Keeper health consumer: detects stale keepers via bootstrap stats.
+    Phase 2: LLM assesses each stale keeper for action; heuristic fallback. *)
 let make_keeper_health_consumer _config : (module Pulse.Consumer) =
   (module struct
     let name = "sentinel-keeper-health"
@@ -150,19 +268,50 @@ let make_keeper_health_consumer _config : (module Pulse.Consumer) =
               let path = Filename.concat keepers_dir name in
               try
                 let json = Yojson.Safe.from_file path in
-                (* Extract last_turn_at from keeper meta *)
                 (match Yojson.Safe.Util.member "last_turn_at" json with
                  | `String ts ->
                      let last = parse_iso_or_epoch ts in
-                     if now_f -. last > threshold then
-                       stale := (Filename.chop_suffix name ".json") :: !stale
+                     let age = now_f -. last in
+                     if age > threshold then
+                       stale := (Filename.chop_suffix name ".json", age) :: !stale
                  | _ -> ())
               with _ -> ()
             end
           );
-          if !stale <> [] then
-            log (sprintf "%d stale keeper(s): %s"
-              (List.length !stale) (String.concat ", " !stale))
+          if !stale <> [] then begin
+            (* Build keeper list for LLM *)
+            let keeper_lines = List.map (fun (k, age) ->
+              sprintf "- %s: last active %.0fs ago (threshold=%.0fs)"
+                k age threshold
+            ) !stale in
+            let keeper_list_str = String.concat "\n" keeper_lines in
+
+            (* LLM-first: let LLM assess each stale keeper *)
+            let llm_result = call_sentinel_llm
+              ~cascade_name:"sentinel_keeper"
+              ~prompt_id:"sentinel-keeper-health"
+              ~vars:[("keeper_list", keeper_list_str)] () in
+
+            match llm_result with
+            | Some (`List items) ->
+                log (sprintf "keeper health LLM assessed %d keepers" (List.length items));
+                List.iter (fun item ->
+                  let open Yojson.Safe.Util in
+                  let keeper = item |> member "keeper" |> to_string_option
+                               |> Option.value ~default:"?" in
+                  let action = item |> member "action" |> to_string_option
+                               |> Option.value ~default:"ignore" in
+                  let reason = item |> member "reason" |> to_string_option
+                               |> Option.value ~default:"" in
+                  if action <> "ignore" then
+                    log (sprintf "keeper %s: %s — %s" keeper action reason)
+                ) items
+            | _ ->
+                (* Heuristic fallback: log all stale keepers *)
+                log (sprintf "%d stale keeper(s): %s"
+                  (List.length !stale)
+                  (String.concat ", " (List.map fst !stale)))
+          end
         end;
         Ok ()
       with exn ->
@@ -181,6 +330,7 @@ let status_json () : Yojson.Safe.t =
     ("enabled", `Bool Env_config.Sentinel.enabled);
     ("started", `Bool !started);
     ("agent_name", `String agent_name);
+    ("llm_enabled", `Bool Env_config.Sentinel.llm_enabled);
     ("uptime_s", `Float (if !started then Time_compat.now () -. !start_ts else 0.0));
     ("consumers", `List [
       `String "sentinel-heartbeat";

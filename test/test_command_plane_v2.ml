@@ -207,6 +207,104 @@ let test_coding_verify_and_review_require_expected_dependencies () =
       Alcotest.(check string) "review stage accepted" "review"
         (Option.value ~default:"" review_op.stage))
 
+let test_intent_create_update_and_operation_inheritance () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let intent =
+        unwrap_ok
+          (Command_plane_v2.create_intent_json config ~actor:"owner"
+             (`Assoc
+               [
+                 ("title", `String "Stabilize command plane intent path");
+                 ("artifact_priors", `List [ `String "lib/command_plane_v2.ml" ]);
+                 ( "current_focus",
+                   `Assoc [ ("stage", `String "inspect") ] );
+               ]))
+      in
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Inspect intent-linked command plane path");
+              ("intent_id", `String intent.intent_id);
+              ("stage", `String "inspect");
+            ])
+      in
+      Alcotest.(check (option string)) "intent linked"
+        (Some intent.intent_id) operation.intent_id;
+      Alcotest.(check (list string)) "artifact priors inherited"
+        [ "lib/command_plane_v2.ml" ] operation.artifact_scope;
+      let updated_intent =
+        unwrap_ok
+          (Command_plane_v2.update_intent_json config ~actor:"owner"
+             (`Assoc
+               [
+                 ("intent_id", `String intent.intent_id);
+                 ("state", `String "blocked");
+               ]))
+      in
+      Alcotest.(check string) "state updated" "blocked"
+        (Command_plane_v2.string_of_intent_state updated_intent.state);
+      let forecast =
+        unwrap_ok
+          (Command_plane_v2.intent_forecast_json config intent.intent_id ())
+      in
+      Alcotest.(check bool) "forecast has candidates" true
+        (forecast |> Yojson.Safe.Util.member "candidate_next_states"
+       |> Yojson.Safe.Util.to_list <> []);
+      Alcotest.(check string) "forecast current focus stage" "inspect"
+        (forecast |> Yojson.Safe.Util.member "current_focus"
+       |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string))
+
+let test_intent_forecast_advances_after_completed_operation () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let intent =
+        unwrap_ok
+          (Command_plane_v2.create_intent_json config ~actor:"owner"
+             (`Assoc
+               [
+                 ("title", `String "Ship coding-task intent flow");
+                 ("artifact_priors", `List [ `String "lib/cp_search_fabric.ml" ]);
+               ]))
+      in
+      let implement_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Implement intent forecast support");
+              ("intent_id", `String intent.intent_id);
+              ("stage", `String "implement");
+            ])
+      in
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.finalize_operation_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String implement_op.operation_id) ])));
+      let forecast =
+        unwrap_ok
+          (Command_plane_v2.intent_forecast_json config intent.intent_id ())
+      in
+      Alcotest.(check string) "recommended next stage" "verify"
+        (forecast |> Yojson.Safe.Util.member "recommended_focus"
+       |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string))
+
 let test_platoon_assignment_expands_detachments_and_tick_runs () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -428,6 +526,11 @@ let test_snapshot_json_reports_consistent_sections () =
        |> Yojson.Safe.Util.to_int);
       Alcotest.(check int) "alerts total" 0
         (snapshot |> Yojson.Safe.Util.member "alerts"
+       |> Yojson.Safe.Util.member "summary"
+       |> Yojson.Safe.Util.member "total"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "intents total" 0
+        (snapshot |> Yojson.Safe.Util.member "intents"
        |> Yojson.Safe.Util.member "summary"
        |> Yojson.Safe.Util.member "total"
        |> Yojson.Safe.Util.to_int);
@@ -1354,6 +1457,14 @@ let () =
             "coding verify and review require expected dependencies"
             `Quick
             test_coding_verify_and_review_require_expected_dependencies;
+          Alcotest.test_case
+            "intent create update and operation inheritance"
+            `Quick
+            test_intent_create_update_and_operation_inheritance;
+          Alcotest.test_case
+            "intent forecast advances after completed operation"
+            `Quick
+            test_intent_forecast_advances_after_completed_operation;
           Alcotest.test_case "invalid search strategy is rejected" `Quick
             test_invalid_search_strategy_is_rejected;
           Alcotest.test_case "best first search blocks and routes research pipeline"

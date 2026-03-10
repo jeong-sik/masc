@@ -1685,6 +1685,11 @@ let build_room_attention_items config =
     |> U.member "microarch"
     |> U.member "signals"
   in
+  let intent_summary =
+    command_plane_summary
+    |> U.member "intents"
+    |> U.member "summary"
+  in
   let signal_items =
     [
       ( "command_issue_pressure",
@@ -1741,6 +1746,36 @@ let build_room_attention_items config =
                  }
            | _ -> None)
   in
+  let intent_items =
+    [
+      ( "intent_blocked",
+        "blocked intents need intervention",
+        intent_summary |> U.member "blocked",
+        "blocked" );
+      ( "intent_handoff_ready",
+        "handoff-ready intents need continuity review",
+        intent_summary |> U.member "handoff_ready",
+        "handoff_ready" );
+    ]
+    |> List.filter_map (fun (kind, summary, value_json, field_name) ->
+           match value_json with
+           | `Int count when count > 0 ->
+               Some
+                 {
+                   kind;
+                   severity = if count >= 3 then "bad" else "warn";
+                   summary;
+                   target_type = "room";
+                   target_id = None;
+                   actor = None;
+                   evidence =
+                     `Assoc
+                       [
+                         (field_name, `Int count);
+                       ];
+                 }
+           | _ -> None)
+  in
   let pending_confirms = read_pending_confirms config in
   let pending_items =
     if pending_confirms = [] then []
@@ -1759,7 +1794,7 @@ let build_room_attention_items config =
         };
       ]
   in
-  List.sort compare_attention (pending_items @ signal_items)
+  List.sort compare_attention (pending_items @ signal_items @ intent_items)
 
 let room_recommendations config =
   let command_plane_summary = Command_plane_v2.summary_json config in
@@ -1768,6 +1803,11 @@ let room_recommendations config =
     |> U.member "operations"
     |> U.member "microarch"
     |> U.member "signals"
+  in
+  let intent_summary =
+    command_plane_summary
+    |> U.member "intents"
+    |> U.member "summary"
   in
   let signal_recommendations =
     [
@@ -1803,17 +1843,38 @@ let room_recommendations config =
         "broadcast",
         "command-plane speculative posture needs review",
         "[operator] Speculative posture is unstable. Review commit and abort rates before widening speculation." );
+      ( intent_summary |> U.member "blocked",
+        "broadcast",
+        "blocked intents need intervention",
+        "[operator] Some intents are blocked. Inspect intent forecast, missing dependencies, and current focus before issuing more work." );
+      ( intent_summary |> U.member "handoff_ready",
+        "broadcast",
+        "handoff-ready intents need continuity review",
+        "[operator] Handoff-ready intents are accumulating. Review continuity and either finalize or hand off explicitly." );
     ]
     |> List.filter_map
          (fun (signal_json, action_type, reason, message) ->
-           match signal_json |> U.member "tone" with
-           | `String ("warn" | "bad" as severity) ->
+           match signal_json with
+           | `Assoc _ -> (
+               match signal_json |> U.member "tone" with
+               | `String ("warn" | "bad" as severity) ->
+                   Some
+                     {
+                       action_type;
+                       target_type = "room";
+                       target_id = None;
+                       severity;
+                       reason;
+                       suggested_payload = `Assoc [ ("message", `String message) ];
+                     }
+               | _ -> None)
+           | `Int count when count > 0 ->
                Some
                  {
                    action_type;
                    target_type = "room";
                    target_id = None;
-                   severity;
+                   severity = if count >= 3 then "bad" else "warn";
                    reason;
                    suggested_payload = `Assoc [ ("message", `String message) ];
                  }

@@ -1271,6 +1271,33 @@ let handle_operation_status (ctx : (_, _) context) args : result =
     Yojson.Safe.to_string
       (Command_plane_v2.operation_status_json ctx.config ?operation_id ()) )
 
+let handle_intent_create (ctx : (_, _) context) args : result =
+  (match Command_plane_v2.create_intent_json ctx.config ~actor:ctx.agent_name args with
+  | Ok intent -> (true, json_ok [ ("result", Command_plane_v2.intent_to_json intent) ])
+  | Error message -> (false, json_error message))
+
+let handle_intent_status (ctx : (_, _) context) args : result =
+  let intent_id = get_string_opt args "intent_id" in
+  (true, Yojson.Safe.to_string (Command_plane_v2.list_intents_json ?intent_id ctx.config))
+
+let handle_intent_update (ctx : (_, _) context) args : result =
+  (match Command_plane_v2.update_intent_json ctx.config ~actor:ctx.agent_name args with
+  | Ok intent -> (true, json_ok [ ("result", Command_plane_v2.intent_to_json intent) ])
+  | Error message -> (false, json_error message))
+
+let handle_intent_forecast (ctx : (_, _) context) args : result =
+  let intent_id =
+    match get_string_opt args "intent_id" with
+    | Some value -> value
+    | None -> invalid_arg "intent_id is required"
+  in
+  let limit =
+    match Yojson.Safe.Util.member "limit" args with
+    | `Int value -> value
+    | _ -> 3
+  in
+  json_result (Command_plane_v2.intent_forecast_json ctx.config intent_id ~limit ())
+
 let handle_operation_checkpoint (ctx : (_, _) context) args : result =
   try
     match Command_plane_v2.checkpoint_operation ctx.config ~actor:ctx.agent_name args with
@@ -1389,6 +1416,10 @@ let dispatch (ctx : (_, _) context) ~name ~args : result option =
   | "masc_unit_list" -> Some (handle_unit_list ctx)
   | "masc_unit_reparent" -> Some (handle_unit_reparent ctx args)
   | "masc_unit_reassign" -> Some (handle_unit_reassign ctx args)
+  | "masc_intent_create" -> Some (handle_intent_create ctx args)
+  | "masc_intent_status" -> Some (handle_intent_status ctx args)
+  | "masc_intent_update" -> Some (handle_intent_update ctx args)
+  | "masc_intent_forecast" -> Some (handle_intent_forecast ctx args)
   | "masc_operation_start" -> Some (handle_operation_start ctx args)
   | "masc_operation_status" -> Some (handle_operation_status ctx args)
   | "masc_operation_checkpoint" -> Some (handle_operation_checkpoint ctx args)
@@ -1529,6 +1560,64 @@ let schemas : tool_schema list =
           ];
     };
     {
+      name = "masc_intent_create";
+      description =
+        "Create a managed intent above goals/tasks/operations. Intents hold invariants, artifact priors, and success metrics for lifecycle control.";
+      input_schema =
+        object_schema ~required:[ "title" ]
+          [
+            ("title", string_prop "Human-readable intent title.");
+            ("owner", string_prop "Optional explicit owner. Defaults to caller.");
+            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "research_pipeline" ]) ]);
+            ("success_metric", `Assoc [ ("type", `String "object") ]);
+            ("invariants", string_array_prop "Invariant strings that must remain true.");
+            ("artifact_priors", string_array_prop "Preferred artifact scopes or prefixes.");
+            ("state", string_prop "Optional initial state. Defaults to adopted.");
+            ("current_focus", `Assoc [ ("type", `String "object") ]);
+            ("checkpoint_ref", string_prop "Optional checkpoint reference.");
+          ];
+    };
+    {
+      name = "masc_intent_status";
+      description =
+        "Read managed intents and their current focus/lifecycle summary.";
+      input_schema =
+        object_schema
+          [
+            ("intent_id", string_prop "Intent id to filter.");
+          ];
+    };
+    {
+      name = "masc_intent_update";
+      description =
+        "Update an intent's title, state, focus, invariants, artifact priors, or success metric.";
+      input_schema =
+        object_schema ~required:[ "intent_id" ]
+          [
+            ("intent_id", string_prop "Managed intent id.");
+            ("title", string_prop "Optional new title.");
+            ("owner", string_prop "Optional owner override.");
+            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "research_pipeline" ]) ]);
+            ("success_metric", `Assoc [ ("type", `String "object") ]);
+            ("invariants", string_array_prop "Replacement invariants.");
+            ("artifact_priors", string_array_prop "Replacement artifact priors.");
+            ("state", string_prop "Optional lifecycle state override.");
+            ("current_focus", `Assoc [ ("type", `String "object") ]);
+            ("checkpoint_ref", string_prop "Optional checkpoint reference.");
+          ];
+    };
+    {
+      name = "masc_intent_forecast";
+      description =
+        "Predict the next likely focus states for an intent using linked operations and current focus.";
+      input_schema =
+        object_schema ~required:[ "intent_id" ]
+          [
+            ("intent_id", string_prop "Managed intent id.");
+            ("limit", integer_prop ~default:3 "Maximum candidate next states.");
+          ];
+    };
+    {
       name = "masc_operation_start";
       description =
         "CPv2 benchmark step 2. Start a managed operation on a ready unit after leadership, live-roster, and capacity checks pass. Set orchestration_kind=chain_dsl to attach llm-mcp Chain DSL execution.";
@@ -1537,6 +1626,7 @@ let schemas : tool_schema list =
           [
             ("assigned_unit_id", string_prop "Target unit id.");
             ("objective", string_prop "Operation objective.");
+            ("intent_id", string_prop "Optional parent intent id.");
             ("autonomy_level", string_prop "Autonomy level such as L3_Guided or L4_Autonomous.");
             ("policy_class", string_prop "Policy class name.");
             ("budget_class", string_prop "Budget class name.");

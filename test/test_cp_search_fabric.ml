@@ -138,6 +138,8 @@ let test_should_rebalance_requires_margin () =
         {
           Search.capability_match = 20.0;
           artifact_locality = 10.0;
+          intent_successor = 0.0;
+          verification_readiness = 0.0;
           runtime_fit = 10.0;
           posterior_success = 10.0;
           capacity_headroom = 5.0;

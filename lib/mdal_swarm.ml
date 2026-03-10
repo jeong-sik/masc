@@ -140,7 +140,7 @@ let run_single_worker ~clock (spec : worker_spec) : worker_result =
             loop (iteration + 1) metric
           end
   in
-  loop 1 Float.nan
+  loop 1 0.0
 
 (* ================================================================ *)
 (* Swarm coordinator                                                *)

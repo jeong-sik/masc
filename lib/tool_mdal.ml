@@ -192,6 +192,10 @@ let active_loops : (string, Mdal.loop_state) Hashtbl.t =
 
 let latest_loop_id : string option ref = ref None
 
+(** In-memory store for async swarm results. *)
+let active_swarms : (string, Mdal_swarm.swarm_result option ref) Hashtbl.t =
+  Hashtbl.create 4
+
 (* ================================================================ *)
 (* Helpers                                                          *)
 (* ================================================================ *)
@@ -1002,26 +1006,42 @@ let parse_aggregate_strategy s =
   | "any" -> Mdal_swarm.Any
   | _ -> Mdal_swarm.Average
 
-let parse_worker_spec (json : Yojson.Safe.t) : Mdal_swarm.worker_spec =
-  let open Yojson.Safe.Util in
-  {
-    worker_id = json |> member "worker_id" |> to_string;
-    label = json |> member "label" |> to_string_option |> Option.value ~default:"";
-    metric_fn = json |> member "metric_fn" |> to_string;
-    goal_expr = json |> member "goal_expr" |> to_string;
-    agent = json |> member "agent" |> to_string_option |> Option.value ~default:"default";
-    max_iterations = json |> member "max_iterations" |> to_int_option |> Option.value ~default:10;
-  }
+let parse_worker_spec (json : Yojson.Safe.t) : (Mdal_swarm.worker_spec, string) result =
+  try
+    let open Yojson.Safe.Util in
+    Ok {
+      worker_id = json |> member "worker_id" |> to_string;
+      label = json |> member "label" |> to_string_option |> Option.value ~default:"";
+      metric_fn = json |> member "metric_fn" |> to_string;
+      goal_expr = json |> member "goal_expr" |> to_string;
+      agent = json |> member "agent" |> to_string_option |> Option.value ~default:"default";
+      max_iterations = json |> member "max_iterations" |> to_int_option |> Option.value ~default:10;
+    }
+  with exn ->
+    Error (Printf.sprintf "Invalid worker spec: %s" (Printexc.to_string exn))
+
+let parse_all_workers workers_json =
+  let rec aux acc = function
+    | [] -> Ok (List.rev acc)
+    | json :: rest ->
+        match parse_worker_spec json with
+        | Ok w -> aux (w :: acc) rest
+        | Error e -> Error e
+  in
+  aux [] workers_json
 
 let handle_swarm_start (ctx : context) args =
   let open Yojson.Safe.Util in
-  match ctx.clock with
-  | None -> `Assoc [("error", `String "Clock not available (swarm requires Eio runtime)")]
-  | Some clock ->
+  match ctx.clock, ctx.sw with
+  | None, _ -> `Assoc [("error", `String "Clock not available (swarm requires Eio runtime)")]
+  | _, None -> `Assoc [("error", `String "Switch not available (swarm requires Eio runtime)")]
+  | Some clock, Some sw ->
     let swarm_id = args |> member "swarm_id" |> to_string in
     let title = args |> member "title" |> to_string_option |> Option.value ~default:swarm_id in
     let workers_json = args |> member "workers" |> to_list in
-    let workers = List.map parse_worker_spec workers_json in
+    match parse_all_workers workers_json with
+    | Error e -> `Assoc [("error", `String e)]
+    | Ok workers ->
     let aggregate_strategy =
       args |> member "aggregate_strategy" |> to_string_option
       |> Option.value ~default:"average"
@@ -1039,8 +1059,28 @@ let handle_swarm_start (ctx : context) args =
       aggregate_goal_expr;
       max_wall_time_sec;
     } in
-    let result = Mdal_swarm.run ~clock config in
-    Mdal_swarm.result_to_json result
+    let result_ref = ref None in
+    Hashtbl.replace active_swarms swarm_id result_ref;
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      let result = Mdal_swarm.run ~clock config in
+      result_ref := Some result;
+      `Stop_daemon
+    );
+    `Assoc [
+      ("status", `String "started");
+      ("swarm_id", `String swarm_id);
+      ("worker_count", `Int (List.length workers));
+    ]
+
+let handle_swarm_status _ctx args =
+  let open Yojson.Safe.Util in
+  let swarm_id = args |> member "swarm_id" |> to_string in
+  match Hashtbl.find_opt active_swarms swarm_id with
+  | None -> `Assoc [("error", `String (Printf.sprintf "Unknown swarm: %s" swarm_id))]
+  | Some result_ref ->
+    match !result_ref with
+    | None -> `Assoc [("status", `String "running"); ("swarm_id", `String swarm_id)]
+    | Some result -> Mdal_swarm.result_to_json result
 
 (* ================================================================ *)
 (* Dispatch                                                         *)
@@ -1056,4 +1096,5 @@ let dispatch (ctx : context) ~name ~args : result option =
   | "masc_mdal_iterate" -> Some (wrap_result (handle_iterate ctx args))
   | "masc_mdal_stop" -> Some (wrap_result (handle_stop ctx args))
   | "masc_mdal_swarm_start" -> Some (wrap_result (handle_swarm_start ctx args))
+  | "masc_mdal_swarm_status" -> Some (wrap_result (handle_swarm_status ctx args))
   | _ -> None

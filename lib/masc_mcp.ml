@@ -131,6 +131,7 @@ module Spawn_registry = Spawn_registry
 module Glm_pool = Glm_pool
 module Bounded = Bounded
 module Mdal = Mdal
+module Mdal_swarm = Mdal_swarm
 module Mdal_store = Mdal_store
 module Mdal_worker = Mdal_worker
 module Orchestrator = Orchestrator
@@ -189,6 +190,8 @@ module Operator_control = Operator_control
 module Goal_guard = Goal_guard
 module Goal_orchestrator = Goal_orchestrator
 module Goal_scheduler = Goal_scheduler
+module Swarm_goal_loop = Swarm_goal_loop
+module Swarm_checkpoint = Swarm_checkpoint
 module Compression_dict = Compression_dict
 (* Redis_common module removed - PostgreSQL is now the only distributed backend *)
 

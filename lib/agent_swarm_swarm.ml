@@ -294,15 +294,35 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
           let result =
             Eio.Switch.run (fun inner_sw ->
               Eio.Fiber.fork_daemon ~sw:inner_sw (fun () ->
-                let rec loop () =
-                  Eio.Time.sleep clock 30.0;
-                  (match Agent_swarm_client.heartbeat ~sw:inner_sw masc with
-                   | Ok _ -> ()
-                   | Error e ->
-                       Printf.eprintf "[%s] heartbeat error: %s\n%!" spec.name e);
-                  loop ()
+                let base_interval = 30.0 in
+                let max_interval = 300.0 in
+                let max_consecutive_failures = 10 in
+                let rec loop consecutive_failures =
+                  let interval =
+                    if consecutive_failures = 0 then base_interval
+                    else
+                      Float.min max_interval
+                        (base_interval *. (2.0 ** Float.of_int (min consecutive_failures 5)))
+                  in
+                  Eio.Time.sleep clock interval;
+                  match Agent_swarm_client.heartbeat ~sw:inner_sw masc with
+                  | Ok _ ->
+                      if consecutive_failures > 0 then
+                        Printf.eprintf "[%s] heartbeat recovered after %d failures\n%!"
+                          spec.name consecutive_failures;
+                      loop 0
+                  | Error e ->
+                      let failures = consecutive_failures + 1 in
+                      Printf.eprintf "[%s] heartbeat error (%d/%d, next in %.0fs): %s\n%!"
+                        spec.name failures max_consecutive_failures interval e;
+                      if failures >= max_consecutive_failures then (
+                        Printf.eprintf "[%s] heartbeat: %d consecutive failures, declaring dead\n%!"
+                          spec.name failures;
+                        `Stop_daemon)
+                      else
+                        loop failures
                 in
-                (try loop ()
+                (try loop 0
                  with
                  | Eio.Cancel.Cancelled _ -> `Stop_daemon
                  | End_of_file -> `Stop_daemon)

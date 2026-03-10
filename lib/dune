@@ -132,6 +132,7 @@
    masc_mcp
    masc_pb
    mdal
+   mdal_swarm
    mdal_worker
    mcp_protocol
    mcp_server
@@ -168,6 +169,7 @@
    goal_guard
    goal_orchestrator
    goal_scheduler
+   swarm_goal_loop
    resilience
    response
    room
@@ -199,6 +201,7 @@
    subscriptions
    swarm_status
    swarm_behaviors_eio
+   swarm_checkpoint
    swarm_eio
    telemetry_eio
    tempo

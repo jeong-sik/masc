@@ -122,7 +122,7 @@ let mock_measure_metric (cmd : string) : (float, string) result =
   else Error (Printf.sprintf "mock: unknown command: %s" cmd)
 
 let make_ctx ?config ?worker_runner () : Tool_mdal.context =
-  { agent_name = "tester"; config; sw = None; proc_mgr = None; worker_runner }
+  { agent_name = "tester"; config; sw = None; proc_mgr = None; worker_runner; clock = None }
 
 let start_custom_loop ?(metric_fn = "printf '0.5\\n'")
     ?(goal = "metric > 0.6") ?(target = "Improve score")

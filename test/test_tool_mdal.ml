@@ -36,7 +36,7 @@ let contains_substring haystack needle =
 
 let dispatch_exn ctx ~name ~args =
   match Tool_mdal.dispatch ctx ~name ~args with
-  | Some result -> result
+  | Some (ok, body) -> (ok, body)
   | None -> failwith ("dispatch returned None for " ^ name)
 
 let reset_loop_registry () =
@@ -85,6 +85,41 @@ let missing_evidence_runner ?(raw_output = "{\"changes\":\"noop\"}")
          tool_call_count;
          tool_names;
        })
+
+(** Mock [measure_metric] to avoid process spawning entirely.
+    Parses the shell command string to extract the expected float.
+    Handles three patterns used by tests:
+    - [printf 'N\n'] → [Ok N]
+    - [if \[ -f FILE \]; then exit 1; else printf 'N\n'; fi] → file-existence check
+    - anything else → [Error "unknown mock command"] *)
+let mock_measure_metric (cmd : string) : (float, string) result =
+  let printf_re = Str.regexp "printf '\\([0-9.]+\\)" in
+  let file_check_re = Str.regexp "if \\[ -f \\([^ ]*\\) \\]" in
+  if Str.string_match file_check_re cmd 0 then
+    let path = Str.matched_group 1 cmd in
+    (* Remove shell quoting if present *)
+    let unquoted =
+      if String.length path >= 2
+         && path.[0] = '\''
+         && path.[String.length path - 1] = '\'' then
+        String.sub path 1 (String.length path - 2)
+      else path
+    in
+    if Sys.file_exists unquoted then
+      Error (Printf.sprintf "mock: exit 1 (file exists: %s)" unquoted)
+    else (
+      (* Use search_forward (not string_match) to find printf anywhere after ] *)
+      match (try Some (Str.search_forward printf_re cmd (Str.match_end ())) with Not_found -> None) with
+      | Some _ ->
+        (match float_of_string_opt (Str.matched_group 1 cmd) with
+        | Some v -> Ok v
+        | None -> Error "mock: cannot parse float from else branch")
+      | None -> Error "mock: no printf in else branch")
+  else if Str.string_match printf_re cmd 0 then
+    (match float_of_string_opt (Str.matched_group 1 cmd) with
+    | Some v -> Ok v
+    | None -> Error (Printf.sprintf "mock: cannot parse float: %s" cmd))
+  else Error (Printf.sprintf "mock: unknown command: %s" cmd)
 
 let make_ctx ?config ?worker_runner () : Tool_mdal.context =
   { agent_name = "tester"; config; sw = None; proc_mgr = None; worker_runner }
@@ -166,7 +201,6 @@ let test_builtin_requires_metric_fn () =
     (contains_substring error "coverage")
 
 let test_strict_start_accepts_explicit_metric_fn () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -199,7 +233,6 @@ let test_strict_start_accepts_explicit_metric_fn () =
   reset_loop_registry ()
 
 let test_start_rejects_codex_worker () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -226,7 +259,6 @@ let test_start_rejects_codex_worker () =
   reset_loop_registry ()
 
 let test_strict_iteration_records_verified_evidence () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -291,7 +323,6 @@ let test_strict_iteration_records_verified_evidence () =
   reset_loop_registry ()
 
 let test_custom_goal_label_is_honored () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -316,7 +347,6 @@ let test_custom_goal_label_is_honored () =
   reset_loop_registry ()
 
 let test_auto_stop_response_is_complete () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -352,7 +382,6 @@ let test_auto_stop_response_is_complete () =
   reset_loop_registry ()
 
 let test_persisted_loop_hydrates_to_interrupted () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -380,7 +409,6 @@ let test_persisted_loop_hydrates_to_interrupted () =
   reset_loop_registry ()
 
 let test_interrupted_loop_can_resume () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -404,7 +432,6 @@ let test_interrupted_loop_can_resume () =
   reset_loop_registry ()
 
 let test_manual_fields_are_rejected_in_strict_mode () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -433,7 +460,6 @@ let test_manual_fields_are_rejected_in_strict_mode () =
   reset_loop_registry ()
 
 let test_missing_evidence_interrupts_loop () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -464,7 +490,6 @@ let test_missing_evidence_interrupts_loop () =
   reset_loop_registry ()
 
 let test_legacy_loop_cannot_iterate () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -488,7 +513,6 @@ let test_legacy_loop_cannot_iterate () =
   reset_loop_registry ()
 
 let test_terminal_states_reject_iterate () =
-  Eio_main.run @@ fun _env ->
   reset_loop_registry ();
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -569,6 +593,8 @@ let test_terminal_states_reject_iterate () =
   reset_loop_registry ()
 
 let () =
+  Eio_main.run @@ fun _env ->
+  Mdal.measure_metric_override := Some mock_measure_metric;
   Alcotest.run "Tool_mdal"
     [
       ( "tool contract",

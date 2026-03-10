@@ -745,6 +745,31 @@ export interface DashboardMissionResponse {
   operator_targets: DashboardMissionTargets
 }
 
+export interface DashboardMissionBriefingSection {
+  id: string
+  label: string
+  status: 'ok' | 'healthy' | 'aligned' | 'watch' | 'risk' | 'unclear'
+  summary: string
+  evidence: string[]
+}
+
+export interface DashboardMissionBriefingResponse {
+  generated_at?: string
+  cached?: boolean
+  status?: 'ok' | 'unavailable' | 'error'
+  model?: string | null
+  ttl_sec?: number
+  criteria: string[]
+  basis?: {
+    current_room?: string | null
+    crew_count?: number
+    agent_count?: number
+    keeper_count?: number
+  }
+  sections: DashboardMissionBriefingSection[]
+  error?: string | null
+}
+
 export interface OperatorRoomSnapshot {
   room_id?: string
   current_room?: string

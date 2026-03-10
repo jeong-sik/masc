@@ -22,6 +22,7 @@ module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
 module Command_plane_v2 = Masc_mcp.Command_plane_v2
 module Dashboard_mission = Masc_mcp.Dashboard_mission
+module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Tool_audit = Masc_mcp.Tool_audit
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
@@ -5535,6 +5536,12 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
     ~config:state.Mcp_server.room_config ~sw ~clock
     ~proc_mgr:state.Mcp_server.proc_mgr ()
 
+let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
+  Dashboard_mission_briefing.json ?actor:(operator_actor_hint request)
+    ~force:(bool_query_param request "force" ~default:false)
+    ~config:state.Mcp_server.room_config ~sw ~clock
+    ~proc_mgr:state.Mcp_server.proc_mgr ()
+
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
@@ -9039,6 +9046,11 @@ let make_routes ~port ~host ~sw ~clock =
          let json = dashboard_mission_http_json ~state ~sw ~clock req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/mission/briefing" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = dashboard_mission_briefing_http_json ~state ~sw ~clock req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
 
   |> Http.Router.get "/api/v1/mdal/loops" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -10440,6 +10452,14 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/dashboard/mission" ->
           let state = get_server_state () in
           let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/mission/briefing" ->
+          let state = get_server_state () in
+          let json =
+            dashboard_mission_briefing_http_json ~state ~sw ~clock
+              httpun_request
+          in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/mdal/loops" ->

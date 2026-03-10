@@ -3,10 +3,16 @@
     Agents predict how other agents would react to a post.
     This creates differentiation: "dreamer would upvote, but I won't."
 
+    Supports three modes via MASC_TOM_MODE:
+    - heuristic (default): Threshold-based prediction, zero latency
+    - llm: SimToM 2-stage prompting via Llm_client cascade
+    - hybrid: LLM with heuristic fallback on failure
+
+    Reference: SimToM (ACL 2024) — 2-stage perspective filter + reasoning
     Reference: EMNLP 2025 Diversity paper — ToM + Persona = stronger differentiation
 
     @since 4.1.0 (Lodge Emergent Identity v2.0)
-*)
+    @since 4.5.0 (SimToM LLM mode) *)
 
 open Printf
 
@@ -19,9 +25,19 @@ type tom_prediction = {
   reasoning: string;
 }
 
-(** {1 Helper Functions} *)
+(* ── Match Mode ─────────────────────────────────────────────────────── *)
 
-(** Predict reaction based on signature and post topics *)
+type tom_mode = Heuristic | Llm | Hybrid
+
+let get_tom_mode () : tom_mode =
+  match Sys.getenv_opt "MASC_TOM_MODE" with
+  | Some "llm" -> Llm
+  | Some "hybrid" -> Hybrid
+  | _ -> Heuristic
+
+(* ── Heuristic Prediction ──────────────────────────────────────────── *)
+
+(** Predict reaction based on signature and post topics (heuristic). *)
 let predict_from_signature
     (sig_ : Lodge_reaction.agent_signature)
     (post_topics : string list) : Lodge_reaction.reaction_type * float * string =
@@ -46,9 +62,154 @@ let predict_from_signature
   else
     (Lodge_reaction.Pass, 0.6, "neutral interest")
 
+(* ── LLM SimToM Prediction ─────────────────────────────────────────── *)
+
+(** Model specs for ToM LLM classification.
+    Override with MASC_TOM_MODELS. *)
+let tom_model_strings () =
+  match Sys.getenv_opt "MASC_TOM_MODELS" with
+  | Some s -> String.split_on_char ',' s |> List.map String.trim
+  | None ->
+      [
+        Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+      ]
+
+let tom_model_specs () =
+  Llm_client.available_model_specs_of_strings (tom_model_strings ())
+
+(** Format agent signature into a concise behavioral profile string. *)
+let format_agent_profile (sig_ : Lodge_reaction.agent_signature) : string =
+  let top_topics =
+    sig_.reaction_patterns
+    |> List.sort (fun (_, a) (_, b) -> Float.compare b a)
+    |> List.filteri (fun i _ -> i < 5)
+    |> List.map (fun (topic, affinity) ->
+        sprintf "%s (%.0f%%)" topic (affinity *. 100.0))
+  in
+  let self_desc = match sig_.generated_self_summary with
+    | Some s -> sprintf "\n- Self-description: %s" s
+    | None -> ""
+  in
+  let recent =
+    sig_.recent_reactions
+    |> List.filteri (fun i _ -> i < 3)
+    |> List.map (fun (r : Lodge_reaction.reaction_record) ->
+        let topics_str = String.concat ", " r.post_topics in
+        sprintf "%s on [%s]" (Lodge_reaction.reaction_type_to_string r.reaction) topics_str)
+    |> String.concat "; "
+  in
+  sprintf
+    "- Upvote ratio: %.0f%%, Comment tendency: %.0f%%\n\
+     - Top topic affinities: %s\n\
+     - Recent reactions: %s%s"
+    (sig_.upvote_ratio *. 100.0)
+    (sig_.comment_tendency *. 100.0)
+    (if top_topics = [] then "none" else String.concat ", " top_topics)
+    (if recent = "" then "none" else recent)
+    self_desc
+
+(** Build SimToM 2-stage prompt for predicting agent reaction. *)
+let build_tom_prompt (sig_ : Lodge_reaction.agent_signature)
+    (post_content : string) : string =
+  sprintf
+{|Predict how agent "%s" would react to a post using Theory of Mind (SimToM).
+
+Stage 1 — Perspective Filtering:
+Consider agent "%s" with this behavioral profile:
+%s
+What aspects of the post below would be relevant to this agent?
+
+Stage 2 — Reaction Prediction:
+Based on the filtered perspective, predict the agent's reaction.
+
+Post content: %s
+
+Reply with ONLY a JSON object (no markdown, no explanation):
+{"reaction":"upvote|pass|comment_intent|skip","confidence":<0.0-1.0>,"reasoning":"<brief explanation>"}|}
+    sig_.agent_name
+    sig_.agent_name
+    (format_agent_profile sig_)
+    (Yojson.Safe.to_string (`String post_content))
+
+(** Parse LLM ToM response into reaction + confidence + reasoning.
+    Handles both clean JSON and JSON embedded in prose. *)
+let parse_tom_response (text : string)
+    : (Lodge_reaction.reaction_type * float * string, string) result =
+  let parse_json (json : Yojson.Safe.t)
+      : (Lodge_reaction.reaction_type * float * string, string) result =
+    match json with
+    | `Assoc fields ->
+        let reaction =
+          match List.assoc_opt "reaction" fields with
+          | Some (`String s) -> Lodge_reaction.reaction_type_of_string s
+          | _ -> Error "missing reaction field"
+        in
+        (match reaction with
+         | Error e -> Error e
+         | Ok reaction ->
+             let confidence =
+               match List.assoc_opt "confidence" fields with
+               | Some (`Float f) -> Float.min 1.0 (Float.max 0.0 f)
+               | Some (`Int i) -> Float.min 1.0 (Float.max 0.0 (Float.of_int i))
+               | _ -> 0.5
+             in
+             let reasoning =
+               match List.assoc_opt "reasoning" fields with
+               | Some (`String s) -> s
+               | _ -> "LLM prediction"
+             in
+             Ok (reaction, confidence, reasoning))
+    | _ -> Error "LLM response is not a JSON object"
+  in
+  let s = String.trim text in
+  match parse_json (Yojson.Safe.from_string s) with
+  | (Ok _) as ok -> ok
+  | Error _ | (exception Yojson.Json_error _) ->
+      (* Extract JSON substring between first { and last } *)
+      let brace_start =
+        try Some (String.index s '{') with Not_found -> None
+      in
+      let brace_end =
+        try Some (String.rindex s '}') with Not_found -> None
+      in
+      (match (brace_start, brace_end) with
+       | Some i, Some j when j > i ->
+           let json_str = String.sub s i (j - i + 1) in
+           (try parse_json (Yojson.Safe.from_string json_str)
+            with Yojson.Json_error msg ->
+              Error (sprintf "cannot parse extracted JSON: %s" msg))
+       | _ ->
+           Error (sprintf "no JSON found in LLM response: %s"
+                    (String.sub s 0 (min 100 (String.length s)))))
+
+(** Validate that an LLM ToM response is parseable and non-trivial. *)
+let tom_response_is_valid (resp : Llm_client.completion_response) : bool =
+  match parse_tom_response resp.content with
+  | Ok _ -> true
+  | Error _ -> false
+
+(** LLM-based SimToM prediction. Returns Error on failure. *)
+let predict_with_llm (sig_ : Lodge_reaction.agent_signature)
+    (post_content : string)
+    : (Lodge_reaction.reaction_type * float * string, string) result =
+  let prompt = build_tom_prompt sig_ post_content in
+  match
+    Llm_client.run_prompt_cascade
+      ~temperature:0.2
+      ~timeout_sec:15
+      ~accept:tom_response_is_valid
+      ~model_specs:(tom_model_specs ())
+      ~max_tokens:200
+      ~prompt ()
+  with
+  | Ok resp -> parse_tom_response resp.content
+  | Error err -> Error err
+
 (** {1 Core Functions} *)
 
-(** Predict how target agent would react to a post *)
+(** Predict how target agent would react to a post.
+    Dispatches to heuristic, LLM (SimToM), or hybrid based on MASC_TOM_MODE. *)
 let predict_reaction ~observer:_ ~target ~post_content : tom_prediction option =
   let target_sig = Lodge_reaction.get_or_compute_signature ~agent_name:target in
 
@@ -56,7 +217,19 @@ let predict_reaction ~observer:_ ~target ~post_content : tom_prediction option =
   if target_sig.total_reactions < 5 then None
   else
     let topics = Lodge_reaction.extract_topics post_content in
-    let (reaction, confidence, reasoning) = predict_from_signature target_sig topics in
+    let (reaction, confidence, reasoning) =
+      match get_tom_mode () with
+      | Heuristic ->
+          predict_from_signature target_sig topics
+      | Llm ->
+          (match predict_with_llm target_sig post_content with
+           | Ok result -> result
+           | Error _ -> (Lodge_reaction.Pass, 0.3, "LLM prediction failed"))
+      | Hybrid ->
+          (match predict_with_llm target_sig post_content with
+           | Ok result -> result
+           | Error _ -> predict_from_signature target_sig topics)
+    in
     Some {
       target_agent = target;
       predicted_reaction = reaction;

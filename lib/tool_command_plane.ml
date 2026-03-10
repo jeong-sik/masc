@@ -1334,6 +1334,45 @@ let handle_observe_traces (ctx : (_, _) context) args : result =
     Yojson.Safe.to_string
       (Command_plane_v2.list_traces_json ctx.config ?operation_id ~limit ()))
 
+let handle_swarm_live_run (ctx : (_, _) context) args : result =
+  match ctx.sw, ctx.clock, ctx.net with
+  | Some sw, Some clock, Some net ->
+      let run_id =
+        match get_string_opt args "run_id" with
+        | Some value -> value
+        | None -> "swarm-live"
+      in
+      let worker_count =
+        match Yojson.Safe.Util.member "worker_count" args with
+        | `Int value when value > 0 && value <= 100 -> value
+        | `Int _ -> Agent_swarm_live_harness.default_config.worker_count
+        | _ -> Agent_swarm_live_harness.default_config.worker_count
+      in
+      let cfg =
+        { Agent_swarm_live_harness.default_config with run_id; worker_count }
+      in
+      (try
+        let result_json = Agent_swarm_live_harness.run ~sw ~net ~clock cfg in
+        let run_dir =
+          Filename.concat
+            (Filename.concat
+               (Cp_paths.control_plane_root_dir ctx.config)
+               "swarm-live")
+            (Agent_swarm_live_harness.safe_run_id run_id)
+        in
+        Room_utils.mkdir_p run_dir;
+        Room_utils.write_json_local
+          (Filename.concat run_dir "swarm-live-summary.json")
+          result_json;
+        (true, Yojson.Safe.to_string result_json)
+      with exn ->
+        (false, json_error (Printf.sprintf "swarm-live harness failed: %s"
+          (Printexc.to_string exn))))
+  | _ ->
+      ( false,
+        json_error
+          "swarm-live harness requires server runtime context (sw, clock, net)" )
+
 let handle_unit_update (ctx : (_, _) context) args : result =
   json_result (Command_plane_v2.unit_update_json ctx.config ~actor:ctx.agent_name args)
 
@@ -1449,6 +1488,7 @@ let dispatch (ctx : (_, _) context) ~name ~args : result option =
   | "masc_observe_operations" -> Some (handle_observe_operations ctx)
   | "masc_observe_capacity" -> Some (handle_observe_capacity ctx)
   | "masc_observe_traces" -> Some (handle_observe_traces ctx args)
+  | "masc_swarm_live_run" -> Some (handle_swarm_live_run ctx args)
   | _ -> None
 
 let object_schema ?(required = []) properties =
@@ -1919,6 +1959,19 @@ let schemas : tool_schema list =
           [
             ("operation_id", string_prop "Operation id.");
             ("limit", integer_prop ~default:25 "Maximum events to return.");
+          ];
+    };
+    {
+      name = "masc_swarm_live_run";
+      description =
+        "Execute the deterministic swarm-live harness. Spawns workers against a synthetic fixture, runs them through the Agent SDK, and persists the summary artifact to .masc/control-plane/swarm-live/<run_id>/. Results are then visible via masc_observe_traces.";
+      input_schema =
+        object_schema
+          [
+            ("run_id", string_prop "Run identifier (default: swarm-live).");
+            ( "worker_count",
+              integer_prop ~default:12
+                "Number of swarm workers to spawn (default: 12)." );
           ];
     };
   ]

@@ -1,7 +1,10 @@
-(** trpg_dm_intent.mli — DM Intent Extraction (deterministic, keyword-based).
+(** trpg_dm_intent.mli — DM Intent Extraction (keyword + LLM hybrid).
 
     Extracts DM's narrative intent from their action text.
-    No LLM required - pure keyword matching for reproducibility and zero cost.
+    Mode selection via MASC_TRPG_DM_INTENT_MODE:
+    - keyword (default): Pure keyword matching, zero latency
+    - llm: LLM structured classification via Llm_client cascade
+    - hybrid: LLM with keyword fallback on failure
 
     @since 2.70.0 *)
 
@@ -25,8 +28,9 @@ type dm_intent = {
 }
 
 (** Extract DM intent from action text.
-    Analyzes the text for keyword patterns associated with each intent category.
-    Returns the strongest match, or Unknown if no patterns exceed threshold. *)
+    In keyword mode: keyword pattern matching.
+    In llm mode: LLM structured classification (returns Unknown on failure).
+    In hybrid mode: LLM first, keyword fallback on failure. *)
 val extract : string -> dm_intent
 
 (** Convert intent to a one-line hint for player keeper prompts. *)
@@ -34,6 +38,13 @@ val to_hint : dm_intent -> string
 
 (** String representation of intent category. *)
 val string_of_category : intent_category -> string
+
+(** Parse intent category from string (case-insensitive, accepts aliases). *)
+val category_of_string : string -> intent_category
+
+(** Parse dm_intent from LLM text response (JSON extraction).
+    Exposed for testing. *)
+val parse_llm_intent : string -> (dm_intent, string) result
 
 (** Serialize to JSON. *)
 val to_yojson : dm_intent -> Yojson.Safe.t

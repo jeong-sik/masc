@@ -22,7 +22,7 @@
         test_datachannel_rfc test_dtls_crypto test_dashboard
         test_multi_room test_worktree_detection test_bounded test_mention test_hat
         test_swarm test_heartbeat_qw test_sse_qw test_agent_health
-        test_post_verifier test_mdal)
+        test_post_verifier test_post_verifier_llm test_mdal)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -31,7 +31,7 @@
           test_datachannel_rfc test_dtls_crypto test_dashboard
           test_multi_room test_worktree_detection test_bounded test_mention test_hat
           test_swarm test_heartbeat_qw test_sse_qw test_agent_health
-          test_post_verifier test_mdal)
+          test_post_verifier test_post_verifier_llm test_mdal)
  (libraries masc_mcp mcp_protocol alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
 
@@ -155,6 +155,12 @@
  (name test_lodge_reaction)
  (modules test_lodge_reaction)
  (libraries masc_mcp alcotest str yojson unix))
+
+; Lodge_tom module tests (SimToM Theory of Mind)
+(test
+ (name test_lodge_tom)
+ (modules test_lodge_tom)
+ (libraries masc_mcp alcotest str yojson))
 
 ; Lodge_decision module tests (structured LLM decision contract)
 (test
@@ -732,3 +738,11 @@
  (name test_llm_scoring_demo)
  (modules test_llm_scoring_demo)
  (libraries masc_mcp yojson))
+
+; Context Router Demo — compare heuristic vs LLM intent classification
+; Run with: MASC_CONTEXT_ROUTER_MODE=llm dune exec test/test_context_router_demo.exe
+(executable
+ (name test_context_router_demo)
+ (modules test_context_router_demo)
+ (libraries masc_mcp yojson))
+

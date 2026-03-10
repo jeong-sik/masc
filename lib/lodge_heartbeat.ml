@@ -468,7 +468,7 @@ let with_auth_header_file api_key f =
   else
     let path = Filename.temp_file "masc-gql-auth-" ".hdr" in
     Fun.protect
-      ~finally:(fun () -> try Sys.remove path with _ -> ())
+      ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
       (fun () ->
          let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
          let oc = Unix.out_channel_of_descr fd in
@@ -479,7 +479,7 @@ let with_auth_header_file api_key f =
 let with_body_file body f =
   let path = Filename.temp_file "masc-gql-body-" ".json" in
   Fun.protect
-    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
        let oc = open_out_bin path in
        Fun.protect
@@ -1273,7 +1273,7 @@ let load_lodge_agents_full () =
                    ("primaryValue", match primary_value with Some s -> `String s | None -> `Null);
                    ("personalityHint", match personality_hint with Some s -> `String s | None -> `Null);
                  ])
-               with _ -> None
+               with Yojson.Safe.Util.Type_error (_, _) -> None
              ) edges in
              Ok (`Assoc [("agents", `List agents)]))
       with e ->
@@ -1326,7 +1326,7 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
          | `List errors when errors <> [] ->
            let msg = try
              List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-           with _ -> "unknown error" in
+           with Failure _ | Yojson.Safe.Util.Type_error (_, _) -> "unknown error" in
            Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
            Error msg
          | _ ->
@@ -1505,7 +1505,8 @@ let post_activity_report ~(result : heartbeat_result) =
          ("author", `String "lodge-system");
          ("content", `String content);
        ])
-       with _ -> ())
+       with exn ->
+         Printf.eprintf "[warn] %s: %s\n" __FUNCTION__ (Printexc.to_string exn))
     end
 
 (** {1 Daemon Loop} *)

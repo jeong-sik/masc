@@ -9724,9 +9724,16 @@ let make_routes ~port ~host ~sw ~clock =
                    match json |> member "model" with
                    | `String s -> s
                    | _ -> (
-                       match Provider_adapter.default_model_label_result () with
-                       | Ok label -> label
-                       | Error _ -> "default-model")
+                       match Sys.getenv_opt "MASC_DEFAULT_CASCADE" with
+                       | Some raw ->
+                           (match raw |> String.split_on_char ',' |> List.map String.trim |> List.filter (fun s -> s <> "") with
+                            | first :: _ -> first
+                            | [] -> "default-model")
+                       | None -> (
+                           match (Sys.getenv_opt "MASC_DEFAULT_PROVIDER", Sys.getenv_opt "MASC_DEFAULT_MODEL") with
+                           | Some provider, Some model_id when String.trim provider <> "" && String.trim model_id <> "" ->
+                               String.trim provider ^ ":" ^ String.trim model_id
+                           | _ -> "default-model"))
                  in
                  let personality_hint =
                    match json |> member "personalityHint" with

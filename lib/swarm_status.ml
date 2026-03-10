@@ -814,12 +814,20 @@ let slice_by_kind kind classify rows =
 
 let lane_present kind ~operations ~detachments ~alerts ~decisions ~traces ~sessions =
   match kind with
+  | Managed ->
+      (* Managed lanes should reflect live command-plane runtime, not historical
+         trace residue. Old traces/alerts without active operations, detachments,
+         or pending approvals otherwise keep the lane present forever and surface
+         stale_data as if work were still in flight. *)
+      List.exists operation_active operations
+      || List.exists detachment_active detachments
+      || List.exists decision_pending decisions
   | Supervised ->
       (* Supervised traces are historical. Only live session/runtime artifacts should
          make the lane present, otherwise stale operator/team-session traces create a
          phantom supervised lane after the real session has already ended. *)
       operations <> [] || detachments <> [] || decisions <> [] || sessions <> []
-  | Managed | Projected ->
+  | Projected ->
       operations <> [] || detachments <> [] || alerts <> [] || decisions <> [] || traces <> []
       || sessions <> []
 

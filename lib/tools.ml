@@ -4531,6 +4531,21 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
       ("required", `List [`String "path"]);
     ];
   };
+
+  {
+    name = "masc_tool_stats";
+    description = "In-memory tool usage statistics for the current server session. Returns top-20 tools by call count, tools unused for 30+ days, and tools never called. Data resets on server restart; telemetry.jsonl is the durable store.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("top_n", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of top tools to return (default: 20)");
+          ("default", `Int 20);
+        ]);
+      ]);
+    ];
+  };
 ]
 
 let deprecated_public_tools =

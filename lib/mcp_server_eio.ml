@@ -2968,6 +2968,9 @@ in
             Printf.eprintf "[WARN] telemetry tracking failed: %s\n%!" (Printexc.to_string exn))
      | None -> ());
 
+  (* Track in-memory call counter (hot-path, O(1), survives until restart) *)
+  Tool_registry.record_call ~tool_name:name ~success ~duration_ms;
+
   let trace_id =
     match id with
     | `String s -> s
@@ -3034,13 +3037,24 @@ Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work."
 
 let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = false)
-    state profile =
+    ?mode_override state profile =
   match profile with
   | Full ->
-      let room_path = Room.masc_dir state.Mcp_server.room_config in
-      let config = Config.load room_path in
-      Config.enabled_tool_schemas ~include_hidden ~include_deprecated
-        config.enabled_categories
+      let categories =
+        match mode_override with
+        | Some mode_str ->
+            (match Mode.mode_of_string (String.lowercase_ascii mode_str) with
+             | Some mode -> Mode.categories_for_mode mode
+             | None ->
+                 let room_path = Room.masc_dir state.Mcp_server.room_config in
+                 let config = Config.load room_path in
+                 config.Config.enabled_categories)
+        | None ->
+            let room_path = Room.masc_dir state.Mcp_server.room_config in
+            let config = Config.load room_path in
+            config.Config.enabled_categories
+      in
+      Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
   | Operator_remote -> Tool_operator.remote_schemas
 
 let tool_allowed_in_profile profile tool_name =
@@ -3080,6 +3094,7 @@ type tools_list_params = {
   include_hidden : bool;
   include_deprecated : bool;
   include_usage : bool;
+  mode : string option;
 }
 
 let bool_param payload key =
@@ -3098,6 +3113,7 @@ let requested_tool_list_params params =
         include_hidden = false;
         include_deprecated = false;
         include_usage = false;
+        mode = None;
       }
   | Some (`Assoc _ as payload) -> (
       let names_result =
@@ -3116,9 +3132,18 @@ let requested_tool_list_params params =
             |> Result.map (fun names -> Some (List.rev names))
         | _ -> Error "Invalid params: names must be an array of strings"
       in
+      let mode_result =
+        match payload |> member "mode" with
+        | `Null -> Ok None
+        | `String s -> Ok (Some s)
+        | _ -> Error "Invalid params: mode must be a string"
+      in
       match names_result with
       | Error _ as err -> err
       | Ok names -> (
+          match mode_result with
+          | Error _ as err -> err
+          | Ok mode -> (
           match bool_param payload "include_hidden" with
           | Error _ as err -> err
           | Ok include_hidden -> (
@@ -3133,7 +3158,8 @@ let requested_tool_list_params params =
                         include_hidden;
                         include_deprecated;
                         include_usage;
-                      }))))
+                        mode;
+                      })))))
   | Some _ -> Error "Invalid params: expected object"
 
 let handle_initialize_eio ?(profile = Full) id params =
@@ -3151,7 +3177,7 @@ let handle_initialize_eio ?(profile = Full) id params =
       ])
 
 let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_usage = false) state id =
+    ?(include_deprecated = false) ?(include_usage = false) ?mode state id =
   let usage_summary =
     if include_usage then
       Some (Telemetry_eio.summarize_tool_usage ?fs:state.Mcp_server.fs state.Mcp_server.room_config)
@@ -3159,7 +3185,8 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
       None
   in
   let tools =
-    tool_schemas_for_profile ~include_hidden ~include_deprecated state profile
+    tool_schemas_for_profile ~include_hidden ~include_deprecated
+      ?mode_override:mode state profile
     |> (match names with
        | None -> Fun.id
        | Some wanted ->
@@ -3243,9 +3270,9 @@ let handle_request
                    | "tools/list" -> (
                        match requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { names; include_hidden; include_deprecated; include_usage } ->
+                       | Ok { names; include_hidden; include_deprecated; include_usage; mode } ->
                            handle_list_tools_eio ~profile ?names ~include_hidden
-                             ~include_deprecated ~include_usage state id)
+                             ~include_deprecated ~include_usage ?mode state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

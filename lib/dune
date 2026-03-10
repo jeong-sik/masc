@@ -245,6 +245,7 @@
    tool_gardener
    tool_library
    tool_catalog
+   tool_registry
    library_bridge
    tool_council
    tool_code

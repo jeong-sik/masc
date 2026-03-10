@@ -1,0 +1,150 @@
+(** Tool Registry - In-memory call counters and usage statistics
+
+    Provides fast O(1) in-memory tracking of tool call frequency.
+    Complements Telemetry_eio's JSONL-based persistence with
+    zero-allocation atomic counters for hot-path performance.
+
+    Usage:
+    - record_call is called on every tools/call dispatch
+    - get_stats / get_top_n / get_unused_since provide reporting
+    - Data resets on server restart (telemetry.jsonl is the durable store)
+*)
+
+(** Per-tool call statistics *)
+type call_stats = {
+  mutable call_count : int;
+  mutable success_count : int;
+  mutable failure_count : int;
+  mutable last_called_at : float;  (** Unix timestamp, 0.0 = never *)
+  mutable total_duration_ms : int;
+}
+
+(** Global registry - process-lifetime, protected by mutex for fiber safety *)
+let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
+let registry_mutex = Mutex.create ()
+
+(** Record a tool call. Called from handle_call_tool_eio after execution. *)
+let record_call ~tool_name ~success ~duration_ms =
+  Mutex.lock registry_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock registry_mutex)
+    (fun () ->
+      let stats =
+        match Hashtbl.find_opt registry tool_name with
+        | Some s -> s
+        | None ->
+            let s = {
+              call_count = 0;
+              success_count = 0;
+              failure_count = 0;
+              last_called_at = 0.0;
+              total_duration_ms = 0;
+            } in
+            Hashtbl.replace registry tool_name s;
+            s
+      in
+      stats.call_count <- stats.call_count + 1;
+      if success then
+        stats.success_count <- stats.success_count + 1
+      else
+        stats.failure_count <- stats.failure_count + 1;
+      stats.last_called_at <- Time_compat.now ();
+      stats.total_duration_ms <- stats.total_duration_ms + duration_ms)
+
+(** Get all stats as a sorted list (by call_count descending) *)
+let get_stats () : (string * call_stats) list =
+  Mutex.lock registry_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock registry_mutex)
+    (fun () ->
+      Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry []
+      |> List.sort (fun (_, a) (_, b) -> compare b.call_count a.call_count))
+
+(** Get top N tools by call count *)
+let get_top_n n : (string * call_stats) list =
+  let all = get_stats () in
+  let rec take acc n = function
+    | [] -> List.rev acc
+    | _ when n <= 0 -> List.rev acc
+    | x :: xs -> take (x :: acc) (n - 1) xs
+  in
+  take [] n all
+
+(** Get tool names not called since the given Unix timestamp.
+    Only includes tools that are registered (have been called at least once)
+    but not recently. *)
+let get_unused_since (cutoff : float) : string list =
+  Mutex.lock registry_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock registry_mutex)
+    (fun () ->
+      Hashtbl.fold
+        (fun name stats acc ->
+          if stats.last_called_at < cutoff then name :: acc else acc)
+        registry []
+      |> List.sort String.compare)
+
+(** Get tools that have never been called (not in registry at all)
+    compared against a list of all known tool names *)
+let get_never_called (all_tool_names : string list) : string list =
+  Mutex.lock registry_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock registry_mutex)
+    (fun () ->
+      List.filter
+        (fun name -> not (Hashtbl.mem registry name))
+        all_tool_names
+      |> List.sort String.compare)
+
+(** Total calls across all tools *)
+let total_calls () : int =
+  Mutex.lock registry_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock registry_mutex)
+    (fun () ->
+      Hashtbl.fold (fun _ stats acc -> acc + stats.call_count) registry 0)
+
+(** Number of distinct tools that have been called *)
+let distinct_tools_called () : int =
+  Mutex.lock registry_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock registry_mutex)
+    (fun () -> Hashtbl.length registry)
+
+(** Convert call_stats to JSON *)
+let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
+  `Assoc [
+    ("name", `String name);
+    ("call_count", `Int stats.call_count);
+    ("success_count", `Int stats.success_count);
+    ("failure_count", `Int stats.failure_count);
+    ("avg_duration_ms",
+     `Int (if stats.call_count > 0
+           then stats.total_duration_ms / stats.call_count
+           else 0));
+    ("last_called_at", `Float stats.last_called_at);
+  ]
+
+(** Generate a full stats report as JSON *)
+let stats_report ~all_tool_names : Yojson.Safe.t =
+  let top_20 = get_top_n 20 in
+  let cutoff_30d = Time_compat.now () -. (30.0 *. 86400.0) in
+  let unused_30d = get_unused_since cutoff_30d in
+  let never_called = get_never_called all_tool_names in
+  `Assoc [
+    ("total_calls", `Int (total_calls ()));
+    ("distinct_tools_called", `Int (distinct_tools_called ()));
+    ("total_tools_available", `Int (List.length all_tool_names));
+    ("top_20", `List (List.map stats_to_json top_20));
+    ("unused_30d", `List (List.map (fun s -> `String s) unused_30d));
+    ("unused_30d_count", `Int (List.length unused_30d));
+    ("never_called", `List (List.map (fun s -> `String s) never_called));
+    ("never_called_count", `Int (List.length never_called));
+  ]
+
+(** Reset all counters (for testing) *)
+let reset () =
+  Mutex.lock registry_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock registry_mutex)
+    (fun () -> Hashtbl.clear registry)

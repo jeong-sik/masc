@@ -45,11 +45,20 @@ let handle_gc ctx args =
 let handle_cleanup_zombies ctx _args =
   (true, Room.cleanup_zombies ctx.config)
 
+let handle_tool_stats _ctx _args =
+  let all_tool_names =
+    List.map (fun (s : Types.tool_schema) -> s.name)
+      Config.all_tool_schemas
+  in
+  let report = Tool_registry.stats_report ~all_tool_names in
+  (true, Yojson.Safe.pretty_to_string report)
+
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_dashboard" -> Some (handle_dashboard ctx args)
   | "masc_gc" -> Some (handle_gc ctx args)
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ctx args)
+  | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
   (* Note: verify_handoff needs tokenize/jaccard/cosine - kept in mcp_server_eio.ml *)
   | _ -> None

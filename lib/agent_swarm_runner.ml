@@ -78,7 +78,8 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
   let base_url = match provider_cfg.provider with
     | Provider.Local { base_url } -> base_url
     | Provider.Anthropic -> Api.default_base_url
-    | Provider.OpenAICompat { base_url; _ } -> base_url in
+    | Provider.OpenAICompat { base_url; _ } -> base_url
+    | Provider.Ollama { base_url; _ } -> base_url in
   let dev_tools =
     Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir:config.workdir ()
   in

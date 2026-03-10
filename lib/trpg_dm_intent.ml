@@ -1,4 +1,11 @@
-(** trpg_dm_intent.ml — DM Intent Extraction (deterministic, keyword-based).
+(** trpg_dm_intent.ml — DM Intent Extraction (keyword + LLM hybrid).
+
+    Extracts DM's narrative intent from their action text.
+    Supports three modes via MASC_TRPG_DM_INTENT_MODE:
+    - keyword (default): Pure keyword matching, zero latency
+    - llm: LLM structured classification via Llm_client cascade
+    - hybrid: LLM with keyword fallback on failure
+
     @since 2.70.0 *)
 
 type intent_category =
@@ -19,7 +26,17 @@ type dm_intent = {
   keywords_matched : string list;
 }
 
-(* --- Keyword tables ---------------------------------------------------- *)
+(* ── Match Mode ─────────────────────────────────────────────────────── *)
+
+type match_mode = Keyword | Llm | Hybrid
+
+let get_match_mode () : match_mode =
+  match Sys.getenv_opt "MASC_TRPG_DM_INTENT_MODE" with
+  | Some "llm" -> Llm
+  | Some "hybrid" -> Hybrid
+  | _ -> Keyword
+
+(* ── Keyword tables ─────────────────────────────────────────────────── *)
 
 let keyword_table : (intent_category * string list) list =
   [
@@ -66,7 +83,7 @@ let keyword_table : (intent_category * string list) list =
       ] );
   ]
 
-(* --- Text tokenisation ------------------------------------------------- *)
+(* ── Text tokenisation ──────────────────────────────────────────────── *)
 
 (** Replace common punctuation with spaces, then split on whitespace.
     Avoids any dependency on [Str]. *)
@@ -84,7 +101,7 @@ let tokenize (text : string) : string list =
   String.split_on_char ' ' lowered
   |> List.filter (fun s -> String.length s > 0)
 
-(* --- Scoring ----------------------------------------------------------- *)
+(* ── Keyword Scoring ────────────────────────────────────────────────── *)
 
 type category_score = {
   category : intent_category;
@@ -114,16 +131,14 @@ let score_category (words : string list) (cat : intent_category)
 let primary_threshold = 0.15
 let secondary_threshold = 0.10
 
-(* --- Public API -------------------------------------------------------- *)
-
-let extract (text : string) : dm_intent =
+(** Keyword-based intent extraction (original algorithm). *)
+let extract_keyword (text : string) : dm_intent =
   let words = tokenize text in
   let scores =
     List.map
       (fun (cat, keywords) -> score_category words cat keywords)
       keyword_table
   in
-  (* sort descending by confidence, stable *)
   let sorted =
     List.sort
       (fun a b -> Float.compare b.confidence a.confidence)
@@ -160,6 +175,149 @@ let extract (text : string) : dm_intent =
           confidence = best.confidence;
           keywords_matched = best.matched;
         }
+
+(* ── LLM Classification ────────────────────────────────────────────── *)
+
+(** Model specs for DM intent LLM classification.
+    Override with MASC_TRPG_DM_INTENT_MODELS. *)
+let intent_model_strings () =
+  match Sys.getenv_opt "MASC_TRPG_DM_INTENT_MODELS" with
+  | Some s -> String.split_on_char ',' s |> List.map String.trim
+  | None ->
+      [
+        Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+      ]
+
+let intent_model_specs () =
+  Llm_client.available_model_specs_of_strings (intent_model_strings ())
+
+let category_of_string (s : string) : intent_category =
+  match String.lowercase_ascii (String.trim s) with
+  | "combat_setup" | "combat" -> Combat_setup
+  | "social_encounter" | "social" -> Social_encounter
+  | "puzzle_challenge" | "puzzle" -> Puzzle_challenge
+  | "exploration" | "explore" -> Exploration
+  | "rest_downtime" | "rest" -> Rest_downtime
+  | "plot_reveal" | "plot" -> Plot_reveal
+  | "tension_building" | "tension" -> Tension_building
+  | _ -> Unknown
+
+let build_classification_prompt (text : string) : string =
+  Printf.sprintf
+{|Classify this TRPG DM narration into exactly ONE primary category.
+
+Categories:
+- combat_setup: Monsters, weapons, battle, initiative, hostile encounters
+- social_encounter: NPC dialogue, negotiation, persuasion, merchants, tavern
+- puzzle_challenge: Riddles, traps, mechanisms, investigation, hidden clues
+- exploration: Travel, discover environment, arrive at new location, landscape
+- rest_downtime: Camp, heal, shop, craft, repair, rest
+- plot_reveal: Lore, prophecy, ancient secrets, destiny, backstory revelation
+- tension_building: Ominous signs, shadows, whispers, dread, foreboding atmosphere
+- unknown: No clear intent detected
+
+Reply with ONLY a JSON object (no markdown, no explanation):
+{"primary":"<category>","secondary":"<category_or_null>","confidence":<0.0-1.0>,"keywords":["<matched_terms>"]}
+
+DM text: %s|}
+    (Yojson.Safe.to_string (`String text))
+
+(** Parse dm_intent from a JSON object (Yojson). *)
+let intent_of_json (json : Yojson.Safe.t) : (dm_intent, string) result =
+  match json with
+  | `Assoc fields ->
+      let primary =
+        match List.assoc_opt "primary" fields with
+        | Some (`String s) -> category_of_string s
+        | _ -> Unknown
+      in
+      let secondary =
+        match List.assoc_opt "secondary" fields with
+        | Some (`String s) ->
+            let cat = category_of_string s in
+            if equal_intent_category cat Unknown
+               || equal_intent_category cat primary
+            then None
+            else Some cat
+        | _ -> None
+      in
+      let confidence =
+        match List.assoc_opt "confidence" fields with
+        | Some (`Float f) -> Float.min 1.0 (Float.max 0.0 f)
+        | Some (`Int i) -> Float.min 1.0 (Float.max 0.0 (Float.of_int i))
+        | _ -> 0.5
+      in
+      let keywords_matched =
+        match List.assoc_opt "keywords" fields with
+        | Some (`List items) ->
+            List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> []
+      in
+      Ok { primary; secondary; confidence; keywords_matched }
+  | _ -> Error "LLM response is not a JSON object"
+
+(** Parse dm_intent from LLM text response.
+    Handles both clean JSON and JSON embedded in prose. *)
+let parse_llm_intent (text : string) : (dm_intent, string) result =
+  let s = String.trim text in
+  match intent_of_json (Yojson.Safe.from_string s) with
+  | (Ok _) as ok -> ok
+  | Error _ | (exception Yojson.Json_error _) ->
+      (* Extract JSON substring between first { and last } *)
+      let brace_start =
+        try Some (String.index s '{') with Not_found -> None
+      in
+      let brace_end =
+        try Some (String.rindex s '}') with Not_found -> None
+      in
+      (match (brace_start, brace_end) with
+       | Some i, Some j when j > i ->
+           let json_str = String.sub s i (j - i + 1) in
+           (try intent_of_json (Yojson.Safe.from_string json_str)
+            with Yojson.Json_error msg ->
+              Error (Printf.sprintf "cannot parse extracted JSON: %s" msg))
+       | _ ->
+           Error (Printf.sprintf "no JSON found in LLM response: %s"
+                    (String.sub s 0 (min 100 (String.length s)))))
+
+(** Validate that an LLM response contains a parseable non-Unknown intent. *)
+let llm_response_is_valid (resp : Llm_client.completion_response) : bool =
+  match parse_llm_intent resp.content with
+  | Ok intent -> not (equal_intent_category intent.primary Unknown)
+  | Error _ -> false
+
+(** LLM-based intent extraction. Returns Error on failure. *)
+let extract_with_llm (text : string) : (dm_intent, string) result =
+  let prompt = build_classification_prompt text in
+  match
+    Llm_client.run_prompt_cascade
+      ~temperature:0.1
+      ~timeout_sec:15
+      ~accept:llm_response_is_valid
+      ~model_specs:(intent_model_specs ())
+      ~max_tokens:200
+      ~prompt ()
+  with
+  | Ok resp -> parse_llm_intent resp.content
+  | Error err -> Error err
+
+(* ── Public API ─────────────────────────────────────────────────────── *)
+
+let extract (text : string) : dm_intent =
+  match get_match_mode () with
+  | Keyword -> extract_keyword text
+  | Llm ->
+      (match extract_with_llm text with
+       | Ok intent -> intent
+       | Error _ ->
+           (* LLM-only mode still returns Unknown on failure *)
+           { primary = Unknown; secondary = None;
+             confidence = 0.0; keywords_matched = [] })
+  | Hybrid ->
+      (match extract_with_llm text with
+       | Ok intent -> intent
+       | Error _ -> extract_keyword text)
 
 let string_of_category = function
   | Combat_setup -> "combat_setup"

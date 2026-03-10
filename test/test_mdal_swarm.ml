@@ -144,6 +144,52 @@ let test_result_to_json () =
   Alcotest.(check int) "worker count" 1 (List.length workers)
 
 (* ================================================================ *)
+(* Runner edge cases                                                *)
+(* ================================================================ *)
+
+let test_run_empty_workers_fails () =
+  Eio_main.run @@ fun env ->
+  let config : Mdal_swarm.swarm_config = {
+    swarm_id = "swarm-empty";
+    title = "Empty Swarm";
+    workers = [];
+    aggregate_strategy = All;
+    aggregate_goal_expr = "metric >= 0.95";
+    max_wall_time_sec = Some 1.0;
+  } in
+  let result = Mdal_swarm.run ~clock:(Eio.Stdenv.clock env) config in
+  Alcotest.(check bool) "goal not met" false result.aggregate_goal_met;
+  Alcotest.(check int) "no workers" 0 (List.length result.worker_results);
+  match result.status with
+  | Mdal_swarm.Failed -> ()
+  | _ -> Alcotest.fail "expected failed status for empty worker set"
+
+let test_run_timeout_marks_timed_out () =
+  Eio_main.run @@ fun env ->
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.cwd env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  let config : Mdal_swarm.swarm_config = {
+    swarm_id = "swarm-timeout";
+    title = "Timeout Swarm";
+    workers = [
+      dummy_worker_spec
+        ~metric_fn:"python3 -c 'import time; time.sleep(0.2); print(1.0)'"
+        ~goal:"metric >= 1.0"
+        ~max_iter:1
+        ()
+    ];
+    aggregate_strategy = All;
+    aggregate_goal_expr = "metric >= 1.0";
+    max_wall_time_sec = Some 0.05;
+  } in
+  let result = Mdal_swarm.run ~clock:(Eio.Stdenv.clock env) config in
+  match result.status with
+  | Mdal_swarm.TimedOut -> ()
+  | _ -> Alcotest.fail "expected timeout status"
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -163,5 +209,10 @@ let () =
           Alcotest.test_case "strategy All" `Quick test_evaluate_aggregate_all;
           Alcotest.test_case "strategy Any" `Quick test_evaluate_aggregate_any;
           Alcotest.test_case "strategy Average" `Quick test_evaluate_aggregate_average;
+        ] );
+      ( "runner_edge_cases",
+        [
+          Alcotest.test_case "empty workers fail" `Quick test_run_empty_workers_fails;
+          Alcotest.test_case "timeout marks timed_out" `Quick test_run_timeout_marks_timed_out;
         ] );
     ]

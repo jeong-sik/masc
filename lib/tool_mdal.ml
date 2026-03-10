@@ -1041,6 +1041,7 @@ let handle_swarm_start (ctx : context) args =
     let workers_json = args |> member "workers" |> to_list in
     match parse_all_workers workers_json with
     | Error e -> `Assoc [("error", `String e)]
+    | Ok [] -> `Assoc [("error", `String "workers must not be empty")]
     | Ok workers ->
     let aggregate_strategy =
       args |> member "aggregate_strategy" |> to_string_option

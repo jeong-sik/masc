@@ -74,11 +74,15 @@ type swarm_result = {
 (* Metric helpers                                                   *)
 (* ================================================================ *)
 
-let measure_metric_shell cmd =
+let measure_metric_shell ?timeout_sec cmd =
   try
-    let ic = Unix.open_process_in cmd in
-    let output = In_channel.input_all ic |> String.trim in
-    let status = Unix.close_process_in ic in
+    let argv = [ "sh"; "-lc"; cmd ] in
+    let status, output =
+      match timeout_sec with
+      | Some secs -> Process_eio.run_argv_with_status ~timeout_sec:secs argv
+      | None -> Process_eio.run_argv_with_status argv
+    in
+    let output = String.trim output in
     match status with
     | Unix.WEXITED 0 ->
         (match Float.of_string_opt output with
@@ -86,7 +90,10 @@ let measure_metric_shell cmd =
          | None -> Error (Printf.sprintf "Not a float: %S" output))
     | Unix.WEXITED code ->
         Error (Printf.sprintf "Exit code %d" code)
-    | _ -> Error "Abnormal termination"
+    | Unix.WSIGNALED signal ->
+        Error (Printf.sprintf "Terminated by signal %d" signal)
+    | Unix.WSTOPPED signal ->
+        Error (Printf.sprintf "Stopped by signal %d" signal)
   with exn ->
     Error (Printf.sprintf "Shell error: %s" (Printexc.to_string exn))
 
@@ -97,7 +104,7 @@ let evaluate_aggregate strategy ~aggregate_goal_expr metrics =
 (* Single worker loop (runs inside an Eio fiber)                    *)
 (* ================================================================ *)
 
-let run_single_worker ~clock (spec : worker_spec) : worker_result =
+let run_single_worker ?timeout_sec ~clock (spec : worker_spec) : worker_result =
   let rec loop iteration last_metric =
     if iteration > spec.max_iterations then
       {
@@ -109,7 +116,7 @@ let run_single_worker ~clock (spec : worker_spec) : worker_result =
         error = None;
       }
     else
-      match measure_metric_shell spec.metric_fn with
+      match measure_metric_shell ?timeout_sec spec.metric_fn with
       | Error e ->
           {
             worker_id = spec.worker_id;
@@ -148,56 +155,75 @@ let run_single_worker ~clock (spec : worker_spec) : worker_result =
 
 (** Run all MDAL workers in parallel using Eio fibers.
     Returns aggregate swarm_result.
-    If [max_wall_time_sec] is set, checks elapsed time after all workers complete
-    and reports TimedOut if the limit was exceeded. *)
+    If [max_wall_time_sec] is set, the whole swarm run is bounded by that limit. *)
 let run ~clock config =
   let started_at = Types.now_iso () in
-  let start_time = Unix.gettimeofday () in
-  let worker_results =
-    Eio.Fiber.List.map
-      (fun spec -> run_single_worker ~clock spec)
-      config.workers
-  in
-  let elapsed = Unix.gettimeofday () -. start_time in
-  let timed_out =
-    match config.max_wall_time_sec with
-    | Some limit -> elapsed > limit
-    | None -> false
-  in
-  let metrics_with_goals =
-    List.map
-      (fun (r : worker_result) -> (r.final_metric, r.goal_met))
-      worker_results
-  in
-  let (aggregate_metric, aggregate_goal_met) =
-    evaluate_aggregate config.aggregate_strategy
-      ~aggregate_goal_expr:config.aggregate_goal_expr metrics_with_goals
-  in
-  let total_iterations =
-    List.fold_left
-      (fun acc (r : worker_result) -> acc + r.iterations_used)
-      0 worker_results
-  in
-  let all_met = List.for_all (fun (r : worker_result) -> r.goal_met) worker_results in
-  let any_error = List.exists (fun (r : worker_result) -> Option.is_some r.error) worker_results in
-  let status =
-    if timed_out then TimedOut
-    else if aggregate_goal_met && all_met then Completed
-    else if aggregate_goal_met then PartialSuccess
-    else if any_error then Failed
-    else PartialSuccess
-  in
-  {
-    swarm_id = config.swarm_id;
-    title = config.title;
-    status;
-    aggregate_metric;
-    aggregate_goal_met;
-    started_at;
-    completed_at = Types.now_iso ();
-    worker_results;
-    total_iterations;
-  }
+  if config.workers = [] then
+    {
+      swarm_id = config.swarm_id;
+      title = config.title;
+      status = Failed;
+      aggregate_metric = 0.0;
+      aggregate_goal_met = false;
+      started_at;
+      completed_at = Types.now_iso ();
+      worker_results = [];
+      total_iterations = 0;
+    }
+  else
+    let run_workers () =
+      Eio.Fiber.List.map
+        (fun spec -> run_single_worker ?timeout_sec:config.max_wall_time_sec ~clock spec)
+        config.workers
+    in
+    let timed_out, worker_results =
+      match config.max_wall_time_sec with
+      | Some limit -> (
+          match Eio.Time.with_timeout clock limit (fun () -> Ok (run_workers ())) with
+          | Ok results -> (false, results)
+          | Error `Timeout -> (true, []))
+      | None -> (false, run_workers ())
+    in
+    let aggregate_metric, aggregate_goal_met, total_iterations, all_met, any_error =
+      if timed_out then
+        (0.0, false, 0, false, false)
+      else
+        let metrics_with_goals =
+          List.map
+            (fun (r : worker_result) -> (r.final_metric, r.goal_met))
+            worker_results
+        in
+        let aggregate_metric, aggregate_goal_met =
+          evaluate_aggregate config.aggregate_strategy
+            ~aggregate_goal_expr:config.aggregate_goal_expr metrics_with_goals
+        in
+        let total_iterations =
+          List.fold_left
+            (fun acc (r : worker_result) -> acc + r.iterations_used)
+            0 worker_results
+        in
+        let all_met = List.for_all (fun (r : worker_result) -> r.goal_met) worker_results in
+        let any_error = List.exists (fun (r : worker_result) -> Option.is_some r.error) worker_results in
+        (aggregate_metric, aggregate_goal_met, total_iterations, all_met, any_error)
+    in
+    let status =
+      if timed_out then TimedOut
+      else if aggregate_goal_met && all_met then Completed
+      else if aggregate_goal_met then PartialSuccess
+      else if any_error then Failed
+      else PartialSuccess
+    in
+    {
+      swarm_id = config.swarm_id;
+      title = config.title;
+      status;
+      aggregate_metric;
+      aggregate_goal_met;
+      started_at;
+      completed_at = Types.now_iso ();
+      worker_results;
+      total_iterations;
+    }
 
 (* ================================================================ *)
 (* JSON response                                                    *)

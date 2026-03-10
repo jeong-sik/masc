@@ -73,6 +73,7 @@ type operation_record = {
   budget_class : string;
   workload_profile : string;
   stage : string option;
+  artifact_scope : string list;
   depends_on_operation_ids : string list;
   search_strategy : string;
   detachment_session_id : string option;
@@ -333,8 +334,7 @@ let get_string_list json key =
   | _ -> []
 
 let operation_workload_profile operation =
-  let profile = String.trim operation.workload_profile in
-  if profile = "" then "generic" else profile
+  Cp_search_fabric.normalized_workload_profile operation.workload_profile
 
 let operation_search_strategy operation =
   Cp_search_fabric.strategy_of_string (Some operation.search_strategy)
@@ -342,9 +342,31 @@ let operation_search_strategy operation =
 let operation_stage_key operation =
   Cp_search_fabric.normalized_stage operation.stage
 
-let validate_workload_profile = function
-  | "generic" | "research_pipeline" as value -> Ok value
+let validate_workload_profile raw =
+  match Cp_search_fabric.normalized_workload_profile raw with
+  | "coding_task" | "research_pipeline" as value -> Ok value
   | other -> Error (Printf.sprintf "unsupported workload_profile: %s" other)
+
+let normalize_stage = function
+  | Some value ->
+      let trimmed = String.trim value |> String.lowercase_ascii in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let validate_stage_for_workload ~workload_profile stage =
+  let stage = normalize_stage stage in
+  let allowed =
+    match workload_profile with
+    | "coding_task" -> [ "decompose"; "inspect"; "implement"; "verify"; "review" ]
+    | "research_pipeline" -> [ "normalize"; "verify"; "curate"; "rank"; "audit" ]
+    | _ -> []
+  in
+  match stage with
+  | None -> Ok None
+  | Some value when List.mem value allowed -> Ok (Some value)
+  | Some value ->
+      Error
+        (Printf.sprintf "unsupported %s stage: %s" workload_profile value)
 
 let validate_search_strategy = function
   | "legacy" | "best_first_v1" as value -> Ok value
@@ -353,7 +375,7 @@ let validate_search_strategy = function
 let room_search_strategy_default config =
   match (Room.read_state config).search_strategy_default with
   | Some ("legacy" | "best_first_v1" as value) -> value
-  | _ -> "legacy"
+  | _ -> "best_first_v1"
 
 let room_speculation_enabled config =
   (Room.read_state config).speculation_enabled
@@ -361,7 +383,7 @@ let room_speculation_enabled config =
 let room_speculation_budget config =
   match (Room.read_state config).speculation_budget with
   | Some value when value > 0 -> value
-  | _ -> 4
+  | _ -> 2
 
 let string_of_unit_kind = function
   | Company -> "company"
@@ -595,6 +617,7 @@ let operation_to_json (operation : operation_record) =
       ("budget_class", `String operation.budget_class);
       ("workload_profile", `String (operation_workload_profile operation));
       ("stage", match operation.stage with Some value -> `String value | None -> `Null);
+      ("artifact_scope", json_list_of_strings operation.artifact_scope);
       ("depends_on_operation_ids", json_list_of_strings operation.depends_on_operation_ids);
       ("search_strategy", `String operation.search_strategy);
       ( "detachment_session_id",
@@ -666,10 +689,13 @@ let operation_of_json json =
             autonomy_level = get_string_default json "autonomy_level" "L4_Autonomous";
             policy_class = get_string_default json "policy_class" "strict";
             budget_class = get_string_default json "budget_class" "standard";
-            workload_profile = get_string_default json "workload_profile" "generic";
-            stage = get_string_opt json "stage";
+            workload_profile =
+              Cp_search_fabric.normalized_workload_profile
+                (get_string_default json "workload_profile" "coding_task");
+            stage = normalize_stage (get_string_opt json "stage");
+            artifact_scope = get_string_list json "artifact_scope";
             depends_on_operation_ids = get_string_list json "depends_on_operation_ids";
-            search_strategy = get_string_default json "search_strategy" "legacy";
+            search_strategy = get_string_default json "search_strategy" "best_first_v1";
             detachment_session_id = get_string_opt json "detachment_session_id";
             trace_id;
             checkpoint_ref = get_string_opt json "checkpoint_ref";
@@ -1457,10 +1483,11 @@ let projected_team_session_operations config units managed_operations =
              Team_session_types.execution_scope_to_string session.execution_scope;
            budget_class =
              Team_session_types.communication_mode_to_string session.communication_mode;
-           workload_profile = "generic";
-           stage = None;
+           workload_profile = "coding_task";
+           stage = Some "implement";
+           artifact_scope = [];
            depends_on_operation_ids = [];
-           search_strategy = "legacy";
+           search_strategy = room_search_strategy_default config;
            detachment_session_id = Some session.session_id;
            trace_id = session.session_id;
            checkpoint_ref = nonempty_string (Some session.artifacts_dir);
@@ -1517,10 +1544,11 @@ let projected_swarm_operations config units managed_operations =
             autonomy_level = "L5_Independent";
             policy_class = "swarm";
             budget_class = "adaptive";
-            workload_profile = "generic";
+            workload_profile = "coding_task";
             stage = None;
+            artifact_scope = [];
             depends_on_operation_ids = [];
-            search_strategy = "legacy";
+            search_strategy = room_search_strategy_default config;
             detachment_session_id = None;
             trace_id = "swarm-trace-" ^ safe_slug swarm_id;
             checkpoint_ref = None;
@@ -2593,20 +2621,32 @@ let operations_summary_json_from_state (state : snapshot_state) =
                    {
                      Cp_microarch_summary.strategy = operation.search_strategy;
                      readiness = "blocked";
+                     status = string_of_operation_status operation.status;
                      candidate_count = 0;
                      best_score = None;
                      workload_profile = operation_workload_profile operation;
                      stage = operation.stage;
+                     artifact_scope_count = List.length operation.artifact_scope;
+                     artifact_scope_key =
+                       (match List.sort_uniq String.compare operation.artifact_scope with
+                       | [] -> None
+                       | scopes -> Some (String.concat "|" scopes));
                    }
              | None ->
                  Some
                    {
                      Cp_microarch_summary.strategy = operation.search_strategy;
                      readiness = "blocked";
+                     status = string_of_operation_status operation.status;
                      candidate_count = 0;
                      best_score = None;
                      workload_profile = operation_workload_profile operation;
                      stage = operation.stage;
+                     artifact_scope_count = List.length operation.artifact_scope;
+                     artifact_scope_key =
+                       (match List.sort_uniq String.compare operation.artifact_scope with
+                       | [] -> None
+                       | scopes -> Some (String.concat "|" scopes));
                    })
     in
     if blockers = [] then "ready" else "blocked"
@@ -2617,11 +2657,13 @@ let operations_summary_json_from_state (state : snapshot_state) =
         let stats =
           Cp_search_fabric.lookup_stats search_store
             ~unit_id:operation.assigned_unit_id
+            ~workload_profile:(operation_workload_profile operation)
             ~stage:(operation_stage_key operation)
         in
         {
           Cp_microarch_summary.strategy = operation.search_strategy;
           readiness = readiness_of_operation operation;
+          status = string_of_operation_status operation.status;
           candidate_count =
             (match operation_search_strategy operation with
             | Cp_search_fabric.Best_first_v1 -> 1
@@ -2633,6 +2675,11 @@ let operations_summary_json_from_state (state : snapshot_state) =
             | Cp_search_fabric.Legacy -> None);
           workload_profile = operation_workload_profile operation;
           stage = operation.stage;
+          artifact_scope_count = List.length operation.artifact_scope;
+          artifact_scope_key =
+            (match List.sort_uniq String.compare operation.artifact_scope with
+            | [] -> None
+            | scopes -> Some (String.concat "|" scopes));
         })
       state.operations
   in
@@ -4379,6 +4426,7 @@ let search_operation_descriptor (operation : operation_record) =
     assigned_unit_id = Some operation.assigned_unit_id;
     workload_profile = operation_workload_profile operation;
     stage = operation.stage;
+    artifact_scope = operation.artifact_scope;
     depends_on_operation_ids = operation.depends_on_operation_ids;
     created_at = operation.created_at;
   }
@@ -4435,10 +4483,12 @@ let speculative_candidates_for_operation (operation : operation_record)
         Speculative_engine.label = candidate.unit_id;
         prompt =
           Printf.sprintf
-            "Objective: %s\nWorkload: %s\nStage: %s\nCandidate unit: %s\nSearch score: %.1f\nRouting reason: %s\n\nDecide whether this is the best execution target. Keep the answer concise."
+            "Objective: %s\nWorkload: %s\nStage: %s\nArtifact scope: %s\nCandidate unit: %s\nSearch score: %.1f\nRouting reason: %s\n\nDecide whether this is the best execution target. Keep the answer concise."
             operation.objective
             (operation_workload_profile operation)
             (operation_stage_key operation)
+            (if operation.artifact_scope = [] then "(unspecified)"
+             else String.concat ", " operation.artifact_scope)
             candidate.unit_id
             candidate.breakdown.total
             candidate.routing_reason;
@@ -4457,6 +4507,13 @@ let speculative_pick_candidate config (operation : operation_record)
   if
     not (room_speculation_enabled config)
     || operation_search_strategy operation <> Cp_search_fabric.Best_first_v1
+    ||
+    not
+      (String.equal (operation_workload_profile operation) "coding_task"
+       &&
+       match normalize_stage operation.stage with
+       | Some ("inspect" | "review") -> true
+       | _ -> false)
     || List.length candidates < 2
   then
     None
@@ -4501,6 +4558,13 @@ let operation_search_json config units operations (operation : operation_record)
            `Assoc
              [
                ("enabled", `Bool (room_speculation_enabled config));
+               ( "stage_allowed",
+                 `Bool
+                   (String.equal (operation_workload_profile operation) "coding_task"
+                    &&
+                    match normalize_stage operation.stage with
+                    | Some ("inspect" | "review") -> true
+                    | _ -> false) );
                ("budget", `Int (room_speculation_budget config));
              ] )
         :: fields )
@@ -4508,15 +4572,16 @@ let operation_search_json config units operations (operation : operation_record)
 
 let update_search_stats_for_operation config operation ~outcome =
   let stage = operation_stage_key operation in
+  let workload_profile = operation_workload_profile operation in
   let current = read_search_stats config in
   let updated =
     match outcome with
     | `Success ->
-        Cp_search_fabric.record_success current ~unit_id:operation.assigned_unit_id
-          ~stage
+        Cp_search_fabric.record_success current
+          ~unit_id:operation.assigned_unit_id ~workload_profile ~stage
     | `Failure ->
-        Cp_search_fabric.record_failure current ~unit_id:operation.assigned_unit_id
-          ~stage
+        Cp_search_fabric.record_failure current
+          ~unit_id:operation.assigned_unit_id ~workload_profile ~stage
   in
   write_search_stats config updated
 
@@ -4770,6 +4835,40 @@ let update_unit config ~(actor : string) ~unit_id f ~event_type detail =
           Ok updated)
 
 let start_operation config ~(actor : string) json =
+  let validate_coding_dependency_requirement ~stage ~depends_on_operation_ids =
+    let expected_stage =
+      match stage with
+      | "verify" -> Some "implement"
+      | "review" -> Some "verify"
+      | _ -> None
+    in
+    match expected_stage with
+    | None -> Ok ()
+    | Some expected_stage ->
+        if depends_on_operation_ids = [] then
+          Error
+            (Printf.sprintf
+               "coding_task %s stage requires at least one %s dependency"
+               stage expected_stage)
+        else
+          let operations = read_operations config in
+          if
+            List.exists
+              (fun dep_id ->
+                match operation_by_id operations dep_id with
+                | Some dependency ->
+                    String.equal (operation_workload_profile dependency) "coding_task"
+                    && normalize_stage dependency.stage = Some expected_stage
+                | None -> false)
+              depends_on_operation_ids
+          then
+            Ok ()
+          else
+            Error
+              (Printf.sprintf
+                 "coding_task %s stage requires a coding_task %s dependency"
+                 stage expected_stage)
+  in
   let assigned_unit_id =
     match get_string_opt json "assigned_unit_id" with
     | Some value -> value
@@ -4783,12 +4882,26 @@ let start_operation config ~(actor : string) json =
   match unit_guard_json config assigned_unit_id with
   | Error message -> Error message
   | Ok _ ->
-      let workload_profile_raw = get_string_default json "workload_profile" "generic" in
+      let workload_profile_raw =
+        get_string_default json "workload_profile" "coding_task"
+      in
       let search_strategy_raw =
         get_string_default json "search_strategy" (room_search_strategy_default config)
       in
+      let depends_on_operation_ids = get_string_list json "depends_on_operation_ids" in
+      let artifact_scope = get_string_list json "artifact_scope" in
       let* workload_profile = validate_workload_profile workload_profile_raw in
+      let* stage =
+        validate_stage_for_workload ~workload_profile (get_string_opt json "stage")
+      in
       let* search_strategy = validate_search_strategy search_strategy_raw in
+      let* () =
+        match workload_profile, stage with
+        | "coding_task", Some ("verify" | "review" as stage_name) ->
+            validate_coding_dependency_requirement ~stage:stage_name
+              ~depends_on_operation_ids
+        | _ -> Ok ()
+      in
       let chain =
         match U.member "chain" json with
         | (`Assoc _ as chain_json) -> (
@@ -4834,8 +4947,9 @@ let start_operation config ~(actor : string) json =
           policy_class = get_string_default json "policy_class" "strict";
           budget_class = get_string_default json "budget_class" "standard";
           workload_profile;
-          stage = get_string_opt json "stage";
-          depends_on_operation_ids = get_string_list json "depends_on_operation_ids";
+          stage;
+          artifact_scope;
+          depends_on_operation_ids;
           search_strategy;
           detachment_session_id = get_string_opt json "detachment_session_id";
           trace_id = next_trace_id ();
@@ -4874,6 +4988,7 @@ let start_operation config ~(actor : string) json =
             ("policy_class", `String operation.policy_class);
             ("workload_profile", `String (operation_workload_profile operation));
             ("stage", match operation.stage with Some value -> `String value | None -> `Null);
+            ("artifact_scope", json_list_of_strings operation.artifact_scope);
             ("search_strategy", `String operation.search_strategy);
           ]);
       Ok operation

@@ -20,15 +20,19 @@ curl_post_mcp() {
   local body="$1"
   local attempt=1
   local output=""
-  local session_args=()
-  if [ -n "$MCP_SESSION_ID" ]; then
-    session_args=(-H "mcp-session-id: $MCP_SESSION_ID")
-  fi
   while [ "$attempt" -le "$CURL_RETRY_COUNT" ]; do
-    if output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
+    if [ -n "$MCP_SESSION_ID" ]; then
+      output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
+        -H 'Content-Type: application/json' \
+        -H 'Accept: application/json, text/event-stream' \
+        -H "mcp-session-id: $MCP_SESSION_ID" \
+        -d "$body" 2>/dev/null)" && {
+          printf "%s" "$output"
+          return 0
+        }
+    elif output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
       -H 'Content-Type: application/json' \
       -H 'Accept: application/json, text/event-stream' \
-      "${session_args[@]}" \
       -d "$body" 2>/dev/null)"; then
       printf "%s" "$output"
       return 0

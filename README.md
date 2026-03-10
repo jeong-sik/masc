@@ -83,7 +83,7 @@ merged 기준 아키텍처 한 장 요약은 [MERGED-ARCHITECTURE-SSOT.md](./doc
 - merged substrate:
   - native chain plane
   - local64 runtime pool
-  - optional `best_first_v1` search fabric
+  - default `best_first_v1` search fabric for `coding_task`
 - merged but not canonical public path:
   - `SWARM-RISC` research modules
 

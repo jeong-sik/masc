@@ -75,6 +75,138 @@ let detachment_rows_for_operation config operation_id =
   Command_plane_v2.list_detachments_json ~operation_id config
   |> Yojson.Safe.Util.member "detachments"
   |> Yojson.Safe.Util.to_list
+
+let test_operation_defaults_to_coding_task_best_first () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Patch command plane defaults");
+            ])
+      in
+      Alcotest.(check string) "default workload_profile" "coding_task"
+        (Command_plane_v2.operation_workload_profile operation);
+      Alcotest.(check string) "default search strategy" "best_first_v1"
+        operation.search_strategy)
+
+let test_generic_alias_normalizes_to_coding_task_and_keeps_artifact_scope () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Inspect command plane defaults");
+              ("workload_profile", `String "generic");
+              ("stage", `String "inspect");
+              ( "artifact_scope",
+                `List
+                  [
+                    `String "lib/command_plane_v2.ml";
+                    `String "test/test_command_plane_v2.ml";
+                  ] );
+            ])
+      in
+      Alcotest.(check string) "generic alias normalized" "coding_task"
+        (Command_plane_v2.operation_workload_profile operation);
+      Alcotest.(check (list string)) "artifact_scope preserved"
+        [ "lib/command_plane_v2.ml"; "test/test_command_plane_v2.ml" ]
+        operation.artifact_scope)
+
+let test_coding_verify_and_review_require_expected_dependencies () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      match
+        Command_plane_v2.start_operation config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Run verify without implement dependency");
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "verify");
+            ])
+      with
+      | Ok _ -> Alcotest.fail "verify without implement dependency should fail"
+      | Error message ->
+          Alcotest.(check string) "verify dependency error"
+            "coding_task verify stage requires at least one implement dependency"
+            message;
+      let implement_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Implement command plane patch");
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "implement");
+            ])
+      in
+      let verify_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Verify command plane patch");
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "verify");
+              ("depends_on_operation_ids", `List [ `String implement_op.operation_id ]);
+            ])
+      in
+      match
+        Command_plane_v2.start_operation config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Review without verify dependency");
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "review");
+              ("depends_on_operation_ids", `List [ `String implement_op.operation_id ]);
+            ])
+      with
+      | Ok _ -> Alcotest.fail "review without verify dependency should fail"
+      | Error message ->
+          Alcotest.(check string) "review dependency error"
+            "coding_task review stage requires a coding_task verify dependency"
+            message;
+      let review_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Review command plane patch");
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "review");
+              ("depends_on_operation_ids", `List [ `String verify_op.operation_id ]);
+            ])
+      in
+      Alcotest.(check string) "review stage accepted" "review"
+        (Option.value ~default:"" review_op.stage))
+
 let test_platoon_assignment_expands_detachments_and_tick_runs () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -150,6 +282,7 @@ let test_platoon_assignment_expands_detachments_and_tick_runs () =
               ("objective", `String "Run platoon-level rehearsal");
               ("policy_class", `String "guarded");
               ("budget_class", `String "standard");
+              ("search_strategy", `String "legacy");
             ])
       in
       let detachments_json =
@@ -274,6 +407,7 @@ let test_snapshot_json_reports_consistent_sections () =
               ("objective", `String "Run snapshot drill");
               ("policy_class", `String "guarded");
               ("budget_class", `String "standard");
+              ("search_strategy", `String "legacy");
             ])
       in
       let snapshot = Command_plane_v2.snapshot_json config in
@@ -1165,7 +1299,11 @@ let test_best_first_search_blocks_and_routes_research_pipeline () =
        |> Yojson.Safe.Util.member "search_fabric" <> `Null);
       Alcotest.(check bool) "microarch exposes operator signals" true
         (operations_overview |> Yojson.Safe.Util.member "microarch"
-       |> Yojson.Safe.Util.member "signals" <> `Null))
+       |> Yojson.Safe.Util.member "signals" <> `Null);
+      Alcotest.(check bool) "microarch exposes quality per token signal" true
+        (operations_overview |> Yojson.Safe.Util.member "microarch"
+       |> Yojson.Safe.Util.member "signals"
+       |> Yojson.Safe.Util.member "quality_per_token" <> `Null))
 
 let test_invalid_search_strategy_is_rejected () =
   let base_dir = temp_dir () in
@@ -1206,6 +1344,16 @@ let () =
         [
           Alcotest.test_case "platoon assignment expands detachments" `Quick
             test_platoon_assignment_expands_detachments_and_tick_runs;
+          Alcotest.test_case "operation defaults to coding_task best_first" `Quick
+            test_operation_defaults_to_coding_task_best_first;
+          Alcotest.test_case
+            "generic alias normalizes to coding_task and keeps artifact scope"
+            `Quick
+            test_generic_alias_normalizes_to_coding_task_and_keeps_artifact_scope;
+          Alcotest.test_case
+            "coding verify and review require expected dependencies"
+            `Quick
+            test_coding_verify_and_review_require_expected_dependencies;
           Alcotest.test_case "invalid search strategy is rejected" `Quick
             test_invalid_search_strategy_is_rejected;
           Alcotest.test_case "best first search blocks and routes research pipeline"

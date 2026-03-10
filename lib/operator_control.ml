@@ -1699,6 +1699,18 @@ let build_room_attention_items config =
       ( "command_routing_confidence",
         "command-plane routing confidence is degraded",
         microarch_signals |> U.member "routing_confidence" );
+      ( "command_quality_per_token",
+        "command-plane quality-per-token is degraded",
+        microarch_signals |> U.member "quality_per_token" );
+      ( "command_verification_gate_failures",
+        "command-plane verification gate failures are accumulating",
+        microarch_signals |> U.member "verification_gate_failures" );
+      ( "command_rework_rate",
+        "command-plane rework rate is elevated",
+        microarch_signals |> U.member "rework_rate" );
+      ( "command_artifact_scope_drift",
+        "command-plane artifact scope drift is elevated",
+        microarch_signals |> U.member "artifact_scope_drift" );
       ( "command_speculative_posture",
         "command-plane speculative posture needs review",
         microarch_signals |> U.member "speculative_posture" );
@@ -1767,6 +1779,22 @@ let room_recommendations config =
         "broadcast",
         "command-plane routing confidence is degraded",
         "[operator] Routing confidence is low. Inspect candidate scoring and avoid risky manual rebalance until blockers clear." );
+      ( microarch_signals |> U.member "quality_per_token",
+        "broadcast",
+        "command-plane quality-per-token is degraded",
+        "[operator] Quality per token is low. Narrow the task graph, reduce weak candidates, and keep coding stages explicit before spawning more workers." );
+      ( microarch_signals |> U.member "verification_gate_failures",
+        "broadcast",
+        "command-plane verification gate failures are accumulating",
+        "[operator] Verification failures are stacking up. Stop widening the swarm, inspect implement->verify handoff quality, and patch failing gates first." );
+      ( microarch_signals |> U.member "rework_rate",
+        "broadcast",
+        "command-plane rework rate is elevated",
+        "[operator] Rework is high. Deduplicate artifact ownership and collapse parallel work that is touching the same scope." );
+      ( microarch_signals |> U.member "artifact_scope_drift",
+        "broadcast",
+        "command-plane artifact scope drift is elevated",
+        "[operator] Artifact scope drift is rising. Require explicit artifact_scope on coding stages before further routing or review." );
       ( microarch_signals |> U.member "cache_contention",
         "broadcast",
         "command-plane cache contention is elevated",

@@ -51,6 +51,42 @@ jobs:
           chmod +x masc-mcp-linux-x64
           ls -la masc-mcp-linux-x64
 
+      - name: Verify Linux binary format
+        run: |
+          set -euo pipefail
+          file masc-mcp-linux-x64
+          file masc-mcp-linux-x64 | grep -q 'ELF 64-bit'
+
+      - name: Build deployment image
+        run: docker build -t masc-mcp-railway-smoke .
+
+      - name: Check shared library resolution
+        run: |
+          docker run --rm masc-mcp-railway-smoke sh -lc '
+            set -e
+            out="$(ldd /app/masc-mcp)"
+            printf "%s\n" "$out"
+            ! printf "%s\n" "$out" | grep -q "not found"
+          '
+
+      - name: Smoke deployment image
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d -e PORT=8080 -p 18080:8080 masc-mcp-railway-smoke)"
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" || true' EXIT
+
+          for attempt in $(seq 1 20); do
+            if curl -fsS "http://127.0.0.1:18080/health" >/dev/null 2>&1; then
+              echo "Container healthcheck passed."
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "Container failed healthcheck."
+          docker logs "$cid" || true
+          exit 1
+
       - name: Remove binary from gitignore for Railway upload
         run: |
           # Railway respects .gitignore, so we need to remove the binary exclusion

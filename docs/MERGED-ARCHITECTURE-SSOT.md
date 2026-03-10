@@ -77,9 +77,9 @@
 ### Layer 4. Scheduling / policy
 
 - `Search Fabric V1`
-- 역할: dependency-aware best-first routing for `research_pipeline`
-- 기본값: `legacy`
-- opt-in: `best_first_v1`
+- 역할: dependency-aware best-first routing for `coding_task`, explicit `research_pipeline`
+- 기본값: `best_first_v1`
+- `legacy`는 explicit opt-out
 - SSOT 문서: [SEARCH-FABRIC-V1.md](./SEARCH-FABRIC-V1.md)
 
 ### Layer 5. Implementation swarm
@@ -116,7 +116,7 @@
 | `Team Session + Supervisor` | Canonical | 기능 구현 경로 |
 | `native chain plane` | Canonical substrate | command-plane 안으로 흡수됨 |
 | `local64 runtime pool` | Canonical substrate | local llama path |
-| `Search Fabric V1` | Opt-in policy | `research_pipeline`용 |
+| `Search Fabric V1` | Mainline policy | 기본 `coding_task`, explicit `research_pipeline` |
 | `SWARM-RISC` | Experimental / research | 개념 참고용 |
 | legacy `masc_swarm_*` public flow | Deprecated | CPv2로 수렴 |
 

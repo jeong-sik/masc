@@ -86,6 +86,13 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 
 이 경로가 benchmark와 swarm의 canonical path다.
 
+기본 운영 가정:
+
+- `masc_operation_start` 기본 workload는 `coding_task`다.
+- `generic`은 deprecated alias로 받아들이되 내부에서는 `coding_task`로 정규화한다.
+- search strategy 기본값은 `best_first_v1`이고, `legacy`는 explicit opt-out이다.
+- `coding_task` stage는 `decompose -> inspect -> implement -> verify -> review`를 canonical graph로 본다.
+
 1. `masc_unit_define`
    - company/platoon/squad/agent hierarchy를 만든다.
 2. `masc_operation_start`

@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-all clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
+.PHONY: build test test-unit test-contract test-contract-live test-all clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
 
 # Default target
 all: build
@@ -18,10 +18,14 @@ test:
 test-unit:
 	dune test --root .
 
-# Contract harness (requires running server on :8935)
+# Contract harness (self-bootstrapping, hermetic local server)
 test-contract:
-	bash scripts/harness/contract/team_session_contract.sh
+	bash scripts/harness/contract/run_all.sh
+
+# Contract harness against an already running server (default :8935)
+test-contract-live:
 	bash scripts/harness/contract/streamable_http_contract.sh
+	bash scripts/harness/contract/team_session_contract.sh
 	bash scripts/harness/contract/game_view_precondition.sh
 	bash scripts/harness/contract/trpg_session_contract.sh
 
@@ -69,7 +73,7 @@ fmt-check:
 	dune fmt --root . --preview || true
 
 # CI target (for GitHub Actions)
-ci: fmt-check test
+ci: fmt-check test test-contract
 	@echo "CI checks passed!"
 
 # Start the MCP server (local development)

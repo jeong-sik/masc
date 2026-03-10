@@ -79,7 +79,7 @@ let match_pattern pattern text =
       Some (Str.matched_string text_lower)
     else
       None
-  with _ -> None
+  with Failure _ | Not_found -> None
 
 let extract_number text =
   try
@@ -88,7 +88,7 @@ let extract_number text =
       Some (int_of_string (Str.matched_string text))
     else
       None
-  with _ -> None
+  with Failure _ | Not_found -> None
 
 (** {1 Action Execution} *)
 

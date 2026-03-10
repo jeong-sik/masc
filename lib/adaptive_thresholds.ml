@@ -165,7 +165,9 @@ let load_state ~(room : string) : adaptive_state option =
           let content = In_channel.input_all ic in
           let json = Yojson.Safe.from_string content in
           state_of_json json)
-    with _ -> None
+    with exn ->
+      ignore exn;
+      None
   else None
 
 (* ============================================================

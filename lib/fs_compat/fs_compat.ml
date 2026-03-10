@@ -105,7 +105,7 @@ let load_jsonl (path : string) : Yojson.Safe.t list =
     |> List.filter (fun line -> String.length (String.trim line) > 0)
     |> List.filter_map (fun line ->
         try Some (Yojson.Safe.from_string line)
-        with _ -> None)
+        with Yojson.Json_error _ -> None)
 
 (** Append JSON value as line to JSONL file. *)
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =

@@ -159,10 +159,10 @@ type governance_report = {
 let governance_summary ?(since="") ?(until_time="") (entries : Audit_log.audit_entry list) : governance_report =
   (* Filter by time range if provided *)
   let since_ts = if since = "" then 0.0
-    else (try float_of_string since with _ -> 0.0)
+    else (try float_of_string since with Failure _ -> 0.0)
   in
   let until_ts = if until_time = "" then infinity
-    else (try float_of_string until_time with _ -> infinity)
+    else (try float_of_string until_time with Failure _ -> infinity)
   in
   let filtered = List.filter (fun (e : Audit_log.audit_entry) ->
     e.timestamp >= since_ts && e.timestamp <= until_ts

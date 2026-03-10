@@ -511,7 +511,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
                    | Some (`String h) when String.length (String.trim h) > 0 -> Some h
                    | _ -> None)
                | _ -> None
-             with _ -> None
+             with Yojson.Json_error _ -> None
            in
            let parse_from_extracted_json () =
              match apply_adapter_transform (Custom "extract_json") input with
@@ -564,7 +564,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
                    let cname = child |> member "name" |> to_string in
                    let ctype = child |> member "type" |> to_string in
                    Some (ctype, cname)
-                 with _ -> None
+                 with Yojson.Safe.Util.Type_error _ -> None
                ) children
              in
              let texts =
@@ -629,7 +629,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
                ("implementation_notes", `List (List.map (fun s -> `String s) impl_notes));
              ] in
              Ok (Yojson.Safe.to_string spec)
-           with _ ->
+           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
              Error "Failed to parse figma summary JSON")
        | "reverse" ->
            let chars = String.to_seq input |> List.of_seq |> List.rev in

@@ -27,14 +27,14 @@ let get_int : Yojson.Safe.t -> string -> int option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `Int n -> Some n
   | `Intlit s -> (
-      try Some (int_of_string s) with _ -> None)
+      try Some (int_of_string s) with Failure _ -> None)
   | _ -> None
 
 let get_int_with_default json ~key ~default =
   match Yojson.Safe.Util.member key json with
   | `Int n -> n
   | `Intlit s -> (
-      try int_of_string s with _ -> default)
+      try int_of_string s with Failure _ -> default)
   | _ -> default
 
 let get_float : Yojson.Safe.t -> string -> float option = fun json key ->
@@ -74,7 +74,7 @@ let json_assoc_list kv =
   `Assoc (List.map (fun (k, v) -> (k, `String v)) kv)
 
 let parse_json_or_string s =
-  try Yojson.Safe.from_string s with _ -> `String s
+  try Yojson.Safe.from_string s with Yojson.Json_error _ -> `String s
 
 (** List utilities *)
 

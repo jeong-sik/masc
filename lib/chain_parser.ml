@@ -32,25 +32,25 @@ open Chain_types
 (** Maximum allowed chain depth to prevent stack overflow *)
 let security_max_depth =
   match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_DEPTH" with
-  | Some s -> (try max 1 (int_of_string s) with _ -> 20)
+  | Some s -> (try max 1 (int_of_string s) with Failure _ -> 20)
   | None -> 20
 
 (** Maximum allowed concurrency to prevent resource exhaustion *)
 let security_max_concurrency =
   match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_CONCURRENCY" with
-  | Some s -> (try max 1 (int_of_string s) with _ -> 10)
+  | Some s -> (try max 1 (int_of_string s) with Failure _ -> 10)
   | None -> 10
 
 (** Maximum total nodes in a chain to prevent memory exhaustion *)
 let security_max_nodes =
   match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_NODES" with
-  | Some s -> (try max 1 (int_of_string s) with _ -> 100)
+  | Some s -> (try max 1 (int_of_string s) with Failure _ -> 100)
   | None -> 100
 
 (** Maximum nodes in a single fanout/parallel to prevent exponential explosion *)
 let security_max_fanout =
   match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_FANOUT" with
-  | Some s -> (try max 1 (int_of_string s) with _ -> 20)
+  | Some s -> (try max 1 (int_of_string s) with Failure _ -> 20)
   | None -> 20
 
 (** Helper: Result bind operator *)
@@ -304,8 +304,8 @@ let rec parse_adapter_transform (json : Yojson.Safe.t) : (adapter_transform, str
       (match String.split_on_char ':' s with
        | ["extract"; path] -> Ok (Extract path)
        | ["template"; tpl] -> Ok (Template tpl)
-       | ["summarize"; n] -> (try Ok (Summarize (int_of_string n)) with _ -> Error "Invalid summarize value")
-       | ["truncate"; n] -> (try Ok (Truncate (int_of_string n)) with _ -> Error "Invalid truncate value")
+       | ["summarize"; n] -> (try Ok (Summarize (int_of_string n)) with Failure _ -> Error "Invalid summarize value")
+       | ["truncate"; n] -> (try Ok (Truncate (int_of_string n)) with Failure _ -> Error "Invalid truncate value")
        | ["jsonpath"; path] -> Ok (JsonPath path)
        | ["parse_json"] | ["parse"] -> Ok ParseJson
        | ["stringify"] -> Ok Stringify

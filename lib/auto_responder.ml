@@ -220,7 +220,8 @@ let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
                   |> member "text" |> to_string
             in
             Ok txt
-          with _ ->
+          with exn ->
+            ignore exn;
             Ok body_str
       with exn ->
         Error (Printexc.to_string exn)

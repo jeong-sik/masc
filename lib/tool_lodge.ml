@@ -177,7 +177,7 @@ let with_auth_header_file api_key f =
   else
     let path = Filename.temp_file "masc-gql-auth-" ".hdr" in
     Fun.protect
-      ~finally:(fun () -> try Sys.remove path with _ -> ())
+      ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
       (fun () ->
          let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
          let oc = Unix.out_channel_of_descr fd in
@@ -188,7 +188,7 @@ let with_auth_header_file api_key f =
 let with_body_file body f =
   let path = Filename.temp_file "masc-gql-body-" ".json" in
   Fun.protect
-    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
        let oc = open_out_bin path in
        Fun.protect
@@ -810,7 +810,7 @@ let agent_file_cache_path () =
 (** Cache TTL in hours (configurable via env) *)
 let agent_cache_ttl_hours () =
   match Sys.getenv_opt "MASC_AGENT_CACHE_TTL_HOURS" with
-  | Some s -> (try float_of_string s with _ -> 24.0)
+  | Some s -> (try float_of_string s with Failure _ -> 24.0)
   | None -> 24.0
 
 (** Convert agent_config to JSON *)
@@ -844,7 +844,7 @@ let agent_config_of_yojson (json : Yojson.Safe.t) : agent_config option =
       model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-4.7-flash:latest";
       interests = json |> member "interests" |> to_list |> List.filter_map to_string_option;
     }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error (_, _) -> None
 
 (** Save in-memory agent cache to file *)
 let save_agents_to_file_cache () =

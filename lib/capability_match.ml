@@ -98,7 +98,7 @@ let agent_profile_of_json (json : Yojson.Safe.t) : agent_profile option =
     let name = json |> U.member "name" |> U.to_string in
     let to_string_list j =
       match j with
-      | `List vs -> List.filter_map (fun v -> try Some (U.to_string v) with _ -> None) vs
+      | `List vs -> List.filter_map (fun v -> try Some (U.to_string v) with Yojson.Safe.Util.Type_error _ -> None) vs
       | `String s -> String.split_on_char ',' s |> List.map String.trim
       | _ -> []
     in
@@ -113,10 +113,10 @@ let agent_profile_of_json (json : Yojson.Safe.t) : agent_profile option =
       capabilities = [];
       model = json |> U.member "model" |> U.to_string_option;
       activity_level =
-        (try json |> U.member "activityLevel" |> U.to_float with _ -> 0.5);
+        (try json |> U.member "activityLevel" |> U.to_float with Yojson.Safe.Util.Type_error _ -> 0.5);
       role;
     }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ -> None
 
 (** Build an agent profile from Agent_identity.t *)
 let agent_profile_of_identity (id : Agent_identity.t) : agent_profile =

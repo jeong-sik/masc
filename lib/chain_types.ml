@@ -49,10 +49,10 @@ let consensus_mode_of_string s =
   else if s = "unanimous" then Unanimous
   else if String.length s > 9 && String.sub s 0 9 = "weighted:" then
     let threshold = String.sub s 9 (String.length s - 9) in
-    Weighted (try float_of_string threshold with _ -> 0.5)
+    Weighted (try float_of_string threshold with Failure _ -> 0.5)
   else
     (* Default: parse as count *)
-    Count (try int_of_string s with _ -> 1)
+    Count (try int_of_string s with Failure _ -> 1)
 
 (** Configuration for chain execution *)
 type chain_config = {

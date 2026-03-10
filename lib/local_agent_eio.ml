@@ -98,7 +98,7 @@ let request_id_matches request_id json =
   match member "id" json with
   | `Int value -> value = request_id
   | `Intlit value -> (
-      try int_of_string value = request_id with _ -> false)
+      try int_of_string value = request_id with Failure _ -> false)
   | `String value -> String.equal value (string_of_int request_id)
   | _ -> false
 
@@ -122,7 +122,7 @@ let normalize_mcp_body ~request_id body =
         try
           let json = Yojson.Safe.from_string line in
           if request_id_matches request_id json then Some line else None
-        with _ -> None)
+        with Yojson.Json_error _ -> None)
       data_lines
   in
   match matching_line with

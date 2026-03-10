@@ -47,7 +47,7 @@ let rec should_retry_unix_fallback = function
 
 let close_quietly fd =
   try Unix.close fd with
-  | _ -> ()
+  | Unix.Unix_error _ -> () (* intentional: best-effort cleanup *)
 
 let with_unix_capture ?env ?stdin_content (argv : string list)
     ~(on_error : unit -> 'a)

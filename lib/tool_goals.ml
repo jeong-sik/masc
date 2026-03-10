@@ -386,7 +386,7 @@ let reply_preview body =
         if String.length s > 160 then Some (String.sub s 0 160 ^ "...")
         else Some s
     | _ -> None
-  with _ -> None
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let add_fallback_task ctx node err =
   let title =
@@ -398,7 +398,9 @@ let add_fallback_task ctx node err =
       node.Goal_orchestrator.node_id node.Goal_orchestrator.depth err
   in
   try Some (Room.add_task ctx.config ~title ~priority:2 ~description:desc)
-  with _ -> None
+  with exn ->
+    Printf.eprintf "[GOALS] add_fallback_task failed: %s\n%!" (Printexc.to_string exn);
+    None
 
 let run_keeper_call ctx ~models ~keeper_prefix ?(fallback_to_task = true) node =
   let keeper_name =

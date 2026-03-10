@@ -96,7 +96,7 @@ let plan_of_json (json : Yojson.Safe.t) : daily_plan option =
       hourly_blocks = json |> member "hourly_blocks" |> to_list |> List.map block_of_json;
       created_at = json |> member "created_at" |> to_float;
     }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
 (* ---------- File I/O ---------- *)
 
@@ -111,7 +111,7 @@ let load_plan ~agent_name ~date : daily_plan option =
         let buf = Bytes.create n in
         really_input ic buf 0 n;
         Yojson.Safe.from_string (Bytes.to_string buf) |> plan_of_json)
-    with _ -> None
+    with exn -> let _ = exn in None
   end
 
 let save_plan (plan : daily_plan) =

@@ -55,7 +55,7 @@ let event_to_sse_json message_str =
       ("method", `String "notifications/board");
       ("params", json)
     ])
-  with _ ->
+  with Yojson.Json_error _ ->
     Printf.eprintf "[Board_listener] Failed to parse event: %s\n%!" message_str;
     None
 

@@ -287,7 +287,9 @@ let load_all_signatures () : agent_signature list =
           match agent_signature_of_json j with
           | Ok sig_ -> Some sig_
           | Error _ -> None)
-    with _ -> []
+    with
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> []
+    | Sys_error _ | Eio.Io _ -> []
   end
 
 (** Save agent signature (upsert).
@@ -474,7 +476,7 @@ let parse_batch_reactions (response : string) : batch_reaction list =
                }
              | Error _ -> None)
           | _ -> None
-        with _ -> None
+        with Failure _ -> None
     )
 
 (** {1 Cold Start} *)
@@ -726,7 +728,7 @@ let load_calibration ~agent_name : confidence_calibration list =
       try
         let record = calibration_of_json json in
         if record.agent_name = agent_name then Some record else None
-      with _ -> None)
+      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
 
 (** Compute average calibration error for an agent.
     Returns 0.5 (neutral) if no calibration data exists. *)

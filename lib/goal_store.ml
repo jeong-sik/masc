@@ -286,7 +286,7 @@ let parse_yyyy_mm_dd s =
         in
         let ts, _ = Unix.mktime tm in
         Some ts)
-  with _ -> None
+  with exn -> ignore exn; None
 
 let days_until due_date =
   match due_date with

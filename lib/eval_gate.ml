@@ -153,7 +153,7 @@ let pre_check
                          let c = json |> member "content" in
                          (match c with `String s -> s | _ -> "")
                      | _ -> "")
-                  with _ -> ""
+                  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) -> ""
                 in
                 begin match detect_destructive cmd_str with
                 | Some (pattern, desc) ->
@@ -181,7 +181,7 @@ let pre_check
                    let c = json |> member "content" in
                    (match c with `String s -> s | _ -> "")
                | _ -> "")
-            with _ -> ""
+            with Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) -> ""
           in
           begin match detect_destructive cmd_str with
           | Some (pattern, desc) ->
@@ -227,7 +227,7 @@ let post_eval
        | `String "" -> false
        | `String _ -> true
        | _ -> false)
-    with _ -> false
+    with Yojson.Json_error _ -> false
   in
 
   let error_message =
@@ -236,7 +236,7 @@ let post_eval
         let json = Yojson.Safe.from_string result in
         let open Yojson.Safe.Util in
         Some (json |> member "error" |> to_string)
-      with _ -> Some "unknown error in result"
+      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) -> Some "unknown error in result"
     else None
   in
 

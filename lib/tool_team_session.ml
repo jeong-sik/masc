@@ -390,13 +390,13 @@ let bool_env_default name ~default =
 let float_env_default name ~default =
   match env_trim_opt name with
   | Some raw -> (
-      try float_of_string raw with _ -> default)
+      try float_of_string raw with Failure _ -> default)
   | None -> default
 
 let int_env_default name ~default =
   match env_trim_opt name with
   | Some raw -> (
-      try int_of_string raw with _ -> default)
+      try int_of_string raw with Failure _ -> default)
   | None -> default
 
 let contains_ci haystack needle =
@@ -661,7 +661,7 @@ let parse_routing_decision_json (json : Yojson.Safe.t) =
         match member "confidence" json with
         | `Float value -> Some value
         | `Int value -> Some (float_of_int value)
-        | `Intlit raw -> (try Some (float_of_string raw) with _ -> None)
+        | `Intlit raw -> (try Some (float_of_string raw) with Failure _ -> None)
         | _ -> None
       in
       let reason =
@@ -749,7 +749,7 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
           try
             Yojson.Safe.from_string response.content
             |> parse_routing_decision_json
-          with _ -> None)
+          with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
       | Error _ -> None
 
 let routing_summary_line (decision : routing_decision) =
@@ -1064,13 +1064,13 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
     match member key json with
     | `Float value -> Some value
     | `Int value -> Some (float_of_int value)
-    | `Intlit raw -> (try Some (float_of_string raw) with _ -> None)
+    | `Intlit raw -> (try Some (float_of_string raw) with Failure _ -> None)
     | _ -> None
   in
   let get_timeout key =
     match member key json with
     | `Int n -> max 1 n
-    | `Intlit s -> (try max 1 (int_of_string s) with _ -> default_timeout)
+    | `Intlit s -> (try max 1 (int_of_string s) with Failure _ -> default_timeout)
     | _ -> default_timeout
   in
   match (get_required_string "spawn_agent", get_required_string "spawn_prompt") with
@@ -1107,7 +1107,7 @@ let parse_step_spawn_specs args =
   let default_batch_timeout =
     match Yojson.Safe.Util.member "spawn_timeout_seconds" args with
     | `Int value -> max 1 value
-    | `Intlit raw -> (try max 1 (int_of_string raw) with _ -> 300)
+    | `Intlit raw -> (try max 1 (int_of_string raw) with Failure _ -> 300)
     | _ -> max 1 (get_int args "spawn_timeout_seconds" 300)
   in
   let batch_specs_result =

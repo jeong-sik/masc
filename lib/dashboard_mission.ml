@@ -13,7 +13,7 @@ let member_assoc key json =
 let int_field ?(default = 0) key json =
   match member_assoc key json with
   | `Int value -> value
-  | `Intlit raw -> (try int_of_string raw with _ -> default)
+  | `Intlit raw -> (try int_of_string raw with Failure _ -> default)
   | `Float value -> int_of_float value
   | _ -> default
 

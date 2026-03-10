@@ -308,14 +308,14 @@ let get_string_default json key default =
 let get_int_default json key default =
   match U.member key json with
   | `Int value -> value
-  | `Intlit value -> (try int_of_string value with _ -> default)
+  | `Intlit value -> (try int_of_string value with Failure _ -> default)
   | _ -> default
 
 let get_float_default json key default =
   match U.member key json with
   | `Float value -> value
   | `Int value -> float_of_int value
-  | `Intlit value -> (try float_of_string value with _ -> default)
+  | `Intlit value -> (try float_of_string value with Failure _ -> default)
   | _ -> default
 
 let get_bool_default json key default =
@@ -2256,7 +2256,7 @@ let iso_of_unix timestamp =
     tm.tm_hour tm.tm_min tm.tm_sec
 
 let file_mtime path =
-  try Some (Unix.stat path).st_mtime with _ -> None
+  try Some (Unix.stat path).st_mtime with Unix.Unix_error _ -> None
 
 let read_jsonl_local path =
   match Safe_ops.read_file_safe path with

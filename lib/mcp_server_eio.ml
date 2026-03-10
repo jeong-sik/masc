@@ -996,7 +996,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
             resolved
           else
             agent_name
-        with _ -> agent_name
+        with exn ->
+          Printf.eprintf "[warn] %s: %s\n" __FUNCTION__ (Printexc.to_string exn);
+          agent_name
       else
         agent_name
     else
@@ -2432,7 +2434,9 @@ Time: %s
             (match Jiphyeon.Archive.get_agent_episodes ~sw ~env cell_id 5 with
              | Ok episodes -> (List.length episodes, List.nth_opt episodes 0)
              | Error _ -> (0, None))
-          with _ -> (0, None))
+          with exn ->
+            Printf.eprintf "[warn] %s: %s\n" __FUNCTION__ (Printexc.to_string exn);
+            (0, None))
         | None -> (0, None)
       in
 
@@ -2733,7 +2737,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
   | Some raw ->
       let parsed =
         try int_of_string (String.trim raw)
-        with _ -> default
+        with Failure _ -> default
       in
       max min_v (min max_v parsed)
 
@@ -2796,7 +2800,7 @@ let read_only_retry_limit () =
       (try
          let parsed = int_of_string (String.trim raw) in
          max 1 (min 5 parsed)
-       with _ -> 2)
+       with Failure _ -> 2)
   | None -> 2
 
 let is_retryable_message message =
@@ -3261,7 +3265,7 @@ let handle_request
                                in
                                Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
                                result)
-                           with _ ->
+                           with Yojson.Safe.Util.Type_error (_, _) ->
                              make_error ~id (-32602) "Invalid params: name must be a string")
                        | None -> make_error ~id (-32602) "Missing params")
                    | method_ -> make_error ~id (-32601) ("Method not found: " ^ method_))

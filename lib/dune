@@ -269,6 +269,8 @@
    ;; Keeper Autonomy Engine (Phase 2: autonomy slider + verifier)
    keeper_autonomy
    keeper_verifier
+   keeper_schema
+   keeper_config
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
@@ -281,6 +283,7 @@
    tool_perpetual
    tool_shard
    tool_keeper
+   trpg_schema
    tool_trpg
    trpg_store
    trpg_preset_store

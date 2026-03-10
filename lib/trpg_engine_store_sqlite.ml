@@ -109,7 +109,7 @@ let string_of_data = function
 
 let int_of_data = function
   | Sqlite3.Data.INT n -> Some (Int64.to_int n)
-  | Sqlite3.Data.TEXT s -> (try Some (int_of_string s) with _ -> None)
+  | Sqlite3.Data.TEXT s -> (try Some (int_of_string s) with Failure _ -> None)
   | _ -> None
 
 let append_event ~base_dir ~(event : Trpg_engine_event.t) =

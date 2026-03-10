@@ -322,5 +322,5 @@ let clear_all config =
   match config.backend with
   | FileSystem _ ->
       if Sys.file_exists dir && Sys.is_directory dir then
-        (try Unix.rmdir dir with _ -> ())
+        (try Unix.rmdir dir with Unix.Unix_error _ -> ())
   | Memory _ | PostgresNative _ -> ()

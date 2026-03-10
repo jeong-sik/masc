@@ -376,7 +376,9 @@ let read_persisted_run_json ~(run_id : string) : Yojson.Safe.t option =
                match Yojson.Safe.Util.member "run_id" json with
                | `String value when String.equal value run_id -> Some json
                | _ -> None
-             with _ -> None)
+             with exn ->
+               ignore exn;
+               None)
 
 let list_runs_json () : Yojson.Safe.t =
   let runs = list_runs () in

@@ -532,7 +532,7 @@ let assoc_int_of_json json =
           match v with
           | `Int n -> Some (k, n)
           | `Intlit s -> (
-              try Some (k, int_of_string s) with _ -> None)
+              try Some (k, int_of_string s) with Failure _ -> None)
           | _ -> None)
         fields
   | _ -> []
@@ -772,7 +772,7 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
               (match member "routing_confidence" json with
               | `Float value -> Some value
               | `Int value -> Some (float_of_int value)
-              | `Intlit raw -> (try Some (float_of_string raw) with _ -> None)
+              | `Intlit raw -> (try Some (float_of_string raw) with Failure _ -> None)
               | _ -> None);
             routing_reason = member "routing_reason" json |> to_string_option;
             routing_escalated =
@@ -837,14 +837,14 @@ let session_of_yojson json =
     let get_int_default key default =
       match member key json with
       | `Int n -> n
-      | `Intlit s -> (try int_of_string s with _ -> default)
+      | `Intlit s -> (try int_of_string s with Failure _ -> default)
       | _ -> default
     in
     let get_float_default key default =
       match member key json with
       | `Float v -> v
       | `Int n -> float_of_int n
-      | `Intlit s -> (try float_of_string s with _ -> default)
+      | `Intlit s -> (try float_of_string s with Failure _ -> default)
       | _ -> default
     in
     let started_at = get_float_default "started_at" (Time_compat.now ()) in
@@ -931,7 +931,7 @@ let session_of_yojson json =
         final_done_delta_total =
           (match member "final_done_delta_total" json with
            | `Int n -> Some n
-           | `Intlit s -> (try Some (int_of_string s) with _ -> None)
+           | `Intlit s -> (try Some (int_of_string s) with Failure _ -> None)
            | _ -> None);
         final_done_delta_by_agent =
           (match member "final_done_delta_by_agent" json with

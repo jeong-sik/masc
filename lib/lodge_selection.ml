@@ -249,7 +249,7 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
       skips;
       updated_at;
     }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ -> None
 
 (** {1 Persistence} *)
 

@@ -31,849 +31,10 @@ type 'a context = {
 
 type tool_result = bool * string
 
-(* --------------------------------------------------------------- *)
-(* Schemas                                                         *)
-(* --------------------------------------------------------------- *)
+let schemas = Keeper_schema.schemas
 
-let schemas : Types.tool_schema list = [
-  {
-    name = "masc_keeper_up";
-    description = "Create or update a persistent keeper agent (event-driven). \
-Stores context on disk and keeps presence alive. Auto-handoff is enabled by default.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle (stable). Example: 'lodge-helper'");
-        ]);
-        ("goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper goal/system purpose (required when creating)");
-        ]);
-        ("short_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: short-term goal horizon (default: goal).");
-        ]);
-        ("mid_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: mid-term goal horizon (default: goal).");
-        ]);
-        ("long_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: long-term goal horizon (default: goal).");
-        ]);
-        ("instructions", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: additional system instructions (kept across compaction/handoff).");
-        ]);
-        ("soul_profile", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Memory priority preset. One of: balanced, safety, delivery, research, relationship, minimal.");
-        ]);
-        ("will", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: keeper's long-term will (의지).");
-        ]);
-        ("needs", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: keeper's operational needs (니즈).");
-        ]);
-        ("desires", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: keeper's desire/drive statement (욕구).");
-        ]);
-        ("models", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Model cascade (provider:model). Examples: 'claude:opus', 'gemini:gemini-3.1-pro-preview', 'ollama:glm-4.7-flash', 'glm:glm-4.7', 'openrouter:...'.");
-        ]);
-        ("verify", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Enable verifier model feedback (default: false for keeper).");
-        ]);
-        ("presence_keepalive", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, periodically refresh Room.heartbeat for the keeper agent (default: true).");
-        ]);
-        ("presence_keepalive_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Presence keepalive interval seconds (default: 30).");
-        ]);
-        ("proactive_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, keeper can send proactive check-ins after idle periods (default: true).");
-        ]);
-        ("proactive_idle_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Idle seconds before proactive check-in is allowed (default: 900).");
-        ]);
-        ("proactive_cooldown_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum seconds between proactive check-ins (default: 1800).");
-        ]);
-        ("drift_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, keeper self-model (will/needs/desires) can drift from conversation signals (default: true).");
-        ]);
-        ("drift_min_turn_gap", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum keeper turns between automatic drift updates (default: 6).");
-        ]);
-        ("compaction_profile", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Compaction preset. One of: aggressive, balanced, conservative, custom.");
-        ]);
-        ("compaction_ratio_gate", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Context ratio gate for compaction (0.1-0.98). Overrides preset when set.");
-        ]);
-        ("compaction_message_gate", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Message count gate for compaction (0 disables this gate). Overrides preset when set.");
-        ]);
-        ("compaction_token_gate", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Token count gate for compaction (0 disables this gate). Overrides preset when set.");
-        ]);
-        ("continuity_compaction_cooldown_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum seconds to wait after a [STATE] continuity update before compaction. 0 disables the reflection hold.");
-        ]);
-        ("auto_handoff", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, automatically rotate trace_id when context gets large (default: true).");
-        ]);
-        ("handoff_threshold", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Context ratio threshold for auto-handoff (default: 0.85).");
-        ]);
-        ("handoff_cooldown_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum seconds between handoffs (default: 300).");
-        ]);
-        ("context_budget", `Assoc [
-          ("type", `String "number");
-          ("description", `String "How much compressed context to transfer to successor (0.0-1.0, default: 0.6).");
-        ]);
-      ]);
-      ("required", `List [`String "name"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_status";
-    description = "Get keeper status (meta + current context stats + monitoring tails).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("tail_turns", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "How many recent turns to include from keeper metrics (default: 3).");
-        ]);
-        ("tail_messages", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "How many recent history messages to include (default: 5).");
-        ]);
-        ("tail_compactions", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "How many recent compaction events to include (default: 10).");
-        ]);
-        ("tail_bytes", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "How many bytes from the end of files to scan for tails (default: 60000).");
-        ]);
-        ("fast", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Enable fast mode (skip heavy sections unless explicitly enabled).");
-        ]);
-        ("include_context", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include checkpoint-derived context stats (default: !fast).");
-        ]);
-        ("include_metrics_overview", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include metrics overview + skill route scan (default: !fast).");
-        ]);
-        ("include_memory_bank", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include memory bank summary (default: !fast).");
-        ]);
-        ("include_history_tail", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include recent history tail + fragment counters (default: !fast).");
-        ]);
-        ("include_compaction_history", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include recent compaction history tail (default: !fast).");
-        ]);
-      ]);
-      ("required", `List [`String "name"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_msg";
-    description = "Send a message to a keeper and get a reply. \
-Persists context + checkpoints. Auto-handoff is applied when needed.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("message", `Assoc [
-          ("type", `String "string");
-          ("description", `String "User message");
-        ]);
-        ("goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set goal when creating keeper inline");
-        ]);
-        ("short_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set short-term goal horizon when creating keeper inline");
-        ]);
-        ("mid_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set mid-term goal horizon when creating keeper inline");
-        ]);
-        ("long_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set long-term goal horizon when creating keeper inline");
-        ]);
-        ("instructions", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set instructions when creating keeper inline");
-        ]);
-        ("soul_profile", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set memory priority preset when creating keeper inline");
-        ]);
-        ("will", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set keeper will (의지) when creating keeper inline");
-        ]);
-        ("needs", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set keeper needs (니즈) when creating keeper inline");
-        ]);
-        ("desires", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: set keeper desires (욕구) when creating keeper inline");
-        ]);
-        ("drift_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: enable/disable self-model drift when creating keeper inline");
-        ]);
-        ("drift_min_turn_gap", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Optional: min turn gap for drift updates when creating keeper inline");
-        ]);
-        ("models", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional: set models when creating keeper inline. If keeper already exists, this acts as a runtime-only cascade override for this message call.");
-        ]);
-        ("timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Optional: overall cascade timeout (sec) for this keeper message call");
-        ]);
-        ("ollama_timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Optional: override Ollama timeout (sec) for this keeper message call");
-        ]);
-        ("no_skill_route", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: do not emit SKILL/SKILL_REASON headers in reply");
-        ]);
-        ("no_state_block", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: do not emit [STATE]...[/STATE] block in reply");
-        ]);
-        ("require_existing", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: fail if keeper does not already exist");
-        ]);
-        ("new_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper goal (persisted)");
-        ]);
-        ("new_short_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper short-term goal horizon (persisted)");
-        ]);
-        ("new_mid_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper mid-term goal horizon (persisted)");
-        ]);
-        ("new_long_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper long-term goal horizon (persisted)");
-        ]);
-        ("new_instructions", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper instructions (persisted)");
-        ]);
-        ("new_soul_profile", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper memory priority preset (persisted)");
-        ]);
-        ("new_will", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper will (persisted)");
-        ]);
-        ("new_needs", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper needs (persisted)");
-        ]);
-        ("new_desires", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: replace keeper desires (persisted)");
-        ]);
-        ("new_drift_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: replace drift enabled flag (persisted)");
-        ]);
-        ("new_drift_min_turn_gap", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Optional: replace drift min turn gap (persisted)");
-        ]);
-      ]);
-      ("required", `List [`String "name"; `String "message"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_down";
-    description = "Stop keeper presence keepalive and optionally remove keeper files.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("remove_meta", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Delete .masc/perpetual-keepers/<name>.json (default: false). Set true only for permanent removal.");
-        ]);
-        ("remove_session", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Delete .masc/perpetual/<trace_id>/ directory (default: false).");
-        ]);
-      ]);
-      ("required", `List [`String "name"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_list";
-    description = "List keepers from .masc/perpetual-keepers.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Max keepers to return (default: 50).");
-        ]);
-        ("detailed", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Return keeper summaries (model/context/handoff/compaction) instead of names only.");
-        ]);
-      ]);
-    ];
-  };
-
-  (* --- Phase 4: Keeper Autonomy MCP Tools --- *)
-
-  {
-    name = "masc_keeper_autonomy";
-    description = "Query or change a keeper's autonomy level (L1_Reactive..L5_Independent). Without 'level', returns current autonomy info.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("level", `Assoc [
-          ("type", `String "string");
-          ("description", `String "New autonomy level: L1_Reactive, L2_Suggestive, L3_Guided, L4_Autonomous, L5_Independent");
-          ("enum", `List [
-            `String "L1_Reactive"; `String "L2_Suggestive"; `String "L3_Guided";
-            `String "L4_Autonomous"; `String "L5_Independent";
-          ]);
-        ]);
-      ]);
-      ("required", `List [`String "name"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_goals";
-    description = "Link, unlink, or list goals for a keeper. Without action, lists the keeper's active goals.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("action", `Assoc [
-          ("type", `String "string");
-          ("description", `String "link | unlink (omit to list)");
-          ("enum", `List [`String "link"; `String "unlink"]);
-        ]);
-        ("goal_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Goal ID to link or unlink");
-        ]);
-      ]);
-      ("required", `List [`String "name"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_trajectory";
-    description = "View recent trajectory entries (tool calls) for a keeper session.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Max entries to return (default: 20, most recent first).");
-        ]);
-      ]);
-      ("required", `List [`String "name"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_eval";
-    description = "Run eval harness against a keeper's trajectory. Returns quality scores.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("scenario_file", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Path to scenario JSONL file (optional, uses keeper trajectory if omitted).");
-        ]);
-      ]);
-      ("required", `List [`String "name"]);
-    ];
-  };
-]
-
-let bool_default_true_of_env name =
-  match Sys.getenv_opt name with
-  | None -> true
-  | Some v ->
-      let v = String.trim v |> String.lowercase_ascii in
-      not (v = "0" || v = "false" || v = "no" || v = "n")
-
-let bool_of_env_default name ~(default : bool) =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then true
-      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then false
-      else default
-
-let validate_name name =
-  (* Same rule as keeper script: conservative handle chars only. *)
-  let re = Str.regexp "^[A-Za-z0-9._-]+$" in
-  name <> "" && Str.string_match re name 0
-
-let default_soul_profile = "balanced"
-let default_proactive_enabled = true
-let default_proactive_idle_sec = 900
-let default_proactive_cooldown_sec = 1800
-let default_drift_enabled = true
-let default_drift_min_turn_gap = 6
-let default_keeper_will = ""
-let default_keeper_needs = ""
-let default_keeper_desires = ""
-let default_goal_horizon_max_chars = 480
-let default_drift_max_clauses = 6
-let default_drift_max_chars = 320
-
-let canonical_soul_profile raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "balanced" | "default" -> Some "balanced"
-  | "safety" | "guardian" -> Some "safety"
-  | "delivery" | "executor" | "execution" -> Some "delivery"
-  | "research" | "analyst" -> Some "research"
-  | "relationship" | "companion" -> Some "relationship"
-  | "minimal" | "lean" -> Some "minimal"
-  | _ -> None
-
-let parse_soul_profile_opt args key : (string option, string) result =
-  match get_string_opt args key with
-  | None -> Ok None
-  | Some raw ->
-      (match canonical_soul_profile raw with
-       | Some p -> Ok (Some p)
-       | None ->
-           Error
-             (Printf.sprintf
-                "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, minimal)"
-                raw))
-
-let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
-  if max_bytes <= 0 then ""
-  else
-    let len = String.length s in
-    if len <= max_bytes then s
-    else
-      let rec loop i last_good =
-        if i >= len || i >= max_bytes then last_good
-        else
-          let dec = String.get_utf_8_uchar s i in
-          let dlen = Uchar.utf_decode_length dec in
-          if dlen <= 0 then last_good
-          else
-            let next = i + dlen in
-            if next > max_bytes then last_good
-            else loop next next
-      in
-      let cut = loop 0 0 in
-      if cut <= 0 then ""
-      else String.sub s 0 cut
-
-let utf8_repair_string (s : string) : string =
-  let len = String.length s in
-  let buf = Buffer.create len in
-  let rec loop i =
-    if i >= len then ()
-    else
-      let dec = String.get_utf_8_uchar s i in
-      let dlen = Uchar.utf_decode_length dec in
-      if dlen > 0 && Uchar.utf_decode_is_valid dec then (
-        Buffer.add_substring buf s i dlen;
-        loop (i + dlen))
-      else (
-        Buffer.add_string buf "\xEF\xBF\xBD";
-        loop (i + 1))
-  in
-  loop 0;
-  Buffer.contents buf
-
-let normalize_self_model_text ?(max_len = default_drift_max_chars) (raw : string) : string =
-  let s = String.trim raw in
-  if s = "" then ""
-  else utf8_safe_prefix_bytes s ~max_bytes:max_len
-
-let normalize_goal_horizon_text ?(max_len = default_goal_horizon_max_chars) (raw : string) : string =
-  let s = String.trim raw in
-  if s = "" then ""
-  else utf8_safe_prefix_bytes s ~max_bytes:max_len
-
-let normalize_goal_horizon_opt (raw_opt : string option) : string option =
-  match raw_opt with
-  | None -> None
-  | Some raw ->
-    let normalized = normalize_goal_horizon_text raw in
-    if normalized = "" then None else Some normalized
-
-let parse_goal_horizon_opt args key : string option =
-  normalize_goal_horizon_opt (get_string_opt args key)
-
-let resolve_goal_horizons
-    ~(goal : string)
-    ~(short_goal_opt : string option)
-    ~(mid_goal_opt : string option)
-    ~(long_goal_opt : string option) : string * string * string =
-  let short_goal =
-    Option.value ~default:goal short_goal_opt
-    |> normalize_goal_horizon_text
-  in
-  let mid_goal =
-    Option.value ~default:goal mid_goal_opt
-    |> normalize_goal_horizon_text
-  in
-  let long_goal =
-    Option.value ~default:goal long_goal_opt
-    |> normalize_goal_horizon_text
-  in
-  (short_goal, mid_goal, long_goal)
-
-let split_semicolon_clauses (raw : string) : string list =
-  raw
-  |> String.split_on_char ';'
-  |> List.map String.trim
-  |> List.filter (fun s -> s <> "")
-
-let take_last n xs =
-  if n <= 0 then []
-  else
-    let len = List.length xs in
-    if len <= n then xs
-    else
-      let rec drop k ys =
-        if k <= 0 then ys
-        else
-          match ys with
-          | [] -> []
-          | _ :: tl -> drop (k - 1) tl
-      in
-      drop (len - n) xs
-
-let compact_self_model_text
-    ?(max_clauses = default_drift_max_clauses)
-    ?(max_chars = default_drift_max_chars)
-    (raw : string) : string =
-  raw
-  |> split_semicolon_clauses
-  |> take_last max_clauses
-  |> String.concat "; "
-  |> normalize_self_model_text ~max_len:max_chars
-
-let parse_self_model_opt args key : string option =
-  match get_string_opt args key with
-  | None -> None
-  | Some raw -> Some (normalize_self_model_text raw)
-
-let clamp_int v ~min_v ~max_v =
-  max min_v (min max_v v)
-
-let int_of_env_default name ~default ~min_v ~max_v =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-      let v =
-        try int_of_string (String.trim raw)
-        with _ -> default
-      in
-      clamp_int v ~min_v ~max_v
-
-let float_of_env_default name ~default ~min_v ~max_v =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-      let v =
-        try float_of_string (String.trim raw)
-        with _ -> default
-      in
-      max min_v (min max_v v)
-
-let keeper_turn_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_TURN_MAX_TOKENS"
-    ~default:1200
-    ~min_v:256
-    ~max_v:4096
-
-let keeper_status_fast_default () : bool =
-  bool_of_env_default "MASC_KEEPER_STATUS_FAST_DEFAULT" ~default:false
-
-let keeper_followup_max_tokens (turn_max_tokens : int) : int =
-  (* Thinking models (e.g. Gemini 2.5) consume internal thinking tokens
-     from this budget, so follow-up needs a generous allocation.
-     Use same budget as the initial turn since the system prompt is minimal. *)
-  clamp_int turn_max_tokens ~min_v:600 ~max_v:4096
-
-let keeper_correction_max_tokens (turn_max_tokens : int) : int =
-  clamp_int (turn_max_tokens / 2) ~min_v:280 ~max_v:900
-
-let keeper_msg_postpass_budget_ms () : int =
-  int_of_env_default
-    "MASC_KEEPER_MSG_POSTPASS_BUDGET_MS"
-    ~default:12000
-    ~min_v:0
-    ~max_v:120000
-
-let keeper_compact_ratio () : float =
-  float_of_env_default
-    "MASC_KEEPER_COMPACT_RATIO"
-    ~default:0.5
-    ~min_v:0.1
-    ~max_v:0.98
-
-let keeper_compact_max_messages () : int =
-  int_of_env_default
-    "MASC_KEEPER_COMPACT_MAX_MESSAGES"
-    ~default:240
-    ~min_v:0
-    ~max_v:5000
-
-let keeper_compact_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_COMPACT_MAX_TOKENS"
-    ~default:0
-    ~min_v:0
-    ~max_v:5000000
-
-let keeper_continuity_compaction_cooldown_sec () : int =
-  int_of_env_default
-    "MASC_KEEPER_CONTINUITY_COMPACTION_COOLDOWN_SEC"
-    ~default:90
-    ~min_v:0
-    ~max_v:172800
-
-let keeper_bootstrap_proactive_warmup_sec () : int =
-  int_of_env_default
-    "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
-    ~default:300
-    ~min_v:0
-    ~max_v:172800
-
-let keeper_compaction_policy_from_env () : (float * int * int) =
-  ( keeper_compact_ratio (),
-    keeper_compact_max_messages (),
-    keeper_compact_max_tokens () )
-
-let normalize_compaction_ratio_gate (v : float) : float =
-  max 0.1 (min 0.98 v)
-
-let normalize_compaction_message_gate (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:5000
-
-let normalize_compaction_token_gate (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:5000000
-
-let normalize_continuity_compaction_cooldown_sec (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:172800
-
-let default_compaction_profile = "custom"
-
-let canonical_compaction_profile raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "aggressive" | "tight" -> Some "aggressive"
-  | "balanced" | "default" -> Some "balanced"
-  | "conservative" | "loose" -> Some "conservative"
-  | "custom" | "manual" | "env" -> Some "custom"
-  | _ -> None
-
-let parse_compaction_profile_opt args key : (string option, string) result =
-  match get_string_opt args key with
-  | None -> Ok None
-  | Some raw ->
-      (match canonical_compaction_profile raw with
-       | Some p -> Ok (Some p)
-       | None ->
-           Error
-             (Printf.sprintf
-                "invalid compaction_profile '%s' (allowed: aggressive, balanced, conservative, custom)"
-                raw))
-
-let compaction_policy_of_profile (profile : string) : (float * int * int) =
-  match canonical_compaction_profile profile |> Option.value ~default:default_compaction_profile with
-  | "aggressive" -> (0.35, 120, 60_000)
-  | "balanced" -> (0.50, 240, 120_000)
-  | "conservative" -> (0.70, 480, 250_000)
-  | _ -> keeper_compaction_policy_from_env ()
-
-let resolve_compaction_policy
-    ~(profile_opt : string option)
-    ~(ratio_opt : float option)
-    ~(message_opt : int option)
-    ~(token_opt : int option)
-    ~(fallback_profile : string)
-    ~(fallback_ratio : float)
-    ~(fallback_message : int)
-    ~(fallback_token : int) : string * float * int * int =
-  let has_explicit_gate =
-    Option.is_some ratio_opt || Option.is_some message_opt || Option.is_some token_opt
-  in
-  let base_profile =
-    match profile_opt with
-    | Some p -> p
-    | None ->
-        if has_explicit_gate then "custom" else fallback_profile
-  in
-  let (base_ratio, base_message, base_token) =
-    match profile_opt with
-    | Some p -> compaction_policy_of_profile p
-    | None ->
-        if has_explicit_gate then (fallback_ratio, fallback_message, fallback_token)
-        else (fallback_ratio, fallback_message, fallback_token)
-  in
-  let ratio =
-    Option.value ~default:base_ratio ratio_opt
-    |> normalize_compaction_ratio_gate
-  in
-  let message_gate =
-    Option.value ~default:base_message message_opt
-    |> normalize_compaction_message_gate
-  in
-  let token_gate =
-    Option.value ~default:base_token token_opt
-    |> normalize_compaction_token_gate
-  in
-  (base_profile, ratio, message_gate, token_gate)
-
-let normalize_proactive_idle_sec (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:172800
-
-let normalize_proactive_cooldown_sec (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:172800
-
-let normalize_drift_min_turn_gap (v : int) : int =
-  clamp_int v ~min_v:1 ~max_v:500
-
-let keeper_rule_reflect_repetition_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_REFLECT_REPETITION"
-    ~default:0.86
-    ~min_v:0.0
-    ~max_v:1.0
-
-let keeper_rule_plan_goal_alignment_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX"
-    ~default:0.06
-    ~min_v:0.0
-    ~max_v:1.0
-
-let keeper_rule_plan_response_alignment_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX"
-    ~default:0.10
-    ~min_v:0.0
-    ~max_v:1.0
-
-let keeper_rule_guardrail_repetition_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_GUARDRAIL_REPETITION"
-    ~default:0.90
-    ~min_v:0.0
-    ~max_v:1.0
-
-let keeper_rule_guardrail_goal_alignment_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX"
-    ~default:0.04
-    ~min_v:0.0
-    ~max_v:1.0
-
-let keeper_rule_guardrail_response_alignment_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX"
-    ~default:0.08
-    ~min_v:0.0
-    ~max_v:1.0
-
-let keeper_rule_guardrail_context_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN"
-    ~default:0.70
-    ~min_v:0.0
-    ~max_v:1.0
+(* Configuration: see Keeper_config *)
+include Keeper_config
 
 let short_preview ?(max_len = 220) (s : string) : string =
   let s = String.trim s in
@@ -1386,7 +547,14 @@ let env_present name =
   | None -> false
 
 let ollama_port_listening () =
-  Sys.command "lsof -iTCP:11434 -sTCP:LISTEN -t >/dev/null 2>&1" = 0
+  try
+    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Fun.protect
+      ~finally:(fun () -> (try Unix.close sock with Unix.Unix_error _ -> ()))
+      (fun () ->
+        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 11434));
+        true)
+  with Unix.Unix_error _ -> false
 
 let model_spec_is_local_runtime (model : Llm_client.model_spec) =
   match model.provider with
@@ -2025,7 +1193,7 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
       None
     else
       Some { json = j; kind; text; priority; ts_unix }
-  with _ ->
+  with Yojson.Json_error _ ->
     None
 
 let memory_compaction_target_notes ~(profile : string) : int =
@@ -2111,7 +1279,7 @@ let compact_memory_bank_if_needed
   else
     let size_bytes =
       try (Unix.stat path).st_size
-      with _ -> 0
+      with Unix.Unix_error _ -> 0
     in
     let trigger_bytes = memory_compaction_trigger_bytes ~target_notes in
     if size_bytes < trigger_bytes then
@@ -2320,7 +1488,7 @@ let summarize_memory_bank_lines
            let text = String.trim text in
            if kind = "" || text = "" then None
            else Some { kind; text; priority; ts_unix }
-         with _ -> None)
+         with Yojson.Json_error _ -> None)
   in
   let total_notes = List.length parsed in
   let last_ts_unix =
@@ -2453,7 +1621,7 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
         let drop = max 0 (n - max_lines) in
         lines |> List.mapi (fun i s -> (i, s)) |> List.filter (fun (i, _) -> i >= drop) |> List.map snd
       )
-    with _ ->
+    with Sys_error _ | End_of_file ->
       []
 
 let read_keeper_memory_summary
@@ -3869,11 +3037,11 @@ let starts_with ~(prefix : string) (s : string) : bool =
 
 let normalize_path_for_check (path : string) : string =
   try Unix.realpath path
-  with _ ->
+  with Unix.Unix_error _ ->
     let parent = Filename.dirname path in
     let parent_norm =
       try Unix.realpath parent
-      with _ -> parent
+      with Unix.Unix_error _ -> parent
     in
     Filename.concat parent_norm (Filename.basename path)
 
@@ -3920,7 +3088,7 @@ let execute_keeper_tool_call
     (tc : Llm_client.tool_call) : string =
   let args =
     try Yojson.Safe.from_string tc.call_arguments
-    with _ -> `Assoc []
+    with Yojson.Json_error _ -> `Assoc []
   in
   let now_ts = Time_compat.now () in
   match tc.call_name with
@@ -4910,7 +4078,7 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) : 
         last_handoff = handoff_json;
         last_compaction = compaction_json;
       }
-    with _ ->
+    with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
       acc
   ) empty_metrics_summary lines
 
@@ -6816,7 +5984,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       let snapshot_interval_sec =
         match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_SEC" with
         | Some s ->
-            (try max 15 (min 3600 (int_of_string (String.trim s))) with _ -> 60)
+            (try max 15 (min 3600 (int_of_string (String.trim s))) with Failure _ -> 60)
         | None -> 60
       in
       let last_snapshot_ts = ref 0.0 in
@@ -7424,7 +6592,7 @@ let handle_keeper_status ctx args : tool_result =
            `List
              (List.filter_map
                 (fun line ->
-                  try Some (Yojson.Safe.from_string line) with _ -> None)
+                  try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
                 lines)
          in
          let metrics_window_lines =
@@ -7478,7 +6646,7 @@ let handle_keeper_status ctx args : tool_result =
                                | None -> `Null );
                            ])
                     | _ -> find_latest tl
-                  with _ -> find_latest tl)
+                  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> find_latest tl)
              in
              find_latest (List.rev metrics_window_lines)
          in
@@ -7572,7 +6740,7 @@ let handle_keeper_status ctx args : tool_result =
                        raw_count + 1,
                        fragment_count + (if is_fragment then 1 else 0),
                        filtered_count )
-                   with _ -> (acc, raw_count, fragment_count, filtered_count))
+                   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> (acc, raw_count, fragment_count, filtered_count))
                  ([], 0, 0, 0) lines
              in
              (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
@@ -7663,7 +6831,7 @@ let handle_keeper_status ctx args : tool_result =
                          ]
                        in
                        item :: acc
-                   with _ -> acc)
+                   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> acc)
                  [] lines
              in
              let events = List.rev events_rev in
@@ -9322,7 +8490,7 @@ let handle_keeper_list ctx args : tool_result =
 	            in
 	            let last_metrics =
 	              match List.rev metrics_window_lines with
-	              | line :: _ -> (try Some (Yojson.Safe.from_string line) with _ -> None)
+	              | line :: _ -> (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
 	              | [] -> None
 	            in
 	            let metrics_overview =
@@ -9337,7 +8505,7 @@ let handle_keeper_list ctx args : tool_result =
 	                       match Safe_ops.json_string_opt "skill_primary" j with
 	                       | Some primary when String.trim primary <> "" -> Some j
 	                       | _ -> find_latest tl
-	                     with _ -> find_latest tl)
+	                     with Yojson.Json_error _ -> find_latest tl)
 	              in
 	              find_latest (List.rev metrics_window_lines)
 	            in

@@ -197,7 +197,7 @@ let read_events () =
       if line = "" then None
       else
         try Some (Yojson.Safe.from_string line)
-        with _ -> None)
+        with Yojson.Json_error _ -> None)
 
 let int_field json key ~default =
   Safe_parse.json_int ~context:"run_log" ~default json key

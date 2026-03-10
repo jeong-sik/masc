@@ -215,7 +215,7 @@ let rec count_lock_files path =
         0
     else
       0
-  with _ -> 0
+  with Sys_error _ -> 0
 
 let count_locks_for_dir (config : Room_utils.config) locks_dir =
   match config.backend with

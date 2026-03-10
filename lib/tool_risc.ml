@@ -115,7 +115,7 @@ let parse_instruction (json : Yojson.Safe.t) : instruction option =
     | "FETCH" ->
         let task_spec = json |> U.member "task_spec" |> U.to_string in
         let priority_val = try json |> U.member "priority" |> U.to_int
-          with _ -> 3 in
+          with Yojson.Safe.Util.Type_error _ -> 3 in
         Some (FETCH { task_spec; priority = priority_of_int priority_val })
     | "DECODE" ->
         let task_id = json |> U.member "task_id" |> U.to_string in
@@ -123,20 +123,20 @@ let parse_instruction (json : Yojson.Safe.t) : instruction option =
     | "EXEC" ->
         let op_id = json |> U.member "op_id" |> U.to_string in
         let tool = json |> U.member "tool" |> U.to_string in
-        let args = try json |> U.member "args" with _ -> `Null in
+        let args = try json |> U.member "args" with Yojson.Safe.Util.Type_error _ -> `Null in
         Some (EXEC { op_id; tool; args })
     | "STORE" ->
         let key = json |> U.member "key" |> U.to_string in
         let value = json |> U.member "value" in
         let scope_str = try json |> U.member "scope" |> U.to_string
-          with _ -> "L2" in
+          with Yojson.Safe.Util.Type_error _ -> "L2" in
         let scope = match cache_scope_of_string scope_str with
           | Ok s -> s | Error _ -> L2_room in
         Some (STORE { key; value; scope })
     | "LOAD" ->
         let key = json |> U.member "key" |> U.to_string in
         let scope_str = try json |> U.member "scope" |> U.to_string
-          with _ -> "L2" in
+          with Yojson.Safe.Util.Type_error _ -> "L2" in
         let scope = match cache_scope_of_string scope_str with
           | Ok s -> s | Error _ -> L2_room in
         Some (LOAD { key; scope })
@@ -148,7 +148,7 @@ let parse_instruction (json : Yojson.Safe.t) : instruction option =
     | "SPEC" ->
         let op_id = json |> U.member "op_id" |> U.to_string in
         let model_str = try json |> U.member "model" |> U.to_string
-          with _ -> "fast_local" in
+          with Yojson.Safe.Util.Type_error _ -> "fast_local" in
         let model = match model_str with
           | "fast_cloud" -> Fast_cloud
           | _ -> Fast_local in
@@ -163,21 +163,21 @@ let parse_instruction (json : Yojson.Safe.t) : instruction option =
         let barrier_id = json |> U.member "barrier_id" |> U.to_string in
         let agents = try
           json |> U.member "agents" |> U.to_list |> List.map U.to_string
-          with _ -> [] in
+          with Yojson.Safe.Util.Type_error _ -> [] in
         Some (SYNC { barrier_id; agents })
     | "YIELD" ->
         let reason = json |> U.member "reason" |> U.to_string in
         Some (YIELD { reason })
     | "HALT" ->
         let exit_code = try json |> U.member "exit_code" |> U.to_int
-          with _ -> 0 in
+          with Yojson.Safe.Util.Type_error _ -> 0 in
         let dna = try
           let d = json |> U.member "dna" in
           if d = `Null then None else Some d
-          with _ -> None in
+          with Yojson.Safe.Util.Type_error _ -> None in
         Some (HALT { exit_code; dna })
     | _ -> None
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ -> None
 
 let handle_decode args : result =
   let task_id = get_string args "task_id" "" in

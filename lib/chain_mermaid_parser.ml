@@ -411,7 +411,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
               Ok (Quorum { consensus; nodes = []; weights = [] })
             else
               Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None })
-          with _ ->
+          with Invalid_argument _ ->
             Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None }))
 
   | `Subroutine ->
@@ -508,7 +508,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
         let rest = String.sub text 8 (String.length text - 8) in
         let parts = String.split_on_char ':' rest in
         let threshold = (match parts with
-          | t :: _ -> (try float_of_string t with _ -> 0.7)
+          | t :: _ -> (try float_of_string t with Failure _ -> 0.7)
           | [] -> 0.7) in
         let ctx_mode = (match parts with
           | _ :: cm :: _ -> Chain_types.context_mode_of_string cm
@@ -1029,8 +1029,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
              let decoded = Base64.decode_exn encoded in
              let args = Yojson.Safe.from_string decoded in
              Ok (Tool { name; args })
-           with _ ->
-             (* Fallback: if Base64 decode fails, store as-is *)
+           with Invalid_argument _ | Yojson.Json_error _ ->
+             (* Fallback: if Base64 decode or JSON parse fails, store as-is *)
              Ok (Tool { name; args = `Assoc [("input", `String encoded)] }))
         (* Parse: name "args" or name 'args' or name {...json...} or just name *)
         else if Str.string_match quote_re rest 0 then
@@ -1054,7 +1054,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
                (try
                   let args = Yojson.Safe.from_string json_unescaped in
                   Ok (Tool { name; args })
-                with _ ->
+                with Yojson.Json_error _ ->
                   (* If JSON parse fails, store as input *)
                   Ok (Tool { name; args = `Assoc [("input", `String json_unescaped)] }))
            | _ ->
@@ -1094,7 +1094,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         let rest = String.sub content 8 (String.length content - 8) in
         let parts = String.split_on_char ':' rest in
         let threshold = (match parts with
-          | t :: _ -> (try float_of_string t with _ -> 0.7)
+          | t :: _ -> (try float_of_string t with Failure _ -> 0.7)
           | [] -> 0.7) in
         let ctx_mode = (match parts with
           | _ :: cm :: _ -> Chain_types.context_mode_of_string cm

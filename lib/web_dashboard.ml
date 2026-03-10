@@ -37,7 +37,7 @@ let html () =
     really_input ic s 0 n;
     close_in ic;
     Bytes.to_string s
-  with _ ->
+  with Sys_error _ ->
     "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>"
 
 let etag () =
@@ -45,7 +45,7 @@ let etag () =
     let st = Unix.stat (index_path ()) in
     let hash = Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex in
     String.sub hash 0 12
-  with _ -> "none"
+  with Unix.Unix_error _ -> "none"
 
 let is_safe_asset_relative_path rel =
   String.length rel > 0

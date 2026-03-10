@@ -16,7 +16,7 @@ open Printf
 
 let default_threshold =
   match Sys.getenv_opt "MASC_LODGE_REFLECTION_THRESHOLD" with
-  | Some v -> (try int_of_string v with _ -> 100)
+  | Some v -> (try int_of_string v with Failure _ -> 100)
   | None -> 100
 
 (* ---------- Tracking: last reflection timestamps ---------- *)
@@ -53,7 +53,9 @@ let load_meta ~agent_name : float =
         really_input ic buf 0 n;
         let json = Yojson.Safe.from_string (Bytes.to_string buf) in
                 Json_util.get_float json "last_reflection" |> Option.value ~default:0.0)
-    with _ -> 0.0
+    with exn ->
+      ignore (Printexc.to_string exn);
+      0.0
   end
 
 let save_meta ~agent_name ~timestamp =

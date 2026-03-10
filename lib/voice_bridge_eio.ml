@@ -277,9 +277,9 @@ let elevenlabs_direct_tts ~agent_id ~message ~voice =
       argv in
     (match status with
      | Unix.WEXITED 0 ->
-       let http_code = try int_of_string (String.trim http_code_str) with _ -> 0 in
+       let http_code = try int_of_string (String.trim http_code_str) with Failure _ -> 0 in
        if http_code >= 200 && http_code < 300 then begin
-         let file_size = try (Unix.stat audio_file).st_size with _ -> 0 in
+         let file_size = try (Unix.stat audio_file).st_size with Unix.Unix_error _ -> 0 in
          if file_size > 100 then begin
            log_info (Printf.sprintf "ElevenLabs TTS OK: %s (%d bytes)" audio_file file_size);
            Ok (`Assoc [
@@ -292,21 +292,21 @@ let elevenlabs_direct_tts ~agent_id ~message ~voice =
            ])
          end else begin
            (* Small file likely means JSON error body *)
-           (try Sys.remove audio_file with _ -> ());
+           (try Sys.remove audio_file with Sys_error _ -> ());
            Error (Printf.sprintf "ElevenLabs returned small response (%d bytes), likely error" file_size)
          end
        end else begin
-         (try Sys.remove audio_file with _ -> ());
+         (try Sys.remove audio_file with Sys_error _ -> ());
          Error (Printf.sprintf "ElevenLabs HTTP %d" http_code)
        end
      | Unix.WEXITED 28 ->
-       (try Sys.remove audio_file with _ -> ());
+       (try Sys.remove audio_file with Sys_error _ -> ());
        Error "ElevenLabs request timed out"
      | Unix.WEXITED code ->
-       (try Sys.remove audio_file with _ -> ());
+       (try Sys.remove audio_file with Sys_error _ -> ());
        Error (Printf.sprintf "curl exit %d" code)
      | _ ->
-       (try Sys.remove audio_file with _ -> ());
+       (try Sys.remove audio_file with Sys_error _ -> ());
        Error "ElevenLabs curl process failed")
   | _ ->
     (* No ELEVENLABS_API_KEY, try Railway proxy *)
@@ -341,9 +341,9 @@ let elevenlabs_direct_tts ~agent_id ~message ~voice =
         argv in
       (match status with
        | Unix.WEXITED 0 ->
-         let http_code = try int_of_string (String.trim http_code_str) with _ -> 0 in
+         let http_code = try int_of_string (String.trim http_code_str) with Failure _ -> 0 in
          if http_code >= 200 && http_code < 300 then begin
-           let file_size = try (Unix.stat audio_file).st_size with _ -> 0 in
+           let file_size = try (Unix.stat audio_file).st_size with Unix.Unix_error _ -> 0 in
            if file_size > 100 then begin
              log_info (Printf.sprintf "Railway proxy TTS OK: %s (%d bytes)" audio_file file_size);
              Ok (`Assoc [
@@ -355,18 +355,18 @@ let elevenlabs_direct_tts ~agent_id ~message ~voice =
                ("message_preview", `String (String.sub message 0 (min 50 (String.length message))));
              ])
            end else begin
-             (try Sys.remove audio_file with _ -> ());
+             (try Sys.remove audio_file with Sys_error _ -> ());
              Error (Printf.sprintf "Proxy returned small response (%d bytes)" file_size)
            end
          end else begin
-           (try Sys.remove audio_file with _ -> ());
+           (try Sys.remove audio_file with Sys_error _ -> ());
            Error (Printf.sprintf "Proxy HTTP %d" http_code)
          end
        | Unix.WEXITED 28 ->
-         (try Sys.remove audio_file with _ -> ());
+         (try Sys.remove audio_file with Sys_error _ -> ());
          Error "Proxy request timed out"
        | _ ->
-         (try Sys.remove audio_file with _ -> ());
+         (try Sys.remove audio_file with Sys_error _ -> ());
          Error "Proxy curl failed")
     | _ ->
       Error "No ELEVENLABS_API_KEY or ELEVENLABS_PROXY_URL configured"
@@ -387,7 +387,7 @@ let cleanup_old_audio_files () =
           Sys.remove path;
           incr removed
         end
-      with _ -> ())
+      with Unix.Unix_error _ | Sys_error _ -> ())
     ) entries;
     if !removed > 0 then
       log_info (Printf.sprintf "Cleaned up %d old audio files" !removed)

@@ -69,7 +69,7 @@ let parse_frontmatter content =
         ) yaml_lines |> Option.value ~default:""
       in
       let get_float name default =
-        try float_of_string (get_field name) with _ -> default
+        try float_of_string (get_field name) with Failure _ -> default
       in
       let get_tags () =
         let raw = get_field "tags" in
@@ -132,7 +132,7 @@ let handle_list _ctx args =
             (String.concat ", " fm.tags))
       | None ->
           Some (sprintf "- %s (no frontmatter)" (Filename.basename path))
-    with _ -> None
+    with Sys_error _ -> None
   ) docs in
   let output = if entries = [] then "No documents in library"
     else sprintf "## Library Documents (%d)\n\n%s" (List.length entries) (String.concat "\n" entries)
@@ -167,7 +167,7 @@ let handle_add ctx args =
   let source = U.member "source" args |> U.to_string_option |> Option.value ~default:"direct_experience" in
   let confidence = U.member "confidence" args |> U.to_float_option |> Option.value ~default:0.7 in
   let tags = try U.member "tags" args |> U.to_list |> List.filter_map U.to_string_option
-    with _ -> [] in
+    with Yojson.Safe.Util.Type_error (_, _) -> [] in
   let content = U.member "content" args |> U.to_string_option |> Option.value ~default:"" in
 
   if title = "" then (false, "title is required")
@@ -272,7 +272,7 @@ let handle_search _ctx args =
           | Some fm -> Some (sprintf "- **%s** [%.2f] %s" fm.title fm.confidence (Filename.basename path))
           | None -> Some (sprintf "- %s" (Filename.basename path))
         else None
-      with _ -> None
+      with Sys_error _ -> None
     ) docs in
     if matches = [] then (true, sprintf "No documents matching '%s'" query)
     else (true, sprintf "## Search Results (%d)\n\n%s" (List.length matches) (String.concat "\n" matches))

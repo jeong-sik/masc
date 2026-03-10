@@ -221,7 +221,7 @@ module Request = struct
     try
       let v = int_of_string value in
       if v > 0 then Some v else None
-    with _ -> None
+    with Failure _ -> None
 
   let max_body_bytes =
     let from_env name =
@@ -269,7 +269,7 @@ module Request = struct
     let stop () =
       if not !stopped then begin
         stopped := true;
-        (try Httpun.Body.Reader.close body with _ -> ())
+        (try Httpun.Body.Reader.close body with exn -> ignore exn)
       end
     in
     (match content_length with

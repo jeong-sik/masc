@@ -118,14 +118,14 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
     let room_id = json |> U.member "room_id" |> U.to_string_option in
     let details =
       try json |> U.member "details"
-      with _ -> `Null
+      with Yojson.Safe.Util.Type_error _ -> `Null
     in
     let outcome =
       let o = json |> U.member "outcome" in
       let status = o |> U.member "status" |> U.to_string in
       if status = "success" then Success
       else
-        let reason = try o |> U.member "reason" |> U.to_string with _ -> "unknown" in
+        let reason = try o |> U.member "reason" |> U.to_string with Yojson.Safe.Util.Type_error _ -> "unknown" in
         Failure reason
     in
     let cost_estimate =
@@ -134,17 +134,17 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
         | `Float f -> Some f
         | `Int i -> Some (float_of_int i)
         | _ -> None
-      with _ -> None
+      with Yojson.Safe.Util.Type_error _ -> None
     in
     let token_count =
       try
         match json |> U.member "token_count" with
         | `Int i -> Some i
         | _ -> None
-      with _ -> None
+      with Yojson.Safe.Util.Type_error _ -> None
     in
     Some { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count }
-  with _ -> None
+  with _exn -> None
 
 (** {1 File Operations} *)
 
@@ -345,14 +345,14 @@ let get_stats (config : Room.config) =
             let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
             if !oldest = None then oldest := Some ts;
             newest := Some ts
-          with _ -> ()
+          with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
         end else begin
           (* Just update newest for each line *)
           try
             let json = Yojson.Safe.from_string line in
             let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
             newest := Some ts
-          with _ -> ()
+          with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
         end
       done
     with End_of_file -> ());

@@ -782,10 +782,28 @@ let should_penalize_failure (result : Spawn.spawn_result) : bool =
     true
 
 let command_available cmd =
-  Sys.command (Printf.sprintf "command -v %s >/dev/null 2>&1" cmd) = 0
+  let path =
+    match Sys.getenv_opt "PATH" with Some p -> p | None -> "/usr/bin:/bin"
+  in
+  let dirs = String.split_on_char ':' path in
+  List.exists
+    (fun dir ->
+      let full_path = Filename.concat dir cmd in
+      try
+        let stat = Unix.stat full_path in
+        stat.Unix.st_kind = Unix.S_REG && stat.Unix.st_perm land 0o111 <> 0
+      with Unix.Unix_error _ -> false)
+    dirs
 
 let port_listening port =
-  Sys.command (Printf.sprintf "lsof -iTCP:%d -sTCP:LISTEN -t >/dev/null 2>&1" port) = 0
+  try
+    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Fun.protect
+      ~finally:(fun () -> (try Unix.close sock with Unix.Unix_error _ -> ()))
+      (fun () ->
+        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
+        true)
+  with Unix.Unix_error _ -> false
 
 let readiness_check agent =
   match agent with
@@ -1528,7 +1546,7 @@ let handle_mitosis_handoff ctx args : result =
             let (ok, body) = run_sync_handoff ctx args_sync in
             let parsed =
               try Yojson.Safe.from_string body
-              with _ -> `String body
+              with Yojson.Json_error _ -> `String body
             in
             let (verification, gate_pass) =
               run_handoff_verifier ~ctx ~args:args_sync ~parsed_result:parsed
@@ -1590,7 +1608,7 @@ let handle_mitosis_handoff ctx args : result =
       let (ok, body) = run_sync_handoff ctx args_sync in
       let parsed =
         try Yojson.Safe.from_string body
-        with _ -> `String body
+        with Yojson.Json_error _ -> `String body
       in
       let (verification, gate_pass) = run_handoff_verifier ~ctx ~args:args_sync ~parsed_result:parsed in
       let final_ok = ok && gate_pass in

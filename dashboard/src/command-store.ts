@@ -65,6 +65,7 @@ import type {
   CommandPlaneUnitRecord,
   CommandPlaneUnitKind,
 } from './types'
+import { refreshOperatorSnapshot } from './operator-store'
 import { registerCommandPlaneRefresh } from './store'
 
 export const commandPlaneSummary = signal<CommandPlaneSummarySnapshot | null>(null)
@@ -1487,5 +1488,8 @@ registerCommandPlaneRefresh(() => {
     || commandPlaneSwarm.value !== null
   ) {
     void refreshCommandPlaneSwarm()
+  }
+  if (commandPlaneSurface.value === 'warroom') {
+    void refreshOperatorSnapshot()
   }
 })

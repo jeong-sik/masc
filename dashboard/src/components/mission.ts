@@ -2,7 +2,15 @@ import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { navigate } from '../router'
-import { missionError, missionLoading, missionSnapshot } from '../mission-store'
+import {
+  missionBriefing,
+  missionBriefingError,
+  missionBriefingLoading,
+  missionError,
+  missionLoading,
+  missionSnapshot,
+  refreshMissionBriefing,
+} from '../mission-store'
 import { agentMotionMap, agents, keepers, messages, tasks } from '../store'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
@@ -499,6 +507,75 @@ function SummaryStat({
   `
 }
 
+function MissionBriefingCard() {
+  const briefing = missionBriefing.value
+  return html`
+    <${Card} title="LLM 판단 레이어" class="mission-briefing-card" semanticId="mission.llm_briefing">
+      <div class="mission-section-head">
+        <h3>heuristic 대신 별도 판단 계층</h3>
+        <p>아래 해석은 LLM이 사실 스냅샷만 읽고 만든 요약입니다. raw thinking은 숨기고, 기준과 근거만 남깁니다.</p>
+      </div>
+
+      <div class="mission-briefing-meta">
+        <span class="command-chip ${toneClass(briefing?.status ?? (missionBriefingError.value ? 'bad' : 'warn'))}">
+          ${briefing?.status ?? (missionBriefingError.value ? 'error' : 'loading')}
+        </span>
+        ${briefing?.model ? html`<span class="command-chip">${briefing.model}</span>` : null}
+        ${briefing?.generated_at ? html`<span class="command-chip">${relativeTime(briefing.generated_at)}</span>` : null}
+        ${briefing?.cached ? html`<span class="command-chip">cached</span>` : null}
+      </div>
+
+      ${missionBriefingError.value ? html`<div class="empty-state error">${missionBriefingError.value}</div>` : null}
+      ${briefing?.error ? html`<div class="empty-state error">${briefing.error}</div>` : null}
+
+      ${briefing && briefing.sections.length > 0
+        ? html`
+            <div class="mission-briefing-grid">
+              ${briefing.sections.map(section => html`
+                <article class="mission-briefing-section ${toneClass(section.status)}">
+                  <div class="mission-card-head">
+                    <strong>${section.label}</strong>
+                    <span class="command-chip ${toneClass(section.status)}">${section.status}</span>
+                  </div>
+                  <p>${section.summary}</p>
+                  ${section.evidence.length > 0
+                    ? html`
+                        <div class="mission-briefing-evidence">
+                          ${section.evidence.map(item => html`<span>${item}</span>`)}
+                        </div>
+                      `
+                    : null}
+                </article>
+              `)}
+            </div>
+          `
+        : (!missionBriefingLoading.value && !missionBriefingError.value
+            ? html`<div class="empty-state">아직 판단 레이어를 불러오지 못했습니다.</div>`
+            : null)}
+
+      ${briefing?.criteria && briefing.criteria.length > 0
+        ? html`
+            <details class="mission-briefing-criteria">
+              <summary>판단 기준 보기</summary>
+              <div class="mission-briefing-evidence">
+                ${briefing.criteria.map(item => html`<span>${item}</span>`)}
+              </div>
+            </details>
+          `
+        : null}
+
+      <div class="mission-card-actions">
+        <button class="control-btn ghost" onClick=${() => { void refreshMissionBriefing(false) }} disabled=${missionBriefingLoading.value}>
+          ${missionBriefingLoading.value ? '판단 불러오는 중…' : '판단 다시 읽기'}
+        </button>
+        <button class="control-btn ghost" onClick=${() => { void refreshMissionBriefing(true) }} disabled=${missionBriefingLoading.value}>
+          강제 갱신
+        </button>
+      </div>
+    <//>
+  `
+}
+
 function CrewCard({ row }: { row: CrewRow }) {
   const memberRows = row.memberNames.slice(0, 4).map(name => {
     const agent = agents.value.find(item => item.name === name)
@@ -760,6 +837,8 @@ export function Mission() {
         room=${mission.summary.current_room}
         generatedAt=${mission.generated_at}
       />
+
+      <${MissionBriefingCard} />
 
       <div class="mission-stat-grid">
         <${SummaryStat} label="활성 흐름" value=${crews.length} detail="지금 보이는 crew / session" tone=${crews.length > 0 ? 'ok' : 'warn'} />

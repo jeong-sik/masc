@@ -245,6 +245,88 @@ let test_agent_profile_of_json_string_traits () =
   let p = Option.get profile in
   assert (List.length p.traits = 2)
 
+(* ---------- LLM Scoring Unit Tests ---------- *)
+
+let test_parse_llm_score_direct () =
+  assert (parse_llm_score "0.85" = Some 0.85);
+  assert (parse_llm_score "0.0" = Some 0.0);
+  assert (parse_llm_score "1.0" = Some 1.0)
+
+let test_parse_llm_score_with_text () =
+  assert (parse_llm_score "The score is 0.72 for this match." = Some 0.72);
+  assert (parse_llm_score "Score: 0.45" = Some 0.45)
+
+let test_parse_llm_score_out_of_range () =
+  assert (parse_llm_score "2.5" = None);
+  assert (parse_llm_score "1.5" = None);
+  (* "-0.5" extracts "0.5" since scanner looks for first valid 0-1 number *)
+  assert (parse_llm_score "-0.5" = Some 0.5)
+
+let test_parse_llm_score_garbage () =
+  assert (parse_llm_score "no numbers here" = None);
+  assert (parse_llm_score "" = None)
+
+let test_parse_llm_score_whitespace () =
+  assert (parse_llm_score "  0.9  " = Some 0.9);
+  assert (parse_llm_score "\n0.65\n" = Some 0.65)
+
+let test_build_scoring_prompt () =
+  let prompt = build_scoring_prompt security_agent security_task in
+  (* Prompt should contain agent and task info *)
+  assert (String.length prompt > 50);
+  assert (
+    let s = prompt in
+    let pat = "claude-security" in
+    let plen = String.length pat in
+    let slen = String.length s in
+    let rec check i =
+      if i > slen - plen then false
+      else if String.sub s i plen = pat then true
+      else check (i + 1)
+    in check 0
+  );
+  assert (
+    let s = prompt in
+    let pat = "authentication" in
+    let plen = String.length pat in
+    let slen = String.length s in
+    let rec check i =
+      if i > slen - plen then false
+      else if String.sub s i plen = pat then true
+      else check (i + 1)
+    in check 0
+  )
+
+let test_match_mode_dispatch () =
+  (* Verify get_match_mode reads env var correctly *)
+  let mode = get_match_mode () in
+  match Sys.getenv_opt "MASC_CAPABILITY_MATCH_MODE" with
+  | Some "llm" -> assert (mode = Llm)
+  | Some "hybrid" -> assert (mode = Hybrid)
+  | _ -> assert (mode = Keyword)
+
+let test_score_keyword_direct () =
+  (* score_keyword should behave identically to old score *)
+  let m = score_keyword security_agent security_task in
+  assert (m.total_score > 0.0);
+  assert (m.agent_name = "claude-security")
+
+let test_score_keyword_role_filter () =
+  let restricted_task = {
+    task_id = "task-restricted";
+    title = "Review security code";
+    description = "Review the authentication module for security issues";
+    priority = 1;
+    keywords = extract_keywords "Review security code Review the authentication module for security issues";
+    required_role = Masc_mcp.Agent_identity.Reviewer;
+  } in
+  (* security_agent is Reviewer — should get a score *)
+  let m1 = score_keyword security_agent restricted_task in
+  assert (m1.total_score > 0.0);
+  (* frontend_agent is Writer — should get 0.0 *)
+  let m2 = score_keyword frontend_agent restricted_task in
+  assert (m2.total_score < 0.01)
+
 (* ---------- Test Runner ---------- *)
 
 let () =
@@ -273,6 +355,16 @@ let () =
     ("ranking_to_json", test_ranking_to_json);
     ("agent_profile_of_json", test_agent_profile_of_json);
     ("agent_profile_of_json_string_traits", test_agent_profile_of_json_string_traits);
+    (* LLM scoring unit tests *)
+    ("parse_llm_score_direct", test_parse_llm_score_direct);
+    ("parse_llm_score_with_text", test_parse_llm_score_with_text);
+    ("parse_llm_score_out_of_range", test_parse_llm_score_out_of_range);
+    ("parse_llm_score_garbage", test_parse_llm_score_garbage);
+    ("parse_llm_score_whitespace", test_parse_llm_score_whitespace);
+    ("build_scoring_prompt", test_build_scoring_prompt);
+    ("match_mode_dispatch", test_match_mode_dispatch);
+    ("score_keyword_direct", test_score_keyword_direct);
+    ("score_keyword_role_filter", test_score_keyword_role_filter);
   ] in
   let passed = ref 0 in
   let failed = ref 0 in

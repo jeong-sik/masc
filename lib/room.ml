@@ -910,9 +910,11 @@ let claim_task_r config ~agent_name ~task_id
       with e -> Error (Types.IoError (Printexc.to_string e))
     )
 
-(** Unified task transition (single entrypoint) *)
+(** Unified task transition (single entrypoint).
+    When [~force:true], release/cancel/done bypass the assignee guard.
+    Used by Board Gardener keeper for orphan task cleanup. *)
 let transition_task_r config ~agent_name ~task_id ~action
-    ?expected_version ?(notes="") ?(reason="") () : string Types.masc_result =
+    ?expected_version ?(notes="") ?(reason="") ?(force=false) () : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else match validate_agent_name_r agent_name, validate_task_id_r task_id with
     | Error e, _ -> Error e
@@ -947,7 +949,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                        | "start", Types.Claimed { assignee; _ } when assignee = agent_name ->
                            Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
                        | "done", Types.Claimed { assignee; _ }
-                       | "done", Types.InProgress { assignee; _ } when assignee = agent_name ->
+                       | "done", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Done {
                              assignee = agent_name;
                              completed_at = now;
@@ -960,14 +962,14 @@ let transition_task_r config ~agent_name ~task_id ~action
                              reason = if reason = "" then None else Some reason;
                            }, None)
                        | "cancel", Types.Claimed { assignee; _ }
-                       | "cancel", Types.InProgress { assignee; _ } when assignee = agent_name ->
+                       | "cancel", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Cancelled {
                              cancelled_by = agent_name;
                              cancelled_at = now;
                              reason = if reason = "" then None else Some reason;
                            }, None)
                        | "release", Types.Claimed { assignee; _ }
-                       | "release", Types.InProgress { assignee; _ } when assignee = agent_name ->
+                       | "release", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Todo, None)
                        | _ ->
                            Error (Types.TaskInvalidState
@@ -1020,6 +1022,14 @@ let transition_task_r config ~agent_name ~task_id ~action
 (** Release task back to backlog - transition wrapper *)
 let release_task_r config ~agent_name ~task_id ?expected_version () : string Types.masc_result =
   transition_task_r config ~agent_name ~task_id ~action:"release" ?expected_version ()
+
+(** Force-release a task regardless of assignee. Board Gardener privilege. *)
+let force_release_task_r config ~agent_name ~task_id () : string Types.masc_result =
+  transition_task_r config ~agent_name ~task_id ~action:"release" ~force:true ()
+
+(** Force-done a task regardless of assignee. Board Gardener privilege. *)
+let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_result =
+  transition_task_r config ~agent_name ~task_id ~action:"done" ~notes ~force:true ()
 
 (** Complete task with file locking *)
 let complete_task config ~agent_name ~task_id ~notes =
@@ -1730,6 +1740,35 @@ let get_agents_raw_in_room config room_id =
           | Error _ -> None
         )
 
+(** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents. *)
+let audit_orphan_tasks config : (Types.task * string) list =
+  if not (is_initialized config) then []
+  else
+    (* Read agent files from the same path that cleanup_zombies and join use *)
+    let agents_path = agents_dir config in
+    let active_names =
+      if Sys.file_exists agents_path then
+        Sys.readdir agents_path
+        |> Array.to_list
+        |> List.filter (fun name -> Filename.check_suffix name ".json")
+        |> List.filter_map (fun name ->
+            let path = Filename.concat agents_path name in
+            let json = read_json config path in
+            match agent_of_yojson json with
+            | Ok agent -> Some agent.name
+            | Error _ -> None)
+      else []
+    in
+    let backlog = read_backlog config in
+    List.filter_map (fun (task : Types.task) ->
+      match task.task_status with
+      | Types.Claimed { assignee; _ }
+      | Types.InProgress { assignee; _ } ->
+          if List.mem assignee active_names then None
+          else Some (task, assignee)
+      | _ -> None
+    ) backlog.tasks
+
 (** Check if an agent has joined the room *)
 let is_agent_joined config ~agent_name =
   ensure_initialized config;
@@ -1990,6 +2029,24 @@ let cleanup_zombies config =
       end
     );
 
+    (* Cascade: release tasks claimed by zombie agents *)
+    let released_tasks = ref [] in
+    if !zombies <> [] then begin
+      let backlog = read_backlog config in
+      List.iter (fun (task : task) ->
+        match task.task_status with
+        | Types.Claimed { assignee; _ }
+        | Types.InProgress { assignee; _ } when List.mem assignee !zombies ->
+            (match force_release_task_r config ~agent_name:"gardener" ~task_id:task.id () with
+             | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
+             | Error e ->
+                 log_event config (Printf.sprintf
+                   "{\"type\":\"zombie_cascade_error\",\"task_id\":\"%s\",\"error\":\"%s\",\"ts\":\"%s\"}"
+                   task.id (Types.masc_error_to_string e) (now_iso ())))
+        | _ -> ()
+      ) backlog.tasks
+    end;
+
     (* Update state to remove zombie agents *)
     if !zombies <> [] then begin
       let _ = update_state config (fun s ->
@@ -1998,12 +2055,16 @@ let cleanup_zombies config =
 
       (* Log event *)
       log_event config (Printf.sprintf
-        "{\"type\":\"zombie_cleanup\",\"agents\":%s,\"ts\":\"%s\"}"
+        "{\"type\":\"zombie_cleanup\",\"agents\":%s,\"released_tasks\":%d,\"ts\":\"%s\"}"
         (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) !zombies)))
+        (List.length !released_tasks)
         (now_iso ()));
 
-      Printf.sprintf "🧟 Cleaned up %d zombie agent(s): %s"
-        (List.length !zombies) (String.concat ", " !zombies)
+      let task_note = if !released_tasks = [] then ""
+        else Printf.sprintf ", released %d orphan task(s)" (List.length !released_tasks)
+      in
+      Printf.sprintf "🧟 Cleaned up %d zombie agent(s): %s%s"
+        (List.length !zombies) (String.concat ", " !zombies) task_note
     end else
       "✅ No zombie agents found"
   end

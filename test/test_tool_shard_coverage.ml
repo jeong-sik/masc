@@ -54,7 +54,7 @@ let test_shard_unknown () =
 
 let test_all_shards_count () =
   let all = Tool_shard.list_all_shards () in
-  Alcotest.(check int) "5 predefined shards" 5 (List.length all)
+  Alcotest.(check int) "6 predefined shards" 6 (List.length all)
 
 (* ============================================================
    default_shard_names tests
@@ -193,7 +193,7 @@ let test_execute_tool_list () =
   let (ok, json) = Tool_shard.execute "masc_tool_list" (`Assoc []) in
   Alcotest.(check bool) "succeeds" true ok;
   let shards = Yojson.Safe.Util.(member "shards" json |> to_list) in
-  Alcotest.(check int) "5 shards in list" 5 (List.length shards)
+  Alcotest.(check int) "6 shards in list" 6 (List.length shards)
 
 let test_execute_tool_list_with_agent () =
   Hashtbl.remove Tool_shard.agent_shards "test-ex";

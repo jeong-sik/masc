@@ -29,8 +29,8 @@ export const DASHBOARD_NAV_SECTIONS: DashboardNavSection[] = [
   },
   {
     id: 'command',
-    label: '실행',
-    description: '개입과 지휘를 실제로 실행하는 표면',
+    label: '통제',
+    description: '개입과 지휘를 실행하는 통제 표면',
   },
 ]
 
@@ -47,21 +47,21 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     label: '개입',
     icon: '\uD83C\uDFAE',
     group: 'command',
-    description: 'room/session/keeper 액션을 실제로 실행하는 intervention workspace',
+    description: 'room, session, supervisor 액션을 실행하는 개입 화면',
   },
   {
     id: 'command',
     label: '지휘',
     icon: '\uD83E\uDDED',
     group: 'command',
-    description: 'command plane, swarm, trace, approvals를 drill-down으로 보는 상세 화면',
+    description: '유닛 계층, 작전 체인, 추적 이력을 보는 상세 화면',
   },
   {
     id: 'agents',
     label: '에이전트',
     icon: '\uD83E\uDD16',
     group: 'observe',
-    description: 'agent 상태, keeper 압력, 현재 작업 초점을 보는 모니터',
+    description: 'agent 상태, 활동 신호, 작업 배정을 보는 모니터',
   },
   {
     id: 'board',
@@ -75,13 +75,13 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     label: '계획',
     icon: '\uD83C\uDFAF',
     group: 'coordinate',
-    description: 'goal, MDAL loop, backlog를 한 화면에서 보는 계획 표면',
+    description: 'goal, 메트릭 루프, backlog를 보는 계획 화면',
   },
   {
     id: 'trpg',
-    label: 'TRPG',
+    label: 'TRPG 롤플레이',
     icon: '\u2694\uFE0F',
     group: 'command',
-    description: 'Narrative room control and state visibility',
+    description: '서사 세션 제어와 게임 상태',
   },
 ]

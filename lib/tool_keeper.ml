@@ -4148,6 +4148,61 @@ let execute_keeper_tool_call
             ("status", process_status_to_json st);
             ("output", `String (truncate_tool_output out));
           ])
+  (* Taskboard tools — Board Gardener operations *)
+  | "keeper_tasks_list" ->
+      let status_filter = Safe_ops.json_string_opt "status" args in
+      let include_done = Safe_ops.json_bool ~default:false "include_done" args in
+      Room.list_tasks ?status:status_filter ~include_done config
+  | "keeper_tasks_audit" ->
+      let orphans = Room.audit_orphan_tasks config in
+      let items = List.map (fun ((task : Types.task), assignee) ->
+        `Assoc [
+          ("task_id", `String task.id);
+          ("title", `String task.title);
+          ("assignee", `String assignee);
+          ("status", `String (Types.string_of_task_status task.task_status));
+        ]
+      ) orphans in
+      Yojson.Safe.to_string (`Assoc [
+        ("orphan_count", `Int (List.length orphans));
+        ("orphans", `List items);
+      ])
+  | "keeper_task_force_release" ->
+      let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
+      let reason = Safe_ops.json_string ~default:"" "reason" args in
+      if task_id = "" then
+        Yojson.Safe.to_string (`Assoc [("error", `String "task_id required")])
+      else begin
+        let agent = Printf.sprintf "gardener:%s" meta.name in
+        match Room.force_release_task_r config ~agent_name:agent ~task_id () with
+        | Ok msg ->
+            let _ = reason in
+            Yojson.Safe.to_string (`Assoc [("ok", `Bool true); ("result", `String msg)])
+        | Error e ->
+            Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String (Types.masc_error_to_string e))])
+      end
+  | "keeper_task_force_done" ->
+      let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
+      let notes = Safe_ops.json_string ~default:"" "notes" args in
+      if task_id = "" then
+        Yojson.Safe.to_string (`Assoc [("error", `String "task_id required")])
+      else begin
+        let agent = Printf.sprintf "gardener:%s" meta.name in
+        match Room.force_done_task_r config ~agent_name:agent ~task_id ~notes () with
+        | Ok msg ->
+            Yojson.Safe.to_string (`Assoc [("ok", `Bool true); ("result", `String msg)])
+        | Error e ->
+            Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String (Types.masc_error_to_string e))])
+      end
+  | "keeper_broadcast" ->
+      let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
+      if message = "" then
+        Yojson.Safe.to_string (`Assoc [("error", `String "message required")])
+      else begin
+        let agent = Printf.sprintf "gardener:%s" meta.name in
+        let _ = Room.broadcast config ~from_agent:agent ~content:message in
+        Yojson.Safe.to_string (`Assoc [("ok", `Bool true); ("broadcast", `String message)])
+      end
   | other ->
       Yojson.Safe.to_string (`Assoc [
         ("error", `String "unknown_tool");
@@ -4185,7 +4240,8 @@ let keeper_tool_followup_prompt
   let is_write_tool (name : string) : bool =
     List.mem
       name
-      [ "keeper_board_post"; "keeper_board_comment"; "keeper_fs_edit"; "keeper_edit" ]
+      [ "keeper_board_post"; "keeper_board_comment"; "keeper_fs_edit"; "keeper_edit";
+        "keeper_task_force_release"; "keeper_task_force_done"; "keeper_broadcast" ]
   in
   let has_write =
     List.exists is_write_tool already_executed

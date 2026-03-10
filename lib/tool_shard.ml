@@ -157,6 +157,63 @@ let weather_tools : Llm_client.tool_def list = [
   };
 ]
 
+let taskboard_tools : Llm_client.tool_def list = [
+  {
+    tool_name = "keeper_tasks_list";
+    tool_description = "List tasks on the MASC backlog. Filter by status: todo, claimed, in_progress, done, cancelled.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("status", `Assoc [("type", `String "string"); ("description", `String "Filter by status (optional). One of: todo, claimed, in_progress, done, cancelled")]);
+        ("include_done", `Assoc [("type", `String "boolean"); ("description", `String "Include completed tasks (default: false)")]);
+      ]);
+    ];
+  };
+  {
+    tool_name = "keeper_tasks_audit";
+    tool_description = "Audit task board health: find claimed/in_progress tasks whose assignees are no longer active agents (orphans).";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    tool_name = "keeper_task_force_release";
+    tool_description = "Force-release a task back to Todo regardless of current assignee. Gardener privilege for orphan cleanup.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to force-release")]);
+        ("reason", `Assoc [("type", `String "string"); ("description", `String "Reason for force release")]);
+      ]);
+      ("required", `List [`String "task_id"]);
+    ];
+  };
+  {
+    tool_name = "keeper_task_force_done";
+    tool_description = "Force-mark a task as Done regardless of current assignee. Use for tasks confirmed complete but not transitioned.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to force-complete")]);
+        ("notes", `Assoc [("type", `String "string"); ("description", `String "Completion notes")]);
+      ]);
+      ("required", `List [`String "task_id"]);
+    ];
+  };
+  {
+    tool_name = "keeper_broadcast";
+    tool_description = "Broadcast a message to the MASC room. Use for status reports and announcements.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("message", `Assoc [("type", `String "string"); ("description", `String "Message to broadcast")]);
+      ]);
+      ("required", `List [`String "message"]);
+    ];
+  };
+]
+
 (** Predefined shards *)
 
 let shard_base : shard = {
@@ -194,6 +251,13 @@ let shard_weather : shard = {
   description = "Weather queries";
 }
 
+let shard_taskboard : shard = {
+  name = "taskboard";
+  tools = taskboard_tools;
+  removable = true;
+  description = "Task board management: list, audit, force-release, force-done, broadcast";
+}
+
 
 
 let agent_shards : (string, string list) Hashtbl.t = Hashtbl.create 32
@@ -225,6 +289,7 @@ let all_shards : (string, shard) Hashtbl.t =
     shard_filesystem;
     shard_shell;
     shard_weather;
+    shard_taskboard;
   ];
   tbl
 
@@ -282,7 +347,7 @@ let schemas : Types.tool_schema list = [
   {
     name = "masc_tool_grant";
     description = "Grant a tool shard to an agent. \
-Shards: base (core), board, filesystem, shell, weather.";
+Shards: base (core), board, filesystem, shell, weather, taskboard.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -292,7 +357,7 @@ Shards: base (core), board, filesystem, shell, weather.";
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to grant: base, board, filesystem, shell, weather");
+          ("description", `String "Shard to grant: base, board, filesystem, shell, weather, taskboard");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);

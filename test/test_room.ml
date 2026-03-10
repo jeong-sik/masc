@@ -1043,6 +1043,98 @@ let test_xss_in_agent_name () =
     Alcotest.(check bool) "agent registered" true (List.length state.active_agents > 0)
   )
 
+(* === Board Gardener Tests === *)
+
+(* Use 3-part nicknames so join() preserves them as-is
+   (Nickname.is_generated_nickname requires 3+ dash-separated parts) *)
+let gardener_agent = "gardener-board-keeper"
+let test_agent_a = "agent-test-alpha"
+let test_agent_z = "agent-test-zombie"
+
+let test_force_release_bypasses_assignee () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Orphan Task" ~priority:1 ~description:"" in
+    let _ = Room.join config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    (* Different agent cannot release without force *)
+    let normal = Room.transition_task_r config ~agent_name:gardener_agent ~task_id:"task-001"
+        ~action:"release" () in
+    Alcotest.(check bool) "normal release blocked" true
+      (match normal with Error _ -> true | Ok _ -> false);
+    (* Force release succeeds *)
+    let forced = Room.force_release_task_r config ~agent_name:gardener_agent ~task_id:"task-001" () in
+    Alcotest.(check bool) "force release ok" true
+      (match forced with Ok _ -> true | Error _ -> false);
+    (* Task should be back to Todo *)
+    let tasks = Room.list_tasks config in
+    Alcotest.(check bool) "task is todo" true (str_contains tasks "Todo" || str_contains tasks "todo")
+  )
+
+let test_force_done_bypasses_assignee () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Force Done Task" ~priority:1 ~description:"" in
+    let _ = Room.join config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    (* Normal done by different agent fails *)
+    let normal = Room.transition_task_r config ~agent_name:gardener_agent ~task_id:"task-001"
+        ~action:"done" ~notes:"forced" () in
+    Alcotest.(check bool) "normal done blocked" true
+      (match normal with Error _ -> true | Ok _ -> false);
+    (* Force done succeeds *)
+    let forced = Room.force_done_task_r config ~agent_name:gardener_agent ~task_id:"task-001"
+        ~notes:"auto-closed by gardener" () in
+    Alcotest.(check bool) "force done ok" true
+      (match forced with Ok _ -> true | Error _ -> false);
+    (* Task should be done *)
+    let tasks = Room.list_tasks ~include_done:true config in
+    Alcotest.(check bool) "task is done" true (str_contains tasks "Done" || str_contains tasks "done")
+  )
+
+let test_audit_orphan_tasks () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
+    let _ = Room.join config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    (* While agent is active, no orphans *)
+    let orphans_before = Room.audit_orphan_tasks config in
+    Alcotest.(check int) "no orphans while active" 0 (List.length orphans_before);
+    (* Remove agent file to simulate it disappearing *)
+    let _ = Room.leave config ~agent_name:test_agent_a in
+    (* Now the task is orphaned (claimed by test_agent_a but agent is gone) *)
+    let orphans_after = Room.audit_orphan_tasks config in
+    Alcotest.(check int) "one orphan detected" 1 (List.length orphans_after);
+    let (task, assignee) = List.hd orphans_after in
+    Alcotest.(check string) "orphan assignee" test_agent_a assignee;
+    Alcotest.(check string) "orphan task id" "task-001" task.id
+  )
+
+let test_cleanup_zombies_releases_tasks () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Zombie Task" ~priority:1 ~description:"" in
+    let _ = Room.join config ~agent_name:test_agent_z ~capabilities:[] () in
+    let _ = Room.claim_task config ~agent_name:test_agent_z ~task_id:"task-001" in
+    (* Manually set agent's last_seen to a very old timestamp to make it a zombie *)
+    let agents_path = Filename.concat
+      (Filename.concat config.base_path ".masc") "agents" in
+    let agent_file = Filename.concat agents_path (test_agent_z ^ ".json") in
+    let json = Yojson.Safe.from_file agent_file in
+    let updated_json = match json with
+      | `Assoc pairs ->
+          `Assoc (List.map (fun (k, v) ->
+            if k = "last_seen" then (k, `String "2020-01-01T00:00:00Z") else (k, v)
+          ) pairs)
+      | other -> other
+    in
+    Yojson.Safe.to_file agent_file updated_json;
+    (* Run cleanup — should remove zombie agent AND release its tasks *)
+    let result = Room.cleanup_zombies config in
+    Alcotest.(check bool) "cleanup ran" true (String.length result > 0);
+    (* Verify task is released (back to Todo) *)
+    let tasks = Room.list_tasks config in
+    Alcotest.(check bool) "task released to todo" true
+      (str_contains tasks "Todo" || str_contains tasks "todo")
+  )
+
 let () =
   Random.init 42;
   Alcotest.run "Room" [
@@ -1205,5 +1297,13 @@ let () =
     "security", [
       Alcotest.test_case "xss in message" `Quick test_xss_in_message;
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
+    ];
+
+    (* === Board Gardener Tests === *)
+    "board_gardener", [
+      Alcotest.test_case "force release bypasses assignee" `Quick test_force_release_bypasses_assignee;
+      Alcotest.test_case "force done bypasses assignee" `Quick test_force_done_bypasses_assignee;
+      Alcotest.test_case "audit orphan tasks" `Quick test_audit_orphan_tasks;
+      Alcotest.test_case "cleanup zombies cascade" `Quick test_cleanup_zombies_releases_tasks;
     ];
   ]

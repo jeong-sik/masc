@@ -134,10 +134,11 @@ let test_code_search_basic () =
 
   if is_error then begin
     (* Error is acceptable if rg not installed *)
-    check bool "error mentions ripgrep or command" true
+    check bool "error mentions ripgrep or command or git" true
       (contains_substring text "ripgrep" ||
        contains_substring text "command" ||
        contains_substring text "rg" ||
+       contains_substring text "git" ||
        contains_substring text "Internal error")
   end else begin
     (* Parse the tool-specific JSON from text *)

@@ -946,7 +946,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                        match action, task.task_status with
                        | "claim", Types.Todo ->
                            Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
-                       | "start", Types.Claimed { assignee; _ } when assignee = agent_name || force ->
+                       | "start", Types.Claimed { assignee; _ } when assignee = agent_name ->
                            Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
                        | "done", Types.Claimed { assignee; _ }
                        | "done", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
@@ -2039,7 +2039,10 @@ let cleanup_zombies config =
         | Types.InProgress { assignee; _ } when List.mem assignee !zombies ->
             (match force_release_task_r config ~agent_name:"gardener" ~task_id:task.id () with
              | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
-             | Error _ -> ())
+             | Error e ->
+                 log_event config (Printf.sprintf
+                   "{\"type\":\"zombie_cascade_error\",\"task_id\":\"%s\",\"error\":\"%s\",\"ts\":\"%s\"}"
+                   task.id (Types.masc_error_to_string e) (now_iso ())))
         | _ -> ()
       ) backlog.tasks
     end;

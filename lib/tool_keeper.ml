@@ -4174,9 +4174,11 @@ let execute_keeper_tool_call
         Yojson.Safe.to_string (`Assoc [("error", `String "task_id required")])
       else begin
         let agent = Printf.sprintf "gardener:%s" meta.name in
+        let _ = Room.broadcast config ~from_agent:agent
+            ~content:(Printf.sprintf "Force-releasing task %s (reason: %s)" task_id
+              (if reason = "" then "no reason given" else reason)) in
         match Room.force_release_task_r config ~agent_name:agent ~task_id () with
         | Ok msg ->
-            let _ = reason in
             Yojson.Safe.to_string (`Assoc [("ok", `Bool true); ("result", `String msg)])
         | Error e ->
             Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String (Types.masc_error_to_string e))])

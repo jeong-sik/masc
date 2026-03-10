@@ -131,6 +131,29 @@ let evaluate_goal op target value =
   | Neq -> not (Float.equal value target)
 
 (* ================================================================ *)
+(* Aggregate evaluation (All / Any / Average)                       *)
+(* ================================================================ *)
+
+let evaluate_aggregate strategy ~aggregate_goal_expr metrics =
+  let count = max 1 (List.length metrics) in
+  let sum = List.fold_left (fun acc (v, _) -> acc +. v) 0.0 metrics in
+  let avg = sum /. Float.of_int count in
+  match strategy with
+  | All ->
+      let all_met = List.for_all (fun (_, met) -> met) metrics in
+      (avg, all_met)
+  | Any ->
+      let any_met = List.exists (fun (_, m) -> m) metrics in
+      (avg, any_met)
+  | Average ->
+      let goal_met =
+        match parse_goal_expr aggregate_goal_expr with
+        | Some (op, target) -> evaluate_goal op target avg
+        | None -> false
+      in
+      (avg, goal_met)
+
+(* ================================================================ *)
 (* Re-plan: cancel incomplete tasks, build new dispatch plan        *)
 (* ================================================================ *)
 

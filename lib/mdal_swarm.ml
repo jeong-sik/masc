@@ -13,7 +13,7 @@
 (* Types                                                            *)
 (* ================================================================ *)
 
-type aggregate_strategy =
+type aggregate_strategy = Swarm_goal_loop.aggregate_strategy =
   | All     (** Every worker must meet its individual goal *)
   | Any     (** At least one worker meets its goal *)
   | Average (** Aggregate (mean) of all worker metrics meets the goal *)
@@ -90,27 +90,8 @@ let measure_metric_shell cmd =
   with exn ->
     Error (Printf.sprintf "Shell error: %s" (Printexc.to_string exn))
 
-let compute_avg metrics =
-  let count = max 1 (List.length metrics) in
-  let sum = List.fold_left (fun acc (v, _) -> acc +. v) 0.0 metrics in
-  sum /. Float.of_int count
-
 let evaluate_aggregate strategy ~aggregate_goal_expr metrics =
-  let avg = compute_avg metrics in
-  match strategy with
-  | All ->
-      let all_met = List.for_all (fun (_, met) -> met) metrics in
-      (avg, all_met)
-  | Any ->
-      let any_met = List.exists (fun (_, m) -> m) metrics in
-      (avg, any_met)
-  | Average ->
-      let goal_met =
-        match Swarm_goal_loop.parse_goal_expr aggregate_goal_expr with
-        | Some (op, target) -> Swarm_goal_loop.evaluate_goal op target avg
-        | None -> false
-      in
-      (avg, goal_met)
+  Swarm_goal_loop.evaluate_aggregate strategy ~aggregate_goal_expr metrics
 
 (* ================================================================ *)
 (* Single worker loop (runs inside an Eio fiber)                    *)

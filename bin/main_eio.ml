@@ -4884,6 +4884,25 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | `List xs -> xs
             | _ -> []
           in
+          let recent_preview_for_role role_name =
+            let role_name = String.lowercase_ascii role_name in
+            conversation_items
+            |> List.fold_left
+                 (fun acc item ->
+                   let role =
+                     Safe_ops.json_string ~default:"" "role" item
+                     |> String.lowercase_ascii
+                     |> String.trim
+                   in
+                   if String.equal role role_name then
+                     let preview =
+                       Safe_ops.json_string ~default:"" "preview" item |> String.trim
+                     in
+                     if preview = "" then acc else Some preview
+                   else
+                     acc)
+                 None
+          in
           let k2k_count =
             match k2k_recent with
             | `List xs -> List.length xs
@@ -4941,6 +4960,20 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 	            let compact_ratio_gate = m.compaction_ratio_gate in
 	            let compact_message_gate = m.compaction_message_gate in
 	            let compact_token_gate = m.compaction_token_gate in
+              let recent_tool_names =
+                match metrics_window_summary with
+                | `Assoc fields -> (
+                    match List.assoc_opt "top_tools" fields with
+                    | Some (`List items) ->
+                        items
+                        |> List.filter_map (fun item ->
+                               let tool =
+                                 Safe_ops.json_string ~default:"" "tool" item |> String.trim
+                               in
+                               if tool = "" then None else Some tool)
+                    | _ -> [])
+                | _ -> []
+              in
               let diagnostic =
                 Tool_keeper.keeper_diagnostic_json
                   ~meta:m
@@ -5071,6 +5104,15 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 match memory_recent_note with
                 | Some text -> `String text
                 | None -> `Null);
+              ("recent_input_preview",
+                match recent_preview_for_role "user" with
+                | Some text -> `String text
+                | None -> `Null);
+              ("recent_output_preview",
+                match recent_preview_for_role "assistant" with
+                | Some text -> `String text
+                | None -> `Null);
+              ("recent_tool_names", `List (List.map (fun item -> `String item) recent_tool_names));
               ("conversation_tail_count", `Int conversation_tail_count);
               ("conversation_raw_count", `Int conversation_raw_count);
               ("conversation_fragment_count", `Int conversation_fragment_count);
@@ -5534,9 +5576,12 @@ let dashboard_agent_json (agent : Types.agent) =
   `Assoc
     [
       ("name", `String agent.name);
+      ("agent_type", `String agent.agent_type);
       ("status", `String (Types.string_of_agent_status agent.status));
       ("current_task", match agent.current_task with Some task -> `String task | None -> `Null);
+      ("joined_at", `String agent.joined_at);
       ("last_seen", `String agent.last_seen);
+      ("capabilities", `List (List.map (fun item -> `String item) agent.capabilities));
       ("emoji", `String emoji);
       ("koreanName", `String korean_name);
     ]

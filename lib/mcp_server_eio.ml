@@ -1780,6 +1780,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           ~content:message
           ~mention
         in
+        (* Increment broadcast_count in active team sessions *)
+        Team_session_engine_eio.increment_broadcast_from_external config
+          ~agent_name;
         (true, result)
       end
 

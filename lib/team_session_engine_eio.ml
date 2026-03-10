@@ -64,6 +64,20 @@ let session_allows_actor ~(actor : string) (session : Team_session_types.session
   String.equal actor session.created_by
   || List.exists (String.equal actor) session.agent_names
 
+let increment_broadcast_from_external (config : Room.config) ~(agent_name : string) =
+  let sessions = Team_session_store.list_sessions config in
+  List.iter
+    (fun (session : Team_session_types.session) ->
+      match session.status with
+      | Team_session_types.Running
+        when session_allows_actor ~actor:agent_name session ->
+          let updated =
+            { session with broadcast_count = session.broadcast_count + 1 }
+          in
+          Team_session_store.save_session config updated
+      | _ -> ())
+    sessions
+
 let hierarchy_lane_ids = [| "lane-a"; "lane-b"; "lane-c"; "lane-d" |]
 
 let controller_tree_json_of_session (session : Team_session_types.session) =

@@ -739,3 +739,4 @@
  (name test_context_router_demo)
  (modules test_context_router_demo)
  (libraries masc_mcp yojson))
+

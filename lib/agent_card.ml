@@ -93,13 +93,13 @@ let capabilities_of_json (json : Yojson.Safe.t) : agent_capabilities =
   match json with
   | `Assoc _ ->
     {
-      streaming = (try json |> member "streaming" |> to_bool with _ -> false);
-      push_notifications = (try json |> member "pushNotifications" |> to_bool with _ -> false);
-      extended_agent_card = (try json |> member "extendedAgentCard" |> to_bool with _ -> false);
+      streaming = (try json |> member "streaming" |> to_bool with Yojson.Safe.Util.Type_error _ -> false);
+      push_notifications = (try json |> member "pushNotifications" |> to_bool with Yojson.Safe.Util.Type_error _ -> false);
+      extended_agent_card = (try json |> member "extendedAgentCard" |> to_bool with Yojson.Safe.Util.Type_error _ -> false);
     }
   | `List strs ->
     (* Backward compat: parse old string list format *)
-    let has s = List.exists (fun v -> try to_string v = s with _ -> false) strs in
+    let has s = List.exists (fun v -> try to_string v = s with Yojson.Safe.Util.Type_error _ -> false) strs in
     {
       streaming = has "streaming";
       push_notifications = has "push-notifications";
@@ -124,11 +124,11 @@ let signature_of_json (json : Yojson.Safe.t) : agent_card_signature option =
     let header =
       match json |> member "header" with
       | `Assoc pairs -> List.filter_map (fun (k, v) ->
-          try Some (k, to_string v) with _ -> None) pairs
+          try Some (k, to_string v) with Yojson.Safe.Util.Type_error _ -> None) pairs
       | _ -> []
     in
     Some { protected_header; signature; header }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ -> None
 
 (** Convert agent_card to JSON (A2A v0.3 spec format) *)
 let to_json (card : agent_card) : Yojson.Safe.t =
@@ -183,7 +183,7 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
 
     let protocol_versions =
       match json |> member "protocolVersions" with
-      | `List vs -> List.filter_map (fun v -> try Some (to_string v) with _ -> None) vs
+      | `List vs -> List.filter_map (fun v -> try Some (to_string v) with Yojson.Safe.Util.Type_error _ -> None) vs
       | _ -> ["0.3"]
     in
 
@@ -226,13 +226,13 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
     let default_input_modes =
       (match json |> member "defaultInputModes" with
       | `List vs -> vs | _ -> [])
-      |> List.filter_map (fun v -> try Some (to_string v) with _ -> None)
+      |> List.filter_map (fun v -> try Some (to_string v) with Yojson.Safe.Util.Type_error _ -> None)
     in
 
     let default_output_modes =
       (match json |> member "defaultOutputModes" with
       | `List vs -> vs | _ -> [])
-      |> List.filter_map (fun v -> try Some (to_string v) with _ -> None)
+      |> List.filter_map (fun v -> try Some (to_string v) with Yojson.Safe.Util.Type_error _ -> None)
     in
 
     let extensions =

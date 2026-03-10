@@ -177,6 +177,88 @@ let test_decision_to_json_skip () =
   let open Yojson.Safe.Util in
   assert (json |> member "depth" |> to_string = "skip")
 
+(* ---------- LLM Intent Classification Unit Tests ---------- *)
+
+let test_parse_intent_conversational () =
+  assert (parse_intent_response "Conversational" = Some (Conversational, 0.90));
+  assert (parse_intent_response "conversational" = Some (Conversational, 0.90));
+  assert (parse_intent_response "  Conversational  " = Some (Conversational, 0.90))
+
+let test_parse_intent_task_command () =
+  assert (parse_intent_response "Task_command" = Some (Task_command, 0.90));
+  assert (parse_intent_response "task command" = Some (Task_command, 0.90));
+  assert (parse_intent_response "TASK_COMMAND" = Some (Task_command, 0.90))
+
+let test_parse_intent_status_check () =
+  assert (parse_intent_response "Status_check" = Some (Status_check, 0.90));
+  assert (parse_intent_response "status check" = Some (Status_check, 0.90))
+
+let test_parse_intent_knowledge () =
+  assert (parse_intent_response "Knowledge_query" = Some (Knowledge_query, 0.85));
+  assert (parse_intent_response "knowledge query" = Some (Knowledge_query, 0.85));
+  (* "knowledge" alone also matches *)
+  assert (parse_intent_response "This is a knowledge request" = Some (Knowledge_query, 0.85))
+
+let test_parse_intent_coordination () =
+  assert (parse_intent_response "Coordination" = Some (Coordination, 0.85));
+  assert (parse_intent_response "coordination" = Some (Coordination, 0.85))
+
+let test_parse_intent_with_explanation () =
+  (* LLM might add extra text — parser should still extract the intent *)
+  assert (parse_intent_response "The intent is Conversational because it is a greeting."
+    = Some (Conversational, 0.90));
+  assert (parse_intent_response "I classify this as Knowledge_query."
+    = Some (Knowledge_query, 0.85))
+
+let test_parse_intent_garbage () =
+  assert (parse_intent_response "" = None);
+  assert (parse_intent_response "no valid intent here" = None);
+  assert (parse_intent_response "42" = None)
+
+let test_build_intent_prompt () =
+  let prompt = build_intent_prompt "최근 이슈 보여줘" in
+  (* Should contain the query *)
+  assert (String.length prompt > 50);
+  let has_sub pat s =
+    let p_len = String.length pat in
+    let s_len = String.length s in
+    let rec check i =
+      if i > s_len - p_len then false
+      else if String.sub s i p_len = pat then true
+      else check (i + 1)
+    in check 0
+  in
+  assert (has_sub "이슈" prompt);
+  (* Should contain all 5 category names *)
+  assert (has_sub "Conversational" prompt);
+  assert (has_sub "Task_command" prompt);
+  assert (has_sub "Status_check" prompt);
+  assert (has_sub "Knowledge_query" prompt);
+  assert (has_sub "Coordination" prompt)
+
+let test_router_mode_dispatch () =
+  let mode = get_router_mode () in
+  match Sys.getenv_opt "MASC_CONTEXT_ROUTER_MODE" with
+  | Some "llm" -> assert (mode = Llm_mode)
+  | Some "hybrid" -> assert (mode = Hybrid_mode)
+  | _ -> assert (mode = Heuristic)
+
+let test_heuristic_direct () =
+  (* classify_intent_heuristic should behave identically to old classify_intent *)
+  let (intent, conf) = classify_intent_heuristic "masc_claim task-001" in
+  assert (intent = Task_command);
+  assert (conf > 0.9);
+  let (intent2, _) = classify_intent_heuristic "hello" in
+  assert (intent2 = Conversational)
+
+let test_heuristic_korean_gap () =
+  (* This is the known gap: "이슈 보여줘" has no matching heuristic pattern,
+     so it falls through to low-confidence Coordination *)
+  let (intent, conf) = classify_intent_heuristic "최근 이슈 보여줘" in
+  (* No status_patterns match "이슈" → falls to short ambiguous *)
+  assert (intent = Coordination);
+  assert (conf < 0.6)
+
 (* ---------- Test Runner ---------- *)
 
 let () =
@@ -206,6 +288,18 @@ let () =
     ("to_recall_config_full", test_to_recall_config_full);
     ("decision_to_json", test_decision_to_json);
     ("decision_to_json_skip", test_decision_to_json_skip);
+    (* LLM intent classification unit tests *)
+    ("parse_intent_conversational", test_parse_intent_conversational);
+    ("parse_intent_task_command", test_parse_intent_task_command);
+    ("parse_intent_status_check", test_parse_intent_status_check);
+    ("parse_intent_knowledge", test_parse_intent_knowledge);
+    ("parse_intent_coordination", test_parse_intent_coordination);
+    ("parse_intent_with_explanation", test_parse_intent_with_explanation);
+    ("parse_intent_garbage", test_parse_intent_garbage);
+    ("build_intent_prompt", test_build_intent_prompt);
+    ("router_mode_dispatch", test_router_mode_dispatch);
+    ("heuristic_direct", test_heuristic_direct);
+    ("heuristic_korean_gap", test_heuristic_korean_gap);
   ] in
   let passed = ref 0 in
   let failed = ref 0 in

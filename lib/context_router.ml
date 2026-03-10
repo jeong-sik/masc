@@ -7,12 +7,19 @@
     query intent before dispatching to Auto_recall sources.
 
     Decision flow:
-    1. Intent classification (heuristic, fast)
+    1. Intent classification (heuristic or LLM)
     2. State-aware check (recent broadcasts contain answer?)
     3. Route: Skip | Light (broadcasts only) | Full (all sources)
 
+    Mode selection via MASC_CONTEXT_ROUTER_MODE:
+      - heuristic (default): pattern-matching, 0-latency
+      - llm: LLM-based semantic classification
+      - hybrid: LLM with heuristic fallback on failure
+
     @see "Context Engineering" — 2025-2026 best practice
-    @since 2.60.0 *)
+    @see IntentGPT (arXiv 2411.10670) — zero-shot intent classification
+    @since 2.60.0
+    @since 2.65.0 — LLM/hybrid intent classification modes *)
 
 (** Retrieval depth — how much context to fetch *)
 type retrieval_depth =
@@ -37,6 +44,31 @@ type routing_decision = {
   reason: string;
   confidence: float;  (** 0.0-1.0 *)
 }
+
+(* ---------- Router Mode ---------- *)
+
+(** Classification mode: heuristic pattern matching, LLM semantic, or hybrid. *)
+type router_mode = Heuristic | Llm_mode | Hybrid_mode
+
+let get_router_mode () : router_mode =
+  match Sys.getenv_opt "MASC_CONTEXT_ROUTER_MODE" with
+  | Some "llm" -> Llm_mode
+  | Some "hybrid" -> Hybrid_mode
+  | _ -> Heuristic
+
+(** Model specs for context router LLM classification.
+    Uses fast local models by default; override with MASC_CONTEXT_ROUTER_MODELS. *)
+let router_model_strings () =
+  match Sys.getenv_opt "MASC_CONTEXT_ROUTER_MODELS" with
+  | Some s -> String.split_on_char ',' s |> List.map String.trim
+  | None ->
+      [
+        Printf.sprintf "ollama:%s" (Env_config.Ollama.default_model);
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+      ]
+
+let router_model_specs () =
+  Llm_client.available_model_specs_of_strings (router_model_strings ())
 
 (* ---------- Intent Classification (Heuristic) ---------- *)
 
@@ -93,7 +125,7 @@ let has_pattern patterns query =
 
 (** Classify query intent using heuristic pattern matching.
     Fast (no LLM call), covers ~80%% of cases accurately. *)
-let classify_intent (query : string) : query_intent * float =
+let classify_intent_heuristic (query : string) : query_intent * float =
   let q = String.trim query in
   let len = String.length q in
   (* Very short queries are usually conversational or commands *)
@@ -107,6 +139,103 @@ let classify_intent (query : string) : query_intent * float =
   (* Default: treat medium+ queries as potential knowledge queries *)
   else if len > 50 then (Knowledge_query, 0.6)
   else (Coordination, 0.5)  (* Short ambiguous → coordination *)
+
+(* ---------- Intent Classification (LLM) ---------- *)
+
+(** Build the LLM prompt for intent classification. *)
+let build_intent_prompt (query : string) : string =
+  Printf.sprintf
+{|Classify the intent of this query into exactly one category.
+Reply with ONLY the category name, nothing else.
+
+Categories:
+- Conversational: greetings, thanks, acknowledgements, small talk, yes/no
+- Task_command: direct commands like claim, done, broadcast, join, cancel
+- Status_check: asking about current status, agent list, task list, progress
+- Knowledge_query: needs domain knowledge, how-to, debugging, explanations, search
+- Coordination: multi-agent coordination, @mentions, delegation, voting
+
+Query: "%s"
+
+Category:|} query
+
+(** Parse an intent category from LLM response text.
+    Extracts the first recognized category name. *)
+let parse_intent_response (text : string) : (query_intent * float) option =
+  let s = String.lowercase_ascii (String.trim text) in
+  let has_sub pat =
+    let p_len = String.length pat in
+    let s_len = String.length s in
+    if p_len > s_len then false
+    else
+      let rec check i =
+        if i > s_len - p_len then false
+        else if String.sub s i p_len = pat then true
+        else check (i + 1)
+      in
+      check 0
+  in
+  (* Match in priority order — more specific first *)
+  if has_sub "task_command" || has_sub "task command" then
+    Some (Task_command, 0.90)
+  else if has_sub "status_check" || has_sub "status check" then
+    Some (Status_check, 0.90)
+  else if has_sub "knowledge_query" || has_sub "knowledge query" || has_sub "knowledge" then
+    Some (Knowledge_query, 0.85)
+  else if has_sub "coordination" then
+    Some (Coordination, 0.85)
+  else if has_sub "conversational" then
+    Some (Conversational, 0.90)
+  else
+    None
+
+(** Validate that an LLM response contains a parseable intent. *)
+let intent_response_is_valid (resp : Llm_client.completion_response) : bool =
+  parse_intent_response resp.content <> None
+
+(** Classify query intent using LLM semantic understanding.
+    Returns (intent, confidence) or falls back to low-confidence default. *)
+let classify_intent_llm (query : string) : query_intent * float =
+  let prompt = build_intent_prompt query in
+  match
+    Llm_client.run_prompt_cascade
+      ~temperature:0.1
+      ~timeout_sec:10
+      ~accept:intent_response_is_valid
+      ~model_specs:(router_model_specs ())
+      ~max_tokens:20
+      ~prompt ()
+  with
+  | Ok resp -> (
+      match parse_intent_response resp.content with
+      | Some result -> result
+      | None -> (Coordination, 0.3))  (* unparseable → low-confidence fallback *)
+  | Error _err -> (Coordination, 0.3)  (* LLM error → low-confidence fallback *)
+
+(** Classify query intent using hybrid mode: LLM first, heuristic fallback. *)
+let classify_intent_hybrid (query : string) : query_intent * float =
+  let prompt = build_intent_prompt query in
+  match
+    Llm_client.run_prompt_cascade
+      ~temperature:0.1
+      ~timeout_sec:10
+      ~accept:intent_response_is_valid
+      ~model_specs:(router_model_specs ())
+      ~max_tokens:20
+      ~prompt ()
+  with
+  | Ok resp -> (
+      match parse_intent_response resp.content with
+      | Some result -> result
+      | None -> classify_intent_heuristic query)
+  | Error _err -> classify_intent_heuristic query
+
+(** Classify query intent using the active mode (env var dispatch). *)
+let classify_intent (query : string) : query_intent * float =
+  match get_router_mode () with
+  | Heuristic -> classify_intent_heuristic query
+  | Llm_mode -> classify_intent_llm query
+  | Hybrid_mode -> classify_intent_hybrid query
 
 (* ---------- State-Aware Check ---------- *)
 

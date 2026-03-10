@@ -732,3 +732,10 @@
  (name test_llm_scoring_demo)
  (modules test_llm_scoring_demo)
  (libraries masc_mcp yojson))
+
+; Context Router Demo — compare heuristic vs LLM intent classification
+; Run with: MASC_CONTEXT_ROUTER_MODE=llm dune exec test/test_context_router_demo.exe
+(executable
+ (name test_context_router_demo)
+ (modules test_context_router_demo)
+ (libraries masc_mcp yojson))

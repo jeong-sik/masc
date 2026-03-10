@@ -112,6 +112,8 @@ dune clean && dune build      # 클린 빌드 (캐시 문제 시)
 make test                     # 테스트
 ```
 
+검증 계층 구분은 `docs/VERIFICATION-MATRIX.md`를 기준으로 본다.
+
 ### 빌드 주의사항
 - start-masc-mcp.sh가 stale executable 감지 시 자동 rebuild
 - 빌드 캐시 오염 시 `dune clean` 필수

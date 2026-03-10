@@ -218,7 +218,7 @@
   <div class="lobby">
     <header>
       <h1>🏛️ MASC LOBBY</h1>
-      <span class="room">[me]</span>
+      <span class="room" id="roomLabel">[default]</span>
       <div class="status">
         <div class="dot"></div>
         <span>Connected</span>
@@ -291,9 +291,14 @@
   </div>
 
   <script>
-    const MCP_URL = 'http://127.0.0.1:8935/mcp';
+    const roomParams = new URLSearchParams(window.location.search);
+    const ROOM_ID = roomParams.get('room') || 'default';
+    const BASE_URL = window.location.origin;
+    const MCP_URL = new URL('/mcp', BASE_URL).toString();
     const MAX_EVENTS = 50;  // 이벤트 스트림 최대 개수
     let requestId = 1;
+    const roomLabel = document.getElementById('roomLabel');
+    if (roomLabel) roomLabel.textContent = `[${ROOM_ID}]`;
 
     // Debounce helper - 연속 호출 방지
     function debounce(fn, delay) {
@@ -585,7 +590,7 @@
 
       updateSSEStatus('🟡');  // connecting
       const sid = encodeURIComponent(getOrCreateLobbySseSessionId());
-      evtSource = new EventSource(`http://127.0.0.1:8935/sse?room=me&session_id=${sid}`);
+      evtSource = new EventSource(`${BASE_URL}/sse?room=${encodeURIComponent(ROOM_ID)}&session_id=${sid}`);
 
       evtSource.onopen = () => {
         reconnectAttempts = 0;

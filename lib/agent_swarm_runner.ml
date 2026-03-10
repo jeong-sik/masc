@@ -23,7 +23,10 @@ let default_config = {
   max_turns = 10;
   fleet_mode = false;
   num_members = 3;
-  masc_url = "http://127.0.0.1:8935";
+  masc_url =
+    (match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
+     | Some value when String.trim value <> "" -> String.trim value
+     | _ -> "");
   verbose = false;
 }
 

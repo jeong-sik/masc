@@ -12,13 +12,6 @@ fi
 
 # Storage backends are opt-in. Use MASC_STORAGE_TYPE + MASC_REDIS_URL/MASC_POSTGRES_URL explicitly.
 
-# Room/namespace: derive from ME_ROOT directory name if not set
-# e.g., ME_ROOT=/Users/dancer/me → cluster "me"
-# e.g., ME_ROOT=/Users/dancer/workspace/my-project → cluster "my-project"
-if [ -z "$MASC_CLUSTER_NAME" ] && [ -n "$ME_ROOT" ]; then
-    export MASC_CLUSTER_NAME="$(basename "$ME_ROOT")"
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -72,7 +65,7 @@ fi
 # Default arguments
 PORT="${MASC_MCP_PORT:-8935}"
 HTTP_MODE="${MASC_MCP_HTTP:-true}"
-BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-$(pwd -P)}}"
+BASE_PATH="${MASC_BASE_PATH:-$SCRIPT_DIR}"
 # NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
 EIO_MODE="true"
 
@@ -300,10 +293,14 @@ if [ "$EIO_MODE" = "true" ]; then
     echo "  Port: $PORT" >&2
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
     if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then
-    echo "  Base path (input): $BASE_PATH" >&2
+        echo "  Base path (input): $BASE_PATH" >&2
     fi
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
-    echo "  MCP endpoint: http://127.0.0.1:$PORT/mcp" >&2
+    if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
+        echo "  MCP endpoint: ${MASC_HTTP_BASE_URL%/}/mcp" >&2
+    else
+        echo "  MCP endpoint: /mcp (set MASC_HTTP_BASE_URL for an absolute origin)" >&2
+    fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
     exec "$SELECTED_EXE" --port="$PORT" --base-path="$BASE_PATH"
@@ -312,10 +309,14 @@ elif [ "$HTTP_MODE" = "true" ]; then
     echo "  Port: $PORT" >&2
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
     if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then
-    echo "  Base path (input): $BASE_PATH" >&2
+        echo "  Base path (input): $BASE_PATH" >&2
     fi
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
-    echo "  MCP endpoint: http://127.0.0.1:$PORT/mcp" >&2
+    if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
+        echo "  MCP endpoint: ${MASC_HTTP_BASE_URL%/}/mcp" >&2
+    else
+        echo "  MCP endpoint: /mcp (set MASC_HTTP_BASE_URL for an absolute origin)" >&2
+    fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
     exec "$SELECTED_EXE" --http --port "$PORT" --path "$BASE_PATH"

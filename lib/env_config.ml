@@ -56,34 +56,33 @@ let existing_file path =
 let home_dir_opt () =
   Sys.getenv_opt "HOME" |> trim_opt
 
-let home_me_root_opt () =
-  match home_dir_opt () with
-  | Some home ->
-      let candidate = Filename.concat home "me" in
-      if existing_dir candidate then Some candidate else None
-  | None -> None
-
 let me_root_opt () =
-  match Sys.getenv_opt "ME_ROOT" |> trim_opt with
+  match Sys.getenv_opt "MASC_WORKSPACE_ROOT" |> trim_opt with
   | Some path -> Some path
-  | None -> home_me_root_opt ()
+  | None -> (
+      match Sys.getenv_opt "ME_ROOT" |> trim_opt with
+      | Some path -> Some path
+      | None -> Sys.getenv_opt "DUNE_SOURCEROOT" |> trim_opt)
 
 let me_root () =
   match me_root_opt () with
   | Some path -> path
-  | None -> failwith "ME_ROOT is not set and $HOME/me does not exist"
+  | None -> failwith "MASC_WORKSPACE_ROOT or ME_ROOT is required (tests may use DUNE_SOURCEROOT)"
 
 let sb_path_opt () =
-  match me_root_opt () with
-  | Some root ->
-      let path = Filename.concat root "scripts/sb" in
-      if existing_file path then Some path else None
-  | None -> None
+  match Sys.getenv_opt "MASC_SB_PATH" |> trim_opt with
+  | Some path -> Some path
+  | None -> (
+      match me_root_opt () with
+      | Some root ->
+          let path = Filename.concat root "scripts/sb" in
+          if existing_file path then Some path else None
+      | None -> None)
 
 let sb_path () =
   match sb_path_opt () with
   | Some path -> path
-  | None -> failwith "Unable to resolve scripts/sb. Set ME_ROOT or create $HOME/me/scripts/sb."
+  | None -> failwith "Unable to resolve scripts/sb. Set MASC_SB_PATH or MASC_WORKSPACE_ROOT."
 
 let masc_http_port () =
   match Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt with
@@ -96,7 +95,13 @@ let masc_http_port () =
 let masc_http_base_url () =
   match Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt with
   | Some base -> strip_trailing_slashes base
-  | None -> Printf.sprintf "http://127.0.0.1:%s" (masc_http_port ())
+  | None ->
+      let host =
+        match Sys.getenv_opt "MASC_HOST" |> trim_opt with
+        | Some value -> value
+        | None -> failwith "MASC_HTTP_BASE_URL is required (or set MASC_HOST with MASC_HTTP_PORT/MASC_PORT)"
+      in
+      Printf.sprintf "http://%s:%s" host (masc_http_port ())
 
 let libdatachannel_path_candidates () =
   let env_path =
@@ -461,16 +466,24 @@ module Endpoints = struct
     get_string ~default:"" "LLM_MCP_URL"  (* Default empty - not used *)
 
   (** MASC server host *)
-  let masc_host =
-    get_string ~default:"127.0.0.1" "MASC_HOST"
+  let masc_host () =
+    match Uri.host (Uri.of_string (masc_http_base_url ())) with
+    | Some host -> host
+    | None -> failwith "MASC_HTTP_BASE_URL must include a host"
 
   (** MASC server port *)
-  let masc_port =
-    get_int ~default:8935 "MASC_MCP_PORT"
+  let masc_port () =
+    match Uri.port (Uri.of_string (masc_http_base_url ())) with
+    | Some port -> port
+    | None -> (
+        match Uri.scheme (Uri.of_string (masc_http_base_url ())) with
+        | Some "https" -> 443
+        | Some "http" -> 80
+        | _ -> failwith "MASC_HTTP_BASE_URL must include a port or scheme")
 
   (** MASC SSE URL (derived) *)
-  let masc_sse_url =
-    Printf.sprintf "http://%s:%d/sse" masc_host masc_port
+  let masc_sse_url () =
+    Printf.sprintf "%s/sse" (masc_http_base_url ())
 end
 
 (** {1 Gardener — Self-Organizing Agent Ecosystem} *)

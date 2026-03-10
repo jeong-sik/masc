@@ -328,6 +328,8 @@ export function workflowActionLabel(actionType?: string | null): string {
 
 export function workflowCommandSurfaceLabel(surface?: string | null): string {
   switch (surface) {
+    case 'warroom':
+      return '워룸'
     case 'summary':
       return '요약'
     case 'swarm':

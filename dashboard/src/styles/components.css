@@ -5552,7 +5552,86 @@ button.council-row.selected {
   gap: 16px;
 }
 
+.command-warroom-strip {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background:
+    radial-gradient(circle at top left, rgba(34,211,238,0.16), transparent 32%),
+    linear-gradient(135deg, rgba(7,10,18,0.94), rgba(12,18,30,0.94));
+  backdrop-filter: blur(18px);
+}
+
+.command-warroom-strip.warn {
+  border-color: rgba(251,191,36,0.32);
+}
+
+.command-warroom-strip-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.command-warroom-strip-head strong {
+  display: block;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.command-warroom-strip-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.command-warroom-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(320px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.command-warroom-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.command-warroom-empty {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+}
+
+.command-warroom-empty-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 520px;
+}
+
+.command-warroom-empty-copy strong {
+  font-size: 26px;
+}
+
+.warroom-worker-card .command-tag-row {
+  margin-top: 10px;
+}
+
 @media (max-width: 1450px) {
+  .command-warroom-grid,
+  .command-warroom-strip-stats,
   .command-hero-summary,
   .command-guided-layout,
   .command-surface-grid,
@@ -5563,6 +5642,7 @@ button.council-row.selected {
 }
 
 @media (max-width: 1100px) {
+  .command-warroom-grid,
   .command-primary-layout,
   .command-hero-summary,
   .command-guided-layout,
@@ -5575,6 +5655,10 @@ button.council-row.selected {
 
   .command-gauge-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .command-warroom-strip {
+    position: static;
   }
 }
 

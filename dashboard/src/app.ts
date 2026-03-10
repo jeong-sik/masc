@@ -94,8 +94,14 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
             if (currentTab === 'command') {
               refreshCommandPlaneCurrentSurface()
               refreshCommandPlaneChainSummary()
-              if (commandPlaneSurface.value === 'swarm') {
+              if (
+                commandPlaneSurface.value === 'swarm'
+                || commandPlaneSurface.value === 'warroom'
+              ) {
                 refreshCommandPlaneSwarm()
+              }
+              if (commandPlaneSurface.value === 'warroom') {
+                refreshOperatorSnapshot()
               }
             }
             if (currentTab === 'mission') {
@@ -278,8 +284,14 @@ export function App() {
       if (tab === 'command') {
         void refreshCommandPlaneCurrentSurface()
         void refreshCommandPlaneChainSummary()
-        if (commandPlaneSurface.value === 'swarm') {
+        if (
+          commandPlaneSurface.value === 'swarm'
+          || commandPlaneSurface.value === 'warroom'
+        ) {
           void refreshCommandPlaneSwarm()
+        }
+        if (commandPlaneSurface.value === 'warroom') {
+          void refreshOperatorSnapshot()
         }
       }
       else if (tab === 'mission') {
@@ -310,8 +322,14 @@ export function App() {
     if (tab === 'command') {
       refreshCommandPlaneCurrentSurface()
       refreshCommandPlaneChainSummary()
-      if (commandPlaneSurface.value === 'swarm') {
+      if (
+        commandPlaneSurface.value === 'swarm'
+        || commandPlaneSurface.value === 'warroom'
+      ) {
         refreshCommandPlaneSwarm()
+      }
+      if (commandPlaneSurface.value === 'warroom') {
+        refreshOperatorSnapshot()
       }
     }
     if (tab === 'mission') {

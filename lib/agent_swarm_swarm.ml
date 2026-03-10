@@ -325,7 +325,9 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
                 max_turns = spec.max_turns;
               } in
               let agent =
-                Agent.create ~net ~config ~tools:all_tools ~provider:spec.provider ()
+                Agent.create ~net ~config ~tools:all_tools
+                  ~options:{ Agent.default_options with
+                             provider = Some spec.provider } ()
               in
               Agent.run ~sw:inner_sw agent goal
             )

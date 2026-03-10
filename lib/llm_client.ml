@@ -656,13 +656,19 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
     );
     (* Parse usage *)
     let usage_json = json |> member "usage" in
-    let usage = {
-      input_tokens = Safe_ops.json_int "prompt_tokens" usage_json;
-      output_tokens = Safe_ops.json_int "completion_tokens" usage_json;
-      total_tokens = Safe_ops.json_int "total_tokens" usage_json;
-      cache_creation_input_tokens = 0;
-      cache_read_input_tokens = 0;
-    } in
+    let usage =
+      try {
+        input_tokens = Safe_ops.json_int "prompt_tokens" usage_json;
+        output_tokens = Safe_ops.json_int "completion_tokens" usage_json;
+        total_tokens = Safe_ops.json_int "total_tokens" usage_json;
+        cache_creation_input_tokens = 0;
+        cache_read_input_tokens = 0;
+      }
+      with exn ->
+        Printf.eprintf "[llm] token count parse failed: %s\n%!" (Printexc.to_string exn);
+        { input_tokens = 0; output_tokens = 0; total_tokens = 0;
+          cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+    in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
     Ok { content; tool_calls; usage; model_used; latency_ms = 0 }

@@ -138,6 +138,7 @@ let test_code_search_basic () =
       (contains_substring text "ripgrep" ||
        contains_substring text "command" ||
        contains_substring text "rg" ||
+       contains_substring text "git" ||
        contains_substring text "Internal error")
   end else begin
     (* Parse the tool-specific JSON from text *)

@@ -68,6 +68,8 @@ let default_model_strings ~cascade_name =
         "llama:qwen3.5-35b-a3b-ud-q8-xl";
         Printf.sprintf "glm:%s" Env_config.Llm.default_model;
       ]
+  | "sentinel_board" | "sentinel_task" | "sentinel_keeper" ->
+      [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
   | _ -> []
 
 let model_key_of_cascade cascade_name = cascade_name ^ "_models"

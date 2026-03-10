@@ -340,11 +340,7 @@ function crewRowsFromMission(): CrewRow[] {
 
 function keeperToolNames(keeper: Keeper): string[] {
   if (keeper.recent_tool_names && keeper.recent_tool_names.length > 0) return keeper.recent_tool_names
-  const metrics = isRecord(keeper.metrics_window) ? keeper.metrics_window : {}
-  const topTools = Array.isArray(metrics.top_tools) ? metrics.top_tools : []
-  return topTools
-    .map(item => (isRecord(item) ? asString(item.tool) : null))
-    .filter((item): item is string => item !== null)
+  return []
 }
 
 function keeperForAgent(agentName: string): Keeper | null {

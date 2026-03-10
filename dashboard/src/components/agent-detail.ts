@@ -54,15 +54,19 @@ function keeperForAgent(agentName: string | null): Keeper | null {
   return keepers.value.find(keeper => keeper.agent_name === agentName || keeper.name === agentName) ?? null
 }
 
-function toolNamesForAgent(agentName: string | null): string[] {
-  const keeper = keeperForAgent(agentName)
+function windowTopTools(keeper: Keeper | null): string[] {
   if (!keeper) return []
-  if (keeper.recent_tool_names && keeper.recent_tool_names.length > 0) return keeper.recent_tool_names
   const metrics = keeper.metrics_window
   const topTools = Array.isArray(metrics?.top_tools) ? metrics.top_tools : []
   return topTools
     .map(item => (typeof item === 'object' && item !== null && 'tool' in item && typeof item.tool === 'string' ? item.tool : null))
     .filter((item): item is string => item !== null)
+}
+
+function recentToolsForAgent(agentName: string | null): string[] {
+  const keeper = keeperForAgent(agentName)
+  if (!keeper) return []
+  return keeper.recent_tool_names && keeper.recent_tool_names.length > 0 ? keeper.recent_tool_names : []
 }
 
 async function refreshAgentDetail(): Promise<void> {
@@ -152,9 +156,11 @@ export function AgentDetailOverlay() {
   const keeper = keeperForAgent(agentName)
   const ownedTasks = assignedTasks(agentName)
   const lines = roomActivity.value
-  const toolNames = toolNamesForAgent(agentName)
+  const recentTools = recentToolsForAgent(agentName)
+  const topTools = windowTopTools(keeper)
   const capabilities = agent?.capabilities ?? []
-  const room = serverStatus.value?.room ?? serverStatus.value?.project ?? 'default'
+  const room = serverStatus.value?.room ?? 'default'
+  const project = serverStatus.value?.project ?? '확인 없음'
   const cluster = serverStatus.value?.cluster ?? '확인 없음'
 
   return html`
@@ -215,6 +221,7 @@ export function AgentDetailOverlay() {
                     ${agent.current_task ? html`<span>Task: ${agent.current_task}</span>` : null}
                     ${agent.last_seen ? html`<span>Last seen: <${TimeAgo} timestamp=${agent.last_seen} /></span>` : null}
                     <span>Room: ${room}</span>
+                    <span>Project: ${project}</span>
                     <span>Cluster: ${cluster}</span>
                   `
                 : null}
@@ -257,11 +264,21 @@ export function AgentDetailOverlay() {
             <div>
               <div style="font-size:12px; color:#888; margin-bottom:6px;">Recent tools</div>
               <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                ${toolNames.length > 0
-                  ? toolNames.map((tool: string) => html`<span class="pill">${tool}</span>`)
+                ${recentTools.length > 0
+                  ? recentTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
                   : html`<span class="empty-state" style="font-size:12px;">No tool telemetry</span>`}
               </div>
             </div>
+            ${recentTools.length === 0 && topTools.length > 0
+              ? html`
+                  <div>
+                    <div style="font-size:12px; color:#888; margin-bottom:6px;">Window top tools</div>
+                    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                      ${topTools.map((tool: string) => html`<span class="pill">${tool}</span>`)}
+                    </div>
+                  </div>
+                `
+              : null}
             ${keeper
               ? html`
                   <div style="font-size:12px; color:#888;">

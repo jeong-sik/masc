@@ -43,6 +43,11 @@ let () =
               let stats = Tool_registry.get_stats () in
               let s = List.assoc "masc_broadcast" stats in
               check int "total_duration_ms" 300 s.total_duration_ms);
+          test_case "ignores unknown tool names when gated" `Quick (fun () ->
+              Tool_registry.reset ();
+              Tool_registry.record_call_if_known ~tool_name:"totally_unknown_tool"
+                ~success:false ~duration_ms:1;
+              check int "total" 0 (Tool_registry.total_calls ()));
         ] );
       ( "get_top_n",
         [
@@ -107,6 +112,7 @@ let () =
                 ~duration_ms:42;
               let json =
                 Tool_registry.stats_report
+                  ~top_n:20
                   ~all_tool_names:[ "masc_status"; "masc_join" ]
               in
               let s = Yojson.Safe.to_string json in
@@ -116,6 +122,27 @@ let () =
               (* Verify it parses back *)
               let _ = Yojson.Safe.from_string s in
               ());
+          test_case "respects top_n" `Quick (fun () ->
+              Tool_registry.reset ();
+              for _ = 1 to 3 do
+                Tool_registry.record_call ~tool_name:"masc_status" ~success:true
+                  ~duration_ms:1
+              done;
+              for _ = 1 to 2 do
+                Tool_registry.record_call ~tool_name:"masc_join" ~success:true
+                  ~duration_ms:1
+              done;
+              Tool_registry.record_call ~tool_name:"masc_leave" ~success:true
+                ~duration_ms:1;
+              let json =
+                Tool_registry.stats_report ~top_n:2
+                  ~all_tool_names:[ "masc_status"; "masc_join"; "masc_leave" ]
+              in
+              let open Yojson.Safe.Util in
+              check int "top_n_requested" 2
+                (json |> member "top_n_requested" |> to_int);
+              check int "top_tools length" 2
+                (json |> member "top_tools" |> to_list |> List.length));
         ] );
       ( "reset",
         [

@@ -2968,8 +2968,8 @@ in
             Printf.eprintf "[WARN] telemetry tracking failed: %s\n%!" (Printexc.to_string exn))
      | None -> ());
 
-  (* Track in-memory call counter (hot-path, O(1), survives until restart) *)
-  Tool_registry.record_call ~tool_name:name ~success ~duration_ms;
+  (* Track in-memory call counter only for declared tool names. *)
+  Tool_registry.record_call_if_known ~tool_name:name ~success ~duration_ms;
 
   let trace_id =
     match id with

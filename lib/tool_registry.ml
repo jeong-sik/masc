@@ -23,6 +23,17 @@ type call_stats = {
 let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
 let registry_mutex = Mutex.create ()
 
+let known_tool_names : (string, unit) Hashtbl.t Lazy.t =
+  lazy
+    (let tbl = Hashtbl.create 256 in
+     List.iter
+       (fun (schema : Types.tool_schema) -> Hashtbl.replace tbl schema.name ())
+       Config.all_tool_schemas;
+     tbl)
+
+let is_known_tool tool_name =
+  Hashtbl.mem (Lazy.force known_tool_names) tool_name
+
 (** Record a tool call. Called from handle_call_tool_eio after execution. *)
 let record_call ~tool_name ~success ~duration_ms =
   Mutex.lock registry_mutex;
@@ -50,6 +61,10 @@ let record_call ~tool_name ~success ~duration_ms =
         stats.failure_count <- stats.failure_count + 1;
       stats.last_called_at <- Time_compat.now ();
       stats.total_duration_ms <- stats.total_duration_ms + duration_ms)
+
+let record_call_if_known ~tool_name ~success ~duration_ms =
+  if is_known_tool tool_name then
+    record_call ~tool_name ~success ~duration_ms
 
 (** Get all stats as a sorted list (by call_count descending) *)
 let get_stats () : (string * call_stats) list =
@@ -126,8 +141,9 @@ let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
   ]
 
 (** Generate a full stats report as JSON *)
-let stats_report ~all_tool_names : Yojson.Safe.t =
-  let top_20 = get_top_n 20 in
+let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
+  let bounded_top_n = max 1 (min 100 top_n) in
+  let top_tools = get_top_n bounded_top_n in
   let cutoff_30d = Time_compat.now () -. (30.0 *. 86400.0) in
   let unused_30d = get_unused_since cutoff_30d in
   let never_called = get_never_called all_tool_names in
@@ -135,7 +151,9 @@ let stats_report ~all_tool_names : Yojson.Safe.t =
     ("total_calls", `Int (total_calls ()));
     ("distinct_tools_called", `Int (distinct_tools_called ()));
     ("total_tools_available", `Int (List.length all_tool_names));
-    ("top_20", `List (List.map stats_to_json top_20));
+    ("top_n_requested", `Int bounded_top_n);
+    ("top_tools", `List (List.map stats_to_json top_tools));
+    ("top_20", `List (List.map stats_to_json top_tools));
     ("unused_30d", `List (List.map (fun s -> `String s) unused_30d));
     ("unused_30d_count", `Int (List.length unused_30d));
     ("never_called", `List (List.map (fun s -> `String s) never_called));

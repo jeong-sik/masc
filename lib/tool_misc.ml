@@ -45,12 +45,13 @@ let handle_gc ctx args =
 let handle_cleanup_zombies ctx _args =
   (true, Room.cleanup_zombies ctx.config)
 
-let handle_tool_stats _ctx _args =
+let handle_tool_stats _ctx args =
+  let top_n = max 1 (min 100 (get_int args "top_n" 20)) in
   let all_tool_names =
     List.map (fun (s : Types.tool_schema) -> s.name)
       Config.all_tool_schemas
   in
-  let report = Tool_registry.stats_report ~all_tool_names in
+  let report = Tool_registry.stats_report ~top_n ~all_tool_names in
   (true, Yojson.Safe.pretty_to_string report)
 
 (* Dispatch function *)

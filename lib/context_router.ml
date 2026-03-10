@@ -163,28 +163,38 @@ Category:|} query
     Extracts the first recognized category name. *)
 let parse_intent_response (text : string) : (query_intent * float) option =
   let s = String.lowercase_ascii (String.trim text) in
-  let has_sub pat =
+  let has_label pat =
     let p_len = String.length pat in
     let s_len = String.length s in
     if p_len > s_len then false
     else
+      let is_label_char = function
+        | 'a' .. 'z' | '0' .. '9' | '_' -> true
+        | _ -> false
+      in
       let rec check i =
         if i > s_len - p_len then false
-        else if String.sub s i p_len = pat then true
+        else if String.sub s i p_len = pat then
+          let left_ok = i = 0 || not (is_label_char s.[i - 1]) in
+          let right_idx = i + p_len in
+          let right_ok =
+            right_idx = s_len || not (is_label_char s.[right_idx])
+          in
+          (left_ok && right_ok) || check (i + 1)
         else check (i + 1)
       in
       check 0
   in
   (* Match in priority order — more specific first *)
-  if has_sub "task_command" || has_sub "task command" then
+  if has_label "task_command" || has_label "task command" then
     Some (Task_command, 0.90)
-  else if has_sub "status_check" || has_sub "status check" then
+  else if has_label "status_check" || has_label "status check" then
     Some (Status_check, 0.90)
-  else if has_sub "knowledge_query" || has_sub "knowledge query" || has_sub "knowledge" then
+  else if has_label "knowledge_query" || has_label "knowledge query" then
     Some (Knowledge_query, 0.85)
-  else if has_sub "coordination" then
+  else if has_label "coordination" then
     Some (Coordination, 0.85)
-  else if has_sub "conversational" then
+  else if has_label "conversational" then
     Some (Conversational, 0.90)
   else
     None

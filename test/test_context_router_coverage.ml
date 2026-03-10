@@ -195,9 +195,7 @@ let test_parse_intent_status_check () =
 
 let test_parse_intent_knowledge () =
   assert (parse_intent_response "Knowledge_query" = Some (Knowledge_query, 0.85));
-  assert (parse_intent_response "knowledge query" = Some (Knowledge_query, 0.85));
-  (* "knowledge" alone also matches *)
-  assert (parse_intent_response "This is a knowledge request" = Some (Knowledge_query, 0.85))
+  assert (parse_intent_response "knowledge query" = Some (Knowledge_query, 0.85))
 
 let test_parse_intent_coordination () =
   assert (parse_intent_response "Coordination" = Some (Coordination, 0.85));
@@ -209,6 +207,20 @@ let test_parse_intent_with_explanation () =
     = Some (Conversational, 0.90));
   assert (parse_intent_response "I classify this as Knowledge_query."
     = Some (Knowledge_query, 0.85))
+
+let test_parse_intent_does_not_match_prompt_echo () =
+  assert
+    (parse_intent_response
+       "Conversational: greetings, thanks, acknowledgements, small talk, yes/no"
+     = Some (Conversational, 0.90));
+  assert
+    (parse_intent_response
+       "Knowledge_query: needs domain knowledge, how-to, debugging, explanations, search"
+     = Some (Knowledge_query, 0.85));
+  assert
+    (parse_intent_response
+       "Categories: greetings, thanks, acknowledgements, small talk"
+     = None)
 
 let test_parse_intent_garbage () =
   assert (parse_intent_response "" = None);
@@ -295,6 +307,7 @@ let () =
     ("parse_intent_knowledge", test_parse_intent_knowledge);
     ("parse_intent_coordination", test_parse_intent_coordination);
     ("parse_intent_with_explanation", test_parse_intent_with_explanation);
+    ("parse_intent_does_not_match_prompt_echo", test_parse_intent_does_not_match_prompt_echo);
     ("parse_intent_garbage", test_parse_intent_garbage);
     ("build_intent_prompt", test_build_intent_prompt);
     ("router_mode_dispatch", test_router_mode_dispatch);

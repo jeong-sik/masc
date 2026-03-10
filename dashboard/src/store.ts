@@ -53,7 +53,7 @@ export const keeperHeartbeats = signal<Map<string, number>>(new Map())
 // --- Board state ---
 
 export const boardPosts = signal<BoardPost[]>([])
-export const boardSortMode = signal<BoardSortMode>('hot')
+export const boardSortMode = signal<BoardSortMode>('recent')
 export const boardExcludeSystem = signal(true)
 
 // --- TRPG state ---

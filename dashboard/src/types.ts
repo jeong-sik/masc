@@ -58,6 +58,9 @@ export interface BoardPost {
   created_at: string
   updated_at: string
   flair?: string
+  hearth?: string | null
+  visibility?: string
+  expires_at?: string | null
   hearth_count?: number
 }
 

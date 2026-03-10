@@ -6,9 +6,9 @@ import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
-import { agents, tasks } from '../store'
+import { agents, keepers, serverStatus, tasks } from '../store'
 import { fetchRoomMessages, fetchTaskHistory, sendBroadcast } from '../api'
-import type { Agent, Task } from '../types'
+import type { Agent, Keeper, Task } from '../types'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
@@ -47,6 +47,22 @@ function selectedAgent(): Agent | null {
 function assignedTasks(agentName: string | null): Task[] {
   if (!agentName) return []
   return tasks.value.filter(t => t.assignee === agentName)
+}
+
+function keeperForAgent(agentName: string | null): Keeper | null {
+  if (!agentName) return null
+  return keepers.value.find(keeper => keeper.agent_name === agentName || keeper.name === agentName) ?? null
+}
+
+function toolNamesForAgent(agentName: string | null): string[] {
+  const keeper = keeperForAgent(agentName)
+  if (!keeper) return []
+  if (keeper.recent_tool_names && keeper.recent_tool_names.length > 0) return keeper.recent_tool_names
+  const metrics = keeper.metrics_window
+  const topTools = Array.isArray(metrics?.top_tools) ? metrics.top_tools : []
+  return topTools
+    .map(item => (typeof item === 'object' && item !== null && 'tool' in item && typeof item.tool === 'string' ? item.tool : null))
+    .filter((item): item is string => item !== null)
 }
 
 async function refreshAgentDetail(): Promise<void> {
@@ -133,8 +149,13 @@ export function AgentDetailOverlay() {
   if (!agentName) return null
 
   const agent = selectedAgent()
+  const keeper = keeperForAgent(agentName)
   const ownedTasks = assignedTasks(agentName)
   const lines = roomActivity.value
+  const toolNames = toolNamesForAgent(agentName)
+  const capabilities = agent?.capabilities ?? []
+  const room = serverStatus.value?.room ?? serverStatus.value?.project ?? 'default'
+  const cluster = serverStatus.value?.cluster ?? '확인 없음'
 
   return html`
     <div
@@ -183,11 +204,18 @@ export function AgentDetailOverlay() {
                 ${agent?.interests?.map((t: string) => html`<span style="font-size:0.7rem;background:#3b1f4e;color:#c084fc;padding:2px 8px;border-radius:10px">${t}</span>`)}
               </div>
             ` : ''}
+            ${capabilities.length > 0 ? html`
+              <div style="display:flex;flex-wrap:wrap;gap:4px">
+                ${capabilities.map((capability: string) => html`<span style="font-size:0.7rem;background:#183153;color:#7dd3fc;padding:2px 8px;border-radius:10px">${capability}</span>`)}
+              </div>
+            ` : ''}
             <div class="agent-detail-sub">
               ${agent
                 ? html`
                     ${agent.current_task ? html`<span>Task: ${agent.current_task}</span>` : null}
                     ${agent.last_seen ? html`<span>Last seen: <${TimeAgo} timestamp=${agent.last_seen} /></span>` : null}
+                    <span>Room: ${room}</span>
+                    <span>Cluster: ${cluster}</span>
                   `
                 : null}
             </div>
@@ -215,6 +243,35 @@ export function AgentDetailOverlay() {
               : html`<div class="agent-activity-list">${lines.map((line, idx) => html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
           <//>
         </div>
+
+        <${Card} title="Capabilities & Tools">
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div>
+              <div style="font-size:12px; color:#888; margin-bottom:6px;">Capabilities</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                ${capabilities.length > 0
+                  ? capabilities.map((capability: string) => html`<span class="pill">${capability}</span>`)
+                  : html`<span class="empty-state" style="font-size:12px;">No capability metadata</span>`}
+              </div>
+            </div>
+            <div>
+              <div style="font-size:12px; color:#888; margin-bottom:6px;">Recent tools</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                ${toolNames.length > 0
+                  ? toolNames.map((tool: string) => html`<span class="pill">${tool}</span>`)
+                  : html`<span class="empty-state" style="font-size:12px;">No tool telemetry</span>`}
+              </div>
+            </div>
+            ${keeper
+              ? html`
+                  <div style="font-size:12px; color:#888;">
+                    Linked keeper: <span style="color:#4ade80;">${keeper.name}</span>
+                    ${keeper.skill_primary ? html` · route <span style="color:#22d3ee;">${keeper.skill_primary}</span>` : null}
+                  </div>
+                `
+              : null}
+          </div>
+        <//>
 
         <${Card} title="Task History">
           ${taskHistories.value.length === 0

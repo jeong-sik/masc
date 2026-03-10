@@ -520,19 +520,28 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     || (raw.updated_at !== undefined ? toIsoTimestamp(raw.updated_at) : createdAt)
   const titleRaw = asString(raw.title, '').trim()
   const title = titleRaw || derivePostTitle(content)
+  const tags = Array.isArray(raw.tags)
+    ? raw.tags.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    : []
 
   return {
     id,
     author,
     title,
     content,
-    tags: [],
+    tags,
     votes,
     vote_balance: score,
     comment_count: commentCount,
     created_at: createdAt,
     updated_at: updatedAt,
     flair: flairValue,
+    hearth: asString(raw.hearth, '').trim() || null,
+    visibility: asString(raw.visibility, '').trim() || undefined,
+    expires_at:
+      asString(raw.expires_at_iso, '').trim()
+      || (raw.expires_at !== undefined ? toIsoTimestamp(raw.expires_at) : '')
+      || null,
     hearth_count: asNumber(raw.hearth_count, 0),
   }
 }
@@ -585,6 +594,9 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
       comment_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      hearth: null,
+      visibility: 'internal',
+      expires_at: null,
     }
     const commentsRaw = Array.isArray(raw.comments) ? raw.comments : []
     const comments = commentsRaw

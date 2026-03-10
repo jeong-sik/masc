@@ -193,7 +193,7 @@ function openSession(tab: 'intervene' | 'command', sessionId: string): void {
 function latestMessageFrom(agentName: string, rows: Message[]): Message | null {
   const key = agentName.trim().toLowerCase()
   return [...rows]
-    .filter(item => item.from.trim().toLowerCase() === key)
+    .filter(item => (item.from ?? '').trim().toLowerCase() === key)
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] ?? null
 }
 
@@ -201,9 +201,9 @@ function latestMessageTo(agentName: string, rows: Message[]): Message | null {
   const key = agentName.trim().toLowerCase()
   return [...rows]
     .filter(item => {
-      const from = item.from.trim().toLowerCase()
+      const from = (item.from ?? '').trim().toLowerCase()
       if (from === key) return false
-      const content = item.content.trim().toLowerCase()
+      const content = (item.content ?? '').trim().toLowerCase()
       return content.includes(`@${key}`) || content.includes(key)
     })
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] ?? null
@@ -763,7 +763,7 @@ export function Mission() {
 
       <div class="mission-stat-grid">
         <${SummaryStat} label="활성 흐름" value=${crews.length} detail="지금 보이는 crew / session" tone=${crews.length > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="활성 에이전트" value=${activeAgentsCount} detail="지금 응답 가능한 actor 수" tone=${activeAgentsCount > 0 ? 'ok' : 'warn'} />
+        <${SummaryStat} label="응답 가능 에이전트" value=${activeAgentsCount} detail="지금 응답 가능한 actor 수" tone=${activeAgentsCount > 0 ? 'ok' : 'warn'} />
         <${SummaryStat} label="Keeper 수" value=${keeperRows.length} detail="연속성 runtime / generation 관찰 대상" tone=${keeperRows.length > 0 ? 'ok' : 'warn'} />
         <${SummaryStat} label="최근 output" value=${liveOutputs} detail="main 화면에서 바로 볼 수 있는 최근 출력 수" tone=${liveOutputs > 0 ? 'ok' : 'warn'} />
         <${SummaryStat} label="내부 incident" value=${mission.incidents.length} detail="시스템 진단 신호는 아래 보조 카드로만 유지" tone=${topIncident?.severity ?? 'ok'} />

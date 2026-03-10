@@ -29,6 +29,7 @@ import { Execution } from './components/agents'
 import { Planning } from './components/goals'
 import { Governance } from './components/governance'
 import { Lab } from './components/lab'
+import { Live } from './components/live'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
@@ -94,8 +95,14 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
             if (currentTab === 'command') {
               refreshCommandPlaneCurrentSurface()
               refreshCommandPlaneChainSummary()
-              if (commandPlaneSurface.value === 'swarm') {
+              if (
+                commandPlaneSurface.value === 'swarm'
+                || commandPlaneSurface.value === 'warroom'
+              ) {
                 refreshCommandPlaneSwarm()
+              }
+              if (commandPlaneSurface.value === 'warroom') {
+                refreshOperatorSnapshot()
               }
             }
             if (currentTab === 'mission') {
@@ -230,6 +237,8 @@ function TabContent() {
       return html`<${Mission} />`
     case 'execution':
       return html`<${Execution} />`
+    case 'live':
+      return html`<${Live} />`
     case 'memory':
       return html`<${Memory} />`
     case 'governance':
@@ -278,8 +287,14 @@ export function App() {
       if (tab === 'command') {
         void refreshCommandPlaneCurrentSurface()
         void refreshCommandPlaneChainSummary()
-        if (commandPlaneSurface.value === 'swarm') {
+        if (
+          commandPlaneSurface.value === 'swarm'
+          || commandPlaneSurface.value === 'warroom'
+        ) {
           void refreshCommandPlaneSwarm()
+        }
+        if (commandPlaneSurface.value === 'warroom') {
+          void refreshOperatorSnapshot()
         }
       }
       else if (tab === 'mission') {
@@ -310,8 +325,14 @@ export function App() {
     if (tab === 'command') {
       refreshCommandPlaneCurrentSurface()
       refreshCommandPlaneChainSummary()
-      if (commandPlaneSurface.value === 'swarm') {
+      if (
+        commandPlaneSurface.value === 'swarm'
+        || commandPlaneSurface.value === 'warroom'
+      ) {
         refreshCommandPlaneSwarm()
+      }
+      if (commandPlaneSurface.value === 'warroom') {
+        refreshOperatorSnapshot()
       }
     }
     if (tab === 'mission') {

@@ -5,10 +5,13 @@
 
 export interface Agent {
   name: string
+  agent_type?: string
   status: 'active' | 'busy' | 'listening' | 'idle' | 'inactive' | 'offline'
   current_task: string | null
   context_ratio?: number
+  joined_at?: string
   last_seen?: string
+  capabilities?: string[]
   emoji?: string
   koreanName?: string
   model?: string
@@ -275,6 +278,7 @@ export interface Keeper {
   last_compaction_ago_s?: number
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
+  last_proactive_preview?: string | null
   last_drift_reason?: string | null
   drift_count_total?: number
   generation?: number
@@ -299,6 +303,9 @@ export interface Keeper {
   needs?: string | null
   desires?: string | null
   memory_recent_note?: string | null
+  recent_input_preview?: string | null
+  recent_output_preview?: string | null
+  recent_tool_names?: string[]
   conversation_tail_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>
@@ -326,10 +333,13 @@ export interface Keeper {
     name?: string
     exists?: boolean
     error?: string
+    agent_type?: string
     status?: string
     current_task?: string | null
+    joined_at?: string
     last_seen?: string
     last_seen_ago_s?: number
+    capabilities?: string[]
     is_zombie?: boolean
     [key: string]: unknown
   }
@@ -1659,6 +1669,7 @@ export interface CommandPlaneSwarmResponse {
 }
 
 export type CommandPlaneSurface =
+  | 'warroom'
   | 'summary'
   | 'swarm'
   | 'operations'
@@ -1847,6 +1858,7 @@ export interface DashboardSemanticsResponse {
 export type TabId =
   | 'mission'
   | 'execution'
+  | 'live'
   | 'memory'
   | 'governance'
   | 'planning'
@@ -1857,6 +1869,7 @@ export type TabId =
 export const VALID_TABS: TabId[] = [
   'mission',
   'execution',
+  'live',
   'memory',
   'governance',
   'planning',

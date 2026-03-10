@@ -39,9 +39,31 @@ let test_cleanup_stale_respects_touch () =
 
   unregister alive_sid
 
+let test_concurrent_register_unregister () =
+  Eio_main.run @@ fun _env ->
+  let open Masc_mcp.Sse in
+  let n = 50 in
+  let prefix = "conc_" ^ string_of_int (Random.int 1000000) ^ "_" in
+  let noop _ = () in
+  let count_before = client_count () in
+  (* N fibers register, then unregister concurrently.
+     Switch.run waits for all forked fibers before returning. *)
+  Eio.Switch.run (fun sw ->
+    for i = 0 to n - 1 do
+      Eio.Fiber.fork ~sw (fun () ->
+        let sid = prefix ^ string_of_int i in
+        let (_id, _) = register sid ~push:noop ~last_event_id:0 in
+        Eio.Fiber.yield ();
+        unregister sid)
+    done);
+  (* All fibers have completed — count should be restored *)
+  let count_after = client_count () in
+  check int "count restored" count_before count_after
+
 let () =
   run "sse"
     [
       ("unregister_if_current", [test_case "guards reconnect" `Quick test_unregister_if_current]);
       ("cleanup_stale", [test_case "uses idle time" `Quick test_cleanup_stale_respects_touch]);
+      ("concurrency", [test_case "concurrent register/unregister" `Quick test_concurrent_register_unregister]);
     ]

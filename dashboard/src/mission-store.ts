@@ -104,18 +104,35 @@ function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
   if (!isRecord(raw)) return null
   const sessionId = asString(raw.session_id)
   if (!sessionId) return null
+  const payload = isRecord(raw.status) ? raw.status : raw
+  const payloadSummary = isRecord(payload.summary) ? payload.summary : undefined
   return {
     session_id: sessionId,
-    status: asString(raw.status),
-    progress_pct: asNumber(raw.progress_pct),
-    elapsed_sec: asNumber(raw.elapsed_sec),
-    remaining_sec: asNumber(raw.remaining_sec),
-    done_delta_total: asNumber(raw.done_delta_total),
-    summary: isRecord(raw.summary) ? raw.summary : undefined,
-    team_health: isRecord(raw.team_health) ? raw.team_health : undefined,
-    communication_metrics: isRecord(raw.communication_metrics) ? raw.communication_metrics : undefined,
-    orchestration_state: isRecord(raw.orchestration_state) ? raw.orchestration_state : undefined,
-    cascade_metrics: isRecord(raw.cascade_metrics) ? raw.cascade_metrics : undefined,
+    status:
+      asString(raw.status)
+      ?? asString(payloadSummary?.status)
+      ?? (isRecord(payload.session) ? asString(payload.session.status) : undefined),
+    progress_pct: asNumber(raw.progress_pct) ?? asNumber(payloadSummary?.progress_pct),
+    elapsed_sec: asNumber(raw.elapsed_sec) ?? asNumber(payloadSummary?.elapsed_sec),
+    remaining_sec: asNumber(raw.remaining_sec) ?? asNumber(payloadSummary?.remaining_sec),
+    done_delta_total: asNumber(raw.done_delta_total) ?? asNumber(payloadSummary?.done_delta_total),
+    summary: isRecord(raw.summary) ? raw.summary : payloadSummary,
+    team_health:
+      isRecord(raw.team_health)
+        ? raw.team_health
+        : (isRecord(payload.team_health) ? payload.team_health : undefined),
+    communication_metrics:
+      isRecord(raw.communication_metrics)
+        ? raw.communication_metrics
+        : (isRecord(payload.communication_metrics) ? payload.communication_metrics : undefined),
+    orchestration_state:
+      isRecord(raw.orchestration_state)
+        ? raw.orchestration_state
+        : (isRecord(payload.orchestration_state) ? payload.orchestration_state : undefined),
+    cascade_metrics:
+      isRecord(raw.cascade_metrics)
+        ? raw.cascade_metrics
+        : (isRecord(payload.cascade_metrics) ? payload.cascade_metrics : undefined),
     report_paths: isRecord(raw.report_paths)
       ? Object.fromEntries(
           Object.entries(raw.report_paths)
@@ -125,8 +142,17 @@ function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
             })
             .filter((entry): entry is [string, string] => entry !== null),
         )
-      : undefined,
-    session: isRecord(raw.session) ? raw.session : undefined,
+      : (isRecord(payload.report_paths)
+          ? Object.fromEntries(
+              Object.entries(payload.report_paths)
+                .map(([key, value]) => {
+                  const text = asString(value)
+                  return text ? [key, text] : null
+                })
+                .filter((entry): entry is [string, string] => entry !== null),
+            )
+          : undefined),
+    session: isRecord(raw.session) ? raw.session : (isRecord(payload.session) ? payload.session : undefined),
     recent_events: extractArray(raw.recent_events, ['events']).filter(isRecord),
   }
 }

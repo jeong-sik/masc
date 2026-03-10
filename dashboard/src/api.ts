@@ -546,7 +546,9 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     visibility: asString(raw.visibility, '').trim() || undefined,
     expires_at:
       asString(raw.expires_at_iso, '').trim()
-      || (raw.expires_at !== undefined ? toIsoTimestamp(raw.expires_at) : '')
+      || (raw.expires_at !== undefined && raw.expires_at !== 0
+        ? toIsoTimestamp(raw.expires_at)
+        : '')
       || null,
     hearth_count: asNumber(raw.hearth_count, 0),
   }

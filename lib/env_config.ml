@@ -459,9 +459,6 @@ end
 (** {1 Endpoint Configuration} *)
 
 module Endpoints = struct
-  let masc_base_url_opt =
-    Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt |> Option.map strip_trailing_slashes
-
   (** @deprecated LLM-MCP server URL - no longer used.
       Use {!Llm_direct.dispatch} for direct API calls instead.
       Kept for backward compatibility; will be removed in v3.0. *)
@@ -469,35 +466,24 @@ module Endpoints = struct
     get_string ~default:"" "LLM_MCP_URL"  (* Default empty - not used *)
 
   (** MASC server host *)
-  let masc_host =
-    match masc_base_url_opt with
-    | Some base -> (
-        match Uri.host (Uri.of_string base) with
-        | Some host -> host
-        | None -> "")
-    | None -> Sys.getenv_opt "MASC_HOST" |> trim_opt |> Option.value ~default:""
+  let masc_host () =
+    match Uri.host (Uri.of_string (masc_http_base_url ())) with
+    | Some host -> host
+    | None -> failwith "MASC_HTTP_BASE_URL must include a host"
 
   (** MASC server port *)
-  let masc_port =
-    match masc_base_url_opt with
-    | Some base -> (
-        match Uri.port (Uri.of_string base) with
-        | Some port -> port
-        | None -> (
-            match Uri.scheme (Uri.of_string base) with
-            | Some "https" -> 443
-            | Some "http" -> 80
-            | _ -> 0))
-    | None ->
-        (match Sys.getenv_opt "MASC_MCP_PORT" |> trim_opt with
-         | Some value -> Safe_ops.int_of_string_with_default ~default:0 value
-         | None -> 0)
+  let masc_port () =
+    match Uri.port (Uri.of_string (masc_http_base_url ())) with
+    | Some port -> port
+    | None -> (
+        match Uri.scheme (Uri.of_string (masc_http_base_url ())) with
+        | Some "https" -> 443
+        | Some "http" -> 80
+        | _ -> failwith "MASC_HTTP_BASE_URL must include a port or scheme")
 
   (** MASC SSE URL (derived) *)
-  let masc_sse_url =
-    match masc_base_url_opt with
-    | Some base -> Printf.sprintf "%s/sse" base
-    | None -> ""
+  let masc_sse_url () =
+    Printf.sprintf "%s/sse" (masc_http_base_url ())
 end
 
 (** {1 Gardener — Self-Organizing Agent Ecosystem} *)

@@ -479,6 +479,60 @@ a:hover {
   line-height: 1.45;
 }
 
+/* ── Compact Rail (Phase 2) ── */
+
+.rail-card-compact {
+  padding: 10px 12px;
+}
+
+.rail-card-compact .rail-tab-btn {
+  padding: 6px 8px;
+  gap: 6px;
+}
+
+.rail-card-compact .rail-tab-btn strong {
+  font-size: 13px;
+}
+
+.rail-intervene-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  width: 100%;
+  transition: background 0.15s;
+}
+
+.rail-intervene-badge.warn {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fcd34d;
+}
+
+.rail-intervene-badge.warn:hover {
+  background: rgba(251, 191, 36, 0.25);
+}
+
+.rail-badge-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.25);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rail-badge-label {
+  flex: 1;
+}
+
 .rail-stat-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

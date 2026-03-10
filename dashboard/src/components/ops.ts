@@ -480,6 +480,55 @@ export function Ops() {
       ${operatorError.value ? html`<section class="ops-banner error">${operatorError.value}</section>` : null}
       ${operatorDigestError.value ? html`<section class="ops-banner error">${operatorDigestError.value}</section>` : null}
 
+      ${(() => {
+        const actions: Array<{ label: string; desc: string; tone: OpsPriorityTone; onClick: () => void }> = []
+        if (pendingConfirms.length > 0) {
+          actions.push({
+            label: `확인 대기 ${pendingConfirms.length}건 처리`,
+            desc: '승인 또는 거부가 필요한 개입이 대기 중입니다',
+            tone: 'bad',
+            onClick: () => {
+              const el = document.querySelector('.ops-pending-section')
+              el?.scrollIntoView({ behavior: 'smooth' })
+            },
+          })
+        }
+        if (room.paused) {
+          actions.push({
+            label: 'Room 재개',
+            desc: `현재 일시정지 상태${room.pause_reason ? ` (${room.pause_reason})` : ''}`,
+            tone: 'warn',
+            onClick: () => void submitResume(),
+          })
+        }
+        if (flaggedKeepers.length > 0) {
+          const badKeepers = flaggedKeepers.filter(k => keeperPriorityTone(k) === 'bad')
+          actions.push({
+            label: badKeepers.length > 0 ? `Keeper ${badKeepers.length}개 오프라인` : `Keeper ${flaggedKeepers.length}개 점검 필요`,
+            desc: badKeepers.length > 0 ? '메시지를 보내거나 상태를 확인하세요' : 'stale 또는 telemetry 누락',
+            tone: badKeepers.length > 0 ? 'bad' : 'warn',
+            onClick: () => {
+              const el = document.querySelector('.ops-keeper-section')
+              el?.scrollIntoView({ behavior: 'smooth' })
+            },
+          })
+        }
+        if (actions.length === 0) return null
+        return html`
+          <section class="ops-action-guide">
+            <h3 class="ops-action-guide-title">지금 할 수 있는 것</h3>
+            <div class="ops-action-guide-list">
+              ${actions.slice(0, 3).map(action => html`
+                <button class="ops-action-guide-item ${action.tone}" onClick=${action.onClick}>
+                  <strong>${action.label}</strong>
+                  <span>${action.desc}</span>
+                </button>
+              `)}
+            </div>
+          </section>
+        `
+      })()}
+
       <section class="card">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">개입 우선순위</h2>

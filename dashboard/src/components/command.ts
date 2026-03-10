@@ -203,15 +203,23 @@ function historySummary(history?: ChainHistoryEventSummary | null): string {
   return pieces.join(' · ')
 }
 
-const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: string }> = [
-  { id: 'operations', label: '작전' },
-  { id: 'swarm', label: '스웜' },
-  { id: 'chains', label: '체인' },
-  { id: 'topology', label: '토폴로지' },
-  { id: 'alerts', label: '알림' },
-  { id: 'trace', label: '트레이스' },
-  { id: 'control', label: '제어' },
-  { id: 'summary', label: '요약' },
+type CommandSurfaceGroup = 'status' | 'history' | 'control'
+
+const COMMAND_SURFACE_GROUPS: Array<{ id: CommandSurfaceGroup; label: string }> = [
+  { id: 'status', label: '현황' },
+  { id: 'history', label: '이력' },
+  { id: 'control', label: '통제' },
+]
+
+const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: string; group: CommandSurfaceGroup }> = [
+  { id: 'summary', label: '요약', group: 'status' },
+  { id: 'topology', label: '토폴로지', group: 'status' },
+  { id: 'swarm', label: '스웜', group: 'status' },
+  { id: 'operations', label: '작전', group: 'history' },
+  { id: 'trace', label: '트레이스', group: 'history' },
+  { id: 'chains', label: '체인', group: 'history' },
+  { id: 'control', label: '제어', group: 'control' },
+  { id: 'alerts', label: '알림', group: 'control' },
 ]
 const COMMAND_SURFACES: CommandPlaneSurface[] = COMMAND_SURFACE_META.map(item => item.id)
 const CHAIN_SSE_EVENT_TYPES = ['chain_start', 'node_start', 'node_complete', 'chain_complete', 'chain_error']
@@ -948,17 +956,26 @@ function SwarmPanel() {
 
 function SurfaceTabs() {
   return html`
-    <div class="command-surface-tabs">
-      ${COMMAND_SURFACE_META.map(surface => html`
-        <button
-          class="command-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
-          onClick=${() => {
-            setCommandPlaneSurface(surface.id)
-            navigate('command', surfaceRouteParams(surface.id))
-          }}
-        >
-          ${surface.label}
-        </button>
+    <div class="command-surface-tabs grouped">
+      ${COMMAND_SURFACE_GROUPS.map(group => html`
+        <div class="command-tab-group" key=${group.id}>
+          <span class="command-tab-group-label">${group.label}</span>
+          <div class="command-tab-group-items">
+            ${COMMAND_SURFACE_META
+              .filter(surface => surface.group === group.id)
+              .map(surface => html`
+                <button
+                  class="command-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
+                  onClick=${() => {
+                    setCommandPlaneSurface(surface.id)
+                    navigate('command', surfaceRouteParams(surface.id))
+                  }}
+                >
+                  ${surface.label}
+                </button>
+              `)}
+          </div>
+        </div>
       `)}
     </div>
   `
@@ -2206,7 +2223,7 @@ export function Command() {
     <section class="dashboard-panel command-plane-view">
       <div class="panel-header">
         <div>
-          <h2>지휘면 / Command Plane</h2>
+          <h2>지휘면</h2>
           <p>기본 진입은 현재 작전입니다. 여기서는 지금 무엇이 움직이고 막히는지 확인한 뒤, 필요한 surface로만 더 깊게 내려갑니다.</p>
         </div>
         <div class="panel-actions">

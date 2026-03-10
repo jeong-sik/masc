@@ -4314,6 +4314,14 @@ let verification_state_of_operation (operation : operation_record) =
   | _, Some "implement" -> Some "implementing"
   | _ -> None
 
+let intent_state_hint_of_operation_status (operation : operation_record) =
+  match operation.status with
+  | Planned | Active -> Active_intent
+  | Paused -> Suspended_intent
+  | Completed -> Completed_intent
+  | Cancelled -> Dropped_intent
+  | Failed -> Blocked_intent
+
 let focus_of_operation (operation : operation_record) =
   {
     stage = operation.stage;
@@ -5173,8 +5181,18 @@ let unresolved_dependencies operations (operation : operation_record) =
 
 let intent_forecast_json config intent_id ?(limit = 3) () =
   with_intent config intent_id (fun _ intent ->
-      let operations = linked_operations_for_intent config intent_id in
-      let latest_operation = List.nth_opt operations 0 in
+      let _, _, units, _ = topology_units config in
+      let all_operations = all_operations config units in
+      let intent_operations =
+        all_operations
+        |> List.filter (fun (operation : operation_record) ->
+               match operation.intent_id with
+               | Some current -> String.equal current intent_id
+               | None -> false)
+        |> List.sort (fun (left : operation_record) (right : operation_record) ->
+               String.compare right.updated_at left.updated_at)
+      in
+      let latest_operation = List.nth_opt intent_operations 0 in
       let base_focus =
         match latest_operation with
         | Some operation -> focus_of_operation operation
@@ -5207,7 +5225,7 @@ let intent_forecast_json config intent_id ?(limit = 3) () =
             if
               match normalize_stage operation.stage with
               | Some ("verify" | "review") ->
-                  unresolved_dependencies operations operation <> []
+                  unresolved_dependencies all_operations operation <> []
               | _ -> false
             then
               flags := "verification_gap" :: !flags);
@@ -5215,7 +5233,7 @@ let intent_forecast_json config intent_id ?(limit = 3) () =
       in
       let blocked_by =
         match latest_operation with
-        | Some operation -> unresolved_dependencies operations operation
+        | Some operation -> unresolved_dependencies all_operations operation
         | None -> []
       in
       let candidate_focuses =
@@ -5836,7 +5854,8 @@ let checkpoint_operation config ~(actor : string) json =
       write_operations config next_operations;
       let _, _, units, _ = topology_units config in
       let _ = sync_managed_detachments config units updated in
-      touch_intent_from_operation config ~actor updated ~state:Active_intent;
+      touch_intent_from_operation config ~actor updated
+        ~state:(intent_state_hint_of_operation_status updated);
       if operation_search_strategy updated = Cp_search_fabric.Best_first_v1 then
         update_search_stats_for_operation config updated ~outcome:`Success;
       append_cp_event config ~trace_id:updated.trace_id ~event_type:"operation_checkpointed"

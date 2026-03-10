@@ -64,6 +64,55 @@ let test_managed_trace_only_does_not_make_lane_present () =
     (String.equal "masc_dispatch_tick"
        (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string))
 
+let test_active_managed_operation_keeps_lane_present () =
+  let now = M.Time_compat.now () in
+  let now_iso = M.Command_plane_v2.iso_of_unix now in
+  let operation : M.Swarm_status.operation_info =
+    {
+      operation_id = "op-running";
+      objective = "Live managed lane";
+      source = "managed";
+      status = "running";
+      trace_id = "trace-running";
+      detachment_session_id = None;
+      note = Some "live operation";
+      updated_at = Some now_iso;
+    }
+  in
+  let json =
+    M.Swarm_status.build_json_from_inputs
+      ~timeline_limit_override:M.Swarm_status.timeline_limit ~now
+      ~operations:[ operation ] ~detachments:[] ~alerts:[] ~decisions:[]
+      ~traces:[] ~sessions:[]
+  in
+  let managed = find_lane json "managed" in
+  check bool "managed lane present for active operation" true
+    (managed |> U.member "present" |> U.to_bool)
+
+let test_managed_alert_only_keeps_lane_present () =
+  let now = M.Time_compat.now () in
+  let now_iso = M.Command_plane_v2.iso_of_unix now in
+  let alert : M.Swarm_status.alert_info =
+    {
+      alert_id = "alert-unit-frozen";
+      severity = "warn";
+      scope_type = Some "unit";
+      scope_id = Some "company-runtime";
+      title = Some "Company runtime is frozen";
+      detail = Some "Dispatch into this unit is blocked until it is unfrozen.";
+      timestamp = Some now_iso;
+    }
+  in
+  let json =
+    M.Swarm_status.build_json_from_inputs
+      ~timeline_limit_override:M.Swarm_status.timeline_limit ~now
+      ~operations:[] ~detachments:[] ~alerts:[ alert ] ~decisions:[]
+      ~traces:[] ~sessions:[]
+  in
+  let managed = find_lane json "managed" in
+  check bool "managed lane present for live alert" true
+    (managed |> U.member "present" |> U.to_bool)
+
 let test_supervised_session_keeps_lane_present () =
   let now = M.Time_compat.now () in
   let now_iso = M.Command_plane_v2.iso_of_unix now in
@@ -262,6 +311,10 @@ let () =
             test_supervised_trace_only_does_not_make_lane_present;
           test_case "trace_only_does_not_activate_managed_lane" `Quick
             test_managed_trace_only_does_not_make_lane_present;
+          test_case "active_managed_operation_keeps_lane_present" `Quick
+            test_active_managed_operation_keeps_lane_present;
+          test_case "managed_alert_only_keeps_lane_present" `Quick
+            test_managed_alert_only_keeps_lane_present;
           test_case "session_keeps_supervised_lane_present" `Quick
             test_supervised_session_keeps_lane_present;
           test_case "stale_session_keeps_stale_flag" `Quick

@@ -65,18 +65,26 @@ let session_allows_actor ~(actor : string) (session : Team_session_types.session
   || List.exists (String.equal actor) session.agent_names
 
 let increment_broadcast_from_external (config : Room.config) ~(agent_name : string) =
-  let sessions = Team_session_store.list_sessions config in
-  List.iter
-    (fun (session : Team_session_types.session) ->
-      match session.status with
-      | Team_session_types.Running
-        when session_allows_actor ~actor:agent_name session ->
-          let updated =
-            { session with broadcast_count = session.broadcast_count + 1 }
-          in
-          Team_session_store.save_session config updated
-      | _ -> ())
-    sessions
+  (* Use update_session for atomic read-modify-write per session to avoid
+     TOCTOU races with concurrent writers (session engine loop, other
+     broadcasts).  Session counts are typically 0-2 active so the directory
+     scan is cheap on the broadcast hot path. *)
+  let root =
+    Filename.concat (Room_utils.masc_dir config) "team-sessions"
+  in
+  if Sys.file_exists root then
+    Sys.readdir root
+    |> Array.iter (fun session_id ->
+           ignore
+             (Team_session_store.update_session config session_id
+                (fun (session : Team_session_types.session) ->
+                  match session.status with
+                  | Team_session_types.Running
+                    when session_allows_actor ~actor:agent_name session ->
+                      { session with
+                        broadcast_count = session.broadcast_count + 1
+                      }
+                  | _ -> session)))
 
 let hierarchy_lane_ids = [| "lane-a"; "lane-b"; "lane-c"; "lane-d" |]
 

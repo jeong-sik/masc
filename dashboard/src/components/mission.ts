@@ -631,7 +631,7 @@ function CrewCard({ row }: { row: CrewRow }) {
             <div class="mission-member-stack">
               ${memberRows.map(member => html`
                 <button class="mission-member-row" onClick=${() => openAgentDetail(member.name)}>
-                  <strong><span class="model-badge">${member.model}</span> ${member.nickname}</strong>
+                  <strong>${member.model !== member.nickname ? html`<span class="model-badge">${member.model}</span> ` : ''}${member.nickname}</strong>
                   <span>${member.currentTask}</span>
                   <small>${member.output ?? '최근 출력 없음'}</small>
                 </button>

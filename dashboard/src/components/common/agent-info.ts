@@ -25,5 +25,5 @@ export function extractAgentInfo(name: string): AgentInfo {
 }
 
 export function isKeeperAgent(name: string): boolean {
-  return name.startsWith('keeper-')
+  return name === 'keeper' || name.startsWith('keeper-')
 }

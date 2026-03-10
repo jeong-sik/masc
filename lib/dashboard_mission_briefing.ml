@@ -462,7 +462,7 @@ let rec json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
           if not (String.equal (json_status result_json) "error") then (
             Mutex.lock cache.mutex;
             cache.cached_json <- Some result_json;
-            cache.cached_at <- now_ts;
+            cache.cached_at <- Unix.gettimeofday ();
             Mutex.unlock cache.mutex
           );
           result_json)

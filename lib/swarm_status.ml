@@ -816,12 +816,13 @@ let lane_present kind ~operations ~detachments ~alerts ~decisions ~traces ~sessi
   match kind with
   | Managed ->
       (* Managed lanes should reflect live command-plane runtime, not historical
-         trace residue. Old traces/alerts without active operations, detachments,
-         or pending approvals otherwise keep the lane present forever and surface
-         stale_data as if work were still in flight. *)
+         trace residue. Current managed alerts are recomputed from snapshot state
+         and must keep the lane visible, but old traces alone should not keep it
+         present forever and surface stale_data as if work were still in flight. *)
       List.exists operation_active operations
       || List.exists detachment_active detachments
       || List.exists decision_pending decisions
+      || alerts <> []
   | Supervised ->
       (* Supervised traces are historical. Only live session/runtime artifacts should
          make the lane present, otherwise stale operator/team-session traces create a

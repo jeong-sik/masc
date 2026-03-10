@@ -92,9 +92,12 @@ let run ~sw ~net ~clock ~proc_mgr config ~goal =
     ~agent_name:config.leader_name ~net in
   let _joined = Agent_swarm_client.join ~sw leader in
   Fun.protect ~finally:(fun () ->
-    (try ignore (Agent_swarm_client.leave ~sw leader) with
+    (try match Agent_swarm_client.leave ~sw leader with
+      | Ok _ -> ()
+      | Error msg -> Printf.eprintf "[WARN] [swarm] leader leave failed: %s\n%!" msg
+    with
      | Eio.Cancel.Cancelled _ as ex -> raise ex
-     | _ -> ())
+     | exn -> Printf.eprintf "[WARN] [swarm] leader leave error: %s\n%!" (Printexc.to_string exn))
   ) (fun () ->
     let names = List.map (fun (m, _) -> member_name m) config.members in
     let _ = Agent_swarm_client.broadcast ~sw leader
@@ -131,7 +134,10 @@ let run_full ~sw ~net ~clock ~proc_mgr ~masc_url ~provider
   let _joined = Agent_swarm_client.join ~sw coordinator in
   Fun.protect
     ~finally:(fun () ->
-      try ignore (Agent_swarm_client.leave ~sw coordinator) with exn -> ignore exn)
+      (try match Agent_swarm_client.leave ~sw coordinator with
+        | Ok _ -> ()
+        | Error msg -> Printf.eprintf "[WARN] [swarm] coordinator leave failed: %s\n%!" msg
+      with exn -> Printf.eprintf "[WARN] [swarm] coordinator leave error: %s\n%!" (Printexc.to_string exn)))
     (fun () ->
       let _ =
         Agent_swarm_client.broadcast ~sw coordinator

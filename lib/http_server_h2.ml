@@ -283,7 +283,8 @@ let run ~sw ~net ~clock config request_handler =
         Eio.Fiber.fork ~sw (fun () ->
           Eio.Switch.run (fun conn_sw ->
             Eio.Switch.on_release conn_sw (fun () ->
-              try Eio.Flow.close flow with exn -> ignore exn
+              try Eio.Flow.close flow with exn ->
+                Printf.eprintf "[WARN] [h2] flow close failed: %s\n%!" (Printexc.to_string exn)
             );
             try
               H2_eio.Server.create_connection_handler

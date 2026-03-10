@@ -4330,10 +4330,69 @@ let touch_intent_from_operation config ~actor (operation : operation_record)
       match lookup_intent (read_intents config) intent_id with
       | None -> ()
       | Some intent ->
+          let linked_operations =
+            let operations : operation_record list = read_operations config in
+            let filtered =
+              List.filter
+                (fun (linked_operation : operation_record) ->
+                  match linked_operation.intent_id with
+                  | Some current -> String.equal current intent_id
+                  | None -> false)
+                operations
+            in
+            List.sort
+              (fun (left : operation_record) (right : operation_record) ->
+                String.compare right.updated_at left.updated_at)
+              filtered
+          in
+          let aggregated_state =
+            if
+              List.exists
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Failed)
+                linked_operations
+            then
+              Blocked_intent
+            else if
+              List.exists
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Active
+                  || linked_operation.status = Planned)
+                linked_operations
+            then
+              Active_intent
+            else if
+              List.exists
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Paused)
+                linked_operations
+            then
+              Suspended_intent
+            else if
+              linked_operations <> []
+              &&
+              List.for_all
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Completed)
+                linked_operations
+            then
+              Completed_intent
+            else if
+              linked_operations <> []
+              &&
+              List.for_all
+                (fun (linked_operation : operation_record) ->
+                  linked_operation.status = Cancelled)
+                linked_operations
+            then
+              Dropped_intent
+            else
+              state
+          in
           let updated =
             {
               intent with
-              state;
+              state = aggregated_state;
               current_focus = focus_of_operation operation;
               checkpoint_ref =
                 option_first_some operation.checkpoint_ref intent.checkpoint_ref;

@@ -305,6 +305,54 @@ let test_intent_forecast_advances_after_completed_operation () =
         (forecast |> Yojson.Safe.Util.member "recommended_focus"
        |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string))
 
+let test_intent_state_aggregates_across_parallel_operations () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let intent =
+        unwrap_ok
+          (Command_plane_v2.create_intent_json config ~actor:"owner"
+             (`Assoc [ ("title", `String "Parallel intent") ]))
+      in
+      let op_a =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Implement branch A");
+              ("intent_id", `String intent.intent_id);
+              ("stage", `String "implement");
+            ])
+      in
+      ignore
+        (start_operation_exn config ~actor:"owner"
+           (`Assoc
+             [
+               ("assigned_unit_id", `String "company-main");
+               ("objective", `String "Implement branch B");
+               ("intent_id", `String intent.intent_id);
+               ("stage", `String "implement");
+             ]));
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.finalize_operation_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String op_a.operation_id) ])));
+      let intent_status =
+        Command_plane_v2.list_intents_json ~intent_id:intent.intent_id config
+      in
+      Alcotest.(check string) "intent stays active while parallel op remains"
+        "active"
+        (intent_status |> Yojson.Safe.Util.member "intents"
+       |> Yojson.Safe.Util.index 0
+       |> Yojson.Safe.Util.member "state"
+       |> Yojson.Safe.Util.to_string))
+
 let test_platoon_assignment_expands_detachments_and_tick_runs () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1465,6 +1513,10 @@ let () =
             "intent forecast advances after completed operation"
             `Quick
             test_intent_forecast_advances_after_completed_operation;
+          Alcotest.test_case
+            "intent state aggregates across parallel operations"
+            `Quick
+            test_intent_state_aggregates_across_parallel_operations;
           Alcotest.test_case "invalid search strategy is rejected" `Quick
             test_invalid_search_strategy_is_rejected;
           Alcotest.test_case "best first search blocks and routes research pipeline"

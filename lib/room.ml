@@ -12,7 +12,7 @@ let read_state config =
     if is_pg_backend config then
       match backend_get config ~key:"room:state" with
       | Ok (Some json_str) ->
-          (try Some (Yojson.Safe.from_string json_str) with _ -> None)
+          (try Some (Yojson.Safe.from_string json_str) with Yojson.Json_error _ -> None)
       | Ok None | Error _ -> None
     else None
   in

@@ -657,7 +657,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
   | Some raw ->
       let v =
         try int_of_string (String.trim raw)
-        with _ -> default
+        with Failure _ -> default
       in
       clamp_int v ~min_v ~max_v
 
@@ -667,7 +667,7 @@ let float_of_env_default name ~default ~min_v ~max_v =
   | Some raw ->
       let v =
         try float_of_string (String.trim raw)
-        with _ -> default
+        with Failure _ -> default
       in
       max min_v (min max_v v)
 
@@ -1386,7 +1386,14 @@ let env_present name =
   | None -> false
 
 let ollama_port_listening () =
-  Sys.command "lsof -iTCP:11434 -sTCP:LISTEN -t >/dev/null 2>&1" = 0
+  try
+    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Fun.protect
+      ~finally:(fun () -> (try Unix.close sock with Unix.Unix_error _ -> ()))
+      (fun () ->
+        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 11434));
+        true)
+  with Unix.Unix_error _ -> false
 
 let model_spec_is_local_runtime (model : Llm_client.model_spec) =
   match model.provider with

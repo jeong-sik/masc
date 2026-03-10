@@ -287,7 +287,9 @@ let load_all_signatures () : agent_signature list =
           match agent_signature_of_json j with
           | Ok sig_ -> Some sig_
           | Error _ -> None)
-    with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> []
+    with
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> []
+    | Sys_error _ | Eio.Io _ -> []
   end
 
 (** Save agent signature (upsert).

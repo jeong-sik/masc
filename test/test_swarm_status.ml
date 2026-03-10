@@ -36,6 +36,34 @@ let test_supervised_trace_only_does_not_make_lane_present () =
     (String.equal "masc_team_session_status"
        (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string))
 
+let test_managed_trace_only_does_not_make_lane_present () =
+  let trace : M.Swarm_status.trace_info =
+    {
+      event_id = "trace-managed-1";
+      event_type = "operation_search_scored";
+      source = "control_plane";
+      trace_id = "trace-managed-1";
+      operation_id = Some "op-old";
+      actor = Some "dashboard";
+      timestamp = Some "2026-03-07T18:02:18Z";
+      detail = `Assoc [ ("selected_unit_id", `String "company-runtime") ];
+    }
+  in
+  let json =
+    M.Swarm_status.build_json_from_inputs
+      ~timeline_limit_override:M.Swarm_status.timeline_limit
+      ~now:(M.Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
+      ~decisions:[] ~traces:[ trace ] ~sessions:[]
+  in
+  let managed = find_lane json "managed" in
+  check bool "managed lane absent" false
+    (managed |> U.member "present" |> U.to_bool);
+  check int "no managed hard flags" 0
+    (managed |> U.member "hard_flags" |> U.to_list |> List.length);
+  check bool "do not recommend dispatch tick from trace residue" false
+    (String.equal "masc_dispatch_tick"
+       (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string))
+
 let test_supervised_session_keeps_lane_present () =
   let now = M.Time_compat.now () in
   let now_iso = M.Command_plane_v2.iso_of_unix now in
@@ -165,6 +193,66 @@ let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_presen
          String.equal "stale_data" (flag |> U.member "code" |> U.to_string))
        (supervised |> U.member "hard_flags" |> U.to_list))
 
+let test_terminal_managed_artifacts_do_not_keep_managed_lane_present () =
+  let now = M.Time_compat.now () in
+  let stale_iso = M.Command_plane_v2.iso_of_unix (now -. 3600.) in
+  let operation : M.Swarm_status.operation_info =
+    {
+      operation_id = "op-old";
+      objective = "Historical managed lane";
+      source = "managed";
+      status = "failed";
+      trace_id = "trace-old";
+      detachment_session_id = None;
+      note = Some "historical failure";
+      updated_at = Some stale_iso;
+    }
+  in
+  let detachment : M.Swarm_status.detachment_info =
+    {
+      detachment_id = "det-op-old";
+      operation_id = "op-old";
+      source = "managed";
+      status = "failed";
+      runtime_kind = Some "managed";
+      session_id = None;
+      roster = [ "worker-a" ];
+      leader_id = Some "worker-a";
+      last_event_at = Some stale_iso;
+      last_progress_at = Some stale_iso;
+      updated_at = Some stale_iso;
+    }
+  in
+  let trace : M.Swarm_status.trace_info =
+    {
+      event_id = "trace-old";
+      event_type = "operation_failed";
+      source = "control_plane";
+      trace_id = "trace-old";
+      operation_id = Some "op-old";
+      actor = Some "dashboard";
+      timestamp = Some stale_iso;
+      detail = `Assoc [ ("status", `String "failed") ];
+    }
+  in
+  let json =
+    M.Swarm_status.build_json_from_inputs
+      ~timeline_limit_override:M.Swarm_status.timeline_limit ~now
+      ~operations:[ operation ] ~detachments:[ detachment ] ~alerts:[]
+      ~decisions:[] ~traces:[ trace ] ~sessions:[]
+  in
+  let managed = find_lane json "managed" in
+  check bool "managed lane absent for terminal-only artifacts" false
+    (managed |> U.member "present" |> U.to_bool);
+  check bool "no stale flag when lane absent" false
+    (List.exists
+       (fun flag ->
+         String.equal "stale_data" (flag |> U.member "code" |> U.to_string))
+       (managed |> U.member "hard_flags" |> U.to_list));
+  check bool "do not recommend dispatch tick from terminal residue" false
+    (String.equal "masc_dispatch_tick"
+       (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string))
+
 let () =
   run "Swarm_status"
     [
@@ -172,6 +260,8 @@ let () =
         [
           test_case "trace_only_does_not_activate_supervised_lane" `Quick
             test_supervised_trace_only_does_not_make_lane_present;
+          test_case "trace_only_does_not_activate_managed_lane" `Quick
+            test_managed_trace_only_does_not_make_lane_present;
           test_case "session_keeps_supervised_lane_present" `Quick
             test_supervised_session_keeps_lane_present;
           test_case "stale_session_keeps_stale_flag" `Quick
@@ -179,5 +269,8 @@ let () =
           test_case "terminal_projected_artifacts_do_not_keep_supervised_lane_present"
             `Quick
             test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_present;
+          test_case "terminal_managed_artifacts_do_not_keep_managed_lane_present"
+            `Quick
+            test_terminal_managed_artifacts_do_not_keep_managed_lane_present;
         ] );
     ]

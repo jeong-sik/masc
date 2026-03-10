@@ -77,6 +77,12 @@ type loop_state = {
 }
 [@@deriving yojson]
 
+(** Shared cancellation flag for external loop cancellation.
+    Set [cancelled] to true from another fiber to request graceful stop. *)
+type cancel_token = { mutable cancelled : bool }
+
+let make_cancel_token () = { cancelled = false }
+
 (* ================================================================ *)
 (* Metric measurement                                               *)
 (* ================================================================ *)
@@ -293,13 +299,17 @@ let run_one_iteration state config ~agent_name ~goals =
 
 (** Run the swarm goal loop as a blocking Eio fiber.
     Returns the final loop_state when the goal is met, max iterations reached,
-    or the loop is cancelled. *)
-let run ~clock config ~room_config ~agent_name ~goals =
+    or the loop is cancelled via [cancel_token]. *)
+let run ~clock ?(cancel_token = { cancelled = false }) config ~room_config ~agent_name ~goals =
   let state = ref (make_initial_state config) in
   let keep_running () =
-    match (!state).status with
-    | Running -> true
-    | GoalMet | MaxIterationsReached | Cancelled | Failed _ -> false
+    if cancel_token.cancelled then begin
+      state := { !state with status = Cancelled };
+      false
+    end else
+      match (!state).status with
+      | Running -> true
+      | GoalMet | MaxIterationsReached | Cancelled | Failed _ -> false
   in
   while keep_running () do
     state := run_one_iteration !state room_config ~agent_name ~goals;

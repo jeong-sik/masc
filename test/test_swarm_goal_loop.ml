@@ -123,6 +123,19 @@ let test_aggregate_average () =
   Alcotest.(check bool) "average fails" false met2
 
 (* ================================================================ *)
+(* Cancel token                                                     *)
+(* ================================================================ *)
+
+let test_cancel_token_default () =
+  let ct = Swarm_goal_loop.make_cancel_token () in
+  Alcotest.(check bool) "default not cancelled" false ct.cancelled
+
+let test_cancel_token_set () =
+  let ct = Swarm_goal_loop.make_cancel_token () in
+  ct.cancelled <- true;
+  Alcotest.(check bool) "cancelled after set" true ct.cancelled
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -144,5 +157,10 @@ let () =
           Alcotest.test_case "strategy All" `Quick test_aggregate_all;
           Alcotest.test_case "strategy Any" `Quick test_aggregate_any;
           Alcotest.test_case "strategy Average" `Quick test_aggregate_average;
+        ] );
+      ( "cancel_token",
+        [
+          Alcotest.test_case "default not cancelled" `Quick test_cancel_token_default;
+          Alcotest.test_case "set cancellation" `Quick test_cancel_token_set;
         ] );
     ]

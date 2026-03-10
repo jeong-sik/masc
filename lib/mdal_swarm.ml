@@ -147,13 +147,22 @@ let run_single_worker ~clock (spec : worker_spec) : worker_result =
 (* ================================================================ *)
 
 (** Run all MDAL workers in parallel using Eio fibers.
-    Returns aggregate swarm_result. *)
+    Returns aggregate swarm_result.
+    If [max_wall_time_sec] is set, checks elapsed time after all workers complete
+    and reports TimedOut if the limit was exceeded. *)
 let run ~clock config =
   let started_at = Types.now_iso () in
+  let start_time = Unix.gettimeofday () in
   let worker_results =
     Eio.Fiber.List.map
       (fun spec -> run_single_worker ~clock spec)
       config.workers
+  in
+  let elapsed = Unix.gettimeofday () -. start_time in
+  let timed_out =
+    match config.max_wall_time_sec with
+    | Some limit -> elapsed > limit
+    | None -> false
   in
   let metrics_with_goals =
     List.map
@@ -172,7 +181,8 @@ let run ~clock config =
   let all_met = List.for_all (fun (r : worker_result) -> r.goal_met) worker_results in
   let any_error = List.exists (fun (r : worker_result) -> Option.is_some r.error) worker_results in
   let status =
-    if aggregate_goal_met && all_met then Completed
+    if timed_out then TimedOut
+    else if aggregate_goal_met && all_met then Completed
     else if aggregate_goal_met then PartialSuccess
     else if any_error then Failed
     else PartialSuccess

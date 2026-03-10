@@ -7,6 +7,7 @@ import type {
   DashboardGovernanceResponse,
   DashboardMemoryResponse,
   DashboardMissionResponse,
+  DashboardMissionBriefingResponse,
   DashboardPlanningResponse,
   DashboardShellResponse,
   BoardPost,
@@ -314,6 +315,11 @@ export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
   return get('/api/v1/dashboard/mission')
+}
+
+export function fetchDashboardMissionBriefing(force = false): Promise<DashboardMissionBriefingResponse> {
+  const query = force ? '?force=1' : ''
+  return get(`/api/v1/dashboard/mission/briefing${query}`)
 }
 
 export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {

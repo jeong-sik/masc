@@ -1,7 +1,9 @@
 import { signal } from '@preact/signals'
-import { fetchDashboardMission } from './api'
+import { fetchDashboardMission, fetchDashboardMissionBriefing } from './api'
 import type {
   DashboardMissionResponse,
+  DashboardMissionBriefingResponse,
+  DashboardMissionBriefingSection,
   DashboardMissionSummary,
   DashboardMissionCommandFocus,
   DashboardMissionTargets,
@@ -17,6 +19,9 @@ import type {
 export const missionSnapshot = signal<DashboardMissionResponse | null>(null)
 export const missionLoading = signal(false)
 export const missionError = signal<string | null>(null)
+export const missionBriefing = signal<DashboardMissionBriefingResponse | null>(null)
+export const missionBriefingLoading = signal(false)
+export const missionBriefingError = signal<string | null>(null)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -282,6 +287,63 @@ function normalizeMission(raw: unknown): DashboardMissionResponse {
   }
 }
 
+function normalizeBriefingSection(raw: unknown): DashboardMissionBriefingSection | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const label = asString(raw.label)
+  const summary = asString(raw.summary)
+  if (!id || !label || !summary) return null
+  const statusRaw = asString(raw.status) ?? 'unclear'
+  const status =
+    statusRaw === 'ok'
+    || statusRaw === 'healthy'
+    || statusRaw === 'aligned'
+    || statusRaw === 'watch'
+    || statusRaw === 'risk'
+    || statusRaw === 'unclear'
+      ? statusRaw
+      : 'unclear'
+  return {
+    id,
+    label,
+    status,
+    summary,
+    evidence: extractArray(raw.evidence)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+  }
+}
+
+function normalizeMissionBriefing(raw: unknown): DashboardMissionBriefingResponse {
+  const root = isRecord(raw) ? raw : {}
+  const basis = isRecord(root.basis) ? root.basis : {}
+  const statusRaw = asString(root.status) ?? 'error'
+  const status =
+    statusRaw === 'ok' || statusRaw === 'unavailable' || statusRaw === 'error'
+      ? statusRaw
+      : 'error'
+  return {
+    generated_at: asString(root.generated_at),
+    cached: asBoolean(root.cached),
+    status,
+    model: asString(root.model) ?? null,
+    ttl_sec: asNumber(root.ttl_sec),
+    criteria: extractArray(root.criteria)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    basis: {
+      current_room: asString(basis.current_room) ?? null,
+      crew_count: asNumber(basis.crew_count),
+      agent_count: asNumber(basis.agent_count),
+      keeper_count: asNumber(basis.keeper_count),
+    },
+    sections: extractArray(root.sections)
+      .map(normalizeBriefingSection)
+      .filter((item): item is DashboardMissionBriefingSection => item !== null),
+    error: asString(root.error) ?? null,
+  }
+}
+
 export async function refreshMissionSnapshot(): Promise<void> {
   missionLoading.value = true
   missionError.value = null
@@ -292,5 +354,18 @@ export async function refreshMissionSnapshot(): Promise<void> {
     missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'
   } finally {
     missionLoading.value = false
+  }
+}
+
+export async function refreshMissionBriefing(force = false): Promise<void> {
+  missionBriefingLoading.value = true
+  missionBriefingError.value = null
+  try {
+    const raw = await fetchDashboardMissionBriefing(force)
+    missionBriefing.value = normalizeMissionBriefing(raw)
+  } catch (err) {
+    missionBriefingError.value = err instanceof Error ? err.message : 'Failed to load mission briefing'
+  } finally {
+    missionBriefingLoading.value = false
   }
 }

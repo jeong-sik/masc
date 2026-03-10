@@ -6269,6 +6269,74 @@ button.monitor-row.bad.state-quiet {
   line-height: 1.5;
 }
 
+.mission-briefing-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.mission-briefing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mission-briefing-section {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  display: grid;
+  gap: 8px;
+}
+
+.mission-briefing-section.ok,
+.mission-briefing-section.healthy,
+.mission-briefing-section.aligned {
+  border-color: rgba(74,222,128,0.22);
+}
+
+.mission-briefing-section.watch {
+  border-color: rgba(251,191,36,0.24);
+}
+
+.mission-briefing-section.risk,
+.mission-briefing-section.bad {
+  border-color: rgba(248,113,113,0.28);
+}
+
+.mission-briefing-section p {
+  margin: 0;
+  color: rgba(255,255,255,0.8);
+  line-height: 1.5;
+}
+
+.mission-briefing-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mission-briefing-evidence span {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.72);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.mission-briefing-criteria {
+  margin-top: 12px;
+}
+
+.mission-briefing-criteria summary {
+  cursor: pointer;
+  color: rgba(255,255,255,0.72);
+}
+
 .mission-crew-card {
   padding: 14px;
   border-radius: 14px;
@@ -6468,6 +6536,7 @@ button.monitor-row.bad.state-quiet {
     grid-template-columns: 1fr;
   }
 
+  .mission-briefing-grid,
   .mission-fact-grid,
   .mission-io-stack {
     grid-template-columns: 1fr;

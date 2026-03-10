@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.78.0] - 2026-03-10
+
+### Added
+- **Mission Dashboard Flow** — dashboard mission panel with visual workflow (#656)
+- **Proof Criteria Unit Tests** — shared harness framework for team session proofs (#655)
+- **Room Strategy Toggles** — room-level strategy and speculation controls (#634)
+- **Provider-Native Runtime Registry** — adapter layer for LLM runtime selection (#629, #631)
+- **Swarm RISC ISA** — Phase 1-4 instruction set, pipeline, MESI cache, OoO execution, speculative execution with MCTS (#593, #608)
+- **Command Plane v2** — absorbed native chain plane into MASC with search fabric (#597, #594)
+- **Local64 Runtime Pool** — 64-worker runtime with smoke harness (#586)
+- **Hierarchical Controller Stack** — 35/27/9 tier team session controllers (#616)
+- **Integrated Benchmark Wrapper** — unified benchmark harness (#607)
+- **Graphical Swarm Panel** — dashboard swarm visualizations (#623)
+
+### Changed
+- Operator digest now surfaces command-plane signals (#635)
+- Dashboard monitoring aligned with portable env defaults (#642)
+- Runtime LLM cascade helpers unified (#640)
+- Tool args extraction refactored, eliminating ~120 duplicate helpers (#621)
+- Non-tool JSON helpers delegated to Safe_ops (#622)
+
+### Fixed
+- **Server-side join dedup guard** in Room.join prevents duplicate agent entries (#654)
+- **Eio.Mutex** around global network/clock refs prevents parallel crash (#652)
+- Keeper prompt and lodge heartbeat stabilized (#651)
+- `Unix.select` replaced with `Eio.Time.sleep` in token generation (#650)
+- Dashboard: Korean labels restored, bilingual UX, a11y polish (#648, #649, #632)
+- Dashboard: repeated `joinRoom()` on ControlDock remount prevented (#638)
+- Dashboard: captured identity for leaveRoom cleanup (#641)
+- Lodge crash paths replaced with `Result.error` returns (#643, #645)
+- Dead code and stubs replaced with explicit errors (#646)
+- Protocol placeholders replaced with real implementations (#644)
+- Hot swarm lifecycle stabilized (#626)
+- Local64 mixed smoke stabilized (#625)
+
+### Security
+- Tracked launchd secrets removed (#636)
+- Credential exposure removed from public repo (#620)
+
+### Testing
+- ~545 vacuous assertions removed across 63 test files (#647)
+
 ## [2.77.0] - 2026-03-03
 
 ### Added

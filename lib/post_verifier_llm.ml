@@ -71,7 +71,7 @@ Rate the following content on three dimensions using a 1-5 scale.
 ## Response format
 Respond with ONLY a JSON object, no other text:
 {"relevance": <1-5>, "quality": <1-5>, "safety": <1-5>, "reasoning": "<brief explanation>"}|}
-    content
+    (Yojson.Safe.to_string (`String content))
 
 (** Parse G-Eval JSON response into scores.
     Returns Ok (relevance_score, quality_score, safety_score, reasoning) or Error. *)
@@ -147,18 +147,12 @@ let verify_llm ~content : (verification_result, string) result =
           let safety = score_to_verdict ~dim_name:"safety" s in
           let overall =
             match (relevance, quality, safety) with
-            | (Fail reason, _, _) ->
-                Fail (Printf.sprintf "relevance: %s" reason)
-            | (_, Fail reason, _) ->
-                Fail (Printf.sprintf "quality: %s" reason)
-            | (_, _, Fail reason) ->
-                Fail (Printf.sprintf "safety: %s" reason)
-            | (Warn reason, _, _) ->
-                Warn (Printf.sprintf "relevance: %s" reason)
-            | (_, Warn reason, _) ->
-                Warn (Printf.sprintf "quality: %s" reason)
-            | (_, _, Warn reason) ->
-                Warn (Printf.sprintf "safety: %s" reason)
+            | (Fail reason, _, _) -> Fail reason
+            | (_, Fail reason, _) -> Fail reason
+            | (_, _, Fail reason) -> Fail reason
+            | (Warn reason, _, _) -> Warn reason
+            | (_, Warn reason, _) -> Warn reason
+            | (_, _, Warn reason) -> Warn reason
             | (Pass, Pass, Pass) -> Pass
           in
           Ok { relevance; quality; safety; overall })

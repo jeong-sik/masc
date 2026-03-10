@@ -97,6 +97,10 @@ let test_score_5_passes () =
   let v = Pvl.score_to_verdict ~dim_name:"quality" 5 in
   check bool "score 5 is Pass" true (is_pass v)
 
+let test_score_0_fails () =
+  let v = Pvl.score_to_verdict ~dim_name:"safety" 0 in
+  check bool "score 0 is Fail" true (is_fail v)
+
 (* ================================================================ *)
 (* verify_auto defaults to heuristic                                 *)
 (* ================================================================ *)
@@ -131,6 +135,7 @@ let () =
       test_case "score 3 warns" `Quick test_score_3_warns;
       test_case "score 4 passes" `Quick test_score_4_passes;
       test_case "score 5 passes" `Quick test_score_5_passes;
+      test_case "score 0 fails" `Quick test_score_0_fails;
     ];
     "verify_auto", [
       test_case "default heuristic passes" `Quick test_verify_auto_default;

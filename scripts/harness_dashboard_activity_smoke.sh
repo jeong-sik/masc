@@ -152,6 +152,11 @@ function extractJsonObject(text) {
     pass: boardBodyAfterReveal.includes('dashboard-harness-bot') && boardBodyAfterReveal.includes(unique),
     postId,
   });
+  checks.push({
+    name: 'board reveals automation metadata chips',
+    pass: boardBodyAfterReveal.includes('dashboard-harness') && boardBodyAfterReveal.includes('internal'),
+    postId,
+  });
 
   const commentText = `${unique}-comment`;
   const commentResult = await mcpCall('masc_board_comment', {

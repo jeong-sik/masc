@@ -69,16 +69,20 @@ function isLikelyTestPost(post: BoardPost): boolean {
 }
 
 function isAutomationBoardPost(post: BoardPost): boolean {
-  const author = post.author.toLowerCase()
   const hearth = (post.hearth ?? '').toLowerCase()
-  if (author === 'mdal' || author.includes('smoke-bot') || author.includes('harness')) return true
-  if (hearth.startsWith('mdal') || hearth.includes('harness')) return true
+  if (post.visibility !== 'internal' || !post.expires_at || !hearth) return false
+  if (hearth.startsWith('mdal')) return true
+  if (hearth.includes('harness')) return true
   return false
 }
 
 function visiblePosts(posts: BoardPost[]): BoardPost[] {
   if (!hideAutomationPosts.value) return posts
-  return posts.filter(post => !isAutomationBoardPost(post) && !isLikelyTestPost(post))
+  return posts.filter(post => {
+    if (isAutomationBoardPost(post)) return false
+    if (post.hearth || post.visibility || post.expires_at) return true
+    return !isLikelyTestPost(post)
+  })
 }
 
 async function loadPostDetail(postId: string) {
@@ -101,6 +105,9 @@ async function loadPostDetail(postId: string) {
       created_at: data.created_at,
       updated_at: data.updated_at,
       flair: data.flair,
+      hearth: data.hearth,
+      visibility: data.visibility,
+      expires_at: data.expires_at,
       hearth_count: data.hearth_count,
     }
     detailComments.value = data.comments ?? []
@@ -315,6 +322,15 @@ function PostDetail({ post }: { post: BoardPost }) {
             <${TimeAgo} timestamp=${post.created_at} />
             <span>${post.votes ?? 0} votes</span>
           </div>
+          ${(post.hearth || post.visibility || post.expires_at)
+            ? html`
+                <div class="post-chip-row" style="margin-top:8px;">
+                  ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
+                  ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
+                  ${post.expires_at ? html`<span class="board-meta-chip">expires <${TimeAgo} timestamp=${post.expires_at} /></span>` : null}
+                </div>
+              `
+            : null}
           <div style="margin-top:8px; display:flex; gap:6px;">
             <button class="vote-btn upvote" onClick=${() => handleVote('up')}>▲ Upvote</button>
             <button class="vote-btn downvote" onClick=${() => handleVote('down')}>▼ Downvote</button>

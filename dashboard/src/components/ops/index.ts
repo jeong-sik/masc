@@ -1,13 +1,10 @@
+// Ops — Main entry component
+
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { showToast } from './common/toast'
-import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
-import type { OperatorAttentionItem, OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
-import { route } from '../router'
+import { PanelSemanticDetails, SurfaceSemanticIntro } from '../common/semantic-layer'
+import { route } from '../../router'
 import {
-  confirmOperatorPendingAction,
-  dispatchOperatorAction,
   operatorActionBusy,
   operatorActionLog,
   operatorDigestError,
@@ -20,433 +17,56 @@ import {
   refreshOperatorRoomDigest,
   refreshOperatorSessionDigest,
   refreshOperatorSnapshot,
-} from '../operator-store'
+} from '../../operator-store'
 import {
   workflowActionLabel,
   workflowContextForRoute,
   workflowTargetLabel,
-  type DashboardWorkflowContext,
-} from '../workflow-context'
-
-const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
-
-function initialActorName(): string {
-  const params = new URLSearchParams(window.location.search)
-  return (
-    params.get('agent')?.trim()
-    || params.get('agent_name')?.trim()
-    || localStorage.getItem(AGENT_NAME_KEY)?.trim()
-    || 'dashboard'
-  )
-}
-
-const actorName = signal(initialActorName())
-const broadcastMessage = signal('')
-const pauseReason = signal('운영 점검')
-const taskTitle = signal('')
-const taskDescription = signal('')
-const taskPriority = signal('2')
-const selectedSessionId = signal('')
-const teamTurnKind = signal<'note' | 'broadcast' | 'task'>('note')
-const teamMessage = signal('')
-const teamTaskTitle = signal('')
-const teamTaskDescription = signal('')
-const teamTaskPriority = signal('2')
-const teamStopReason = signal('운영자 중지 요청')
-const selectedKeeperName = signal('')
-const keeperMessage = signal('')
-const hydratedWorkflowId = signal<string | null>(null)
-
-function persistActorName(value: string): void {
-  const trimmed = value.trim() || 'dashboard'
-  actorName.value = trimmed
-  localStorage.setItem(AGENT_NAME_KEY, trimmed)
-}
-
-function prettyJson(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
-function relativeAge(seconds?: number): string {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return '확인 없음'
-  if (seconds < 60) return `${Math.round(seconds)}초 전`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}분 전`
-  return `${Math.round(seconds / 3600)}시간 전`
-}
-
-type OpsPriorityTone = 'ok' | 'warn' | 'bad'
-
-interface OpsPriorityCardData {
-  key: string
-  label: string
-  value: string | number
-  detail: string
-  tone: OpsPriorityTone
-}
-
-function normalizeStatus(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : ''
-}
-
-function sessionPriorityTone(session: OperatorSessionSnapshot): OpsPriorityTone {
-  const status = normalizeStatus(session.status)
-  if (status === 'paused') return 'bad'
-  if (status === '' || status === 'unknown') return 'warn'
-  const health = normalizeStatus(session.team_health?.status)
-  if (health && health !== 'ok' && health !== 'healthy' && health !== 'green') return 'warn'
-  if (status && status !== 'active' && status !== 'running' && status !== 'ended') return 'warn'
-  return 'ok'
-}
-
-function keeperPriorityTone(keeper: OperatorKeeperSnapshot): OpsPriorityTone {
-  const status = normalizeStatus(keeper.status)
-  if (status === 'offline' || status === 'inactive' || status === 'error') return 'bad'
-  if (status === '' || status === 'unknown') return 'warn'
-  if ((keeper.context_ratio ?? 0) >= 0.8) return 'warn'
-  if (keeper.context_ratio == null) return 'warn'
-  if (keeper.last_turn_ago_s == null) return 'warn'
-  if ((keeper.last_turn_ago_s ?? 0) >= 3600) return 'warn'
-  return 'ok'
-}
-
-function attentionTone(items: OperatorAttentionItem[]): OpsPriorityTone {
-  if (items.some(item => normalizeStatus(item.severity) === 'bad')) return 'bad'
-  if (items.length > 0) return 'warn'
-  return 'ok'
-}
-
-function isSessionAttention(item: OperatorAttentionItem): boolean {
-  return item.target_type === 'team_session'
-}
-
-function isKeeperAttention(item: OperatorAttentionItem): boolean {
-  return item.target_type === 'keeper'
-}
-
-function actionTypeLabel(value?: string | null): string {
-  switch (value) {
-    case 'broadcast':
-      return '방송'
-    case 'room_pause':
-      return 'room 일시정지'
-    case 'room_resume':
-      return 'room 재개'
-    case 'team_turn':
-      return '세션 업데이트'
-    case 'team_note':
-      return '세션 노트'
-    case 'team_broadcast':
-      return '세션 방송'
-    case 'team_task_inject':
-      return '세션 작업 주입'
-    case 'task_inject':
-      return '작업 주입'
-    case 'team_stop':
-      return '세션 중지'
-    case 'keeper_message':
-      return 'keeper 메시지'
-    case 'keeper_msg':
-      return 'keeper 메시지'
-    default:
-      return value?.trim() || '액션'
-  }
-}
-
-function targetTypeLabel(value?: string | null): string {
-  switch (value) {
-    case 'room':
-      return 'room'
-    case 'team_session':
-      return 'session'
-    case 'keeper':
-      return 'keeper'
-    default:
-      return value?.trim() || 'target'
-  }
-}
-
-function displayStatus(value?: string | null): string {
-  const normalized = normalizeStatus(value)
-  switch (normalized) {
-    case 'running':
-    case 'active':
-      return '진행 중'
-    case 'paused':
-      return '일시정지'
-    case 'ended':
-    case 'done':
-      return '종료'
-    case 'offline':
-      return '오프라인'
-    case 'idle':
-      return '대기'
-    case 'unknown':
-    case '':
-      return '확인 필요'
-    default:
-      return value?.trim() || '확인 필요'
-  }
-}
-
-function deliveryModeLabel(confirmRequired?: boolean): string {
-  return confirmRequired ? '확인 후 실행' : '즉시 실행'
-}
-
-function sessionActionLabel(value: typeof teamTurnKind.value): string {
-  switch (value) {
-    case 'note':
-      return '노트'
-    case 'broadcast':
-      return '방송'
-    case 'task':
-      return '작업'
-    default:
-      return value
-  }
-}
-
-function workflowPayloadString(
-  payload: Record<string, unknown> | null | undefined,
-  key: string,
-): string | null {
-  if (!payload) return null
-  const value = payload[key]
-  if (typeof value === 'string' && value.trim() !== '') return value.trim()
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
-  return null
-}
-
-function workflowTeamTurnKind(context: DashboardWorkflowContext): typeof teamTurnKind.value {
-  if (context.action_type === 'team_task_inject') return 'task'
-  if (context.action_type === 'team_broadcast') return 'broadcast'
-  if (context.action_type === 'team_note') return 'note'
-  if (context.action_type === 'team_turn') {
-    const requested = workflowPayloadString(context.suggested_payload, 'turn_kind')
-    if (requested === 'broadcast' || requested === 'task') return requested
-  }
-  return 'note'
-}
-
-function hydrateOpsWorkflow(context: DashboardWorkflowContext): void {
-  const payload = context.suggested_payload
-  if (context.target_type === 'room') {
-    if (context.action_type === 'broadcast') {
-      broadcastMessage.value = workflowPayloadString(payload, 'message') ?? context.summary
-      return
-    }
-    if (context.action_type === 'task_inject') {
-      taskTitle.value = workflowPayloadString(payload, 'title') ?? '운영자 주입 작업'
-      taskDescription.value = workflowPayloadString(payload, 'description') ?? context.summary
-      taskPriority.value = workflowPayloadString(payload, 'priority') ?? taskPriority.value
-    }
-    return
-  }
-
-  if (context.target_type === 'team_session') {
-    if (context.target_id) selectedSessionId.value = context.target_id
-    if (context.action_type === 'team_stop') {
-      teamStopReason.value = workflowPayloadString(payload, 'reason') ?? context.summary
-      return
-    }
-    teamTurnKind.value = workflowTeamTurnKind(context)
-    const message = workflowPayloadString(payload, 'message')
-    if (message) teamMessage.value = message
-    if (teamTurnKind.value === 'task') {
-      teamTaskTitle.value = workflowPayloadString(payload, 'task_title') ?? workflowPayloadString(payload, 'title') ?? '운영자 주입 작업'
-      teamTaskDescription.value = workflowPayloadString(payload, 'task_description') ?? workflowPayloadString(payload, 'description') ?? context.summary
-      teamTaskPriority.value = workflowPayloadString(payload, 'task_priority') ?? workflowPayloadString(payload, 'priority') ?? teamTaskPriority.value
-    }
-    return
-  }
-
-  if (context.target_type === 'keeper') {
-    if (context.target_id) selectedKeeperName.value = context.target_id
-    keeperMessage.value = workflowPayloadString(payload, 'message') ?? context.summary
-  }
-}
-
-function workflowTargetReady(
-  context: DashboardWorkflowContext | null,
-  sessions: OperatorSessionSnapshot[],
-  keepers: OperatorKeeperSnapshot[],
-): boolean {
-  if (!context) return true
-  if (!context.target_type || context.target_type === 'room') return true
-  if (context.target_type === 'team_session') {
-    return !!context.target_id && sessions.some(session => session.session_id === context.target_id)
-  }
-  if (context.target_type === 'keeper') {
-    return !!context.target_id && keepers.some(keeper => keeper.name === context.target_id)
-  }
-  return true
-}
-
-async function executeAction(input: {
-  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_stop' | 'keeper_message'
-  target_type: 'room' | 'team_session' | 'keeper'
-  target_id?: string
-  payload: Record<string, unknown>
-  successMessage: string
-}) {
-  const actor = actorName.value.trim() || 'dashboard'
-  try {
-    const result = await dispatchOperatorAction({
-      actor,
-      action_type: input.action_type,
-      target_type: input.target_type,
-      target_id: input.target_id,
-      payload: input.payload,
-    })
-    if (result.confirm_required) {
-      showToast('확인 대기열에 올렸습니다', 'warning')
-    } else {
-      showToast(input.successMessage, 'success')
-    }
-    return result
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '개입 실행에 실패했습니다'
-    showToast(message, 'error')
-    return null
-  }
-}
-
-async function submitBroadcast() {
-  const message = broadcastMessage.value.trim()
-  if (!message) return
-  const result = await executeAction({
-    action_type: 'broadcast',
-    target_type: 'room',
-    payload: { message },
-    successMessage: '방송을 보냈습니다',
-  })
-  if (result) broadcastMessage.value = ''
-}
-
-async function submitPause() {
-  await executeAction({
-    action_type: 'room_pause',
-    target_type: 'room',
-    payload: { reason: pauseReason.value.trim() || '운영 점검' },
-    successMessage: 'room 일시정지를 요청했습니다',
-  })
-}
-
-async function submitResume() {
-  await executeAction({
-    action_type: 'room_resume',
-    target_type: 'room',
-    payload: {},
-    successMessage: 'room 재개를 요청했습니다',
-  })
-}
-
-async function submitTaskInject() {
-  const title = taskTitle.value.trim()
-  if (!title) return
-  const result = await executeAction({
-    action_type: 'task_inject',
-    target_type: 'room',
-    payload: {
-      title,
-      description: taskDescription.value.trim() || 'Intervene 화면에서 주입',
-      priority: Number.parseInt(taskPriority.value, 10) || 2,
-    },
-    successMessage: '작업 주입을 보냈습니다',
-  })
-  if (result) {
-    taskTitle.value = ''
-    taskDescription.value = ''
-  }
-}
-
-async function submitTeamTurn() {
-  const snapshot = operatorSnapshot.value
-  const sessionId = selectedSessionId.value || snapshot?.sessions[0]?.session_id || ''
-  if (!sessionId) {
-    showToast('먼저 세션을 고르세요', 'warning')
-    return
-  }
-  const payload: Record<string, unknown> = {}
-  const message = teamMessage.value.trim()
-  if (message) payload.message = message
-  let actionType: 'team_note' | 'team_broadcast' | 'team_task_inject' = 'team_note'
-  if (teamTurnKind.value === 'broadcast') {
-    actionType = 'team_broadcast'
-  } else if (teamTurnKind.value === 'task') {
-    actionType = 'team_task_inject'
-  }
-  if (teamTurnKind.value === 'task') {
-    payload.task_title = teamTaskTitle.value.trim() || '운영자 주입 작업'
-    payload.task_description = teamTaskDescription.value.trim() || 'Intervene 화면에서 주입'
-    payload.task_priority = Number.parseInt(teamTaskPriority.value, 10) || 2
-  }
-  const result = await executeAction({
-    action_type: actionType,
-    target_type: 'team_session',
-    target_id: sessionId,
-    payload,
-    successMessage: '세션 액션을 적용했습니다',
-  })
-  if (result) {
-    teamMessage.value = ''
-    if (teamTurnKind.value === 'task') {
-      teamTaskTitle.value = ''
-      teamTaskDescription.value = ''
-    }
-  }
-}
-
-async function submitTeamStop() {
-  const snapshot = operatorSnapshot.value
-  const sessionId = selectedSessionId.value || snapshot?.sessions[0]?.session_id || ''
-  if (!sessionId) {
-    showToast('먼저 세션을 고르세요', 'warning')
-    return
-  }
-  await executeAction({
-    action_type: 'team_stop',
-    target_type: 'team_session',
-    target_id: sessionId,
-    payload: { reason: teamStopReason.value.trim() || '운영자 중지 요청' },
-    successMessage: '세션 중지를 요청했습니다',
-  })
-}
-
-async function submitKeeperMessage() {
-  const snapshot = operatorSnapshot.value
-  const keeperName = selectedKeeperName.value || snapshot?.keepers[0]?.name || ''
-  const message = keeperMessage.value.trim()
-  if (!keeperName) {
-    showToast('먼저 keeper를 고르세요', 'warning')
-    return
-  }
-  if (!message) return
-  const result = await executeAction({
-    action_type: 'keeper_message',
-    target_type: 'keeper',
-    target_id: keeperName,
-    payload: { message },
-    successMessage: `${keeperName}에게 메시지를 보냈습니다`,
-  })
-  if (result) keeperMessage.value = ''
-}
-
-async function confirmPending(confirmToken: string) {
-  const actor = actorName.value.trim() || 'dashboard'
-  try {
-    await confirmOperatorPendingAction(actor, confirmToken)
-    showToast('확인 실행을 완료했습니다', 'success')
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '확인 실행에 실패했습니다'
-    showToast(message, 'error')
-  }
-}
+} from '../../workflow-context'
+import {
+  actorName,
+  actionTypeLabel,
+  attentionTone,
+  broadcastMessage,
+  confirmPending,
+  deliveryModeLabel,
+  displayStatus,
+  hydrateOpsWorkflow,
+  hydratedWorkflowId,
+  isKeeperAttention,
+  isSessionAttention,
+  keeperMessage,
+  keeperPriorityTone,
+  normalizeStatus,
+  pauseReason,
+  persistActorName,
+  prettyJson,
+  relativeAge,
+  selectedKeeperName,
+  selectedSessionId,
+  sessionActionLabel,
+  sessionPriorityTone,
+  submitBroadcast,
+  submitKeeperMessage,
+  submitPause,
+  submitResume,
+  submitTaskInject,
+  submitTeamStop,
+  submitTeamTurn,
+  taskDescription,
+  taskPriority,
+  taskTitle,
+  teamMessage,
+  teamStopReason,
+  teamTaskDescription,
+  teamTaskPriority,
+  teamTaskTitle,
+  teamTurnKind,
+  targetTypeLabel,
+  workflowTargetReady,
+  type OpsPriorityCardData,
+  type OpsPriorityTone,
+} from './helpers'
 
 export function Ops() {
   const snapshot = operatorSnapshot.value

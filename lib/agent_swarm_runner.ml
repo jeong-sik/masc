@@ -96,10 +96,8 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
           Hooks.Continue
         | _ -> Hooks.Continue) }
   else Hooks.empty in
-  let options = { Agent.default_options with
-    base_url; provider = Some provider_cfg; hooks } in
   let agent = Agent.create ~net ~config:agent_config ~tools:dev_tools
-    ~options () in
+    ~base_url ~provider:provider_cfg ~hooks () in
   Agent.run ~sw agent config.goal
 
 let run_fleet ~sw ~net ~clock ~proc_mgr config =

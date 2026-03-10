@@ -1,7 +1,6 @@
 (** Post Verifier — 3-dimension output verification gate for Lodge agents.
 
-    Checks content before it reaches the Board, using deterministic heuristics
-    across three dimensions:
+    Pure deterministic heuristic checks across three dimensions:
 
     1. Relevance  — content has substance, minimum length, not filler
     2. Quality    — well-formed, no repetition/gibberish, coherent structure
@@ -10,7 +9,8 @@
     Each dimension yields a verdict: Pass, Warn, or Fail.
     Overall verdict: any Fail → Fail, any Warn → Warn, all Pass → Pass.
 
-    Pure functions — no Eio, no LLM calls, no side effects.
+    LLM-based G-Eval scoring is in Post_verifier_llm (separate module to
+    avoid dependency cycles through Board -> Lodge_selection -> here).
 
     @since 2.71.0 *)
 
@@ -264,3 +264,4 @@ let to_dimension_results result =
     { dimension = Quality; verdict = result.quality };
     { dimension = Safety; verdict = result.safety };
   ]
+

@@ -39,7 +39,6 @@ module Sse = Masc_mcp.Sse
 module Safe_ops = Masc_mcp.Safe_ops
 module Context_manager = Masc_mcp.Context_manager
 module Llm_client = Masc_mcp.Llm_client
-module Provider_adapter = Masc_mcp.Provider_adapter
 module Tool_perpetual = Masc_mcp.Tool_perpetual
 module Tool_mdal = Masc_mcp.Tool_mdal
 module Tool_board = Masc_mcp.Tool_board
@@ -1559,8 +1558,20 @@ let split_csv_nonempty (raw : string) : string list =
   in
   List.rev out_rev
 
+let has_nonempty_env name =
+  match Sys.getenv_opt name with
+  | Some value -> String.trim value <> ""
+  | None -> false
+
 let trpg_default_fast_keeper_models () : string list =
-  Llm_client.default_execution_model_labels ()
+  let glm_available = has_nonempty_env "ZAI_API_KEY" in
+  let gemini_available = has_nonempty_env "GEMINI_API_KEY" in
+  match (glm_available, gemini_available) with
+  | true, true ->
+      [ "glm:glm-4.7"; "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
+  | true, false -> [ "glm:glm-4.7"; "ollama:glm-4.7-flash" ]
+  | false, true -> [ "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
+  | false, false -> [ "ollama:glm-4.7-flash" ]
 
 let trpg_keeper_models_override_csv () : string option =
   match Sys.getenv_opt "MASC_TRPG_KEEPER_MODELS" with
@@ -4917,12 +4928,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                  | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
                  | Ok specs ->
                      let primary =
-                       match specs with
-                       | m0 :: _ -> m0
-                       | [] -> (
-                           match Llm_client.default_execution_model_spec () with
-                           | Ok model -> model
-                           | Error _ -> Llm_client.glm_cloud)
+                       match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm
                      in
                      let base_dir = Tool_keeper.session_base_dir config in
                      let (_session, ctx_opt) =
@@ -7383,7 +7389,6 @@ let health_handler _request reqd =
   in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let guardian_json = Masc_mcp.Guardian.status_json () in
-  let sentinel_json = Masc_mcp.Sentinel.status_json () in
   let health_json = `Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
@@ -7407,7 +7412,6 @@ let health_handler _request reqd =
     ("sse_clients", `Int (Masc_mcp.Sse.client_count ()));
     ("lodge", lodge_json);
     ("guardian", guardian_json);
-    ("sentinel", sentinel_json);
   ] in
   Http.Response.json (Yojson.Safe.to_string health_json) reqd
 
@@ -9737,11 +9741,7 @@ let make_routes ~port ~host ~sw ~clock =
                  in
                  let model =
                    match json |> member "model" with
-                   | `String s -> s
-                   | _ -> (
-                       match Provider_adapter.default_model_label_result () with
-                       | Ok label -> label
-                       | Error _ -> "")
+                   | `String s -> s | _ -> "glm-4.7-flash:latest"
                  in
                  let personality_hint =
                    match json |> member "personalityHint" with
@@ -9766,9 +9766,6 @@ let make_routes ~port ~host ~sw ~clock =
                  else if preferred_hours = [] then
                    Http.Response.json ~status:`Bad_request
                      {|{"error":"at least one preferredHour"}|} reqd
-                 else if String.trim model = "" then
-                   Http.Response.json ~status:`Bad_request
-                     {|{"error":"model is required (or configure MASC_DEFAULT_CASCADE / MASC_DEFAULT_PROVIDER+MASC_DEFAULT_MODEL)"}|} reqd
                  else if activity_level < 0.1 || activity_level > 1.0 then
                    Http.Response.json ~status:`Bad_request
                      {|{"error":"activityLevel: 0.1-1.0"}|} reqd
@@ -9907,6 +9904,7 @@ let run_server ~sw ~env ~port ~base_path =
   (* Set net and clock references in Mcp_eio for async operations *)
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
+  Masc_mcp.Eio_context.set_switch sw;
   Masc_mcp.Eio_context.set_net net;
   Masc_mcp.Eio_context.set_clock clock;
   Council.Thread_persist.set_eio_context ~clock
@@ -9961,11 +9959,8 @@ let run_server ~sw ~env ~port ~base_path =
   Masc_mcp.Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator;
   (* Lodge world heartbeat - wakes agents every 60s *)
   Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
-  (* Sentinel: default resident agent (subsumes Guardian consumers) *)
-  Masc_mcp.Sentinel.start ~sw ~clock ~net state.room_config;
-  (* Fallback: run Guardian standalone when Sentinel is disabled *)
-  if not Masc_mcp.Env_config.Sentinel.enabled then
-    Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
+  (* Internal guardian loops (no external watchdog dependency) *)
+  Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
   (* Start MCP session cleanup loop *)
   Masc_mcp.Session.start_mcp_session_cleanup_loop ~sw ~clock ();
 
@@ -10197,7 +10192,6 @@ let run_server ~sw ~env ~port ~base_path =
           in
           let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
           let guardian_json = Masc_mcp.Guardian.status_json () in
-          let sentinel_json = Masc_mcp.Sentinel.status_json () in
           let health_json = `Assoc [
             ("status", `String "ok");
             ("server", `String "masc-mcp");
@@ -10207,7 +10201,6 @@ let run_server ~sw ~env ~port ~base_path =
             ("sse_clients", `Int (Sse.client_count ()));
             ("lodge", lodge_json);
             ("guardian", guardian_json);
-            ("sentinel", sentinel_json);
           ] in
           let body = Yojson.Safe.to_string health_json in
           h2_respond_json h2_reqd body ~extra_headers:cors

@@ -32,7 +32,7 @@ let read_state config =
       pause_reason = None;
       paused_by = None;
       paused_at = None;
-      search_strategy_default = None;
+      search_strategy_default = Some "best_first_v1";
       speculation_enabled = false;
       speculation_budget = None;
     }
@@ -242,7 +242,7 @@ let rec init config ~agent_name =
       pause_reason = None;
       paused_by = None;
       paused_at = None;
-      search_strategy_default = None;
+      search_strategy_default = Some "best_first_v1";
       speculation_enabled = false;
       speculation_budget = None;
     } in
@@ -274,7 +274,7 @@ let rec init config ~agent_name =
       pause_reason = None;
       paused_by = None;
       paused_at = None;
-      search_strategy_default = None;
+      search_strategy_default = Some "best_first_v1";
       speculation_enabled = false;
       speculation_budget = None;
     } in

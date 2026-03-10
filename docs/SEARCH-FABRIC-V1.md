@@ -5,11 +5,15 @@
 
 ## Scope
 
-- 대상 workload: `research_pipeline`
-- 대상 stage: `normalize -> verify -> curate -> rank -> audit`
+- 대상 workload:
+  - 기본 `coding_task`
+  - explicit `research_pipeline`
+- 대상 stage:
+  - `coding_task`: `decompose -> inspect -> implement -> verify -> review`
+  - `research_pipeline`: `normalize -> verify -> curate -> rank -> audit`
 - public 표면: 기존 `masc_operation_start`, `masc_dispatch_plan`, `masc_dispatch_tick`, `masc_observe_operations`
-- 기본 동작: `legacy`
-- opt-in 전략: `best_first_v1`
+- 기본 동작: `best_first_v1`
+- explicit opt-out: `legacy`
 
 ## Mapping
 
@@ -26,15 +30,20 @@
 
 - `best_first_v1`는 approval이 필요 없는 candidate만 본다.
 - score는 고정이다:
-  - `capability_match 0-40`
-  - `capacity_headroom 0-20`
-  - `posterior_success 0-20`
-  - `queue_age 0-10`
-  - `stickiness 10`
+  - `capability_match 0-25`
+  - `artifact_locality 0-20`
+  - `runtime_fit 0-15`
+  - `posterior_success 0-15`
+  - `capacity_headroom 0-10`
+  - `cost_efficiency 0-5`
+  - `queue_age 0-5`
+  - `stickiness 0-5`
 - reassignment는 새 candidate가 현재 unit보다 `15점 이상` 높을 때만 일어난다.
-- prior는 `(unit_id, stage)` 단위로 `.masc/control-plane/search-stats.json`에 저장한다.
+- prior는 `(unit_id, workload_profile, stage)` 단위로 `.masc/control-plane/search-stats.json`에 저장한다.
   - `checkpoint/finalize => alpha + 1`
   - `stall/escalate => beta + 1`
+- `coding_task verify`는 `implement` dependency가 있어야 하고, `review`는 `verify` dependency가 있어야 한다.
+- speculation은 `coding_task`의 `inspect`, `review` stage에서만 허용한다.
 
 ## Interface Additions
 
@@ -42,6 +51,7 @@
 
 - `workload_profile`
 - `stage`
+- `artifact_scope`
 - `depends_on_operation_ids`
 - `search_strategy`
 
@@ -61,6 +71,7 @@
 
 Operator-facing 요약은 `masc_operator_digest`와 dashboard `Ops`에서 번역된 signal로 본다.
 기본 surface는 `routing confidence`, `issue pressure`, `scheduler efficiency`, `cache contention` 같은 운영 의미를 사용하고,
+`quality per token`, `verification gate failures`, `rework rate`, `artifact scope drift`를 함께 노출한다.
 `RISC/MESI/MCTS` raw 용어는 detail/diagnostic에서만 본다.
 
 ## Benchmark
@@ -83,6 +94,8 @@ Wrapper script:
 - `verify_blocked_before_checkpoint`
 - `verify_final_detachments`
 - `verify_assigned_unit`
+- `coding_task.default_best_first.selected_unit`
+- `coding_task.speculative_best_first.search.stage_allowed`
 - `elapsed_ms`
 
 ## Research Anchors

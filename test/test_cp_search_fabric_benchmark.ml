@@ -93,6 +93,77 @@ let setup_units config =
           `List [ `String "verify"; `String "research"; `String "research_pipeline" ] );
       ])
 
+let setup_coding_units config =
+  let owner = "owner-root-node" in
+  let coding_lead = "coding-lead-node" in
+  let review_lead = "review-lead-node" in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
+  ignore (Room.join config ~agent_name:coding_lead ~capabilities:[] ());
+  ignore (Room.join config ~agent_name:review_lead ~capabilities:[] ());
+  unit_update_exn config ~actor:"owner"
+    (`Assoc
+      [
+        ("unit_id", `String "company-main");
+        ("kind", `String "company");
+        ("label", `String "Main Company");
+        ("leader_id", `String owner);
+        ( "roster",
+          `List [ `String owner; `String coding_lead; `String review_lead ] );
+      ]);
+  unit_update_exn config ~actor:"owner"
+    (`Assoc
+      [
+        ("unit_id", `String "platoon-runtime");
+        ("kind", `String "platoon");
+        ("label", `String "Runtime Platoon");
+        ("parent_unit_id", `String "company-main");
+        ("leader_id", `String owner);
+        ("roster", `List [ `String coding_lead; `String review_lead ]);
+        ("capability_profile", `List [ `String "coding_task"; `String "role:planner" ]);
+      ]);
+  unit_update_exn config ~actor:"owner"
+    (`Assoc
+      [
+        ("unit_id", `String "squad-ocaml");
+        ("kind", `String "squad");
+        ("label", `String "OCaml Coding Squad");
+        ("parent_unit_id", `String "platoon-runtime");
+        ("leader_id", `String coding_lead);
+        ("roster", `List [ `String coding_lead ]);
+        ( "capability_profile",
+          `List
+            [
+              `String "coding_task";
+              `String "role:implementer";
+              `String "lang:ocaml";
+              `String "artifact:lib/command_plane_v2.ml";
+              `String "artifact:test/test_command_plane_v2.ml";
+              `String "tool:dune";
+              `String "runtime:local64";
+              `String "model:glm-4.7-flash";
+            ] );
+      ]);
+  unit_update_exn config ~actor:"owner"
+    (`Assoc
+      [
+        ("unit_id", `String "squad-review");
+        ("kind", `String "squad");
+        ("label", `String "Review Squad");
+        ("parent_unit_id", `String "platoon-runtime");
+        ("leader_id", `String review_lead);
+        ("roster", `List [ `String review_lead ]);
+        ( "capability_profile",
+          `List
+            [
+              `String "coding_task";
+              `String "role:reviewer";
+              `String "artifact:test/test_command_plane_v2.ml";
+              `String "runtime:local64";
+              `String "model:glm-4.7-flash";
+            ] );
+      ])
+
 let run_scenario ~strategy =
   let base_dir = temp_dir () in
   Fun.protect
@@ -212,9 +283,103 @@ let run_scenario ~strategy =
             match search_strategy_seen with Some value -> `String value | None -> `Null );
         ])
 
+let run_coding_scenario ?(strategy = "best_first_v1") ?(speculation = false) () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      setup_coding_units config;
+      if speculation then
+        ignore
+          (Room.update_state config (fun state ->
+               {
+                 state with
+                 speculation_enabled = true;
+                 speculation_budget = Some 2;
+               }));
+      let started_at = Unix.gettimeofday () in
+      let inspect_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "platoon-runtime");
+              ("objective", `String "Inspect coding task routing");
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "inspect");
+              ( "artifact_scope",
+                `List
+                  [
+                    `String "lib/command_plane_v2.ml";
+                    `String "test/test_command_plane_v2.ml";
+                  ] );
+              ("search_strategy", `String strategy);
+            ])
+      in
+      let plan =
+        Command_plane_v2.dispatch_plan_json config
+          (`Assoc [ ("operation_id", `String inspect_op.operation_id) ])
+      in
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.dispatch_tick_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String inspect_op.operation_id) ])));
+      let operation_status =
+        Command_plane_v2.operation_status_json config
+          ~operation_id:inspect_op.operation_id ()
+      in
+      let selected_unit =
+        operation_status |> Yojson.Safe.Util.member "operations"
+        |> Yojson.Safe.Util.index 0
+        |> Yojson.Safe.Util.member "operation"
+        |> Yojson.Safe.Util.member "assigned_unit_id"
+        |> Yojson.Safe.Util.to_string
+      in
+      let detachment_rows = detachment_rows_for_operation config inspect_op.operation_id in
+      let search_json =
+        match detachment_rows with
+        | row :: _ ->
+            let detachment_id =
+              row |> Yojson.Safe.Util.member "detachment"
+              |> Yojson.Safe.Util.member "detachment_id"
+              |> Yojson.Safe.Util.to_string
+            in
+            unwrap_ok
+              (Command_plane_v2.detachment_status_json config
+                 (`Assoc [ ("detachment_id", `String detachment_id) ]))
+            |> Yojson.Safe.Util.member "result"
+            |> Yojson.Safe.Util.member "search"
+        | [] -> `Assoc []
+      in
+      let elapsed_ms =
+        int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0)
+      in
+      `Assoc
+        [
+          ("strategy", `String strategy);
+          ("speculation_enabled", `Bool speculation);
+          ( "recommended_units",
+            plan |> Yojson.Safe.Util.member "recommended_units" );
+          ("selected_unit", `String selected_unit);
+          ("detachment_count", `Int (List.length detachment_rows));
+          ("artifact_scope_count", `Int (List.length inspect_op.artifact_scope));
+          ( "search",
+            `Assoc
+              [
+                ("strategy", Yojson.Safe.Util.member "strategy" search_json);
+                ( "stage_allowed",
+                  Yojson.Safe.Util.member "speculation" search_json
+                  |> Yojson.Safe.Util.member "stage_allowed" );
+              ] );
+          ("elapsed_ms", `Int elapsed_ms);
+        ])
+
 let () =
   let legacy = run_scenario ~strategy:"legacy" in
   let best_first = run_scenario ~strategy:"best_first_v1" in
+  let coding_legacy = run_coding_scenario ~strategy:"legacy" () in
+  let coding_default = run_coding_scenario () in
+  let coding_speculative = run_coding_scenario ~speculation:true () in
   let legacy_initial =
     legacy |> Yojson.Safe.Util.member "initial_detachments" |> Yojson.Safe.Util.to_int
   in
@@ -228,6 +393,13 @@ let () =
         ("workload", `String "research_pipeline");
         ("legacy", legacy);
         ("best_first_v1", best_first);
+        ( "coding_task",
+          `Assoc
+            [
+              ("legacy", coding_legacy);
+              ("default_best_first", coding_default);
+              ("speculative_best_first", coding_speculative);
+            ] );
         ( "delta",
           `Assoc
             [

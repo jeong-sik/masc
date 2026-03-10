@@ -3,10 +3,13 @@ module U = Yojson.Safe.Util
 type search_row = {
   strategy : string;
   readiness : string;
+  status : string;
   candidate_count : int;
   best_score : float option;
   workload_profile : string;
   stage : string option;
+  artifact_scope_count : int;
+  artifact_scope_key : string option;
 }
 
 let tone_of_threshold ~warn ~bad value =
@@ -63,6 +66,9 @@ let search_fabric_json (rows : search_row list) =
   let research_rows =
     List.filter (fun row -> String.equal row.workload_profile "research_pipeline") rows
   in
+  let coding_rows =
+    List.filter (fun row -> String.equal row.workload_profile "coding_task") rows
+  in
   let avg_candidate_count =
     if best_first_rows = [] then 0.0
     else
@@ -81,6 +87,73 @@ let search_fabric_json (rows : search_row list) =
       List.fold_left ( +. ) 0.0 best_scores
       /. float_of_int (List.length best_scores)
   in
+  let quality_per_token =
+    let scored =
+      coding_rows
+      |> List.filter_map (fun row ->
+             Option.map
+               (fun best_score ->
+                 let denom = float_of_int (max 1 row.candidate_count) in
+                 best_score /. denom)
+               row.best_score)
+    in
+    if scored = [] then 0.0
+    else
+      List.fold_left ( +. ) 0.0 scored /. float_of_int (List.length scored)
+  in
+  let verification_gate_failures =
+    coding_rows
+    |> List.filter (fun row ->
+           match row.stage with
+           | Some ("verify" | "review") ->
+               List.mem row.status [ "failed"; "cancelled" ]
+           | _ -> false)
+    |> List.length
+  in
+  let rework_rate =
+    let rows_with_scope =
+      coding_rows
+      |> List.filter (fun row ->
+             match row.artifact_scope_key with
+             | Some key -> String.trim key <> ""
+             | None -> false)
+    in
+    let duplicate_count =
+      rows_with_scope
+      |> List.fold_left
+           (fun acc row ->
+             match row.artifact_scope_key with
+             | None -> acc
+             | Some key ->
+                 let current =
+                   match List.assoc_opt key acc with Some count -> count | None -> 0
+                 in
+                 (key, current + 1)
+                 :: List.remove_assoc key acc)
+           []
+      |> List.fold_left (fun acc (_, count) -> if count > 1 then acc + count else acc) 0
+    in
+    if rows_with_scope = [] then 0.0
+    else
+      float_of_int duplicate_count /. float_of_int (List.length rows_with_scope)
+  in
+  let artifact_scope_drift =
+    let scoped_rows =
+      coding_rows
+      |> List.filter (fun row ->
+             match row.stage with
+             | Some "decompose" -> false
+             | _ -> true)
+    in
+    let drifted =
+      scoped_rows
+      |> List.filter (fun row -> row.artifact_scope_count = 0)
+      |> List.length
+    in
+    if scoped_rows = [] then 0.0
+    else
+      float_of_int drifted /. float_of_int (List.length scoped_rows)
+  in
   let top_stage =
     rows
     |> List.filter_map (fun row -> row.stage)
@@ -94,8 +167,13 @@ let search_fabric_json (rows : search_row list) =
     ("blocked_operations", `Int (List.length blocked_rows));
     ("ready_operations", `Int (List.length ready_rows));
     ("research_pipeline_operations", `Int (List.length research_rows));
+    ("coding_task_operations", `Int (List.length coding_rows));
     ("avg_candidate_count", `Float avg_candidate_count);
     ("avg_best_score", `Float avg_best_score);
+    ("quality_per_token", `Float quality_per_token);
+    ("verification_gate_failures", `Int verification_gate_failures);
+    ("rework_rate", `Float rework_rate);
+    ("artifact_scope_drift", `Float artifact_scope_drift);
     ("top_stage", match top_stage with Some stage -> `String stage | None -> `Null);
   ]
 
@@ -108,7 +186,20 @@ let signals_json ~(pipeline : Yojson.Safe.t) ~(cache : Yojson.Safe.t)
   let pending_ops = get_int_default ooo "current_pending" 0 in
   let in_flight = get_int_default ooo "current_in_flight" 0 in
   let avg_best_score = get_float_opt search_fabric "avg_best_score" |> Option.value ~default:0.0 in
+  let best_first_ops = get_int_default search_fabric "best_first_operations" 0 in
   let blocked_ops = get_int_default search_fabric "blocked_operations" 0 in
+  let quality_per_token =
+    get_float_opt search_fabric "quality_per_token" |> Option.value ~default:0.0
+  in
+  let verification_gate_failures =
+    get_int_default search_fabric "verification_gate_failures" 0
+  in
+  let rework_rate =
+    get_float_opt search_fabric "rework_rate" |> Option.value ~default:0.0
+  in
+  let artifact_scope_drift =
+    get_float_opt search_fabric "artifact_scope_drift" |> Option.value ~default:0.0
+  in
   let spec_active = get_int_default speculative "active_sessions" 0 in
   let spec_commit_rate = get_float_opt speculative "commit_rate" |> Option.value ~default:0.0 in
   `Assoc [
@@ -135,10 +226,33 @@ let signals_json ~(pipeline : Yojson.Safe.t) ~(cache : Yojson.Safe.t)
       ("total_stolen", U.member "total_stolen" ooo);
     ]);
     ("routing_confidence", `Assoc [
-      ("tone", `String (tone_of_inverse_threshold ~warn:60.0 ~bad:40.0 avg_best_score));
+      ( "tone",
+        `String
+          (if best_first_ops = 0 then "ok"
+           else tone_of_inverse_threshold ~warn:60.0 ~bad:40.0 avg_best_score) );
       ("avg_best_score", `Float avg_best_score);
       ("avg_candidate_count", U.member "avg_candidate_count" search_fabric);
-      ("best_first_operations", U.member "best_first_operations" search_fabric);
+      ("best_first_operations", `Int best_first_ops);
+    ]);
+    ("quality_per_token", `Assoc [
+      ( "tone",
+        `String
+          (if get_int_default search_fabric "coding_task_operations" 0 = 0 then "ok"
+           else tone_of_inverse_threshold ~warn:40.0 ~bad:25.0 quality_per_token) );
+      ("value", `Float quality_per_token);
+      ("coding_task_operations", U.member "coding_task_operations" search_fabric);
+    ]);
+    ("verification_gate_failures", `Assoc [
+      ("tone", `String (tone_of_threshold ~warn:1 ~bad:3 verification_gate_failures));
+      ("count", `Int verification_gate_failures);
+    ]);
+    ("rework_rate", `Assoc [
+      ("tone", `String (if rework_rate >= 0.4 then "bad" else if rework_rate >= 0.2 then "warn" else "ok"));
+      ("value", `Float rework_rate);
+    ]);
+    ("artifact_scope_drift", `Assoc [
+      ("tone", `String (if artifact_scope_drift >= 0.5 then "bad" else if artifact_scope_drift >= 0.25 then "warn" else "ok"));
+      ("value", `Float artifact_scope_drift);
     ]);
     ("speculative_posture", `Assoc [
       ("tone", `String (if spec_active > 0 && spec_commit_rate < 0.5 then "warn" else "ok"));

@@ -10,6 +10,7 @@ type operation_descriptor = {
   assigned_unit_id : string option;
   workload_profile : string;
   stage : string option;
+  artifact_scope : string list;
   depends_on_operation_ids : string list;
   created_at : string;
 }
@@ -40,6 +41,7 @@ type candidate_input = {
 
 type stats_entry = {
   unit_id : string;
+  workload_profile : string;
   stage : string;
   alpha : float;
   beta : float;
@@ -48,8 +50,11 @@ type stats_entry = {
 
 type score_breakdown = {
   capability_match : float;
-  capacity_headroom : float;
+  artifact_locality : float;
+  runtime_fit : float;
   posterior_success : float;
+  capacity_headroom : float;
+  cost_efficiency : float;
   queue_age : float;
   stickiness : float;
   total : float;
@@ -72,6 +77,13 @@ let strategy_of_string = function
   | Some "best_first_v1" -> Best_first_v1
   | Some "legacy" -> Legacy
   | _ -> Legacy
+
+let normalized_workload_profile raw =
+  match String.trim raw |> String.lowercase_ascii with
+  | "" | "generic" -> "coding_task"
+  | "coding_task" -> "coding_task"
+  | "research_pipeline" -> "research_pipeline"
+  | other -> other
 
 let normalized_stage = function
   | Some raw ->
@@ -99,6 +111,7 @@ let stats_entry_to_json (entry : stats_entry) =
   `Assoc
     [
       ("unit_id", `String entry.unit_id);
+      ("workload_profile", `String entry.workload_profile);
       ("stage", `String entry.stage);
       ("alpha", `Float entry.alpha);
       ("beta", `Float entry.beta);
@@ -108,6 +121,10 @@ let stats_entry_to_json (entry : stats_entry) =
 let stats_entry_of_json json =
   try
     let unit_id = json |> U.member "unit_id" |> U.to_string in
+    let workload_profile =
+      json |> U.member "workload_profile" |> U.to_string_option
+      |> Option.value ~default:"generic"
+    in
     let stage = json |> U.member "stage" |> U.to_string in
     let alpha = json |> U.member "alpha" |> U.to_float in
     let beta = json |> U.member "beta" |> U.to_float in
@@ -117,7 +134,7 @@ let stats_entry_of_json json =
     if unit_id = "" || stage = "" then
       None
     else
-      Some { unit_id; stage; alpha; beta; updated_at }
+      Some { unit_id; workload_profile; stage; alpha; beta; updated_at }
   with _ -> None
 
 let load_store path : stats_store =
@@ -143,28 +160,62 @@ let save_store path (store : stats_store) =
         ("entries", `List (List.map stats_entry_to_json store));
       ])
 
-let lookup_stats (store : stats_store) ~unit_id ~stage =
+let lookup_stats (store : stats_store) ~unit_id ~workload_profile ~stage =
+  let workload_profile = normalized_workload_profile workload_profile in
   let stage = normalized_stage (Some stage) in
-  store
-  |> List.find_opt (fun (entry : stats_entry) ->
-         String.equal entry.unit_id unit_id && String.equal entry.stage stage)
-  |> Option.value
-       ~default:{ unit_id; stage; alpha = 1.0; beta = 1.0; updated_at = now_iso () }
+  let exact_match =
+    store
+    |> List.find_opt (fun (entry : stats_entry) ->
+           String.equal entry.unit_id unit_id
+           && String.equal (normalized_workload_profile entry.workload_profile)
+                workload_profile
+           && String.equal entry.stage stage)
+  in
+  let legacy_match =
+    store
+    |> List.find_opt (fun (entry : stats_entry) ->
+           String.equal entry.unit_id unit_id
+           && String.equal entry.workload_profile "generic"
+           && String.equal entry.stage stage)
+  in
+  match exact_match with
+  | Some entry ->
+      if String.equal entry.workload_profile workload_profile then
+        entry
+      else
+        { entry with workload_profile; stage }
+  | None -> (
+      match legacy_match with
+      | Some entry ->
+          { entry with workload_profile; stage }
+      | None ->
+          {
+            unit_id;
+            workload_profile;
+            stage;
+            alpha = 1.0;
+            beta = 1.0;
+            updated_at = now_iso ();
+          })
 
 let upsert_stats (store : stats_store) (entry : stats_entry) =
   entry
   :: List.filter
        (fun (current : stats_entry) ->
-         not (String.equal current.unit_id entry.unit_id && String.equal current.stage entry.stage))
+         not
+           (String.equal current.unit_id entry.unit_id
+            && String.equal (normalized_workload_profile current.workload_profile)
+                 (normalized_workload_profile entry.workload_profile)
+            && String.equal current.stage entry.stage))
        store
 
-let record_success (store : stats_store) ~unit_id ~stage =
-  let current = lookup_stats store ~unit_id ~stage in
+let record_success (store : stats_store) ~unit_id ~workload_profile ~stage =
+  let current = lookup_stats store ~unit_id ~workload_profile ~stage in
   upsert_stats store
     { current with alpha = current.alpha +. 1.0; updated_at = now_iso () }
 
-let record_failure (store : stats_store) ~unit_id ~stage =
-  let current = lookup_stats store ~unit_id ~stage in
+let record_failure (store : stats_store) ~unit_id ~workload_profile ~stage =
+  let current = lookup_stats store ~unit_id ~workload_profile ~stage in
   upsert_stats store
     { current with beta = current.beta +. 1.0; updated_at = now_iso () }
 
@@ -179,8 +230,11 @@ let breakdown_to_json (breakdown : score_breakdown) =
   `Assoc
     [
       ("capability_match", `Float breakdown.capability_match);
-      ("capacity_headroom", `Float breakdown.capacity_headroom);
+      ("artifact_locality", `Float breakdown.artifact_locality);
+      ("runtime_fit", `Float breakdown.runtime_fit);
       ("posterior_success", `Float breakdown.posterior_success);
+      ("capacity_headroom", `Float breakdown.capacity_headroom);
+      ("cost_efficiency", `Float breakdown.cost_efficiency);
       ("queue_age", `Float breakdown.queue_age);
       ("stickiness", `Float breakdown.stickiness);
       ("total", `Float breakdown.total);
@@ -238,7 +292,6 @@ let stop_words =
     "stage";
     "pipeline";
     "operation";
-    "generic";
     "managed";
   ]
 
@@ -263,19 +316,65 @@ let extract_keywords text =
   |> List.filter (fun word -> not (List.mem word stop_words))
   |> List.sort_uniq String.compare
 
+let path_keywords path =
+  path
+  |> String.split_on_char '/'
+  |> List.concat_map (fun part ->
+         let trimmed = String.trim part in
+         if trimmed = "" then [] else part :: String.split_on_char '.' part)
+  |> List.concat_map extract_keywords
+
+let extract_tag_value prefix raw =
+  let prefix = String.lowercase_ascii prefix ^ ":" in
+  let lowered = String.lowercase_ascii (String.trim raw) in
+  let prefix_len = String.length prefix in
+  if String.length lowered > prefix_len
+     && String.sub lowered 0 prefix_len = prefix
+  then
+    Some (String.sub lowered prefix_len (String.length lowered - prefix_len))
+  else
+    None
+
+let tag_values prefix xs =
+  xs |> List.filter_map (extract_tag_value prefix)
+
+let has_tag prefix xs = tag_values prefix xs <> []
+
+let any_contains needles haystack =
+  List.exists (fun needle ->
+      let needle = String.lowercase_ascii needle in
+      List.exists
+        (fun value ->
+          let value = String.lowercase_ascii value in
+          let needle_len = String.length needle in
+          let value_len = String.length value in
+          let rec loop idx =
+            if needle_len = 0 then true
+            else if idx > value_len - needle_len then false
+            else if String.sub value idx needle_len = needle then true
+            else loop (idx + 1)
+          in
+          needle_len > 0 && value_len >= needle_len && loop 0)
+        haystack)
+    needles
+
 let demand_keywords (operation : operation_descriptor) =
   let profile_keyword =
-    match String.trim operation.workload_profile with
-    | "" | "generic" -> []
-    | profile -> [ String.lowercase_ascii profile ]
+    match normalized_workload_profile operation.workload_profile with
+    | "" -> []
+    | profile -> [ profile ]
   in
   let stage_keyword =
     match operation.stage with
-    | Some stage when String.trim stage <> "" -> [ String.lowercase_ascii (String.trim stage) ]
-    | _ -> []
+      | Some stage when String.trim stage <> "" -> [ String.lowercase_ascii (String.trim stage) ]
+      | _ -> []
   in
   let objective_keywords = extract_keywords operation.objective in
-  List.sort_uniq String.compare (profile_keyword @ stage_keyword @ objective_keywords)
+  let artifact_keywords =
+    operation.artifact_scope |> List.concat_map path_keywords
+  in
+  List.sort_uniq String.compare
+    (profile_keyword @ stage_keyword @ objective_keywords @ artifact_keywords)
 
 let candidate_keywords (candidate : candidate_input) =
   let id_keywords = extract_keywords candidate.unit_id in
@@ -283,9 +382,15 @@ let candidate_keywords (candidate : candidate_input) =
   let capability_keywords =
     candidate.capability_profile
     |> List.map String.lowercase_ascii
-    |> List.concat_map extract_keywords
+    |> List.concat_map (fun raw ->
+           raw
+           :: (match String.split_on_char ':' raw with
+              | [] -> []
+              | _prefix :: rest -> rest)
+           |> List.concat_map extract_keywords)
   in
-  List.sort_uniq String.compare (id_keywords @ label_keywords @ capability_keywords)
+  List.sort_uniq String.compare
+    (id_keywords @ label_keywords @ capability_keywords)
 
 let keyword_overlap reference candidate =
   if reference = [] then
@@ -371,46 +476,98 @@ let capacity_score (candidate : candidate_input) =
     let ratio =
       float_of_int free_slots /. float_of_int candidate.active_operation_cap
     in
-    min 20.0 (ratio *. 20.0)
+    min 10.0 (ratio *. 10.0)
 
-let capability_score operation candidate =
+let capability_score (operation : operation_descriptor)
+    (candidate : candidate_input) =
   let demand = demand_keywords operation in
   let supply = candidate_keywords candidate in
   let stage_bonus =
     match operation.stage with
     | Some stage ->
         let stage_key = normalize_word stage in
-        if stage_key <> "" && List.mem stage_key supply then 20.0 else 0.0
+        if stage_key <> "" && List.mem stage_key supply then 10.0 else 0.0
     | None -> 0.0
   in
-  min 40.0 (stage_bonus +. (keyword_overlap demand supply *. 20.0))
+  min 25.0 (stage_bonus +. (keyword_overlap demand supply *. 15.0))
+
+let artifact_locality_score (operation : operation_descriptor)
+    (candidate : candidate_input) =
+  let workload_profile = normalized_workload_profile operation.workload_profile in
+  let scope_keywords = operation.artifact_scope |> List.concat_map path_keywords in
+  match scope_keywords with
+  | [] -> (
+      match workload_profile, normalized_stage operation.stage with
+      | "coding_task", "decompose" -> 10.0
+      | _ -> 0.0)
+  | _ -> min 20.0 (keyword_overlap scope_keywords (candidate_keywords candidate) *. 20.0)
+
+let runtime_fit_score (operation : operation_descriptor)
+    (candidate : candidate_input) =
+  let runtime_tags = tag_values "runtime" candidate.capability_profile in
+  let model_tags = tag_values "model" candidate.capability_profile in
+  let tool_tags = tag_values "tool" candidate.capability_profile in
+  let base =
+    (if runtime_tags <> [] then 7.5 else 0.0)
+    +. if model_tags <> [] then 7.5 else 0.0
+  in
+  match normalized_workload_profile operation.workload_profile, normalized_stage operation.stage with
+  | "coding_task", ("implement" | "verify") when tool_tags <> [] ->
+      min 15.0 (base +. 3.0)
+  | "coding_task", ("inspect" | "review") when runtime_tags <> [] && model_tags <> [] ->
+      15.0
+  | _ -> min 15.0 base
+
+let cost_efficiency_score (candidate : candidate_input) =
+  let runtime_tags = tag_values "runtime" candidate.capability_profile in
+  let model_tags = tag_values "model" candidate.capability_profile in
+  let cheap_hints =
+    runtime_tags @ model_tags @ candidate.capability_profile
+  in
+  if any_contains [ "local64"; "cheap"; "small"; "mini"; "flash"; "q8"; "1b"; "3b"; "7b" ] cheap_hints then
+    5.0
+  else if model_tags <> [] then
+    2.5
+  else
+    0.0
 
 let candidate_breakdown ~store ~(operation : operation_descriptor)
     (candidate : candidate_input) =
   let stage = normalized_stage operation.stage in
-  let stats = lookup_stats store ~unit_id:candidate.unit_id ~stage in
+  let workload_profile = normalized_workload_profile operation.workload_profile in
+  let stats =
+    lookup_stats store ~unit_id:candidate.unit_id ~workload_profile ~stage
+  in
   let breakdown =
     {
       capability_match = capability_score operation candidate;
+      artifact_locality = artifact_locality_score operation candidate;
+      runtime_fit = runtime_fit_score operation candidate;
+      posterior_success = posterior_mean stats *. 15.0;
       capacity_headroom = capacity_score candidate;
-      posterior_success = posterior_mean stats *. 20.0;
-      queue_age = queue_age_score operation.created_at;
-      stickiness = if candidate.current_assignment then 10.0 else 0.0;
+      cost_efficiency = cost_efficiency_score candidate;
+      queue_age = min 5.0 (queue_age_score operation.created_at /. 2.0);
+      stickiness = if candidate.current_assignment then 5.0 else 0.0;
       total = 0.0;
     }
   in
   let total =
     breakdown.capability_match
-    +. breakdown.capacity_headroom
+    +. breakdown.artifact_locality
+    +. breakdown.runtime_fit
     +. breakdown.posterior_success
+    +. breakdown.capacity_headroom
+    +. breakdown.cost_efficiency
     +. breakdown.queue_age
     +. breakdown.stickiness
   in
   let final_breakdown = { breakdown with total } in
   let reason =
-    Printf.sprintf "cap=%.1f posterior=%.1f headroom=%.1f queue=%.1f"
-      final_breakdown.capability_match final_breakdown.posterior_success
-      final_breakdown.capacity_headroom final_breakdown.queue_age
+    Printf.sprintf
+      "cap=%.1f artifact=%.1f runtime=%.1f posterior=%.1f headroom=%.1f cost=%.1f"
+      final_breakdown.capability_match final_breakdown.artifact_locality
+      final_breakdown.runtime_fit final_breakdown.posterior_success
+      final_breakdown.capacity_headroom final_breakdown.cost_efficiency
   in
   { unit_id = candidate.unit_id; label = candidate.label; breakdown = final_breakdown; routing_reason = reason }
 

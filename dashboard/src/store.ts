@@ -30,6 +30,7 @@ import {
   fetchDashboardPlanning,
   fetchDashboardSemantics,
   fetchDashboardShell,
+  fetchMessagesList,
   fetchTrpgState,
 } from './api'
 import { lastEvent, connected, journal } from './sse'
@@ -319,6 +320,32 @@ function normalizeMessage(raw: unknown): Message | null {
     timestamp,
     type: asString(raw.type),
   }
+}
+
+function messageSortKey(message: Message): number {
+  if (typeof message.seq === 'number' && Number.isFinite(message.seq)) return message.seq
+  const parsed = Date.parse(message.timestamp)
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+function mergeMessages(current: Message[], incoming: Message[]): Message[] {
+  if (incoming.length === 0) return current
+  const byKey = new Map<string, Message>()
+  for (const message of current) {
+    const key = typeof message.seq === 'number'
+      ? `seq:${message.seq}`
+      : `ts:${message.timestamp}|from:${message.from}|content:${message.content}`
+    byKey.set(key, message)
+  }
+  for (const message of incoming) {
+    const key = typeof message.seq === 'number'
+      ? `seq:${message.seq}`
+      : `ts:${message.timestamp}|from:${message.from}|content:${message.content}`
+    byKey.set(key, message)
+  }
+  return [...byKey.values()]
+    .sort((a, b) => messageSortKey(a) - messageSortKey(b))
+    .slice(-500)
 }
 
 function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
@@ -726,9 +753,10 @@ export async function refreshExecution(): Promise<void> {
     tasks.value = (Array.isArray(data.tasks) ? data.tasks : [])
       .map(normalizeTask)
       .filter((row): row is Task => row !== null)
-    messages.value = (Array.isArray(data.messages) ? data.messages : [])
+    const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
       .map(normalizeMessage)
       .filter((row): row is Message => row !== null)
+    messages.value = mergeMessages(messages.value, executionMessages)
     keepers.value = normalizeKeepers(data.keepers, normalizedStatus ?? serverStatus.value)
     perpetualStatus.value = null
     lastDashboardRefreshAt.value = new Date().toISOString()
@@ -746,7 +774,17 @@ export async function refreshTasks(): Promise<void> {
 }
 
 export async function refreshMessages(): Promise<void> {
-  return refreshExecution()
+  try {
+    const current = messages.value
+    const maxSeq = current.reduce((max, message) => Math.max(max, message.seq ?? 0), 0)
+    const data = await fetchMessagesList(maxSeq)
+    const incoming = (Array.isArray(data.messages) ? data.messages : [])
+      .map(normalizeMessage)
+      .filter((row): row is Message => row !== null)
+    messages.value = mergeMessages(current, incoming)
+  } catch (err) {
+    console.error('Messages selective fetch error:', err)
+  }
 }
 
 export async function refreshBoard(): Promise<void> {

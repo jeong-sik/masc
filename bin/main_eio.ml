@@ -5561,9 +5561,21 @@ let json_int_field key json ~default =
   | `Intlit raw -> (try int_of_string raw with Failure _ -> default)
   | _ -> default
 
+let dashboard_current_room_id config =
+  Room.current_room_id config
+
+let dashboard_tasks_safe config =
+  Room.get_tasks_raw_in_room config (dashboard_current_room_id config)
+
+let dashboard_agents_safe config =
+  Room.get_agents_raw_in_room config (dashboard_current_room_id config)
+
+let dashboard_messages_safe config ~since_seq ~limit =
+  Room.get_messages_raw_in_room config ~room_id:(dashboard_current_room_id config) ~since_seq ~limit
+
 let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
-  let agents = Room.get_agents_raw config in
-  let tasks = Room.get_tasks_raw config in
+  let agents = dashboard_agents_safe config in
+  let tasks = dashboard_tasks_safe config in
   let keepers_json = keepers_dashboard_json ~compact:true config in
   let keepers_total = json_int_field "total" keepers_json ~default:0 in
   `Assoc
@@ -5580,9 +5592,9 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
     ]
 
 let dashboard_execution_http_json (config : Room.config) : Yojson.Safe.t =
-  let tasks = Room.get_tasks_raw config in
-  let agents = Room.get_agents_raw config in
-  let messages = Room.get_messages_raw config ~since_seq:0 ~limit:50 in
+  let tasks = dashboard_tasks_safe config in
+  let agents = dashboard_agents_safe config in
+  let messages = dashboard_messages_safe config ~since_seq:0 ~limit:50 in
   let keepers_json = keepers_dashboard_json ~compact:true config in
   let keepers = json_list_field "keepers" keepers_json in
   let active_agents =
@@ -5733,7 +5745,7 @@ let dashboard_planning_http_json request ~(config : Room.config) : Yojson.Safe.t
     | Error message -> `Assoc [ ("error", `String message); ("loops", `List []) ]
   in
   let task_rollup =
-    Room.get_tasks_raw config
+    dashboard_tasks_safe config
     |> List.fold_left
          (fun (todo, claimed, running, done_count, cancelled) (task : Types.task) ->
            match task.task_status with

@@ -4,7 +4,6 @@ import { useEffect } from 'preact/hooks'
 import { showToast } from './common/toast'
 import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
 import type { OperatorAttentionItem, OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
-import { addTaskFromDashboard } from '../api'
 import {
   confirmOperatorPendingAction,
   dispatchOperatorAction,
@@ -130,6 +129,8 @@ function actionTypeLabel(value?: string | null): string {
       return 'room 일시정지'
     case 'room_resume':
       return 'room 재개'
+    case 'task_inject':
+      return '작업 주입'
     case 'team_note':
       return '세션 노트'
     case 'team_broadcast':
@@ -199,7 +200,7 @@ function sessionActionLabel(value: typeof teamTurnKind.value): string {
 }
 
 async function executeAction(input: {
-  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_stop' | 'keeper_message'
+  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_stop' | 'keeper_message'
   target_type: 'room' | 'team_session' | 'keeper'
   target_id?: string
   payload: Record<string, unknown>
@@ -260,18 +261,19 @@ async function submitResume() {
 async function submitTaskInject() {
   const title = taskTitle.value.trim()
   if (!title) return
-  try {
-    await addTaskFromDashboard(
+  const result = await executeAction({
+    action_type: 'task_inject',
+    target_type: 'room',
+    payload: {
       title,
-      taskDescription.value.trim() || 'Intervene 화면에서 주입',
-      Number.parseInt(taskPriority.value, 10) || 2,
-    )
-    showToast('작업을 backlog에 추가했습니다', 'success')
+      description: taskDescription.value.trim() || 'Intervene 화면에서 주입',
+      priority: Number.parseInt(taskPriority.value, 10) || 2,
+    },
+    successMessage: '작업 주입을 보냈습니다',
+  })
+  if (result) {
     taskTitle.value = ''
     taskDescription.value = ''
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '작업 추가에 실패했습니다'
-    showToast(message, 'error')
   }
 }
 

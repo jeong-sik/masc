@@ -1,30 +1,15 @@
 // MASC Dashboard — Hash-based router
-// Reads location.hash and supports legacy deep-link forms:
-// #overview, #/overview, #board/post/:id, #tab=agents, /dashboard/agents
+// Reads location.hash for canonical dashboard routes only.
+// Legacy aliases were intentionally removed during the operator-console rewrite.
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'mission', params: {}, postId: null }
-const LEGACY_TAB_ALIASES: Record<string, TabId> = {
-  overview: 'mission',
-  journal: 'mission',
-  mdal: 'goals',
-  tasks: 'goals',
-  execution: 'mission',
-  council: 'board',
-  activity: 'mission',
-  ops: 'intervene',
-}
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
-}
-
-function normalizeTabAlias(v: string | null | undefined): string | undefined {
-  if (!v) return undefined
-  return LEGACY_TAB_ALIASES[v] ?? v
 }
 
 function decodeSafe(input: string): string {
@@ -65,24 +50,23 @@ function parseSegments(
     return { tab: 'command', params: nextParams, postId: null }
   }
 
-  const tabFromPath = normalizeTabAlias(segments[0])
-  const tabFromQuery = normalizeTabAlias(params.tab)
+  if (segments[0] === 'lab') {
+    const nextParams = { ...params }
+    if (segments[1]) {
+      nextParams.surface = decodeSafe(segments[1])
+    }
+    return { tab: 'lab', params: nextParams, postId: null }
+  }
+
+  const tabFromPath = segments[0]
+  const tabFromQuery = params.tab
   const tab: TabId = isTabId(tabFromPath)
     ? tabFromPath
     : isTabId(tabFromQuery)
       ? tabFromQuery
       : 'mission'
 
-  let postId: string | null = null
-  if (tab === 'board') {
-    if (segments[0] === 'board' && segments[1] === 'post' && segments[2]) {
-      postId = decodeSafe(segments[2])
-    } else if (segments[0] === 'post' && segments[1]) {
-      postId = decodeSafe(segments[1])
-    }
-  }
-
-  return { tab, params, postId }
+  return { tab, params, postId: null }
 }
 
 function parseHash(hash: string): RouteState {
@@ -104,7 +88,6 @@ function parseHash(hash: string): RouteState {
     }
   }
 
-  // Legacy format: #tab=agents&room=xxx
   if (!queryPart && pathPart.includes('=') && !pathPart.includes('/')) {
     queryPart = pathPart
     pathPart = ''
@@ -128,10 +111,14 @@ function parsePathname(pathname: string, search: string): RouteState | null {
 }
 
 function toHash(r: RouteState): string {
-  const path = r.postId
-    ? `board/post/${encodeURIComponent(r.postId)}`
+  const path = r.tab === 'lab' && r.params.surface
+    ? `lab/${encodeURIComponent(r.params.surface)}`
     : r.tab
-  const paramEntries = Object.entries(r.params).filter(([k]) => k !== 'tab')
+  const paramEntries = Object.entries(r.params).filter(([key]) => {
+    if (key === 'tab') return false
+    if (r.tab === 'lab' && key === 'surface') return false
+    return true
+  })
   if (paramEntries.length === 0) return `#${path}`
   const sp = new URLSearchParams(paramEntries)
   return `#${path}?${sp.toString()}`
@@ -149,13 +136,12 @@ window.addEventListener('hashchange', () => {
 // --- Navigation helpers ---
 
 export function navigate(tab: TabId, params?: Record<string, string>): void {
-  const canonical = normalizeTabAlias(tab) ?? tab
-  const next = { tab: canonical as TabId, params: params ?? {}, postId: null } satisfies RouteState
+  const next = { tab, params: params ?? {}, postId: null } satisfies RouteState
   window.location.hash = toHash(next)
 }
 
 export function navigateToPost(postId: string): void {
-  window.location.hash = `#board/post/${encodeURIComponent(postId)}`
+  window.location.hash = `#memory?post=${encodeURIComponent(postId)}`
 }
 
 export function navigateBack(): void {

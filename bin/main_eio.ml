@@ -5493,6 +5493,275 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
     ~config:state.Mcp_server.room_config ~sw ~clock
     ~proc_mgr:state.Mcp_server.proc_mgr ()
 
+let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
+  let room_state = Room.read_state config in
+  let tempo = Tempo.get_tempo config in
+  let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  `Assoc
+    [
+      ("room", `String room_state.project);
+      ("room_base_path", `String config.base_path);
+      ( "cluster",
+        `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME"))
+      );
+      ("project", `String room_state.project);
+      ("tempo_interval_s", `Float tempo.current_interval_s);
+      ("paused", `Bool room_state.paused);
+      ("lodge", lodge_json);
+      ("version", `String Masc_mcp.Version.version);
+    ]
+
+let dashboard_task_assignee (task : Types.task) =
+  match task.task_status with
+  | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } ->
+      Some assignee
+  | Todo | Cancelled _ -> None
+
+let dashboard_task_json (task : Types.task) =
+  `Assoc
+    [
+      ("id", `String task.id);
+      ("title", `String task.title);
+      ("description", `String task.description);
+      ("status", `String (Types.string_of_task_status task.task_status));
+      ("priority", `Int task.priority);
+      ("assignee", match dashboard_task_assignee task with Some v -> `String v | None -> `Null);
+      ("created_at", `String task.created_at);
+    ]
+
+let dashboard_agent_json (agent : Types.agent) =
+  let (emoji, korean_name) = get_agent_identity agent.name in
+  `Assoc
+    [
+      ("name", `String agent.name);
+      ("status", `String (Types.string_of_agent_status agent.status));
+      ("current_task", match agent.current_task with Some task -> `String task | None -> `Null);
+      ("last_seen", `String agent.last_seen);
+      ("emoji", `String emoji);
+      ("koreanName", `String korean_name);
+    ]
+
+let dashboard_message_json (message : Types.message) =
+  `Assoc
+    [
+      ("from", `String message.from_agent);
+      ("content", `String message.content);
+      ("timestamp", `String message.timestamp);
+      ("seq", `Int message.seq);
+    ]
+
+let json_list_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `List items -> items
+  | _ -> []
+
+let json_int_field key json ~default =
+  match Yojson.Safe.Util.member key json with
+  | `Int value -> value
+  | `Intlit raw -> (try int_of_string raw with Failure _ -> default)
+  | _ -> default
+
+let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
+  let agents = Room.get_agents_raw config in
+  let tasks = Room.get_tasks_raw config in
+  let keepers_json = keepers_dashboard_json ~compact:true config in
+  let keepers_total = json_int_field "total" keepers_json ~default:0 in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("status", dashboard_shell_status_json config);
+      ( "counts",
+        `Assoc
+          [
+            ("agents", `Int (List.length agents));
+            ("tasks", `Int (List.length tasks));
+            ("keepers", `Int keepers_total);
+          ] );
+    ]
+
+let dashboard_execution_http_json (config : Room.config) : Yojson.Safe.t =
+  let tasks = Room.get_tasks_raw config in
+  let agents = Room.get_agents_raw config in
+  let messages = Room.get_messages_raw config ~since_seq:0 ~limit:50 in
+  let keepers_json = keepers_dashboard_json ~compact:true config in
+  let keepers = json_list_field "keepers" keepers_json in
+  let active_agents =
+    List.fold_left
+      (fun acc (agent : Types.agent) ->
+        match agent.status with
+        | Types.Active | Types.Busy | Types.Listening -> acc + 1
+        | Types.Inactive -> acc)
+      0 agents
+  in
+  let task_rollup =
+    List.fold_left
+      (fun (todo, claimed, running, done_count, cancelled) (task : Types.task) ->
+        match task.task_status with
+        | Todo -> (todo + 1, claimed, running, done_count, cancelled)
+        | Claimed _ -> (todo, claimed + 1, running, done_count, cancelled)
+        | InProgress _ -> (todo, claimed, running + 1, done_count, cancelled)
+        | Done _ -> (todo, claimed, running, done_count + 1, cancelled)
+        | Cancelled _ -> (todo, claimed, running, done_count, cancelled + 1))
+      (0, 0, 0, 0, 0) tasks
+  in
+  let (todo_count, claimed_count, running_count, done_count, cancelled_count) = task_rollup in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("status", dashboard_shell_status_json config);
+      ( "summary",
+        `Assoc
+          [
+            ("active_agents", `Int active_agents);
+            ("todo_tasks", `Int todo_count);
+            ("claimed_tasks", `Int claimed_count);
+            ("running_tasks", `Int running_count);
+            ("done_tasks", `Int done_count);
+            ("cancelled_tasks", `Int cancelled_count);
+            ("keepers", `Int (List.length keepers));
+          ] );
+      ("agents", `List (List.map dashboard_agent_json agents));
+      ("tasks", `List (List.map dashboard_task_json tasks));
+      ("messages", `List (List.map dashboard_message_json messages));
+      ("keepers", `List keepers);
+    ]
+
+let dashboard_memory_http_json request : Yojson.Safe.t =
+  let hearth = query_param request "hearth" in
+  let sort_by = board_sort_order_of_request request in
+  let exclude_system = bool_query_param request "exclude_system" ~default:false in
+  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+  let fetch_limit = board_fetch_limit ~exclude_system ~limit ~offset in
+  let posts = Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit () in
+  let posts = filter_board_posts ~exclude_system posts in
+  let karma_map = Board_dispatch.get_all_karma () in
+  let get_karma author =
+    try List.assoc author karma_map with Not_found -> 0
+  in
+  let paged = posts |> drop offset |> take limit in
+  let posts_json =
+    List.map
+      (fun (post : Board.post) ->
+        let author = Board.Agent_id.to_string post.author in
+        board_post_dashboard_json ~author_karma:(get_karma author) post)
+      paged
+  in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ( "summary",
+        `Assoc
+          [
+            ("visible_posts", `Int (List.length posts_json));
+            ("sort_by", `String (board_sort_label sort_by));
+            ("exclude_system", `Bool exclude_system);
+          ] );
+      ("posts", `List posts_json);
+      ("count", `Int (List.length posts_json));
+      ("limit", `Int limit);
+      ("offset", `Int offset);
+      ("sort_by", `String (board_sort_label sort_by));
+    ]
+
+let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
+  let config = Council.make_config ~base_path in
+  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+  let fetch_limit = limit + offset in
+  let status_filter =
+    match query_param request "status" with
+    | None -> None
+    | Some raw -> (
+        match String.lowercase_ascii (String.trim raw) with
+        | "open" -> Some Council.Debate.Open
+        | "closed" -> Some Council.Debate.Closed
+        | "pending" -> Some Council.Debate.Pending
+        | _ -> None)
+  in
+  let debates =
+    Council.DebateApi.list_all ~config ~status_filter ~limit:fetch_limit ()
+    |> drop offset |> take limit
+    |> List.map
+         (fun (debate : Council.Debate.debate) ->
+           `Assoc
+             [
+               ("id", `String debate.id);
+               ("topic", `String debate.topic);
+               ("status", `String (Council.Debate.status_to_string debate.status));
+               ("argument_count", `Int (List.length debate.arguments));
+               ("created_at", `Float debate.created_at);
+               ("created_at_iso", `String (iso8601_of_unix debate.created_at));
+             ])
+  in
+  let sessions =
+    Council.ConsensusApi.list_active () |> drop offset |> take limit
+    |> List.map
+         (fun (session : Council.Consensus.session) ->
+           `Assoc
+             [
+               ("id", `String session.id);
+               ("topic", `String session.topic);
+               ("initiator", `String session.initiator);
+               ("votes", `Int (List.length session.votes));
+               ("quorum", `Int session.quorum);
+               ("threshold", `Float session.threshold);
+               ("state", Council.Consensus.voting_state_to_yojson session.state);
+               ("created_at", `Float session.created_at);
+               ("created_at_iso", `String (iso8601_of_unix session.created_at));
+             ])
+  in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ( "summary",
+        `Assoc
+          [
+            ("debates", `Int (List.length debates));
+            ("voting_sessions", `Int (List.length sessions));
+          ] );
+      ("debates", `List debates);
+      ("sessions", `List sessions);
+    ]
+
+let dashboard_planning_http_json request ~(config : Room.config) : Yojson.Safe.t =
+  let goals = Masc_mcp.Goal_store.list_goals config () in
+  let rollup = Masc_mcp.Goal_store.compute_rollup goals in
+  let mdal_json =
+    match mdal_loops_json ~config request with
+    | Ok json -> json
+    | Error message -> `Assoc [ ("error", `String message); ("loops", `List []) ]
+  in
+  let task_rollup =
+    Room.get_tasks_raw config
+    |> List.fold_left
+         (fun (todo, claimed, running, done_count, cancelled) (task : Types.task) ->
+           match task.task_status with
+           | Todo -> (todo + 1, claimed, running, done_count, cancelled)
+           | Claimed _ -> (todo, claimed + 1, running, done_count, cancelled)
+           | InProgress _ -> (todo, claimed, running + 1, done_count, cancelled)
+           | Done _ -> (todo, claimed, running, done_count + 1, cancelled)
+           | Cancelled _ -> (todo, claimed, running, done_count, cancelled + 1))
+         (0, 0, 0, 0, 0)
+  in
+  let (todo_count, claimed_count, running_count, done_count, cancelled_count) = task_rollup in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("goals", `List (List.map Masc_mcp.Goal_store.goal_to_yojson goals));
+      ("rollup", Masc_mcp.Goal_store.rollup_to_yojson rollup);
+      ("mdal", mdal_json);
+      ( "task_backlog",
+        `Assoc
+          [
+            ("todo", `Int todo_count);
+            ("claimed", `Int claimed_count);
+            ("in_progress", `Int running_count);
+            ("done", `Int done_count);
+            ("cancelled", `Int cancelled_count);
+          ] );
+    ]
+
 let operator_action_http_json ~state ~sw ~clock request ~args =
   let ctx : _ Operator_control.context =
     {
@@ -8666,10 +8935,41 @@ let make_routes ~port ~host ~sw ~clock =
 
   (* Batch dashboard endpoint: single request replaces 4 separate API calls *)
   |> Http.Router.get "/api/v1/dashboard" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json =
+           `Assoc
+             [
+               ("error", `String "dashboard batch contract removed");
+               ("message", `String "Use /api/v1/dashboard/shell and surface-specific projection endpoints.");
+             ]
+         in
+         Http.Response.json ~status:`Gone ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/shell" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let config = state.Mcp_server.room_config in
-         let compact = dashboard_compact_mode req in
-         let json = dashboard_batch_json ~compact config in
+         let json = dashboard_shell_http_json state.Mcp_server.room_config in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = dashboard_execution_http_json state.Mcp_server.room_config in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/memory" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = dashboard_memory_http_json req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/governance" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json = dashboard_governance_http_json req ~base_path in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/planning" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = dashboard_planning_http_json req ~config:state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/semantics" (fun request reqd ->
@@ -10036,10 +10336,44 @@ let run_server ~sw ~env ~port ~base_path =
          REST API
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/api/v1/dashboard" ->
+          let json =
+            `Assoc
+              [
+                ("error", `String "dashboard batch contract removed");
+                ("message", `String "Use /api/v1/dashboard/shell and surface-specific projection endpoints.");
+              ]
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            ~status:`Gone ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/shell" ->
           let state = get_server_state () in
-          let config = state.Mcp_server.room_config in
-          let compact = dashboard_compact_mode httpun_request in
-          let json = dashboard_batch_json ~compact config in
+          let json = dashboard_shell_http_json state.Mcp_server.room_config in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/execution" ->
+          let state = get_server_state () in
+          let json = dashboard_execution_http_json state.Mcp_server.room_config in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/memory" ->
+          let json = dashboard_memory_http_json httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/governance" ->
+          let state = get_server_state () in
+          let json =
+            dashboard_governance_http_json httpun_request
+              ~base_path:state.Mcp_server.room_config.base_path
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/planning" ->
+          let state = get_server_state () in
+          let json =
+            dashboard_planning_http_json httpun_request
+              ~config:state.Mcp_server.room_config
+          in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/semantics" ->

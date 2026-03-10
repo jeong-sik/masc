@@ -159,7 +159,7 @@ let test_dashboard_semantics_has_required_surfaces () =
   List.iter
     (fun expected ->
       Alcotest.(check bool) expected true (List.mem expected ids))
-    [ "side_rail"; "mission"; "intervene"; "command"; "agents"; "board"; "goals"; "trpg" ]
+    [ "side_rail"; "mission"; "execution"; "memory"; "governance"; "planning"; "intervene"; "command"; "lab" ]
 
 let test_dashboard_semantics_panels_have_required_fields () =
   let json = Lib.Dashboard_semantics.json () in

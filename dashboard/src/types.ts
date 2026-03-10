@@ -628,6 +628,67 @@ export interface DashboardData {
   perpetual: PerpetualStatus
 }
 
+export interface DashboardShellResponse {
+  generated_at?: string
+  status: ServerStatus
+  counts?: {
+    agents?: number
+    tasks?: number
+    keepers?: number
+  }
+}
+
+export interface DashboardExecutionResponse {
+  generated_at?: string
+  status?: ServerStatus
+  summary?: Record<string, unknown>
+  agents?: unknown[]
+  tasks?: unknown[]
+  messages?: unknown[]
+  keepers?: unknown[]
+}
+
+export interface DashboardMemoryResponse {
+  generated_at?: string
+  summary?: {
+    visible_posts?: number
+    sort_by?: string
+    exclude_system?: boolean
+  }
+  posts?: BoardPost[]
+  count?: number
+  limit?: number
+  offset?: number
+  sort_by?: string
+}
+
+export interface DashboardGovernanceResponse {
+  generated_at?: string
+  summary?: {
+    debates?: number
+    voting_sessions?: number
+  }
+  debates?: CouncilDebate[]
+  sessions?: CouncilSession[]
+}
+
+export interface DashboardPlanningResponse {
+  generated_at?: string
+  goals?: unknown[]
+  rollup?: Record<string, unknown>
+  mdal?: {
+    loops?: unknown[]
+    error?: string
+  }
+  task_backlog?: {
+    todo?: number
+    claimed?: number
+    in_progress?: number
+    done?: number
+    cancelled?: number
+  }
+}
+
 export interface DashboardMissionSummary {
   room_health?: string
   cluster?: string
@@ -836,16 +897,14 @@ export type OperatorActionType =
   | 'room_pause'
   | 'room_resume'
   | 'lodge_tick'
-  | 'team_turn'
   | 'team_note'
   | 'team_broadcast'
   | 'team_task_inject'
+  | 'team_worker_spawn_batch'
   | 'team_stop'
-  | 'keeper_msg'
   | 'keeper_message'
   | 'keeper_probe'
   | 'keeper_recover'
-  | 'task_inject'
 
 export type OperatorTargetType = 'room' | 'team_session' | 'keeper'
 
@@ -1786,23 +1845,21 @@ export interface DashboardSemanticsResponse {
 
 export type TabId =
   | 'mission'
+  | 'execution'
+  | 'memory'
+  | 'governance'
+  | 'planning'
   | 'intervene'
   | 'command'
-  | 'overview'
-  | 'board'
-  | 'goals'
-  | 'agents'
-  | 'ops'
-  | 'trpg'
+  | 'lab'
 
 export const VALID_TABS: TabId[] = [
   'mission',
+  'execution',
+  'memory',
+  'governance',
+  'planning',
   'intervene',
   'command',
-  'overview',
-  'board',
-  'goals',
-  'agents',
-  'ops',
-  'trpg',
+  'lab',
 ]

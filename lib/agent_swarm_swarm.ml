@@ -326,8 +326,7 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
               } in
               let agent =
                 Agent.create ~net ~config ~tools:all_tools
-                  ~options:{ Agent.default_options with
-                             provider = Some spec.provider } ()
+                  ~provider:spec.provider ()
               in
               Agent.run ~sw:inner_sw agent goal
             )

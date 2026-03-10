@@ -97,6 +97,7 @@ let metadata name =
   | "masc_vote_create" | "masc_vote_cast" | "masc_vote_status" | "masc_votes" ->
       hidden_active
         "Low-usage room vote utility hidden from the default tool list; prefer decision.*, masc_consensus_*, or masc_debate_* for primary coordination workflows."
+  | "masc_swarm_live_run" -> default_metadata
   | _ when String.starts_with ~prefix:"masc_swarm_" name ->
       deprecated
         "Swarm public tools are deprecated. Use Command Plane V2 dispatch, detachment, and policy tools instead."

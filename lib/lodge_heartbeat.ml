@@ -863,9 +863,19 @@ let load_agents_from_neo4j () =
                  try
                    let node = Yojson.Safe.Util.member "node" edge in
                    let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-                   let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
+                   let preferred_hours =
+                     try Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int)
+                     with Yojson.Safe.Util.Type_error (msg, _) | Failure msg ->
+                       Printf.eprintf "[heartbeat] preferred_hours parse: %s for agent %s\n%!" msg name;
+                       []
+                   in
                    let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
-                   let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
+                   let traits =
+                     try Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string)
+                     with Yojson.Safe.Util.Type_error (msg, _) | Failure msg ->
+                       Printf.eprintf "[heartbeat] traits parse: %s for agent %s\n%!" msg name;
+                       []
+                   in
                    let activity_level =
                      match Yojson.Safe.Util.(member "activityLevel" node) with
                      | `Null -> 0.5
@@ -873,7 +883,9 @@ let load_agents_from_neo4j () =
                    in
                    let interests =
                      try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
-                     with Yojson.Safe.Util.Type_error _ | Failure _ -> []
+                     with Yojson.Safe.Util.Type_error (msg, _) | Failure msg ->
+                       Printf.eprintf "[heartbeat] interests parse: %s for agent %s\n%!" msg name;
+                       []
                    in
                    let personality_hint =
                      match Yojson.Safe.Util.(member "personalityHint" node) with

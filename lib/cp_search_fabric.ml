@@ -179,10 +179,15 @@ let lookup_stats (store : stats_store) ~unit_id ~workload_profile ~stage =
            && String.equal entry.stage stage)
   in
   match exact_match with
-  | Some entry -> entry
+  | Some entry ->
+      if String.equal entry.workload_profile workload_profile then
+        entry
+      else
+        { entry with workload_profile; stage }
   | None -> (
       match legacy_match with
-      | Some entry -> entry
+      | Some entry ->
+          { entry with workload_profile; stage }
       | None ->
           {
             unit_id;

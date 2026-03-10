@@ -188,6 +188,31 @@ let test_stats_roundtrip () =
       check (float 0.01) "alpha" 2.0 stats.Search.alpha;
       check (float 0.01) "beta" 2.0 stats.Search.beta)
 
+let test_legacy_generic_stats_upgrade_to_coding_task () =
+  let legacy_store =
+    [
+      {
+        Search.unit_id = "squad-verify";
+        workload_profile = "generic";
+        stage = "verify";
+        alpha = 2.0;
+        beta = 1.0;
+        updated_at = "2026-03-08T00:00:00Z";
+      };
+    ]
+  in
+  let upgraded =
+    Search.record_success legacy_store ~unit_id:"squad-verify"
+      ~workload_profile:"coding_task" ~stage:"verify"
+  in
+  let stats =
+    Search.lookup_stats upgraded ~unit_id:"squad-verify"
+      ~workload_profile:"coding_task" ~stage:"verify"
+  in
+  check string "workload upgraded" "coding_task" stats.Search.workload_profile;
+  check (float 0.01) "alpha increments" 3.0 stats.Search.alpha;
+  check (float 0.01) "beta preserved" 1.0 stats.Search.beta
+
 let () =
   run "Cp_search_fabric"
     [
@@ -207,5 +232,10 @@ let () =
           test_case "rebalance requires margin" `Quick
             test_should_rebalance_requires_margin;
         ] );
-      ("stats", [ test_case "roundtrip" `Quick test_stats_roundtrip ]);
+      ( "stats",
+        [
+          test_case "roundtrip" `Quick test_stats_roundtrip;
+          test_case "legacy generic stats upgrade to coding_task" `Quick
+            test_legacy_generic_stats_upgrade_to_coding_task;
+        ] );
     ]

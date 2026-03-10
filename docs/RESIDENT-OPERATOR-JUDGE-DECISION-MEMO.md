@@ -167,11 +167,11 @@ The resident keeper must write durable `operator judgment` records with this min
   "judgment_id": "judg-...",
   "target_type": "room | team_session | operation | detachment | lane",
   "target_id": "string | null",
-  "surface": "mission | command.warroom | command.swarm | intervene",
+  "surface": "command.warroom | command.swarm | intervene",
   "status": "active | stale | superseded | error",
   "severity": "ok | watch | risk | bad | unclear",
   "summary": "human-facing judgment",
-  "confidence": 0.0,
+  "confidence": 0.85,
   "generated_at": "ISO-8601",
   "expires_at": "ISO-8601",
   "model_used": "provider:model",
@@ -220,6 +220,7 @@ This is not optional. A card without provenance should be treated as a design bu
 - Continue to show the LLM briefing.
 - Label it as `narrative`.
 - Do not let it override fresher command/intervene judgments.
+- If `Mission` later summarizes resident judgments, it should reference them secondarily rather than become a judgment target itself.
 
 ### Swarm / War Room
 
@@ -236,8 +237,9 @@ This is not optional. A card without provenance should be treated as a design bu
 
 Default policy:
 
-- `command.warroom` judgments: short TTL
-- `command.swarm` and `intervene` judgments: medium TTL
+- `command.warroom` judgments: 30-60s TTL
+- `command.swarm` judgments: 2-5m TTL
+- `intervene` judgments: 2-5m TTL
 - `mission` narrative can keep its existing cache, but must show age clearly
 
 ### Failure behavior
@@ -246,6 +248,14 @@ Default policy:
 - Fallback must set `fallback_used=true` and `provenance=fallback`.
 - If truth and judgment disagree, truth remains visible and judgment is marked as disagreement, not silent override.
 - Superseded judgments must remain queryable for audit, but not rendered as current.
+
+### Supersession rules
+
+- A newer judgment supersedes an older one only when `target_type`, `target_id`, and `surface` match.
+- `active` becomes `superseded` when a fresher successful judgment for the same target/surface is written.
+- `error` never supersedes `active`; it only records that a refresh attempt failed.
+- `stale` is time-based expiry, not semantic supersession.
+- UI renders only the freshest non-superseded judgment per target/surface.
 
 ## Why this should be a keeper, not Gardener
 

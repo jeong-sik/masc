@@ -75,7 +75,7 @@ export const commandPlaneError = signal<string | null>(null)
 export const commandPlaneDetailError = signal<string | null>(null)
 export const commandPlaneActionBusy = signal<string | null>(null)
 export const commandPlaneActionError = signal<string | null>(null)
-export const commandPlaneSurface = signal<CommandPlaneSurface>('operations')
+export const commandPlaneSurface = signal<CommandPlaneSurface>('warroom')
 export const commandPlaneHelp = signal<CommandPlaneHelpResponse | null>(null)
 export const commandPlaneHelpLoading = signal(false)
 export const commandPlaneHelpError = signal<string | null>(null)
@@ -92,7 +92,7 @@ export const commandPlaneChainFocusOperationId = signal<string | null>(null)
 let activeChainRunRequestId: string | null = null
 
 function surfaceNeedsDetail(surface: CommandPlaneSurface): boolean {
-  return surface !== 'summary' && surface !== 'swarm'
+  return surface !== 'summary' && surface !== 'swarm' && surface !== 'warroom'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1481,7 +1481,11 @@ export function toggleCommandPlaneKillSwitch(unitId: string, enabled: boolean): 
 registerCommandPlaneRefresh(() => {
   void refreshCommandPlaneCurrentSurface()
   void refreshCommandPlaneChainSummary()
-  if (commandPlaneSurface.value === 'swarm' || commandPlaneSwarm.value !== null) {
+  if (
+    commandPlaneSurface.value === 'swarm'
+    || commandPlaneSurface.value === 'warroom'
+    || commandPlaneSwarm.value !== null
+  ) {
     void refreshCommandPlaneSwarm()
   }
 })

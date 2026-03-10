@@ -1669,6 +1669,7 @@ export interface CommandPlaneSwarmResponse {
 }
 
 export type CommandPlaneSurface =
+  | 'warroom'
   | 'summary'
   | 'swarm'
   | 'operations'

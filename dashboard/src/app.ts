@@ -16,9 +16,6 @@ import {
   startPeriodicRefresh,
   stopPeriodicRefresh,
   dashboardLoading,
-  agents,
-  tasks,
-  keepers,
 } from './store'
 import { Mission } from './components/mission'
 import { Command } from './components/command'
@@ -31,7 +28,6 @@ import { Trpg } from './components/trpg'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
-import { PanelSemanticDetails, SurfaceSemanticIntro } from './components/common/semantic-layer'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionSnapshot } from './mission-store'
@@ -54,120 +50,19 @@ function ConnectionStatus() {
   `
 }
 
-function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string; currentSectionLabel: string }) {
-  const liveConnected = connected.value
-  return html`
-    <section class="rail-card">
-      <div class="rail-card-head">
-        <h3>Snapshot</h3>
-        <${PanelSemanticDetails} panelId="side_rail.snapshot" compact=${true} />
-        <span class="rail-section-chip ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? 'Live' : 'Offline'}</span>
-      </div>
-      <div class="rail-stat-grid">
-        <div class="rail-stat-card">
-          <span>Agents</span>
-          <strong>${agents.value.length}</strong>
-        </div>
-        <div class="rail-stat-card">
-          <span>Keepers</span>
-          <strong>${keepers.value.length}</strong>
-        </div>
-        <div class="rail-stat-card">
-          <span>Tasks</span>
-          <strong>${tasks.value.length}</strong>
-        </div>
-        <div class="rail-stat-card">
-          <span>Events</span>
-          <strong>${eventCount.value}</strong>
-        </div>
-      </div>
-      <div class="rail-snapshot-copy">
-        <span>Connection ${liveConnected ? 'healthy' : 'recovering'}</span>
-        <span>${currentSectionLabel} workspace active</span>
-      </div>
-      <div class="rail-inline-actions">
-        <button
-          class="rail-refresh-btn"
-          onClick=${() => {
-            refreshDashboard()
-            refreshDashboardSemantics()
-            if (currentTab === 'command') {
-              refreshCommandPlaneCurrentSurface()
-              refreshCommandPlaneChainSummary()
-              if (commandPlaneSurface.value === 'swarm') {
-                refreshCommandPlaneSwarm()
-              }
-            }
-            if (currentTab === 'mission' || currentTab === 'overview') {
-              refreshMissionSnapshot()
-            }
-            if (currentTab === 'intervene' || currentTab === 'ops') {
-              refreshOperatorSnapshot()
-              refreshOperatorRoomDigest()
-            }
-            if (currentTab === 'board') refreshBoard()
-            if (currentTab === 'trpg') refreshTrpg()
-            if (currentTab === 'goals') {
-              refreshGoals()
-              refreshMdal()
-            }
-          }}
-        >
-          Refresh Now
-        </button>
-        <button class="rail-secondary-btn" onClick=${() => navigate('intervene')}>
-          Open Intervene
-        </button>
-      </div>
-    </section>
-  `
-}
-
-function InterveneRailCard() {
+function InterveneRailBadge() {
   const snapshot = operatorSnapshot.value
   const pendingConfirms = snapshot?.pending_confirms.length ?? 0
-  const sessionCount = snapshot?.sessions.length ?? 0
-  const keeperCount = snapshot?.keepers.length ?? 0
+  if (pendingConfirms === 0) return null
   return html`
-    <section class="rail-card">
-      <div class="rail-card-head">
-        <h3>개입 바로가기</h3>
-        <${PanelSemanticDetails} panelId="side_rail.quick_actions" compact=${true} />
-        <span class="rail-section-chip ${pendingConfirms > 0 ? 'warn' : 'ok'}">${pendingConfirms > 0 ? '확인 필요' : '준비됨'}</span>
-      </div>
-      <div class="rail-snapshot-copy">
-        <span>구조화된 개입은 전용 화면에서 처리합니다</span>
-        <span>rail은 요약만, 실제 조작은 Intervene에서</span>
-      </div>
-      <div class="rail-stat-grid">
-        <div class="rail-stat-card">
-          <span>확인 대기</span>
-          <strong>${pendingConfirms}</strong>
-        </div>
-        <div class="rail-stat-card">
-          <span>세션</span>
-          <strong>${sessionCount}</strong>
-        </div>
-        <div class="rail-stat-card">
-          <span>keepers</span>
-          <strong>${keeperCount}</strong>
-        </div>
-      </div>
-      <div class="rail-inline-actions">
-        <button
-          class="rail-refresh-btn"
-          onClick=${() => {
-            refreshOperatorSnapshot()
-            refreshOperatorRoomDigest()
-          }}
-        >
-          개입 데이터 갱신
-        </button>
-        <button class="rail-secondary-btn" onClick=${() => navigate('intervene')}>
-          개입 열기
-        </button>
-      </div>
-    </section>
+    <button
+      class="rail-intervene-badge warn"
+      onClick=${() => navigate('intervene')}
+      title="확인 대기 ${pendingConfirms}건"
+    >
+      <span class="rail-badge-count">${pendingConfirms}</span>
+      <span class="rail-badge-label">확인 대기</span>
+    </button>
   `
 }
 
@@ -178,17 +73,14 @@ function SideRail() {
 
   return html`
     <aside class="dashboard-rail">
-      <${SurfaceSemanticIntro} surfaceId="side_rail" compact=${true} />
-      <section class="rail-card">
+      <section class="rail-card rail-card-compact">
         <div class="rail-card-head">
           <h3>Navigate</h3>
-          <${PanelSemanticDetails} panelId="side_rail.navigate" compact=${true} />
           ${currentSection ? html`<span class="rail-section-chip">${currentSection.label}</span>` : null}
         </div>
         ${DASHBOARD_NAV_SECTIONS.map(section => html`
           <div class="rail-nav-group" key=${section.id}>
             <div class="rail-group-label">${section.label}</div>
-            <div class="rail-group-copy">${section.description}</div>
             <div class="rail-tab-list">
               ${DASHBOARD_NAV_ITEMS
                 .filter(item => item.group === section.id)
@@ -196,26 +88,17 @@ function SideRail() {
                   <button
                     class="rail-tab-btn ${current === item.id ? 'active' : ''}"
                     onClick=${() => navigate(item.id)}
+                    title=${item.description}
                   >
                     <span class="rail-tab-icon">${item.icon}</span>
-                    <span class="rail-tab-copy">
-                      <strong>${item.label}</strong>
-                      <span>${item.description}</span>
-                    </span>
+                    <strong>${item.label}</strong>
                   </button>
                 `)}
             </div>
           </div>
         `)}
-        <div class="rail-view-note">
-          <div class="rail-view-note-label">Current focus</div>
-          <strong>${currentView?.label ?? current}</strong>
-          <p>${currentView?.description ?? 'Live operational view'}</p>
-        </div>
       </section>
-
-      <${SnapshotCard} currentTab=${current} currentSectionLabel=${currentSection?.label ?? 'Observe'} />
-      <${InterveneRailCard} />
+      <${InterveneRailBadge} />
     </aside>
   `
 }

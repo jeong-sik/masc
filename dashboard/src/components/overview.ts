@@ -30,7 +30,7 @@ const QUIET_AGENT_MS = 10 * 60 * 1000
 const STALE_AGENT_MS = 20 * 60 * 1000
 const HOT_KEEPER_RATIO = 0.8
 
-type OverviewSubView = 'triage' | 'dispatch'
+type OverviewSubView = 'triage' | 'dispatch' | 'execution'
 const overviewSubView = signal<OverviewSubView>('triage')
 
 interface OverviewAlertItem {
@@ -584,6 +584,13 @@ export function Overview() {
 
   const subView = overviewSubView.value
 
+  // Hero tone: worst severity from intervention queue
+  const heroTone: MonitorTone =
+    interventionQueue.some(item => item.tone === 'bad') ? 'bad'
+    : interventionQueue.some(item => item.tone === 'warn') ? 'warn'
+    : 'ok'
+  const topAlert = interventionQueue[0] ?? null
+
   return html`
     <div class="overview-sub-tabs">
       <button
@@ -594,216 +601,225 @@ export function Overview() {
         class="sub-tab-btn ${subView === 'dispatch' ? 'active' : ''}"
         onClick=${() => { overviewSubView.value = 'dispatch' }}
       >Dispatch</button>
+      <button
+        class="sub-tab-btn ${subView === 'execution' ? 'active' : ''}"
+        onClick=${() => { overviewSubView.value = 'execution' }}
+      >Execution</button>
     </div>
 
     ${subView === 'dispatch'
       ? html`<${Execution} />`
-      : html`<div class="stats-grid">
+      : subView === 'execution'
+      ? html`<${Card} title="실행 현황" class="section">
+          <div class="monitor-list">
+            ${taskPulses.length === 0
+              ? html`<div class="empty-state">활성 또는 대기 작업이 없습니다</div>`
+              : taskPulses.slice(0, 10).map(row => html`
+                  <${WatchRow}
+                    key=${row.task.id}
+                    tone=${row.tone}
+                    title=${row.task.title}
+                    subtitle=${`${taskPriorityLabel(row.task.priority)} · ${row.note}`}
+                    meta=${[
+                      row.task.assignee ? `담당 ${row.task.assignee}` : '미할당',
+                      row.lastSignalAt ? `신호 ${new Date(row.lastSignalAt).toLocaleTimeString()}` : '신호 없음',
+                      row.task.updated_at ? `갱신 ${new Date(row.task.updated_at).toLocaleTimeString()}` : '타임스탬프 없음',
+                    ]}
+                    focus=${row.focus}
+                    onClick=${() => navigate('overview')}
+                  />
+                `)}
+          </div>
+        <//>`
+      : html`
+    <section class="overview-hero ${heroTone}">
+      ${heroTone === 'ok'
+        ? html`
+          <div class="overview-hero-body">
+            <strong class="overview-hero-title">운영 정상</strong>
+            <span class="overview-hero-detail">긴급 개입이 필요한 항목이 없습니다</span>
+          </div>`
+        : html`
+          <div class="overview-hero-body">
+            <span class="overview-hero-tone-badge">${heroTone === 'bad' ? 'Act now' : 'Watch'}</span>
+            <strong class="overview-hero-title">${topAlert?.title ?? '확인 필요'}</strong>
+            <span class="overview-hero-detail">${topAlert?.detail ?? ''}</span>
+            ${topAlert?.action
+              ? html`<button class="control-btn overview-hero-cta" onClick=${topAlert.action}>개입하기</button>`
+              : null}
+          </div>`}
+      <div class="overview-hero-health">
+        <span class="health-dot" style=${`color:${isLive ? '#4ade80' : '#fbbf24'}`} title=${`Live: ${isLive ? 'Online' : 'Retrying'} · ${eventCount.value} events`}>● Live</span>
+        <span class="health-dot" style=${`color:${toneColor(monitorTone(boardMonitor?.alert_level))}`} title=${`Board: ${monitorLevelLabel(boardMonitor?.alert_level)}`}>● Board</span>
+        <span class="health-dot" style=${`color:${toneColor(monitorTone(councilMonitor?.alert_level))}`} title=${`Council: ${monitorLevelLabel(councilMonitor?.alert_level)}`}>● Council</span>
+        <span class="health-dot" style=${`color:${toneColor(roomTone)}`} title=${`Runtime: ${status?.paused ? 'Paused' : 'Stable'}`}>● Runtime</span>
+        <span class="health-uptime">Uptime ${formatUptime(status?.uptime_seconds ?? 0)}</span>
+      </div>
+    </section>
+
+    <div class="stats-grid">
       <${StatCard}
-        label="Room State 방 상태"
+        label="방 상태"
         value=${status?.paused ? 'Paused' : 'Running'}
         color=${toneColor(roomTone)}
         caption=${status?.room ?? status?.project ?? 'default room'}
       />
       <${StatCard}
-        label="Urgent Queue 긴급 대기"
-        value=${urgentReady.length}
-        color=${urgentReady.length > 0 ? '#fb7185' : '#4ade80'}
-        caption="P1/P2 우선순위 대기 작업"
-      />
-      <${StatCard}
-        label="Active Work 진행 중"
+        label="진행 중"
         value=${byStatus.inProgress.length}
         color="#fbbf24"
         caption="할당됨 + 진행 중인 작업"
       />
       <${StatCard}
-        label="Dispatchable 배치 가능"
-        value=${dispatchableAgents.length}
-        color="#22d3ee"
-        caption="부하 없는 대기 에이전트"
-      />
-      <${StatCard}
-        label="Keeper Pressure 키퍼 부하"
-        value=${keeperAlerts.length}
-        color=${keeperAlerts.length > 0 ? '#fbbf24' : '#4ade80'}
-        caption="오래되거나 컨텍스트 과부하 키퍼"
-      />
-      <${StatCard}
-        label="Owner Gaps 담당자 공백"
-        value=${ownerGapCount}
-        color=${ownerGapCount > 0 ? '#fb7185' : '#4ade80'}
-        caption="활성 담당자 없는 작업"
+        label="긴급 대기"
+        value=${urgentReady.length}
+        color=${urgentReady.length > 0 ? '#fb7185' : '#4ade80'}
+        caption="P1/P2 우선순위 대기 작업"
       />
     </div>
 
-    <${Card} title="Room Health" class="section">
-      <div class="health-strip">
-        <span class="health-dot" style=${`color:${isLive ? '#4ade80' : '#fbbf24'}`} title=${`Live Feed: ${isLive ? 'Online' : 'Retrying'} · ${eventCount.value} events`}>● Live</span>
-        <span class="health-dot" style=${`color:${toneColor(monitorTone(boardMonitor?.alert_level))}`} title=${`Board: ${monitorLevelLabel(boardMonitor?.alert_level)} · Freshness ${formatDuration(boardMonitor?.last_activity_age_s)}`}>● Board</span>
-        <span class="health-dot" style=${`color:${toneColor(monitorTone(councilMonitor?.alert_level))}`} title=${`Council: ${monitorLevelLabel(councilMonitor?.alert_level)} · ${councilMonitor?.sessions_without_quorum ?? 0} sessions without quorum`}>● Council</span>
-        <span class="health-dot" style=${`color:${toneColor(roomTone)}`} title=${`Runtime: ${status?.paused ? 'Paused' : 'Stable'}`}>● Runtime</span>
-        <span class="health-uptime">Uptime ${formatUptime(status?.uptime_seconds ?? 0)}</span>
+    <details class="overview-stats-extra">
+      <summary class="runtime-summary">추가 지표 (배치 가능, 키퍼 부하, 담당자 공백)</summary>
+      <div class="stats-grid" style="margin-top: 8px">
+        <${StatCard}
+          label="배치 가능"
+          value=${dispatchableAgents.length}
+          color="#22d3ee"
+          caption="부하 없는 대기 에이전트"
+        />
+        <${StatCard}
+          label="키퍼 부하"
+          value=${keeperAlerts.length}
+          color=${keeperAlerts.length > 0 ? '#fbbf24' : '#4ade80'}
+          caption="오래되거나 컨텍스트 과부하 키퍼"
+        />
+        <${StatCard}
+          label="담당자 공백"
+          value=${ownerGapCount}
+          color=${ownerGapCount > 0 ? '#fb7185' : '#4ade80'}
+          caption="활성 담당자 없는 작업"
+        />
       </div>
-      <details class="runtime-collapsible">
-        <summary class="runtime-summary">Sync and tempo details</summary>
-        <div class="overview-note-stack">
-          <div class="overview-inline-note">
-            ${status?.data_quality?.last_sync_at
-              ? html`Last sync <${TimeAgo} timestamp=${status.data_quality.last_sync_at} />`
-              : html`No sync metadata yet`}
-          </div>
-          <div class="overview-inline-note">
-            ${status?.tempo ? `Tempo ${status.tempo}` : 'Tempo unavailable'}${status?.tempo_interval_s != null ? ` · ${status.tempo_interval_s}s interval` : ''}
-          </div>
-          <div class="overview-inline-note">${lodgeSummary(status?.lodge)}</div>
-          ${status?.lodge?.last_skip_reason
-            ? html`<div class="overview-inline-note">Last Lodge skip: ${status.lodge.last_skip_reason}</div>`
-            : null}
-        </div>
-      </details>
-    <//>
+    </details>
 
-    <div class="overview-workbench">
-      <div class="overview-column">
-        <${Card} title="Intervention Queue 개입 대기열" class="section">
+    ${interventionQueue.length > 0
+      ? html`
+        <${Card} title="개입 대기열" class="section">
           <div class="monitor-alert-list">
-            ${interventionQueue.length === 0
-              ? html`<div class="empty-state">No immediate intervention required</div>`
-              : interventionQueue.map(item => html`<${AlertRow} key=${item.key} item=${item} />`)}
+            ${interventionQueue.map(item => html`<${AlertRow} key=${item.key} item=${item} />`)}
           </div>
-        <//>
+        <//>`
+      : null}
+
+    <details class="overview-section-collapsible" open=${dispatchableAgents.length > 0}>
+      <summary class="runtime-summary">배치 현황 (${dispatchableAgents.length})</summary>
+      <div class="monitor-list" style="margin-top: 8px">
+        ${dispatchableAgents.length === 0
+          ? html`<div class="empty-state">배치 가능한 에이전트가 없습니다</div>`
+          : dispatchableAgents.slice(0, 5).map(row => html`
+              <${WatchRow}
+                key=${row.agent.name}
+                tone=${row.tone}
+                title=${row.agent.name}
+                subtitle=${row.note}
+                meta=${[
+                  row.lastSignalAt ? `신호 ${new Date(row.lastSignalAt).toLocaleTimeString()}` : '신호 없음',
+                  row.agent.model ?? 'model n/a',
+                  row.agent.koreanName ?? 'room agent',
+                ]}
+                focus=${row.focus}
+                onClick=${() => openAgentDetail(row.agent.name)}
+              />
+            `)}
       </div>
+    </details>
 
-      <div class="overview-column">
-        <${Card} title="Dispatch Window 배치 현황" class="section">
-          <div class="monitor-list">
-            ${dispatchableAgents.length === 0
-              ? html`<div class="empty-state">No fully dispatchable agents right now</div>`
-              : dispatchableAgents.slice(0, 5).map(row => html`
-                  <${WatchRow}
-                    key=${row.agent.name}
-                    tone=${row.tone}
-                    title=${row.agent.name}
-                    subtitle=${row.note}
-                    meta=${[
-                      row.lastSignalAt ? `Signal ${new Date(row.lastSignalAt).toLocaleTimeString()}` : 'No recent signal',
-                      row.agent.model ?? 'model n/a',
-                      row.agent.koreanName ?? 'room agent',
-                    ]}
-                    focus=${row.focus}
-                    onClick=${() => openAgentDetail(row.agent.name)}
-                  />
-                `)}
-          </div>
-        <//>
-
-        <${Card} title="Agent Watch 에이전트 감시" class="section">
-          <div class="monitor-list">
-            ${agentDrift.length === 0
-              ? html`<div class="empty-state">No agent drift or stale load right now</div>`
-              : agentDrift.slice(0, 4).map(row => html`
-                  <button class="monitor-row ${row.tone}" onClick=${() => openAgentDetail(row.agent.name)}>
-                    <div class="monitor-row-header">
-                      <div class="monitor-row-title">
-                        <div class="monitor-name-line">
-                          <span class="monitor-title">${row.agent.name}</span>
-                          ${row.agent.koreanName ? html`<span class="monitor-sub">${row.agent.koreanName}</span>` : null}
-                        </div>
-                        <div class="monitor-note">${row.note}</div>
-                      </div>
-                      <${StatusBadge} status=${row.agent.status} />
-                      <span class="monitor-pill ${row.tone}">${row.dispatchable ? 'Ready' : row.drift ? 'Drift' : 'Watch'}</span>
+    <details class="overview-section-collapsible" open=${agentDrift.length > 0}>
+      <summary class="runtime-summary">에이전트 감시 (${agentDrift.length})</summary>
+      <div class="monitor-list" style="margin-top: 8px">
+        ${agentDrift.length === 0
+          ? html`<div class="empty-state">drift나 stale 에이전트가 없습니다</div>`
+          : agentDrift.slice(0, 4).map(row => html`
+              <button class="monitor-row ${row.tone}" onClick=${() => openAgentDetail(row.agent.name)}>
+                <div class="monitor-row-header">
+                  <div class="monitor-row-title">
+                    <div class="monitor-name-line">
+                      <span class="monitor-title">${row.agent.name}</span>
+                      ${row.agent.koreanName ? html`<span class="monitor-sub">${row.agent.koreanName}</span>` : null}
                     </div>
-                    <div class="monitor-meta">
-                      ${row.lastSignalAt ? html`<span>Signal <${TimeAgo} timestamp=${row.lastSignalAt} /></span>` : html`<span>No recent signal</span>`}
-                      <span>${row.activeTaskCount > 0 ? `${row.activeTaskCount} active tasks` : 'No active tasks'}</span>
-                      ${row.agent.model ? html`<span>${row.agent.model}</span>` : null}
-                    </div>
-                    <div class="monitor-focus">${row.focus}</div>
-                  </button>
-                `)}
-          </div>
-        <//>
+                    <div class="monitor-note">${row.note}</div>
+                  </div>
+                  <${StatusBadge} status=${row.agent.status} />
+                  <span class="monitor-pill ${row.tone}">${row.dispatchable ? 'Ready' : row.drift ? 'Drift' : 'Watch'}</span>
+                </div>
+                <div class="monitor-meta">
+                  ${row.lastSignalAt ? html`<span>신호 <${TimeAgo} timestamp=${row.lastSignalAt} /></span>` : html`<span>신호 없음</span>`}
+                  <span>${row.activeTaskCount > 0 ? `${row.activeTaskCount}개 활성 작업` : '활성 작업 없음'}</span>
+                  ${row.agent.model ? html`<span>${row.agent.model}</span>` : null}
+                </div>
+                <div class="monitor-focus">${row.focus}</div>
+              </button>
+            `)}
       </div>
+    </details>
 
-      <div class="overview-column">
-        <${Card} title="Keeper Pressure 키퍼 부하" class="section">
-          <div class="monitor-list">
-            ${keeperAlerts.length === 0
-              ? html`<div class="empty-state">No keeper pressure signals right now</div>`
-              : keeperAlerts.slice(0, 4).map(row => html`
-                  <${WatchRow}
-                    key=${row.keeper.name}
-                    tone=${row.tone}
-                    title=${row.keeper.name}
-                    subtitle=${row.keeper.diagnostic?.health_state
-                      ? `${row.note} · ${row.keeper.diagnostic.health_state}`
-                      : row.note}
-                    meta=${[
-                      row.timestamp ? `Heartbeat ${new Date(row.timestamp).toLocaleTimeString()}` : 'No heartbeat',
-                      `Context ${typeof row.keeper.context_ratio === 'number' ? Math.round(row.keeper.context_ratio * 100) : 0}%`,
-                      row.keeper.model ? `Model ${row.keeper.model}` : 'model n/a',
-                      row.keeper.diagnostic
-                        ? `${quietReasonLabel(row.keeper.diagnostic.quiet_reason)} · next ${nextActionLabel(row.keeper.diagnostic.next_action_path)} · reply ${row.keeper.diagnostic.last_reply_status}`
-                        : 'Diagnostic unavailable',
-                    ]}
-                    focus=${row.focus}
-                    onClick=${() => openKeeperDetail(row.keeper)}
-                  />
-                `)}
-          </div>
-        <//>
-
-        <${Card} title="Runtime Notes 런타임 메모" class="section">
-          <details class="runtime-collapsible">
-            <summary class="runtime-summary">Runtime context (${5 + (status?.lodge?.last_skip_reason ? 1 : 0)} items)</summary>
-            <div class="overview-note-stack">
-              <div class="overview-inline-note">
-                Room ${status?.room ?? 'default'}${status?.cluster ? ` · Cluster ${status.cluster}` : ''}${status?.project ? ` · Project ${status.project}` : ''}
-              </div>
-              <div class="overview-inline-note">
-                ${status?.version ? `Version ${status.version}` : 'Version unavailable'} · Active agents ${activeAgents.value.length} · Total tasks ${taskList.length}
-              </div>
-              <div class="overview-inline-note">
-                ${perpetualStatus.value
-                  ? `Perpetual runtime ${perpetualStatus.value.running ? 'running' : 'stopped'}${perpetualStatus.value.goal ? ` · ${limitText(perpetualStatus.value.goal, 120)}` : ''}`
-                  : 'Perpetual runtime unavailable'}
-              </div>
-              <div class="overview-inline-note">
-                Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}${status?.lodge?.last_skip_reason ? ` · Skip ${status.lodge.last_skip_reason}` : ''}
-              </div>
-              <div class="overview-inline-note">
-                ${keeperList.length > 0
-                  ? `Hot keepers: ${keeperAlerts.length} · Highest context ${formatTokens(Math.max(...keeperList.map(keeper => keeper.context_tokens ?? 0)))}`
-                  : 'No keepers registered'}
-              </div>
-            </div>
-          </details>
-        <//>
+    <details class="overview-section-collapsible" open=${keeperAlerts.length > 0}>
+      <summary class="runtime-summary">키퍼 부하 (${keeperAlerts.length})</summary>
+      <div class="monitor-list" style="margin-top: 8px">
+        ${keeperAlerts.length === 0
+          ? html`<div class="empty-state">키퍼 부하 신호가 없습니다</div>`
+          : keeperAlerts.slice(0, 4).map(row => html`
+              <${WatchRow}
+                key=${row.keeper.name}
+                tone=${row.tone}
+                title=${row.keeper.name}
+                subtitle=${row.keeper.diagnostic?.health_state
+                  ? `${row.note} · ${row.keeper.diagnostic.health_state}`
+                  : row.note}
+                meta=${[
+                  row.timestamp ? `Heartbeat ${new Date(row.timestamp).toLocaleTimeString()}` : 'Heartbeat 없음',
+                  `Context ${typeof row.keeper.context_ratio === 'number' ? Math.round(row.keeper.context_ratio * 100) : 0}%`,
+                  row.keeper.model ? `Model ${row.keeper.model}` : 'model n/a',
+                  row.keeper.diagnostic
+                    ? `${quietReasonLabel(row.keeper.diagnostic.quiet_reason)} · next ${nextActionLabel(row.keeper.diagnostic.next_action_path)} · reply ${row.keeper.diagnostic.last_reply_status}`
+                    : 'Diagnostic unavailable',
+                ]}
+                focus=${row.focus}
+                onClick=${() => openKeeperDetail(row.keeper)}
+              />
+            `)}
       </div>
-    </div>
+    </details>
 
-    <${Card} title="Execution Pulse" class="section">
-        <div class="monitor-list">
-          ${taskPulses.length === 0
-            ? html`<div class="empty-state">No active or ready tasks</div>`
-            : taskPulses.slice(0, 6).map(row => html`
-                <${WatchRow}
-                  key=${row.task.id}
-                  tone=${row.tone}
-                  title=${row.task.title}
-                  subtitle=${`${taskPriorityLabel(row.task.priority)} · ${row.note}`}
-                  meta=${[
-                    row.task.assignee ? `Owner ${row.task.assignee}` : 'Unassigned',
-                    row.lastSignalAt ? `Signal ${new Date(row.lastSignalAt).toLocaleTimeString()}` : 'No live signal',
-                    row.task.updated_at ? `Touched ${new Date(row.task.updated_at).toLocaleTimeString()}` : 'No task timestamp',
-                  ]}
-                  focus=${row.focus}
-                  onClick=${() => navigate('overview')}
-                />
-              `)}
+    <details class="overview-section-collapsible">
+      <summary class="runtime-summary">런타임 메모 (${5 + (status?.lodge?.last_skip_reason ? 1 : 0)} items)</summary>
+      <div class="overview-note-stack" style="margin-top: 8px">
+        <div class="overview-inline-note">
+          Room ${status?.room ?? 'default'}${status?.cluster ? ` · Cluster ${status.cluster}` : ''}${status?.project ? ` · Project ${status.project}` : ''}
         </div>
-    <//>`}
+        <div class="overview-inline-note">
+          ${status?.version ? `Version ${status.version}` : 'Version unavailable'} · Active agents ${activeAgents.value.length} · Total tasks ${taskList.length}
+        </div>
+        <div class="overview-inline-note">
+          ${perpetualStatus.value
+            ? `Perpetual runtime ${perpetualStatus.value.running ? 'running' : 'stopped'}${perpetualStatus.value.goal ? ` · ${limitText(perpetualStatus.value.goal, 120)}` : ''}`
+            : 'Perpetual runtime unavailable'}
+        </div>
+        <div class="overview-inline-note">
+          Lodge ${status?.lodge?.enabled ? 'enabled' : 'disabled'} · Last tick ${status?.lodge?.last_tick_ago ?? 'never'} · Self heartbeats ${status?.lodge?.active_self_heartbeats?.length ?? 0}${status?.lodge?.last_skip_reason ? ` · Skip ${status.lodge.last_skip_reason}` : ''}
+        </div>
+        <div class="overview-inline-note">
+          ${keeperList.length > 0
+            ? `Hot keepers: ${keeperAlerts.length} · Highest context ${formatTokens(Math.max(...keeperList.map(keeper => keeper.context_tokens ?? 0)))}`
+            : 'No keepers registered'}
+        </div>
+        <div class="overview-inline-note">
+          ${status?.data_quality?.last_sync_at
+            ? html`Last sync <${TimeAgo} timestamp=${status.data_quality.last_sync_at} />`
+            : 'No sync metadata yet'}
+          ${status?.tempo ? ` · Tempo ${status.tempo}` : ''}${status?.tempo_interval_s != null ? ` · ${status.tempo_interval_s}s interval` : ''}
+        </div>
+      </div>
+    </details>`}
   `
 }

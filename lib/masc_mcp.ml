@@ -154,6 +154,7 @@ module Mention = Mention
 module Hat = Hat
 module Heartbeat = Heartbeat
 module Guardian = Guardian
+module Sentinel = Sentinel
 module Mitosis = Mitosis
 module Mitosis_metrics = Mitosis_metrics
 module Generational_metrics = Generational_metrics

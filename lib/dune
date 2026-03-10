@@ -62,6 +62,7 @@
    hat
    heartbeat
    guardian
+   sentinel
    heartbeat_smart
    hebbian_eio
    http_server_eio

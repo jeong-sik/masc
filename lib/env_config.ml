@@ -635,6 +635,16 @@ module KeeperAlert = struct
     get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
 end
 
+module Sentinel = struct
+  let enabled = get_bool ~default:true "MASC_SENTINEL_ENABLED"
+  let heartbeat_interval_sec = get_float ~default:30.0 "MASC_SENTINEL_HEARTBEAT_SEC"
+  let board_patrol_interval_sec = get_float ~default:600.0 "MASC_SENTINEL_BOARD_PATROL_SEC"
+  let task_hygiene_interval_sec = get_float ~default:300.0 "MASC_SENTINEL_TASK_HYGIENE_SEC"
+  let keeper_health_interval_sec = get_float ~default:300.0 "MASC_SENTINEL_KEEPER_HEALTH_SEC"
+  let task_stuck_threshold_sec = get_float ~default:600.0 "MASC_SENTINEL_TASK_STUCK_SEC"
+  let task_stale_threshold_sec = get_float ~default:1800.0 "MASC_SENTINEL_TASK_STALE_SEC"
+end
+
 (** Print configuration summary for debugging *)
 let print_summary () =
   Printf.eprintf "[env_config] Zombie: threshold=%.0fs cleanup_interval=%.0fs\n%!"

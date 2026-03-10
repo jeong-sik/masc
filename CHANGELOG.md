@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Graphical Swarm Panel** — dashboard swarm visualizations (#623)
 
 ### Changed
+- Coding-task search brain set as CPv2 default (#658)
 - Operator digest now surfaces command-plane signals (#635)
 - Dashboard monitoring aligned with portable env defaults (#642)
 - Runtime LLM cascade helpers unified (#640)
@@ -31,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Eio.Mutex** around global network/clock refs prevents parallel crash (#652)
 - Keeper prompt and lodge heartbeat stabilized (#651)
 - `Unix.select` replaced with `Eio.Time.sleep` in token generation (#650)
+- Dashboard: navigation labels and descriptions normalized (#660)
 - Dashboard: Korean labels restored, bilingual UX, a11y polish (#648, #649, #632)
 - Dashboard: repeated `joinRoom()` on ControlDock remount prevented (#638)
 - Dashboard: captured identity for leaveRoom cleanup (#641)
@@ -39,12 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Protocol placeholders replaced with real implementations (#644)
 - Hot swarm lifecycle stabilized (#626)
 - Local64 mixed smoke stabilized (#625)
+- Railway deploy runtime contract hardened (#659)
 
 ### Security
 - Tracked launchd secrets removed (#636)
 - Credential exposure removed from public repo (#620)
 
 ### Testing
+- Hermetic contract harness CI gate added (#661)
 - ~545 vacuous assertions removed across 63 test files (#647)
 
 ## [2.77.0] - 2026-03-03

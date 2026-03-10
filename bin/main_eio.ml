@@ -39,6 +39,7 @@ module Sse = Masc_mcp.Sse
 module Safe_ops = Masc_mcp.Safe_ops
 module Context_manager = Masc_mcp.Context_manager
 module Llm_client = Masc_mcp.Llm_client
+module Provider_adapter = Masc_mcp.Provider_adapter
 module Tool_perpetual = Masc_mcp.Tool_perpetual
 module Tool_mdal = Masc_mcp.Tool_mdal
 module Tool_board = Masc_mcp.Tool_board
@@ -1558,20 +1559,8 @@ let split_csv_nonempty (raw : string) : string list =
   in
   List.rev out_rev
 
-let has_nonempty_env name =
-  match Sys.getenv_opt name with
-  | Some value -> String.trim value <> ""
-  | None -> false
-
 let trpg_default_fast_keeper_models () : string list =
-  let glm_available = has_nonempty_env "ZAI_API_KEY" in
-  let gemini_available = has_nonempty_env "GEMINI_API_KEY" in
-  match (glm_available, gemini_available) with
-  | true, true ->
-      [ "glm:glm-4.7"; "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
-  | true, false -> [ "glm:glm-4.7"; "ollama:glm-4.7-flash" ]
-  | false, true -> [ "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
-  | false, false -> [ "ollama:glm-4.7-flash" ]
+  Llm_client.default_execution_model_labels ()
 
 let trpg_keeper_models_override_csv () : string option =
   match Sys.getenv_opt "MASC_TRPG_KEEPER_MODELS" with
@@ -4928,7 +4917,12 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                  | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
                  | Ok specs ->
                      let primary =
-                       match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm
+                       match specs with
+                       | m0 :: _ -> m0
+                       | [] -> (
+                           match Llm_client.default_execution_model_spec () with
+                           | Ok model -> model
+                           | Error _ -> Llm_client.glm_cloud)
                      in
                      let base_dir = Tool_keeper.session_base_dir config in
                      let (_session, ctx_opt) =
@@ -9741,7 +9735,11 @@ let make_routes ~port ~host ~sw ~clock =
                  in
                  let model =
                    match json |> member "model" with
-                   | `String s -> s | _ -> "glm-4.7-flash:latest"
+                   | `String s -> s
+                   | _ -> (
+                       match Provider_adapter.default_model_label_result () with
+                       | Ok label -> label
+                       | Error _ -> "")
                  in
                  let personality_hint =
                    match json |> member "personalityHint" with
@@ -9766,6 +9764,9 @@ let make_routes ~port ~host ~sw ~clock =
                  else if preferred_hours = [] then
                    Http.Response.json ~status:`Bad_request
                      {|{"error":"at least one preferredHour"}|} reqd
+                 else if String.trim model = "" then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"model is required (or configure MASC_DEFAULT_CASCADE / MASC_DEFAULT_PROVIDER+MASC_DEFAULT_MODEL)"}|} reqd
                  else if activity_level < 0.1 || activity_level > 1.0 then
                    Http.Response.json ~status:`Bad_request
                      {|{"error":"activityLevel: 0.1-1.0"}|} reqd

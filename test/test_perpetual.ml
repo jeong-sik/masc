@@ -197,7 +197,7 @@ let test_llm_client () = group "LLM Client" (fun () ->
   assert_true "builtin:default_local_provider"
     (default_local.provider = Llm_client.Ollama);
   assert_equal "builtin:default_local_model_id"
-    Masc_mcp.Env_config.Ollama.default_model default_local.model_id;
+    "default-model" default_local.model_id;
 )
 
 (* ================================================================ *)

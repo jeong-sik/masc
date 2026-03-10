@@ -111,7 +111,7 @@ let cli_argv_of_agent_type (agent_type : string) : string list =
   | "claude" -> ["claude"; "-p"; "--allowedTools"; "mcp__masc__*"]
   | "gemini" -> ["gemini"; "--yolo"]
   | "codex" -> ["codex"; "exec"]
-  | "ollama" -> ["ollama"; "run"; Env_config.Ollama.default_model]
+  | "ollama" -> ["ollama"; "run"; Provider_adapter.explicit_ollama_model_id ()]
   | other -> [other]
 
 let run_cli_agent ~agent_type ~prompt =
@@ -143,11 +143,7 @@ let auto_responder_model_strings ~agent_type =
   | "gemini" ->
       [ "gemini:flash"; Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
   | "glm" -> [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
-  | "codex" | "ollama" | _ ->
-      [
-        Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-      ]
+  | "codex" | "ollama" | _ -> Llm_client.default_execution_model_labels ()
 
 let available_model_specs_for_agent_type ~agent_type =
   Llm_client.available_model_specs_of_strings

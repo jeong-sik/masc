@@ -455,7 +455,7 @@ let default_configs = [
   });
   ("ollama", {
     agent_name = "ollama";
-    command = Printf.sprintf "ollama run %s" Env_config.Ollama.default_model;
+    command = "ollama run";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = [];
@@ -507,6 +507,12 @@ let build_prompt_args agent_name prompt =
 let parse_command cmd =
   let parts = String.split_on_char ' ' cmd in
   List.filter (fun s -> String.length s > 0) parts
+
+let add_default_model_arg agent_name argv =
+  match Provider_adapter.resolve_direct_adapter agent_name with
+  | Some adapter when adapter.canonical_name = "ollama" -> (
+      argv @ [ Provider_adapter.explicit_ollama_model_id () ])
+  | _ -> argv
 
 type glm_spawn_success = {
   model_used: string;
@@ -910,7 +916,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
              })
   else
     (* Build command arguments outside the chdir critical section *)
-    let base_args = parse_command config.command in
+    let base_args = parse_command config.command |> add_default_model_arg agent_name in
     let prompt_args = build_prompt_args agent_name augmented_prompt in
     let cmd_args = base_args @ mcp_args @ prompt_args in
     let full_args = ["timeout"; string_of_int timeout] @ cmd_args in

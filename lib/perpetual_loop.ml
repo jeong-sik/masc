@@ -89,7 +89,13 @@ let default_config ~goal ~models ?verifier ?session_dir () =
   let me_root = Env_config.me_root () in
   let verifier_model = match verifier with
     | Some v -> v
-    | None -> Llm_client.ollama_lfm  (* Cheapest available *)
+    | None -> (
+        match Llm_client.default_verifier_model_spec () with
+        | Ok model -> model
+        | Error _ -> (
+            match models with
+            | model :: _ -> model
+            | [] -> Llm_client.glm_cloud))
   in
   let session_base = match session_dir with
     | Some d -> d

@@ -320,7 +320,7 @@ think → act → observe → verify → compact → heartbeat → loop (or hand
 ```
 # 에이전트 시작
 masc_perpetual_start(goal: "Monitor CI failures and fix them",
-                     models: ["ollama:glm-4.7-flash", "claude:opus"])
+                     models: ["glm:glm-4.7", "claude:opus"])
 
 # 상태 확인
 masc_perpetual_status()
@@ -340,12 +340,12 @@ MCP 서버 없이 독립 실행:
 # 기본 실행
 ./_build/default/bin/perpetual_cli.exe \
   --goal "Write a report on system health" \
-  --models "ollama:glm-4.7-flash"
+  --models "glm:glm-4.7"
 
 # 전체 옵션
 ./_build/default/bin/perpetual_cli.exe \
   --goal "Task description" \
-  --models "ollama:glm-4.7-flash,claude:opus" \
+  --models "glm:glm-4.7,claude:opus" \
   --verify-with "ollama:LFM2.5-1.2B-Instruct" \
   --heartbeat 30 \
   --max-idle 5 \
@@ -373,7 +373,7 @@ MCP 서버 없이 독립 실행:
 
 | Provider | 예시 | API |
 |----------|------|-----|
-| `ollama` | `ollama:glm-4.7-flash` | `http://127.0.0.1:11434/api/chat` |
+| `ollama` | `glm:glm-4.7` | `http://127.0.0.1:11434/api/chat` |
 | `claude` | `claude:opus` | Anthropic Messages API |
 | `gemini` | `gemini:pro` | Google AI GenerateContent |
 | `glm` | `glm:glm-4.7` | Z.ai ChatCompletions |
@@ -403,5 +403,5 @@ Context가 handoff threshold를 초과하면:
 DUNE_SOURCEROOT="$(pwd)" dune exec --root "$(pwd)" test/test_perpetual.exe
 
 # CLI 통합 테스트
-./_build/default/bin/perpetual_cli.exe --goal "Write a haiku" --models "ollama:glm-4.7-flash" --no-verify
+./_build/default/bin/perpetual_cli.exe --goal "Write a haiku" --models "glm:glm-4.7" --no-verify
 ```

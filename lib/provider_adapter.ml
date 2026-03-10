@@ -215,15 +215,62 @@ let resolve_cli_canonical_name label =
 
 let default_cli_agent_name () = "claude"
 
+let split_csv_nonempty raw =
+  raw
+  |> String.split_on_char ','
+  |> List.map String.trim
+  |> List.filter (fun s -> s <> "")
+
+let default_model_labels_result () =
+  match Sys.getenv_opt "MASC_DEFAULT_CASCADE" with
+  | Some raw ->
+      let labels = split_csv_nonempty raw in
+      if labels = [] then
+        Error "MASC_DEFAULT_CASCADE is set but empty"
+      else
+        Ok labels
+  | None -> (
+      match
+        (Sys.getenv_opt "MASC_DEFAULT_PROVIDER", Sys.getenv_opt "MASC_DEFAULT_MODEL")
+      with
+      | Some provider, Some model_id ->
+          let provider = String.trim provider in
+          let model_id = String.trim model_id in
+          if provider = "" || model_id = "" then
+            Error
+              "MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL must both be non-empty"
+          else
+            Ok [ provider ^ ":" ^ model_id ]
+      | Some _, None ->
+          Error
+            "MASC_DEFAULT_MODEL is required when MASC_DEFAULT_PROVIDER is set"
+      | None, Some _ ->
+          Error
+            "MASC_DEFAULT_PROVIDER is required when MASC_DEFAULT_MODEL is set"
+      | None, None ->
+          Error
+            "No default model configured; set MASC_DEFAULT_CASCADE or MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL")
+
+let default_model_label_result () =
+  match default_model_labels_result () with
+  | Ok (first :: _) -> Ok first
+  | Ok [] -> Error "No default model configured"
+  | Error _ as e -> e
+
 let default_local_model_label () =
-  let model_id =
-    match Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" with
-    | Some raw ->
-        let trimmed = String.trim raw in
-        if trimmed = "" then "glm-4.7-flash" else trimmed
-    | None -> "glm-4.7-flash"
-  in
-  "ollama:" ^ model_id
+  match default_model_label_result () with
+  | Ok label -> label
+  | Error msg -> invalid_arg msg
+
+let explicit_ollama_model_id () =
+  match Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then "glm-4.7-flash" else trimmed
+  | None -> "glm-4.7-flash"
+
+let explicit_ollama_model_label () =
+  "ollama:" ^ explicit_ollama_model_id ()
 
 let vertex_location () =
   match Sys.getenv_opt google_cloud_location_env with

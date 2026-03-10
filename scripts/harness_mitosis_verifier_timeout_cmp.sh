@@ -9,7 +9,7 @@ TIMEOUT_B="${TIMEOUT_B:-60}"
 MIN_JUDGES="${MIN_JUDGES:-3}"
 SAGA_TIMEOUT_SEC="${SAGA_TIMEOUT_SEC:-180}"
 PROFILE="${VERIFIER_PROFILE:-abc_neutral}"
-MODELS_JSON="${MODELS_JSON:-[\"gemini:gemini-2.5-flash\",\"ollama:glm-4.7-flash\",\"gemini:gemini-2.5-flash\"]}"
+MODELS_JSON="${MODELS_JSON:-[\"gemini:gemini-2.5-flash\",\"glm:glm-4.7\",\"gemini:gemini-2.5-flash\"]}"
 PASS_RATIO="${PASS_RATIO:-0.6666666666666666}"
 MIN_AGREEMENT="${MIN_AGREEMENT:-0.6666666666666666}"
 

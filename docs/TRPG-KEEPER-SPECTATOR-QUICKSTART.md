@@ -40,7 +40,7 @@ make viewer-serve
 1. 상단 `새 게임` 클릭
 2. `DM` 1명 선택
 3. 플레이어 keeper 선택 (권장 4명)
-4. `new-game-models` 확인 (예: `ollama:glm-4.7-flash`)
+4. `new-game-models` 확인 (예: `glm:glm-4.7`)
 5. `세션 시작` 클릭
 
 ### 3.4 관전 시작
@@ -54,7 +54,7 @@ make viewer-serve
 Viewer에서 직접 세션을 만들지 않고, 터미널에서 TRPG 세션 + keeper 배치를 먼저 만든다.
 
 ```bash
-KEEPER_MODELS="ollama:glm-4.7-flash" \
+KEEPER_MODELS="glm:glm-4.7" \
 RUN_ROUND=1 \
 ROUNDS=3 \
 scripts/run_trpg_grimland_smoke.sh

@@ -5412,7 +5412,11 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
     | Some L1_Reactive -> None
     | Some level ->
         let primary = match specs with p :: _ -> p | [] -> Llm_client.default_local_model_spec () in
-        let verify_model = Llm_client.ollama_lfm in
+        let verify_model =
+          match Llm_client.default_verifier_model_spec () with
+          | Ok model -> model
+          | Error _ -> primary
+        in
         let keeper_context =
           Printf.sprintf "keeper=%s autonomy=%s turns=%d cost=$%.4f"
             meta.name (Keeper_autonomy.autonomy_level_to_string level)

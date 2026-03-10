@@ -182,6 +182,18 @@ let sanitize_message_utf8 (m : message) : message =
 let sanitize_messages_utf8 (msgs : message list) : message list =
   List.map sanitize_message_utf8 msgs
 
+let env_present name =
+  match Sys.getenv_opt name with
+  | Some value -> String.trim value <> ""
+  | None -> false
+
+let nonempty_env name =
+  match Sys.getenv_opt name with
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
 (* ================================================================ *)
 (* Built-in Model Specs                                             *)
 (* ================================================================ *)
@@ -1245,10 +1257,60 @@ let model_spec_of_string s =
                "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, llama, claude, gemini, glm, openrouter, mlx, custom)"
                s provider)
 
-let default_local_model_spec () =
-  match model_spec_of_string (Provider_adapter.default_local_model_label ()) with
-  | Ok spec -> spec
-  | Error _ -> ollama_glm
+let configured_default_model_label () =
+  match Provider_adapter.default_model_label_result () with
+  | Ok label -> Some label
+  | Error _ -> None
+
+let configured_default_verifier_model_label () =
+  match nonempty_env "MASC_DEFAULT_VERIFIER_MODEL" with
+  | Some label -> Some label
+  | None -> configured_default_model_label ()
+
+let gemini_direct_available () =
+  match Provider_adapter.resolve_gemini_direct_auth () with
+  | Provider_adapter.Gemini_api_key
+  | Provider_adapter.Gemini_vertex_adc _ -> true
+  | Provider_adapter.Gemini_auth_missing _ -> false
+
+let dedupe_keep_order items =
+  let seen = Hashtbl.create (List.length items) in
+  List.filter
+    (fun item ->
+      if Hashtbl.mem seen item then
+        false
+      else (
+        Hashtbl.add seen item ();
+        true))
+    items
+
+let default_execution_model_labels () =
+  dedupe_keep_order
+    (List.filter_map
+       Fun.id
+       [
+         configured_default_model_label ();
+         if env_present "ZAI_API_KEY" then Some "glm:glm-4.7" else None;
+         if gemini_direct_available () then Some "gemini:gemini-2.5-pro" else None;
+         if env_present "ANTHROPIC_API_KEY" then
+           Some "claude:claude-sonnet-4-5-20250929"
+         else None;
+         if env_present "OPENAI_API_KEY" then Some "openai:gpt-5" else None;
+       ])
+
+let default_verifier_model_labels () =
+  dedupe_keep_order
+    (List.filter_map
+       Fun.id
+       [
+         configured_default_verifier_model_label ();
+         if env_present "ZAI_API_KEY" then Some "glm:glm-4.7" else None;
+         if gemini_direct_available () then Some "gemini:gemini-2.5-flash" else None;
+         if env_present "ANTHROPIC_API_KEY" then
+           Some "claude:claude-sonnet-4-5-20250929"
+         else None;
+         if env_present "OPENAI_API_KEY" then Some "openai:gpt-5" else None;
+       ])
 
 let available_model_specs_of_strings model_strs =
   model_strs
@@ -1268,6 +1330,35 @@ let available_model_specs_of_strings model_strs =
                    None)
                  else Some spec
              | None -> Some spec))
+
+let first_available_model_spec labels =
+  match available_model_specs_of_strings labels with
+  | spec :: _ -> Ok spec
+  | [] ->
+      Error
+        "No default model available. Set MASC_DEFAULT_MODEL / MASC_DEFAULT_VERIFIER_MODEL, \
+         configure a supported provider credential (ZAI_API_KEY, GEMINI_API_KEY, \
+         GOOGLE_CLOUD_PROJECT, ANTHROPIC_API_KEY, OPENAI_API_KEY), or pass a model explicitly."
+
+let default_execution_model_spec () =
+  first_available_model_spec (default_execution_model_labels ())
+
+let default_verifier_model_spec () =
+  first_available_model_spec (default_verifier_model_labels ())
+
+let default_local_model_spec () =
+  match configured_default_model_label () with
+  | Some label -> (
+      match model_spec_of_string label with
+      | Ok spec -> spec
+      | Error _ -> (
+          match default_execution_model_spec () with
+          | Ok spec -> spec
+          | Error _ -> glm_cloud))
+  | None -> (
+      match default_execution_model_spec () with
+      | Ok spec -> spec
+      | Error _ -> glm_cloud)
 
 let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec ?ollama_timeout_sec
     ?(accept = fun _ -> true) ~model_specs ~max_tokens ~prompt () =

@@ -240,12 +240,12 @@ module Spawn = struct
     int_of_float (get_float ~default:60.0 "MASC_SPAWN_GRACE_PERIOD_SEC")
 end
 
-(** {1 Ollama Configuration} *)
+(** {1 Local Runtime Compatibility Configuration} *)
 
 module Ollama = struct
-  (** Default model — always resident in VRAM via launchd preload *)
+  (** Default local runtime model — mirrors the centralized default model. *)
   let default_model =
-    get_string ~default:"glm-4.7-flash" "OLLAMA_DEFAULT_MODEL"
+    get_string ~default:"default-model" "MASC_DEFAULT_MODEL"
 end
 
 (** {1 llama.cpp Server Configuration} *)

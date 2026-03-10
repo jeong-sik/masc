@@ -317,12 +317,9 @@ let test_eio_default_dispatch_uses_shared_cascade () =
     (file_contains_pattern "lib/room_walph_eio.ml" "Llm_client.run_prompt_cascade");
   check bool "legacy direct dispatch removed" false
     (file_contains_pattern "lib/room_walph_eio.ml" "Llm_direct.dispatch");
-  check bool "shared pool starts with ollama" true
+  check bool "shared pool uses centralized defaults" true
     (file_contains_pattern "lib/room_walph_eio.ml"
-       {|Printf.sprintf "ollama:%s" Env_config.Ollama.default_model|});
-  check bool "shared pool falls back to glm" true
-    (file_contains_pattern "lib/room_walph_eio.ml"
-       {|Printf.sprintf "glm:%s" Env_config.Llm.default_model|})
+       {|Llm_client.default_execution_model_labels ()|})
 
 (* ============================================
    Test Registration

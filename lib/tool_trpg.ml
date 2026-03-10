@@ -7878,7 +7878,10 @@ let handle_round_run ctx args : result =
             let tier1_model =
               match Llm_client.model_spec_of_string tier1_str with
               | Ok m -> m
-              | Error _ -> Llm_client.ollama_lfm
+              | Error _ -> (
+                  match Llm_client.default_verifier_model_spec () with
+                  | Ok model -> model
+                  | Error _ -> Llm_client.glm_cloud)
             in
             let tier2_model =
               match Sys.getenv_opt "TRPG_HARNESS_TIER2_MODEL" with

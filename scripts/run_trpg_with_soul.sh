@@ -26,7 +26,7 @@ $DM_SOUL
 $WORLD_INFO
 
 Task: Manage room '$ROOM_ID'." 
-  --models "ollama:glm-4.7-flash" 
+  --models "glm:glm-4.7"
   --heartbeat_sec 10 > logs/dm_soul.log 2>&1 &
 
 # 2. Summon Aragorn
@@ -41,7 +41,7 @@ $ARAGORN_SOUL
 $WORLD_INFO
 
 Task: Play in room '$ROOM_ID' as 'aragorn-1'." 
-  --models "ollama:glm-4.7-flash" 
+  --models "glm:glm-4.7"
   --heartbeat_sec 10 > logs/aragorn_soul.log 2>&1 &
 
 echo "✅ Souls infused. The society is alive."

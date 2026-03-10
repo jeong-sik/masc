@@ -4,9 +4,9 @@
     Useful for testing and standalone deployment.
 
     Usage:
-      ./perpetual_cli --goal "Task description" --models "ollama:glm-4.7-flash"
+      ./perpetual_cli --goal "Task description" --models "glm:glm-4.7,gemini:gemini-2.5-pro"
       ./perpetual_cli --status
-      ./perpetual_cli --goal "Count to 10" --models "ollama:glm-4.7-flash" --no-verify
+      ./perpetual_cli --goal "Count to 10" --models "glm:glm-4.7" --no-verify
 
     @since 2.61.0 *)
 
@@ -98,7 +98,7 @@ Options:\n\
   --goal GOAL           Goal for the agent\n\
   --models M1,M2,...    Model cascade (provider:model format)\n\
   --no-verify           Disable action verification\n\
-  --verify-with MODEL   Verifier model (default: ollama:LFM2.5-1.2B-Instruct)\n\
+  --verify-with MODEL   Verifier model (default: provider-aware auto selection)\n\
   --heartbeat SECS      Heartbeat interval (default: 30)\n\
   --max-idle N          Max idle turns (default: 5)\n\
   --max-context N       Override max context tokens\n\
@@ -147,15 +147,19 @@ let () =
     exit 1
   end;
 
-  let verifier = match args.verifier_str with
-    | Some s -> (match Llm_client.model_spec_of_string s with
-      | Ok m -> m
-      | Error _ -> Llm_client.ollama_lfm)
-    | None -> Llm_client.ollama_lfm
+  let verifier =
+    match args.verifier_str with
+    | Some s -> (
+        match Llm_client.model_spec_of_string s with
+        | Ok m -> Some m
+        | Error e ->
+            eprintf "Bad verifier spec '%s': %s\n%!" s e;
+            None)
+    | None -> None
   in
 
   let config = Perpetual_loop.default_config ~goal:args.goal ~models
-    ~verifier () in
+    ?verifier () in
   let config = { config with
     feedback_enabled = args.verify;
     heartbeat_interval_s = args.heartbeat;
@@ -171,7 +175,7 @@ let () =
     (List.map (fun (m : Llm_client.model_spec) ->
       sprintf "%s:%s" (Llm_client.string_of_provider m.provider) m.model_id
     ) models));
-  eprintf "Verify: %b (model: %s)\n%!" args.verify verifier.model_id;
+  eprintf "Verify: %b (model: %s)\n%!" args.verify config.verifier_model.model_id;
   eprintf "Thresholds: compact=%.0f%%, handoff=%.0f%%\n%!"
     (args.compact_at *. 100.0) (args.handoff_at *. 100.0);
   eprintf "---\n%!";

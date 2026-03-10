@@ -19,7 +19,7 @@ let schemas : Types.tool_schema list = [
 The agent will think → act → observe → verify in a loop, compacting context as needed \
 and handing off to successor agents when context fills up. \
 Requires: goal (what to accomplish), models (LLM cascade in priority order). \
-Example models: 'gemini:gemini-3-flash-preview', 'ollama:glm-4.7-flash', 'claude:opus', 'glm:glm-4.7'.";
+Example models: 'gemini:gemini-3-flash-preview', 'claude:opus', 'glm:glm-4.7', 'openrouter:openai/gpt-4o-mini'.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -31,7 +31,7 @@ Example models: 'gemini:gemini-3-flash-preview', 'ollama:glm-4.7-flash', 'claude
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "LLM model cascade in priority order. \
-Format: 'provider:model_id'. Examples: 'gemini:gemini-3-flash-preview', 'ollama:glm-4.7-flash', 'claude:opus', 'glm:glm-4.7'");
+Format: 'provider:model_id'. Examples: 'gemini:gemini-3-flash-preview', 'claude:opus', 'glm:glm-4.7', 'openrouter:openai/gpt-4o-mini'");
         ]);
         ("verify", `Assoc [
           ("type", `String "boolean");

@@ -194,11 +194,8 @@ let set_bool_arg args key value =
   | _ ->
       `Assoc [ (key, `Bool value) ]
 
-let default_verifier_models = [
-  "ollama:glm-4.7-flash";
-  "ollama:glm-4.7-flash";
-  "ollama:glm-4.7-flash";
-]
+let default_verifier_models =
+  Llm_client.default_verifier_model_labels ()
 
 let default_verifier_perspectives = [
   "A: continuity archivist (value-neutral)";

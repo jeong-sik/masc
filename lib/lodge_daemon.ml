@@ -63,7 +63,10 @@ let default_config = {
   heartbeat_interval_s = 30.0;
   reflection_interval_s = 3600.0;  (* 1 hour *)
   ollama_url = "http://127.0.0.1:11434";
-  ollama_model = "glm-4.7-flash:latest";  (* 128k context *)
+  ollama_model =
+    (match Sys.getenv_opt "MASC_DEFAULT_MODEL" with
+     | Some value when String.trim value <> "" -> String.trim value
+     | _ -> "default-model");
   neo4j_enabled = true;
 }
 
@@ -86,8 +89,10 @@ let load_config () =
     reflection_interval_s = get_env_float "MASC_LODGE_REFLECTION_INTERVAL" 3600.0;
     ollama_url = Option.value ~default:"http://127.0.0.1:11434"
       (Sys.getenv_opt "OLLAMA_URL");
-    (* Always use long-context model - no env override needed *)
-    ollama_model = "glm-4.7-flash:latest";
+    ollama_model =
+      (match Sys.getenv_opt "MASC_DEFAULT_MODEL" with
+       | Some value when String.trim value <> "" -> String.trim value
+       | _ -> default_config.ollama_model);
     neo4j_enabled = get_env_bool "MASC_LODGE_NEO4J_ENABLED" true;
   }
 

@@ -1,0 +1,481 @@
+/* ── Council ──────────────────────────────────────────────── */
+.council-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.council-error {
+  margin-top: 10px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f7b6b6;
+  font-size: 12px;
+}
+
+.council-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.council-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.council-row {
+  width: 100%;
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
+}
+
+button.council-row {
+  cursor: pointer;
+}
+
+button.council-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+button.council-row.selected {
+  border-color: rgba(71, 184, 255, 0.5);
+  background: rgba(71, 184, 255, 0.14);
+}
+
+.council-row-main {
+  min-width: 0;
+}
+
+.council-topic {
+  color: #e8f0ff;
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.council-sub {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #8ea9d6;
+  font-size: 11px;
+}
+
+.council-state {
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11px;
+  text-transform: lowercase;
+  border: 1px solid rgba(138, 163, 211, 0.25);
+  background: rgba(255, 255, 255, 0.06);
+  color: #b7cbee;
+}
+
+.council-state.open {
+  border-color: rgba(74, 222, 128, 0.48);
+  background: rgba(74, 222, 128, 0.15);
+  color: #b4f5ca;
+}
+
+.council-state.closed,
+.council-state.vote {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.14);
+  color: #ffe09b;
+}
+
+.council-detail {
+  white-space: pre-wrap;
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.28);
+  color: #d3e3ff;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-family: "IBM Plex Mono", "Fira Code", monospace;
+}
+
+/* ── Agent Detail Overlay ─────────────────────────────────── */
+.agent-detail-overlay {
+  /* Uses --z-overlay-agent */
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay-agent, 3030);
+  background: rgba(0, 0, 0, 0.64);
+  backdrop-filter: blur(4px);
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.agent-detail-modal {
+  width: min(1020px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(138, 163, 211, 0.3);
+  background: rgba(16, 25, 45, 0.95);
+  padding: 18px;
+}
+
+.agent-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.agent-detail-header h2 {
+  color: #eaf1ff;
+  font-size: 20px;
+  margin: 0;
+}
+
+.agent-detail-sub {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #9ab3de;
+  font-size: 12px;
+}
+
+.agent-detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.agent-detail-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-detail-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 10px;
+}
+
+.agent-detail-task-title {
+  flex: 1;
+  color: #d7e7ff;
+}
+
+.agent-activity-list {
+  max-height: 210px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-activity-line {
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 10px;
+  font-family: "IBM Plex Mono", "Fira Code", monospace;
+  font-size: 12px;
+  color: #c8daf7;
+  line-height: 1.4;
+}
+
+.agent-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-history-row {
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 10px;
+}
+
+.agent-history-head {
+  margin-bottom: 8px;
+}
+
+.agent-history-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #cfe0ff;
+  font-family: "IBM Plex Mono", "Fira Code", monospace;
+}
+
+.agent-mention-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+/* ── Keeper Rich Card (Overview) ──────────────────────────── */
+.keeper-ctx-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.keeper-ctx-bar {
+  flex: 1;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.keeper-ctx-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.keeper-ctx-fill.ctx-bar-ok { background: #4ade80; }
+.keeper-ctx-fill.ctx-bar-warn { background: #fbbf24; }
+.keeper-ctx-fill.ctx-bar-bad { background: #ef4444; }
+.keeper-ctx-label {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 52px;
+  text-align: right;
+}
+.keeper-ctx-label.ctx-bar-ok { color: #4ade80; }
+.keeper-ctx-label.ctx-bar-warn { color: #fbbf24; }
+.keeper-ctx-label.ctx-bar-bad { color: #ef4444; }
+
+.keeper-metrics-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  color: #9db4de;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.keeper-metric-hl { color: #fbbf24; }
+.keeper-metric-compact { color: #a78bfa; }
+
+.keeper-heartbeat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #8ca8d5;
+}
+.keeper-heartbeat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4ade80;
+  flex-shrink: 0;
+}
+.keeper-heartbeat-dot.pulse {
+  animation: keeperPulse 2s ease-in-out infinite;
+}
+@keyframes keeperPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(74,222,128,0.4); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(74,222,128,0); }
+}
+
+.keeper-trait-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.keeper-trait-chip {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(138, 163, 211, 0.15);
+  color: #b7cbee;
+  white-space: nowrap;
+}
+.keeper-trait-more {
+  font-size: 10px;
+  padding: 1px 6px;
+  color: #8ca8d5;
+}
+
+.keeper-note-preview {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #7f9ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+}
+
+.pill.pill-skill {
+  background: rgba(167, 139, 250, 0.15);
+  color: #a78bfa;
+  border-color: rgba(167, 139, 250, 0.3);
+}
+
+/* ── Metric explain tooltip ──────────────────────────────── */
+.metric-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 4px;
+  border-radius: 50%;
+  border: 1px solid rgba(138, 163, 211, 0.4);
+  color: #9fb8e1;
+  font-size: 10px;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}
+
+.metric-tip-pop {
+  /* Uses --z-overlay-tooltip */
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  min-width: 250px;
+  max-width: 320px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(138, 163, 211, 0.35);
+  background: rgba(10, 18, 34, 0.96);
+  color: #d3e3ff;
+  display: none;
+  z-index: var(--z-overlay-tooltip, 3080);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.metric-tip-pop strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #e8f2ff;
+}
+
+.metric-tip-pop span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.metric-tip-pop code {
+  color: #9ad9ff;
+}
+
+.metric-tip:hover .metric-tip-pop,
+.metric-tip:focus .metric-tip-pop,
+.metric-tip:focus-within .metric-tip-pop {
+  display: block;
+}
+
+/* ── Core keeper card (6 key metrics) ───────────────────── */
+.keeper-core-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.keeper-core-item {
+  border: 1px solid rgba(138, 163, 211, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 9px;
+  min-height: 52px;
+}
+
+.keeper-core-item-span {
+  grid-column: 1 / -1;
+}
+
+.keeper-core-label {
+  display: inline-flex;
+  align-items: center;
+  color: #8ea9d6;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.keeper-core-value {
+  display: block;
+  margin-top: 5px;
+  font-size: 13px;
+  color: #e8f0ff;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.keeper-core-text {
+  font-weight: 500;
+  color: #cfe0ff;
+}
+
+/* ── Keeper detail tabs ──────────────────────────────────── */
+.keeper-detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.keeper-detail-tab {
+  border: 1px solid rgba(138, 163, 211, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #9fb8e1;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.keeper-detail-tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.keeper-detail-tab.active {
+  border-color: rgba(71, 184, 255, 0.48);
+  background: rgba(71, 184, 255, 0.15);
+  color: #c9ebff;
+}
+

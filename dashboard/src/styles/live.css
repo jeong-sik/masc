@@ -1,0 +1,382 @@
+/* ── Pulse Strip ────────────────────────────────────── */
+
+.pulse-strip {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  overflow-x: auto;
+  align-items: center;
+  min-height: 56px;
+}
+
+.pulse-strip-empty {
+  color: rgba(255,255,255,0.3);
+  font-size: 0.8rem;
+}
+
+.pulse-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1.5px solid transparent;
+  background: rgba(255,255,255,0.04);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  min-width: 56px;
+  flex-shrink: 0;
+}
+
+.pulse-bubble:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.pulse-working {
+  border-color: rgba(74,222,128,0.35);
+  animation: livePulse 2s ease-in-out infinite;
+}
+
+.pulse-idle {
+  border-color: rgba(255,255,255,0.1);
+}
+
+.pulse-stale {
+  border-color: rgba(239,68,68,0.3);
+  opacity: 0.6;
+}
+
+.pulse-selected {
+  border-color: rgba(96,165,250,0.6);
+  background: rgba(96,165,250,0.08);
+  box-shadow: 0 0 8px rgba(96,165,250,0.15);
+}
+
+.pulse-emoji {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.pulse-name {
+  font-size: 0.65rem;
+  color: rgba(255,255,255,0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 64px;
+}
+
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.25); }
+  50% { box-shadow: 0 0 8px 2px rgba(74,222,128,0.12); }
+}
+
+/* ── Live Panels (Activity + Focus) ──────────────────── */
+
+.live-panels {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 16px;
+  min-height: 480px;
+}
+
+/* ── Activity Stream ─────────────────────────────────── */
+
+.activity-stream {
+  display: grid;
+  gap: 10px;
+  grid-template-rows: auto auto 1fr;
+  min-height: 0;
+}
+
+.activity-stream-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.activity-stream-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.activity-count {
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.4);
+}
+
+.activity-filter-bar {
+  display: flex;
+  gap: 6px;
+}
+
+.activity-filter-btn {
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: transparent;
+  color: rgba(255,255,255,0.4);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.activity-filter-btn.active {
+  color: rgba(255,255,255,0.85);
+  border-color: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.06);
+}
+
+.activity-filter-btn.live-event-broadcast.active { border-color: rgba(96,165,250,0.4); color: #60a5fa; }
+.activity-filter-btn.live-event-task.active { border-color: rgba(74,222,128,0.4); color: #4ade80; }
+.activity-filter-btn.live-event-keeper.active { border-color: rgba(168,85,247,0.4); color: #a855f7; }
+.activity-filter-btn.live-event-system.active { border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7); }
+
+.activity-stream-list {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  overflow-y: auto;
+  max-height: 520px;
+  padding-right: 4px;
+}
+
+.activity-empty {
+  padding: 24px;
+  text-align: center;
+  color: rgba(255,255,255,0.25);
+  font-size: 0.8rem;
+}
+
+.activity-item {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  border-left: 3px solid transparent;
+  transition: background 0.15s;
+}
+
+.activity-item:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.activity-item.live-event-broadcast { border-left-color: rgba(96,165,250,0.5); }
+.activity-item.live-event-task { border-left-color: rgba(74,222,128,0.5); }
+.activity-item.live-event-keeper { border-left-color: rgba(168,85,247,0.5); }
+.activity-item.live-event-system { border-left-color: rgba(255,255,255,0.15); }
+
+.activity-item-new {
+  animation: activityFadeIn 0.3s ease-out;
+}
+
+@keyframes activityFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.activity-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.activity-kind-chip {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.activity-kind-chip.live-event-broadcast { background: rgba(96,165,250,0.15); color: #60a5fa; }
+.activity-kind-chip.live-event-task { background: rgba(74,222,128,0.15); color: #4ade80; }
+.activity-kind-chip.live-event-keeper { background: rgba(168,85,247,0.15); color: #a855f7; }
+.activity-kind-chip.live-event-system { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); }
+
+.activity-agent {
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.6);
+  font-weight: 500;
+}
+
+.activity-time {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.3);
+  margin-left: auto;
+}
+
+.activity-item-text {
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.7);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* ── Focus Sidebar ───────────────────────────────────── */
+
+.focus-sidebar {
+  display: grid;
+  gap: 10px;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+
+.focus-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.focus-sidebar-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.focus-count {
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.4);
+}
+
+.focus-sidebar-list {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  overflow-y: auto;
+  max-height: 560px;
+  padding-right: 4px;
+}
+
+.focus-empty {
+  padding: 24px;
+  text-align: center;
+  color: rgba(255,255,255,0.25);
+  font-size: 0.8rem;
+}
+
+.focus-agent-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  display: grid;
+  gap: 4px;
+}
+
+.focus-agent-card:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.1);
+}
+
+.focus-agent-selected {
+  border-color: rgba(96,165,250,0.4);
+  background: rgba(96,165,250,0.05);
+}
+
+.focus-agent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.focus-agent-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.focus-emoji {
+  font-size: 0.95rem;
+}
+
+.focus-pressure-badge {
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.focus-pressure-calm {
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.45);
+}
+
+.focus-pressure-normal {
+  background: rgba(74,222,128,0.1);
+  color: #4ade80;
+}
+
+.focus-pressure-hot {
+  background: rgba(251,191,36,0.12);
+  color: #fbbf24;
+}
+
+.focus-task-count {
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 0.6rem;
+}
+
+.focus-current-task {
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.55);
+  padding: 3px 8px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.05);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focus-agent-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.focus-activity-text {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.focus-no-activity {
+  font-style: italic;
+  color: rgba(255,255,255,0.25);
+}
+
+.focus-agent-footer .time-ago {
+  font-size: 0.68rem;
+  color: rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+
+/* ── Live Responsive ─────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .live-panels {
+    grid-template-columns: 1fr;
+  }
+}

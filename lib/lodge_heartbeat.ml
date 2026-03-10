@@ -1255,7 +1255,14 @@ let load_lodge_agents_full () =
                  let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
                  let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with exn -> Printf.eprintf "[heartbeat] preferred_hours parse: %s\n%!" (Printexc.to_string exn); []) in
                  let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
-                 let model = (match member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
+                 let model =
+                   (match member "model" node with
+                    | `String s -> s
+                    | _ -> (
+                        match Sys.getenv_opt "MASC_DEFAULT_MODEL" with
+                        | Some value when String.trim value <> "" -> String.trim value
+                        | _ -> "default-model"))
+                 in
                  let status = (match member "status" node with `String s -> s | _ -> "active") in
                  let primary_value = (match member "primaryValue" node with `String s -> Some s | _ -> None) in
                  let personality_hint = (match member "personalityHint" node with `String s -> Some s | _ -> None) in

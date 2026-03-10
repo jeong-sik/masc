@@ -111,17 +111,7 @@ let cli_argv_of_agent_type (agent_type : string) : string list =
   | "claude" -> ["claude"; "-p"; "--allowedTools"; "mcp__masc__*"]
   | "gemini" -> ["gemini"; "--yolo"]
   | "codex" -> ["codex"; "exec"]
-  | "ollama" -> (
-      match Provider_adapter.default_model_label_result () with
-      | Ok label ->
-          let model =
-            match String.index_opt label ':' with
-            | Some idx when idx + 1 < String.length label ->
-                String.sub label (idx + 1) (String.length label - idx - 1)
-            | _ -> label
-          in
-          ["ollama"; "run"; model]
-      | Error msg -> invalid_arg msg)
+  | "ollama" -> ["ollama"; "run"; Provider_adapter.explicit_ollama_model_id ()]
   | other -> [other]
 
 let run_cli_agent ~agent_type ~prompt =

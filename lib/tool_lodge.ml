@@ -434,7 +434,15 @@ let glm_direct ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system pro
   with exn -> Error (Printf.sprintf "❌ LLM: GLM exception [%s]" (Printexc.to_string exn))
 
 (** Call local ollama API — DEPRECATED, use glm_direct instead *)
-let ollama_generate ~net:_ ?(model = Env_config.Ollama.default_model) ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
+let ollama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
+  let model =
+    match model with
+    | Some value -> value
+    | None -> (
+        match Sys.getenv_opt "MASC_DEFAULT_MODEL" with
+        | Some value when String.trim value <> "" -> String.trim value
+        | _ -> "default-model")
+  in
   try
     let body = Yojson.Safe.to_string (`Assoc [
       ("model", `String model);
@@ -729,6 +737,11 @@ type agent_config = {
   interests: string list;
 }
 
+let default_model () =
+  match Sys.getenv_opt "MASC_DEFAULT_MODEL" with
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> "default-model"
+
 let builtin_core_agent_configs () =
   [
     {
@@ -740,7 +753,7 @@ let builtin_core_agent_configs () =
       status = "active";
       emoji = "🌙";
       korean_name = "몽상가";
-      model = "glm-4.7-flash:latest";
+      model = default_model ();
       interests = [ "vision"; "future"; "art"; "possibility" ];
     };
     {
@@ -752,7 +765,7 @@ let builtin_core_agent_configs () =
       status = "active";
       emoji = "🧐";
       korean_name = "회의론자";
-      model = "glm-4.7-flash:latest";
+      model = default_model ();
       interests = [ "evidence"; "risk"; "debugging"; "correctness" ];
     };
     {
@@ -764,7 +777,7 @@ let builtin_core_agent_configs () =
       status = "active";
       emoji = "📚";
       korean_name = "역사가";
-      model = "glm-4.7-flash:latest";
+      model = default_model ();
       interests = [ "context"; "history"; "continuity"; "archives" ];
     };
     {
@@ -776,7 +789,7 @@ let builtin_core_agent_configs () =
       status = "active";
       emoji = "🔧";
       korean_name = "실용주의자";
-      model = "glm-4.7-flash:latest";
+      model = default_model ();
       interests = [ "operations"; "execution"; "delivery"; "practicality" ];
     };
     {
@@ -788,7 +801,7 @@ let builtin_core_agent_configs () =
       status = "active";
       emoji = "🕸️";
       korean_name = "연결자";
-      model = "glm-4.7-flash:latest";
+      model = default_model ();
       interests = [ "relationships"; "coordination"; "bridges"; "community" ];
     };
   ]
@@ -841,7 +854,7 @@ let agent_config_of_yojson (json : Yojson.Safe.t) : agent_config option =
       status = json |> member "status" |> to_string_option |> Option.value ~default:"active";
       emoji = json |> member "emoji" |> to_string_option |> Option.value ~default:"🤖";
       korean_name = json |> member "korean_name" |> to_string_option |> Option.value ~default:"";
-      model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-4.7-flash:latest";
+      model = json |> member "model" |> to_string_option |> Option.value ~default:(default_model ());
       interests = json |> member "interests" |> to_list |> List.filter_map to_string_option;
     }
   with Yojson.Safe.Util.Type_error (_, _) -> None
@@ -953,7 +966,7 @@ let load_agents_config () =
                      status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
                      emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
                      korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
-                     model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
+                     model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:(default_model ());
                      interests;
                    } in
                    Mutex.lock agent_cache_mu;
@@ -1166,7 +1179,7 @@ let validate_agent_name name =
 let get_agent_model name =
   match get_cached_agent name with
   | Some c -> c.model
-  | None -> "glm-4.7-flash:latest"
+  | None -> default_model ()
 
 (** Get prompt from Neo4j cache *)
 let get_agent_prompt name =

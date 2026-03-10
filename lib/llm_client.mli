@@ -202,7 +202,7 @@ val run_prompt_cascade :
     deterministic tests. *)
 val cache_key_of_request : completion_request -> string
 
-(** Parse model spec from string like "ollama:glm-4.7-flash:latest",
+(** Parse model spec from string like "glm:glm-4.7",
     "claude:opus", or "gemini:gemini-3-flash-preview".
     Splits at the first ':' only, so model IDs may contain additional ':'. *)
 val model_spec_of_string : string -> (model_spec, string) result

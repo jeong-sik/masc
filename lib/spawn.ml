@@ -310,16 +310,7 @@ let parse_command cmd =
 let add_default_model_arg agent_name argv =
   match Provider_adapter.resolve_direct_adapter agent_name with
   | Some adapter when adapter.canonical_name = "ollama" -> (
-      match Provider_adapter.default_model_label_result () with
-      | Ok label ->
-          let model =
-            match String.index_opt label ':' with
-            | Some idx when idx + 1 < String.length label ->
-                String.sub label (idx + 1) (String.length label - idx - 1)
-            | _ -> label
-          in
-          argv @ [ model ]
-      | Error msg -> invalid_arg msg)
+      argv @ [ Provider_adapter.explicit_ollama_model_id () ])
   | _ -> argv
 
 (** Spawn an agent with a prompt/task (direct execution, no shell) *)

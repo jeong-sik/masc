@@ -65,9 +65,10 @@ let test_default_cli_agent_name () =
     (Adapter.default_cli_agent_name ())
 
 let test_default_local_model_label () =
-  with_env "OLLAMA_DEFAULT_MODEL" (Some "my-local-model") (fun () ->
-      check string "default local label" "ollama:my-local-model"
-        (Adapter.default_local_model_label ()))
+  with_env "MASC_DEFAULT_PROVIDER" (Some "glm") (fun () ->
+      with_env "MASC_DEFAULT_MODEL" (Some "glm-4.7") (fun () ->
+          check string "default local label" "glm:glm-4.7"
+            (Adapter.default_local_model_label ())))
 
 let () =
   run "Provider Adapter"

@@ -38,6 +38,7 @@ module Sse = Masc_mcp.Sse
 module Safe_ops = Masc_mcp.Safe_ops
 module Context_manager = Masc_mcp.Context_manager
 module Llm_client = Masc_mcp.Llm_client
+module Provider_adapter = Masc_mcp.Provider_adapter
 module Tool_perpetual = Masc_mcp.Tool_perpetual
 module Tool_mdal = Masc_mcp.Tool_mdal
 module Tool_board = Masc_mcp.Tool_board
@@ -9724,16 +9725,9 @@ let make_routes ~port ~host ~sw ~clock =
                    match json |> member "model" with
                    | `String s -> s
                    | _ -> (
-                       match Sys.getenv_opt "MASC_DEFAULT_CASCADE" with
-                       | Some raw ->
-                           (match raw |> String.split_on_char ',' |> List.map String.trim |> List.filter (fun s -> s <> "") with
-                            | first :: _ -> first
-                            | [] -> "default-model")
-                       | None -> (
-                           match (Sys.getenv_opt "MASC_DEFAULT_PROVIDER", Sys.getenv_opt "MASC_DEFAULT_MODEL") with
-                           | Some provider, Some model_id when String.trim provider <> "" && String.trim model_id <> "" ->
-                               String.trim provider ^ ":" ^ String.trim model_id
-                           | _ -> "default-model"))
+                       match Provider_adapter.default_model_label_result () with
+                       | Ok label -> label
+                       | Error _ -> "")
                  in
                  let personality_hint =
                    match json |> member "personalityHint" with
@@ -9758,6 +9752,9 @@ let make_routes ~port ~host ~sw ~clock =
                  else if preferred_hours = [] then
                    Http.Response.json ~status:`Bad_request
                      {|{"error":"at least one preferredHour"}|} reqd
+                 else if String.trim model = "" then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"model is required (or configure MASC_DEFAULT_CASCADE / MASC_DEFAULT_PROVIDER+MASC_DEFAULT_MODEL)"}|} reqd
                  else if activity_level < 0.1 || activity_level > 1.0 then
                    Http.Response.json ~status:`Bad_request
                      {|{"error":"activityLevel: 0.1-1.0"}|} reqd

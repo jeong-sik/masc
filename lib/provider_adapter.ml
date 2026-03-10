@@ -247,14 +247,9 @@ let default_model_labels_result () =
       | None, Some _ ->
           Error
             "MASC_DEFAULT_PROVIDER is required when MASC_DEFAULT_MODEL is set"
-      | None, None -> (
-          match Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" with
-          | Some raw when String.trim raw <> "" ->
-              Error
-                "OLLAMA_DEFAULT_MODEL is deprecated for default selection; set MASC_DEFAULT_CASCADE or MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL"
-          | _ ->
-              Error
-                "No default model configured; set MASC_DEFAULT_CASCADE or MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL"))
+      | None, None ->
+          Error
+            "No default model configured; set MASC_DEFAULT_CASCADE or MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL")
 
 let default_model_label_result () =
   match default_model_labels_result () with
@@ -266,6 +261,16 @@ let default_local_model_label () =
   match default_model_label_result () with
   | Ok label -> label
   | Error msg -> invalid_arg msg
+
+let explicit_ollama_model_id () =
+  match Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then "glm-4.7-flash" else trimmed
+  | None -> "glm-4.7-flash"
+
+let explicit_ollama_model_label () =
+  "ollama:" ^ explicit_ollama_model_id ()
 
 let vertex_location () =
   match Sys.getenv_opt google_cloud_location_env with

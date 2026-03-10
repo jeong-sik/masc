@@ -54,7 +54,8 @@ let get_neo4j_password () =
 let close_connection () =
   match global_state.conn with
   | Some (Box conn) ->
-      (try Bolt.close conn with exn -> let _ = exn in ());
+      (try Bolt.close conn with exn ->
+        Printf.eprintf "[WARN] [neo4j] close failed: %s\n%!" (Printexc.to_string exn));
       global_state.conn <- None
   | None -> ()
 

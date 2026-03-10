@@ -1296,6 +1296,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     sw = Some sw;
     proc_mgr = state.Mcp_server.proc_mgr;
     worker_runner = None;
+    clock = Some clock;
   } in
   let simple_ctx_perpetual : Tool_perpetual.context = {
     agent_name;

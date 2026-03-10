@@ -269,7 +269,8 @@ module Request = struct
     let stop () =
       if not !stopped then begin
         stopped := true;
-        (try Httpun.Body.Reader.close body with exn -> ignore exn)
+        (try Httpun.Body.Reader.close body with exn ->
+          Printf.eprintf "[WARN] [http] body close failed: %s\n%!" (Printexc.to_string exn))
       end
     in
     (match content_length with

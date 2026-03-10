@@ -1250,10 +1250,10 @@ let load_lodge_agents_full () =
                  let name = member "name" node |> to_string in
                  let emoji = (match member "emoji" node with `String s -> s | _ -> "🤖") in
                  let korean_name = (match member "koreanName" node with `String s -> Some s | _ -> None) in
-                 let traits = (try member "traits" node |> to_list |> List.map to_string with exn -> Printf.eprintf "[heartbeat] traits parse: %s\n%!" (Printexc.to_string exn); []) in
-                 let interests = (try member "interests" node |> to_list |> List.map to_string with exn -> Printf.eprintf "[heartbeat] interests parse: %s\n%!" (Printexc.to_string exn); []) in
-                 let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
-                 let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with exn -> Printf.eprintf "[heartbeat] preferred_hours parse: %s\n%!" (Printexc.to_string exn); []) in
+                 let traits = Safe_ops.json_string_list "traits" node in
+                 let interests = Safe_ops.json_string_list "interests" node in
+                 let activity_level = Safe_ops.json_float ~default:0.5 "activityLevel" node in
+                 let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with Type_error _ -> []) in
                  let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
                  let model =
                    (match member "model" node with

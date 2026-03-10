@@ -146,9 +146,10 @@ let write_json path json =
   let oc = open_out tmp_path in
   let closed = ref false in
   Common.protect ~module_name:"debate" ~finally_label:"finalizer" ~finally:(fun () ->
-    if not !closed then (try close_out oc with exn -> ignore (Printexc.to_string exn));
+    if not !closed then (try close_out oc with exn ->
+      Printf.eprintf "[WARN] [debate] close_out failed: %s\n%!" (Printexc.to_string exn));
     if Sys.file_exists tmp_path then
-      try Sys.remove tmp_path with exn -> ignore (Printexc.to_string exn)
+      Safe_ops.remove_file_logged ~context:"debate" tmp_path
   ) (fun () ->
     output_string oc content;
     flush oc;

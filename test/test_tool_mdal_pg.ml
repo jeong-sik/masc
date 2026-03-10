@@ -55,7 +55,7 @@ let strict_runner () : Mdal_worker.runner =
     }
 
 let make_ctx ?config ?worker_runner () : Tool_mdal.context =
-  { agent_name = "tester"; config; sw = None; proc_mgr = None; worker_runner }
+  { agent_name = "tester"; config; sw = None; proc_mgr = None; worker_runner; clock = None }
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in

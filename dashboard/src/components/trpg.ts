@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
+import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
@@ -1286,7 +1287,7 @@ function ControlSafetyPanel({ state, nowMs }: { state: TrpgState; nowMs: number 
   const remains = controlRemainingSeconds(nowMs)
 
   return html`
-    <${Card} title="조작 안전 잠금" style="margin-bottom:16px;">
+    <${Card} title="조작 안전 잠금" style="margin-bottom:16px;" semanticId="trpg.control">
       <div class="trpg-control-lock ${locked ? 'locked' : 'unlocked'}">
         <div class="trpg-control-lock-title">
           ${locked ? '잠금 상태: 관전 전용' : '잠금 해제됨'}
@@ -1338,7 +1339,7 @@ function OverviewView({ state }: { state: TrpgState }) {
   return html`
     <div class="trpg-layout">
       <div>
-        <${Card} title="관전 가이드">
+        <${Card} title="관전 가이드" semanticId="trpg.overview">
           <div class="trpg-guide-box">
             <div class="trpg-guide-title">권장 운영 순서</div>
             <div class="trpg-guide-text">1) Overview에서 상태 파악 → 2) Timeline에서 원인 확인 → 3) 필요 시 Control에서 최소 개입</div>
@@ -1352,7 +1353,7 @@ function OverviewView({ state }: { state: TrpgState }) {
 
         ${state.map
           ? html`
-            <${Card} title="맵" style="margin-top:16px;">
+            <${Card} title="맵" style="margin-top:16px;" semanticId="trpg.overview">
               <${AsciiMap} mapStr=${state.map} />
             <//>
           `
@@ -1360,11 +1361,11 @@ function OverviewView({ state }: { state: TrpgState }) {
       </div>
 
       <div class="trpg-sidebar">
-        <${Card} title="현재 라운드">
+        <${Card} title="현재 라운드" semanticId="trpg.overview">
           <${NextAction} state=${state} />
         <//>
 
-        <${Card} title="기여도" style="margin-top:16px;">
+        <${Card} title="기여도" style="margin-top:16px;" semanticId="trpg.overview">
           <${ContributionLedger} state=${state} />
         <//>
 
@@ -1401,11 +1402,11 @@ function TimelineView({ state }: { state: TrpgState }) {
       </div>
 
       <div class="trpg-sidebar">
-        <${Card} title="최근 라운드 결과">
+        <${Card} title="최근 라운드 결과" semanticId="trpg.timeline">
           <${RoundRunInsight} />
         <//>
 
-        <${Card} title="현재 라운드" style="margin-top:16px;">
+        <${Card} title="현재 라운드" style="margin-top:16px;" semanticId="trpg.timeline">
           <${NextAction} state=${state} />
         <//>
       </div>
@@ -1421,25 +1422,25 @@ function ControlView({ state, nowMs }: { state: TrpgState; nowMs: number }) {
       <${ControlSafetyPanel} state=${state} nowMs=${nowMs} />
       <div class="trpg-layout">
         <div>
-          <${Card} title="조작 패널">
+          <${Card} title="조작 패널" semanticId="trpg.control">
             <${ControlBox} state=${state} nowMs=${nowMs} />
           <//>
 
-          <${Card} title="Actor Spawn" style="margin-top:16px;">
+          <${Card} title="Actor Spawn" style="margin-top:16px;" semanticId="trpg.control">
             <${ActorSpawnPanel} state=${state} />
           <//>
 
-          <${Card} title="Mid-Join Gate" style="margin-top:16px;">
+          <${Card} title="Mid-Join Gate" style="margin-top:16px;" semanticId="trpg.control">
             <${JoinGatePanel} state=${state} nowMs=${nowMs} />
           <//>
 
-          <${Card} title="최근 라운드 결과" style="margin-top:16px;">
+          <${Card} title="최근 라운드 결과" style="margin-top:16px;" semanticId="trpg.control">
             <${RoundRunInsight} />
           <//>
         </div>
 
         <div class="trpg-sidebar">
-          <${Card} title="기여도" style="margin-top:0;">
+          <${Card} title="기여도" style="margin-top:0;" semanticId="trpg.control">
             <${ContributionLedger} state=${state} />
           <//>
 
@@ -1503,6 +1504,7 @@ export function Trpg() {
 
   return html`
     <div>
+      <${SurfaceSemanticIntro} surfaceId="trpg" />
       <div style="display:flex; gap:8px; align-items:center; justify-content:space-between; margin-bottom:8px;">
         <div style="font-size:11px; color:#8ea9d6;">
           room: ${trpgRoom.value || state.session?.room || '-'} · phase: ${state.current_round?.phase ?? state.session?.status ?? '-'}

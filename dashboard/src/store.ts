@@ -19,9 +19,13 @@ import type {
   Goal,
   MdalLoop,
   MdalIterationRecord,
+  DashboardSemanticsResponse,
+  DashboardSemanticSurface,
+  DashboardSemanticPanel,
+  DashboardSemanticSurfaceId,
 } from './types'
 import {
-  fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, fetchMdalLoops,
+  fetchDashboard, fetchDashboardSemantics, fetchBoard, fetchTrpgState, fetchGoals, fetchMdalLoops,
   fetchAgentsList, fetchTasksList, fetchMessagesList,
   type DashboardMode,
 } from './api'
@@ -70,6 +74,9 @@ export const dashboardLoading = signal(false)
 export const boardLoading = signal(false)
 export const trpgLoading = signal(false)
 export const mdalLoading = signal(false)
+export const dashboardSemantics = signal<DashboardSemanticsResponse | null>(null)
+export const dashboardSemanticsLoading = signal(false)
+export const dashboardSemanticsError = signal<string | null>(null)
 
 // --- Refresh timestamps ---
 
@@ -77,6 +84,7 @@ export const lastDashboardRefreshAt = signal<string | null>(null)
 export const lastBoardRefreshAt = signal<string | null>(null)
 export const lastGoalsRefreshAt = signal<string | null>(null)
 export const lastMdalRefreshAt = signal<string | null>(null)
+export const lastDashboardSemanticsRefreshAt = signal<string | null>(null)
 
 // --- Derived state ---
 
@@ -630,6 +638,36 @@ export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<vo
   } finally {
     dashboardLoading.value = false
   }
+}
+
+export async function refreshDashboardSemantics(): Promise<void> {
+  dashboardSemanticsLoading.value = true
+  dashboardSemanticsError.value = null
+  try {
+    const data = await fetchDashboardSemantics()
+    dashboardSemantics.value = data
+    lastDashboardSemanticsRefreshAt.value = new Date().toISOString()
+  } catch (err) {
+    dashboardSemanticsError.value =
+      err instanceof Error ? err.message : 'Failed to load dashboard semantics'
+  } finally {
+    dashboardSemanticsLoading.value = false
+  }
+}
+
+export function findDashboardSemanticSurface(
+  surfaceId: DashboardSemanticSurfaceId | string,
+): DashboardSemanticSurface | null {
+  return dashboardSemantics.value?.surfaces.find(surface => surface.id === surfaceId) ?? null
+}
+
+export function findDashboardSemanticPanel(panelId: string): DashboardSemanticPanel | null {
+  const surfaces = dashboardSemantics.value?.surfaces ?? []
+  for (const surface of surfaces) {
+    const panel = surface.panels.find(row => row.id === panelId)
+    if (panel) return panel
+  }
+  return null
 }
 
 // --- Selective refresh: individual resource fetchers with merge ---

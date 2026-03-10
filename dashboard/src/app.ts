@@ -7,6 +7,7 @@ import { route, initRouter, navigate } from './router'
 import { connected, eventCount, connectSSE, disconnectSSE } from './sse'
 import {
   refreshDashboard,
+  refreshDashboardSemantics,
   refreshBoard,
   refreshTrpg,
   refreshGoals,
@@ -30,6 +31,7 @@ import { Trpg } from './components/trpg'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
+import { PanelSemanticDetails, SurfaceSemanticIntro } from './components/common/semantic-layer'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionSnapshot } from './mission-store'
@@ -58,6 +60,7 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
     <section class="rail-card">
       <div class="rail-card-head">
         <h3>Snapshot</h3>
+        <${PanelSemanticDetails} panelId="side_rail.snapshot" compact=${true} />
         <span class="rail-section-chip ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? 'Live' : 'Offline'}</span>
       </div>
       <div class="rail-stat-grid">
@@ -87,6 +90,7 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
           class="rail-refresh-btn"
           onClick=${() => {
             refreshDashboard()
+            refreshDashboardSemantics()
             if (currentTab === 'command') {
               refreshCommandPlaneCurrentSurface()
               refreshCommandPlaneChainSummary()
@@ -128,6 +132,7 @@ function InterveneRailCard() {
     <section class="rail-card">
       <div class="rail-card-head">
         <h3>개입 바로가기</h3>
+        <${PanelSemanticDetails} panelId="side_rail.quick_actions" compact=${true} />
         <span class="rail-section-chip ${pendingConfirms > 0 ? 'warn' : 'ok'}">${pendingConfirms > 0 ? '확인 필요' : '준비됨'}</span>
       </div>
       <div class="rail-snapshot-copy">
@@ -173,9 +178,11 @@ function SideRail() {
 
   return html`
     <aside class="dashboard-rail">
+      <${SurfaceSemanticIntro} surfaceId="side_rail" compact=${true} />
       <section class="rail-card">
         <div class="rail-card-head">
           <h3>Navigate</h3>
+          <${PanelSemanticDetails} panelId="side_rail.navigate" compact=${true} />
           ${currentSection ? html`<span class="rail-section-chip">${currentSection.label}</span>` : null}
         </div>
         ${DASHBOARD_NAV_SECTIONS.map(section => html`
@@ -248,6 +255,7 @@ export function App() {
     // Connect SSE and start data fetching
     connectSSE()
     refreshDashboard()
+    refreshDashboardSemantics()
 
     // Setup SSE → store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()

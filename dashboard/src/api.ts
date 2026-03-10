@@ -21,6 +21,7 @@ import type {
   OperatorActionResult,
   OperatorDigest,
   OperatorSnapshot,
+  DashboardSemanticsResponse,
   CommandPlaneHelpResponse,
   CommandPlaneChainRunResponse,
   CommandPlaneChainSummary,
@@ -278,6 +279,10 @@ export type DashboardMode = 'compact' | 'full'
 
 export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<DashboardData> {
   return get(`/api/v1/dashboard?mode=${mode}`)
+}
+
+export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
+  return get('/api/v1/dashboard/semantics')
 }
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {

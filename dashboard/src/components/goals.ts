@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import { Card } from './common/card'
+import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import {
@@ -164,7 +165,7 @@ function HorizonGroup({ horizon, items }: { horizon: string; items: Goal[] }) {
   const sorted = [...items].sort((a, b) => b.priority - a.priority)
 
   return html`
-    <${Card} title="${horizonLabel(horizon)} Goals (${items.length})" class="section">
+    <${Card} title="${horizonLabel(horizon)} Goals (${items.length})" class="section" semanticId="goals.goal_pipeline">
       <div class="goal-list">
         ${sorted.map(g => html`<${GoalRow} key=${g.id} goal=${g} />`)}
       </div>
@@ -311,7 +312,7 @@ function KanbanCard({ task }: { task: Task }) {
 function TaskBacklog() {
   const { todo, inProgress, done } = tasksByStatus.value
   return html`
-    <${Card} title="Task Backlog" class="section">
+    <${Card} title="Task Backlog" class="section" semanticId="goals.task_backlog">
       <div class="kanban-board">
         <div class="kanban-column">
           <div class="kanban-header todo">
@@ -366,6 +367,7 @@ export function Goals() {
 
   return html`
     <div>
+      <${SurfaceSemanticIntro} surfaceId="goals" />
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-label">Active goals</div>
@@ -389,7 +391,7 @@ export function Goals() {
         </div>
       </div>
 
-      <${Card} title="Planning Surface" class="section">
+      <${Card} title="Planning Surface" class="section" semanticId="goals.planning_surface">
         <div class="planning-header">
           <div>
             <h2 class="planning-headline">Direction lives here. Goals define intent, MDAL shows whether iteration is moving the metric.</h2>
@@ -428,7 +430,7 @@ export function Goals() {
         </div>
       <//>
 
-      <${Card} title="Goal Pipeline" class="section">
+      <${Card} title="Goal Pipeline" class="section" semanticId="goals.goal_pipeline">
         <${GoalsSummary} />
         <${FilterBar} />
       <//>
@@ -443,7 +445,7 @@ export function Goals() {
               <${HorizonGroup} horizon="long" items=${grouped.long ?? []} />
             `}
 
-      <${Card} title="MDAL Loops" class="section">
+      <${Card} title="MDAL Loops" class="section" semanticId="goals.mdal_loops">
         ${mdalLoading.value && loops.length === 0
           ? html`<div class="loading-indicator">Loading MDAL loops...</div>`
           : loops.length === 0 && mdalState === 'error'

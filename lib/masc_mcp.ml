@@ -159,6 +159,7 @@ module Generational_metrics = Generational_metrics
 module Handoff_quality = Handoff_quality
 module Adaptive_thresholds = Adaptive_thresholds
 module Dashboard = Dashboard
+module Dashboard_semantics = Dashboard_semantics
 module Dashboard_mission = Dashboard_mission
 module Swarm_status = Swarm_status
 module Tempo = Tempo

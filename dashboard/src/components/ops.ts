@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { showToast } from './common/toast'
+import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
 import type { OperatorAttentionItem, OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
 import {
   confirmOperatorPendingAction,
@@ -441,9 +442,13 @@ export function Ops() {
 
   return html`
     <section class="ops-view">
+      <${SurfaceSemanticIntro} surfaceId="intervene" />
       <div class="ops-header card">
         <div>
-          <div class="card-title">Intervene</div>
+          <div class="card-title-row">
+            <div class="card-title">Intervene</div>
+            <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+          </div>
           <h2 class="ops-heading">room, session, keeper에 바로 손대는 개입 화면</h2>
           <p class="ops-subheading">
             읽는 화면이 아니라 행동하는 화면입니다. room, session, keeper를 나눠서 보고 바로 개입합니다.
@@ -478,6 +483,7 @@ export function Ops() {
       <section class="card">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">개입 우선순위</h2>
+          <${PanelSemanticDetails} panelId="intervene.priority_cards" compact=${true} />
           <p class="monitor-subheadline">지금 가장 먼저 손댈 대상이 room인지, session인지, keeper인지 먼저 좁힙니다.</p>
         </div>
         <div class="ops-priority-grid">
@@ -494,7 +500,10 @@ export function Ops() {
       <div class="ops-workbench">
         <div class="ops-column">
           <section class="card ops-panel ops-lane-panel">
-            <div class="card-title">Room 개입</div>
+            <div class="card-title-row">
+              <div class="card-title">Room 개입</div>
+              <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+            </div>
             <p class="ops-context-note">전체 room에 영향 주는 액션입니다. 방송, 정지/재개, 작업 주입을 여기서 처리합니다.</p>
 
             <div class="ops-stat-grid">
@@ -588,7 +597,10 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel">
-            <div class="card-title">추천 개입</div>
+            <div class="card-title-row">
+              <div class="card-title">추천 개입</div>
+              <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} />
+            </div>
             <p class="ops-context-note">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
             ${operatorDigestLoading.value && !roomDigest ? html`
               <div class="ops-empty">개입 추천을 불러오는 중입니다...</div>
@@ -611,7 +623,10 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel">
-            <div class="card-title">승인 대기</div>
+            <div class="card-title-row">
+              <div class="card-title">승인 대기</div>
+              <${PanelSemanticDetails} panelId="intervene.pending_confirmations" compact=${true} />
+            </div>
             <p class="ops-context-note">미리보기만 끝났고 아직 사람이 눌러줘야 하는 액션만 남깁니다.</p>
             ${pendingConfirms.length > 0 ? html`
               <div class="ops-confirmation-list">
@@ -636,7 +651,10 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel">
-            <div class="card-title">최근 Room 메시지</div>
+            <div class="card-title-row">
+              <div class="card-title">최근 Room 메시지</div>
+              <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} />
+            </div>
             <p class="ops-context-note">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
             ${roomFeed.length > 0 ? html`
               <div class="ops-feed-list">
@@ -656,7 +674,10 @@ export function Ops() {
 
         <div class="ops-column">
           <section class="card ops-panel ops-lane-panel">
-            <div class="card-title">Session 개입</div>
+            <div class="card-title-row">
+              <div class="card-title">Session 개입</div>
+              <${PanelSemanticDetails} panelId="intervene.session_queue" compact=${true} />
+            </div>
             <p class="ops-context-note">어떤 세션이 뜨거운지 고르고, 그 세션에만 노트, 작업, 중지를 적용합니다.</p>
 
             <div class="ops-entity-list">
@@ -681,7 +702,10 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel">
-            <div class="card-title">선택한 Session 요약</div>
+            <div class="card-title-row">
+              <div class="card-title">선택한 Session 요약</div>
+              <${PanelSemanticDetails} panelId="intervene.session_digest" compact=${true} />
+            </div>
             <p class="ops-context-note">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
             ${selectedSession && sessionDigest ? html`
               <div class="ops-log-list">
@@ -713,7 +737,10 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel ops-lane-panel">
-            <div class="card-title">선택한 Session 액션</div>
+            <div class="card-title-row">
+              <div class="card-title">선택한 Session 액션</div>
+              <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+            </div>
             <p class="ops-context-note">선택한 세션에만 메모, 작업, 체크포인트, 중지 요청을 보냅니다.</p>
 
             ${selectedSession ? html`
@@ -807,7 +834,10 @@ export function Ops() {
 
         <div class="ops-column">
           <section class="card ops-panel ops-lane-panel">
-            <div class="card-title">Keeper 개입</div>
+            <div class="card-title-row">
+              <div class="card-title">Keeper 개입</div>
+              <${PanelSemanticDetails} panelId="intervene.keeper_queue" compact=${true} />
+            </div>
             <p class="ops-context-note">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
 
             <div class="ops-entity-list">
@@ -832,7 +862,10 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel ops-lane-panel">
-            <div class="card-title">선택한 Keeper 액션</div>
+            <div class="card-title-row">
+              <div class="card-title">선택한 Keeper 액션</div>
+              <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+            </div>
             <p class="ops-context-note">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
 
             ${selectedKeeper ? html`
@@ -864,7 +897,10 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel">
-            <div class="card-title">가능한 액션 목록</div>
+            <div class="card-title-row">
+              <div class="card-title">가능한 액션 목록</div>
+              <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+            </div>
             <p class="ops-context-note">백엔드가 현재 허용한다고 광고하는 액션입니다. 일부는 이 화면의 폼과 1:1로 연결됩니다.</p>
             <div class="ops-log-list">
               ${availableActions.length
@@ -883,7 +919,10 @@ export function Ops() {
           </section>
 
           <section class="card ops-panel">
-            <div class="card-title">최근 개입 로그</div>
+            <div class="card-title-row">
+              <div class="card-title">최근 개입 로그</div>
+              <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} />
+            </div>
             <div class="ops-log-list">
               ${operatorActionLog.value.length === 0 ? html`
                 <div class="ops-empty">이 세션에서 실행한 개입이 아직 없습니다.</div>

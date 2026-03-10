@@ -36,7 +36,7 @@ import { ToastContainer } from './components/common/toast'
 import { PanelSemanticDetails, SurfaceSemanticIntro } from './components/common/semantic-layer'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
-import { refreshMissionSnapshot } from './mission-store'
+import { refreshMissionBriefing, refreshMissionSnapshot } from './mission-store'
 import {
   commandPlaneSurface,
   refreshCommandPlaneChainSummary,
@@ -107,6 +107,7 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
             }
             if (currentTab === 'mission') {
               refreshMissionSnapshot()
+              refreshMissionBriefing()
             }
             if (currentTab === 'execution') {
               refreshExecution()
@@ -337,6 +338,7 @@ export function App() {
     }
     if (tab === 'mission') {
       refreshMissionSnapshot()
+      refreshMissionBriefing()
     }
     if (tab === 'execution') {
       refreshExecution()

@@ -20,12 +20,6 @@ let with_env name value fn =
       Unix.putenv name value;
       fn ())
 
-let make_temp_dir prefix =
-  let path = Filename.temp_file prefix "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
-
 (* ============================================================
    get_string Tests
    ============================================================ *)
@@ -87,28 +81,21 @@ let test_me_root_prefers_env () =
     check (option string) "me_root_opt" (Some "/tmp/masc-custom-root") (Env_config.me_root_opt ());
     check string "me_root" "/tmp/masc-custom-root" (Env_config.me_root ()))
 
-let test_me_root_falls_back_to_home_me () =
-  let home = make_temp_dir "env-config-home-" in
-  let me_dir = Filename.concat home "me" in
-  Fun.protect
-    ~finally:(fun () ->
-      Unix.rmdir me_dir;
-      Unix.rmdir home)
-    (fun () ->
-      Unix.mkdir me_dir 0o755;
-      with_env "ME_ROOT" "" (fun () ->
-        with_env "HOME" home (fun () ->
-          check (option string) "me_root_opt fallback" (Some me_dir) (Env_config.me_root_opt ());
-          check string "me_root fallback" me_dir (Env_config.me_root ()))))
+let test_me_root_prefers_explicit_workspace_root () =
+  with_env "MASC_WORKSPACE_ROOT" "/tmp/masc-workspace-root" (fun () ->
+    with_env "ME_ROOT" "" (fun () ->
+      check (option string) "me_root_opt explicit" (Some "/tmp/masc-workspace-root") (Env_config.me_root_opt ());
+      check string "me_root explicit" "/tmp/masc-workspace-root" (Env_config.me_root ())))
 
 let test_masc_http_base_url_prefers_env_and_trims () =
   with_env "MASC_HTTP_BASE_URL" "http://example.test:9911/" (fun () ->
     check string "base url trimmed" "http://example.test:9911" (Env_config.masc_http_base_url ()))
 
-let test_masc_http_base_url_falls_back_to_port () =
+let test_masc_http_base_url_uses_explicit_host_and_port () =
   with_env "MASC_HTTP_BASE_URL" "" (fun () ->
-    with_env "MASC_HTTP_PORT" "7777" (fun () ->
-      check string "base url from port" "http://127.0.0.1:7777" (Env_config.masc_http_base_url ())))
+    with_env "MASC_HOST" "masc.example.test" (fun () ->
+      with_env "MASC_HTTP_PORT" "7777" (fun () ->
+        check string "base url from host+port" "http://masc.example.test:7777" (Env_config.masc_http_base_url ()))))
 
 let test_libdatachannel_candidates_include_env_override () =
   with_env "LIBDATACHANNEL_PATH" "/tmp/libdatachannel-custom.dylib" (fun () ->
@@ -326,9 +313,9 @@ let () =
     ];
     "path_helpers", [
       test_case "me_root prefers env" `Quick test_me_root_prefers_env;
-      test_case "me_root falls back to home/me" `Quick test_me_root_falls_back_to_home_me;
+      test_case "me_root prefers explicit workspace root" `Quick test_me_root_prefers_explicit_workspace_root;
       test_case "base url prefers env and trims" `Quick test_masc_http_base_url_prefers_env_and_trims;
-      test_case "base url falls back to port" `Quick test_masc_http_base_url_falls_back_to_port;
+      test_case "base url uses explicit host+port" `Quick test_masc_http_base_url_uses_explicit_host_and_port;
       test_case "libdatachannel candidates include env override" `Quick test_libdatachannel_candidates_include_env_override;
     ];
     "print_summary", [

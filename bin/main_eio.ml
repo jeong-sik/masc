@@ -7389,6 +7389,7 @@ let health_handler _request reqd =
   in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let guardian_json = Masc_mcp.Guardian.status_json () in
+  let sentinel_json = Masc_mcp.Sentinel.status_json () in
   let health_json = `Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
@@ -7412,6 +7413,7 @@ let health_handler _request reqd =
     ("sse_clients", `Int (Masc_mcp.Sse.client_count ()));
     ("lodge", lodge_json);
     ("guardian", guardian_json);
+    ("sentinel", sentinel_json);
   ] in
   Http.Response.json (Yojson.Safe.to_string health_json) reqd
 
@@ -9958,8 +9960,11 @@ let run_server ~sw ~env ~port ~base_path =
   Masc_mcp.Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator;
   (* Lodge world heartbeat - wakes agents every 60s *)
   Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
-  (* Internal guardian loops (no external watchdog dependency) *)
-  Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
+  (* Sentinel: default resident agent (subsumes Guardian consumers) *)
+  Masc_mcp.Sentinel.start ~sw ~clock ~net state.room_config;
+  (* Fallback: run Guardian standalone when Sentinel is disabled *)
+  if not Masc_mcp.Env_config.Sentinel.enabled then
+    Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
   (* Start MCP session cleanup loop *)
   Masc_mcp.Session.start_mcp_session_cleanup_loop ~sw ~clock ();
 
@@ -10191,6 +10196,7 @@ let run_server ~sw ~env ~port ~base_path =
           in
           let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
           let guardian_json = Masc_mcp.Guardian.status_json () in
+          let sentinel_json = Masc_mcp.Sentinel.status_json () in
           let health_json = `Assoc [
             ("status", `String "ok");
             ("server", `String "masc-mcp");
@@ -10200,6 +10206,7 @@ let run_server ~sw ~env ~port ~base_path =
             ("sse_clients", `Int (Sse.client_count ()));
             ("lodge", lodge_json);
             ("guardian", guardian_json);
+            ("sentinel", sentinel_json);
           ] in
           let body = Yojson.Safe.to_string health_json in
           h2_respond_json h2_reqd body ~extra_headers:cors

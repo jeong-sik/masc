@@ -6516,6 +6516,20 @@ button.monitor-row.bad.state-quiet {
   line-height: 1.45;
 }
 
+.model-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.6);
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
 .mission-activity-list {
   display: flex;
   flex-direction: column;

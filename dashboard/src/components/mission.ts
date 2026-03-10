@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
+import { extractAgentInfo, isKeeperAgent } from './common/agent-info'
 import { navigate } from '../router'
 import {
   missionBriefing,
@@ -224,7 +225,7 @@ function memberNamesForSession(session: OperatorSessionSnapshot): string[] {
     ...stringArray(rawSession.agent_names),
     ...stringArray(summary.active_agents),
     ...stringArray(summary.planned_participants),
-  ])
+  ]).filter(name => !isKeeperAgent(name))
 }
 
 function sessionGoal(session: OperatorSessionSnapshot): string {
@@ -597,8 +598,11 @@ function CrewCard({ row }: { row: CrewRow }) {
   const memberRows = row.memberNames.slice(0, 4).map(name => {
     const agent = agents.value.find(item => item.name === name)
     const output = latestMessageFrom(name, messages.value)
+    const info = extractAgentInfo(name)
     return {
       name,
+      model: info.model,
+      nickname: info.nickname,
       currentTask: agent ? taskLabel(agent, tasks.value) : 'agent snapshot 없음',
       output: trimText(output?.content, 96),
     }
@@ -648,7 +652,7 @@ function CrewCard({ row }: { row: CrewRow }) {
             <div class="mission-member-stack">
               ${memberRows.map(member => html`
                 <button class="mission-member-row" onClick=${() => openAgentDetail(member.name)}>
-                  <strong>${member.name}</strong>
+                  <strong>${member.model !== member.nickname ? html`<span class="model-badge">${member.model}</span> ` : ''}${member.nickname}</strong>
                   <span>${member.currentTask}</span>
                   <small>${member.output ?? '최근 출력 없음'}</small>
                 </button>

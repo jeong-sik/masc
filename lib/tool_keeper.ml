@@ -2032,7 +2032,7 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
       None
     else
       Some { json = j; kind; text; priority; ts_unix }
-  with _ ->
+  with Yojson.Json_error _ ->
     None
 
 let memory_compaction_target_notes ~(profile : string) : int =
@@ -2118,7 +2118,7 @@ let compact_memory_bank_if_needed
   else
     let size_bytes =
       try (Unix.stat path).st_size
-      with _ -> 0
+      with Unix.Unix_error _ -> 0
     in
     let trigger_bytes = memory_compaction_trigger_bytes ~target_notes in
     if size_bytes < trigger_bytes then
@@ -2327,7 +2327,7 @@ let summarize_memory_bank_lines
            let text = String.trim text in
            if kind = "" || text = "" then None
            else Some { kind; text; priority; ts_unix }
-         with _ -> None)
+         with Yojson.Json_error _ -> None)
   in
   let total_notes = List.length parsed in
   let last_ts_unix =
@@ -2460,7 +2460,7 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
         let drop = max 0 (n - max_lines) in
         lines |> List.mapi (fun i s -> (i, s)) |> List.filter (fun (i, _) -> i >= drop) |> List.map snd
       )
-    with _ ->
+    with Sys_error _ | End_of_file ->
       []
 
 let read_keeper_memory_summary
@@ -3876,11 +3876,11 @@ let starts_with ~(prefix : string) (s : string) : bool =
 
 let normalize_path_for_check (path : string) : string =
   try Unix.realpath path
-  with _ ->
+  with Unix.Unix_error _ ->
     let parent = Filename.dirname path in
     let parent_norm =
       try Unix.realpath parent
-      with _ -> parent
+      with Unix.Unix_error _ -> parent
     in
     Filename.concat parent_norm (Filename.basename path)
 
@@ -3927,7 +3927,7 @@ let execute_keeper_tool_call
     (tc : Llm_client.tool_call) : string =
   let args =
     try Yojson.Safe.from_string tc.call_arguments
-    with _ -> `Assoc []
+    with Yojson.Json_error _ -> `Assoc []
   in
   let now_ts = Time_compat.now () in
   match tc.call_name with
@@ -4859,7 +4859,7 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) : 
         last_handoff = handoff_json;
         last_compaction = compaction_json;
       }
-    with _ ->
+    with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
       acc
   ) empty_metrics_summary lines
 
@@ -6765,7 +6765,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       let snapshot_interval_sec =
         match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_SEC" with
         | Some s ->
-            (try max 15 (min 3600 (int_of_string (String.trim s))) with _ -> 60)
+            (try max 15 (min 3600 (int_of_string (String.trim s))) with Failure _ -> 60)
         | None -> 60
       in
       let last_snapshot_ts = ref 0.0 in
@@ -7373,7 +7373,7 @@ let handle_keeper_status ctx args : tool_result =
            `List
              (List.filter_map
                 (fun line ->
-                  try Some (Yojson.Safe.from_string line) with _ -> None)
+                  try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
                 lines)
          in
          let metrics_window_lines =
@@ -7427,7 +7427,7 @@ let handle_keeper_status ctx args : tool_result =
                                | None -> `Null );
                            ])
                     | _ -> find_latest tl
-                  with _ -> find_latest tl)
+                  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> find_latest tl)
              in
              find_latest (List.rev metrics_window_lines)
          in
@@ -7521,7 +7521,7 @@ let handle_keeper_status ctx args : tool_result =
                        raw_count + 1,
                        fragment_count + (if is_fragment then 1 else 0),
                        filtered_count )
-                   with _ -> (acc, raw_count, fragment_count, filtered_count))
+                   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> (acc, raw_count, fragment_count, filtered_count))
                  ([], 0, 0, 0) lines
              in
              (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
@@ -7612,7 +7612,7 @@ let handle_keeper_status ctx args : tool_result =
                          ]
                        in
                        item :: acc
-                   with _ -> acc)
+                   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> acc)
                  [] lines
              in
              let events = List.rev events_rev in
@@ -9271,7 +9271,7 @@ let handle_keeper_list ctx args : tool_result =
 	            in
 	            let last_metrics =
 	              match List.rev metrics_window_lines with
-	              | line :: _ -> (try Some (Yojson.Safe.from_string line) with _ -> None)
+	              | line :: _ -> (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
 	              | [] -> None
 	            in
 	            let metrics_overview =
@@ -9286,7 +9286,7 @@ let handle_keeper_list ctx args : tool_result =
 	                       match Safe_ops.json_string_opt "skill_primary" j with
 	                       | Some primary when String.trim primary <> "" -> Some j
 	                       | _ -> find_latest tl
-	                     with _ -> find_latest tl)
+	                     with Yojson.Json_error _ -> find_latest tl)
 	              in
 	              find_latest (List.rev metrics_window_lines)
 	            in

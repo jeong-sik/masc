@@ -1,4 +1,4 @@
-// Agents tab — live monitoring surface for agent and keeper health
+// Execution surface — live worker and keeper continuity monitoring
 
 import { html } from 'htm/preact'
 import { Card } from './common/card'
@@ -322,7 +322,7 @@ function KeeperWatchRow({ row }: { row: KeeperMonitorRow }) {
   `
 }
 
-export function Agents() {
+export function Execution() {
   const agentRows = [...agents.value]
     .map(buildAgentRow)
     .sort((a, b) => {
@@ -381,44 +381,44 @@ export function Agents() {
 
   return html`
     <div class="agents-monitor">
-      <${SurfaceSemanticIntro} surfaceId="agents" />
+      <${SurfaceSemanticIntro} surfaceId="execution" />
       <div class="stats-grid">
-        <${MonitorStat} label="Agents online 온라인" value=${onlineAgents} color="#4ade80" caption="활성 + 대기 에이전트" />
-        <${MonitorStat} label="Working now 작업중" value=${workingAgents} color="#fbbf24" caption="작업 또는 할당된 부하" />
-        <${MonitorStat} label="Fresh signals 최신 신호" value=${freshSignals} color="#22d3ee" caption="최근 2분 이내" />
-        <${MonitorStat} label="Agent alerts 에이전트 경고" value=${agentAlerts.length} color=${agentAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="비활성 또는 오프라인" />
-        <${MonitorStat} label="Keeper alerts 키퍼 경고" value=${keeperAlerts.length} color=${keeperAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="오래되거나 높은 부하" />
+        <${MonitorStat} label="Workers online" value=${onlineAgents} color="#4ade80" caption="활성 + 대기 실행 actor" />
+        <${MonitorStat} label="Working now" value=${workingAgents} color="#fbbf24" caption="작업 또는 할당된 부하" />
+        <${MonitorStat} label="Fresh signals" value=${freshSignals} color="#22d3ee" caption="최근 2분 이내 신호" />
+        <${MonitorStat} label="Worker alerts" value=${agentAlerts.length} color=${agentAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="실행 actor 경고" />
+        <${MonitorStat} label="Continuity alerts" value=${keeperAlerts.length} color=${keeperAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="keeper 연속성 경고" />
       </div>
 
-      <${Card} title="Attention Queue 주의 필요" class="section" semanticId="agents.attention_queue">
+      <${Card} title="Execution Priorities" class="section" semanticId="execution.priority_queue">
         <div class="monitor-section-head">
-          <h2 class="monitor-headline">Who needs intervention right now</h2>
-          <p class="monitor-subheadline">Rows are sorted by severity first, then by the freshest signal we have.</p>
+          <h2 class="monitor-headline">What needs execution attention right now</h2>
+          <p class="monitor-subheadline">Worker drift and keeper continuity risk are ranked together here, but diagnosed in separate sections below.</p>
         </div>
         <div class="monitor-alert-list">
           ${attentionItems.length === 0
-            ? html`<div class="empty-state">No agent or keeper alerts right now</div>`
+            ? html`<div class="empty-state">No execution alerts right now</div>`
             : attentionItems.map(item => html`<${AttentionRow} key=${item.key} item=${item} />`)}
         </div>
       <//>
 
       <div class="agents-workbench">
-        <${Card} title="Active Agents 활성 에이전트" class="section" semanticId="agents.active_agents">
+        <${Card} title="Workers" class="section" semanticId="execution.workers">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">Short-horizon execution monitor</h2>
-            <p class="monitor-subheadline">Live agents stay grouped here first so execution drift is visible before you scan offline history.</p>
+            <p class="monitor-subheadline">Live workers stay grouped here so owner drift is visible before you scan offline history.</p>
           </div>
           <div class="monitor-list">
             ${aliveRows.length === 0
-              ? html`<div class="empty-state">No active agents visible</div>`
+              ? html`<div class="empty-state">No active workers visible</div>`
               : aliveRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
           </div>
         <//>
 
-        <${Card} title="Keeper Watch 키퍼 감시" class="section" semanticId="agents.keeper_watch">
+        <${Card} title="Continuity" class="section" semanticId="execution.continuity">
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">Long-running keeper health</h2>
-            <p class="monitor-subheadline">Heartbeat, context pressure, and continuity state in one list.</p>
+            <h2 class="monitor-headline">Long-running keeper continuity</h2>
+            <p class="monitor-subheadline">Heartbeat, context pressure, and handoff state are isolated from worker execution drift.</p>
           </div>
           <div class="monitor-list">
             ${keeperRows.length === 0
@@ -427,14 +427,14 @@ export function Agents() {
           </div>
         <//>
 
-        <${Card} title="Offline Agents 오프라인" class="section" semanticId="agents.offline_agents">
+        <${Card} title="Offline Workers" class="section" semanticId="execution.offline">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">Who dropped out of the live loop</h2>
-            <p class="monitor-subheadline">Offline rows are separated so they do not drown the active execution monitor.</p>
+            <p class="monitor-subheadline">Offline rows stay separate so they do not drown the active execution monitor.</p>
           </div>
           <div class="monitor-list">
             ${offlineRows.length === 0
-              ? html`<div class="empty-state">No offline agents right now</div>`
+              ? html`<div class="empty-state">No offline workers right now</div>`
               : offlineRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
           </div>
         <//>
@@ -442,3 +442,5 @@ export function Agents() {
     </div>
   `
 }
+
+export const Agents = Execution

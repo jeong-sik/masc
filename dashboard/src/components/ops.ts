@@ -5,6 +5,7 @@ import { showToast } from './common/toast'
 import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
 import type { OperatorAttentionItem, OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
 import { route } from '../router'
+import { addTaskFromDashboard } from '../api'
 import {
   confirmOperatorPendingAction,
   dispatchOperatorAction,
@@ -47,7 +48,7 @@ const taskTitle = signal('')
 const taskDescription = signal('')
 const taskPriority = signal('2')
 const selectedSessionId = signal('')
-const teamTurnKind = signal<'note' | 'broadcast' | 'task' | 'checkpoint'>('note')
+const teamTurnKind = signal<'note' | 'broadcast' | 'task'>('note')
 const teamMessage = signal('')
 const teamTaskTitle = signal('')
 const teamTaskDescription = signal('')
@@ -144,13 +145,15 @@ function actionTypeLabel(value?: string | null): string {
     case 'team_broadcast':
       return '세션 방송'
     case 'team_task_inject':
-      return '세션 작업'
-    case 'team_stop':
-      return '세션 중지'
-    case 'keeper_msg':
-      return 'keeper 메시지'
+      return '세션 작업 주입'
     case 'task_inject':
       return '작업 주입'
+    case 'team_stop':
+      return '세션 중지'
+    case 'keeper_message':
+      return 'keeper 메시지'
+    case 'keeper_msg':
+      return 'keeper 메시지'
     default:
       return value?.trim() || '액션'
   }
@@ -204,8 +207,6 @@ function sessionActionLabel(value: typeof teamTurnKind.value): string {
       return '방송'
     case 'task':
       return '작업'
-    case 'checkpoint':
-      return '체크포인트'
     default:
       return value
   }
@@ -228,7 +229,7 @@ function workflowTeamTurnKind(context: DashboardWorkflowContext): typeof teamTur
   if (context.action_type === 'team_note') return 'note'
   if (context.action_type === 'team_turn') {
     const requested = workflowPayloadString(context.suggested_payload, 'turn_kind')
-    if (requested === 'broadcast' || requested === 'task' || requested === 'checkpoint') return requested
+    if (requested === 'broadcast' || requested === 'task') return requested
   }
   return 'note'
 }
@@ -288,7 +289,7 @@ function workflowTargetReady(
 }
 
 async function executeAction(input: {
-  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'team_turn' | 'team_stop' | 'keeper_msg' | 'task_inject'
+  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_stop' | 'keeper_message'
   target_type: 'room' | 'team_session' | 'keeper'
   target_id?: string
   payload: Record<string, unknown>
@@ -349,19 +350,18 @@ async function submitResume() {
 async function submitTaskInject() {
   const title = taskTitle.value.trim()
   if (!title) return
-  const result = await executeAction({
-    action_type: 'task_inject',
-    target_type: 'room',
-    payload: {
+  try {
+    await addTaskFromDashboard(
       title,
-      description: taskDescription.value.trim() || 'Intervene 화면에서 주입',
-      priority: Number.parseInt(taskPriority.value, 10) || 2,
-    },
-    successMessage: '작업 주입을 보냈습니다',
-  })
-  if (result) {
+      taskDescription.value.trim() || 'Intervene 화면에서 주입',
+      Number.parseInt(taskPriority.value, 10) || 2,
+    )
+    showToast('작업을 backlog에 추가했습니다', 'success')
     taskTitle.value = ''
     taskDescription.value = ''
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '작업 추가에 실패했습니다'
+    showToast(message, 'error')
   }
 }
 
@@ -372,18 +372,22 @@ async function submitTeamTurn() {
     showToast('먼저 세션을 고르세요', 'warning')
     return
   }
-  const payload: Record<string, unknown> = {
-    turn_kind: teamTurnKind.value,
-  }
+  const payload: Record<string, unknown> = {}
   const message = teamMessage.value.trim()
   if (message) payload.message = message
+  let actionType: 'team_note' | 'team_broadcast' | 'team_task_inject' = 'team_note'
+  if (teamTurnKind.value === 'broadcast') {
+    actionType = 'team_broadcast'
+  } else if (teamTurnKind.value === 'task') {
+    actionType = 'team_task_inject'
+  }
   if (teamTurnKind.value === 'task') {
     payload.task_title = teamTaskTitle.value.trim() || '운영자 주입 작업'
     payload.task_description = teamTaskDescription.value.trim() || 'Intervene 화면에서 주입'
     payload.task_priority = Number.parseInt(teamTaskPriority.value, 10) || 2
   }
   const result = await executeAction({
-    action_type: 'team_turn',
+    action_type: actionType,
     target_type: 'team_session',
     target_id: sessionId,
     payload,
@@ -424,7 +428,7 @@ async function submitKeeperMessage() {
   }
   if (!message) return
   const result = await executeAction({
-    action_type: 'keeper_msg',
+    action_type: 'keeper_message',
     target_type: 'keeper',
     target_id: keeperName,
     payload: { message },
@@ -610,6 +614,55 @@ export function Ops() {
         </section>
       ` : null}
 
+      ${(() => {
+        const actions: Array<{ label: string; desc: string; tone: OpsPriorityTone; onClick: () => void }> = []
+        if (pendingConfirms.length > 0) {
+          actions.push({
+            label: `확인 대기 ${pendingConfirms.length}건 처리`,
+            desc: '승인 또는 거부가 필요한 개입이 대기 중입니다',
+            tone: 'bad',
+            onClick: () => {
+              const el = document.querySelector('.ops-pending-section')
+              el?.scrollIntoView({ behavior: 'smooth' })
+            },
+          })
+        }
+        if (room.paused) {
+          actions.push({
+            label: 'Room 재개',
+            desc: `현재 일시정지 상태${room.pause_reason ? ` (${room.pause_reason})` : ''}`,
+            tone: 'warn',
+            onClick: () => void submitResume(),
+          })
+        }
+        if (flaggedKeepers.length > 0) {
+          const badKeepers = flaggedKeepers.filter(k => keeperPriorityTone(k) === 'bad')
+          actions.push({
+            label: badKeepers.length > 0 ? `Keeper ${badKeepers.length}개 오프라인` : `Keeper ${flaggedKeepers.length}개 점검 필요`,
+            desc: badKeepers.length > 0 ? '메시지를 보내거나 상태를 확인하세요' : 'stale 또는 telemetry 누락',
+            tone: badKeepers.length > 0 ? 'bad' : 'warn',
+            onClick: () => {
+              const el = document.querySelector('.ops-keeper-section')
+              el?.scrollIntoView({ behavior: 'smooth' })
+            },
+          })
+        }
+        if (actions.length === 0) return null
+        return html`
+          <section class="ops-action-guide">
+            <h3 class="ops-action-guide-title">지금 할 수 있는 것</h3>
+            <div class="ops-action-guide-list">
+              ${actions.slice(0, 3).map(action => html`
+                <button class="ops-action-guide-item ${action.tone}" onClick=${action.onClick}>
+                  <strong>${action.label}</strong>
+                  <span>${action.desc}</span>
+                </button>
+              `)}
+            </div>
+          </section>
+        `
+      })()}
+
       <section class="card">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">개입 우선순위</h2>
@@ -752,7 +805,7 @@ export function Ops() {
             `}
           </section>
 
-          <section class="card ops-panel">
+          <section class="card ops-panel ops-pending-section">
             <div class="card-title-row">
               <div class="card-title">승인 대기</div>
               <${PanelSemanticDetails} panelId="intervene.pending_confirmations" compact=${true} />
@@ -899,7 +952,6 @@ export function Ops() {
                 <option value="note">노트</option>
                 <option value="broadcast">방송</option>
                 <option value="task">작업</option>
-                <option value="checkpoint">체크포인트</option>
               </select>
               <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${operatorActionBusy.value || !selectedSession}>
                 적용
@@ -963,7 +1015,7 @@ export function Ops() {
         </div>
 
         <div class="ops-column">
-          <section class="card ops-panel ops-lane-panel">
+          <section class="card ops-panel ops-lane-panel ops-keeper-section">
             <div class="card-title-row">
               <div class="card-title">Keeper 개입</div>
               <${PanelSemanticDetails} panelId="intervene.keeper_queue" compact=${true} />

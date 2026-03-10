@@ -2,6 +2,7 @@ import { signal } from '@preact/signals'
 import type { OperatorAttentionItem, OperatorRecommendedAction, RouteState, TabId } from './types'
 
 const STORAGE_KEY = 'masc_dashboard_workflow_context'
+const CONTEXT_TTL_MS = 15 * 60 * 1000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -90,22 +91,33 @@ function parseStoredContext(raw: string | null): DashboardWorkflowContext | null
   }
 }
 
+function contextIsFresh(context: DashboardWorkflowContext): boolean {
+  const ts = Date.parse(context.created_at)
+  if (Number.isNaN(ts)) return false
+  return Date.now() - ts <= CONTEXT_TTL_MS
+}
+
 function initialContext(): DashboardWorkflowContext | null {
   const storage = safeStorage()
-  return parseStoredContext(storage?.getItem(STORAGE_KEY) ?? null)
+  const parsed = parseStoredContext(storage?.getItem(STORAGE_KEY) ?? null)
+  if (!parsed) return null
+  if (contextIsFresh(parsed)) return parsed
+  storage?.removeItem(STORAGE_KEY)
+  return null
 }
 
 export const dashboardWorkflowContext = signal<DashboardWorkflowContext | null>(initialContext())
 
 export function persistWorkflowContext(context: DashboardWorkflowContext | null): void {
-  dashboardWorkflowContext.value = context
+  const freshContext = context && contextIsFresh(context) ? context : null
+  dashboardWorkflowContext.value = freshContext
   const storage = safeStorage()
   if (!storage) return
-  if (!context) {
+  if (!freshContext) {
     storage.removeItem(STORAGE_KEY)
     return
   }
-  const serialized = serializeContext(context)
+  const serialized = serializeContext(freshContext)
   if (!serialized) return
   storage.setItem(STORAGE_KEY, serialized)
 }
@@ -203,7 +215,7 @@ export function workflowContextForRoute(routeState: Pick<RouteState, 'params'>):
   const { params } = routeState
   if (params.source !== 'mission') return null
   const stored = dashboardWorkflowContext.value
-  if (stored && matchesRouteParams(stored, params)) return stored
+  if (stored && contextIsFresh(stored) && matchesRouteParams(stored, params)) return stored
   const createdAt = new Date().toISOString()
   return {
     id: missionContextId(

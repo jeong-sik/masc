@@ -7,11 +7,12 @@ import { route, initRouter, navigate } from './router'
 import { connected, eventCount, connectSSE, disconnectSSE } from './sse'
 import {
   refreshDashboard,
+  refreshExecution,
   refreshDashboardSemantics,
   refreshBoard,
-  refreshTrpg,
   refreshGoals,
-  refreshMdal,
+  refreshShell,
+  refreshTrpg,
   setupSSEReaction,
   startPeriodicRefresh,
   stopPeriodicRefresh,
@@ -23,11 +24,11 @@ import {
 import { Mission } from './components/mission'
 import { Command } from './components/command'
 import { Ops } from './components/ops'
-import { Board } from './components/board'
-import { Activity } from './components/activity'
-import { Agents } from './components/agents'
-import { Goals } from './components/goals'
-import { Trpg } from './components/trpg'
+import { Memory } from './components/memory'
+import { Execution } from './components/agents'
+import { Planning } from './components/goals'
+import { Governance } from './components/governance'
+import { Lab } from './components/lab'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
@@ -41,7 +42,6 @@ import {
   refreshCommandPlaneCurrentSurface,
   refreshCommandPlaneSwarm,
 } from './command-store'
-import { activityPanelOpen, closeActivityPanel, toggleActivityPanel } from './activity-panel'
 
 function ConnectionStatus() {
   const isConnected = connected.value
@@ -98,19 +98,21 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
                 refreshCommandPlaneSwarm()
               }
             }
-            if (currentTab === 'mission' || currentTab === 'overview') {
+            if (currentTab === 'mission') {
               refreshMissionSnapshot()
             }
-            if (currentTab === 'intervene' || currentTab === 'ops') {
+            if (currentTab === 'execution') {
+              refreshExecution()
+            }
+            if (currentTab === 'intervene') {
               refreshOperatorSnapshot()
               refreshOperatorRoomDigest()
             }
-            if (currentTab === 'board') refreshBoard()
-            if (currentTab === 'trpg') refreshTrpg()
-            if (currentTab === 'goals') {
+            if (currentTab === 'memory') refreshBoard()
+            if (currentTab === 'planning') {
               refreshGoals()
-              refreshMdal()
             }
+            if (currentTab === 'lab') refreshTrpg()
           }}
         >
           Refresh Now
@@ -226,22 +228,20 @@ function TabContent() {
   switch (tab) {
     case 'mission':
       return html`<${Mission} />`
+    case 'execution':
+      return html`<${Execution} />`
+    case 'memory':
+      return html`<${Memory} />`
+    case 'governance':
+      return html`<${Governance} />`
+    case 'planning':
+      return html`<${Planning} />`
     case 'intervene':
       return html`<${Ops} />`
     case 'command':
       return html`<${Command} />`
-    case 'overview':
-      return html`<${Mission} />`
-    case 'ops':
-      return html`<${Ops} />`
-    case 'board':
-      return html`<${Board} />`
-    case 'agents':
-      return html`<${Agents} />`
-    case 'goals':
-      return html`<${Goals} />`
-    case 'trpg':
-      return html`<${Trpg} />`
+    case 'lab':
+      return html`<${Lab} />`
     default:
       return html`<${Mission} />`
   }
@@ -254,8 +254,10 @@ export function App() {
 
     // Connect SSE and start data fetching
     connectSSE()
-    refreshDashboard()
+    refreshShell()
+    refreshExecution()
     refreshDashboardSemantics()
+    refreshMissionSnapshot()
 
     // Setup SSE → store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()
@@ -280,19 +282,21 @@ export function App() {
           void refreshCommandPlaneSwarm()
         }
       }
-      else if (tab === 'mission' || tab === 'overview') {
+      else if (tab === 'mission') {
         void refreshMissionSnapshot()
       }
-      else if (tab === 'intervene' || tab === 'ops') {
+      else if (tab === 'execution') {
+        void refreshExecution()
+      }
+      else if (tab === 'intervene') {
         void refreshOperatorSnapshot()
         void refreshOperatorRoomDigest()
       }
-      else if (tab === 'board') void refreshBoard()
-      else if (tab === 'trpg') void refreshTrpg()
-      else if (tab === 'goals') {
+      else if (tab === 'memory') void refreshBoard()
+      else if (tab === 'planning') {
         void refreshGoals()
-        void refreshMdal()
       }
+      else if (tab === 'lab') void refreshTrpg()
     }, 15000)
 
     return () => {
@@ -310,19 +314,21 @@ export function App() {
         refreshCommandPlaneSwarm()
       }
     }
-    if (tab === 'mission' || tab === 'overview') {
+    if (tab === 'mission') {
       refreshMissionSnapshot()
     }
-    if (tab === 'intervene' || tab === 'ops') {
+    if (tab === 'execution') {
+      refreshExecution()
+    }
+    if (tab === 'intervene') {
       refreshOperatorSnapshot()
       refreshOperatorRoomDigest()
     }
-    if (tab === 'board') refreshBoard()
-    if (tab === 'trpg') refreshTrpg()
-    if (tab === 'goals') {
+    if (tab === 'memory') refreshBoard()
+    if (tab === 'planning') {
       refreshGoals()
-      refreshMdal()
     }
+    if (tab === 'lab') refreshTrpg()
   }, [route.value.tab])
 
   const currentTab = route.value.tab
@@ -336,16 +342,9 @@ export function App() {
             MASC Dashboard
             <span class="version-badge">SPA</span>
           </h1>
-          <p class="header-subtitle">${currentView?.description ?? 'Decision and execution operations console'}</p>
+          <p class="header-subtitle">${currentView?.description ?? 'Operator-first decision and execution console'}</p>
         </div>
         <div class="header-right">
-          <button
-            class="activity-panel-toggle ${activityPanelOpen.value ? 'active' : ''}"
-            onClick=${toggleActivityPanel}
-            title="Toggle Activity Panel"
-          >
-            Activity
-          </button>
           <${ConnectionStatus} />
         </div>
       </header>
@@ -358,19 +357,6 @@ export function App() {
             : html`<${TabContent} />`}
         </main>
       </div>
-
-      ${activityPanelOpen.value ? html`
-        <div class="activity-panel-backdrop" onClick=${closeActivityPanel} />
-        <aside class="activity-panel">
-          <div class="activity-panel-header">
-            <h3>Activity Feed</h3>
-            <button class="activity-panel-close" onClick=${closeActivityPanel}>Close</button>
-          </div>
-          <div class="activity-panel-body">
-            <${Activity} />
-          </div>
-        </aside>
-      ` : null}
 
       <${KeeperDetailOverlay} />
       <${AgentDetailOverlay} />

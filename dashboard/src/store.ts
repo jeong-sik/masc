@@ -25,9 +25,12 @@ import type {
   DashboardSemanticSurfaceId,
 } from './types'
 import {
-  fetchDashboard, fetchDashboardSemantics, fetchBoard, fetchTrpgState, fetchGoals, fetchMdalLoops,
-  fetchAgentsList, fetchTasksList, fetchMessagesList,
-  type DashboardMode,
+  fetchDashboardExecution,
+  fetchDashboardMemory,
+  fetchDashboardPlanning,
+  fetchDashboardSemantics,
+  fetchDashboardShell,
+  fetchTrpgState,
 } from './api'
 import { lastEvent, connected, journal } from './sse'
 import { deriveKeeperDiagnostic, normalizeLodgeRuntimeStatus } from './keeper-runtime'
@@ -192,10 +195,8 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
   return stale
 })
 
-// --- Cache for dashboard batch ---
+// --- Refresh orchestration ---
 
-const _dashboardCache: Partial<Record<DashboardMode, { data: unknown; time: number }>> = {}
-const DASHBOARD_CACHE_TTL = 5000
 let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
 
 function isDashboardRefreshEvent(eventType: string): boolean {
@@ -214,8 +215,7 @@ function isDashboardRefreshEvent(eventType: string): boolean {
 }
 
 export function invalidateDashboardCache(): void {
-  delete _dashboardCache.compact
-  delete _dashboardCache.full
+  // Projection endpoints are intentionally fresh-first after the operator-console rewrite.
 }
 
 // --- Data fetchers ---
@@ -607,34 +607,13 @@ function normalizeMdalLoop(raw: unknown): MdalLoop | null {
     history,
   }
 }
-export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<void> {
-  const now = Date.now()
-  const cached = _dashboardCache[mode]
-  if (cached && (now - cached.time) < DASHBOARD_CACHE_TTL) {
-    return // Use cached data (already applied to signals)
-  }
-
+export async function refreshDashboard(): Promise<void> {
   dashboardLoading.value = true
   try {
-    const data = await fetchDashboard(mode)
-    _dashboardCache[mode] = { data, time: now }
-
-    agents.value = (Array.isArray(data.agents?.agents) ? data.agents.agents : [])
-      .map(normalizeAgent)
-      .filter((row): row is Agent => row !== null)
-    tasks.value = (Array.isArray(data.tasks?.tasks) ? data.tasks.tasks : [])
-      .map(normalizeTask)
-      .filter((row): row is Task => row !== null)
-    messages.value = (Array.isArray(data.messages?.messages) ? data.messages.messages : [])
-      .map(normalizeMessage)
-      .filter((row): row is Message => row !== null)
-    const normalizedStatus = normalizeServerStatus(data.status)
-    serverStatus.value = normalizedStatus
-    keepers.value = normalizeKeepers(data.keepers, normalizedStatus)
-    perpetualStatus.value = data.perpetual ?? null
+    await Promise.all([refreshShell(), refreshExecution()])
     lastDashboardRefreshAt.value = new Date().toISOString()
   } catch (err) {
-    console.error('Dashboard fetch error:', err)
+    console.error('Dashboard refresh error:', err)
   } finally {
     dashboardLoading.value = false
   }
@@ -670,87 +649,110 @@ export function findDashboardSemanticPanel(panelId: string): DashboardSemanticPa
   return null
 }
 
-// --- Selective refresh: individual resource fetchers with merge ---
-// Individual endpoints return simplified fields. Merge preserves rich data
-// from the initial full dashboard load (emoji, koreanName, model, etc.).
+function applyPlanningEnvelope(data: {
+  goals?: unknown[]
+  mdal?: {
+    loops?: unknown[]
+    error?: string
+  }
+}): void {
+  goals.value = (Array.isArray(data.goals) ? data.goals : [])
+    .map((row): Goal | null => {
+      if (!isRecord(row)) return null
+      const id = asString(row.id)
+      const title = asString(row.title)
+      const horizon = asString(row.horizon)
+      const status = asString(row.status)
+      const createdAt = asString(row.created_at)
+      const updatedAt = asString(row.updated_at)
+      if (!id || !title || !horizon || !status || !createdAt || !updatedAt) return null
+      return {
+        id,
+        horizon: horizon as Goal['horizon'],
+        title,
+        metric: asString(row.metric) ?? null,
+        target_value: asString(row.target_value) ?? null,
+        due_date: asString(row.due_date) ?? null,
+        priority: asNumber(row.priority) ?? 3,
+        status,
+        parent_goal_id: asString(row.parent_goal_id) ?? null,
+        last_review_note: asString(row.last_review_note) ?? null,
+        last_review_at: asString(row.last_review_at) ?? null,
+        created_at: createdAt,
+        updated_at: updatedAt,
+      }
+    })
+    .filter((row): row is Goal => row !== null)
+
+  const nextLoops = new Map<string, MdalLoop>()
+  const rows = Array.isArray(data.mdal?.loops) ? data.mdal.loops : []
+  for (const row of rows) {
+    const loop = normalizeMdalLoop(row)
+    if (!loop) continue
+    nextLoops.set(loop.loop_id, loop)
+  }
+  mdalLoops.value = nextLoops
+  lastMdalError.value = typeof data.mdal?.error === 'string' ? data.mdal.error : null
+  mdalSnapshotState.value =
+    lastMdalError.value
+      ? 'error'
+      : nextLoops.size === 0
+        ? 'idle'
+        : 'ready'
+}
+
+export async function refreshShell(): Promise<void> {
+  try {
+    const data = await fetchDashboardShell()
+    const normalizedStatus = normalizeServerStatus(data.status)
+    if (normalizedStatus) {
+      serverStatus.value = normalizedStatus
+    }
+  } catch (err) {
+    console.error('Dashboard shell fetch error:', err)
+  }
+}
+
+export async function refreshExecution(): Promise<void> {
+  try {
+    const data = await fetchDashboardExecution()
+    const normalizedStatus = normalizeServerStatus(data.status)
+    if (normalizedStatus) {
+      serverStatus.value = normalizedStatus
+    }
+    agents.value = (Array.isArray(data.agents) ? data.agents : [])
+      .map(normalizeAgent)
+      .filter((row): row is Agent => row !== null)
+    tasks.value = (Array.isArray(data.tasks) ? data.tasks : [])
+      .map(normalizeTask)
+      .filter((row): row is Task => row !== null)
+    messages.value = (Array.isArray(data.messages) ? data.messages : [])
+      .map(normalizeMessage)
+      .filter((row): row is Message => row !== null)
+    keepers.value = normalizeKeepers(data.keepers, normalizedStatus ?? serverStatus.value)
+    perpetualStatus.value = null
+    lastDashboardRefreshAt.value = new Date().toISOString()
+  } catch (err) {
+    console.error('Dashboard execution fetch error:', err)
+  }
+}
 
 export async function refreshAgents(): Promise<void> {
-  try {
-    const data = await fetchAgentsList()
-    const incoming = (Array.isArray(data.agents) ? data.agents : [])
-      .map(normalizeAgent)
-      .filter((a): a is Agent => a !== null)
-    const prev = agents.value
-    const prevMap = new Map(prev.map(a => [a.name, a]))
-    agents.value = incoming.map(a => {
-      const old = prevMap.get(a.name)
-      if (!old) return a
-      return { ...old, status: a.status, current_task: a.current_task }
-    })
-  } catch (err) {
-    console.error('Agents selective fetch error:', err)
-  }
+  return refreshExecution()
 }
 
 export async function refreshTasks(): Promise<void> {
-  try {
-    const data = await fetchTasksList({ includeDone: true, includeCancelled: true })
-    const incoming = (Array.isArray(data.tasks) ? data.tasks : [])
-      .map(normalizeTask)
-      .filter((t): t is Task => t !== null)
-    const prev = tasks.value
-    const prevMap = new Map(prev.map(t => [t.id, t]))
-    tasks.value = incoming.map(t => {
-      const old = prevMap.get(t.id)
-      if (!old) return t
-      return {
-        ...old,
-        status: t.status,
-        priority: t.priority ?? old.priority,
-        assignee: t.assignee ?? old.assignee,
-      }
-    })
-  } catch (err) {
-    console.error('Tasks selective fetch error:', err)
-  }
+  return refreshExecution()
 }
 
 export async function refreshMessages(): Promise<void> {
-  try {
-    const current = messages.value
-    const maxSeq = current.reduce((m, msg) => Math.max(m, msg.seq ?? 0), 0)
-    const data = await fetchMessagesList(maxSeq)
-    const incoming = (Array.isArray(data.messages) ? data.messages : [])
-      .map(normalizeMessage)
-      .filter((m): m is Message => m !== null)
-    if (incoming.length === 0) return
-    const existingSeqs = new Set(
-      current.map(m => m.seq).filter((s): s is number => s != null),
-    )
-    const existingKeys = new Set(
-      current.filter(m => m.seq == null).map(m => `${m.timestamp}|${m.from}`),
-    )
-    const fresh = incoming.filter(m => {
-      if (m.seq != null) return !existingSeqs.has(m.seq)
-      const key = `${m.timestamp}|${m.from}`
-      if (existingKeys.has(key)) return false
-      existingKeys.add(key)
-      return true
-    })
-    if (fresh.length > 0) {
-      const merged = [...current, ...fresh]
-      // Cap at 500 messages to prevent unbounded growth in long sessions
-      messages.value = merged.length > 500 ? merged.slice(-500) : merged
-    }
-  } catch (err) {
-    console.error('Messages selective fetch error:', err)
-  }
+  return refreshExecution()
 }
 
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
-    const data = await fetchBoard(boardSortMode.value, { excludeSystem: boardExcludeSystem.value })
+    const data = await fetchDashboardMemory(boardSortMode.value, { excludeSystem: boardExcludeSystem.value })
     boardPosts.value = data.posts ?? []
     lastBoardRefreshAt.value = new Date().toISOString()
   } catch (err) {
@@ -778,39 +780,24 @@ export async function refreshTrpg(): Promise<void> {
 
 export async function refreshGoals(): Promise<void> {
   goalsLoading.value = true
+  mdalLoading.value = true
   try {
-    const data = await fetchGoals()
-    goals.value = Array.isArray(data) ? data : []
+    const data = await fetchDashboardPlanning()
+    applyPlanningEnvelope(data)
     lastGoalsRefreshAt.value = new Date().toISOString()
+    lastMdalRefreshAt.value = new Date().toISOString()
   } catch (err) {
-    console.error('Goals fetch error:', err)
+    console.error('Planning fetch error:', err)
+    mdalSnapshotState.value = 'error'
+    lastMdalError.value = err instanceof Error ? err.message : String(err)
   } finally {
     goalsLoading.value = false
+    mdalLoading.value = false
   }
 }
 
 export async function refreshMdal(): Promise<void> {
-  mdalLoading.value = true
-  try {
-    const data = await fetchMdalLoops()
-    const rows = Array.isArray(data.loops) ? data.loops : []
-    const next = new Map<string, MdalLoop>()
-    for (const row of rows) {
-      const loop = normalizeMdalLoop(row)
-      if (!loop) continue
-      next.set(loop.loop_id, loop)
-    }
-    mdalLoops.value = next
-    lastMdalRefreshAt.value = new Date().toISOString()
-    lastMdalError.value = null
-    mdalSnapshotState.value = next.size === 0 ? 'idle' : 'ready'
-  } catch (err) {
-    console.error('MDAL fetch error:', err)
-    mdalSnapshotState.value = 'error'
-    lastMdalError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    mdalLoading.value = false
-  }
+  return refreshGoals()
 }
 
 // --- Council refresh registration (avoids circular import) ---
@@ -855,9 +842,9 @@ export function setupSSEReaction(): () => void {
       return
     }
 
-    // Agent events → fetch agents only
+    // Agent events → execution surface refresh
     if (event.type === 'agent_joined' || event.type === 'agent_left') {
-      scheduleRefresh('agents', refreshAgents)
+      scheduleRefresh('execution', refreshExecution)
     }
 
     // Dashboard data events — debounced full refresh
@@ -873,26 +860,23 @@ export function setupSSEReaction(): () => void {
       }
     }
 
-    // Task events → fetch tasks only
+    // Task events → execution surface refresh
     if (event.type.startsWith('task_') || event.type.startsWith('masc/task_')) {
-      scheduleRefresh('tasks', refreshTasks)
+      scheduleRefresh('execution', refreshExecution)
     }
 
-    // Broadcast → fetch new messages only (append-only via since_seq)
+    // Broadcast → execution timeline refresh
     if (event.type === 'broadcast') {
-      scheduleRefresh('messages', refreshMessages)
+      scheduleRefresh('execution', refreshExecution)
     }
 
-    // Keeper lifecycle events → full dashboard (keeper data only in bundle)
+    // Keeper lifecycle events → execution + mission refresh
     if (
       event.type === 'keeper_handoff'
       || event.type === 'keeper_compaction'
       || event.type === 'keeper_guardrail'
     ) {
-      scheduleRefresh('dashboard', () => {
-        invalidateDashboardCache()
-        refreshDashboard()
-      })
+      scheduleRefresh('execution', refreshExecution)
     }
 
     // Board events → board refresh only

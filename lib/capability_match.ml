@@ -1,16 +1,27 @@
 (** Capability Match — Task-Agent Compatibility Scoring
 
-    Computes compatibility between tasks and agents based on
-    keyword overlap between task content and agent traits/interests.
+    Computes compatibility between tasks and agents using keyword
+    overlap (heuristic) or LLM-based semantic scoring (llm/hybrid).
 
     Used to improve task assignment from first-come-first-served
     to capability-aware matching (COALESCE pattern).
 
-    Scoring formula:
+    Keyword scoring formula:
       score = trait_overlap * 0.4 + interest_overlap * 0.4 + capability_match * 0.2
 
+    LLM scoring: Prompts an LLM to rate agent-task fit as 0.0-1.0,
+    capturing semantic similarity that keyword overlap misses
+    (e.g. "security" ↔ "cybersecurity", "frontend" ↔ "UI").
+
+    Mode selection via MASC_CAPABILITY_MATCH_MODE:
+      - keyword (default): existing heuristic, 0-latency
+      - llm: LLM-only scoring
+      - hybrid: LLM with keyword fallback on failure
+
     @see "Orchestrating Human-AI Teams" — capability-based assignment
-    @since 2.60.0 *)
+    @see arXiv 2601.04748 — semantic confusability in agent routing
+    @since 2.60.0
+    @since 2.65.0 — LLM/hybrid scoring modes *)
 
 (** Agent capabilities for matching.
     Extracted from GraphQL agent fields or Agent_identity.t *)
@@ -43,6 +54,17 @@ type match_score = {
   capability_score: float;  (** 0.0-1.0: direct capability match *)
   total_score: float;       (** Weighted combination *)
 } [@@deriving show, eq]
+
+(* ---------- Match Mode ---------- *)
+
+(** Scoring mode: keyword heuristic, LLM semantic, or hybrid. *)
+type match_mode = Keyword | Llm | Hybrid
+
+let get_match_mode () : match_mode =
+  match Sys.getenv_opt "MASC_CAPABILITY_MATCH_MODE" with
+  | Some "llm" -> Llm
+  | Some "hybrid" -> Hybrid
+  | _ -> Keyword
 
 (* ---------- Keyword Extraction ---------- *)
 
@@ -130,7 +152,107 @@ let agent_profile_of_identity (id : Agent_identity.t) : agent_profile =
     role = Agent_identity.get_role id;
   }
 
-(* ---------- Scoring ---------- *)
+(* ---------- LLM Scoring ---------- *)
+
+(** Model specs for capability match LLM scoring.
+    Uses fast local models by default; override with MASC_CAPABILITY_MATCH_MODELS. *)
+let match_model_strings () =
+  match Sys.getenv_opt "MASC_CAPABILITY_MATCH_MODELS" with
+  | Some s -> String.split_on_char ',' s |> List.map String.trim
+  | None ->
+      [
+        Printf.sprintf "ollama:%s" (Env_config.Ollama.default_model);
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+      ]
+
+let match_model_specs () =
+  Llm_client.available_model_specs_of_strings (match_model_strings ())
+
+(** Build the LLM prompt for agent-task compatibility scoring. *)
+let build_scoring_prompt (agent : agent_profile) (task : task_profile) : string =
+  let traits_str = match agent.traits with
+    | [] -> "none"
+    | ts -> String.concat ", " ts
+  in
+  let interests_str = match agent.interests with
+    | [] -> "none"
+    | is -> String.concat ", " is
+  in
+  let caps_str = match agent.capabilities with
+    | [] -> "none"
+    | cs -> String.concat ", " cs
+  in
+  Printf.sprintf
+{|Rate how well this agent matches the task. Reply with ONLY a decimal number between 0.0 and 1.0.
+
+Agent: %s
+  Traits: %s
+  Interests: %s
+  Capabilities: %s
+
+Task: %s
+  Description: %s
+
+Score (0.0 = no match, 1.0 = perfect match):|}
+    agent.name traits_str interests_str caps_str
+    task.title task.description
+
+(** Parse a float score from LLM response text.
+    Extracts the first decimal number found in the response. *)
+let parse_llm_score (text : string) : float option =
+  let s = String.trim text in
+  (* Try direct float_of_string first *)
+  match float_of_string_opt s with
+  | Some f when f >= 0.0 && f <= 1.0 -> Some f
+  | _ ->
+      (* Scan for first decimal pattern like "0.85" in the response *)
+      let len = String.length s in
+      let rec scan i =
+        if i >= len then None
+        else
+          let c = s.[i] in
+          if (c >= '0' && c <= '9') || c = '.' then
+            (* Find end of number *)
+            let rec find_end j =
+              if j >= len then j
+              else let c2 = s.[j] in
+                if (c2 >= '0' && c2 <= '9') || c2 = '.' then find_end (j + 1)
+                else j
+            in
+            let end_pos = find_end i in
+            let num_str = String.sub s i (end_pos - i) in
+            (match float_of_string_opt num_str with
+             | Some f when f >= 0.0 && f <= 1.0 -> Some f
+             | _ -> scan end_pos)
+          else scan (i + 1)
+      in
+      scan 0
+
+(** Validate that an LLM response contains a parseable score. *)
+let llm_score_is_valid (resp : Llm_client.completion_response) : bool =
+  parse_llm_score resp.content <> None
+
+(** Call LLM to score agent-task compatibility.
+    Returns Ok float or Error string. *)
+let score_with_llm (agent : agent_profile) (task : task_profile)
+    : (float, string) result =
+  let prompt = build_scoring_prompt agent task in
+  match
+    Llm_client.run_prompt_cascade
+      ~temperature:0.1
+      ~timeout_sec:15
+      ~accept:llm_score_is_valid
+      ~model_specs:(match_model_specs ())
+      ~max_tokens:20
+      ~prompt ()
+  with
+  | Ok resp -> (
+      match parse_llm_score resp.content with
+      | Some f -> Ok f
+      | None -> Error (Printf.sprintf "unparseable LLM response: %s" resp.content))
+  | Error err -> Error err
+
+(* ---------- Keyword Scoring ---------- *)
 
 (** Compute keyword overlap between two lists.
     Returns 0.0-1.0: |intersection| / |reference| *)
@@ -159,10 +281,10 @@ let keyword_overlap (reference : string list) (candidate : string list) : float 
     ) candidate in
     float_of_int (List.length matching) /. float_of_int (List.length reference)
 
-(** Compute match score between an agent and a task.
+(** Compute keyword-based match score between an agent and a task.
     When the task has a required_role, agents without a matching role
     receive a total_score of 0.0 (filtered out). *)
-let score (agent : agent_profile) (task : task_profile) : match_score =
+let score_keyword (agent : agent_profile) (task : task_profile) : match_score =
   let role_ok = Agent_identity.role_satisfies
     ~required:task.required_role ~agent_role:agent.role in
   let trait_score = keyword_overlap task.keywords agent.traits in
@@ -182,6 +304,51 @@ let score (agent : agent_profile) (task : task_profile) : match_score =
     capability_score;
     total_score;
   }
+
+(** Compute LLM-based match score. Falls back to keyword on parse failure. *)
+let score_llm (agent : agent_profile) (task : task_profile) : match_score =
+  let role_ok = Agent_identity.role_satisfies
+    ~required:task.required_role ~agent_role:agent.role in
+  if not role_ok then
+    { agent_name = agent.name; task_id = task.task_id;
+      trait_score = 0.0; interest_score = 0.0;
+      capability_score = 0.0; total_score = 0.0 }
+  else
+    match score_with_llm agent task with
+    | Ok llm_score ->
+        { agent_name = agent.name; task_id = task.task_id;
+          trait_score = llm_score; interest_score = llm_score;
+          capability_score = llm_score; total_score = llm_score }
+    | Error _err ->
+        (* LLM failed — return zero rather than silently falling back *)
+        { agent_name = agent.name; task_id = task.task_id;
+          trait_score = 0.0; interest_score = 0.0;
+          capability_score = 0.0; total_score = 0.0 }
+
+(** Compute hybrid match score: LLM first, keyword fallback on failure. *)
+let score_hybrid (agent : agent_profile) (task : task_profile) : match_score =
+  let role_ok = Agent_identity.role_satisfies
+    ~required:task.required_role ~agent_role:agent.role in
+  if not role_ok then
+    { agent_name = agent.name; task_id = task.task_id;
+      trait_score = 0.0; interest_score = 0.0;
+      capability_score = 0.0; total_score = 0.0 }
+  else
+    match score_with_llm agent task with
+    | Ok llm_score ->
+        { agent_name = agent.name; task_id = task.task_id;
+          trait_score = llm_score; interest_score = llm_score;
+          capability_score = llm_score; total_score = llm_score }
+    | Error _err ->
+        (* LLM unavailable — fall back to keyword heuristic *)
+        score_keyword agent task
+
+(** Compute match score using the active mode (env var dispatch). *)
+let score (agent : agent_profile) (task : task_profile) : match_score =
+  match get_match_mode () with
+  | Keyword -> score_keyword agent task
+  | Llm -> score_llm agent task
+  | Hybrid -> score_hybrid agent task
 
 (** Rank agents for a given task. Returns agents sorted by compatibility (best first). *)
 let rank_agents_for_task (agents : agent_profile list) (task : task_profile)

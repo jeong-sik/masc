@@ -725,3 +725,10 @@
  (name test_proof_criteria)
  (modules test_proof_criteria)
  (libraries masc_mcp alcotest yojson))
+
+; LLM Scoring Demo — compare keyword vs LLM capability matching
+; Run with: MASC_CAPABILITY_MATCH_MODE=llm dune exec test/test_llm_scoring_demo.exe
+(executable
+ (name test_llm_scoring_demo)
+ (modules test_llm_scoring_demo)
+ (libraries masc_mcp yojson))

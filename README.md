@@ -193,7 +193,7 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 | 인증 | `masc_auth_enable`, `masc_auth_create_token` |
 | 비용 추적 | `masc_cost_report`, `masc_cost_log` |
 
-**Web Dashboard**: `/dashboard` 경로에서 Preact SPA로 실시간 모니터링을 제공합니다.
+**Web Dashboard**: `/dashboard` 경로에서 operator-first Preact SPA를 제공합니다. Main surface는 `Mission / Execution / Memory / Governance / Planning / Intervene / Command`이고, 실험 기능은 `Lab`으로 분리됩니다.
 
 약 290개 이상의 MCP 도구를 제공합니다. 네임스페이스: `masc_*`, `lodge_*`, `decision.*`, `experiment.*`, `trpg.*`, `client.*`.
 

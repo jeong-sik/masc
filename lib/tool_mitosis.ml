@@ -1546,7 +1546,7 @@ let handle_mitosis_handoff ctx args : result =
             let (ok, body) = run_sync_handoff ctx args_sync in
             let parsed =
               try Yojson.Safe.from_string body
-              with _ -> `String body
+              with Yojson.Json_error _ -> `String body
             in
             let (verification, gate_pass) =
               run_handoff_verifier ~ctx ~args:args_sync ~parsed_result:parsed
@@ -1608,7 +1608,7 @@ let handle_mitosis_handoff ctx args : result =
       let (ok, body) = run_sync_handoff ctx args_sync in
       let parsed =
         try Yojson.Safe.from_string body
-        with _ -> `String body
+        with Yojson.Json_error _ -> `String body
       in
       let (verification, gate_pass) = run_handoff_verifier ~ctx ~args:args_sync ~parsed_result:parsed in
       let final_ok = ok && gate_pass in

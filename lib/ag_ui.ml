@@ -207,9 +207,9 @@ let of_custom ~room_id ~name (value : Yojson.Safe.t) : event =
     Inspects the "status" field to determine the event type. *)
 let of_task_update ~room_id (task_json : Yojson.Safe.t) : event =
   let module U = Yojson.Safe.Util in
-  let task_id = (try task_json |> U.member "id" |> U.to_string with _ -> "unknown") in
-  let status = (try task_json |> U.member "status" |> U.to_string with _ -> "") in
-  let agent = (try task_json |> U.member "agent" |> U.to_string with _ -> "unknown") in
+  let task_id = (try task_json |> U.member "id" |> U.to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
+  let status = (try task_json |> U.member "status" |> U.to_string with Yojson.Safe.Util.Type_error _ -> "") in
+  let agent = (try task_json |> U.member "agent" |> U.to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
   match status with
   | "claimed" ->
     of_task_claimed ~room_id ~agent_name:agent ~task_id

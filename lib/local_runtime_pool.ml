@@ -67,7 +67,7 @@ let float_of_env_default name ~default =
       try
         let value = float_of_string (String.trim raw) in
         if value > 0.0 then value else default
-      with _ -> default)
+      with Failure _ -> default)
 
 let cooldown_seconds () =
   float_of_env_default "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" ~default:30.0
@@ -99,7 +99,7 @@ let pool : pool_state ref = ref empty_pool
 let reset () = pool := empty_pool
 
 let parse_int_opt raw =
-  try Some (int_of_string (String.trim raw)) with _ -> None
+  try Some (int_of_string (String.trim raw)) with Failure _ -> None
 
 let int_of_env_default name ~default =
   match Sys.getenv_opt name with
@@ -110,7 +110,7 @@ let int_of_env_default name ~default =
       | _ -> default)
 
 let runtime_port base_url =
-  try Uri.of_string base_url |> Uri.port with _ -> None
+  try Uri.of_string base_url |> Uri.port with Failure _ -> None
 
 let runtime_id_of_base_url base_url =
   match runtime_port base_url with

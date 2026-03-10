@@ -357,7 +357,9 @@ let hydrate (dna : succession_dna) (spec : successor_spec) : Context_manager.wor
     else
       try Some (Context_manager.deserialize_context
                   dna.compressed_context ~max_tokens:spec.model.max_context)
-      with _ -> None
+      with exn ->
+        ignore (Printexc.to_string exn);
+        None
   in
   (* Preserve the previous system prompt (keeper/perpetual constitution + custom instructions).
      This is critical for continuity across handoffs. *)

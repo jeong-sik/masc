@@ -44,7 +44,7 @@ let get_object_opt args key =
   | _ -> None
 
 let parse_json_or_string s =
-  try Yojson.Safe.from_string s with _ -> `String s
+  try Yojson.Safe.from_string s with Yojson.Json_error _ -> `String s
 
 let dedupe_keep_order xs =
   let rec loop seen acc = function
@@ -383,7 +383,9 @@ let capabilities_for_agent config ~agent_name =
                | _ -> None)
         |> Option.value ~default:[]
     | _ -> []
-  with _ -> []
+  with exn ->
+    Printf.eprintf "[TRPG] capabilities_for_agent failed: %s\n%!" (Printexc.to_string exn);
+    []
 
 let default_world_skills =
   [ "observe"; "deliberate"; "act"; "negotiate" ]

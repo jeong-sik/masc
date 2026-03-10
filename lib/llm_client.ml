@@ -28,7 +28,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
   | Some raw ->
       let v =
         try int_of_string (String.trim raw)
-        with _ -> default
+        with Failure _ -> default
       in
       max min_v (min max_v v)
 
@@ -607,7 +607,9 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
               call_name = fn |> member "name" |> to_string;
               call_arguments = fn |> member "arguments" |> to_string;
             }
-          with _ -> None
+          with exn ->
+            ignore (Printexc.to_string exn);
+            None
         ) calls
       | _ -> (
           match msg |> member "function_call" with

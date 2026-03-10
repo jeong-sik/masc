@@ -38,7 +38,7 @@ let string_opt_to_json = function Some value -> `String value | None -> `Null
 let float_opt_to_json = function Some value -> `Float value | None -> `Null
 
 let parse_int_opt value =
-  try Some (int_of_string (String.trim value)) with _ -> None
+  try Some (int_of_string (String.trim value)) with Failure _ -> None
 
 let unique_preserve_order items =
   let rec loop seen = function
@@ -289,7 +289,7 @@ let raw_completion_at ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec () 
                 (json |> member "choices" |> to_list |> List.hd
                 |> member "message" |> member "content" |> to_string_option);
               { success = true; latency_ms; error = None }
-        with _ ->
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
           { success = false; latency_ms; error = Some "invalid llama response json" })
     | Unix.WEXITED code ->
         {

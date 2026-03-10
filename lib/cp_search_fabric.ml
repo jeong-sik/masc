@@ -118,7 +118,7 @@ let stats_entry_of_json json =
       None
     else
       Some { unit_id; stage; alpha; beta; updated_at }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ -> None
 
 let load_store path : stats_store =
   if not (Sys.file_exists path) then
@@ -132,7 +132,7 @@ let load_store path : stats_store =
           | _ -> default_store)
       | `List rows -> List.filter_map stats_entry_of_json rows
       | _ -> default_store
-    with _ -> default_store
+    with Yojson.Json_error _ | Sys_error _ -> default_store
 
 let save_store path (store : stats_store) =
   ensure_dir (Filename.dirname path);
@@ -222,7 +222,7 @@ let parse_iso_timestamp iso =
           }
         in
         Some (fst (Unix.mktime tm)))
-  with _ -> None
+  with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
 
 let stop_words =
   [

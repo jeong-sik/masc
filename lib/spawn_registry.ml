@@ -400,10 +400,10 @@ let persist reg ~reg_path : (unit, spawn_error) result =
       end
     with
     | Unix.Unix_error (err, fn, arg) ->
-        (try Unix.unlink tmp_path with _ -> ());
+        (try Unix.unlink tmp_path with Unix.Unix_error _ -> ());
         Error (Persist_error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err)))
     | e ->
-        (try Unix.unlink tmp_path with _ -> ());
+        (try Unix.unlink tmp_path with Unix.Unix_error _ -> ());
         Error (Persist_error (Printexc.to_string e))
   )
 

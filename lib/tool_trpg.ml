@@ -836,7 +836,7 @@ let get_required_int args key =
   | `Int i -> Ok i
   | `Intlit s -> (
       try Ok (int_of_string s)
-      with _ -> Error (Printf.sprintf "%s must be int" key))
+      with Failure _ -> Error (Printf.sprintf "%s must be int" key))
   | `Null -> Error (Printf.sprintf "%s is required" key)
   | _ -> Error (Printf.sprintf "%s must be int" key)
 
@@ -845,7 +845,7 @@ let get_optional_int args key =
   | `Int i -> Ok (Some i)
   | `Intlit s -> (
       try Ok (Some (int_of_string s))
-      with _ -> Error (Printf.sprintf "%s must be int" key))
+      with Failure _ -> Error (Printf.sprintf "%s must be int" key))
   | `Null -> Ok None
   | _ -> Error (Printf.sprintf "%s must be int" key)
 
@@ -855,7 +855,7 @@ let get_optional_float args key ~default =
   | `Int i -> Ok (float_of_int i)
   | `Intlit s -> (
       try Ok (float_of_string s)
-      with _ -> Error (Printf.sprintf "%s must be number" key))
+      with Failure _ -> Error (Printf.sprintf "%s must be number" key))
   | `Null -> Ok default
   | _ -> Error (Printf.sprintf "%s must be number" key)
 

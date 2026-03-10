@@ -506,7 +506,7 @@ let parse_http_response raw =
     | status_line :: _ ->
         let cleaned = String.trim status_line in
         (match String.split_on_char ' ' cleaned with
-        | _http :: code :: _ -> (try int_of_string code with _ -> 200)
+        | _http :: code :: _ -> (try int_of_string code with Failure _ -> 200)
         | _ -> 200)
     | [] -> 200
   in
@@ -664,11 +664,11 @@ let call_jsonrpc_tool ~net ~clock ?host ?port ?(timeout_sec=120.0) ~name ~argume
 
 let int_of_extra extra key =
   Option.bind (List.assoc_opt key extra) (fun value ->
-      try Some (int_of_string value) with _ -> None)
+      try Some (int_of_string value) with Failure _ -> None)
 
 let bool_of_extra extra key =
   Option.bind (List.assoc_opt key extra) (fun value ->
-      try Some (bool_of_string value) with _ -> None)
+      try Some (bool_of_string value) with Invalid_argument _ -> None)
 
 let call_chain_run ~net ~clock ?host ?port ?chain_id ?mermaid ?input_json
     ?(trace=true) ?(checkpoint_enabled=true) ?(timeout_sec=120.0) () =

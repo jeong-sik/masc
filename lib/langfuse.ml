@@ -210,7 +210,7 @@ let send_to_langfuse ~endpoint ~body () =
       let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string
         (try (Unix.gethostbyname host).Unix.h_addr_list.(0)
               |> Unix.string_of_inet_addr
-         with _ -> "127.0.0.1"), port) in
+         with Not_found -> "127.0.0.1"), port) in
       let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
       (* Use blocking socket for reliable connection *)
       Unix.setsockopt_float sock Unix.SO_SNDTIMEO 2.0;  (* 2 second timeout *)
@@ -229,7 +229,7 @@ let send_to_langfuse ~endpoint ~body () =
       let _ = Unix.write_substring sock request 0 (String.length request) in
       (* Read response to ensure request is processed *)
       let buf = Bytes.create 256 in
-      let n = try Unix.read sock buf 0 256 with _ -> 0 in
+      let n = try Unix.read sock buf 0 256 with Unix.Unix_error _ -> 0 in
       Printf.eprintf "[Langfuse] Response (%d bytes): %s\n%!" n (Bytes.sub_string buf 0 (min n 100));
       Unix.close sock
     with exn ->

@@ -124,10 +124,10 @@ let apply_world_time_update state ~payload =
               (fun acc part ->
                 if String.ends_with ~suffix:"h" part then
                   try acc + (int_of_string (String.sub part 0 (String.length part - 1))) * 60
-                  with _ -> acc
+                  with Failure _ -> acc
                 else if String.ends_with ~suffix:"m" part then
                   try acc + (int_of_string (String.sub part 0 (String.length part - 1)))
-                  with _ -> acc
+                  with Failure _ -> acc
                 else acc)
               0 parts
         | None -> 0

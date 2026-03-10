@@ -36,7 +36,7 @@ let strip_extra s =
     List.exists (fun pat ->
       let plen = String.length pat in
       String.length line >= plen &&
-      (try String.sub line 0 plen = pat with _ -> false)
+      (try String.sub line 0 plen = pat with Invalid_argument _ -> false)
     ) hook_patterns
   in
   let filtered = List.filter (fun l -> not (is_hook_line l)) lines in
@@ -78,7 +78,7 @@ let call_glm ?(api_key="") ~model ~prompt ~timeout_sec ~max_chars () =
            |> Yojson.Safe.Util.member "message"
            |> Yojson.Safe.Util.member "content"
            |> Yojson.Safe.Util.to_string
-    with _ -> raw in
+    with Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) -> raw in
     let truncated = if String.length result > max_chars
       then String.sub result 0 max_chars else result in
     strip_extra truncated
@@ -129,7 +129,7 @@ let call_ollama ~model ~prompt ~timeout_sec ~max_chars () =
     let json = Yojson.Safe.from_string raw in
     json |> Yojson.Safe.Util.member "response"
          |> Yojson.Safe.Util.to_string
-  with _ -> raw in
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) -> raw in
   let truncated = if String.length result > max_chars
     then String.sub result 0 max_chars else result in
   strip_extra truncated
@@ -162,7 +162,7 @@ let call_llama ~model ~prompt ~timeout_sec ~max_chars () =
          |> Yojson.Safe.Util.member "message"
          |> Yojson.Safe.Util.member "content"
          |> Yojson.Safe.Util.to_string
-  with _ -> raw in
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) -> raw in
   let truncated = if String.length result > max_chars
     then String.sub result 0 max_chars else result in
   strip_extra truncated

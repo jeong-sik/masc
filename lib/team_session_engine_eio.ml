@@ -257,7 +257,7 @@ let policy_violations_add violations entry =
 let parse_summary_int key (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member key json with
   | `Int n -> n
-  | `Intlit s -> (try int_of_string s with _ -> 0)
+  | `Intlit s -> (try int_of_string s with Failure _ -> 0)
   | `Float v -> int_of_float v
   | _ -> 0
 
@@ -265,7 +265,7 @@ let parse_summary_float key (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member key json with
   | `Float v -> v
   | `Int n -> float_of_int n
-  | `Intlit s -> (try float_of_string s with _ -> 0.0)
+  | `Intlit s -> (try float_of_string s with Failure _ -> 0.0)
   | _ -> 0.0
 
 let team_health_json (session : Team_session_types.session) active_agents =
@@ -1541,7 +1541,7 @@ let list_events ~(config : Room.config) ~(session_id : string)
             match Yojson.Safe.Util.member "ts" json with
             | `Float v -> v > ts
             | `Int n -> float_of_int n > ts
-            | `Intlit s -> (try float_of_string s > ts with _ -> false)
+            | `Intlit s -> (try float_of_string s > ts with Failure _ -> false)
             | _ -> false)
       in
       let filtered =

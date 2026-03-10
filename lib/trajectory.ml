@@ -100,7 +100,7 @@ let entry_to_json (e : tool_call_entry) : Yojson.Safe.t =
     ("turn", `Int e.turn);
     ("round", `Int e.round);
     ("tool_name", `String e.tool_name);
-    ("args", (try Yojson.Safe.from_string e.args_json with _ -> `String e.args_json));
+    ("args", (try Yojson.Safe.from_string e.args_json with Yojson.Json_error _ -> `String e.args_json));
     ("gate", gate_decision_to_json e.gate_decision);
     ("result",
       (match e.result with
@@ -224,7 +224,7 @@ let record_entry (acc : accumulator) (entry : tool_call_entry) : unit =
   (* Persist immediately for crash recovery *)
   (try append_entry ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name
        ~trace_id:acc.trace_id entry
-   with _ -> Printf.eprintf "[TRAJECTORY] Failed to persist entry for %s\n%!" acc.trace_id)
+   with exn -> Printf.eprintf "[TRAJECTORY] Failed to persist entry for %s: %s\n%!" acc.trace_id (Printexc.to_string exn))
 
 let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
   let traj = {
@@ -242,7 +242,7 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
   } in
   (try append_summary ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name
        ~trace_id:acc.trace_id traj
-   with _ -> Printf.eprintf "[TRAJECTORY] Failed to persist summary for %s\n%!" acc.trace_id);
+   with exn -> Printf.eprintf "[TRAJECTORY] Failed to persist summary for %s: %s\n%!" acc.trace_id (Printexc.to_string exn));
   traj
 
 (* ================================================================ *)

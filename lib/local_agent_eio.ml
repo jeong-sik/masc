@@ -362,12 +362,10 @@ let local_worker_extra_schemas : Types.tool_schema list =
     };
   ]
 
-let list_masc_tools ~sw ~(auth_token : string option) ~session_id
+let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
     ?(names : string list option = None) () :
     (Types.tool_schema list, string) result =
-  let _ = sw in
-  let _ = auth_token in
-  let _ = session_id in
+  ignore (_sw, auth_token, session_id);
   let all_schemas = local_worker_extra_schemas in
   match names with
   | None -> Ok all_schemas

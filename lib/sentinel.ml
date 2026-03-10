@@ -32,9 +32,9 @@ let parse_iso_or_epoch s =
 let parse_llm_json_safe s =
   try Some (Yojson.Safe.from_string s)
   with Yojson.Json_error _ ->
-    let re = Str.regexp "```json?[\n\r]+\\([^`]+\\)```" in
+    let re = Str.regexp "```\\(json\\)?[\n\r]+\\([^`]+\\)```" in
     if Str.string_match re s 0 then
-      (try Some (Yojson.Safe.from_string (Str.matched_group 1 s))
+      (try Some (Yojson.Safe.from_string (Str.matched_group 2 s))
        with _ -> None)
     else None
 
@@ -118,13 +118,24 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
 
           (* LLM-first: ask LLM for a context-aware daily summary *)
           let agent_names = String.concat ", " state.active_agents in
+          let board_posts = (try Board_dispatch.list_posts ~limit:50 ()
+                             with _ -> []) in
+          let post_count = List.length board_posts in
+          let now_f = Time_compat.now () in
+          let stale_posts = List.filter (fun (p : Board.post) ->
+            now_f -. p.created_at > 604800.0 (* 7 days *)
+          ) board_posts |> List.length in
+          let latest_age = match board_posts with
+            | p :: _ -> sprintf "%.0fs" (now_f -. p.created_at)
+            | [] -> "no posts"
+          in
           let llm_content = call_sentinel_llm
             ~cascade_name:"sentinel_board"
             ~prompt_id:"sentinel-board-patrol"
             ~vars:[
-              ("total_posts", string_of_int task_count);
-              ("stale_count", string_of_int 0);
-              ("latest_post_age", "unknown");
+              ("total_posts", string_of_int post_count);
+              ("stale_count", string_of_int stale_posts);
+              ("latest_post_age", latest_age);
               ("active_agents", agent_names);
             ] () in
           let content = match llm_content with

@@ -7219,9 +7219,9 @@ let assets_root () =
   in
   match env_assets with
   | Some path when is_dir path -> path
+  | _ when is_dir exe_assets -> exe_assets
   | _ when is_dir (Filename.concat (Sys.getcwd ()) "assets") ->
       Filename.concat (Sys.getcwd ()) "assets"
-  | _ when is_dir exe_assets -> exe_assets
   | _ -> Filename.concat (Sys.getcwd ()) "assets"
 
 (** Local GraphiQL assets *)

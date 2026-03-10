@@ -51,14 +51,14 @@ val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
 
 (** {1 Network Context} *)
 
-(** Type alias for generic Eio network capability *)
-type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
+(** Type alias for Eio network capability (Generic + Unix for Agent SDK) *)
+type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
-(** Set the Eio network reference for Walph chain execution.
+(** Set the Eio network reference for server-side network calls.
     Must be called from main_eio.ml during server initialization.
-    Accepts any Eio.Net.t (Unix, Generic, etc.) and stores as generic.
+    Requires Generic + Unix capabilities for Agent SDK compatibility.
     @param net Eio network capability *)
-val set_net : _ Eio.Net.t -> unit
+val set_net : [> `Generic | `Unix] Eio.Net.ty Eio.Resource.t -> unit
 
 (** Set the Eio clock reference for async sleep. *)
 val set_clock : float Eio.Time.clock_ty Eio.Resource.t -> unit

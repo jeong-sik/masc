@@ -20,7 +20,7 @@ type tool_profile =
 (** {1 Network Context for LLM Chain Calls} *)
 
 (** Type alias for generic Eio network capability *)
-type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
+type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
 (** Global Eio network reference for Walph chain execution.
     Set by main_eio.ml during server initialization.

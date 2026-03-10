@@ -4,6 +4,7 @@ import { useEffect } from 'preact/hooks'
 import { showToast } from './common/toast'
 import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
 import type { OperatorAttentionItem, OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
+import { route } from '../router'
 import {
   confirmOperatorPendingAction,
   dispatchOperatorAction,
@@ -20,6 +21,12 @@ import {
   refreshOperatorSessionDigest,
   refreshOperatorSnapshot,
 } from '../operator-store'
+import {
+  workflowActionLabel,
+  workflowContextForRoute,
+  workflowTargetLabel,
+  type DashboardWorkflowContext,
+} from '../workflow-context'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
@@ -48,6 +55,7 @@ const teamTaskPriority = signal('2')
 const teamStopReason = signal('운영자 중지 요청')
 const selectedKeeperName = signal('')
 const keeperMessage = signal('')
+const hydratedWorkflowId = signal<string | null>(null)
 
 function persistActorName(value: string): void {
   const trimmed = value.trim() || 'dashboard'
@@ -129,17 +137,21 @@ function actionTypeLabel(value?: string | null): string {
       return 'room 일시정지'
     case 'room_resume':
       return 'room 재개'
-    case 'task_inject':
-      return '작업 주입'
+    case 'team_turn':
+      return '세션 업데이트'
     case 'team_note':
       return '세션 노트'
     case 'team_broadcast':
       return '세션 방송'
     case 'team_task_inject':
       return '세션 작업 주입'
+    case 'task_inject':
+      return '작업 주입'
     case 'team_stop':
       return '세션 중지'
     case 'keeper_message':
+      return 'keeper 메시지'
+    case 'keeper_msg':
       return 'keeper 메시지'
     default:
       return value?.trim() || '액션'
@@ -197,6 +209,82 @@ function sessionActionLabel(value: typeof teamTurnKind.value): string {
     default:
       return value
   }
+}
+
+function workflowPayloadString(
+  payload: Record<string, unknown> | null | undefined,
+  key: string,
+): string | null {
+  if (!payload) return null
+  const value = payload[key]
+  if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return null
+}
+
+function workflowTeamTurnKind(context: DashboardWorkflowContext): typeof teamTurnKind.value {
+  if (context.action_type === 'team_task_inject') return 'task'
+  if (context.action_type === 'team_broadcast') return 'broadcast'
+  if (context.action_type === 'team_note') return 'note'
+  if (context.action_type === 'team_turn') {
+    const requested = workflowPayloadString(context.suggested_payload, 'turn_kind')
+    if (requested === 'broadcast' || requested === 'task') return requested
+  }
+  return 'note'
+}
+
+function hydrateOpsWorkflow(context: DashboardWorkflowContext): void {
+  const payload = context.suggested_payload
+  if (context.target_type === 'room') {
+    if (context.action_type === 'broadcast') {
+      broadcastMessage.value = workflowPayloadString(payload, 'message') ?? context.summary
+      return
+    }
+    if (context.action_type === 'task_inject') {
+      taskTitle.value = workflowPayloadString(payload, 'title') ?? '운영자 주입 작업'
+      taskDescription.value = workflowPayloadString(payload, 'description') ?? context.summary
+      taskPriority.value = workflowPayloadString(payload, 'priority') ?? taskPriority.value
+    }
+    return
+  }
+
+  if (context.target_type === 'team_session') {
+    if (context.target_id) selectedSessionId.value = context.target_id
+    if (context.action_type === 'team_stop') {
+      teamStopReason.value = workflowPayloadString(payload, 'reason') ?? context.summary
+      return
+    }
+    teamTurnKind.value = workflowTeamTurnKind(context)
+    const message = workflowPayloadString(payload, 'message')
+    if (message) teamMessage.value = message
+    if (teamTurnKind.value === 'task') {
+      teamTaskTitle.value = workflowPayloadString(payload, 'task_title') ?? workflowPayloadString(payload, 'title') ?? '운영자 주입 작업'
+      teamTaskDescription.value = workflowPayloadString(payload, 'task_description') ?? workflowPayloadString(payload, 'description') ?? context.summary
+      teamTaskPriority.value = workflowPayloadString(payload, 'task_priority') ?? workflowPayloadString(payload, 'priority') ?? teamTaskPriority.value
+    }
+    return
+  }
+
+  if (context.target_type === 'keeper') {
+    if (context.target_id) selectedKeeperName.value = context.target_id
+    keeperMessage.value = workflowPayloadString(payload, 'message') ?? context.summary
+  }
+}
+
+function workflowTargetReady(
+  context: DashboardWorkflowContext | null,
+  sessions: OperatorSessionSnapshot[],
+  keepers: OperatorKeeperSnapshot[],
+): boolean {
+  if (!context) return true
+  if (!context.target_type || context.target_type === 'room') return true
+  if (context.target_type === 'team_session') {
+    return !!context.target_id && sessions.some(session => session.session_id === context.target_id)
+  }
+  if (context.target_type === 'keeper') {
+    return !!context.target_id && keepers.some(keeper => keeper.name === context.target_id)
+  }
+  return true
 }
 
 async function executeAction(input: {
@@ -362,6 +450,7 @@ async function confirmPending(confirmToken: string) {
 
 export function Ops() {
   const snapshot = operatorSnapshot.value
+  const workflowContext = route.value.tab === 'intervene' ? workflowContextForRoute(route.value) : null
   const roomDigest = operatorRoomDigest.value
   const sessionDigest = operatorSessionDigest.value
   const room = snapshot?.room ?? {}
@@ -379,10 +468,33 @@ export function Ops() {
   const flaggedSessions = sessions.filter(session => sessionPriorityTone(session) !== 'ok')
   const flaggedKeepers = keepers.filter(keeper => keeperPriorityTone(keeper) !== 'ok')
   const roomFeed = recentMessages.slice(0, 5)
+  const workflowReady = workflowTargetReady(workflowContext, sessions, keepers)
 
   useEffect(() => {
     void refreshOperatorRoomDigest()
   }, [])
+
+  useEffect(() => {
+    if (route.value.tab !== 'intervene') {
+      hydratedWorkflowId.value = null
+      return
+    }
+    if (!workflowContext) {
+      hydratedWorkflowId.value = null
+      return
+    }
+    if (hydratedWorkflowId.value === workflowContext.id) return
+    hydratedWorkflowId.value = workflowContext.id
+    hydrateOpsWorkflow(workflowContext)
+  }, [
+    route.value.tab,
+    route.value.params.source,
+    route.value.params.action_type,
+    route.value.params.target_type,
+    route.value.params.target_id,
+    route.value.params.focus_kind,
+    workflowContext?.id,
+  ])
 
   useEffect(() => {
     const sessionId = selectedSession?.session_id ?? null
@@ -485,6 +597,22 @@ export function Ops() {
 
       ${operatorError.value ? html`<section class="ops-banner error">${operatorError.value}</section>` : null}
       ${operatorDigestError.value ? html`<section class="ops-banner error">${operatorDigestError.value}</section>` : null}
+      ${workflowContext ? html`
+        <section class="ops-banner ${workflowReady ? 'info' : 'warn'} ops-handoff-banner">
+          <div class="ops-handoff-head">
+            <strong>${workflowContext.source_label}</strong>
+            <span>${workflowActionLabel(workflowContext.action_type)}</span>
+            <span>${workflowTargetLabel(workflowContext)}</span>
+          </div>
+          <div class="ops-handoff-body">${workflowContext.summary}</div>
+          ${workflowContext.payload_preview ? html`<div class="ops-handoff-preview">${workflowContext.payload_preview}</div>` : null}
+          <div class="ops-handoff-meta">
+            ${workflowReady
+              ? '추천 액션 기준으로 대상 선택과 입력값을 미리 맞춰 두었습니다.'
+              : '대상이 현재 snapshot에 없습니다. 일반 개입 화면으로 열렸고, 실제 대상 선택은 수동으로 해야 합니다.'}
+          </div>
+        </section>
+      ` : null}
 
       ${(() => {
         const actions: Array<{ label: string; desc: string; tone: OpsPriorityTone; onClick: () => void }> = []

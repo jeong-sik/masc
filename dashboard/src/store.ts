@@ -744,9 +744,11 @@ export async function refreshExecution(): Promise<void> {
   try {
     const data = await fetchDashboardExecution()
     const normalizedStatus = normalizeServerStatus(data.status)
+    const previousRoom = serverStatus.value?.room
     if (normalizedStatus) {
       serverStatus.value = normalizedStatus
     }
+    const roomChanged = previousRoom != null && normalizedStatus?.room != null && previousRoom !== normalizedStatus.room
     agents.value = (Array.isArray(data.agents) ? data.agents : [])
       .map(normalizeAgent)
       .filter((row): row is Agent => row !== null)
@@ -756,7 +758,7 @@ export async function refreshExecution(): Promise<void> {
     const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
       .map(normalizeMessage)
       .filter((row): row is Message => row !== null)
-    messages.value = mergeMessages(messages.value, executionMessages)
+    messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
     keepers.value = normalizeKeepers(data.keepers, normalizedStatus ?? serverStatus.value)
     perpetualStatus.value = null
     lastDashboardRefreshAt.value = new Date().toISOString()

@@ -1,13 +1,18 @@
 # MASC MCP Server - Production Dockerfile
-# Uses pre-built binary from GitHub Actions (Ubuntu 24.04)
+# Runtime image for the CI-built Linux Eio binary.
 
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    libffi8 \
+    libgmp10 \
     libpq5 \
     libsqlite3-0 \
+    libssl3t64 \
+    libzstd1 \
+    zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

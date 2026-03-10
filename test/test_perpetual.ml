@@ -193,11 +193,23 @@ let test_llm_client () = group "LLM Client" (fun () ->
     (Llm_client.openai_default.provider = Llm_client.OpenAI);
   assert_true "builtin:llama_default_provider"
     (Llm_client.llama_default.provider = Llm_client.Llama);
+  (* Set env vars so default_local_model_spec returns Ollama regardless of CI env *)
+  let prev_provider = Sys.getenv_opt "MASC_DEFAULT_PROVIDER" in
+  let prev_model = Sys.getenv_opt "MASC_DEFAULT_MODEL" in
+  Unix.putenv "MASC_DEFAULT_PROVIDER" "ollama";
+  Unix.putenv "MASC_DEFAULT_MODEL" "default-model";
   let default_local = Llm_client.default_local_model_spec () in
   assert_true "builtin:default_local_provider"
     (default_local.provider = Llm_client.Ollama);
   assert_equal "builtin:default_local_model_id"
     "default-model" default_local.model_id;
+  (* Restore env vars *)
+  (match prev_provider with
+   | Some v -> Unix.putenv "MASC_DEFAULT_PROVIDER" v
+   | None -> (try Unix.putenv "MASC_DEFAULT_PROVIDER" "" with _ -> ()));
+  (match prev_model with
+   | Some v -> Unix.putenv "MASC_DEFAULT_MODEL" v
+   | None -> (try Unix.putenv "MASC_DEFAULT_MODEL" "" with _ -> ()));
 )
 
 (* ================================================================ *)

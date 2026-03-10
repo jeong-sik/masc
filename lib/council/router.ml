@@ -42,27 +42,56 @@ type route_decision = {
 [@@deriving show]
 
 (** Default agent pool - configurable *)
-let default_agents : agent_spec list = [
-  (* Local tier - always resident in VRAM via OLLAMA_DEFAULT_MODEL *)
-  { name = "glm-flash"; model = (match Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" with Some m -> m | None -> "glm-4.7-flash"); tier = Tiny;
-    strengths = [Factual; Conversation; Code; Analysis; Creative]; cost_per_1k = 0.0 };
-  
-  (* Medium tier - cloud balanced *)
-  { name = "sonnet"; model = "claude-3.5-sonnet"; tier = Medium;
-    strengths = [Code; Analysis; Creative]; cost_per_1k = 0.003 };
-  { name = "gpt-4o-mini"; model = "gpt-4o-mini"; tier = Medium;
-    strengths = [Conversation; Factual; Analysis]; cost_per_1k = 0.00015 };
-  
-  (* Large tier - heavy lifting *)
-  { name = "opus"; model = "claude-opus-4"; tier = Large;
-    strengths = [Complex; Analysis; Creative; Code]; cost_per_1k = 0.015 };
-  { name = "gpt-4o"; model = "gpt-4o"; tier = Large;
-    strengths = [Complex; Analysis; Code]; cost_per_1k = 0.005 };
-  
-  (* Giant tier - deep reasoning *)
-  { name = "o1"; model = "o1"; tier = Giant;
-    strengths = [Complex; Analysis; Code]; cost_per_1k = 0.015 };
-]
+let default_tiny_model_opt () =
+  let split_csv_nonempty raw =
+    raw
+    |> String.split_on_char ','
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
+  in
+  let label_opt =
+    match Sys.getenv_opt "MASC_DEFAULT_CASCADE" with
+    | Some raw -> (
+        match split_csv_nonempty raw with
+        | first :: _ -> Some first
+        | [] -> None)
+    | None -> (
+        match (Sys.getenv_opt "MASC_DEFAULT_PROVIDER", Sys.getenv_opt "MASC_DEFAULT_MODEL") with
+        | Some provider, Some model_id ->
+            let provider = String.trim provider in
+            let model_id = String.trim model_id in
+            if provider = "" || model_id = "" then None else Some (provider ^ ":" ^ model_id)
+        | _ -> None)
+  in
+  match label_opt with
+  | Some label -> (
+      match String.index_opt label ':' with
+      | Some idx when idx + 1 < String.length label ->
+          Some (String.sub label (idx + 1) (String.length label - idx - 1))
+      | _ -> Some label)
+  | None -> None
+
+let default_agents : agent_spec list =
+  let tiny_agents =
+    match default_tiny_model_opt () with
+    | Some model ->
+        [ { name = "default-tiny"; model; tier = Tiny;
+            strengths = [Factual; Conversation; Code; Analysis; Creative];
+            cost_per_1k = 0.0 } ]
+    | None -> []
+  in
+  tiny_agents @ [
+    { name = "sonnet"; model = "claude-3.5-sonnet"; tier = Medium;
+      strengths = [Code; Analysis; Creative]; cost_per_1k = 0.003 };
+    { name = "gpt-4o-mini"; model = "gpt-4o-mini"; tier = Medium;
+      strengths = [Conversation; Factual; Analysis]; cost_per_1k = 0.00015 };
+    { name = "opus"; model = "claude-opus-4"; tier = Large;
+      strengths = [Complex; Analysis; Creative; Code]; cost_per_1k = 0.015 };
+    { name = "gpt-4o"; model = "gpt-4o"; tier = Large;
+      strengths = [Complex; Analysis; Code]; cost_per_1k = 0.005 };
+    { name = "o1"; model = "o1"; tier = Giant;
+      strengths = [Complex; Analysis; Code]; cost_per_1k = 0.015 };
+  ]
 
 (** Feature extraction from query text *)
 module Features = struct

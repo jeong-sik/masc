@@ -229,7 +229,10 @@ let model_runner_of_string raw =
   | "claude" | "claude-cli" | "opus" | "opus-4" -> direct "claude:opus"
   | "sonnet" -> direct "claude:sonnet"
   | "haiku" | "haiku-4.5" -> direct "claude:haiku"
-  | "ollama" -> direct "ollama:glm-4.7-flash"
+  | "ollama" -> (
+      match Provider_adapter.default_model_label_result () with
+      | Ok label -> direct label
+      | Error msg -> Error msg)
   | "glm" | "glm-4.7" -> direct "glm:glm-4.7"
   | "stub" | "mock" -> Ok Stub
   | "codex" | "gpt-5.2" -> Ok (Spawn "codex")
@@ -371,12 +374,14 @@ let call_named_tool_model (runtime : runtime) ~tool_name ~(args : Yojson.Safe.t)
     | "codex" ->
         assoc_get_string_opt args "model" |> Option.value ~default:"codex"
     | "ollama" ->
-        let default_model = "ollama:glm-4.7-flash" in
         (match assoc_get_string_opt args "model" with
         | Some value when starts_with ~prefix:"ollama:" (String.lowercase_ascii value) ->
             value
         | Some value -> "ollama:" ^ value
-        | None -> default_model)
+        | None -> (
+            match Provider_adapter.default_model_label_result () with
+            | Ok label -> label
+            | Error _ -> "ollama"))
     | "glm" ->
         let default_model = "glm:glm-4.7" in
         (match assoc_get_string_opt args "model" with

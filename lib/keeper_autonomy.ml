@@ -167,7 +167,7 @@ let evaluate_next_action ~config ~goal_ids ~keeper_name:_ =
           StartPerpetualAgent {
             goal_id = goal.id;
             goal_title = goal.title;
-            models = ["ollama:glm-4.7-flash"; "gemini:gemini-2.5-flash"];
+            models = Llm_client.default_execution_model_labels ();
             coding_mode = true;
             coding_agent = "claude";
           }

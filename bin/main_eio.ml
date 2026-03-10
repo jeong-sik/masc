@@ -1557,20 +1557,8 @@ let split_csv_nonempty (raw : string) : string list =
   in
   List.rev out_rev
 
-let has_nonempty_env name =
-  match Sys.getenv_opt name with
-  | Some value -> String.trim value <> ""
-  | None -> false
-
 let trpg_default_fast_keeper_models () : string list =
-  let glm_available = has_nonempty_env "ZAI_API_KEY" in
-  let gemini_available = has_nonempty_env "GEMINI_API_KEY" in
-  match (glm_available, gemini_available) with
-  | true, true ->
-      [ "glm:glm-4.7"; "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
-  | true, false -> [ "glm:glm-4.7"; "ollama:glm-4.7-flash" ]
-  | false, true -> [ "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
-  | false, false -> [ "ollama:glm-4.7-flash" ]
+  Llm_client.default_execution_model_labels ()
 
 let trpg_keeper_models_override_csv () : string option =
   match Sys.getenv_opt "MASC_TRPG_KEEPER_MODELS" with
@@ -4927,7 +4915,12 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                  | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
                  | Ok specs ->
                      let primary =
-                       match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm
+                       match specs with
+                       | m0 :: _ -> m0
+                       | [] -> (
+                           match Llm_client.default_execution_model_spec () with
+                           | Ok model -> model
+                           | Error _ -> Llm_client.glm_cloud)
                      in
                      let base_dir = Tool_keeper.session_base_dir config in
                      let (_session, ctx_opt) =
@@ -9729,7 +9722,11 @@ let make_routes ~port ~host ~sw ~clock =
                  in
                  let model =
                    match json |> member "model" with
-                   | `String s -> s | _ -> "glm-4.7-flash:latest"
+                   | `String s -> s
+                   | _ -> (
+                       match Provider_adapter.default_model_label_result () with
+                       | Ok label -> label
+                       | Error _ -> "default-model")
                  in
                  let personality_hint =
                    match json |> member "personalityHint" with

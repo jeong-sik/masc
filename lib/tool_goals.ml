@@ -358,7 +358,7 @@ let env_keeper_models () =
 let default_keeper_models () =
   let from_env = env_keeper_models () in
   if from_env <> [] then from_env
-  else [ "ollama:glm-4.7-flash"; "gemini:gemini-3-pro-preview" ]
+  else Llm_client.default_execution_model_labels ()
 
 let sanitize_keeper_name s =
   let buf = Buffer.create (String.length s) in

@@ -4,8 +4,8 @@
     whether the action was correct and aligned with the goal.
     This implements the "verify" step of think → act → observe → verify.
 
-    Uses the cheapest available model (LFM2.5 local, or GLM-4.7-flash)
-    with a max 200-token budget per verification.
+    Uses a provider-aware default verifier model when the caller does not
+    specify one, with a max 200-token budget per verification.
 
     Read-only actions (file reads, searches) are skipped.
 

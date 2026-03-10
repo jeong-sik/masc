@@ -159,11 +159,7 @@ let agent_profile_of_identity (id : Agent_identity.t) : agent_profile =
 let match_model_strings () =
   match Sys.getenv_opt "MASC_CAPABILITY_MATCH_MODELS" with
   | Some s -> String.split_on_char ',' s |> List.map String.trim
-  | None ->
-      [
-        Printf.sprintf "ollama:%s" (Env_config.Ollama.default_model);
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-      ]
+  | None -> Llm_client.default_execution_model_labels ()
 
 let match_model_specs () =
   Llm_client.available_model_specs_of_strings (match_model_strings ())

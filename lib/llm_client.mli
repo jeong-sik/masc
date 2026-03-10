@@ -148,6 +148,22 @@ val gemini_pro : model_spec
     Falls back to [ollama_glm] if parsing fails. *)
 val default_local_model_spec : unit -> model_spec
 
+(** Preferred model labels for execution defaults, resolved from explicit env
+    overrides first, then available remote provider credentials, then any
+    explicitly configured local model. *)
+val default_execution_model_labels : unit -> string list
+
+(** Preferred model labels for verifier defaults. *)
+val default_verifier_model_labels : unit -> string list
+
+(** Resolve the first callable execution default.
+    Returns [Error _] instead of silently forcing a local Ollama model. *)
+val default_execution_model_spec : unit -> (model_spec, string) result
+
+(** Resolve the first callable verifier default.
+    Returns [Error _] instead of silently forcing a local Ollama model. *)
+val default_verifier_model_spec : unit -> (model_spec, string) result
+
 (** Create a message. *)
 val system_msg : string -> message
 val user_msg : string -> message

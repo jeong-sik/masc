@@ -261,7 +261,7 @@ let default_configs = [
   });
   ("ollama", {
     agent_name = "ollama";
-    command = Printf.sprintf "ollama run %s" Env_config.Ollama.default_model;  (* Direct ollama CLI *)
+    command = "ollama run";  (* Direct ollama CLI; model resolved by adapter policy *)
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = [];  (* Ollama has no MCP support *)
@@ -307,6 +307,21 @@ let parse_command cmd =
   let parts = String.split_on_char ' ' cmd in
   List.filter (fun s -> String.length s > 0) parts
 
+let add_default_model_arg agent_name argv =
+  match Provider_adapter.resolve_direct_adapter agent_name with
+  | Some adapter when adapter.canonical_name = "ollama" -> (
+      match Provider_adapter.default_model_label_result () with
+      | Ok label ->
+          let model =
+            match String.index_opt label ':' with
+            | Some idx when idx + 1 < String.length label ->
+                String.sub label (idx + 1) (String.length label - idx - 1)
+            | _ -> label
+          in
+          argv @ [ model ]
+      | Error msg -> invalid_arg msg)
+  | _ -> argv
+
 (** Spawn an agent with a prompt/task (direct execution, no shell) *)
 let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let start_time = Time_compat.now () in
@@ -330,7 +345,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let prompt_args = build_prompt_args agent_name augmented_prompt in
 
   (* Build command args - direct execution without shell *)
-  let base_args = parse_command config.command in
+  let base_args = parse_command config.command |> add_default_model_arg agent_name in
   let cmd_args = ["timeout"; string_of_int timeout] @ base_args @ mcp_args @ prompt_args in
   let cmd_array = Array.of_list cmd_args in
 

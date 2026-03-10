@@ -2266,7 +2266,7 @@ Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
         ("verifier_models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Verifier model list (provider:model). Default: ['ollama:glm-4.7-flash'].");
+          ("description", `String "Verifier model list (provider:model). Default: provider-aware auto selection from explicit env or available remote credentials.");
         ]);
         ("verifier_perspectives", `Assoc [
           ("type", `String "array");

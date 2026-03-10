@@ -266,10 +266,7 @@ let get_chain_id_for_preset = function
 
 (** Default LLM dispatcher for Walph loop. Exposed as overridable parameter for tests. *)
 let walph_default_model_strings () =
-  [
-    Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
-    Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-  ]
+  Llm_client.default_execution_model_labels ()
 
 let walph_available_model_specs () =
   Llm_client.available_model_specs_of_strings (walph_default_model_strings ())

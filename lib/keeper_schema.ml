@@ -53,7 +53,7 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
         ("models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Model cascade (provider:model). Examples: 'claude:opus', 'gemini:gemini-3.1-pro-preview', 'ollama:glm-4.7-flash', 'glm:glm-4.7', 'openrouter:...'.");
+          ("description", `String "Model cascade (provider:model). Examples: 'claude:opus', 'gemini:gemini-3.1-pro-preview', 'glm:glm-4.7', 'openrouter:openai/gpt-4o-mini'.");
         ]);
         ("verify", `Assoc [
           ("type", `String "boolean");

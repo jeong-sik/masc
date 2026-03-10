@@ -1861,6 +1861,7 @@ export interface DashboardSemanticsResponse {
 export type TabId =
   | 'mission'
   | 'execution'
+  | 'live'
   | 'memory'
   | 'governance'
   | 'planning'
@@ -1871,6 +1872,7 @@ export type TabId =
 export const VALID_TABS: TabId[] = [
   'mission',
   'execution',
+  'live',
   'memory',
   'governance',
   'planning',

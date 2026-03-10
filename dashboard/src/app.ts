@@ -29,6 +29,7 @@ import { Execution } from './components/agents'
 import { Planning } from './components/goals'
 import { Governance } from './components/governance'
 import { Lab } from './components/lab'
+import { Live } from './components/live'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
@@ -236,6 +237,8 @@ function TabContent() {
       return html`<${Mission} />`
     case 'execution':
       return html`<${Execution} />`
+    case 'live':
+      return html`<${Live} />`
     case 'memory':
       return html`<${Memory} />`
     case 'governance':

@@ -55,6 +55,13 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     description: 'worker, task, keeper continuity를 분리해서 보는 실행 표면',
   },
   {
+    id: 'live',
+    label: 'Live',
+    icon: '\uD83D\uDCE1',
+    group: 'observe',
+    description: '실시간 에이전트 활동과 이벤트 스트림을 한눈에 모니터링',
+  },
+  {
     id: 'planning',
     label: 'Planning',
     icon: '\uD83C\uDFAF',

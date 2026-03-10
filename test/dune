@@ -156,6 +156,12 @@
  (modules test_lodge_reaction)
  (libraries masc_mcp alcotest str yojson unix))
 
+; Lodge_tom module tests (SimToM Theory of Mind)
+(test
+ (name test_lodge_tom)
+ (modules test_lodge_tom)
+ (libraries masc_mcp alcotest str yojson))
+
 ; Lodge_decision module tests (structured LLM decision contract)
 (test
  (name test_lodge_decision)

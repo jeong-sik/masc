@@ -20,11 +20,12 @@ let assets_root () =
   match env_assets with
   | Some d -> d
   | None ->
+      let exe_dir = Filename.dirname Sys.executable_name in
+      let exe_assets = Filename.concat exe_dir "assets" in
       let cwd_assets = Filename.concat (Sys.getcwd ()) "assets" in
-      if Sys.file_exists cwd_assets then cwd_assets
-      else
-        let exe_dir = Filename.dirname Sys.executable_name in
-        Filename.concat exe_dir "assets"
+      if Sys.file_exists exe_assets then exe_assets
+      else if Sys.file_exists cwd_assets then cwd_assets
+      else exe_assets
 
 let index_path () =
   Filename.concat (Filename.concat (assets_root ()) "dashboard") "index.html"

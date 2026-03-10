@@ -320,9 +320,9 @@ let resolve_single_input ctx (ref_str : string) : string =
   let try_extract_json_path raw path_parts =
     let parse_index part =
       if String.length part >= 3 && part.[0] = '[' && part.[String.length part - 1] = ']' then
-        try Some (int_of_string (String.sub part 1 (String.length part - 2))) with _ -> None
+        try Some (int_of_string (String.sub part 1 (String.length part - 2))) with Failure _ -> None
       else
-        try Some (int_of_string part) with _ -> None
+        try Some (int_of_string part) with Failure _ -> None
     in
     try
       let json = Yojson.Safe.from_string raw in
@@ -349,7 +349,7 @@ let resolve_single_input ctx (ref_str : string) : string =
              | _ -> Error (Printf.sprintf "Cannot extract '%s' from non-object" key))
       in
       walk json path_parts
-    with _ -> Error "JSON parse error"
+    with Yojson.Json_error _ -> Error "JSON parse error"
   in
   (* Support tools that return bullet lists instead of JSON.
      Example:
@@ -847,7 +847,8 @@ let execute_masc_listen ctx ~clock ~tool_exec (node : node) ~filter ~timeout_sec
               Eio.Time.sleep clock poll_interval;
               poll_loop ~since_seq:max_seq ~collected:new_collected
             end
-          with _ ->
+          with
+          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error (_, _) ->
             (* Parse error, wait and retry *)
             Eio.Time.sleep clock poll_interval;
             poll_loop ~since_seq ~collected)
@@ -1346,7 +1347,7 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                     let passed = float_of_string (Str.matched_group 1 sim_output) in
                     let total = float_of_string (Str.matched_group 2 sim_output) in
                     passed /. total
-                  with _ ->
+                  with Failure _ | Not_found | Invalid_argument _ ->
                     float_of_string (Str.matched_group 3 sim_output)
                 with Not_found -> 0.5)
             | "anti_fake" ->

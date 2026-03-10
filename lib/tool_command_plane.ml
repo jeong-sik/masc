@@ -357,14 +357,14 @@ let launch_chain_background (ctx : (_, _) context) (operation : Command_plane_v2
                 let duration_ms =
                   match U.member "duration_ms" run_json with
                   | `Int value -> Some value
-                  | `Intlit value -> (try Some (int_of_string value) with _ -> None)
+                  | `Intlit value -> (try Some (int_of_string value) with Failure _ -> None)
                   | _ -> None
                 in
                 let started_at =
                   match U.member "started_at" run_json with
                   | `Float value -> Some value
                   | `Int value -> Some (float_of_int value)
-                  | `Intlit value -> (try Some (float_of_string value) with _ -> None)
+                  | `Intlit value -> (try Some (float_of_string value) with Failure _ -> None)
                   | _ -> None
                 in
                 let timestamp =
@@ -803,28 +803,28 @@ let history_timestamp_iso json =
   | `String value -> Some value
   | `Float value -> Some (Command_plane_v2.iso_of_unix value)
   | `Int value -> Some (Command_plane_v2.iso_of_unix (float_of_int value))
-  | `Intlit value -> (try Some (Command_plane_v2.iso_of_unix (float_of_string value)) with _ -> None)
+  | `Intlit value -> (try Some (Command_plane_v2.iso_of_unix (float_of_string value)) with Failure _ -> None)
   | _ -> None
 
 let history_tokens json =
   match U.member "tokens" json with
   | `Int value -> Some value
-  | `Intlit value -> (try Some (int_of_string value) with _ -> None)
+  | `Intlit value -> (try Some (int_of_string value) with Failure _ -> None)
   | `Assoc fields -> (
       match List.assoc_opt "total_tokens" fields with
       | Some (`Int value) -> Some value
-      | Some (`Intlit value) -> (try Some (int_of_string value) with _ -> None)
+      | Some (`Intlit value) -> (try Some (int_of_string value) with Failure _ -> None)
       | _ ->
           let prompt =
             match List.assoc_opt "prompt_tokens" fields with
             | Some (`Int value) -> value
-            | Some (`Intlit value) -> (try int_of_string value with _ -> 0)
+            | Some (`Intlit value) -> (try int_of_string value with Failure _ -> 0)
             | _ -> 0
           in
           let completion =
             match List.assoc_opt "completion_tokens" fields with
             | Some (`Int value) -> value
-            | Some (`Intlit value) -> (try int_of_string value with _ -> 0)
+            | Some (`Intlit value) -> (try int_of_string value with Failure _ -> 0)
             | _ -> 0
           in
           if prompt + completion > 0 then Some (prompt + completion) else None)
@@ -846,7 +846,7 @@ let history_event_json json =
       ( "duration_ms",
         match U.member "duration_ms" json with
         | `Int value -> `Int value
-        | `Intlit value -> (try `Int (int_of_string value) with _ -> `Null)
+        | `Intlit value -> (try `Int (int_of_string value) with Failure _ -> `Null)
         | _ -> `Null );
       ("message", match U.member "message" json with `String value -> `String value | _ -> `Null);
       ("tokens", match history_tokens json with Some value -> `Int value | None -> `Null);
@@ -861,14 +861,14 @@ let run_store_history_json run_json =
   let duration_ms =
     match U.member "duration_ms" run_json with
     | `Int value -> `Int value
-    | `Intlit value -> (try `Int (int_of_string value) with _ -> `Null)
+    | `Intlit value -> (try `Int (int_of_string value) with Failure _ -> `Null)
     | _ -> `Null
   in
   let started_at =
     match U.member "started_at" run_json with
     | `Float value -> Some value
     | `Int value -> Some (float_of_int value)
-    | `Intlit value -> (try Some (float_of_string value) with _ -> None)
+    | `Intlit value -> (try Some (float_of_string value) with Failure _ -> None)
     | _ -> None
   in
   let completed_at =

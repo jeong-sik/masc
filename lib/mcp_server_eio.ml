@@ -2062,11 +2062,7 @@ Time: %s
               if String.contains raw ':' then raw else "llama:" ^ raw
             in
             Llm_client.model_spec_of_string spec_name
-        | _, Some raw ->
-            let spec_name =
-              if String.contains raw ':' then raw else raw
-            in
-            Llm_client.model_spec_of_string spec_name
+        | _, Some _ -> Llm_client.default_execution_model_spec ()
         | _, None -> Llm_client.default_execution_model_spec ()
       in
       let module U = Yojson.Safe.Util in

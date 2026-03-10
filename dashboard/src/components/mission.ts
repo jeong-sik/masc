@@ -4,6 +4,16 @@ import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { navigate } from '../router'
 import { missionError, missionLoading, missionSnapshot } from '../mission-store'
 import type { OperatorAttentionItem, OperatorRecommendedAction, OperatorSessionCard } from '../types'
+import {
+  createMissionWorkflowContext,
+  extractActionPayload,
+  missionCommandParams,
+  missionInterveneParams,
+  persistWorkflowContext,
+  summarizePayloadPreview,
+  workflowActionLabel,
+  workflowTargetLabel,
+} from '../workflow-context'
 
 function toneClass(tone?: string | null): string {
   if (tone === 'bad') return 'bad'
@@ -21,14 +31,85 @@ function relativeTime(iso?: string | null): string {
   return `${Math.round(deltaSec / 3600)}h 전`
 }
 
-function nextActionRoute(action?: OperatorRecommendedAction | null): () => void {
-  if (!action) {
-    return () => navigate('intervene')
-  }
-  if (action.target_type === 'room' || action.target_type === 'team_session' || action.target_type === 'keeper') {
-    return () => navigate('intervene')
-  }
-  return () => navigate('command')
+function actionModeLabel(action?: OperatorRecommendedAction | null): string {
+  return action?.confirm_required ? '확인 후 실행' : '즉시 실행'
+}
+
+function actionPayloadPreview(action?: OperatorRecommendedAction | null): string | null {
+  return summarizePayloadPreview(extractActionPayload(action))
+}
+
+function actionTargetLabel(action?: OperatorRecommendedAction | null): string {
+  return workflowTargetLabel(
+    action
+      ? createMissionWorkflowContext(action, null, '상황판 추천 액션')
+      : null,
+  )
+}
+
+function navigateWithContext(
+  tab: 'intervene' | 'command',
+  context = createMissionWorkflowContext(),
+): void {
+  persistWorkflowContext(context)
+  navigate(tab, tab === 'intervene' ? missionInterveneParams(context) : missionCommandParams(context))
+}
+
+function openIncidentIntervene(item: OperatorAttentionItem): void {
+  navigateWithContext('intervene', createMissionWorkflowContext(null, item, '상황판 incident'))
+}
+
+function openIncidentCommand(item: OperatorAttentionItem): void {
+  navigateWithContext('command', createMissionWorkflowContext(null, item, '상황판 incident'))
+}
+
+function openActionIntervene(
+  action: OperatorRecommendedAction,
+  incident?: OperatorAttentionItem | null,
+  sourceLabel = '상황판 추천 액션',
+): void {
+  navigateWithContext('intervene', createMissionWorkflowContext(action, incident, sourceLabel))
+}
+
+function openActionCommand(
+  action: OperatorRecommendedAction,
+  incident?: OperatorAttentionItem | null,
+  sourceLabel = '상황판 추천 액션',
+): void {
+  navigateWithContext('command', createMissionWorkflowContext(action, incident, sourceLabel))
+}
+
+function MissionContextBar({
+  cluster,
+  project,
+  room,
+  generatedAt,
+}: {
+  cluster?: string
+  project?: string
+  room?: string | null
+  generatedAt?: string
+}) {
+  return html`
+    <div class="mission-context-bar">
+      <div class="mission-context-item">
+        <span>cluster</span>
+        <strong>${cluster ?? '확인 없음'}</strong>
+      </div>
+      <div class="mission-context-item">
+        <span>project</span>
+        <strong>${project ?? '확인 없음'}</strong>
+      </div>
+      <div class="mission-context-item">
+        <span>room</span>
+        <strong>${room ?? 'default'}</strong>
+      </div>
+      <div class="mission-context-item">
+        <span>generated</span>
+        <strong>${generatedAt ? relativeTime(generatedAt) : 'fresh'}</strong>
+      </div>
+    </div>
+  `
 }
 
 function SummaryStat({
@@ -60,23 +141,36 @@ function IncidentCard({ item }: { item: OperatorAttentionItem }) {
       </div>
       <strong>${item.summary}</strong>
       <div class="mission-card-actions">
-        <button class="control-btn ghost" onClick=${() => navigate('intervene')}>개입 열기</button>
-        <button class="control-btn ghost" onClick=${() => navigate('command')}>지휘면 보기</button>
+        <button class="control-btn ghost" onClick=${() => openIncidentIntervene(item)}>이 이슈로 개입 열기</button>
+        <button class="control-btn ghost" onClick=${() => openIncidentCommand(item)}>이 이슈의 원인 보기</button>
       </div>
     </article>
   `
 }
 
-function RecommendedActionCard({ action }: { action: OperatorRecommendedAction }) {
+function RecommendedActionCard({
+  action,
+  incident,
+}: {
+  action: OperatorRecommendedAction
+  incident?: OperatorAttentionItem | null
+}) {
+  const payloadPreview = actionPayloadPreview(action)
   return html`
     <article class="mission-action-card ${toneClass(action.severity)}">
       <div class="mission-card-head">
-        <span class="command-chip ${toneClass(action.severity)}">${action.action_type}</span>
+        <span class="command-chip ${toneClass(action.severity)}">${workflowActionLabel(action.action_type)}</span>
         <span class="mission-card-target">${action.target_type}${action.target_id ? ` · ${action.target_id}` : ''}</span>
       </div>
       <p>${action.reason}</p>
+      <div class="mission-action-detail">
+        <span>${actionModeLabel(action)}</span>
+        <span>${actionTargetLabel(action)}</span>
+      </div>
+      ${payloadPreview ? html`<div class="mission-action-preview">${payloadPreview}</div>` : null}
       <div class="mission-card-actions">
-        <button class="control-btn ghost" onClick=${nextActionRoute(action)}>개입 워크스페이스</button>
+        <button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, '상황판 추천 액션')}>이 액션으로 개입 열기</button>
+        <button class="control-btn ghost" onClick=${() => openActionCommand(action, incident, '상황판 추천 액션')}>이 이슈의 원인 보기</button>
       </div>
     </article>
   `
@@ -135,6 +229,13 @@ export function Mission() {
         </div>
       </div>
 
+      <${MissionContextBar}
+        cluster=${summary.cluster}
+        project=${summary.project}
+        room=${summary.current_room}
+        generatedAt=${mission.generated_at}
+      />
+
       <div class="mission-stat-grid">
         <${SummaryStat} label="활성 에이전트" value=${summary.active_agents ?? 0} detail="실시간 응답 가능한 agent 수" tone=${summary.active_agents && summary.active_agents > 0 ? 'ok' : 'warn'} />
         <${SummaryStat} label="Keeper 압력" value=${summary.keeper_pressure ?? 0} detail="stale / hot keeper 수" tone=${(summary.keeper_pressure ?? 0) > 0 ? 'warn' : 'ok'} />
@@ -161,13 +262,18 @@ export function Mission() {
             ? html`
                 <div class="mission-action-highlight">
                   <div class="mission-card-head">
-                    <span class="command-chip ${toneClass(topAction.severity)}">${topAction.action_type}</span>
+                    <span class="command-chip ${toneClass(topAction.severity)}">${workflowActionLabel(topAction.action_type)}</span>
                     <span class="mission-card-target">${topAction.target_type}${topAction.target_id ? ` · ${topAction.target_id}` : ''}</span>
                   </div>
                   <p>${topAction.reason}</p>
+                  <div class="mission-action-detail">
+                    <span>${actionModeLabel(topAction)}</span>
+                    <span>${actionTargetLabel(topAction)}</span>
+                  </div>
+                  ${actionPayloadPreview(topAction) ? html`<div class="mission-action-preview">${actionPayloadPreview(topAction)}</div>` : null}
                   <div class="mission-card-actions">
-                    <button class="control-btn ghost" onClick=${nextActionRoute(topAction)}>개입하러 가기</button>
-                    <button class="control-btn ghost" onClick=${() => navigate('command', { surface: 'swarm' })}>지휘면 상세</button>
+                    <button class="control-btn ghost" onClick=${() => openActionIntervene(topAction, topIncident, '상황판 hero 액션')}>이 액션으로 개입 열기</button>
+                    <button class="control-btn ghost" onClick=${() => openActionCommand(topAction, topIncident, '상황판 hero 액션')}>이 이슈의 원인 보기</button>
                   </div>
                 </div>
               `

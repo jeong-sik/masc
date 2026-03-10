@@ -4219,6 +4219,54 @@ button.council-row.selected {
   color: #fecaca;
 }
 
+.ops-banner.warn {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.28);
+  color: #fde68a;
+}
+
+.ops-banner.info {
+  background: rgba(34, 211, 238, 0.12);
+  border-color: rgba(34, 211, 238, 0.26);
+  color: #cffafe;
+}
+
+.ops-handoff-banner {
+  display: grid;
+  gap: 8px;
+}
+
+.ops-handoff-head {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  color: rgba(255,255,255,0.72);
+}
+
+.ops-handoff-head strong {
+  color: var(--text-strong);
+}
+
+.ops-handoff-body {
+  color: rgba(255,255,255,0.84);
+  line-height: 1.5;
+}
+
+.ops-handoff-preview {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-strong);
+  line-height: 1.45;
+}
+
+.ops-handoff-meta {
+  color: rgba(255,255,255,0.58);
+  font-size: 12px;
+}
+
 .ops-workbench {
   display: grid;
   grid-template-columns: minmax(0, 0.92fr) minmax(0, 0.9fr) minmax(0, 1.18fr);
@@ -4660,6 +4708,11 @@ button.council-row.selected {
   gap: 6px;
 }
 
+.monitor-stat-card.highlight {
+  border-color: rgba(34,211,238,0.34);
+  box-shadow: 0 0 0 1px rgba(34,211,238,0.16);
+}
+
 .monitor-stat-card span {
   color: rgba(255,255,255,0.6);
   font-size: 12px;
@@ -4684,6 +4737,40 @@ button.council-row.selected {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.command-focus-banner {
+  border-radius: 14px;
+  border: 1px solid rgba(34,211,238,0.26);
+  background: linear-gradient(180deg, rgba(34,211,238,0.1), rgba(255,255,255,0.03));
+  padding: 14px 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.command-focus-head {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.command-focus-head strong {
+  color: var(--text-strong);
+}
+
+.command-focus-body {
+  color: rgba(255,255,255,0.84);
+  line-height: 1.5;
+}
+
+.command-focus-preview {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.05);
+  color: var(--text-strong);
+  line-height: 1.45;
 }
 
 .command-entry-strip {
@@ -5286,6 +5373,10 @@ button.council-row.selected {
 .command-guide-card.highlight {
   border-color: rgba(34,211,238,0.32);
   background: linear-gradient(180deg, rgba(34,211,238,0.12), rgba(255,255,255,0.03));
+}
+
+.command-guide-card.focus {
+  box-shadow: 0 0 0 1px rgba(34,211,238,0.16);
 }
 
 .command-guide-card.ok {
@@ -5920,6 +6011,33 @@ button.monitor-row.bad.state-quiet {
   align-items: center;
 }
 
+.mission-context-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.mission-context-item {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  display: grid;
+  gap: 6px;
+}
+
+.mission-context-item span {
+  color: rgba(255,255,255,0.52);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mission-context-item strong {
+  color: var(--text-strong);
+  font-size: 16px;
+}
+
 .mission-stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -6029,6 +6147,23 @@ button.monitor-row.bad.state-quiet {
   margin: 0;
   color: rgba(255,255,255,0.8);
   line-height: 1.5;
+}
+
+.mission-action-detail {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: rgba(255,255,255,0.62);
+  font-size: 12px;
+}
+
+.mission-action-preview {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-strong);
+  line-height: 1.45;
 }
 
 .mission-card-actions {

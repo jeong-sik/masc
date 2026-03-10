@@ -322,9 +322,17 @@ let update_stagnation (state : loop_state) (record : iteration_record) : unit =
 (* Metric Measurement                                               *)
 (* ================================================================ *)
 
+(** Optional override for testing. When set, [measure_metric] calls
+    this function instead of spawning a shell process. *)
+let measure_metric_override : (string -> (float, string) result) option ref = ref None
+
 (** Run a shell command and parse the first float from stdout.
-    Uses Process_eio if initialized, falls back to Unix. *)
+    Uses Process_eio if initialized, falls back to Unix.
+    If [measure_metric_override] is set, delegates to that function. *)
 let measure_metric (cmd : string) : (float, string) result =
+  match !measure_metric_override with
+  | Some f -> f cmd
+  | None ->
   try
     let output = Process_eio.run_argv ~timeout_sec:30.0 ["sh"; "-c"; cmd] in
     let trimmed = String.trim output in

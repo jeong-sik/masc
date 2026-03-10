@@ -156,6 +156,7 @@
    orchestrator
    planning_eio
    post_verifier
+   post_verifier_llm
    provider_adapter
    process_eio
    progress

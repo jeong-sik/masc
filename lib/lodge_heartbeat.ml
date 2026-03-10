@@ -2492,7 +2492,7 @@ let execute_agent_action ~agent_name ~action =
         (Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name;
          Passed "duplicate_post")
       else begin
-        let vr = Post_verifier.verify ~content in
+        let vr = Post_verifier_llm.verify_auto ~content in
         Lodge_selection.record_quality_signal ~agent_name ~verdict:vr.overall;
         if not (Post_verifier.is_acceptable vr) then begin
           let reason = Post_verifier.verdict_to_string vr.overall in
@@ -2533,7 +2533,7 @@ let execute_agent_action ~agent_name ~action =
         (Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id;
          Skipped "comment_limit_reached")
       else begin
-        let vr = Post_verifier.verify ~content in
+        let vr = Post_verifier_llm.verify_auto ~content in
         Lodge_selection.record_quality_signal ~agent_name ~verdict:vr.overall;
         if not (Post_verifier.is_acceptable vr) then begin
           let reason = Post_verifier.verdict_to_string vr.overall in

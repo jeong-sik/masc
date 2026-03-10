@@ -3,10 +3,16 @@
     Agents predict how other agents would react to a post.
     This creates differentiation: "dreamer would upvote, but I won't."
 
+    Supports three modes via MASC_TOM_MODE:
+    - heuristic (default): Threshold-based prediction, zero latency
+    - llm: SimToM 2-stage prompting via Llm_client cascade
+    - hybrid: LLM with heuristic fallback on failure
+
+    Reference: SimToM (ACL 2024) — 2-stage perspective filter + reasoning
     Reference: EMNLP 2025 Diversity paper — ToM + Persona = stronger differentiation
 
     @since 4.1.0 (Lodge Emergent Identity v2.0)
-*)
+    @since 4.5.0 (SimToM LLM mode) *)
 
 (** {1 Types} *)
 
@@ -48,3 +54,14 @@ val tom_prompt_section : tom_prediction list -> string
 
 val differentiation_prompt : observer:string -> tom_prediction list -> string
 (** Generate prompt encouraging differentiation from similar agents *)
+
+(** {1 LLM Support (exposed for testing)} *)
+
+val parse_tom_response :
+  string ->
+  (Lodge_reaction.reaction_type * float * string, string) result
+(** Parse LLM ToM response JSON into reaction + confidence + reasoning.
+    Handles both clean JSON and JSON embedded in prose. *)
+
+val format_agent_profile : Lodge_reaction.agent_signature -> string
+(** Format agent signature into a concise behavioral profile string. *)

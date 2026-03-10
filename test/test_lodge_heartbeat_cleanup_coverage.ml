@@ -101,6 +101,16 @@ let test_lodge_heartbeat_uses_shared_prompt_cascade () =
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "Llm_client.run_prompt_cascade")
 
+let test_lodge_heartbeat_uses_runtime_verifier_mode () =
+  check bool "heartbeat uses verifier auto mode for posts"
+    true
+    (file_contains_pattern "lib/lodge_heartbeat.ml"
+       "Post_verifier_llm.verify_auto ~content");
+  check bool "heartbeat no longer bypasses verifier mode"
+    false
+    (file_contains_pattern "lib/lodge_heartbeat.ml"
+       "Post_verifier.verify ~content")
+
 let test_lodge_heartbeat_uses_tom_context () =
   check bool "ToM context used"
     true
@@ -166,6 +176,7 @@ let () =
           test_case "tool assignment prompt mainline" `Quick test_lodge_heartbeat_uses_tool_assignment_prompt;
           test_case "graphql defaults and guards" `Quick test_lodge_graphql_defaults_and_guards;
           test_case "shared prompt cascade helper" `Quick test_lodge_heartbeat_uses_shared_prompt_cascade;
+          test_case "runtime verifier mode wired" `Quick test_lodge_heartbeat_uses_runtime_verifier_mode;
           test_case "reflection updates self summary" `Quick test_lodge_heartbeat_updates_self_summary;
           test_case "ToM context used" `Quick test_lodge_heartbeat_uses_tom_context;
           test_case "no heuristic fallback policy locked" `Quick test_lodge_heartbeat_no_heuristic_fallback_policy;

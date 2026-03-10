@@ -148,6 +148,37 @@ let test_lodge_status_json_has_runtime_fields () =
   Alcotest.(check bool) "last_skip_reason present" true (has_key "last_skip_reason");
   Alcotest.(check bool) "last_tick_ago string" true (member "last_tick_ago" json <> `Null)
 
+let test_dashboard_semantics_has_required_surfaces () =
+  let json = Lib.Dashboard_semantics.json () in
+  let open Yojson.Safe.Util in
+  let surfaces = json |> member "surfaces" |> to_list in
+  let ids =
+    surfaces
+    |> List.map (fun row -> row |> member "id" |> to_string)
+  in
+  List.iter
+    (fun expected ->
+      Alcotest.(check bool) expected true (List.mem expected ids))
+    [ "side_rail"; "mission"; "intervene"; "command"; "agents"; "board"; "goals"; "trpg" ]
+
+let test_dashboard_semantics_panels_have_required_fields () =
+  let json = Lib.Dashboard_semantics.json () in
+  let open Yojson.Safe.Util in
+  let surfaces = json |> member "surfaces" |> to_list in
+  List.iter
+    (fun surface ->
+      let panels = surface |> member "panels" |> to_list in
+      Alcotest.(check bool) "surface has panels" true (panels <> []);
+      List.iter
+        (fun panel ->
+          Alcotest.(check bool) "panel purpose present" true (panel |> member "purpose" <> `Null);
+          Alcotest.(check bool) "panel problem present" true (panel |> member "problem_solved" <> `Null);
+          Alcotest.(check bool) "panel when present" true (panel |> member "when_active" <> `Null);
+          Alcotest.(check bool) "panel role present" true (panel |> member "agent_role" <> `Null);
+          Alcotest.(check bool) "panel ecosystem present" true (panel |> member "ecosystem_function" <> `Null))
+        panels)
+    surfaces
+
 (* ===== Test Suite ===== *)
 
 let format_tests = [
@@ -171,6 +202,8 @@ let section_tests = [
   "messages section empty", `Quick, test_messages_section_empty;
   "worktrees section empty", `Quick, test_worktrees_section_empty;
   "lodge status runtime fields", `Quick, test_lodge_status_json_has_runtime_fields;
+  "dashboard semantics required surfaces", `Quick, test_dashboard_semantics_has_required_surfaces;
+  "dashboard semantics panel fields", `Quick, test_dashboard_semantics_panels_have_required_fields;
 ]
 
 let () =

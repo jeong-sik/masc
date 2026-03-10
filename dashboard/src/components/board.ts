@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
+import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
@@ -380,7 +381,7 @@ function PostDetail({ post }: { post: BoardPost }) {
   return html`
     <div>
       <button class="back-btn" onClick=${() => navigate('board')}>← Back to Board</button>
-      <${Card} title=${html`${post.title} <${FlairBadge} flair=${post.flair} />`}>
+      <${Card} title=${html`${post.title} <${FlairBadge} flair=${post.flair} />`} semanticId="board.post_feed">
         <div class="board-detail">
           <div class="post-body">
             <${Markdown} text=${post.content} />
@@ -398,7 +399,7 @@ function PostDetail({ post }: { post: BoardPost }) {
         </div>
       <//>
 
-      <${Card} title="Comments (${detailLoading.value ? '...' : detailComments.value.length})">
+      <${Card} title="Comments (${detailLoading.value ? '...' : detailComments.value.length})" semanticId="board.post_feed">
         ${detailLoading.value
           ? html`<div class="loading-indicator">Loading comments...</div>`
           : html`<${CommentThread} comments=${detailComments.value} />`}
@@ -467,7 +468,7 @@ function DebatesView() {
   return html`
     <div>
       <${CouncilFeedNotice} />
-      <${Card} title="Start Debate" class="section">
+      <${Card} title="Start Debate" class="section" semanticId="board.debates">
         <div class="council-create">
           <input
             class="control-input"
@@ -492,7 +493,7 @@ function DebatesView() {
         ${councilErrorText.value ? html`<div class="council-error">${councilErrorText.value}</div>` : null}
       <//>
 
-      <${Card} title="Debates" class="section">
+      <${Card} title="Debates" class="section" semanticId="board.debates">
         <div class="council-list">
           ${councilDebates.value.length === 0
             ? html`<div class="empty-state">${councilFeedDegraded ? 'No debates loaded (council feed degraded).' : 'No debates yet'}</div>`
@@ -500,7 +501,7 @@ function DebatesView() {
         </div>
       <//>
 
-      <${Card} title=${selectedDebateId.value ? `Debate Detail (${selectedDebateId.value})` : 'Debate Detail'} class="section">
+      <${Card} title=${selectedDebateId.value ? `Debate Detail (${selectedDebateId.value})` : 'Debate Detail'} class="section" semanticId="board.debates">
         ${councilDetailLoading.value
           ? html`<div class="loading-indicator">Loading debate detail...</div>`
           : selectedDebateDetail.value
@@ -530,7 +531,7 @@ function VotingView() {
   return html`
     <div>
       <${CouncilFeedNotice} />
-      <${Card} title="Voting Sessions" class="section">
+      <${Card} title="Voting Sessions" class="section" semanticId="board.voting">
         <div class="council-list">
           ${councilSessions.value.length === 0
             ? html`<div class="empty-state">${councilFeedDegraded ? 'No sessions loaded (council feed degraded).' : 'No active sessions'}</div>`
@@ -592,6 +593,7 @@ export function Board() {
   const postId = route.value.postId
   const boardFeedDegraded = serverStatus.value?.data_quality?.board_contract_ok === false
   const subView = boardSubView.value
+  const surfaceIntro = html`<${SurfaceSemanticIntro} surfaceId="board" />`
 
   // Load council data when switching to debates/voting sub-tab
   useEffect(() => {
@@ -608,12 +610,14 @@ export function Board() {
     }
     return post
       ? html`
+          ${surfaceIntro}
           <${BoardFeedNotice} />
           <${BoardSummary} />
           <${PostDetail} post=${post} />
         `
       : html`
           <div>
+            ${surfaceIntro}
             <${BoardFeedNotice} />
             <${BoardSummary} />
             <button class="back-btn" onClick=${() => navigate('board')}>← Back to Board</button>
@@ -630,6 +634,7 @@ export function Board() {
 
   // List view with sub-tabs
   return html`
+    ${surfaceIntro}
     <${BoardSubTabs} />
     ${subView === 'debates'
       ? html`<${DebatesView} />`

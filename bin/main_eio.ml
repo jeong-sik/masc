@@ -3128,6 +3128,9 @@ let int_of_env_default name ~default ~min_v ~max_v =
   in
   max min_v (min max_v v)
 
+let dashboard_semantics_http_json () =
+  Masc_mcp.Dashboard_semantics.json ()
+
 let float_of_env_default name ~default ~min_v ~max_v =
   let v =
     match Sys.getenv_opt name with
@@ -8669,6 +8672,11 @@ let make_routes ~port ~host ~sw ~clock =
          let json = dashboard_batch_json ~compact config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/semantics" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = dashboard_semantics_http_json () in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_mission_http_json ~state ~sw ~clock req in
@@ -10032,6 +10040,10 @@ let run_server ~sw ~env ~port ~base_path =
           let config = state.Mcp_server.room_config in
           let compact = dashboard_compact_mode httpun_request in
           let json = dashboard_batch_json ~compact config in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/semantics" ->
+          let json = dashboard_semantics_http_json () in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/mission" ->

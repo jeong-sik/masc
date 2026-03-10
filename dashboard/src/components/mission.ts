@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { navigate } from '../router'
 import { missionError, missionLoading, missionSnapshot } from '../mission-store'
 import type { OperatorAttentionItem, OperatorRecommendedAction, OperatorSessionCard } from '../types'
@@ -121,6 +122,7 @@ export function Mission() {
 
   return html`
     <section class="dashboard-panel mission-view">
+      <${SurfaceSemanticIntro} surfaceId="mission" />
       <div class="panel-header">
         <div>
           <h2>상황판</h2>
@@ -143,7 +145,7 @@ export function Mission() {
       </div>
 
       <div class="mission-primary-grid">
-        <${Card} title="지금 가장 먼저 볼 것" class="mission-hero-card">
+        <${Card} title="지금 가장 먼저 볼 것" class="mission-hero-card" semanticId="mission.hero">
           ${topIncident
             ? html`
                 <div class="mission-priority-block ${toneClass(topIncident.severity)}">
@@ -172,7 +174,7 @@ export function Mission() {
             : null}
         <//>
 
-        <${Card} title="운영 포커스" class="mission-focus-card">
+        <${Card} title="운영 포커스" class="mission-focus-card" semanticId="mission.focus">
           <div class="mission-focus-grid">
             <div class="mission-focus-item">
               <span>지휘 건강도</span>
@@ -199,7 +201,7 @@ export function Mission() {
       </div>
 
       <div class="mission-content-grid">
-        <${Card} title="우선 Incident" class="mission-list-card">
+        <${Card} title="우선 Incident" class="mission-list-card" semanticId="mission.incidents">
           <div class="mission-list-stack">
             ${mission.incidents.length > 0
               ? mission.incidents.slice(0, 5).map(item => html`<${IncidentCard} item=${item} />`)
@@ -207,7 +209,7 @@ export function Mission() {
           </div>
         <//>
 
-        <${Card} title="추천 액션" class="mission-list-card">
+        <${Card} title="추천 액션" class="mission-list-card" semanticId="mission.actions">
           <div class="mission-list-stack">
             ${mission.recommended_actions.length > 0
               ? mission.recommended_actions.slice(0, 4).map(action => html`<${RecommendedActionCard} action=${action} />`)
@@ -217,7 +219,7 @@ export function Mission() {
       </div>
 
       <div class="mission-content-grid">
-        <${Card} title="집중 세션" class="mission-list-card">
+        <${Card} title="집중 세션" class="mission-list-card" semanticId="mission.sessions">
           <div class="mission-list-stack">
             ${sessions.length > 0
               ? sessions.map(session => html`<${SessionFocusCard} session=${session} />`)
@@ -225,7 +227,7 @@ export function Mission() {
           </div>
         <//>
 
-        <${Card} title="바로 개입할 대상" class="mission-list-card">
+        <${Card} title="바로 개입할 대상" class="mission-list-card" semanticId="mission.targets">
           <div class="mission-target-grid">
             <div class="mission-target-block">
               <span class="mission-target-title">Keepers</span>

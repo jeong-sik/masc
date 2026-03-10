@@ -67,6 +67,7 @@ import {
 } from '../command-store'
 import { agents, serverStatus, tasks } from '../store'
 import { navigate, route } from '../router'
+import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
 
 function prettyJson(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -883,7 +884,10 @@ function SwarmPanel() {
 
   return html`
     <section class="card command-section">
-      <div class="card-title">스웜</div>
+      <div class="card-title-row">
+        <div class="card-title">스웜</div>
+        <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
+      </div>
       ${swarm
         ? html`
             <${SwarmStoryboard} lanes=${lanes} />
@@ -1132,7 +1136,10 @@ function GuidedPanel() {
   return html`
     <div class="command-guided-layout">
       <section class="card command-section">
-        <div class="card-title">즉시 조치</div>
+        <div class="card-title-row">
+          <div class="card-title">즉시 조치</div>
+          <${PanelSemanticDetails} panelId="command.summary" compact=${true} />
+        </div>
         <div class="command-guide-card highlight command-next-step-card">
           <div class="command-guide-head">
             <strong>${nextStep?.title ?? nextTool}</strong>
@@ -1183,7 +1190,10 @@ function GuidedPanel() {
       </section>
 
       <section class="card command-section">
-        <div class="card-title">운영 경로</div>
+        <div class="card-title-row">
+          <div class="card-title">운영 경로</div>
+          <${PanelSemanticDetails} panelId="command.summary" compact=${true} />
+        </div>
         ${commandPlaneHelpLoading.value
           ? html`<div class="empty-state">CPv2 runbook 불러오는 중…</div>`
           : commandPlaneHelpError.value
@@ -1682,7 +1692,10 @@ function SwarmSurface() {
       <${SwarmPanel} />
       <div class="command-surface-grid">
         <section class="card command-section">
-          <div class="card-title">스웜 라이브 런</div>
+          <div class="card-title-row">
+            <div class="card-title">스웜 라이브 런</div>
+            <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
+          </div>
           ${commandPlaneSwarmLoading.value
             ? html`<div class="empty-state">Loading swarm live state…</div>`
             : commandPlaneSwarmError.value
@@ -1715,7 +1728,10 @@ function SwarmSurface() {
         </section>
 
         <section class="card command-section">
-          <div class="card-title">체크리스트</div>
+          <div class="card-title-row">
+            <div class="card-title">체크리스트</div>
+            <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
+          </div>
           ${swarm && swarm.checklist.length > 0
             ? html`<div class="command-card-stack">
                 ${swarm.checklist.map(item => html`<${SwarmChecklistCard} item=${item} />`)}
@@ -1724,7 +1740,10 @@ function SwarmSurface() {
         </section>
 
         <section class="card command-section">
-          <div class="card-title">워커</div>
+          <div class="card-title-row">
+            <div class="card-title">워커</div>
+            <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
+          </div>
           ${swarm && swarm.workers.length > 0
             ? html`<div class="command-card-stack">
                 ${swarm.workers.map(worker => html`<${SwarmWorkerCard} worker=${worker} />`)}
@@ -1733,7 +1752,10 @@ function SwarmSurface() {
         </section>
 
         <section class="card command-section">
-          <div class="card-title">런타임</div>
+          <div class="card-title-row">
+            <div class="card-title">런타임</div>
+            <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
+          </div>
           ${swarm?.provider
             ? html`
                 <div class="command-card-grid">
@@ -1776,7 +1798,10 @@ function SwarmSurface() {
         </section>
 
         <section class="card command-section">
-          <div class="card-title">막힘 요인</div>
+          <div class="card-title-row">
+            <div class="card-title">막힘 요인</div>
+            <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
+          </div>
           ${swarm && swarm.blockers.length > 0
             ? html`<div class="command-card-stack">
                 ${swarm.blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)}
@@ -1785,7 +1810,10 @@ function SwarmSurface() {
         </section>
 
         <section class="card command-section">
-          <div class="card-title">최근 메시지</div>
+          <div class="card-title-row">
+            <div class="card-title">최근 메시지</div>
+            <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
+          </div>
           ${swarm && swarm.recent_messages.length > 0
             ? html`<div class="command-trace-stack">
                 ${swarm.recent_messages.map(message => html`
@@ -1805,7 +1833,10 @@ function SwarmSurface() {
         </section>
 
         <section class="card command-section">
-          <div class="card-title">최근 트레이스 이벤트</div>
+          <div class="card-title-row">
+            <div class="card-title">최근 트레이스 이벤트</div>
+            <${PanelSemanticDetails} panelId="command.trace" compact=${true} />
+          </div>
           ${swarm && swarm.recent_trace_events.length > 0
             ? html`<div class="command-trace-stack">
                 ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
@@ -1822,7 +1853,10 @@ function OperationsSurface() {
   return html`
     <div class="command-surface-grid">
       <section class="card command-section">
-        <div class="card-title">Operations</div>
+        <div class="card-title-row">
+          <div class="card-title">Operations</div>
+          <${PanelSemanticDetails} panelId="command.operations" compact=${true} />
+        </div>
         ${snapshot && snapshot.operations.operations.length > 0
           ? html`<div class="command-card-stack">
               ${snapshot.operations.operations.map(card => html`<${OperationCard} card=${card} />`)}
@@ -1830,7 +1864,10 @@ function OperationsSurface() {
           : html`<div class="empty-state">No managed or projected operations.</div>`}
       </section>
       <section class="card command-section">
-        <div class="card-title">Detachments</div>
+        <div class="card-title-row">
+          <div class="card-title">Detachments</div>
+          <${PanelSemanticDetails} panelId="command.operations" compact=${true} />
+        </div>
         ${snapshot && snapshot.detachments.detachments.length > 0
           ? html`<div class="command-card-stack">
               ${snapshot.detachments.detachments.map(card => html`<${DetachmentCard} card=${card} />`)}
@@ -1864,7 +1901,10 @@ function ChainsSurface() {
   return html`
     <div class="command-grid">
       <section class="card command-section">
-        <div class="card-title">Chains</div>
+        <div class="card-title-row">
+          <div class="card-title">Chains</div>
+          <${PanelSemanticDetails} panelId="command.chains" compact=${true} />
+        </div>
         <article class="command-guide-card ${chainStatusTone(summary?.connection.status)}">
           <div class="command-guide-head">
             <strong>llm-mcp connection</strong>
@@ -1916,7 +1956,10 @@ function ChainsSurface() {
       </section>
 
       <section class="card command-section">
-        <div class="card-title">Chain Detail</div>
+        <div class="card-title-row">
+          <div class="card-title">Chain Detail</div>
+          <${PanelSemanticDetails} panelId="command.chains" compact=${true} />
+        </div>
         ${selectedOverlay
           ? html`
               <article class="command-card">
@@ -1995,7 +2038,10 @@ function TopologySurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <section class="card command-section">
-      <div class="card-title">지휘 계층</div>
+      <div class="card-title-row">
+        <div class="card-title">지휘 계층</div>
+        <${PanelSemanticDetails} panelId="command.topology" compact=${true} />
+      </div>
       ${snapshot && snapshot.topology.units.length > 0
         ? html`${snapshot.topology.units.map(node => html`<${TopologyNode} node=${node} />`)}`
         : html`<div class="empty-state">아직 그려진 지휘 계층이 없습니다.</div>`}
@@ -2007,7 +2053,10 @@ function AlertsSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <section class="card command-section">
-      <div class="card-title">경보</div>
+      <div class="card-title-row">
+        <div class="card-title">경보</div>
+        <${PanelSemanticDetails} panelId="command.alerts" compact=${true} />
+      </div>
       ${snapshot && snapshot.alerts.alerts.length > 0
         ? html`<div class="command-card-stack">
             ${snapshot.alerts.alerts.map(alert => html`<${AlertCard} alert=${alert} />`)}
@@ -2021,7 +2070,10 @@ function TraceSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <section class="card command-section">
-      <div class="card-title">최근 트레이스</div>
+      <div class="card-title-row">
+        <div class="card-title">최근 트레이스</div>
+        <${PanelSemanticDetails} panelId="command.trace" compact=${true} />
+      </div>
       ${snapshot && snapshot.traces.events.length > 0
         ? html`<div class="command-trace-stack">
             ${snapshot.traces.events.map(event => html`<${TraceRow} event=${event} />`)}
@@ -2036,7 +2088,10 @@ function ControlSurface() {
   return html`
     <div class="command-surface-grid">
       <section class="card command-section">
-        <div class="card-title">승인 대기</div>
+        <div class="card-title-row">
+          <div class="card-title">승인 대기</div>
+          <${PanelSemanticDetails} panelId="command.control" compact=${true} />
+        </div>
         ${snapshot && snapshot.decisions.decisions.length > 0
           ? html`<div class="command-card-stack">
               ${snapshot.decisions.decisions.map(decision => html`<${DecisionCard} decision=${decision} />`)}
@@ -2045,7 +2100,10 @@ function ControlSurface() {
       </section>
 
       <section class="card command-section">
-        <div class="card-title">Unit 제어</div>
+        <div class="card-title-row">
+          <div class="card-title">Unit 제어</div>
+          <${PanelSemanticDetails} panelId="command.control" compact=${true} />
+        </div>
         ${snapshot && snapshot.capacity.capacity.length > 0
           ? html`<div class="command-card-stack">
               ${snapshot.capacity.capacity.map(row => html`<${CapacityRowCard} row=${row} />`)}
@@ -2181,6 +2239,7 @@ export function Command() {
       ${commandPlaneActionError.value
         ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
         : null}
+      <${SurfaceSemanticIntro} surfaceId="command" />
       <${CommandEntryStrip} />
       <${SurfaceTabs} />
       <${SurfaceBody} />

@@ -353,6 +353,111 @@ let test_intent_state_aggregates_across_parallel_operations () =
        |> Yojson.Safe.Util.member "state"
        |> Yojson.Safe.Util.to_string))
 
+let test_intent_forecast_resolves_dependencies_against_all_operations () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let shared_upstream =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Shared setup");
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "implement");
+            ])
+      in
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.finalize_operation_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String shared_upstream.operation_id) ])));
+      let intent =
+        unwrap_ok
+          (Command_plane_v2.create_intent_json config ~actor:"owner"
+             (`Assoc
+               [
+                 ("title", `String "Cross intent dependency forecast");
+                 ("artifact_priors", `List [ `String "lib/command_plane_v2.ml" ]);
+               ]))
+      in
+      ignore
+        (start_operation_exn config ~actor:"owner"
+           (`Assoc
+             [
+               ("assigned_unit_id", `String "company-main");
+               ("objective", `String "Verify after shared setup");
+               ("intent_id", `String intent.intent_id);
+               ("workload_profile", `String "coding_task");
+               ("stage", `String "verify");
+               ("depends_on_operation_ids", `List [ `String shared_upstream.operation_id ]);
+             ]));
+      let forecast =
+        unwrap_ok
+          (Command_plane_v2.intent_forecast_json config intent.intent_id ())
+      in
+      Alcotest.(check (list string)) "blocked_by empty when upstream already completed" []
+        (forecast |> Yojson.Safe.Util.member "blocked_by"
+       |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string);
+      Alcotest.(check bool) "no verification gap risk" false
+        (forecast |> Yojson.Safe.Util.member "risk_flags"
+       |> Yojson.Safe.Util.to_list
+       |> List.exists (fun value ->
+              String.equal (Yojson.Safe.Util.to_string value) "verification_gap")))
+
+let test_checkpoint_preserves_terminal_intent_state () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let intent =
+        unwrap_ok
+          (Command_plane_v2.create_intent_json config ~actor:"owner"
+             (`Assoc [ ("title", `String "Terminal checkpoint preservation") ]))
+      in
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Complete and checkpoint");
+              ("intent_id", `String intent.intent_id);
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "implement");
+            ])
+      in
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.finalize_operation_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String operation.operation_id) ])));
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.checkpoint_operation config ~actor:"owner"
+              (`Assoc
+                [
+                  ("operation_id", `String operation.operation_id);
+                  ("checkpoint_ref", `String "late-terminal-checkpoint");
+                ])));
+      let intent_status =
+        Command_plane_v2.list_intents_json ~intent_id:intent.intent_id config
+      in
+      Alcotest.(check string) "intent remains completed after late checkpoint"
+        "completed"
+        (intent_status |> Yojson.Safe.Util.member "intents"
+       |> Yojson.Safe.Util.index 0
+       |> Yojson.Safe.Util.member "state"
+       |> Yojson.Safe.Util.to_string))
+
 let test_platoon_assignment_expands_detachments_and_tick_runs () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1517,6 +1622,14 @@ let () =
             "intent state aggregates across parallel operations"
             `Quick
             test_intent_state_aggregates_across_parallel_operations;
+          Alcotest.test_case
+            "intent forecast resolves dependencies against all operations"
+            `Quick
+            test_intent_forecast_resolves_dependencies_against_all_operations;
+          Alcotest.test_case
+            "checkpoint preserves terminal intent state"
+            `Quick
+            test_checkpoint_preserves_terminal_intent_state;
           Alcotest.test_case "invalid search strategy is rejected" `Quick
             test_invalid_search_strategy_is_rejected;
           Alcotest.test_case "best first search blocks and routes research pipeline"

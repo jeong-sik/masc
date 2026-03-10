@@ -3,7 +3,12 @@
 
 import type {
   DashboardData,
+  DashboardExecutionResponse,
+  DashboardGovernanceResponse,
+  DashboardMemoryResponse,
   DashboardMissionResponse,
+  DashboardPlanningResponse,
+  DashboardShellResponse,
   BoardPost,
   BoardComment,
   BoardHearth,
@@ -281,12 +286,38 @@ export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<Dashboa
   return get(`/api/v1/dashboard?mode=${mode}`)
 }
 
+export function fetchDashboardShell(): Promise<DashboardShellResponse> {
+  return get('/api/v1/dashboard/shell')
+}
+
+export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
+  return get('/api/v1/dashboard/execution')
+}
+
+export function fetchDashboardMemory(
+  sortMode: BoardSortMode,
+  opts?: { excludeSystem?: boolean },
+): Promise<DashboardMemoryResponse> {
+  const params = new URLSearchParams()
+  params.set('sort_by', sortMode)
+  if (opts?.excludeSystem) params.set('exclude_system', 'true')
+  return get(`/api/v1/dashboard/memory${params.toString() ? `?${params}` : ''}`)
+}
+
+export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
+  return get('/api/v1/dashboard/governance')
+}
+
 export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
   return get('/api/v1/dashboard/semantics')
 }
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
   return get('/api/v1/dashboard/mission')
+}
+
+export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
+  return get('/api/v1/dashboard/planning')
 }
 
 // --- Individual resource fetchers (selective SSE-driven refresh) ---
@@ -414,7 +445,6 @@ export function runCommandPlaneAction(
 
 function operatorActionTimeoutMs(body: OperatorActionRequest): number {
   switch (body.action_type) {
-    case 'keeper_msg':
     case 'keeper_message':
     case 'keeper_recover':
       return 90_000

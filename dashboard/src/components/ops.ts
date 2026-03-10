@@ -4,6 +4,7 @@ import { useEffect } from 'preact/hooks'
 import { showToast } from './common/toast'
 import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
 import type { OperatorAttentionItem, OperatorKeeperSnapshot, OperatorSessionSnapshot } from '../types'
+import { addTaskFromDashboard } from '../api'
 import {
   confirmOperatorPendingAction,
   dispatchOperatorAction,
@@ -40,7 +41,7 @@ const taskTitle = signal('')
 const taskDescription = signal('')
 const taskPriority = signal('2')
 const selectedSessionId = signal('')
-const teamTurnKind = signal<'note' | 'broadcast' | 'task' | 'checkpoint'>('note')
+const teamTurnKind = signal<'note' | 'broadcast' | 'task'>('note')
 const teamMessage = signal('')
 const teamTaskTitle = signal('')
 const teamTaskDescription = signal('')
@@ -129,14 +130,16 @@ function actionTypeLabel(value?: string | null): string {
       return 'room 일시정지'
     case 'room_resume':
       return 'room 재개'
-    case 'team_turn':
-      return '세션 업데이트'
+    case 'team_note':
+      return '세션 노트'
+    case 'team_broadcast':
+      return '세션 방송'
+    case 'team_task_inject':
+      return '세션 작업 주입'
     case 'team_stop':
       return '세션 중지'
-    case 'keeper_msg':
+    case 'keeper_message':
       return 'keeper 메시지'
-    case 'task_inject':
-      return '작업 주입'
     default:
       return value?.trim() || '액션'
   }
@@ -190,15 +193,13 @@ function sessionActionLabel(value: typeof teamTurnKind.value): string {
       return '방송'
     case 'task':
       return '작업'
-    case 'checkpoint':
-      return '체크포인트'
     default:
       return value
   }
 }
 
 async function executeAction(input: {
-  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'team_turn' | 'team_stop' | 'keeper_msg' | 'task_inject'
+  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_stop' | 'keeper_message'
   target_type: 'room' | 'team_session' | 'keeper'
   target_id?: string
   payload: Record<string, unknown>
@@ -259,19 +260,18 @@ async function submitResume() {
 async function submitTaskInject() {
   const title = taskTitle.value.trim()
   if (!title) return
-  const result = await executeAction({
-    action_type: 'task_inject',
-    target_type: 'room',
-    payload: {
+  try {
+    await addTaskFromDashboard(
       title,
-      description: taskDescription.value.trim() || 'Intervene 화면에서 주입',
-      priority: Number.parseInt(taskPriority.value, 10) || 2,
-    },
-    successMessage: '작업 주입을 보냈습니다',
-  })
-  if (result) {
+      taskDescription.value.trim() || 'Intervene 화면에서 주입',
+      Number.parseInt(taskPriority.value, 10) || 2,
+    )
+    showToast('작업을 backlog에 추가했습니다', 'success')
     taskTitle.value = ''
     taskDescription.value = ''
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '작업 추가에 실패했습니다'
+    showToast(message, 'error')
   }
 }
 
@@ -282,18 +282,22 @@ async function submitTeamTurn() {
     showToast('먼저 세션을 고르세요', 'warning')
     return
   }
-  const payload: Record<string, unknown> = {
-    turn_kind: teamTurnKind.value,
-  }
+  const payload: Record<string, unknown> = {}
   const message = teamMessage.value.trim()
   if (message) payload.message = message
+  let actionType: 'team_note' | 'team_broadcast' | 'team_task_inject' = 'team_note'
+  if (teamTurnKind.value === 'broadcast') {
+    actionType = 'team_broadcast'
+  } else if (teamTurnKind.value === 'task') {
+    actionType = 'team_task_inject'
+  }
   if (teamTurnKind.value === 'task') {
     payload.task_title = teamTaskTitle.value.trim() || '운영자 주입 작업'
     payload.task_description = teamTaskDescription.value.trim() || 'Intervene 화면에서 주입'
     payload.task_priority = Number.parseInt(teamTaskPriority.value, 10) || 2
   }
   const result = await executeAction({
-    action_type: 'team_turn',
+    action_type: actionType,
     target_type: 'team_session',
     target_id: sessionId,
     payload,
@@ -334,7 +338,7 @@ async function submitKeeperMessage() {
   }
   if (!message) return
   const result = await executeAction({
-    action_type: 'keeper_msg',
+    action_type: 'keeper_message',
     target_type: 'keeper',
     target_id: keeperName,
     payload: { message },
@@ -769,7 +773,6 @@ export function Ops() {
                 <option value="note">노트</option>
                 <option value="broadcast">방송</option>
                 <option value="task">작업</option>
-                <option value="checkpoint">체크포인트</option>
               </select>
               <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${operatorActionBusy.value || !selectedSession}>
                 적용

@@ -1,6 +1,6 @@
 import type { TabId } from '../types'
 
-export type DashboardNavGroup = 'observe' | 'coordinate' | 'command'
+export type DashboardNavGroup = 'observe' | 'context' | 'act' | 'lab'
 
 export interface DashboardNavItem {
   id: TabId
@@ -19,69 +19,81 @@ export interface DashboardNavSection {
 export const DASHBOARD_NAV_SECTIONS: DashboardNavSection[] = [
   {
     id: 'observe',
-    label: '먼저 보기',
-    description: '지금 상태와 우선순위를 먼저 읽는 운영 랜딩',
+    label: 'Observe',
+    description: '지금 상태, 실행 압력, 계획 상태를 먼저 읽는 운영 표면',
   },
   {
-    id: 'coordinate',
-    label: '보조 공간',
-    description: '대화, 계획, 에이전트 상태를 보조 작업 공간으로 분리',
+    id: 'context',
+    label: 'Context',
+    description: '비동기 메모리와 의사결정 거버넌스를 분리해서 보는 표면',
   },
   {
-    id: 'command',
-    label: '통제',
-    description: '개입과 지휘를 직접 실행하는 화면',
+    id: 'act',
+    label: 'Act',
+    description: '개입과 system-of-record 지휘를 실행하는 표면',
+  },
+  {
+    id: 'lab',
+    label: 'Lab',
+    description: '실험적 기능은 메인 operator console 밖으로 분리',
   },
 ]
 
 export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
   {
     id: 'mission',
-    label: '상황판',
+    label: 'Mission',
     icon: '\uD83C\uDFE0',
     group: 'observe',
     description: '지금 문제, 다음 액션, 운영 포커스를 먼저 보는 기본 랜딩',
   },
   {
+    id: 'execution',
+    label: 'Execution',
+    icon: '\uD83E\uDD16',
+    group: 'observe',
+    description: 'worker, task, keeper continuity를 분리해서 보는 실행 표면',
+  },
+  {
+    id: 'planning',
+    label: 'Planning',
+    icon: '\uD83C\uDFAF',
+    group: 'observe',
+    description: 'goal, metric loop, backlog 압력을 읽는 계획 표면',
+  },
+  {
+    id: 'memory',
+    label: 'Memory',
+    icon: '\uD83D\uDCAC',
+    group: 'context',
+    description: 'posts/comments만으로 room의 비동기 메모리를 읽는 표면',
+  },
+  {
+    id: 'governance',
+    label: 'Governance',
+    icon: '\u2696\uFE0F',
+    group: 'context',
+    description: 'debate와 voting만 분리해 의사결정 상태를 보는 표면',
+  },
+  {
     id: 'intervene',
-    label: '개입',
+    label: 'Intervene',
     icon: '\uD83C\uDFAE',
-    group: 'command',
-    description: 'room, session, supervisor 액션을 실행하는 개입 화면',
+    group: 'act',
+    description: 'room, session, keeper 액션을 실행하는 개입 화면',
   },
   {
     id: 'command',
-    label: '지휘',
+    label: 'Command',
     icon: '\uD83E\uDDED',
-    group: 'command',
+    group: 'act',
     description: '유닛 계층, 작전 체인, 승인, 추적 이력을 보는 상세 화면',
   },
   {
-    id: 'agents',
-    label: '에이전트',
-    icon: '\uD83E\uDD16',
-    group: 'observe',
-    description: 'agent 상태, 활동 신호, 작업 배정을 보는 모니터',
-  },
-  {
-    id: 'board',
-    label: '보드',
-    icon: '\uD83D\uDCAC',
-    group: 'coordinate',
-    description: '사람과 agent 대화를 시스템 노이즈를 줄여서 보는 피드',
-  },
-  {
-    id: 'goals',
-    label: '계획',
-    icon: '\uD83C\uDFAF',
-    group: 'coordinate',
-    description: 'goal, 메트릭 루프, backlog를 보는 계획 화면',
-  },
-  {
-    id: 'trpg',
-    label: 'TRPG 롤플레이',
+    id: 'lab',
+    label: 'Lab',
     icon: '\u2694\uFE0F',
-    group: 'command',
-    description: '서사 세션 제어와 게임 상태',
+    group: 'lab',
+    description: 'TRPG 같은 실험 surface를 메인 console 밖에서 다룹니다',
   },
 ]

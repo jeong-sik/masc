@@ -1,4 +1,4 @@
-// Planning tab — goals plus MDAL loop visibility with freshness context
+// Planning surface — goals plus MDAL loop visibility with freshness context
 
 import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
@@ -165,7 +165,7 @@ function HorizonGroup({ horizon, items }: { horizon: string; items: Goal[] }) {
   const sorted = [...items].sort((a, b) => b.priority - a.priority)
 
   return html`
-    <${Card} title="${horizonLabel(horizon)} Goals (${items.length})" class="section" semanticId="goals.goal_pipeline">
+    <${Card} title="${horizonLabel(horizon)} Goals (${items.length})" class="section" semanticId="planning.goal_pipeline">
       <div class="goal-list">
         ${sorted.map(g => html`<${GoalRow} key=${g.id} goal=${g} />`)}
       </div>
@@ -312,7 +312,7 @@ function KanbanCard({ task }: { task: Task }) {
 function TaskBacklog() {
   const { todo, inProgress, done } = tasksByStatus.value
   return html`
-    <${Card} title="Task Backlog" class="section" semanticId="goals.task_backlog">
+    <${Card} title="Task Backlog" class="section" semanticId="planning.backlog">
       <div class="kanban-board">
         <div class="kanban-column">
           <div class="kanban-header todo">
@@ -351,7 +351,7 @@ function TaskBacklog() {
 
 // ── Main export ───────────────────────────────────
 
-export function Goals() {
+export function Planning() {
   const grouped = groupedByHorizon.value
   const loops = loopsList.value
   const runningLoops = loops.filter(loop => loop.status === 'running').length
@@ -367,7 +367,7 @@ export function Goals() {
 
   return html`
     <div>
-      <${SurfaceSemanticIntro} surfaceId="goals" />
+      <${SurfaceSemanticIntro} surfaceId="planning" />
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-label">Active goals</div>
@@ -391,12 +391,12 @@ export function Goals() {
         </div>
       </div>
 
-      <${Card} title="Planning Surface" class="section" semanticId="goals.planning_surface">
+      <${Card} title="Planning Surface" class="section" semanticId="planning.surface">
         <div class="planning-header">
           <div>
             <h2 class="planning-headline">Direction lives here. Goals define intent, MDAL shows whether iteration is moving the metric.</h2>
             <p class="planning-subtitle">
-              Goals refresh on tab open or manual refresh. MDAL reads the current loop snapshot exposed by <code>/api/v1/mdal/loops</code>.
+              Planning refresh reads a dedicated projection so goals, loops, and backlog pressure stay in one surface.
             </p>
           </div>
           <div class="planning-actions">
@@ -420,17 +420,17 @@ export function Goals() {
         </div>
 
         <div class="planning-freshness-grid">
-          <${FreshnessRow} label="Goals" timestamp=${lastGoalsRefreshAt.value} source="masc_goal_list" />
+          <${FreshnessRow} label="Goals" timestamp=${lastGoalsRefreshAt.value} source="/api/v1/dashboard/planning" />
           <${FreshnessRow}
             label="MDAL loops"
             timestamp=${lastMdalRefreshAt.value}
-            source="/api/v1/mdal/loops"
+            source="/api/v1/dashboard/planning"
             note=${mdalNote}
           />
         </div>
       <//>
 
-      <${Card} title="Goal Pipeline" class="section" semanticId="goals.goal_pipeline">
+      <${Card} title="Goal Pipeline" class="section" semanticId="planning.goal_pipeline">
         <${GoalsSummary} />
         <${FilterBar} />
       <//>
@@ -445,7 +445,7 @@ export function Goals() {
               <${HorizonGroup} horizon="long" items=${grouped.long ?? []} />
             `}
 
-      <${Card} title="MDAL Loops" class="section" semanticId="goals.mdal_loops">
+      <${Card} title="MDAL Loops" class="section" semanticId="planning.mdal_loops">
         ${mdalLoading.value && loops.length === 0
           ? html`<div class="loading-indicator">Loading MDAL loops...</div>`
           : loops.length === 0 && mdalState === 'error'
@@ -477,3 +477,5 @@ export function Goals() {
     </div>
   `
 }
+
+export const Goals = Planning

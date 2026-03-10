@@ -1,85 +1,85 @@
-# Dashboard Integration Spec (MASC MCP)
+# Dashboard Integration Spec (Operator Console)
 
-## 목표
-- 외부 대시보드에서 **상태/작업/에이전트/메시지**를 안전하게 읽는다.
-- SSE 스트림으로 변경 이벤트를 받는다.
-- 인증/권한을 강제한다.
+## Goal
+- Expose one operator-first dashboard model instead of a mixed omnibus bundle.
+- Keep each surface responsible for one judgment domain.
+- Keep experimental surfaces out of the main operator navigation.
 
-## 기본 정보
+## Canonical Main Surfaces
+- `mission`: what needs attention now
+- `execution`: workers, tasks, keepers, continuity pressure
+- `memory`: durable posts/comments only
+- `governance`: debates and voting only
+- `planning`: goals, MDAL loops, backlog posture
+- `intervene`: mutating operator actions
+- `command`: command-plane truth
+
+Experimental features such as TRPG live under `lab`.
+
+## Base
 - Base URL: `http://127.0.0.1:8935`
 - REST Base: `/api/v1`
 - SSE: `/sse`
 - MCP: `/mcp`
 
-## 인증
+## Auth
 - HTTP Header
   - `Authorization: Bearer <token>`
   - `X-MASC-Agent: <agent_name>`
-- SSE (EventSource는 header 불가)
+- SSE
   - `/sse?agent=<agent_name>&token=<token>`
-- Auth 비활성 시에도 위 헤더는 허용한다.
 
-## REST API
+## Dashboard Read Model
 
-### GET /api/v1/status
-- 응답
-  - `cluster`, `project`, `tempo_interval_s`, `paused`
+### Removed
+- `GET /api/v1/dashboard`
+  - removed as a dashboard read model
+  - returns `410 Gone`
 
-### GET /api/v1/tasks
-- Query
-  - `status`: `todo|claimed|in_progress|done|cancelled` (optional)
-  - `limit`: default 50
-  - `offset`: default 0
-- 응답
-  - `tasks`: list
-  - `limit`, `offset`, `total`
+### Canonical projections
+- `GET /api/v1/dashboard/shell`
+  - shell-only room status and top-level counts
+- `GET /api/v1/dashboard/mission`
+  - mission summary derived from operator + command truth
+- `GET /api/v1/dashboard/execution`
+  - `agents`, `tasks`, `messages`, `keepers`, execution summary
+- `GET /api/v1/dashboard/memory`
+  - `posts` plus memory-feed summary
+- `GET /api/v1/dashboard/governance`
+  - `debates`, `sessions`, governance summary
+- `GET /api/v1/dashboard/planning`
+  - `goals`, `rollup`, `mdal`, `task_backlog`
+- `GET /api/v1/dashboard/semantics`
+  - surface and panel semantics registry
 
-### GET /api/v1/agents
-- Query
-  - `status`: `active|busy|inactive` (optional)
-  - `limit`: default 50
-  - `offset`: default 0
-- 응답
-  - `agents`: list
-  - `limit`, `offset`, `total`
+## Raw Domain Endpoints
+- `/api/v1/board*`, `/api/v1/council*`, `/api/v1/operator*`, `/api/v1/command-plane*`
+- These may still exist for domain consumers or drill-down flows.
+- The dashboard client should prefer the canonical projection endpoints above.
 
-### GET /api/v1/messages
-- Query
-  - `since_seq`: default 0
-  - `limit`: default 20
-  - `agent`: filter by sender (optional)
-- 응답
-  - `messages`: list
-  - `limit`, `since_seq`, `total`
+## SSE Expectations
+- Treat SSE as freshness transport, not as the read model.
+- Use projection endpoints for hydration after events.
+- Minimum event classes the operator dashboard reacts to:
+  - `broadcast`
+  - `task_*`
+  - `agent_joined`
+  - `agent_left`
+  - `board_post`
+  - `board_comment`
+  - `decision_*`
+  - `mdal_*`
+  - `command_plane_*`
+  - `operator_*`
 
-### GET /api/v1/credits
-- 응답
-  - credits dashboard JSON
-
-## SSE (Server-Sent Events)
-- Endpoint: `/sse`
-- 인증: `?agent=...&token=...` (권장)
-- 이벤트 형식
-  - `event: message`
-  - `data: <JSON>`
-- 주요 타입
-  - `masc/broadcast`
-  - `masc/task_update`
-  - `masc/agent_joined`
-  - `masc/agent_left`
-  - `masc/tempo_change`
-
-## 오류 규약
-- REST 응답은 JSON으로 반환
-- 인증 실패
-  - 401 Unauthorized
-  - 메시지: `{"error":"unauthorized"}`
-- 권한 부족
-  - 403 Forbidden
-  - 메시지: `{"error":"forbidden"}`
-
-## 통합 체크리스트
-- Authorization 헤더 또는 SSE query 적용
-- REST 페이지네이션 적용
-- SSE 이벤트 타입 매핑
-- 장애 대비 폴링 fallback (5s)
+## Error Contract
+- JSON responses only
+- Auth failure
+  - `401 Unauthorized`
+  - `{"error":"unauthorized"}`
+- Permission failure
+  - `403 Forbidden`
+  - `{"error":"forbidden"}`
+- Removed legacy batch endpoint
+  - `410 Gone`
+  - `{"error":"dashboard batch contract removed", ...}`

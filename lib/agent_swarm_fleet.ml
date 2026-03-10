@@ -131,7 +131,7 @@ let run_full ~sw ~net ~clock ~proc_mgr ~masc_url ~provider
   let _joined = Agent_swarm_client.join ~sw coordinator in
   Fun.protect
     ~finally:(fun () ->
-      try ignore (Agent_swarm_client.leave ~sw coordinator) with _ -> ())
+      try ignore (Agent_swarm_client.leave ~sw coordinator) with exn -> ignore exn)
     (fun () ->
       let _ =
         Agent_swarm_client.broadcast ~sw coordinator

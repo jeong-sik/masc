@@ -355,7 +355,7 @@ let parse_verification_response (response: string) : verification_result =
     match json |> member key with
     | `List items ->
         List.filter_map (fun v ->
-          try Some (to_string v) with _ -> None
+          try Some (to_string v) with Yojson.Safe.Util.Type_error _ -> None
         ) items
     | `String s -> [s]
     | _ -> []
@@ -427,7 +427,7 @@ let parse_verification_response (response: string) : verification_result =
         match json |> member "confidence" with
         | `Float f -> f
         | `Int i -> float_of_int i
-        | `String s -> (try float_of_string s with _ -> if is_complete then 0.9 else 0.3)
+        | `String s -> (try float_of_string s with Failure _ -> if is_complete then 0.9 else 0.3)
         | _ -> if is_complete then 0.9 else 0.3
       in
       let reason =

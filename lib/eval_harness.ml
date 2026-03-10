@@ -405,7 +405,7 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
               args_contain = (match te |> member "args_contain" with
                 | `String s -> Some s | _ -> None);
             }
-            with _ -> None
+            with Yojson.Safe.Util.Type_error _ -> None
           ) items
       | _ -> []
     in

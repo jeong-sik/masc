@@ -15,7 +15,7 @@ let int_env name ~default ~min_v ~max_v =
       try
         let parsed = int_of_string (String.trim raw) in
         max min_v (min max_v parsed)
-      with _ -> default)
+      with Failure _ -> default)
 
 let bool_env name ~default =
   match Sys.getenv_opt name with

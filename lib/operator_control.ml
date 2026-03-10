@@ -1645,7 +1645,7 @@ let build_session_digest config (session : Team_session_types.session) ~now =
     escalation_count =
       (match U.member "escalation_count" summary with
       | `Int value -> value
-      | `Intlit raw -> (try int_of_string raw with _ -> 0)
+      | `Intlit raw -> (try int_of_string raw with Failure _ -> 0)
       | _ -> Team_session_types.escalation_count session.planned_workers);
     controller_tree =
       (match U.member "controller_tree" summary with

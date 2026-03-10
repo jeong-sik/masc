@@ -154,8 +154,8 @@ let write_json path json =
   let closed = ref false in
   Fun.protect
     ~finally:(fun () ->
-      if not !closed then (try close_out oc with _ -> ());
-      if Sys.file_exists tmp then (try Sys.remove tmp with _ -> ()))
+      if not !closed then (try close_out oc with exn -> let _ = exn in ());
+      if Sys.file_exists tmp then (try Sys.remove tmp with Sys_error _ -> ()))
     (fun () ->
       output_string oc content;
       flush oc;
@@ -171,7 +171,7 @@ let read_json path =
         really_input_string ic (in_channel_length ic))
     in
     Some (Yojson.Safe.from_string content)
-  with _ -> None
+  with exn -> let _ = exn in None
 
 let save_experiment config (exp : experiment) =
   ensure_dir (experiments_dir config);
@@ -180,7 +180,7 @@ let save_experiment config (exp : experiment) =
 let load_experiment config experiment_id : experiment option =
   let path = experiment_path config experiment_id in
   match read_json path with
-  | Some json -> (try Some (experiment_of_yojson json) with _ -> None)
+  | Some json -> (try Some (experiment_of_yojson json) with Yojson.Safe.Util.Type_error _ | Invalid_argument _ -> None)
   | None -> None
 
 let list_experiments config =
@@ -192,10 +192,10 @@ let list_experiments config =
     |> List.filter (fun f -> Filename.check_suffix f ".json")
     |> List.filter_map (fun f ->
          match read_json (Filename.concat dir f) with
-         | Some json -> (try Some (experiment_of_yojson json) with _ -> None)
+         | Some json -> (try Some (experiment_of_yojson json) with Yojson.Safe.Util.Type_error _ | Invalid_argument _ -> None)
          | None -> None)
     |> List.sort (fun a b -> compare b.created_at a.created_at)
-  with _ -> []
+  with Sys_error _ -> []
 
 (* {1 ID Generation} *)
 

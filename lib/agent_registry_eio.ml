@@ -101,7 +101,7 @@ let get_or_create_identity ?mcp_session_id params =
       (* Touch to update last_seen and room *)
       let room_id = Yojson.Safe.Util.(
         try Some (params |> member "room" |> to_string)
-        with _ -> None
+        with Yojson.Safe.Util.Type_error _ -> None
       ) in
       Agent_identity.Registry.touch reg identity.session_key ?room_id ();
       (* Return fresh identity with updated room *)

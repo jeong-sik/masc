@@ -174,7 +174,7 @@ let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_
                 if Sys.is_directory path then walk (depth + 1) path acc
                 else if is_allowed_file path then path :: acc
                 else acc
-              with _ -> acc
+              with Sys_error _ -> acc
           ) acc names
   in
 
@@ -184,7 +184,7 @@ let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_
         try
           let st = Unix.stat path in
           Some (st.Unix.st_mtime, path)
-        with _ -> None)
+        with Unix.Unix_error _ -> None)
     |> List.sort (fun (a_m, _) (b_m, _) -> compare b_m a_m)
     |> List.filteri (fun i _ -> i < max_files)
     |> List.map snd

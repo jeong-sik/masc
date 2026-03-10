@@ -66,7 +66,7 @@ let run_with_masc ~sw ~proc_mgr ~clock ~net ~masc_url config ~goal =
       ~agent_name:config.name ~net in
     let _joined = Agent_swarm_client.join ~sw client in
     Fun.protect ~finally:(fun () ->
-      try ignore (Agent_swarm_client.leave ~sw client) with _ -> ()
+      try ignore (Agent_swarm_client.leave ~sw client) with exn -> ignore exn
     ) (fun () ->
       let _ = Agent_swarm_client.broadcast ~sw client
         ~message:(Printf.sprintf "Starting: %s" goal) in

@@ -202,7 +202,7 @@ let make_zero_zombie_consumer ~room_config
             try
               String.sub status_trimmed 0 (min 4 (String.length status_trimmed)) = "\xf0\x9f\xa7\x9f" ||
               String.length status_trimmed >= 7 && String.sub status_trimmed 0 7 = "Cleaned"
-            with _ -> false
+            with exn -> let _ = exn in false
           in
           if has_zombie_indicator then
             Printf.eprintf "[ZeroZombie] %s\n%!" status_trimmed

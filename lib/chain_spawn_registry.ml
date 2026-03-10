@@ -30,7 +30,7 @@ let state_mutex = Eio.Mutex.create ()
 let with_lock f = Eio.Mutex.use_rw ~protect:true state_mutex f
 
 let parse_int value =
-  try Some (int_of_string value) with _ -> None
+  try Some (int_of_string value) with Failure _ -> None
 
 let env_int ~name ~default =
   match Sys.getenv_opt name with

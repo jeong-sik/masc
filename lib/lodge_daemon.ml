@@ -70,7 +70,7 @@ let default_config = {
 let load_config () =
   let get_env_float name default =
     match Sys.getenv_opt name with
-    | Some s -> (try float_of_string s with _ -> default)
+    | Some s -> (try float_of_string s with Failure _ -> default)
     | None -> default
   in
   let get_env_bool name default =

@@ -107,7 +107,7 @@ let entry_of_json (json : Yojson.Safe.t) : memory_entry option =
       importance = json |> member "importance" |> to_int;
       entry_type = json |> member "entry_type" |> memory_type_of_json;
     }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
 (* ---------- File I/O ---------- *)
 

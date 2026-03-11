@@ -5900,6 +5900,8 @@ let mcp_transport_json_headers session_id protocol_version origin =
         cors_headers = cors_headers;
         auth_token_from_request = auth_token_from_request;
         get_server_state_opt = (fun () -> !server_state);
+        get_sw = Masc_mcp.Eio_context.get_switch_opt;
+        get_clock = Masc_mcp.Eio_context.get_clock_opt;
         verify_mcp_auth =
           (fun ~base_path request ->
             Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
@@ -6445,6 +6447,8 @@ let mcp_transport_http_deps : Server_mcp_transport_http.deps =
     cors_headers;
     auth_token_from_request;
     get_server_state_opt = (fun () -> !server_state);
+    get_sw = Masc_mcp.Eio_context.get_switch_opt;
+    get_clock = Masc_mcp.Eio_context.get_clock_opt;
     verify_mcp_auth =
       (fun ~base_path request ->
         Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));

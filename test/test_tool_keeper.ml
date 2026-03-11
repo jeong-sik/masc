@@ -92,18 +92,18 @@ let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
   with_env "ZAI_API_KEY" "zai-test" (fun () ->
       let labels =
         Masc_mcp.Tool_keeper.maybe_append_keeper_fallback_models
-          ["ollama:glm-4.7-flash"]
+          ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
       in
-      let ollama_listening =
-        match Masc_mcp.Tool_keeper.model_specs_of_strings ["ollama:glm-4.7-flash"] with
+      let llama_listening =
+        match Masc_mcp.Tool_keeper.model_specs_of_strings ["llama:qwen3.5-35b-a3b-ud-q8-xl"] with
         | Ok [spec] -> Masc_mcp.Tool_keeper.model_spec_is_available spec
         | _ -> false
       in
       let expected =
-        if ollama_listening then
-          ["ollama:glm-4.7-flash"]
+        if llama_listening then
+          ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
         else
-          ["ollama:glm-4.7-flash"; "glm:glm-4.7"]
+          ["llama:qwen3.5-35b-a3b-ud-q8-xl"; "glm:glm-4.7"]
       in
       check (list string) "append glm fallback only when local runtime unavailable"
         expected labels)
@@ -178,6 +178,20 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
 let test_keeper_model_set_persists_active_model () =
+  let local_llama_available =
+    try
+      let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+      Fun.protect
+        ~finally:(fun () ->
+          try Unix.close sock with Unix.Unix_error _ -> ())
+        (fun () ->
+          Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 8085));
+          true)
+    with Unix.Unix_error _ -> false
+  in
+  if not local_llama_available then
+    check bool "skip when local llama unavailable" true true
+  else
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -200,8 +214,8 @@ let test_keeper_model_set_persists_active_model () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Maintain Sangsu persona");
-              ("models", `List [ `String "ollama:glm-4.7-flash" ]);
-              ("active_model", `String "ollama:glm-4.7-flash");
+              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("active_model", `String "llama:qwen3.5-35b-a3b-ud-q8-xl");
               ("room_scope", `String "all");
               ("trigger_mode", `String "explicit_only");
               ("mention_targets", `List [ `String "sangsu" ]);
@@ -215,12 +229,12 @@ let test_keeper_model_set_persists_active_model () =
           (`Assoc
             [
               ("name", `String "sangsu");
-              ("model", `String "ollama:qwen3.5:35b-a3b");
+              ("model", `String "llama:qwen3.5:35b-a3b");
             ])
       in
       check bool "model set ok" true ok;
       let json = Yojson.Safe.from_string body in
-      check string "active model updated" "ollama:qwen3.5:35b-a3b"
+      check string "active model updated" "llama:qwen3.5:35b-a3b"
         Yojson.Safe.Util.(json |> member "active_model" |> to_string);
       let ok, status_body =
         dispatch "masc_keeper_status"
@@ -237,7 +251,7 @@ let test_keeper_model_set_persists_active_model () =
       in
       check bool "status ok" true ok;
       let status_json = Yojson.Safe.from_string status_body in
-      check string "status active model" "ollama:qwen3.5:35b-a3b"
+      check string "status active model" "llama:qwen3.5:35b-a3b"
         Yojson.Safe.Util.(status_json |> member "active_model" |> to_string))
 
 let write_persona_profile ~me_root ~persona_name ~content =

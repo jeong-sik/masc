@@ -1,7 +1,7 @@
 (** Llm_client — Vendor-agnostic LLM client for the Perpetual Agent Runtime.
 
     Provides structured chat/completion calls to any LLM provider via
-    OpenAI-compatible API format.  Local models (Ollama) and remote APIs
+    OpenAI-compatible API format. Local llama.cpp runtimes and remote APIs
     (Claude, GLM, Gemini, OpenRouter) are supported through a unified
     interface.
 
@@ -14,7 +14,6 @@
 
 (** Supported LLM providers. *)
 type provider =
-  | Ollama
   | Llama
   | Claude
   | OpenAI
@@ -98,12 +97,9 @@ type completion_response = {
 (** Call LLM with structured request.
     Uses subprocess curl for HTTP — no Eio runtime dependency.
     Optional [timeout_sec] overrides provider HTTP timeout (seconds) for this call.
-    Optional [ollama_timeout_sec] overrides Ollama request timeout (seconds)
-    for this call only.
     @return Ok response on success, Error message on failure. *)
 val complete :
   ?timeout_sec:int ->
-  ?ollama_timeout_sec:int ->
   completion_request ->
   (completion_response, string) result
 
@@ -113,13 +109,10 @@ val complete :
     the cascade to continue with the next model.
     Optional [timeout_sec] sets an overall wall-clock budget (seconds) for the
     full cascade. Remaining budget is applied per-attempt.
-    Optional [ollama_timeout_sec] overrides Ollama request timeout (seconds)
-    for all tries in this cascade.
     @return Ok response from first successful model, Error if all fail. *)
 val cascade :
   ?accept:(completion_response -> bool) ->
   ?timeout_sec:int ->
-  ?ollama_timeout_sec:int ->
   completion_request list ->
   (completion_response, string) result
 
@@ -135,8 +128,6 @@ val llm_semaphore_available : unit -> int
 (** {1 Helpers} *)
 
 (** Built-in model specs for common configurations. *)
-val ollama_glm : model_spec
-val ollama_lfm : model_spec
 val llama_default : model_spec
 val claude_opus : model_spec
 val claude_sonnet : model_spec
@@ -145,7 +136,7 @@ val glm_cloud : model_spec
 val gemini_pro : model_spec
 
 (** Resolve the canonical default local model through the provider registry.
-    Falls back to [ollama_glm] if parsing fails. *)
+    Falls back to the first available execution model or GLM if parsing fails. *)
 val default_local_model_spec : unit -> model_spec
 
 (** Preferred model labels for execution defaults, resolved from explicit env
@@ -157,11 +148,11 @@ val default_execution_model_labels : unit -> string list
 val default_verifier_model_labels : unit -> string list
 
 (** Resolve the first callable execution default.
-    Returns [Error _] instead of silently forcing a local Ollama model. *)
+    Returns [Error _] instead of silently forcing a local model. *)
 val default_execution_model_spec : unit -> (model_spec, string) result
 
 (** Resolve the first callable verifier default.
-    Returns [Error _] instead of silently forcing a local Ollama model. *)
+    Returns [Error _] instead of silently forcing a local model. *)
 val default_verifier_model_spec : unit -> (model_spec, string) result
 
 (** Create a message. *)
@@ -190,7 +181,6 @@ val available_model_specs_of_strings : string list -> model_spec list
 val run_prompt_cascade :
   ?temperature:float ->
   ?timeout_sec:int ->
-  ?ollama_timeout_sec:int ->
   ?accept:(completion_response -> bool) ->
   ?system:string ->
   model_specs:model_spec list ->

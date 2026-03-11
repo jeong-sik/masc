@@ -98,7 +98,7 @@ let resolve_targets mode ~available_agents =
       |> List.filter (fun name -> agent_type_of_mention name = agent_type)
 
 (** Agent types that can be auto-spawned by Auto-Responder *)
-let spawnable_agents = ["gemini"; "codex"; "claude"; "ollama"; "glm"]
+let spawnable_agents = ["gemini"; "codex"; "claude"; "llama"; "glm"]
 
 (** Check if an agent type is spawnable *)
 let is_spawnable mention =

@@ -27,8 +27,8 @@ type config = {
   check_interval_s: float;
   heartbeat_interval_s: float;
   reflection_interval_s: float;
-  ollama_url: string;
-  ollama_model: string;
+  local_url: string;
+  local_model: string;
   neo4j_enabled: bool;
 }
 

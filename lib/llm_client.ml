@@ -1,26 +1,16 @@
 (** Llm_client — Vendor-agnostic LLM client for the Perpetual Agent Runtime.
 
-    Unified interface for calling any LLM provider.  All providers are
+    Unified interface for calling any LLM provider. All providers are
     normalized to an internal message format and results are parsed into
     structured completion_response records.
 
     HTTP calls use Process_eio subprocess (curl) — the same proven pattern
-    used by llm_direct.ml.  This avoids complex TLS/cohttp-eio setup
+    used by llm_direct.ml. This avoids complex TLS/cohttp-eio setup
     while being equally reliable.
 
     @since 2.61.0 *)
 
 open Printf
-
-let contains_ci (text : string) (needle : string) : bool =
-  let hay = String.lowercase_ascii text in
-  let ndl = String.lowercase_ascii needle in
-  ndl <> ""
-  &&
-  try
-    let _ = Str.search_forward (Str.regexp_string ndl) hay 0 in
-    true
-  with Not_found -> false
 
 let int_of_env_default name ~default ~min_v ~max_v =
   match Sys.getenv_opt name with
@@ -32,20 +22,12 @@ let int_of_env_default name ~default ~min_v ~max_v =
       in
       max min_v (min max_v v)
 
-let ollama_timeout_sec () =
-  int_of_env_default
-    "MASC_LLM_OLLAMA_TIMEOUT_SEC"
-    ~default:45
-    ~min_v:10
-    ~max_v:180
-
 (* ================================================================ *)
 (* Concurrency limiter — throttle simultaneous LLM requests          *)
 (* ================================================================ *)
 
 (** Maximum concurrent cascade/LLM calls.
-    Default 2 matches OLLAMA_MAX_LOADED_MODELS on M3 Max 128GB.
-    Prevents keeper stampede from overloading Ollama VRAM. *)
+    Default 2 is conservative for local llama.cpp runtimes on 128GB hosts. *)
 let max_concurrent_llm =
   int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:2 ~min_v:1 ~max_v:128
 
@@ -57,18 +39,11 @@ let with_llm_permit f =
   Eio.Semaphore.acquire llm_semaphore;
   Fun.protect ~finally:(fun () -> Eio.Semaphore.release llm_semaphore) f
 
-let ollama_should_fallback_to_generate (err : string) : bool =
-  contains_ci err "404"
-  || contains_ci err "not found"
-  || contains_ci err "unsupported"
-  || contains_ci err "unknown endpoint"
-
 (* ================================================================ *)
 (* Types                                                            *)
 (* ================================================================ *)
 
 type provider =
-  | Ollama
   | Llama
   | Claude
   | OpenAI
@@ -138,7 +113,6 @@ type completion_response = {
 (* ================================================================ *)
 
 let string_of_provider = function
-  | Ollama -> "ollama"
   | Llama -> "llama"
   | Claude -> "claude"
   | OpenAI -> "openai"
@@ -182,45 +156,13 @@ let sanitize_message_utf8 (m : message) : message =
 let sanitize_messages_utf8 (msgs : message list) : message list =
   List.map sanitize_message_utf8 msgs
 
-let env_present name =
-  match Sys.getenv_opt name with
-  | Some value -> String.trim value <> ""
-  | None -> false
-
-let nonempty_env name =
-  match Sys.getenv_opt name with
-  | Some value ->
-      let trimmed = String.trim value in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
-
 (* ================================================================ *)
 (* Built-in Model Specs                                             *)
 (* ================================================================ *)
 
-let ollama_glm = {
-  provider = Ollama;
-  model_id = "glm-4.7-flash";
-  max_context = 202000;
-  api_url = Env_config.Ollama.server_url;
-  api_key_env = None;
-  cost_per_1k_input = 0.0;
-  cost_per_1k_output = 0.0;
-}
-
-let ollama_lfm = {
-  provider = Ollama;
-  model_id = "LFM2.5-1.2B-Instruct";
-  max_context = 128000;
-  api_url = Env_config.Ollama.server_url;
-  api_key_env = None;
-  cost_per_1k_input = 0.0;
-  cost_per_1k_output = 0.0;
-}
-
 let llama_default = {
   provider = Llama;
-  model_id = "explicit-model-required";
+  model_id = Env_config.Llama.default_model;
   max_context = 128000;
   api_url = Env_config.Llama.server_url;
   api_key_env = None;
@@ -496,7 +438,7 @@ let tool_def_to_openai_json (td : tool_def) : Yojson.Safe.t =
     ]);
   ]
 
-(** Build OpenAI-compatible request body (works for Ollama, GLM, OpenRouter).
+(** Build OpenAI-compatible request body (works for llama.cpp, GLM, OpenRouter).
     Gemini's OpenAI-compat endpoint uses [max_completion_tokens] (thinking models
     consume internal tokens from this budget, so [max_tokens] alone under-allocates). *)
 let build_openai_body (req : completion_request) : string =
@@ -725,51 +667,6 @@ let parse_claude_response (json_str : string) : (completion_response, string) re
   | Failure msg -> Error msg
   | exn -> Error (sprintf "Parse error: %s" (Printexc.to_string exn))
 
-let parse_ollama_generate_response (json_str : string) : (completion_response, string) result =
-  try
-    let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    let content = json |> member "response" |> to_string in
-    let eval_count = Safe_ops.json_int "eval_count" json in
-    let prompt_eval_count = Safe_ops.json_int "prompt_eval_count" json in
-    let model_used = json |> member "model" |> to_string_option
-                     |> Option.value ~default:"unknown" in
-    let usage = {
-      input_tokens = prompt_eval_count;
-      output_tokens = eval_count;
-      total_tokens = prompt_eval_count + eval_count;
-      cache_creation_input_tokens = 0;
-      cache_read_input_tokens = 0;
-    } in
-    Ok { content; tool_calls = []; usage; model_used; latency_ms = 0 }
-  with exn ->
-    Error (sprintf "Ollama parse error: %s" (Printexc.to_string exn))
-
-(** Parse native Ollama /api/chat response.
-    Format: { "message": { "content": "..." }, "done": true,
-              "eval_count": N, "prompt_eval_count": N, "model": "..." } *)
-let parse_ollama_chat_response (json_str : string) : (completion_response, string) result =
-  try
-    let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    let msg = json |> member "message" in
-    let content = msg |> member "content" |> to_string_option
-                  |> Option.value ~default:"" in
-    let eval_count = Safe_ops.json_int "eval_count" json in
-    let prompt_eval_count = Safe_ops.json_int "prompt_eval_count" json in
-    let model_used = json |> member "model" |> to_string_option
-                     |> Option.value ~default:"unknown" in
-    let usage = {
-      input_tokens = prompt_eval_count;
-      output_tokens = eval_count;
-      total_tokens = prompt_eval_count + eval_count;
-      cache_creation_input_tokens = 0;
-      cache_read_input_tokens = 0;
-    } in
-    Ok { content; tool_calls = []; usage; model_used; latency_ms = 0 }
-  with exn ->
-    Error (sprintf "Ollama chat parse error: %s" (Printexc.to_string exn))
-
 (* ================================================================ *)
 (* HTTP Execution via curl subprocess                               *)
 (* ================================================================ *)
@@ -847,8 +744,7 @@ let resolve_openai_compatible_endpoint (spec : model_spec) =
             [ ("Authorization", sprintf "Bearer %s" api_key) ] )
   | Claude ->
       Error "Claude direct provider uses call_claude, not OpenAI-compatible transport"
-  | Ollama | Llama ->
-      Ok (spec.api_url, "/v1/chat/completions", [])
+  | Llama -> Ok (spec.api_url, "/v1/chat/completions", [])
   | Custom _ ->
       let auth_headers =
         match get_api_key spec with
@@ -905,74 +801,6 @@ let curl_post ~url ~headers ~body ~timeout_sec : (string, string) result =
     handle 0
   with exn ->
     Error (sprintf "HTTP error: %s" (Printexc.to_string exn))
-
-(* ================================================================ *)
-(* Provider-Specific Execution                                      *)
-(* ================================================================ *)
-
-(** Build native Ollama /api/chat request body with think:false.
-    Uses the same message format as OpenAI but adds Ollama-specific fields.
-    Includes tools when provided - Ollama supports OpenAI-compatible tool format. *)
-let build_ollama_chat_body (req : completion_request) : string =
-  let messages_json =
-    req.messages |> sanitize_messages_utf8 |> List.map message_to_openai_json
-  in
-  let base = [
-    ("model", `String req.model.model_id);
-    ("messages", `List messages_json);
-    ("stream", `Bool false);
-    ("think", `Bool false);
-    ("options", `Assoc [
-      ("temperature", `Float req.temperature);
-      ("num_predict", `Int req.max_tokens);
-    ]);
-  ] in
-  let with_tools = match req.tools with
-    | [] -> base
-    | tools ->
-      let tools_json = List.map tool_def_to_openai_json tools in
-      ("tools", `List tools_json) :: base
-  in
-  Yojson.Safe.to_string (`Assoc with_tools)
-
-let call_ollama_chat ?timeout_sec (req : completion_request) : (completion_response, string) result =
-  let url = sprintf "%s/api/chat" req.model.api_url in
-  let body = build_ollama_chat_body req in
-  let headers = [("Content-Type", "application/json")] in
-  let timeout_sec = Option.value timeout_sec ~default:(ollama_timeout_sec ()) in
-  eprintf "[llm_client] ollama_chat req: model=%s tools=%d body_len=%d\n%!"
-    req.model.model_id (List.length req.tools) (String.length body);
-  match curl_post ~url ~headers ~body ~timeout_sec with
-  | Error e -> Error e
-  | Ok raw -> parse_ollama_chat_response raw
-
-(** Ollama fallback: /api/generate for models without chat support. *)
-let call_ollama_generate ?timeout_sec (req : completion_request) : (completion_response, string) result =
-  let url = sprintf "%s/api/generate" req.model.api_url in
-  let sanitized_messages = sanitize_messages_utf8 req.messages in
-  let prompt = List.fold_left (fun acc m ->
-    match m.role with
-    | System -> sprintf "%s[System] %s\n" acc m.content
-    | User -> sprintf "%s%s\n" acc m.content
-    | Assistant -> sprintf "%s[Assistant] %s\n" acc m.content
-    | Tool -> sprintf "%s[Tool:%s] %s\n" acc
-                (Option.value ~default:"" m.name) m.content
-  ) "" sanitized_messages in
-  let body = Yojson.Safe.to_string (`Assoc [
-    ("model", `String req.model.model_id);
-    ("prompt", `String prompt);
-    ("stream", `Bool false);
-    ("think", `Bool false);
-    ("options", `Assoc [
-      ("temperature", `Float req.temperature);
-      ("num_predict", `Int req.max_tokens);
-    ]);
-  ]) in
-  let headers = [("Content-Type", "application/json")] in
-  let timeout_sec = Option.value timeout_sec ~default:(ollama_timeout_sec ()) in
-  match curl_post ~url ~headers ~body ~timeout_sec with
-  | Error e -> Error e
-  | Ok raw -> parse_ollama_generate_response raw
 
 let call_claude ?timeout_sec (req : completion_request) : (completion_response, string) result =
   let api_key = get_api_key req.model in
@@ -1038,15 +866,8 @@ let call_glm_cloud_with_pool ?timeout_sec (req : completion_request) : (completi
 (* Core: complete                                                   *)
 (* ================================================================ *)
 
-let complete ?timeout_sec ?ollama_timeout_sec (req : completion_request) : (completion_response, string) result =
+let complete ?timeout_sec (req : completion_request) : (completion_response, string) result =
   let t0 = Time_compat.now () in
-  let effective_ollama_timeout_sec =
-    match timeout_sec, ollama_timeout_sec with
-    | None, None -> None
-    | Some t, None -> Some (max 1 t)
-    | None, Some o -> Some o
-    | Some t, Some o -> Some (min (max 1 t) o)
-  in
   let cache_key =
     match cache_bypass_reason req with
     | Some reason ->
@@ -1081,20 +902,8 @@ let complete ?timeout_sec ?ollama_timeout_sec (req : completion_request) : (comp
     match cached_result with
     | Some cached -> cached
     | None ->
-        let upstream_result =
+      let upstream_result =
           match req.model.provider with
-          | Ollama ->
-              (* Try chat API first.
-                 Fallback to /api/generate only for likely endpoint-support errors,
-                 because retrying on timeouts doubles latency and can exceed caller deadlines. *)
-              (match call_ollama_chat ?timeout_sec:effective_ollama_timeout_sec req with
-              | Ok _ as ok -> ok
-              | Error e ->
-                  if req.tools <> [] then
-                    Error e
-                  else if ollama_should_fallback_to_generate e then
-                    call_ollama_generate ?timeout_sec:effective_ollama_timeout_sec req
-                  else Error e)
           | Llama -> call_openai_compatible ?timeout_sec req
           | Claude -> call_claude ?timeout_sec req
           | Glm_cloud -> call_glm_cloud_with_pool ?timeout_sec req
@@ -1122,7 +931,7 @@ let complete ?timeout_sec ?ollama_timeout_sec (req : completion_request) : (comp
 (* Cascade: try models in order                                     *)
 (* ================================================================ *)
 
-let cascade ?(accept = fun _ -> true) ?timeout_sec ?ollama_timeout_sec
+let cascade ?(accept = fun _ -> true) ?timeout_sec
     (requests : completion_request list) : (completion_response, string) result =
   with_llm_permit (fun () ->
     let avail = Eio.Semaphore.get_value llm_semaphore in
@@ -1152,9 +961,9 @@ let cascade ?(accept = fun _ -> true) ?timeout_sec ?ollama_timeout_sec
           req.model.model_id (string_of_provider req.model.provider);
         let attempt_result =
           match remaining_timeout_sec () with
-          | None -> complete ?ollama_timeout_sec req
+          | None -> complete req
           | Some sec when sec > 0 ->
-              complete ~timeout_sec:sec ?ollama_timeout_sec req
+              complete ~timeout_sec:sec req
           | Some _ -> Error "cascade deadline exceeded"
         in
         match attempt_result with
@@ -1197,8 +1006,6 @@ let model_spec_of_string s =
         Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)
       else
         match Provider_adapter.resolve_direct_adapter provider with
-        | Some adapter when adapter.canonical_name = "ollama" ->
-          Ok { ollama_glm with model_id }
         | Some adapter when adapter.canonical_name = "llama" ->
           Ok { llama_default with model_id }
         | Some adapter when adapter.canonical_name = "gemini-api" ->
@@ -1261,63 +1068,19 @@ let model_spec_of_string s =
         | _ ->
           Error
             (sprintf
-               "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, llama, claude, gemini, glm, openrouter, mlx, custom)"
+               "Cannot parse model spec: %s (unsupported provider '%s'; supported: llama, claude, gemini, glm, openrouter, mlx, custom)"
                s provider)
 
 let configured_default_model_label () =
-  match Provider_adapter.default_model_label_result () with
+  match Provider_adapter.configured_default_model_label_result () with
   | Ok label -> Some label
   | Error _ -> None
 
-let configured_default_verifier_model_label () =
-  match nonempty_env "MASC_DEFAULT_VERIFIER_MODEL" with
-  | Some label -> Some label
-  | None -> configured_default_model_label ()
-
-let gemini_direct_available () =
-  match Provider_adapter.resolve_gemini_direct_auth () with
-  | Provider_adapter.Gemini_api_key
-  | Provider_adapter.Gemini_vertex_adc _ -> true
-  | Provider_adapter.Gemini_auth_missing _ -> false
-
-let dedupe_keep_order items =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item then
-        false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
-
 let default_execution_model_labels () =
-  dedupe_keep_order
-    (List.filter_map
-       Fun.id
-       [
-         configured_default_model_label ();
-         if env_present "ZAI_API_KEY" then Some "glm:glm-4.7" else None;
-         if gemini_direct_available () then Some "gemini:gemini-2.5-pro" else None;
-         if env_present "ANTHROPIC_API_KEY" then
-           Some "claude:claude-sonnet-4-5-20250929"
-         else None;
-         if env_present "OPENAI_API_KEY" then Some "openai:gpt-5" else None;
-       ])
+  Provider_adapter.preferred_execution_model_labels ()
 
 let default_verifier_model_labels () =
-  dedupe_keep_order
-    (List.filter_map
-       Fun.id
-       [
-         configured_default_verifier_model_label ();
-         if env_present "ZAI_API_KEY" then Some "glm:glm-4.7" else None;
-         if gemini_direct_available () then Some "gemini:gemini-2.5-flash" else None;
-         if env_present "ANTHROPIC_API_KEY" then
-           Some "claude:claude-sonnet-4-5-20250929"
-         else None;
-         if env_present "OPENAI_API_KEY" then Some "openai:gpt-5" else None;
-       ])
+  Provider_adapter.preferred_verifier_model_labels ()
 
 let available_model_specs_of_strings model_strs =
   model_strs
@@ -1367,7 +1130,7 @@ let default_local_model_spec () =
       | Ok spec -> spec
       | Error _ -> glm_cloud)
 
-let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec ?ollama_timeout_sec
+let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec
     ?(accept = fun _ -> true) ?system ~model_specs ~max_tokens ~prompt () =
   let msgs =
     match system with
@@ -1388,4 +1151,4 @@ let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec ?ollama_timeout_sec
           : completion_request))
       model_specs
   in
-  cascade ?timeout_sec ?ollama_timeout_sec ~accept requests
+  cascade ?timeout_sec ~accept requests

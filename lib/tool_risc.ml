@@ -45,13 +45,13 @@ let global_scheduler = Reservation_station.create_scheduler ()
 (* ================================================================ *)
 
 (** Default fast model for speculative execution.
-    Uses Ollama glm-4.7-flash (local, cheap).
+    Uses the configured local llama runtime.
     Overridable via tool args at runtime. *)
 let default_fast_model : Llm_client.model_spec = {
-  provider = Ollama;
-  model_id = "glm-4.7-flash";
-  max_context = 202000;
-  api_url = Env_config.Ollama.server_url;
+  provider = Llm_client.Llama;
+  model_id = Env_config.Llama.default_model;
+  max_context = 128000;
+  api_url = Env_config.Llama.server_url;
   api_key_env = None;
   cost_per_1k_input = 0.0;
   cost_per_1k_output = 0.0;

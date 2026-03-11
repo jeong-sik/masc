@@ -15,7 +15,7 @@ type model =
   | Gemini      (** Fast, good for classification *)
   | Claude      (** Balanced, good for reasoning *)
   | Codex       (** Code-focused *)
-  | Ollama of string  (** Local model *)
+  | Llama of string  (** Local model *)
 
 type response = {
   content: string;
@@ -41,7 +41,7 @@ let model_to_string = function
   | Gemini -> "gemini"
   | Claude -> "claude-cli"
   | Codex -> "codex"
-  | Ollama name -> Printf.sprintf "ollama:%s" name
+  | Llama name -> Printf.sprintf "llama:%s" name
 
 (** Build MCP JSON-RPC request for LLM call *)
 let build_request ~model ~prompt =

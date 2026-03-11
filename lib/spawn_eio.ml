@@ -293,13 +293,6 @@ let default_configs = [
     working_dir = None;
     mcp_tools = masc_mcp_tools;
   });
-  ("ollama", {
-    agent_name = "ollama";
-    command = "ollama run";
-    timeout_seconds = Env_config.Spawn.timeout_seconds;
-    working_dir = None;
-    mcp_tools = [];
-  });
   ("llama", {
     agent_name = "llama";
     command = "llama:explicit-model-required";
@@ -349,8 +342,8 @@ let parse_command cmd =
 
 let add_default_model_arg agent_name argv =
   match Provider_adapter.resolve_direct_adapter agent_name with
-  | Some adapter when adapter.canonical_name = "ollama" -> (
-      argv @ [ Provider_adapter.explicit_ollama_model_id () ])
+  | Some adapter when adapter.canonical_name = "llama" -> (
+      argv @ [ Provider_adapter.explicit_llama_model_id () ])
   | _ -> argv
 
 (** Spawn GLM agent via Llm_client cascade.
@@ -415,6 +408,20 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
     ?room_config ?runtime_agent_name ?runtime_model ?runtime_role
     ?runtime_session_id ?runtime_selection_note () : spawn_result =
   let start_time = Time_compat.now () in
+  let normalized_agent = String.lowercase_ascii (String.trim agent_name) in
+  if Provider_adapter.is_bare_ollama_label normalized_agent then
+    {
+      success = false;
+      output = Provider_adapter.bare_ollama_migration_message ();
+      exit_code = 2;
+      elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+      input_tokens = None;
+      output_tokens = None;
+      cache_creation_tokens = None;
+      cache_read_tokens = None;
+      cost_usd = None;
+    }
+  else
 
   let config = match get_config agent_name with
     | Some c -> c
@@ -587,9 +594,6 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
               let inp, out, cached, cost = parse_gemini_output raw_output in
               let result_text = Option.value (extract_gemini_response_text raw_output) ~default:raw_output in
               (result_text, inp, out, cached, None, cost)
-          | "ollama" ->
-              let inp, out, cost = parse_ollama_output raw_output in
-              (raw_output, inp, out, None, None, cost)
           | "codex" ->
               let inp, out, cached, cost = parse_codex_output raw_output in
               (raw_output, inp, out, cached, None, cost)

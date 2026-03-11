@@ -319,18 +319,14 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
       Printf.eprintf "[GraphQL] Cohttp failed (%s), trying curl fallback...\n%!" cohttp_err;
       graphql_request_curl body
 
-(** {1 LLM Provider Rotation — Avoid ollama overload} *)
+(** {1 LLM Provider Rotation} *)
 
 type llm_provider =
-  | Ollama_fast   (** glm-4.7-flash — always resident in VRAM *)
-  | Ollama_heavy  (** glm-4.7-flash — same model, no cold-load *)
   | Gemini_cli    (** gemini CLI tool *)
   | Claude_cli    (** claude CLI tool *)
   | Codex_cli     (** codex CLI tool *)
 
 let string_of_provider = function
-  | Ollama_fast -> "ollama-fast"
-  | Ollama_heavy -> "ollama-heavy"
   | Gemini_cli -> "gemini"
   | Claude_cli -> "claude"
   | Codex_cli -> "codex"
@@ -344,22 +340,6 @@ let next_cli_provider () =
   provider_index := (!provider_index + 1) mod Array.length cli_providers;
   p
 
-(** Check if ollama has a small model loaded (not blocking with 30b) *)
-let ollama_is_light () =
-  try
-    let (_status, content) =
-      run_cmd_with_status ~timeout_sec:10.0 ["curl"; "-sf"; "http://localhost:11434/api/ps"]
-    in
-    let json = Yojson.Safe.from_string content in
-    let models = json |> member "models" |> to_list in
-    (* If no models loaded or only small models, ollama is light *)
-    models = [] || List.for_all (fun m ->
-      let name = m |> member "name" |> to_string_option |> Option.value ~default:"" in
-      (* Consider models with "1.7b", "3b", "1.5b" as light *)
-      Str.string_match (Str.regexp ".*\\(1\\.[0-9]b\\|3b\\|mini\\|small\\).*") name 0
-    ) models
-  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> false  (* On error, assume busy *)
-
 (** Call CLI tool with prompt - uses stdin to avoid shell escaping issues *)
 let cli_generate provider ~system prompt =
   let full_prompt = Printf.sprintf "%s\n\n%s" system prompt in
@@ -367,7 +347,6 @@ let cli_generate provider ~system prompt =
     | Gemini_cli -> Ok ("gemini", ["gemini"])
     | Claude_cli -> Ok ("claude", ["claude"; "-p"; "-"])
     | Codex_cli -> Ok ("codex", ["codex"; "exec"; "-"])
-    | _ -> Error (Printf.sprintf "unsupported CLI provider: %s" (string_of_provider provider))
   in
   match cli_and_argv with
   | Error msg -> Error (Printf.sprintf "❌ LLM: %s" msg)
@@ -388,7 +367,7 @@ let cli_generate provider ~system prompt =
 
 (** Unified LLM generate with automatic provider selection *)
 let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
-  (* Strategy: prefer CLI tools to avoid ollama overload *)
+  (* Strategy: prefer CLI tools for cheap local orchestration decisions. *)
   if prefer_fast then begin
     (* Try CLI first (rotation) *)
     let cli = next_cli_provider () in
@@ -397,9 +376,7 @@ let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
         Printf.eprintf "[LLM] Used %s\n%!" (string_of_provider cli);
         Ok response
     | Error e1 ->
-        (* Fallback to ollama small model *)
-        Printf.eprintf "[LLM] %s failed (%s), trying ollama-fast\n%!" (string_of_provider cli) e1;
-        (* Will use ollama_generate below *)
+        Printf.eprintf "[LLM] %s failed (%s), no secondary local CLI fallback\n%!" (string_of_provider cli) e1;
         Error e1
   end else begin
     (* prefer_fast=false: try CLI rotation with second attempt before giving up *)
@@ -430,31 +407,44 @@ let glm_direct ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system pro
   | Ok _ -> Error "LLM: GLM returned empty response"
   | Error e -> Error (Printf.sprintf "LLM: cascade failed [%s]" e)
 
-(** Call local ollama API — DEPRECATED, use glm_direct instead *)
-let ollama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
+(** Call local llama.cpp API — deprecated fallback kept for local-only debugging. *)
+let _local_llama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
   let model =
     match model with
     | Some value -> value
     | None -> (
-        match Sys.getenv_opt "MASC_DEFAULT_MODEL" with
+        match Sys.getenv_opt "LLAMA_DEFAULT_MODEL" with
         | Some value when String.trim value <> "" -> String.trim value
-        | _ -> "default-model")
+        | _ -> Env_config.Llama.default_model)
   in
   try
-    let body = Yojson.Safe.to_string (`Assoc [
-      ("model", `String model);
-      ("system", `String system);
-      ("prompt", `String prompt);
-      ("stream", `Bool false);
-      ("options", `Assoc [
-        ("temperature", `Float temperature);
-        ("num_predict", `Int num_predict);
-        ("num_ctx", `Int 8192);
-      ]);
-    ]) in
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc
+          [
+            ("model", `String model);
+            ( "messages",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("role", `String "system");
+                      ("content", `String system);
+                    ];
+                  `Assoc
+                    [
+                      ("role", `String "user");
+                      ("content", `String prompt);
+                    ];
+                ] );
+            ("temperature", `Float temperature);
+            ("max_tokens", `Int num_predict);
+            ("stream", `Bool false);
+          ])
+    in
     let argv =
       ["curl"; "-sf"; "--max-time"; "120";
-       "-X"; "POST"; Env_config.Ollama.server_url ^ "/api/generate";
+       "-X"; "POST"; Env_config.Llama.server_url ^ "/v1/chat/completions";
        "-H"; "Content-Type: application/json";
        "-d"; "@-"]
     in
@@ -467,12 +457,14 @@ let ollama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500) ~sys
     match status with
     | Unix.WEXITED 0 ->
         let json = Yojson.Safe.from_string content in
-        Ok (json |> member "response" |> to_string)
-    | Unix.WEXITED n -> Error (Printf.sprintf "❌ LLM: ollama exit %d" n)
-    | _ -> Error "❌ LLM: ollama signaled"
+        Ok
+          (json |> member "choices" |> index 0 |> member "message" |> member "content"
+         |> to_string)
+    | Unix.WEXITED n -> Error (Printf.sprintf "❌ LLM: llama exit %d" n)
+    | _ -> Error "❌ LLM: llama signaled"
   with
   | Yojson.Json_error msg -> Error (Printf.sprintf "❌ Parse: JSON error [%s]" msg)
-  | exn -> Error (Printf.sprintf "❌ LLM: ollama exception [%s]" (Printexc.to_string exn))
+  | exn -> Error (Printf.sprintf "❌ LLM: llama exception [%s]" (Printexc.to_string exn))
 
 (** Smart LLM generate — CLI rotation with ollama fallback *)
 let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =

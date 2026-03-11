@@ -209,8 +209,11 @@ let test_default_configs_has_gemini () =
 let test_default_configs_has_codex () =
   check bool "has codex" true (List.mem_assoc "codex" Spawn.default_configs)
 
-let test_default_configs_has_ollama () =
-  check bool "has ollama" true (List.mem_assoc "ollama" Spawn.default_configs)
+let test_default_configs_has_llama () =
+  check bool "has llama" true (List.mem_assoc "llama" Spawn.default_configs)
+
+let test_default_configs_has_no_ollama () =
+  check bool "no bare ollama config" false (List.mem_assoc "ollama" Spawn.default_configs)
 
 let test_default_configs_claude_command () =
   match List.assoc_opt "claude" Spawn.default_configs with
@@ -268,15 +271,34 @@ let test_get_config_codex () =
   | Some cfg -> check string "agent name" "codex" cfg.agent_name
   | None -> fail "expected Some"
 
-let test_get_config_ollama () =
-  match Spawn.get_config "ollama" with
-  | Some cfg -> check string "agent name" "ollama" cfg.agent_name
+let test_get_config_llama () =
+  match Spawn.get_config "llama" with
+  | Some cfg -> check string "agent name" "llama" cfg.agent_name
   | None -> fail "expected Some"
+
+let test_get_config_ollama_removed () =
+  match Spawn.get_config "ollama" with
+  | None -> ()
+  | Some _ -> fail "expected bare ollama config to be removed"
 
 let test_get_config_unknown () =
   match Spawn.get_config "unknown-agent" with
   | None -> ()
   | Some _ -> fail "expected None"
+
+let test_spawn_bare_ollama_rejected () =
+  let result = Spawn.spawn ~agent_name:"ollama" ~prompt:"test" () in
+  check bool "spawn rejected" false result.Spawn.success;
+  check int "exit code" 2 result.Spawn.exit_code;
+  check bool "mentions migration" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "ollama:<model>")
+           result.Spawn.output 0
+       in
+       true
+     with Not_found -> false)
 
 (* ============================================================
    build_mcp_args Tests
@@ -311,9 +333,9 @@ let test_build_mcp_args_codex () =
   let flags = Spawn.build_mcp_args "codex" ["tool1"; "tool2"] in
   check (list string) "codex empty" [] flags
 
-let test_build_mcp_args_ollama () =
-  let flags = Spawn.build_mcp_args "ollama" ["tool1"] in
-  check (list string) "ollama empty" [] flags
+let test_build_mcp_args_llama () =
+  let flags = Spawn.build_mcp_args "llama" ["tool1"] in
+  check (list string) "llama empty" [] flags
 
 let test_build_mcp_args_unknown () =
   let flags = Spawn.build_mcp_args "unknown" ["tool1"] in
@@ -681,7 +703,8 @@ let () =
       test_case "has claude" `Quick test_default_configs_has_claude;
       test_case "has gemini" `Quick test_default_configs_has_gemini;
       test_case "has codex" `Quick test_default_configs_has_codex;
-      test_case "has ollama" `Quick test_default_configs_has_ollama;
+      test_case "has llama" `Quick test_default_configs_has_llama;
+      test_case "has no ollama" `Quick test_default_configs_has_no_ollama;
       test_case "claude command" `Quick test_default_configs_claude_command;
       test_case "gemini command" `Quick test_default_configs_gemini_command;
       test_case "gemini json output" `Quick test_default_configs_gemini_json_output;
@@ -692,8 +715,10 @@ let () =
       test_case "claude" `Quick test_get_config_claude;
       test_case "gemini" `Quick test_get_config_gemini;
       test_case "codex" `Quick test_get_config_codex;
-      test_case "ollama" `Quick test_get_config_ollama;
+      test_case "llama" `Quick test_get_config_llama;
+      test_case "ollama removed" `Quick test_get_config_ollama_removed;
       test_case "unknown" `Quick test_get_config_unknown;
+      test_case "bare ollama rejected" `Quick test_spawn_bare_ollama_rejected;
     ];
     "build_mcp_args", [
       test_case "empty" `Quick test_build_mcp_args_empty;
@@ -703,7 +728,7 @@ let () =
       test_case "gemini prompt args" `Quick test_build_prompt_args_gemini;
       test_case "other prompt args" `Quick test_build_prompt_args_other;
       test_case "codex" `Quick test_build_mcp_args_codex;
-      test_case "ollama" `Quick test_build_mcp_args_ollama;
+      test_case "llama" `Quick test_build_mcp_args_llama;
       test_case "unknown" `Quick test_build_mcp_args_unknown;
     ];
     "parse_claude_json", [

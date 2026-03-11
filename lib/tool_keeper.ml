@@ -827,24 +827,13 @@ let env_present name =
   | Some value -> String.trim value <> ""
   | None -> false
 
-let ollama_port_listening () =
-  try
-    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect
-      ~finally:(fun () -> (try Unix.close sock with Unix.Unix_error _ -> ()))
-      (fun () ->
-        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 11434));
-        true)
-  with Unix.Unix_error _ -> false
-
 let model_spec_is_local_runtime (model : Llm_client.model_spec) =
   match model.provider with
-  | Llm_client.Ollama | Llm_client.Llama -> true
+  | Llm_client.Llama -> true
   | _ -> false
 
 let model_spec_is_available (model : Llm_client.model_spec) =
   match model.provider with
-  | Llm_client.Ollama -> ollama_port_listening ()
   | Llm_client.Llama -> true
   | _ -> true
 
@@ -8486,12 +8475,6 @@ let handle_keeper_msg ctx args : tool_result =
              let sec = int_of_float (Float.ceil v) in
              max 5 (min 300 sec))
     in
-    let ollama_timeout_sec_opt =
-      Safe_ops.json_float_opt "ollama_timeout_sec" args
-      |> Option.map (fun v ->
-             let sec = int_of_float (Float.ceil v) in
-             max 10 (min 300 sec))
-    in
     match inline_soul_profile_res, new_soul_profile_res with
     | Error e, _ | _, Error e -> (false, "❌ " ^ e)
     | Ok inline_soul_profile, Ok new_soul_profile ->
@@ -8974,14 +8957,9 @@ let handle_keeper_msg ctx args : tool_result =
               ) specs
             in
             let run_cascade requests =
-              match timeout_sec_opt, ollama_timeout_sec_opt with
-              | Some timeout_sec, Some ollama_timeout_sec ->
-                  Llm_client.cascade ~timeout_sec ~ollama_timeout_sec requests
-              | Some timeout_sec, None ->
-                  Llm_client.cascade ~timeout_sec requests
-              | None, Some ollama_timeout_sec ->
-                  Llm_client.cascade ~ollama_timeout_sec requests
-              | None, None -> Llm_client.cascade requests
+              match timeout_sec_opt with
+              | Some timeout_sec -> Llm_client.cascade ~timeout_sec requests
+              | None -> Llm_client.cascade requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
             match run_cascade requests with

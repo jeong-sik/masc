@@ -300,6 +300,10 @@ let test_default_configs_has_codex () =
 let test_default_configs_has_llama () =
   check bool "has llama" true (List.mem_assoc "llama" Spawn_eio.default_configs)
 
+let test_default_configs_has_no_ollama () =
+  check bool "has no bare ollama config" false
+    (List.mem_assoc "ollama" Spawn_eio.default_configs)
+
 let test_default_configs_gemini_json_output () =
   match Spawn_eio.get_config "gemini" with
   | Some cfg ->
@@ -328,6 +332,11 @@ let test_get_config_llama () =
         (String.starts_with ~prefix:"llama:" cfg.command)
   | None -> fail "expected Some"
 
+let test_get_config_ollama_removed () =
+  match Spawn_eio.get_config "ollama" with
+  | None -> ()
+  | Some _ -> fail "expected bare ollama config to be removed"
+
 let test_spawn_llama_requires_explicit_runtime_model () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -339,6 +348,25 @@ let test_spawn_llama_requires_explicit_runtime_model () =
   check bool "mentions runtime_model" true
     (try
        let _ = Str.search_forward (Str.regexp_string "runtime_model") result.output 0 in
+       true
+     with Not_found -> false)
+
+let test_spawn_bare_ollama_rejected () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let result =
+    Spawn_eio.spawn ~sw ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~agent_name:"ollama" ~prompt:"hello" ()
+  in
+  check bool "spawn fails" false result.success;
+  check int "exit code" 2 result.exit_code;
+  check bool "migration message" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "ollama:<model>")
+           result.output 0
+       in
        true
      with Not_found -> false)
 
@@ -445,12 +473,15 @@ let () =
       test_case "gemini json output" `Quick test_default_configs_gemini_json_output;
       test_case "has codex" `Quick test_default_configs_has_codex;
       test_case "has llama" `Quick test_default_configs_has_llama;
+      test_case "has no ollama" `Quick test_default_configs_has_no_ollama;
     ];
     "get_config", [
       test_case "claude" `Quick test_get_config_claude;
       test_case "llama" `Quick test_get_config_llama;
+      test_case "ollama removed" `Quick test_get_config_ollama_removed;
       test_case "llama requires explicit runtime_model" `Quick
         test_spawn_llama_requires_explicit_runtime_model;
+      test_case "bare ollama rejected" `Quick test_spawn_bare_ollama_rejected;
       test_case "unknown" `Quick test_get_config_unknown;
     ];
     "build_mcp_args", [

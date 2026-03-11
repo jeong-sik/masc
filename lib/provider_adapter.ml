@@ -9,7 +9,6 @@ type provider_family =
   | Gemini_family
   | Glm_family
   | Llama_family
-  | Ollama_family
   | OpenRouter_family
   | Custom_family of string
 
@@ -68,7 +67,6 @@ let string_of_provider_family = function
   | Gemini_family -> "gemini"
   | Glm_family -> "glm"
   | Llama_family -> "llama"
-  | Ollama_family -> "ollama"
   | OpenRouter_family -> "openrouter"
   | Custom_family name -> "custom:" ^ name
 
@@ -91,13 +89,6 @@ let normalize_label label = String.trim label |> String.lowercase_ascii
 
 let direct_adapters =
   [
-    {
-      canonical_name = "ollama";
-      runtime_kind = Local;
-      provider_family = Ollama_family;
-      auth_mode = No_auth;
-      aliases = [ "ollama" ];
-    };
     {
       canonical_name = "llama";
       runtime_kind = Local;
@@ -221,35 +212,134 @@ let split_csv_nonempty raw =
   |> List.map String.trim
   |> List.filter (fun s -> s <> "")
 
-let default_model_labels_result () =
+let nonempty_env name =
+  match Sys.getenv_opt name with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let env_present name = Option.is_some (nonempty_env name)
+
+let dedupe_keep_order items =
+  let seen = Hashtbl.create (List.length items) in
+  List.filter
+    (fun item ->
+      if Hashtbl.mem seen item then
+        false
+      else (
+        Hashtbl.add seen item ();
+        true))
+    items
+
+let bare_ollama_migration_message () =
+  "Bare `ollama` is no longer supported. Use `llama:<model>` for local execution, or choose another supported provider label explicitly."
+
+let is_bare_ollama_label label =
+  String.equal (normalize_label label) "ollama"
+
+let explicit_llama_model_id_result () =
+  match nonempty_env "LLAMA_DEFAULT_MODEL" with
+  | Some model_id -> Ok model_id
+  | None -> (
+      match
+        ( nonempty_env "MASC_DEFAULT_PROVIDER",
+          nonempty_env "MASC_DEFAULT_MODEL" )
+      with
+      | Some provider, Some model_id
+        when String.equal (String.lowercase_ascii provider) "llama" ->
+          Ok model_id
+      | _ ->
+          Error
+            "LLAMA_DEFAULT_MODEL is not set; configure LLAMA_DEFAULT_MODEL or MASC_DEFAULT_PROVIDER=llama with MASC_DEFAULT_MODEL")
+
+let explicit_llama_model_id () =
+  match explicit_llama_model_id_result () with
+  | Ok model_id -> model_id
+  | Error msg -> invalid_arg msg
+
+let explicit_llama_model_label_result () =
+  Result.map (fun model_id -> "llama:" ^ model_id) (explicit_llama_model_id_result ())
+
+let explicit_llama_model_label () =
+  match explicit_llama_model_label_result () with
+  | Ok label -> label
+  | Error msg -> invalid_arg msg
+
+let gemini_direct_available () =
+  env_present google_cloud_project_env || env_present "GEMINI_API_KEY"
+
+let configured_default_model_label_result () =
   match Sys.getenv_opt "MASC_DEFAULT_CASCADE" with
   | Some raw ->
       let labels = split_csv_nonempty raw in
       if labels = [] then
         Error "MASC_DEFAULT_CASCADE is set but empty"
       else
-        Ok labels
+        Ok (List.hd labels)
   | None -> (
       match
-        (Sys.getenv_opt "MASC_DEFAULT_PROVIDER", Sys.getenv_opt "MASC_DEFAULT_MODEL")
+        ( nonempty_env "MASC_DEFAULT_PROVIDER",
+          nonempty_env "MASC_DEFAULT_MODEL" )
       with
-      | Some provider, Some model_id ->
-          let provider = String.trim provider in
-          let model_id = String.trim model_id in
-          if provider = "" || model_id = "" then
-            Error
-              "MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL must both be non-empty"
-          else
-            Ok [ provider ^ ":" ^ model_id ]
+      | Some provider, Some model_id -> Ok (provider ^ ":" ^ model_id)
       | Some _, None ->
           Error
             "MASC_DEFAULT_MODEL is required when MASC_DEFAULT_PROVIDER is set"
       | None, Some _ ->
           Error
             "MASC_DEFAULT_PROVIDER is required when MASC_DEFAULT_MODEL is set"
-      | None, None ->
-          Error
-            "No default model configured; set MASC_DEFAULT_CASCADE or MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL")
+      | None, None -> Error "No explicit default model configured")
+
+let configured_verifier_model_label_result () =
+  match nonempty_env "MASC_DEFAULT_VERIFIER_MODEL" with
+  | Some label -> Ok label
+  | None -> configured_default_model_label_result ()
+
+let preferred_execution_model_labels () =
+  dedupe_keep_order
+    (List.filter_map
+       Fun.id
+       [
+         (match configured_default_model_label_result () with
+         | Ok label -> Some label
+         | Error _ -> None);
+         (match explicit_llama_model_label_result () with
+         | Ok label -> Some label
+         | Error _ -> None);
+         if env_present "ZAI_API_KEY" then Some "glm:glm-4.7" else None;
+         if gemini_direct_available () then Some "gemini:gemini-2.5-pro" else None;
+         if env_present "ANTHROPIC_API_KEY" then
+           Some "claude:claude-sonnet-4-5-20250929"
+         else None;
+         if env_present "OPENAI_API_KEY" then Some "openai:gpt-5" else None;
+       ])
+
+let preferred_verifier_model_labels () =
+  dedupe_keep_order
+    (List.filter_map
+       Fun.id
+       [
+         (match configured_verifier_model_label_result () with
+         | Ok label -> Some label
+         | Error _ -> None);
+         (match explicit_llama_model_label_result () with
+         | Ok label -> Some label
+         | Error _ -> None);
+         if env_present "ZAI_API_KEY" then Some "glm:glm-4.7" else None;
+         if gemini_direct_available () then Some "gemini:gemini-2.5-flash" else None;
+         if env_present "ANTHROPIC_API_KEY" then
+           Some "claude:claude-sonnet-4-5-20250929"
+         else None;
+         if env_present "OPENAI_API_KEY" then Some "openai:gpt-5" else None;
+       ])
+
+let default_model_labels_result () =
+  let labels = preferred_execution_model_labels () in
+  if labels = [] then
+    Error
+      "No default model configured; set LLAMA_DEFAULT_MODEL, MASC_DEFAULT_CASCADE, MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL, or a supported cloud provider credential"
+  else Ok labels
 
 let default_model_label_result () =
   match default_model_labels_result () with
@@ -261,16 +351,6 @@ let default_local_model_label () =
   match default_model_label_result () with
   | Ok label -> label
   | Error msg -> invalid_arg msg
-
-let explicit_ollama_model_id () =
-  match Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" with
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then "glm-4.7-flash" else trimmed
-  | None -> "glm-4.7-flash"
-
-let explicit_ollama_model_label () =
-  "ollama:" ^ explicit_ollama_model_id ()
 
 let vertex_location () =
   match Sys.getenv_opt google_cloud_location_env with

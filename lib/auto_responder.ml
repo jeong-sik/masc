@@ -111,29 +111,31 @@ let cli_argv_of_agent_type (agent_type : string) : string list =
   | "claude" -> ["claude"; "-p"; "--allowedTools"; "mcp__masc__*"]
   | "gemini" -> ["gemini"; "--yolo"]
   | "codex" -> ["codex"; "exec"]
-  | "ollama" -> ["ollama"; "run"; Provider_adapter.explicit_ollama_model_id ()]
   | other -> [other]
 
 let run_cli_agent ~agent_type ~prompt =
-  let base = cli_argv_of_agent_type agent_type in
-  let argv = if Lazy.force has_timeout then ["timeout"; "120"] @ base else base in
-  debug_log (Printf.sprintf "SPAWN argv=%s" (String.concat " " (List.map Filename.quote argv)));
-  let (status, output) =
-    Process_eio.run_argv_with_stdin_and_status
-      ~timeout_sec:140.0
-      ~stdin_content:prompt
-      argv
-  in
-  let status_s = match status with
-    | Unix.WEXITED n -> Printf.sprintf "exit=%d" n
-    | Unix.WSIGNALED n -> Printf.sprintf "signaled=%d" n
-    | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
-  in
-  let preview =
-    let s = String.trim output in
-    if String.length s > 200 then String.sub s 0 200 ^ "..." else s
-  in
-  debug_log (Printf.sprintf "SPAWN_DONE %s output=%s" status_s preview)
+  if Provider_adapter.is_bare_ollama_label agent_type then
+    debug_log (Provider_adapter.bare_ollama_migration_message ())
+  else
+    let base = cli_argv_of_agent_type agent_type in
+    let argv = if Lazy.force has_timeout then ["timeout"; "120"] @ base else base in
+    debug_log (Printf.sprintf "SPAWN argv=%s" (String.concat " " (List.map Filename.quote argv)));
+    let (status, output) =
+      Process_eio.run_argv_with_stdin_and_status
+        ~timeout_sec:140.0
+        ~stdin_content:prompt
+        argv
+    in
+    let status_s = match status with
+      | Unix.WEXITED n -> Printf.sprintf "exit=%d" n
+      | Unix.WSIGNALED n -> Printf.sprintf "signaled=%d" n
+      | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
+    in
+    let preview =
+      let s = String.trim output in
+      if String.length s > 200 then String.sub s 0 200 ^ "..." else s
+    in
+    debug_log (Printf.sprintf "SPAWN_DONE %s output=%s" status_s preview)
 
 (* --- LLM mode: shared cascade + in-process MASC HTTP tools/call --- *)
 

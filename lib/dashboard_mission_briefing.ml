@@ -218,25 +218,29 @@ let relevant_sessions_for_briefing ~current_room ~now_ts sessions =
     match trim_to_option (Some current_room) with
     | None -> true
     | Some room_id ->
-        String.equal room_id (string_field "room_id" (member_assoc "session" session_json))
+        let status_detail = member_assoc "status" session_json in
+        String.equal room_id
+          (string_field "room_id" (member_assoc "session" status_detail))
   in
   sessions
   |> List.filter (fun session_json ->
          room_matches session_json
          &&
+         let status_detail = member_assoc "status" session_json in
          let status =
-           string_field "status" (member_assoc "summary" session_json)
+           string_field "status" (member_assoc "summary" status_detail)
            |> fun value ->
            if String.trim value <> "" then value
-           else string_field "status" (member_assoc "session" session_json)
+           else string_field "status" (member_assoc "session" status_detail)
          in
          status_is_live status || session_recent_enough ~now_ts session_json)
 
 let compact_session_json session_json =
-  let session = member_assoc "session" session_json in
-  let summary = member_assoc "summary" session_json in
-  let team_health = member_assoc "team_health" session_json in
-  let communication = member_assoc "communication_metrics" session_json in
+  let status_detail = member_assoc "status" session_json in
+  let session = member_assoc "session" status_detail in
+  let summary = member_assoc "summary" status_detail in
+  let team_health = member_assoc "team_health" status_detail in
+  let communication = member_assoc "communication_metrics" status_detail in
   let recent_events =
     match member_assoc "recent_events" session_json with
     | `List items -> items

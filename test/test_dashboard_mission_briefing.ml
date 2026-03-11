@@ -96,10 +96,14 @@ let test_compact_session_json_normalizes_missing_fields () =
     `Assoc
       [
         ("session_id", `String "sess-1");
-        ("session", `Assoc [ ("goal", `Null); ("room_id", `Null); ("status", `Null) ]);
-        ("summary", `Assoc []);
-        ("team_health", `Assoc []);
-        ("communication_metrics", `Assoc []);
+        ( "status",
+          `Assoc
+            [
+              ("session", `Assoc [ ("goal", `Null); ("room_id", `Null); ("status", `Null) ]);
+              ("summary", `Assoc []);
+              ("team_health", `Assoc []);
+              ("communication_metrics", `Assoc []);
+            ] );
         ("recent_events", `List []);
       ]
   in
@@ -156,8 +160,12 @@ let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
     `Assoc
       [
         ("session_id", `String "old");
-        ("session", `Assoc [ ("room_id", `String "default"); ("status", `String "interrupted") ]);
-        ("summary", `Assoc []);
+        ( "status",
+          `Assoc
+            [
+              ("session", `Assoc [ ("room_id", `String "default"); ("status", `String "interrupted") ]);
+              ("summary", `Assoc []);
+            ] );
         ("recent_events", `List []);
       ]
   in
@@ -165,8 +173,12 @@ let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
     `Assoc
       [
         ("session_id", `String "live");
-        ("session", `Assoc [ ("room_id", `String "default"); ("status", `String "running") ]);
-        ("summary", `Assoc []);
+        ( "status",
+          `Assoc
+            [
+              ("session", `Assoc [ ("room_id", `String "default"); ("status", `String "running") ]);
+              ("summary", `Assoc []);
+            ] );
         ( "recent_events",
           `List
             [
@@ -190,10 +202,14 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
         (`Assoc
           [
             ("session_id", `String "sess-gap");
-            ("session", `Assoc [ ("goal", `Null); ("room_id", `String "default") ]);
-            ("summary", `Assoc []);
-            ("team_health", `Assoc []);
-            ("communication_metrics", `Assoc []);
+            ( "status",
+              `Assoc
+                [
+                  ("session", `Assoc [ ("goal", `Null); ("room_id", `String "default") ]);
+                  ("summary", `Assoc []);
+                  ("team_health", `Assoc []);
+                  ("communication_metrics", `Assoc []);
+                ] );
             ("recent_events", `List []);
           ]);
     ]

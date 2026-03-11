@@ -363,6 +363,11 @@ let metadata_gap_json ~kind ~summary ~scope_type ~scope_id ~severity =
     ]
 
 let collect_metadata_gaps ~sessions ~keepers ~agents =
+  let agent_needs_focus json =
+    List.mem
+      (String.lowercase_ascii (String.trim (string_field "status" json)))
+      [ "active"; "busy" ]
+  in
   let session_gaps =
     sessions
     |> List.concat_map (fun json ->
@@ -398,7 +403,9 @@ let collect_metadata_gaps ~sessions ~keepers ~agents =
   let agent_gaps =
     agents
     |> List.filter_map (fun json ->
-           if string_field "assignment_status" json = "unassigned" then
+           if string_field "assignment_status" json = "unassigned"
+              && agent_needs_focus json
+           then
              Some
                (metadata_gap_json ~kind:"agent_focus_missing"
                   ~summary:"Active agent has no current focus bound."

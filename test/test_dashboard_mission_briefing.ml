@@ -243,6 +243,39 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
   in
   check int "gap count" 4 (List.length gaps)
 
+let test_collect_metadata_gaps_ignores_inactive_agents () =
+  let inactive_agent : Masc_mcp.Types.agent =
+    {
+      name = "agent-idle";
+      agent_type = "codex";
+      capabilities = [];
+      current_task = None;
+      status = Masc_mcp.Types.Inactive;
+      joined_at = "2026-03-11T08:00:00Z";
+      last_seen = "2026-03-11T08:05:00Z";
+      meta = None;
+    }
+  in
+  let active_agent : Masc_mcp.Types.agent =
+    {
+      inactive_agent with
+      name = "agent-live";
+      status = Masc_mcp.Types.Active;
+    }
+  in
+  let gaps =
+    Briefing.collect_metadata_gaps ~sessions:[] ~keepers:[]
+      ~agents:
+        [
+          Briefing.compact_agent_json inactive_agent;
+          Briefing.compact_agent_json active_agent;
+        ]
+  in
+  check int "only live unassigned agent becomes a gap" 1 (List.length gaps);
+  match gaps with
+  | [ json ] -> check_string_field json "kind" "agent_focus_missing"
+  | _ -> fail "expected one live agent focus gap"
+
 let () =
   run "Dashboard Mission Briefing"
     [
@@ -266,5 +299,7 @@ let () =
             test_relevant_sessions_for_briefing_filters_stale_terminal_sessions;
           test_case "metadata gaps collected" `Quick
             test_collect_metadata_gaps_separates_null_like_inputs;
+          test_case "inactive agents ignored for focus gaps" `Quick
+            test_collect_metadata_gaps_ignores_inactive_agents;
         ] );
     ]

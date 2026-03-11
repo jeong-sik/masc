@@ -64,6 +64,16 @@ let handle_tool_stats _ctx args =
   let report = Tool_registry.stats_report ~top_n ~all_tool_names in
   (true, Yojson.Safe.pretty_to_string report)
 
+let handle_tool_help _ctx args =
+  let tool_name = String.trim (get_string args "tool_name" "") in
+  if tool_name = "" then
+    (false, "❌ tool_name is required")
+  else
+    match Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name with
+    | None -> (false, Printf.sprintf "❌ unknown tool: %s" tool_name)
+    | Some entry ->
+        (true, Yojson.Safe.pretty_to_string (Tool_help_registry.entry_json entry))
+
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =
   match name with
@@ -72,4 +82,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_gc" -> Some (handle_gc ctx args)
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ctx args)
   | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
+  | "masc_tool_help" -> Some (handle_tool_help ctx args)
   | _ -> None

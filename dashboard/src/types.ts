@@ -861,6 +861,79 @@ export interface DashboardMissionBriefingResponse {
   last_error?: string | null
 }
 
+export type DashboardProofVerdict = 'proven' | 'partial' | 'insufficient' | string
+
+export interface DashboardProofSummary {
+  headline?: string
+  detail?: string
+  session_id?: string
+  goal?: string
+  verdict?: DashboardProofVerdict
+  actors_count?: number
+  interaction_count?: number
+  evidence_count?: number
+  cp_trace_count?: number
+}
+
+export interface DashboardProofTimelineItem {
+  id: string
+  seq?: number
+  source?: string
+  session_id?: string | null
+  operation_id?: string | null
+  event_type?: string
+  timestamp?: string
+  actor?: string | null
+  summary?: string
+  detail?: Record<string, unknown>
+}
+
+export interface DashboardProofActorContribution {
+  actor: string
+  role?: string | null
+  turn_count?: number
+  spawn_count?: number
+  tool_evidence_count?: number
+  interaction_count?: number
+  recent_input_preview?: string | null
+  recent_output_preview?: string | null
+  recent_event_summary?: string | null
+  recent_tool_names?: string[]
+  last_active_at?: string | null
+}
+
+export interface DashboardProofArtifactRef {
+  kind: string
+  path: string
+  exists: boolean
+}
+
+export interface DashboardProofBackingEvidence {
+  operation_id?: string
+  detachment_id?: string
+  traces?: Record<string, unknown>
+  detachments?: Record<string, unknown>
+  summary?: Record<string, unknown>
+  swarm_proof?: Record<string, unknown> | null
+}
+
+export interface DashboardProofResponse {
+  schema_version?: string
+  generated_at?: string
+  room?: Record<string, unknown>
+  session_id?: string | null
+  operation_id?: string | null
+  proof_verdict?: DashboardProofVerdict
+  summary?: DashboardProofSummary
+  timeline?: DashboardProofTimelineItem[]
+  actor_contributions?: DashboardProofActorContribution[]
+  goal_binding?: Record<string, unknown>
+  tool_evidence?: Record<string, unknown>[]
+  cp_backing_evidence?: DashboardProofBackingEvidence | null
+  artifacts?: DashboardProofArtifactRef[]
+  raw_proof?: Record<string, unknown> | null
+}
+
 export interface OperatorRoomSnapshot {
   room_id?: string
   current_room?: string
@@ -1976,6 +2049,7 @@ export interface DashboardSemanticsResponse {
 
 export type TabId =
   | 'mission'
+  | 'proof'
   | 'execution'
   | 'live'
   | 'memory'
@@ -1987,6 +2061,7 @@ export type TabId =
 
 export const VALID_TABS: TabId[] = [
   'mission',
+  'proof',
   'execution',
   'live',
   'memory',

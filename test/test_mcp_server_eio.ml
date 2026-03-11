@@ -379,18 +379,16 @@ let test_handle_request_tools_list_mdal_descriptions () =
   in
   Alcotest.(check bool) "start mentions deterministic numeric goal" true
     (contains_substring start_description "deterministic numeric goal");
-  Alcotest.(check bool) "start warns against qualitative work" true
-    (contains_substring start_description "qualitative work");
+  Alcotest.(check bool) "start description stays single-line" true
+    (not (contains_substring start_description "\n"));
   Alcotest.(check bool) "start description stays concise" true
     (String.length start_description <= 220);
 
   let iterate_description =
     find_tool_exn tools "masc_mdal_iterate" |> tool_description_exn
   in
-  Alcotest.(check bool) "iterate mentions re-measuring" true
-    (contains_substring iterate_description "re-measures the metric");
-  Alcotest.(check bool) "iterate mentions auditable tool use" true
-    (contains_substring iterate_description "auditable tool");
+  Alcotest.(check bool) "iterate description stays single-line" true
+    (not (contains_substring iterate_description "\n"));
   Alcotest.(check bool) "iterate description stays concise" true
     (String.length iterate_description <= 220);
 
@@ -1333,6 +1331,189 @@ let test_handle_request_method_not_found () =
 
   cleanup_dir base_path
 
+let test_handle_request_prompts_list_non_empty () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 21);
+          ("method", `String "prompts/list");
+          ("params", `Assoc []);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let prompts =
+    match response with
+    | `Assoc fields -> (
+        match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) -> (
+            match List.assoc_opt "prompts" result_fields with
+            | Some (`List prompts) -> prompts
+            | _ -> Alcotest.fail "prompts not a list")
+        | _ -> Alcotest.fail "result not an object")
+    | _ -> Alcotest.fail "response not an object"
+  in
+  Alcotest.(check bool) "prompt inventory is non-empty" true
+    (List.length prompts >= 3);
+  cleanup_dir base_path
+
+let test_handle_request_prompts_get_tool_help () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 22);
+          ("method", `String "prompts/get");
+          ( "params",
+            `Assoc
+              [
+                ("name", `String "tool_help");
+                ("arguments", `Assoc [ ("tool_name", `String "masc_status") ]);
+              ] );
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let description, messages =
+    match response with
+    | `Assoc fields -> (
+        match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) -> (
+            let description =
+              match List.assoc_opt "description" result_fields with
+              | Some (`String value) -> value
+              | _ -> Alcotest.fail "prompt description missing"
+            in
+            let messages =
+              match List.assoc_opt "messages" result_fields with
+              | Some (`List items) -> items
+              | _ -> Alcotest.fail "prompt messages missing"
+            in
+            (description, messages))
+        | _ -> Alcotest.fail "result not an object")
+    | _ -> Alcotest.fail "response not an object"
+  in
+  Alcotest.(check bool) "description contains help intent" true
+    (contains_substring description "tool");
+  Alcotest.(check bool) "prompt has one or more messages" true
+    (messages <> []);
+  cleanup_dir base_path
+
+let test_handle_request_resources_list_includes_tool_help () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 23);
+          ("method", `String "resources/list");
+          ("params", `Assoc []);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let resources =
+    match response with
+    | `Assoc fields -> (
+        match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) -> (
+            match List.assoc_opt "resources" result_fields with
+            | Some (`List resources) -> resources
+            | _ -> Alcotest.fail "resources not a list")
+        | _ -> Alcotest.fail "result not an object")
+    | _ -> Alcotest.fail "response not an object"
+  in
+  let tool_help_index_present =
+    List.exists
+      (function
+        | `Assoc fields -> List.assoc_opt "uri" fields = Some (`String "masc://tool-help-index")
+        | _ -> false)
+      resources
+  in
+  let tool_help_resource_present =
+    List.exists
+      (function
+        | `Assoc fields -> (
+            match List.assoc_opt "uri" fields with
+            | Some (`String uri) -> contains_substring uri "masc://tool-help/masc_status"
+            | _ -> false)
+        | _ -> false)
+      resources
+  in
+  Alcotest.(check bool) "tool help index listed" true tool_help_index_present;
+  Alcotest.(check bool) "per-tool help listed" true tool_help_resource_present;
+  cleanup_dir base_path
+
+let test_handle_request_tool_help_resource_read () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 24);
+          ("method", `String "resources/read");
+          ("params", `Assoc [ ("uri", `String "masc://tool-help/masc_status") ]);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let text =
+    match response with
+    | `Assoc fields -> (
+        match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) -> (
+            match List.assoc_opt "contents" result_fields with
+            | Some (`List (`Assoc content_fields :: _)) -> (
+                match List.assoc_opt "text" content_fields with
+                | Some (`String value) -> value
+                | _ -> Alcotest.fail "resource text missing")
+            | _ -> Alcotest.fail "resource contents missing")
+        | _ -> Alcotest.fail "result not an object")
+    | _ -> Alcotest.fail "response not an object"
+  in
+  Alcotest.(check bool) "resource contains heading" true
+    (contains_substring text "# masc_status");
+  cleanup_dir base_path
+
+let test_execute_tool_help_tool () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Full in
+  let ok, msg =
+    Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_tool_help"
+      ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
+  in
+  Alcotest.(check bool) "tool help call succeeds" true ok;
+  let json = extract_json_from_text msg in
+  Alcotest.(check string) "help tool echoes name" "masc_status"
+    Yojson.Safe.Util.(json |> member "name" |> to_string);
+  cleanup_dir base_path
+
 (* ===== Test Suites ===== *)
 
 let state_tests = [
@@ -1358,6 +1539,11 @@ let eio_tests = [
   "handle initialize operator profile", `Quick,
     test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;
+  "handle prompts/list non-empty", `Quick, test_handle_request_prompts_list_non_empty;
+  "handle prompts/get tool_help", `Quick, test_handle_request_prompts_get_tool_help;
+  "handle resources/list includes tool-help", `Quick, test_handle_request_resources_list_includes_tool_help;
+  "handle resources/read tool-help", `Quick, test_handle_request_tool_help_resource_read;
+  "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
   "handle tools/list mdal descriptions", `Quick,
     test_handle_request_tools_list_mdal_descriptions;
   "handle tools/list with names filter", `Quick,

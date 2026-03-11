@@ -8,7 +8,8 @@ import { runOperatorAction } from '../api'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
-import type { Keeper, KeeperMetricPoint, TrpgCharacterStats, AutonomyLevel } from '../types'
+import { missionSnapshot } from '../mission-store'
+import type { DashboardMissionKeeperBrief, Keeper, KeeperMetricPoint, TrpgCharacterStats, AutonomyLevel } from '../types'
 import { invalidateDashboardCache, refreshDashboard, serverStatus } from '../store'
 import { operatorSnapshot } from '../operator-store'
 import { normalizeLodgeTickResult, selectKeeper } from '../keeper-runtime'
@@ -133,6 +134,15 @@ function keeperTopTools(keeper: Keeper): string[] {
   return topTools
     .map(item => (typeof item === 'object' && item !== null && 'tool' in item && typeof item.tool === 'string' ? item.tool : null))
     .filter((item): item is string => item !== null)
+}
+
+function missionKeeperBrief(keeper: Keeper): DashboardMissionKeeperBrief | null {
+  const mission = missionSnapshot.value
+  if (!mission) return null
+  return mission.keeper_briefs.find(brief =>
+    brief.name === keeper.name
+      || (brief.agent_name && keeper.agent_name && brief.agent_name === keeper.agent_name))
+    ?? null
 }
 
 function KpiGrid({ keeper }: { keeper: Keeper }) {
@@ -428,6 +438,12 @@ function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
     .slice(0, 8)
   const recentTools = keeperRecentTools(keeper)
   const topTools = keeperTopTools(keeper)
+  const missionBrief = missionKeeperBrief(keeper)
+  const allowedTools = missionBrief?.allowed_tool_names ?? []
+  const observedTools = missionBrief?.latest_tool_names ?? []
+  const toolCallCount = missionBrief?.latest_tool_call_count
+  const auditSource = missionBrief?.tool_audit_source
+  const auditAt = missionBrief?.tool_audit_at
   const capabilities = keeper.agent?.capabilities ?? []
   const roomName = room.current_room ?? room.room_id ?? serverStatus.value?.room ?? 'default'
   const project = room.project ?? serverStatus.value?.project ?? '확인 없음'
@@ -456,14 +472,42 @@ function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <strong>${keeper.skill_primary ?? '미확인'}</strong>
       </div>
       <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-        <span style="font-size:12px; color:#888;">Recent tools</span>
+        <span style="font-size:12px; color:#888;">Allowed tools</span>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${allowedTools.length > 0
+            ? allowedTools.map(tool => html`<span class="pill">${tool}</span>`)
+            : html`<span style="font-size:12px; color:#888;">allowlist 미보고</span>`}
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+        <span style="font-size:12px; color:#888;">Observed tools</span>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${observedTools.length > 0
+            ? observedTools.map(tool => html`<span class="pill">${tool}</span>`)
+            : html`<span style="font-size:12px; color:#888;">observed tool-use evidence 없음</span>`}
+        </div>
+      </div>
+      <div class="keeper-signal-row">
+        <span>Tool calls</span>
+        <strong>${typeof toolCallCount === 'number' ? toolCallCount : '—'}</strong>
+      </div>
+      <div class="keeper-signal-row">
+        <span>Evidence source</span>
+        <strong>${auditSource ?? 'unreported'}</strong>
+      </div>
+      <div class="keeper-signal-row">
+        <span>Observed at</span>
+        <strong>${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : 'unreported'}</strong>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+        <span style="font-size:12px; color:#888;">Keeper recent tools</span>
         <div style="display:flex; flex-wrap:wrap; gap:6px;">
           ${recentTools.length > 0
             ? recentTools.map(tool => html`<span class="pill">${tool}</span>`)
             : html`<span style="font-size:12px; color:#888;">도구 텔레메트리 없음</span>`}
         </div>
       </div>
-      ${recentTools.length === 0 && topTools.length > 0
+      ${topTools.length > 0
         ? html`
             <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
               <span style="font-size:12px; color:#888;">Window top tools</span>
@@ -663,7 +707,7 @@ export function KeeperDetailOverlay() {
             <${RuntimeSignals} keeper=${keeper} />
           <//>
 
-          <${Card} title="Neighborhood & Tools">
+          <${Card} title="Neighborhood & Tool Audit">
             <${KeeperNeighborhood} keeper=${keeper} />
           <//>
 

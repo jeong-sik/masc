@@ -2,6 +2,7 @@
 
 import { signal } from '@preact/signals'
 import { showToast } from '../common/toast'
+import { isRecord } from '../common/normalize'
 import type { TrpgRoundRunResult } from '../../api'
 import type { TrpgEvent } from '../../types'
 
@@ -106,9 +107,7 @@ export function explainSkill(skill: string): string {
   return SKILL_HINTS[key] ?? '상황에 따라 선택되는 전술 액션입니다.'
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
+export { isRecord }
 
 export function recString(obj: Record<string, unknown>, key: string, fallback = ''): string {
   const value = obj[key]

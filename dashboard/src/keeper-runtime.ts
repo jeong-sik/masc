@@ -14,6 +14,7 @@ import type {
   LodgeTickResult,
 } from './types'
 import { invalidateDashboardCache, refreshDashboard } from './store'
+import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 
 export const activeKeeperName = signal('')
 export const keeperStatusDetails = signal<Record<string, KeeperStatusDetail>>({})
@@ -29,35 +30,6 @@ function setRecordValue<T>(state: typeof keeperThreads | typeof keeperHydrating 
     ...state.value,
     [key]: value,
   } as typeof state.value
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function toIsoTimestamp(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim() !== '') return value
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
-  return new Date(value * 1000).toISOString()
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map(item => asString(item))
-    .filter((item): item is string => Boolean(item))
 }
 
 function normalizeRole(value: unknown): KeeperConversationRole {
@@ -160,7 +132,7 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     quiet_reason: (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason'],
     next_action_path: nextActionPath as KeeperDiagnostic['next_action_path'],
     last_reply_status: lastReplyStatus as KeeperDiagnostic['last_reply_status'],
-    last_reply_at: toIsoTimestamp(raw.last_reply_at),
+    last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? null,
     last_reply_preview: asString(raw.last_reply_preview) ?? null,
     last_error: asString(raw.last_error) ?? null,
     next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,

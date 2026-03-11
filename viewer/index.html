@@ -576,7 +576,6 @@
                                 <span>Proxy URL</span>
                                 <select id="dm-voice-proxy-select" title="ElevenLabs 프록시 URL 템플릿을 선택합니다">
                                     <option value="custom">직접 입력</option>
-                                    <option value="https://elevenlabs-proxy-production-443b.up.railway.app/v1/audio/speech">Railway ElevenLabs Proxy /v1/audio/speech</option>
                                     <option value="origin:/api/v1/trpg/tts">현재 서버 /api/v1/trpg/tts</option>
                                     <option value="origin:/api/v1/tts">현재 서버 /api/v1/tts</option>
                                     <option value="origin:/tts">현재 서버 /tts</option>
@@ -601,8 +600,8 @@
                                 <input id="dm-voice-model-custom" type="text" maxlength="120" placeholder="eleven_turbo_v2_5" />
                             </label>
                             <label class="new-game-field">
-                                <span>응답 Voice ID</span>
-                                <select id="dm-voice-id-select" title="응답 Voice ID를 선택합니다">
+                                <span>응답 음성</span>
+                                <select id="dm-voice-id-select" title="응답 음성을 선택합니다">
                                     <option value="">자동 (프록시 기본값)</option>
                                     <option value="random_preset">랜덤 (추천 Voice 중 선택)</option>
                                     <option value="21m00Tcm4TlvDq8ikWAM">Rachel</option>
@@ -618,8 +617,8 @@
                                 </select>
                             </label>
                             <label id="dm-voice-id-custom-wrap" class="new-game-field dm-voice-custom" hidden>
-                                <span>Voice ID 직접 입력</span>
-                                <input id="dm-voice-id-custom" type="text" maxlength="120" placeholder="21m00Tcm4TlvDq8ikWAM" />
+                                <span>음성 직접 입력</span>
+                                <input id="dm-voice-id-custom" type="text" maxlength="120" placeholder="Josh" />
                             </label>
                         </div>
                         <div class="dm-voice-actions">

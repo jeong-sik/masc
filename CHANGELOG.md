@@ -10,13 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Gardener Signal Observation** — full signal-based observation with LLM-primary decision making for spawn/retire (#773)
 - **CP Workload Templates** — `masc_operation_start` accepts workload templates and attached team sessions (#769)
+- **Voice Tools** — expose public voice tools for browser-based voice interaction (#775)
+- **Dashboard Tool Audit** — raw tool audit view in agent and keeper detail pages (#776)
+- **Dashboard Build Identity** — expose backend build identity (version, commit, uptime) in dashboard (#780, #787)
+- **Keeper Offline Policy** — learned offline policy substrate for keeper agents (#781)
+- **Sangsu Policy V2** — keeper policy v2 substrate with refined decision rules (#788)
+- **Operator Run Resolution** — swarm run resolution actions for operator control (#783, #789)
 
 ### Changed
 - **Cascade Phase 3** — distributed-pattern modules (`auto_chain`, `walph`) migrated to `Lodge_cascade.call` (#772)
+- **Cascade Phase 4** — `auto_responder` LLM calls migrated to `Lodge_cascade.call` (#779)
 - **WebRTC Deduplication** — removed duplicated WebRTC code in favor of `ocaml-webrtc` library (#778)
+- **Ollama Runtime Removal** — removed Ollama runtime path, LLM calls go through `Lodge_cascade` only (#785)
+- **Dashboard Utils Extraction** — deduplicated 5 utility functions from 12 files into `Dashboard_utils` module (#791)
+- **Transport Deps Injection** — Eio context passed via deps record instead of global singleton (#793)
 
 ### Fixed
 - Mission briefing async refresh UX with loading states and error recovery (#774)
+- GC archive logic now includes cancelled team-sessions (#777)
+- Team-session `stop_session` directly finalizes instead of deferring to runtime loop (#784, #786)
 
 ## [2.82.0] - 2026-03-11
 

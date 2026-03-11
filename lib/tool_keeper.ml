@@ -210,6 +210,15 @@ type keeper_profile_defaults = {
   proactive_enabled : bool option;
 }
 
+type persona_summary = {
+  persona_name : string;
+  display_name : string;
+  role : string option;
+  trait : string option;
+  profile_path : string;
+  has_keeper_defaults : bool;
+}
+
 let empty_keeper_profile_defaults = {
   manifest_path = None;
   goal = None;
@@ -232,6 +241,13 @@ let empty_keeper_profile_defaults = {
   presence_keepalive_sec = None;
   proactive_enabled = None;
 }
+
+let personas_root_opt () =
+  try
+    let me_root = Env_config.me_root () in
+    let path = Filename.concat me_root "personas" in
+    if Sys.file_exists path && Sys.is_directory path then Some path else None
+  with _ -> None
 
 let persona_profile_path_opt name =
   try
@@ -287,6 +303,43 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
               | `Bool flag -> Some flag
               | _ -> None);
           })
+
+let load_persona_summary name : persona_summary option =
+  match persona_profile_path_opt name with
+  | None -> None
+  | Some path -> (
+      match Safe_ops.read_json_file_safe path with
+      | Error _ -> None
+      | Ok json ->
+          let display_name =
+            Safe_ops.json_string_opt "name" json |> Option.value ~default:name
+          in
+          let role = Safe_ops.json_string_opt "role" json in
+          let trait = Safe_ops.json_string_opt "trait" json in
+          let has_keeper_defaults =
+            match Yojson.Safe.Util.member "keeper" json with
+            | `Assoc _ -> true
+            | _ -> false
+          in
+          Some
+            {
+              persona_name = name;
+              display_name;
+              role;
+              trait;
+              profile_path = path;
+              has_keeper_defaults;
+            })
+
+let list_persona_summaries () : persona_summary list =
+  match personas_root_opt () with
+  | None -> []
+  | Some root ->
+      Sys.readdir root
+      |> Array.to_list
+      |> List.filter validate_name
+      |> List.filter_map load_persona_summary
+      |> List.sort (fun a b -> String.compare a.persona_name b.persona_name)
 
 let keeper_dir (config : Room.config) =
   (* Keepers are global — never scoped to cluster/room.
@@ -4366,6 +4419,236 @@ let exact_direct_mention_present ~(targets : string list) (content : string) : b
         true
       with Not_found -> false)
     escaped_targets
+
+let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("persona_name", `String persona.persona_name);
+      ("display_name", `String persona.display_name);
+      ("role", match persona.role with Some value -> `String value | None -> `Null);
+      ("trait", match persona.trait with Some value -> `String value | None -> `Null);
+      ("profile_path", `String persona.profile_path);
+      ("has_keeper_defaults", `Bool persona.has_keeper_defaults);
+    ]
+
+let string_list_to_json values = `List (List.map (fun value -> `String value) values)
+
+let upsert_assoc key value fields =
+  (key, value) :: List.remove_assoc key fields
+
+let resolved_keeper_args_to_json
+    ~name ~persona_name ~persona_profile_path ~goal ~short_goal ~mid_goal ~long_goal
+    ~instructions ~soul_profile ~will ~needs ~desires ~models ~allowed_models
+    ~active_model ~room_scope ~scope_kind ~trigger_mode ~mention_targets
+    ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled ~verify
+    ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec ~context_budget =
+  `Assoc
+    [
+      ("name", `String name);
+      ("persona_name", `String persona_name);
+      ("persona_profile_path", `String persona_profile_path);
+      ("goal", `String goal);
+      ("short_goal", `String short_goal);
+      ("mid_goal", `String mid_goal);
+      ("long_goal", `String long_goal);
+      ("instructions", `String instructions);
+      ("soul_profile", `String soul_profile);
+      ("will", `String will);
+      ("needs", `String needs);
+      ("desires", `String desires);
+      ("models", string_list_to_json models);
+      ("allowed_models", string_list_to_json allowed_models);
+      ("active_model", `String active_model);
+      ("room_scope", `String room_scope);
+      ("scope_kind", `String scope_kind);
+      ("trigger_mode", `String trigger_mode);
+      ("mention_targets", string_list_to_json mention_targets);
+      ("presence_keepalive", `Bool presence_keepalive);
+      ("presence_keepalive_sec", `Int presence_keepalive_sec);
+      ("proactive_enabled", `Bool proactive_enabled);
+      ("verify", `Bool verify);
+      ("auto_handoff", `Bool auto_handoff);
+      ("handoff_threshold", `Float handoff_threshold);
+      ("handoff_cooldown_sec", `Int handoff_cooldown_sec);
+      ("context_budget", `Float context_budget);
+    ]
+
+let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
+  let errors = ref [] in
+  let name = Safe_ops.json_string ~default:"" "name" json in
+  let goal = Safe_ops.json_string ~default:"" "goal" json |> String.trim in
+  let models = Safe_ops.json_string_list "models" json in
+  let allowed_models = Safe_ops.json_string_list "allowed_models" json in
+  let active_model = Safe_ops.json_string ~default:"" "active_model" json |> String.trim in
+  let mention_targets = Safe_ops.json_string_list "mention_targets" json in
+  if not (validate_name name) then errors := "invalid keeper name" :: !errors;
+  if goal = "" then errors := "goal is required" :: !errors;
+  if models = [] then errors := "models is required" :: !errors;
+  if active_model <> "" && not (List.mem active_model (allowed_models @ models)) then
+    errors := "active_model must be included in models or allowed_models" :: !errors;
+  if Safe_ops.json_string ~default:"legacy" "trigger_mode" json = "explicit_only"
+     && mention_targets = []
+  then errors := "mention_targets is required for explicit_only trigger_mode" :: !errors;
+  List.rev !errors
+
+let resolved_keeper_args_from_persona args :
+    ((persona_summary * Yojson.Safe.t), string) result =
+  let persona_name = get_string args "persona_name" "" |> String.trim in
+  let soul_profile_opt_res = parse_soul_profile_opt args "soul_profile" in
+  match soul_profile_opt_res with
+  | Error err -> Error err
+  | Ok soul_profile_opt ->
+      if not (validate_name persona_name) then
+        Error "persona_name is required"
+      else
+        match load_persona_summary persona_name with
+        | None -> Error (Printf.sprintf "persona not found or missing profile.json: %s" persona_name)
+        | Some persona ->
+        let defaults = load_keeper_profile_defaults persona_name in
+        let name =
+          get_string_opt args "name" |> Option.value ~default:persona_name
+        in
+        let goal =
+          get_string_opt args "goal"
+          |> first_some defaults.goal
+          |> Option.value ~default:""
+          |> normalize_goal_horizon_text
+        in
+        let short_goal =
+          parse_goal_horizon_opt args "short_goal"
+          |> first_some defaults.short_goal
+          |> Option.value ~default:goal
+          |> normalize_goal_horizon_text
+        in
+        let mid_goal =
+          parse_goal_horizon_opt args "mid_goal"
+          |> first_some defaults.mid_goal
+          |> Option.value ~default:goal
+          |> normalize_goal_horizon_text
+        in
+        let long_goal =
+          parse_goal_horizon_opt args "long_goal"
+          |> first_some defaults.long_goal
+          |> Option.value ~default:goal
+          |> normalize_goal_horizon_text
+        in
+        let instructions =
+          get_string_opt args "instructions"
+          |> first_some defaults.instructions
+          |> Option.value ~default:""
+        in
+        let soul_profile =
+          soul_profile_opt
+          |> first_some defaults.soul_profile
+          |> Option.value ~default:default_soul_profile
+        in
+        let will =
+          parse_self_model_opt args "will"
+          |> first_some defaults.will
+          |> Option.value ~default:default_keeper_will
+        in
+        let needs =
+          parse_self_model_opt args "needs"
+          |> first_some defaults.needs
+          |> Option.value ~default:default_keeper_needs
+        in
+        let desires =
+          parse_self_model_opt args "desires"
+          |> first_some defaults.desires
+          |> Option.value ~default:default_keeper_desires
+        in
+        let explicit_models = get_string_list args "models" in
+        let explicit_allowed_models = get_string_list args "allowed_models" in
+        let active_model_opt = get_string_opt args "active_model" in
+        let base_models =
+          if explicit_models <> [] then explicit_models
+          else if defaults.models <> [] then defaults.models
+          else (
+            match active_model_opt |> first_some defaults.active_model with
+            | Some model -> [ model ]
+            | None -> [])
+        in
+        let allowed_models =
+          dedupe_keep_order
+            (explicit_allowed_models @ defaults.allowed_models @ base_models)
+        in
+        let active_model =
+          active_model_opt
+          |> first_some defaults.active_model
+          |> Option.value
+               ~default:
+                 (match base_models with
+                  | model :: _ -> model
+                  | [] -> "")
+        in
+        let room_scope =
+          get_string_opt args "room_scope"
+          |> first_some defaults.room_scope
+          |> Option.value ~default:"current"
+          |> canonical_room_scope
+        in
+        let scope_kind =
+          get_string_opt args "scope_kind"
+          |> first_some defaults.scope_kind
+          |> Option.value ~default:(if room_scope = "all" then "global" else "local")
+          |> canonical_scope_kind
+        in
+        let trigger_mode =
+          get_string_opt args "trigger_mode"
+          |> first_some defaults.trigger_mode
+          |> Option.value ~default:"legacy"
+          |> canonical_trigger_mode
+        in
+        let mention_targets =
+          let explicit = get_string_list args "mention_targets" in
+          let raw =
+            if explicit <> [] then explicit
+            else if defaults.mention_targets <> [] then defaults.mention_targets
+            else [ persona_name ]
+          in
+          raw |> List.filter (fun value -> String.trim value <> "") |> dedupe_keep_order
+        in
+        let presence_keepalive =
+          get_bool_opt args "presence_keepalive"
+          |> first_some defaults.presence_keepalive
+          |> Option.value ~default:true
+        in
+        let presence_keepalive_sec =
+          Safe_ops.json_int_opt "presence_keepalive_sec" args
+          |> first_some defaults.presence_keepalive_sec
+          |> Option.value ~default:30
+        in
+        let proactive_enabled =
+          get_bool_opt args "proactive_enabled"
+          |> first_some defaults.proactive_enabled
+          |> Option.value
+               ~default:(if trigger_mode = "explicit_only" then false else default_proactive_enabled)
+        in
+        let verify = get_bool args "verify" false in
+        let auto_handoff = get_bool args "auto_handoff" true in
+        let handoff_threshold =
+          Safe_ops.json_float_opt "handoff_threshold" args |> Option.value ~default:0.85
+        in
+        let handoff_cooldown_sec =
+          Safe_ops.json_int_opt "handoff_cooldown_sec" args |> Option.value ~default:300
+        in
+        let context_budget =
+          Safe_ops.json_float_opt "context_budget" args |> Option.value ~default:0.6
+        in
+        let resolved =
+          resolved_keeper_args_to_json
+            ~name
+            ~persona_name
+            ~persona_profile_path:persona.profile_path
+            ~goal ~short_goal ~mid_goal ~long_goal
+            ~instructions ~soul_profile ~will ~needs ~desires
+            ~models:base_models ~allowed_models ~active_model
+            ~room_scope ~scope_kind ~trigger_mode ~mention_targets
+            ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
+            ~verify ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec
+            ~context_budget
+        in
+        Ok (persona, resolved)
 
 let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Safe.t =
   let agent_file =
@@ -9230,6 +9513,70 @@ let handle_keeper_model_set ctx args : tool_result =
                           ("trigger_mode", `String updated.trigger_mode);
                         ]) ))
 
+let handle_persona_list _ctx args : tool_result =
+  let detailed = get_bool args "detailed" true in
+  let personas = list_persona_summaries () in
+  let payload =
+    if detailed then
+      `List (List.map persona_summary_to_json personas)
+    else
+      string_list_to_json (List.map (fun persona -> persona.persona_name) personas)
+  in
+  let json =
+    `Assoc
+      [
+        ("count", `Int (List.length personas));
+        ("personas", payload);
+      ]
+  in
+  (true, Yojson.Safe.pretty_to_string json)
+
+let handle_keeper_create_from_persona ctx args : tool_result =
+  match resolved_keeper_args_from_persona args with
+  | Error e -> (false, "❌ " ^ e)
+  | Ok (persona, resolved_args) ->
+      let errors = validate_resolved_keeper_create_json resolved_args in
+      let dry_run = get_bool args "dry_run" false in
+      if dry_run then
+        let json =
+          `Assoc
+            [
+              ("persona", persona_summary_to_json persona);
+              ("ready", `Bool (errors = []));
+              ("errors", string_list_to_json errors);
+              ("resolved_args", resolved_args);
+            ]
+        in
+        (true, Yojson.Safe.pretty_to_string json)
+      else if errors <> [] then
+        ( false,
+          Yojson.Safe.pretty_to_string
+            (`Assoc
+              [
+                ("persona", persona_summary_to_json persona);
+                ("ready", `Bool false);
+                ("errors", string_list_to_json errors);
+                ("resolved_args", resolved_args);
+              ]) )
+      else
+        let ok, body = handle_keeper_up ctx resolved_args in
+        if not ok then
+          (false, body)
+        else
+          let created_json =
+            try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+          in
+          let json =
+            `Assoc
+              [
+                ("persona", persona_summary_to_json persona);
+                ("created", `Bool true);
+                ("result", created_json);
+                ("resolved_args", resolved_args);
+              ]
+          in
+          (true, Yojson.Safe.pretty_to_string json)
+
 let handle_keeper_down ctx args : tool_result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -9786,6 +10133,8 @@ let dispatch ctx ~name ~args : tool_result option =
   (try start_existing_keepalives ctx with exn ->
     Printf.eprintf "[keeper] start_existing_keepalives failed: %s\n%!" (Printexc.to_string exn));
   match name with
+  | "masc_persona_list" -> Some (handle_persona_list ctx args)
+  | "masc_keeper_create_from_persona" -> Some (handle_keeper_create_from_persona ctx args)
   | "masc_keeper_up" -> Some (handle_keeper_up ctx args)
   | "masc_keeper_status" -> Some (handle_keeper_status ctx args)
   | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)

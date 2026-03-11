@@ -317,6 +317,7 @@ let tool_category tool_name =
   | "masc_gardener_retire_agent" | "masc_gardener_execute_retire"
   | "masc_gardener_reset_circuit"
   (* Keeper *)
+  | "masc_persona_list" | "masc_keeper_create_from_persona"
   | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_status"
   | "masc_keeper_list" | "masc_keeper_msg" | "masc_keeper_eval"
   | "masc_keeper_model_set"

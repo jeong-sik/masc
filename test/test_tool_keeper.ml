@@ -10,13 +10,24 @@ let rec rm_rf path =
       Unix.unlink path
 
 let temp_dir () =
-  let dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "keeper-tool-test-%d-%d" (Unix.getpid ())
-         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  let rec pick attempt =
+    let dir =
+      Filename.concat (Filename.get_temp_dir_name ())
+        (Printf.sprintf "keeper-tool-test-%d-%d-%d" (Unix.getpid ())
+           (int_of_float (Unix.gettimeofday () *. 1000.)) attempt)
+    in
+    try
+      Unix.mkdir dir 0o755;
+      dir
+    with Unix.Unix_error (Unix.EEXIST, _, _) -> pick (attempt + 1)
   in
-  Unix.mkdir dir 0o755;
-  dir
+  pick 0
+
+let rec mkdir_p path =
+  if path = "" || path = "/" || Sys.file_exists path then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
 
 let with_temp_file contents f =
   let path = Filename.temp_file "keeper-tail" ".log" in
@@ -194,6 +205,104 @@ let test_keeper_model_set_persists_active_model () =
       check string "status active model" "ollama:qwen3.5:35b-a3b"
         Yojson.Safe.Util.(status_json |> member "active_model" |> to_string))
 
+let write_persona_profile ~me_root ~persona_name ~content =
+  let persona_dir = Filename.concat (Filename.concat me_root "personas") persona_name in
+  mkdir_p persona_dir;
+  let profile_path = Filename.concat persona_dir "profile.json" in
+  let oc = open_out profile_path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let test_persona_list_and_create_from_persona () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let me_root = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf base_dir;
+      rm_rf me_root)
+    (fun () ->
+      write_persona_profile ~me_root ~persona_name:"sangsu"
+        ~content:
+          {|{
+  "name": "상수",
+  "role": "홍상수 영화 속 찌질한 40대 남자",
+  "trait": "직설적이고 현실적",
+  "keeper": {
+    "goal": "상수처럼 대화한다",
+    "models": ["llama:qwen3.5-35b-a3b-ud-q8-xl"],
+    "allowed_models": ["llama:qwen3.5-35b-a3b-ud-q8-xl"],
+    "active_model": "llama:qwen3.5-35b-a3b-ud-q8-xl",
+    "room_scope": "all",
+    "trigger_mode": "explicit_only",
+    "mention_targets": ["sangsu"],
+    "presence_keepalive": false,
+    "proactive_enabled": false
+  }
+}|};
+      with_env "ME_ROOT" me_root (fun () ->
+        let config = Masc_mcp.Room.default_config base_dir in
+        ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+        let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+          { config; sw; clock = Eio.Stdenv.clock env }
+        in
+        let dispatch name args =
+          match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+          | Some result -> result
+          | None -> fail ("missing dispatch for " ^ name)
+        in
+        let ok, list_body = dispatch "masc_persona_list" (`Assoc []) in
+        check bool "persona list ok" true ok;
+        let list_json = Yojson.Safe.from_string list_body in
+        check bool "contains sangsu" true
+          Yojson.Safe.Util.(
+            list_json |> member "personas" |> to_list
+            |> List.exists (fun row -> member "persona_name" row = `String "sangsu"));
+        let ok, dry_body =
+          dispatch "masc_keeper_create_from_persona"
+            (`Assoc
+              [
+                ("persona_name", `String "sangsu");
+                ("dry_run", `Bool true);
+              ])
+        in
+        check bool "dry run ok" true ok;
+        let dry_json = Yojson.Safe.from_string dry_body in
+        check bool "dry run ready" true
+          Yojson.Safe.Util.(dry_json |> member "ready" |> to_bool);
+        check string "dry run trigger mode" "explicit_only"
+          Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "trigger_mode" |> to_string);
+        let ok, create_body =
+          dispatch "masc_keeper_create_from_persona"
+            (`Assoc
+              [
+                ("persona_name", `String "sangsu");
+                ("name", `String "sangsu");
+              ])
+        in
+        check bool "create ok" true ok;
+        let create_json = Yojson.Safe.from_string create_body in
+        check bool "created true" true Yojson.Safe.Util.(create_json |> member "created" |> to_bool);
+        let ok, status_body =
+          dispatch "masc_keeper_status"
+            (`Assoc
+              [
+                ("name", `String "sangsu");
+                ("fast", `Bool true);
+                ("include_context", `Bool false);
+                ("include_metrics_overview", `Bool false);
+                ("include_memory_bank", `Bool false);
+                ("include_history_tail", `Bool false);
+                ("include_compaction_history", `Bool false);
+              ])
+        in
+        check bool "status ok" true ok;
+        let status_json = Yojson.Safe.from_string status_body in
+        check string "status room scope" "all"
+          Yojson.Safe.Util.(status_json |> member "meta" |> member "room_scope" |> to_string)))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -209,5 +318,7 @@ let () =
            test_llm_client_sanitize_messages_utf8_preserves_message_count;
          test_case "keeper model set persists active model" `Quick
            test_keeper_model_set_persists_active_model;
+         test_case "persona list and create from persona" `Quick
+           test_persona_list_and_create_from_persona;
        ]);
   ]

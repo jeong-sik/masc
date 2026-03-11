@@ -4,6 +4,85 @@ open Types
 
 let schemas : tool_schema list = [
   {
+    name = "masc_persona_list";
+    description = "List available personas that have structured profile.json data. Use this before creating a keeper from a persona.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("detailed", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, return persona summaries with profile path and keeper availability. If false, return persona names only.");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_create_from_persona";
+    description = "Create or dry-run a keeper configuration from a persona profile.json using deterministic field merging only. Explicit arguments override persona defaults.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("persona_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Persona handle under ME_ROOT/personas/<persona_name>/profile.json");
+        ]);
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional keeper handle. Defaults to persona_name.");
+        ]);
+        ("dry_run", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, return the resolved keeper args and validation errors without creating the keeper.");
+        ]);
+        ("goal", `Assoc [("type", `String "string")]);
+        ("short_goal", `Assoc [("type", `String "string")]);
+        ("mid_goal", `Assoc [("type", `String "string")]);
+        ("long_goal", `Assoc [("type", `String "string")]);
+        ("instructions", `Assoc [("type", `String "string")]);
+        ("soul_profile", `Assoc [("type", `String "string")]);
+        ("will", `Assoc [("type", `String "string")]);
+        ("needs", `Assoc [("type", `String "string")]);
+        ("desires", `Assoc [("type", `String "string")]);
+        ("models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("allowed_models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("active_model", `Assoc [("type", `String "string")]);
+        ("room_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "current"; `String "all"]);
+        ]);
+        ("scope_kind", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "local"; `String "global"]);
+        ]);
+        ("trigger_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "legacy"; `String "explicit_only"]);
+        ]);
+        ("mention_targets", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("presence_keepalive", `Assoc [("type", `String "boolean")]);
+        ("presence_keepalive_sec", `Assoc [("type", `String "integer")]);
+        ("proactive_enabled", `Assoc [("type", `String "boolean")]);
+        ("verify", `Assoc [("type", `String "boolean")]);
+        ("auto_handoff", `Assoc [("type", `String "boolean")]);
+        ("handoff_threshold", `Assoc [("type", `String "number")]);
+        ("handoff_cooldown_sec", `Assoc [("type", `String "integer")]);
+        ("context_budget", `Assoc [("type", `String "number")]);
+      ]);
+      ("required", `List [`String "persona_name"]);
+    ];
+  };
+
+  {
     name = "masc_keeper_up";
     description = "Create or update a persistent keeper agent (event-driven). \
 Stores context on disk and keeps presence alive. Auto-handoff is enabled by default.";

@@ -195,8 +195,8 @@ let test_source_main_keeper_log_parse () =
       {|[main] keeper log parse:|})
 
 let test_source_trpg_npc_heal () =
-  check bool "tool_trpg.ml has npc heal logging"
-    true (file_contains_pattern "lib/tool_trpg.ml"
+  check bool "trpg_round.ml has npc heal logging"
+    true (file_contains_pattern "lib/trpg_round.ml"
       {|[trpg] npc heal:|})
 
 (* ============================================================

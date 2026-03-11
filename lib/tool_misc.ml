@@ -97,10 +97,53 @@ let mode_snapshot_json ctx =
       ("config_summary", Config.get_config_summary room_path);
     ]
 
+let keeper_gate_config_for_level
+    ~(autonomy_level : Keeper_autonomy.autonomy_level) : Eval_gate.gate_config =
+  let base_allowed = [
+    "keeper_board_post"; "keeper_board_comment"; "keeper_board_list";
+    "keeper_read"; "keeper_fs_read";
+    "keeper_memory_search";
+    "keeper_time_now"; "keeper_context_status";
+  ] in
+  let base_denied = [
+    "keeper_bash"; "keeper_edit"; "keeper_fs_edit"; "keeper_github";
+  ] in
+  match autonomy_level with
+  | Keeper_autonomy.L4_Autonomous ->
+      {
+        max_cost_usd = 0.10;
+        max_tool_calls_per_turn = 5;
+        entropy_threshold = 2;
+        destructive_check_enabled = true;
+        allowlist_enabled = true;
+        allowed_tools = "keeper_bash" :: base_allowed;
+        denied_tools = List.filter (fun t -> t <> "keeper_bash") base_denied;
+      }
+  | Keeper_autonomy.L5_Independent ->
+      {
+        max_cost_usd = 0.50;
+        max_tool_calls_per_turn = 10;
+        entropy_threshold = 3;
+        destructive_check_enabled = true;
+        allowlist_enabled = false;
+        allowed_tools = [];
+        denied_tools = [];
+      }
+  | _ ->
+      {
+        max_cost_usd = 0.10;
+        max_tool_calls_per_turn = 5;
+        entropy_threshold = 2;
+        destructive_check_enabled = true;
+        allowlist_enabled = true;
+        allowed_tools = base_allowed;
+        denied_tools = base_denied;
+      }
+
 let keeper_tool_policy_json autonomy_level =
   match Keeper_autonomy.autonomy_level_of_string autonomy_level with
   | Some level ->
-      let gate = Tool_keeper.autonomous_gate_config ~autonomy_level:level in
+      let gate = keeper_gate_config_for_level ~autonomy_level:level in
       `Assoc
         [
           ("configured_tool_policy", `String (if gate.allowlist_enabled then "allowlist" else "all"));
@@ -123,8 +166,8 @@ let keeper_tool_policy_json autonomy_level =
           ("destructive_check_enabled", `Null);
         ]
 
-let keeper_policy_row ctx ~runtime_class (meta : Tool_keeper.keeper_meta) =
-  let status_json = Tool_keeper.parse_agent_status ctx.config ~agent_name:meta.agent_name in
+let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
+  let status_json = Keeper_execution.parse_agent_status ctx.config ~agent_name:meta.agent_name in
   let status =
     match U.member "status" status_json with
     | `String value -> value
@@ -147,7 +190,7 @@ let keeper_policy_row ctx ~runtime_class (meta : Tool_keeper.keeper_meta) =
        ("reward_model_path",
         if String.trim meta.policy_reward_model_path = "" then `Null
         else `String meta.policy_reward_model_path);
-       ("active_model", `String (Tool_keeper.active_model_of_meta meta));
+       ("active_model", `String (Keeper_execution.active_model_of_meta meta));
        ("allowed_models", `List (List.map (fun model -> `String model) meta.allowed_models));
        ("updated_at", `String meta.updated_at);
      ]
@@ -155,16 +198,16 @@ let keeper_policy_row ctx ~runtime_class (meta : Tool_keeper.keeper_meta) =
 
 let keeper_policies_json ctx =
   let resident_rows =
-    Tool_keeper.resident_keeper_names ctx.config
+    Keeper_types.resident_keeper_names ctx.config
     |> List.filter_map (fun name ->
-           match Tool_keeper.read_meta ctx.config name with
+           match Keeper_types.read_meta ctx.config name with
            | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"resident_keeper" meta)
            | Ok None | Error _ -> None)
   in
   let persistent_rows =
-    Tool_keeper.persistent_agent_names ctx.config
+    Keeper_types.persistent_agent_names ctx.config
     |> List.filter_map (fun name ->
-           match Tool_keeper.read_meta ctx.config name with
+           match Keeper_types.read_meta ctx.config name with
            | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"persistent_agent" meta)
            | Ok None | Error _ -> None)
   in
@@ -308,17 +351,17 @@ let apply_keeper_policy_update config ~runtime_class args =
   let reward_model_path_opt = get_string_opt args "reward_model_path" |> Option.map String.trim in
   let membership_ok =
     match runtime_class with
-    | "resident_keeper" -> List.mem name (Tool_keeper.resident_keeper_names config)
-    | "persistent_agent" -> List.mem name (Tool_keeper.persistent_agent_names config)
+    | "resident_keeper" -> List.mem name (Keeper_types.resident_keeper_names config)
+    | "persistent_agent" -> List.mem name (Keeper_types.persistent_agent_names config)
     | _ -> false
   in
-  if not (Tool_keeper.validate_name name) then
+  if not (Keeper_config.validate_name name) then
     Error "invalid keeper name"
   else if not membership_ok then
     Error
       (Printf.sprintf "%s not found in %s set" name runtime_class)
   else
-    match Tool_keeper.read_meta config name with
+    match Keeper_types.read_meta config name with
     | Error err -> Error err
     | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
     | Ok (Some meta) ->
@@ -365,7 +408,7 @@ let apply_keeper_policy_update config ~runtime_class args =
             in
             let effective_reward_result =
               if String.equal policy_mode "learned_offline_v1" then
-                Tool_keeper.load_keeper_reward_model reward_model_path
+                Keeper_memory.load_keeper_reward_model reward_model_path
                 |> Result.map (fun _ -> (reward_model_path, None))
               else
                 Ok (reward_model_path, None)
@@ -383,7 +426,7 @@ let apply_keeper_policy_update config ~runtime_class args =
                     updated_at = Types.now_iso ();
                   }
                 in
-                (match Tool_keeper.write_meta config updated with
+                (match Keeper_types.write_meta config updated with
                 | Error err -> Error err
                 | Ok () ->
                     let policy_json =
@@ -451,19 +494,9 @@ let handle_tool_admin_update ctx args =
         | None -> current.require_token
       in
       let enabled_opt = bool_arg_opt args "enabled" in
-      let room_secret =
-        match enabled_opt with
-        | Some true when not current.enabled ->
-            Some (Auth.enable_auth ctx.config.base_path ~require_token)
-        | Some false when current.enabled ->
-            Auth.disable_auth ctx.config.base_path;
-            None
-        | _ -> None
-      in
-      let refreshed = Auth.load_auth_config ctx.config.base_path in
       let default_role_result =
         match get_string_opt args "default_role" with
-        | None -> Ok refreshed.default_role
+        | None -> Ok current.default_role
         | Some raw -> (
             match Types.agent_role_of_string (String.lowercase_ascii (String.trim raw)) with
             | Ok role -> Ok role
@@ -473,11 +506,21 @@ let handle_tool_admin_update ctx args =
         match int_arg_opt args "token_expiry_hours" with
         | Some value when value > 0 -> Ok value
         | Some _ -> Error "token_expiry_hours must be > 0"
-        | None -> Ok refreshed.token_expiry_hours
+        | None -> Ok current.token_expiry_hours
       in
       (match default_role_result, expiry_hours with
       | Error err, _ | _, Error err -> (false, "❌ " ^ err)
       | Ok default_role, Ok token_expiry_hours ->
+          let room_secret =
+            match enabled_opt with
+            | Some true when not current.enabled ->
+                Some (Auth.enable_auth ctx.config.base_path ~require_token)
+            | Some false when current.enabled ->
+                Auth.disable_auth ctx.config.base_path;
+                None
+            | _ -> None
+          in
+          let refreshed = Auth.load_auth_config ctx.config.base_path in
           let updated =
             {
               refreshed with

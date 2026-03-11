@@ -204,6 +204,27 @@ let () = test "dispatch_tool_admin_update_auth" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_tool_admin_update_auth_invalid_does_not_mutate" (fun () ->
+  let ctx = make_test_ctx () in
+  let before = Auth.load_auth_config ctx.config.base_path in
+  let args =
+    `Assoc
+      [
+        ("section", `String "auth");
+        ("enabled", `Bool true);
+        ("default_role", `String "not-a-role");
+      ]
+  in
+  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
+  | Some (success, _result) ->
+      assert (not success);
+      let after = Auth.load_auth_config ctx.config.base_path in
+      assert (after.enabled = before.enabled);
+      assert (after.require_token = before.require_token);
+      assert (after.default_role = before.default_role)
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "dispatch_tool_admin_update_unit_policy" (fun () ->
   let ctx = make_test_ctx () in
   let define_args =
@@ -275,7 +296,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           assert success;
           let json = parse_json result in
           assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "keeper_policy");
-          (match Tool_keeper.read_meta ctx.config "admin-keeper" with
+          (match Keeper_types.read_meta ctx.config "admin-keeper" with
           | Ok (Some meta) ->
               assert (meta.autonomy_level = "l4_autonomous" || meta.autonomy_level = "L4_Autonomous");
               assert (meta.policy_action_budget = "board")

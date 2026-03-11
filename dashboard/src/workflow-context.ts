@@ -1,12 +1,9 @@
 import { signal } from '@preact/signals'
 import type { OperatorAttentionItem, OperatorRecommendedAction, RouteState, TabId } from './types'
+import { isRecord } from './components/common/normalize'
 
 const STORAGE_KEY = 'masc_dashboard_workflow_context'
 const CONTEXT_TTL_MS = 15 * 60 * 1000
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null

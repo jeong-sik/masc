@@ -1,0 +1,42 @@
+// Shared type-safe normalization utilities for unknown API/SSE payloads.
+// Single source of truth — all dashboard modules import from here.
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+}
+
+export function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+export function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+export function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean)
+}
+
+export function extractArray(value: unknown, keys: string[] = []): unknown[] {
+  if (Array.isArray(value)) return value
+  if (!isRecord(value)) return []
+  for (const key of keys) {
+    const candidate = value[key]
+    if (Array.isArray(candidate)) return candidate
+  }
+  return []
+}
+
+export function toIsoTimestamp(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim() !== '') return value
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
+  return new Date(value * 1000).toISOString()
+}
+

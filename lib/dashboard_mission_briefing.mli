@@ -19,4 +19,11 @@ module For_test : sig
     keepers:Yojson.Safe.t list ->
     agents:Yojson.Safe.t list ->
     Yojson.Safe.t list
+  val build_briefing_sections :
+    mission_summary_json:Yojson.Safe.t ->
+    sessions:Yojson.Safe.t list ->
+    agents:Yojson.Safe.t list ->
+    recent_messages:Yojson.Safe.t list ->
+    metadata_gaps:Yojson.Safe.t list ->
+    string * Yojson.Safe.t list
 end

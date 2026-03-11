@@ -120,12 +120,54 @@ a:hover {
   color: #9ad9ff;
 }
 
+.build-identity-wrap {
+  position: relative;
+}
+
+.build-badge-trigger {
+  cursor: pointer;
+  font: inherit;
+}
+
+.build-badge-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  min-width: 280px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: rgba(10, 18, 34, 0.96);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.34);
+  display: grid;
+  gap: 8px;
+}
+
+.build-badge-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.build-badge-row strong {
+  color: var(--text-strong);
+  text-align: right;
+}
+
 .header-right {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: nowrap;
   justify-content: flex-end;
+}
+
+.rail-build-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .header-links {

@@ -800,6 +800,13 @@ export interface DashboardShellResponse {
   }
 }
 
+export interface ServerBuildIdentity {
+  release_version: string
+  commit?: string | null
+  started_at: string
+  uptime_seconds: number
+}
+
 export type DashboardExecutionTone = 'ok' | 'warn' | 'bad'
 export type DashboardExecutionWorkerState = 'working' | 'watching' | 'quiet' | 'offline'
 export type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
@@ -2183,6 +2190,8 @@ export interface ServerStatus {
   project?: string
   paused?: boolean
   version?: string
+  generated_at?: string
+  build?: ServerBuildIdentity
   uptime_seconds?: number
   tempo_interval_s?: number
   tempo?: string

@@ -709,11 +709,38 @@ function normalizeKeepers(raw: unknown, serverStatusValue?: ServerStatus | null)
     .filter((row): row is Keeper => row !== null)
 }
 
-function normalizeServerStatus(raw: unknown): ServerStatus | null {
+function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | undefined {
+  if (!isRecord(raw)) return undefined
+  const releaseVersion = asString(raw.release_version)
+  const startedAt = toIsoTimestamp(raw.started_at)
+  const uptimeSeconds = asNumber(raw.uptime_seconds)
+  if (!releaseVersion || !startedAt || uptimeSeconds == null) return undefined
+  return {
+    release_version: releaseVersion,
+    commit: asString(raw.commit) ?? null,
+    started_at: startedAt,
+    uptime_seconds: uptimeSeconds,
+  }
+}
+
+function normalizeServerStatus(raw: unknown, generatedAt?: string): ServerStatus | null {
   if (!isRecord(raw)) return null
   return {
     ...(raw as ServerStatus),
+    generated_at: generatedAt ?? toIsoTimestamp(raw.generated_at) ?? undefined,
+    build: normalizeBuildIdentity(raw.build),
     lodge: normalizeLodgeRuntimeStatus(raw.lodge) ?? undefined,
+  }
+}
+
+function mergeServerStatus(previous: ServerStatus | null, next: ServerStatus | null): ServerStatus | null {
+  if (!next) return previous
+  if (!previous) return next
+  return {
+    ...previous,
+    ...next,
+    build: next.build ?? previous.build,
+    generated_at: next.generated_at ?? previous.generated_at,
   }
 }
 
@@ -913,9 +940,9 @@ function applyPlanningEnvelope(data: {
 export async function refreshShell(): Promise<void> {
   try {
     const data = await fetchDashboardShell()
-    const normalizedStatus = normalizeServerStatus(data.status)
+    const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
     if (normalizedStatus) {
-      serverStatus.value = normalizedStatus
+      serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
     }
   } catch (err) {
     console.error('Dashboard shell fetch error:', err)
@@ -925,10 +952,10 @@ export async function refreshShell(): Promise<void> {
 export async function refreshExecution(): Promise<void> {
   try {
     const data = await fetchDashboardExecution()
-    const normalizedStatus = normalizeServerStatus(data.status)
+    const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
     const previousRoom = serverStatus.value?.room
     if (normalizedStatus) {
-      serverStatus.value = normalizedStatus
+      serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
     }
     const roomChanged = previousRoom != null && normalizedStatus?.room != null && previousRoom !== normalizedStatus.room
     agents.value = (Array.isArray(data.agents) ? data.agents : [])
@@ -1040,4 +1067,3 @@ export async function refreshGoals(): Promise<void> {
 export async function refreshMdal(): Promise<void> {
   return refreshGoals()
 }
-

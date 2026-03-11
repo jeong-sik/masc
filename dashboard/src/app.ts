@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import { signal } from '@preact/signals'
 import { route, initRouter, navigate } from './router'
 import { connected, eventCount, connectSSE, disconnectSSE } from './sse'
 import {
@@ -17,6 +18,7 @@ import {
   agents,
   tasks,
   keepers,
+  serverStatus,
 } from './store'
 import { setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { Mission } from './components/mission'
@@ -31,6 +33,7 @@ import { Lab } from './components/lab'
 import { Live } from './components/live'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
+import { TimeAgo } from './components/common/time-ago'
 import { ToastContainer } from './components/common/toast'
 import { PanelSemanticDetails, SurfaceSemanticIntro } from './components/common/semantic-layer'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
@@ -44,6 +47,8 @@ import {
   refreshCommandPlaneSwarm,
 } from './command-store'
 
+const buildIdentityOpen = signal(false)
+
 function ConnectionStatus() {
   const isConnected = connected.value
   return html`
@@ -51,6 +56,62 @@ function ConnectionStatus() {
       <span class="status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
       <span class="status-text">${isConnected ? 'Live' : '재연결 중...'}</span>
       <span class="event-count">${eventCount.value} events</span>
+    </div>
+  `
+}
+
+function shortCommit(commit: string | null | undefined): string {
+  const value = commit?.trim()
+  if (!value) return 'commit unavailable'
+  return value.length > 10 ? value.slice(0, 10) : value
+}
+
+function BuildIdentityBadge() {
+  const status = serverStatus.value
+  const build = status?.build
+  const label = build
+    ? `v${build.release_version} · ${shortCommit(build.commit)}`
+    : status?.version
+      ? `v${status.version} · commit unavailable`
+      : 'version unavailable'
+  return html`
+    <div class="build-identity-wrap">
+      <button
+        class="version-badge build-badge-trigger"
+        type="button"
+        aria-expanded=${buildIdentityOpen.value}
+        onClick=${() => {
+          buildIdentityOpen.value = !buildIdentityOpen.value
+        }}
+      >
+        Server Build · ${label}
+      </button>
+      ${buildIdentityOpen.value
+        ? html`
+            <div class="build-badge-panel">
+              <div class="build-badge-row">
+                <span>릴리즈</span>
+                <strong>${build?.release_version ?? status?.version ?? 'unknown'}</strong>
+              </div>
+              <div class="build-badge-row">
+                <span>커밋</span>
+                <strong>${build?.commit ?? 'commit unavailable'}</strong>
+              </div>
+              <div class="build-badge-row">
+                <span>서버 시작</span>
+                <strong>${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : 'unknown'}</strong>
+              </div>
+              <div class="build-badge-row">
+                <span>업타임</span>
+                <strong>${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : 'unknown'}</strong>
+              </div>
+              <div class="build-badge-row">
+                <span>쉘 스냅샷</span>
+                <strong>${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : 'unknown'}</strong>
+              </div>
+            </div>
+          `
+        : null}
     </div>
   `
 }
@@ -85,6 +146,7 @@ function refreshForTab(tab: string) {
 
 function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
+  const build = serverStatus.value?.build
   return html`
     <section class="rail-card">
       <div class="rail-card-head">
@@ -125,6 +187,9 @@ function SnapshotCard({ currentTab }: { currentTab: string }) {
           개입 열기
         </button>
       </div>
+      ${build
+        ? html`<div class="rail-build-hint">Server Build · v${build.release_version} · ${shortCommit(build.commit)}</div>`
+        : null}
     </section>
   `
 }
@@ -296,7 +361,7 @@ export function App() {
         <div class="header-title-wrap">
           <h1>
             MASC Dashboard
-            <span class="version-badge">SPA</span>
+            <${BuildIdentityBadge} />
           </h1>
           <p class="header-subtitle">${currentView?.description ?? '운영자 의사결정 및 실행 콘솔'}</p>
         </div>

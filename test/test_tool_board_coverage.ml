@@ -12,6 +12,15 @@ let _test_base_path =
     Must call inside Eio_main.run since Board.store contains Eio.Mutex. *)
 let rng_initialized = ref false
 
+let rec remove_path path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun entry -> remove_path (Filename.concat path entry));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
 let cleanup () =
   if not !rng_initialized then begin
     Mirage_crypto_rng_unix.use_default ();
@@ -19,6 +28,7 @@ let cleanup () =
   end;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  remove_path (Filename.concat _test_base_path ".masc");
   Board_dispatch.init_jsonl ()
 
 let dispatch name args =

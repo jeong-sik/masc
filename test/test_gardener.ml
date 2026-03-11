@@ -61,13 +61,21 @@ let test_ecosystem_health_to_json () =
     last_retirement = None;
     spawns_today = 1;
     retirements_today = 0;
+    task_backlog = empty_task_backlog;
+    system_error_rate = 0.0;
+    needs_workers = false;
   } in
   let json = ecosystem_health_to_yojson health in
   let open Yojson.Safe.Util in
   check int "total_agents in json" 10 (json |> member "total_agents" |> to_int);
   check int "active_agents in json" 5 (json |> member "active_agents" |> to_int);
   check bool "needs_spawn in json" false (json |> member "needs_spawn" |> to_bool);
-  check (float 0.01) "homeostatic_score in json" 0.9 (json |> member "homeostatic_score" |> to_float)
+  check (float 0.01) "homeostatic_score in json" 0.9 (json |> member "homeostatic_score" |> to_float);
+  (* Task-aware fields *)
+  let backlog_json = json |> member "task_backlog" in
+  check int "todo_count in json" 0 (backlog_json |> member "todo_count" |> to_int);
+  check (float 0.01) "system_error_rate in json" 0.0 (json |> member "system_error_rate" |> to_float);
+  check bool "needs_workers in json" false (json |> member "needs_workers" |> to_bool)
 
 (** {1 Spawn Decision Tests} *)
 
@@ -668,6 +676,9 @@ let test_spawn_high_similarity_rejected () =
     last_retirement = None;
     spawns_today = 0;
     retirements_today = 0;
+    task_backlog = empty_task_backlog;
+    system_error_rate = 0.0;
+    needs_workers = false;
   } in
   ignore config; ignore health; ignore gap;
   (* Can't easily test internal decide_spawn without Eio, but we verify types compile *)
@@ -734,6 +745,130 @@ let test_urgency_boundary () =
   check bool "Low eq Low" true (equal_urgency Low Low);
   check bool "Critical eq Critical" true (equal_urgency Critical Critical);
   check bool "Low not eq High" false (equal_urgency Low High)
+
+(** {1 Task Backlog Tests} *)
+
+(** Test empty_task_backlog has all zeros *)
+let test_empty_task_backlog () =
+  let b = empty_task_backlog in
+  check int "total_tasks = 0" 0 b.total_tasks;
+  check int "todo_count = 0" 0 b.todo_count;
+  check int "orphan_count = 0" 0 b.orphan_count;
+  check (float 0.01) "oldest_todo_age = 0" 0.0 b.oldest_todo_age_hours;
+  check int "high_priority_todo = 0" 0 b.high_priority_todo
+
+(** Test task_backlog_summary JSON serialization *)
+let test_task_backlog_to_json () =
+  let backlog = {
+    total_tasks = 35;
+    todo_count = 10;
+    claimed_count = 5;
+    in_progress_count = 8;
+    done_count = 12;
+    orphan_count = 2;
+    oldest_todo_age_hours = 48.5;
+    high_priority_todo = 3;
+  } in
+  let json = task_backlog_summary_to_yojson backlog in
+  let open Yojson.Safe.Util in
+  check int "todo_count" 10 (json |> member "todo_count" |> to_int);
+  check int "orphan_count" 2 (json |> member "orphan_count" |> to_int);
+  check (float 0.01) "oldest_todo_age" 48.5 (json |> member "oldest_todo_age_hours" |> to_float);
+  check int "high_priority_todo" 3 (json |> member "high_priority_todo" |> to_int)
+
+(** Test needs_workers is true when tasks exist but no active agents *)
+let test_needs_workers_logic () =
+  let health = {
+    total_agents = 5;
+    active_agents = 0;
+    idle_agents = 5;
+    overloaded_agents = 0;
+    posts_24h = 0;
+    comments_24h = 0;
+    unanswered_questions = 0;
+    topic_coverage = [];
+    selection_entropy = 0.0;
+    homeostatic_score = 0.6;
+    needs_spawn = true;
+    needs_retirement = false;
+    last_spawn = None;
+    last_retirement = None;
+    spawns_today = 0;
+    retirements_today = 0;
+    task_backlog = { empty_task_backlog with todo_count = 10; high_priority_todo = 2 };
+    system_error_rate = 0.0;
+    needs_workers = true;
+  } in
+  check bool "needs_workers true" true health.needs_workers;
+  check int "task backlog todo" 10 health.task_backlog.todo_count
+
+(** Test needs_workers is false when active agents exist *)
+let test_needs_workers_false_with_active () =
+  let health = {
+    total_agents = 10;
+    active_agents = 5;
+    idle_agents = 3;
+    overloaded_agents = 0;
+    posts_24h = 10;
+    comments_24h = 20;
+    unanswered_questions = 1;
+    topic_coverage = [];
+    selection_entropy = 0.5;
+    homeostatic_score = 0.8;
+    needs_spawn = false;
+    needs_retirement = false;
+    last_spawn = None;
+    last_retirement = None;
+    spawns_today = 0;
+    retirements_today = 0;
+    task_backlog = { empty_task_backlog with todo_count = 5 };
+    system_error_rate = 0.0;
+    needs_workers = false;
+  } in
+  check bool "needs_workers false" false health.needs_workers
+
+(** Test ecosystem_health JSON includes task_backlog with non-zero values *)
+let test_health_json_with_task_backlog () =
+  let backlog = {
+    total_tasks = 50;
+    todo_count = 29;
+    claimed_count = 3;
+    in_progress_count = 10;
+    done_count = 8;
+    orphan_count = 4;
+    oldest_todo_age_hours = 72.0;
+    high_priority_todo = 5;
+  } in
+  let health = {
+    total_agents = 12;
+    active_agents = 8;
+    idle_agents = 2;
+    overloaded_agents = 0;
+    posts_24h = 15;
+    comments_24h = 30;
+    unanswered_questions = 3;
+    topic_coverage = [];
+    selection_entropy = 0.6;
+    homeostatic_score = 0.7;
+    needs_spawn = true;
+    needs_retirement = false;
+    last_spawn = None;
+    last_retirement = None;
+    spawns_today = 0;
+    retirements_today = 0;
+    task_backlog = backlog;
+    system_error_rate = 0.02;
+    needs_workers = true;
+  } in
+  let json = ecosystem_health_to_yojson health in
+  let open Yojson.Safe.Util in
+  let tb = json |> member "task_backlog" in
+  check int "todo_count 29" 29 (tb |> member "todo_count" |> to_int);
+  check int "orphan_count 4" 4 (tb |> member "orphan_count" |> to_int);
+  check int "high_priority_todo 5" 5 (tb |> member "high_priority_todo" |> to_int);
+  check (float 0.01) "oldest 72h" 72.0 (tb |> member "oldest_todo_age_hours" |> to_float);
+  check bool "needs_workers true" true (json |> member "needs_workers" |> to_bool);
+  check (float 0.01) "error_rate 0.02" 0.02 (json |> member "system_error_rate" |> to_float)
 
 (** {1 Test Suite} *)
 
@@ -845,6 +980,13 @@ let suite = [
 
   (* Config JSON *)
   "gardener_config_to_json", `Quick, test_gardener_config_to_json;
+
+  (* Task Backlog *)
+  "empty_task_backlog", `Quick, test_empty_task_backlog;
+  "task_backlog_to_json", `Quick, test_task_backlog_to_json;
+  "needs_workers_logic", `Quick, test_needs_workers_logic;
+  "needs_workers_false_with_active", `Quick, test_needs_workers_false_with_active;
+  "health_json_with_task_backlog", `Quick, test_health_json_with_task_backlog;
 ]
 
 let () =

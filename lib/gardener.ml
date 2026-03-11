@@ -45,6 +45,7 @@ let load_config () : gardener_config = {
 
 let gardener_state_ref : gardener_state option ref = ref None
 let gardener_lock : Eio.Mutex.t option ref = ref None
+let room_config_ref : Room_utils.config option ref = ref None
 
 (** Execute [f] with lock if available, otherwise directly.
     Safe for single-threaded test scenarios (no Eio runtime). *)
@@ -321,8 +322,51 @@ let count_unanswered_questions () : int =
     else count
   ) 0 posts
 
+(** Collect task backlog signals from MASC room *)
+let collect_task_signals ~(room_config : Room_utils.config) : task_backlog_summary =
+  try
+    let room_id = Room.current_room_id room_config in
+    let tasks = Room.get_tasks_raw_in_room room_config room_id in
+    let orphans = Room.audit_orphan_tasks room_config in
+    let now = Time_compat.now () in
+
+    let todo_count = ref 0 in
+    let claimed_count = ref 0 in
+    let in_progress_count = ref 0 in
+    let done_count = ref 0 in
+    let oldest_todo_age = ref 0.0 in
+    let high_priority_todo = ref 0 in
+
+    List.iter (fun (task : Types.task) ->
+      match task.task_status with
+      | Types.Todo ->
+          incr todo_count;
+          let age_hours =
+            let created = Types.parse_iso8601 task.created_at in
+            (now -. created) /. 3600.0
+          in
+          if age_hours > !oldest_todo_age then oldest_todo_age := age_hours;
+          if task.priority <= 2 then incr high_priority_todo
+      | Types.Claimed _ -> incr claimed_count
+      | Types.InProgress _ -> incr in_progress_count
+      | Types.Done _ -> incr done_count
+      | Types.Cancelled _ -> ()
+    ) tasks;
+
+    {
+      total_tasks = List.length tasks;
+      todo_count = !todo_count;
+      claimed_count = !claimed_count;
+      in_progress_count = !in_progress_count;
+      done_count = !done_count;
+      orphan_count = List.length orphans;
+      oldest_todo_age_hours = !oldest_todo_age;
+      high_priority_todo = !high_priority_todo;
+    }
+  with _ -> empty_task_backlog
+
 (** Calculate comprehensive ecosystem health *)
-let calculate_health ~config : ecosystem_health =
+let calculate_health ~config ~room_config : ecosystem_health =
   let agents = Lodge_heartbeat.get_agents () in
   let all_stats = Lodge_selection.get_all_stats () in
   let now = Time_compat.now () in
@@ -356,14 +400,18 @@ let calculate_health ~config : ecosystem_health =
   let selection_entropy = calculate_entropy all_stats in
   let homeostatic_score = calculate_homeostatic_score ~config ~total_agents in
 
-  (* Determine needs *)
-  let needs_spawn =
-    total_agents < config.target_agents &&
-    (unanswered_questions > 5 || active_agents < 3) in
+  (* Task backlog signals *)
+  let task_backlog = match room_config with
+    | Some rc -> collect_task_signals ~room_config:rc
+    | None -> empty_task_backlog
+  in
 
-  let needs_retirement =
-    total_agents > config.target_agents &&
-    idle_agents > (total_agents / 3) in
+  (* No heuristic pre-computation — these fields are purely informational.
+     All decision-making is delegated to LLM (primary) or rule-based inline (fallback).
+     Raw signals (agent counts, task_backlog, Board data) flow directly to the decision layer. *)
+  let needs_spawn = false in
+  let needs_workers = false in
+  let needs_retirement = false in
 
   let state = get_state () in
   let last_spawn = if state.last_spawn_attempt > 0.0 then Some state.last_spawn_attempt else None in
@@ -390,6 +438,9 @@ let calculate_health ~config : ecosystem_health =
     last_retirement;
     spawns_today = state.spawns_today;
     retirements_today = state.retirements_today;
+    task_backlog;
+    system_error_rate = 0.0;
+    needs_workers;
   }
 
 (** {1 Gap Signal Processing} *)
@@ -700,47 +751,141 @@ let execute_retire ~(decision : retirement_decision) : (string, string) result =
 
 (** {1 Intervention Detection} *)
 
+(** Rule-based intervention detection (task-aware fallback) *)
+let detect_intervention_rule_based ~config ~health : intervention =
+  let backlog = health.task_backlog in
+
+  (* Task pressure takes priority over Board gaps *)
+  if backlog.todo_count > 0 && backlog.high_priority_todo > 0 && health.active_agents < 2 then
+    NeedWorker backlog
+  else if backlog.orphan_count > 0 then
+    NeedWorker backlog
+  else begin
+    (* Board gap detection — existing logic *)
+    let mature_gaps = Lodge_heartbeat.check_gap_threshold () in
+    let agents = Lodge_heartbeat.get_agents () in
+
+    match mature_gaps with
+    | (topic, _count) :: _ when health.total_agents < config.target_agents ->
+        let signals = Lodge_heartbeat.get_signals_for_topic ~topic in
+        let gap = enrich_gap ~topic ~signals ~agents in
+        if gap.maturity_hours >= config.gap_maturity_hours then
+          NeedSpawn gap
+        else
+          Balanced
+    | _ ->
+        (* Check for retirement candidates — inline condition, no pre-computed boolean *)
+        if health.total_agents > config.target_agents && health.idle_agents > 0 then begin
+          let all_stats = Lodge_selection.get_all_stats () in
+          let idle_candidates = all_stats
+            |> List.filter (fun s ->
+                let idle_hours = (Time_compat.now () -. s.Lodge_selection.last_selected_at) /. 3600.0 in
+                idle_hours > config.idle_threshold_hours)
+            |> List.sort (fun a b ->
+                compare b.Lodge_selection.last_selected_at a.Lodge_selection.last_selected_at) in
+          match idle_candidates with
+          | candidate :: _ -> NeedRetirement (convert_stats candidate)
+          | [] -> Balanced
+        end else
+          Balanced
+  end
+
+(** Use LLM to decide ecosystem intervention (primary decision path) *)
+let decide_intervention_with_llm ~config ~health : intervention =
+  let backlog = health.task_backlog in
+  let prompt = Printf.sprintf
+    {|에이전트 생태계 관리자로서 모든 시그널을 종합 분석하고 개입 여부를 판단해줘.
+
+== 에이전트 ==
+총: %d/%d, 활성: %d, 유휴: %d
+
+== 보드 ==
+24h 게시물: %d, 미답변: %d
+
+== 태스크 백로그 ==
+미할당 TODO: %d개 (최대 대기: %.1f시간)
+고우선순위(P1-P2): %d개
+고아 태스크: %d개
+진행중: %d개
+
+== 시스템 ==
+에러율: %.1f%%, 오늘 spawn: %d/%d
+
+[응답 형식 - JSON만, 다른 텍스트 없이]
+{ "action": "spawn_worker" | "spawn_agent" | "retire" | "none", "reason": "판단 이유", "urgency": "low" | "medium" | "high" | "critical" }|}
+    health.total_agents config.target_agents health.active_agents health.idle_agents
+    health.posts_24h health.unanswered_questions
+    backlog.todo_count backlog.oldest_todo_age_hours
+    backlog.high_priority_todo backlog.orphan_count backlog.in_progress_count
+    (health.system_error_rate *. 100.0) health.spawns_today config.max_daily_spawns
+  in
+
+  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"gardener_spawn" () in
+  let response =
+    match Llm_client.run_prompt_cascade ~temperature:0.3 ~timeout_sec:20
+        ~model_specs ~max_tokens:300 ~prompt () with
+    | Ok resp -> resp.content
+    | Error _ -> ""
+  in
+
+  (* Parse LLM response *)
+  let action =
+    try
+      let start = String.index response '{' in
+      let end_pos = String.rindex response '}' in
+      let json_str = String.sub response start (end_pos - start + 1) in
+      let json = Yojson.Safe.from_string json_str in
+      let module U = Yojson.Safe.Util in
+      json |> U.member "action" |> U.to_string
+    with _ -> "none"
+  in
+
+  match action with
+  | "spawn_worker" when backlog.todo_count > 0 -> NeedWorker backlog
+  | "spawn_worker" | "spawn_agent" ->
+      (* LLM decided to spawn — find appropriate gap signal *)
+      let mature_gaps = Lodge_heartbeat.check_gap_threshold () in
+      let agents = Lodge_heartbeat.get_agents () in
+      (match mature_gaps with
+       | (topic, _) :: _ ->
+           let signals = Lodge_heartbeat.get_signals_for_topic ~topic in
+           let gap = enrich_gap ~topic ~signals ~agents in
+           NeedSpawn gap
+       | [] -> Balanced)
+  | "retire" ->
+      (* LLM decided to retire — find most idle agent *)
+      let all_stats = Lodge_selection.get_all_stats () in
+      let idle_candidates = all_stats
+        |> List.filter (fun s ->
+            let idle_hours = (Time_compat.now () -. s.Lodge_selection.last_selected_at) /. 3600.0 in
+            idle_hours > config.idle_threshold_hours)
+        |> List.sort (fun a b ->
+            compare b.Lodge_selection.last_selected_at a.Lodge_selection.last_selected_at) in
+      (match idle_candidates with
+       | candidate :: _ -> NeedRetirement (convert_stats candidate)
+       | [] -> Balanced)
+  | _ -> Balanced
+
 (** Detect what intervention is needed *)
 let detect_intervention ~config ~health : intervention =
-  (* Check for mature gaps first *)
-  let mature_gaps = Lodge_heartbeat.check_gap_threshold () in
-  let agents = Lodge_heartbeat.get_agents () in
-
-  match mature_gaps with
-  | (topic, _count) :: _ when health.needs_spawn ->
-      let signals = Lodge_heartbeat.get_signals_for_topic ~topic in
-      let gap = enrich_gap ~topic ~signals ~agents in
-      if gap.maturity_hours >= config.gap_maturity_hours then
-        NeedSpawn gap
-      else
-        Balanced
-  | _ ->
-      (* Check for retirement candidates *)
-      if health.needs_retirement then begin
-        let all_stats = Lodge_selection.get_all_stats () in
-        let idle_candidates = all_stats
-          |> List.filter (fun s ->
-              let idle_hours = (Time_compat.now () -. s.Lodge_selection.last_selected_at) /. 3600.0 in
-              idle_hours > config.idle_threshold_hours)
-          |> List.sort (fun a b ->
-              compare b.Lodge_selection.last_selected_at a.Lodge_selection.last_selected_at) in
-        match idle_candidates with
-        | candidate :: _ -> NeedRetirement (convert_stats candidate)
-        | [] -> Balanced
-      end else
-        Balanced
+  if config.use_llm_decision then
+    decide_intervention_with_llm ~config ~health
+  else
+    detect_intervention_rule_based ~config ~health
 
 (** {1 Background Loop} *)
 
 (** Main gardener loop iteration *)
-let tick ~config ~room_config:_ : unit =
+let tick ~config ~room_config : unit =
   if is_circuit_open () then
     Eio.traceln "[Gardener] Circuit open, skipping tick"
   else begin
-    let health = calculate_health ~config in
-    Eio.traceln "[Gardener] Health: agents=%d/%d active=%d idle=%d score=%.2f"
+    let health = calculate_health ~config ~room_config:(Some room_config) in
+    let backlog = health.task_backlog in
+    Eio.traceln "[Gardener] Health: agents=%d/%d active=%d idle=%d score=%.2f task_backlog: todo=%d high_pri=%d orphans=%d"
       health.total_agents config.target_agents health.active_agents
-      health.idle_agents health.homeostatic_score;
+      health.idle_agents health.homeostatic_score
+      backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
 
     match detect_intervention ~config ~health with
     | NeedSpawn gap ->
@@ -749,6 +894,22 @@ let tick ~config ~room_config:_ : unit =
         (match execute_spawn ~decision with
          | Ok name -> Eio.traceln "[Gardener] Spawned: %s" name
          | Error e -> Eio.traceln "[Gardener] Spawn failed: %s" e)
+
+    | NeedWorker backlog ->
+        Eio.traceln "[Gardener] Task pressure: %d TODO, %d high-pri, %d orphans"
+          backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
+        let store = Board.global () in
+        let msg = Printf.sprintf
+          "[Gardener] %d unclaimed tasks (P1-P2: %d, oldest: %.1fh). Worker needed."
+          backlog.todo_count backlog.high_priority_todo backlog.oldest_todo_age_hours in
+        (try ignore (Board.create_post store ~author:"gardener" ~content:msg ~ttl_hours:24 ())
+         with exn -> Eio.traceln "[Gardener] Board post failed: %s" (Printexc.to_string exn));
+        Sse.broadcast (`Assoc [
+          ("type", `String "gardener_need_worker");
+          ("todo_count", `Int backlog.todo_count);
+          ("high_priority_todo", `Int backlog.high_priority_todo);
+          ("orphan_count", `Int backlog.orphan_count);
+        ])
 
     | NeedRetirement stats ->
         Eio.traceln "[Gardener] Intervention needed: retire %s" stats.name;
@@ -770,6 +931,7 @@ let rec run_loop ~clock ~config ~room_config () =
 (** Start the gardener (called from main server init) *)
 let start ~sw ~clock ~room_config =
   let config = load_config () in
+  room_config_ref := Some room_config;
   if config.enabled then begin
     (* Initialize lock for thread safety before any concurrent access *)
     gardener_lock := Some (Eio.Mutex.create ());
@@ -786,12 +948,12 @@ let start ~sw ~clock ~room_config =
 (** Get current ecosystem health (for MCP tool) *)
 let get_health () : ecosystem_health =
   let config = load_config () in
-  calculate_health ~config
+  calculate_health ~config ~room_config:!room_config_ref
 
 (** Propose a spawn (for MCP tool) *)
 let propose_spawn ~topic ~reason ~urgency : spawn_decision =
   let config = load_config () in
-  let health = calculate_health ~config in
+  let health = calculate_health ~config ~room_config:!room_config_ref in
   let now = Time_compat.now () in
 
   (* Create a synthetic enriched gap *)
@@ -810,7 +972,7 @@ let propose_spawn ~topic ~reason ~urgency : spawn_decision =
 
 let propose_spawn_with_provenance ~topic ~reason ~urgency : spawn_decision * string =
   let config = load_config () in
-  let health = calculate_health ~config in
+  let health = calculate_health ~config ~room_config:!room_config_ref in
   let now = Time_compat.now () in
   let gap = {
     topic;
@@ -828,7 +990,7 @@ let propose_spawn_with_provenance ~topic ~reason ~urgency : spawn_decision * str
 (** Propose a retirement (for MCP tool) *)
 let propose_retire ~agent_name : retirement_decision =
   let config = load_config () in
-  let health = calculate_health ~config in
+  let health = calculate_health ~config ~room_config:!room_config_ref in
 
   (* Get stats for the agent *)
   let ls = Lodge_selection.get_stats agent_name in

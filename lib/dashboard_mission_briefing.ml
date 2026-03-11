@@ -64,11 +64,26 @@ let normalize_status raw ~allowed ~fallback =
   let lowered = String.trim raw |> String.lowercase_ascii in
   if List.mem lowered allowed then lowered else fallback
 
+let split_csv_nonempty raw =
+  raw
+  |> String.split_on_char ','
+  |> List.filter_map (fun item ->
+         let trimmed = String.trim item in
+         if trimmed = "" then None else Some trimmed)
+
 (** Model specs for mission briefing LLM cascade.
-    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
-    Override via config/llm_cascade.json key "briefing_models". *)
+    Explicit MASC_DASHBOARD_BRIEFING_MODELS keeps its old escape-hatch behavior.
+    Otherwise delegate to Lodge_cascade for hot-reloadable config/defaults. *)
 let mission_briefing_models () =
-  Lodge_cascade.get_cascade ~cascade_name:"briefing" ()
+  match Sys.getenv_opt "MASC_DASHBOARD_BRIEFING_MODELS" with
+  | Some raw ->
+      let parsed = split_csv_nonempty raw in
+      if parsed = [] then
+        Lodge_cascade.get_cascade ~cascade_name:"briefing" ()
+      else
+        Llm_client.available_model_specs_of_strings parsed
+  | None ->
+      Lodge_cascade.get_cascade ~cascade_name:"briefing" ()
 
 let mission_briefing_criteria =
   [

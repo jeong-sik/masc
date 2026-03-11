@@ -79,8 +79,8 @@ let worker_model_spec () =
       | Some raw when String.trim raw <> "" ->
           Llm_client.model_spec_of_string ("llama:" ^ String.trim raw)
       | _ ->
-          Error
-            "MASC_LODGE_WORKER_MODEL (provider:model) or LLAMA_SWARM_MODEL is required for Lodge MCP workers")
+          Llm_client.model_spec_of_string
+            ("llama:" ^ Env_config.Llama.default_model))
 
 let base_path () =
   Room_utils.resolve_masc_base_path (Sys.getcwd ())

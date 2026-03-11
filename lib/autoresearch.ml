@@ -300,8 +300,14 @@ let git_reset_last ~workdir =
 
 (** Commit with autoresearch-formatted message. *)
 let git_commit_cycle ~workdir ~cycle ~hypothesis ~baseline =
+  (* Sanitize hypothesis: collapse newlines/control chars to single space *)
+  let safe_hyp =
+    String.to_seq hypothesis
+    |> Seq.map (fun c -> if c < ' ' then ' ' else c)
+    |> String.of_seq
+    |> String.trim in
   let message = Printf.sprintf "[autoresearch] cycle %d: %s (baseline=%.4f)"
-    cycle hypothesis baseline in
+    cycle safe_hyp baseline in
   git_commit ~workdir ~message
 
 (** Tag the current HEAD as the best result so far. *)

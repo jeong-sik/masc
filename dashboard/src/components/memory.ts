@@ -36,6 +36,8 @@ const detailPostId = signal<string | null>(null)
 const commentText = signal('')
 const commentSubmitting = signal(false)
 const hideAutomationPosts = signal(true)
+const PAGE_SIZE = 20
+const visibleLimit = signal(PAGE_SIZE)
 
 function defaultCommentAuthor(): string {
   const params = new URLSearchParams(window.location.search)
@@ -62,13 +64,14 @@ function isUpdated(post: BoardPost): boolean {
 }
 
 function isLikelyTestPost(post: BoardPost): boolean {
-  const haystack = `${post.title} ${post.tags.join(' ')} ${post.flair ?? ''}`.toLowerCase()
+  const haystack = `${post.title} ${post.author} ${post.tags.join(' ')} ${post.flair ?? ''}`.toLowerCase()
   return /\b(test|smoke|harness|sandbox|dummy|sample|tmp|qa|e2e)\b/.test(haystack)
     || haystack.includes('테스트')
     || haystack.includes('실험')
 }
 
 function isAutomationBoardPost(post: BoardPost): boolean {
+  if (post.post_kind) return post.post_kind === 'automation'
   const hearth = (post.hearth ?? '').toLowerCase()
   if (post.visibility !== 'internal' || !post.expires_at || !hearth) return false
   if (hearth.startsWith('mdal')) return true
@@ -80,6 +83,7 @@ function visiblePosts(posts: BoardPost[]): BoardPost[] {
   if (!hideAutomationPosts.value) return posts
   return posts.filter(post => {
     if (isAutomationBoardPost(post)) return false
+    if (post.post_kind) return true
     if (post.hearth || post.visibility || post.expires_at) return true
     return !isLikelyTestPost(post)
   })
@@ -104,6 +108,7 @@ async function loadPostDetail(postId: string) {
       comment_count: data.comment_count,
       created_at: data.created_at,
       updated_at: data.updated_at,
+      post_kind: data.post_kind,
       flair: data.flair,
       hearth: data.hearth,
       visibility: data.visibility,
@@ -151,6 +156,7 @@ function SortBar() {
             class="board-sort-btn ${current === mode.id ? 'active' : ''}"
             onClick=${() => {
               boardSortMode.value = mode.id
+              visibleLimit.value = PAGE_SIZE
               refreshBoard()
             }}
           >
@@ -390,8 +396,18 @@ export function Memory() {
           : html`
               <${Card} title="Posts / Comments" class="section" semanticId="memory.feed">
                 <div class="board-post-list">
-                  ${posts.map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
+                  ${posts.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                 </div>
+                ${posts.length > visibleLimit.value ? html`
+                  <div style="text-align:center; padding:12px 0;">
+                    <button
+                      class="control-btn ghost"
+                      onClick=${() => { visibleLimit.value = visibleLimit.value + PAGE_SIZE }}
+                    >
+                      Show more (${posts.length - visibleLimit.value} remaining)
+                    </button>
+                  </div>
+                ` : null}
               <//>
             `}
     </div>

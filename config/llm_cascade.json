@@ -13,5 +13,23 @@
   ],
   "sentinel_keeper_models": [
     "glm:glm-4.7"
+  ],
+  "gardener_spawn_models": [
+    "glm:glm-4.7"
+  ],
+  "lodge_context_rewrite_models": [
+    "glm:glm-4.7"
+  ],
+  "lodge_trait_gen_models": [
+    "glm:glm-4.7"
+  ],
+  "lodge_comment_models": [
+    "glm:glm-4.7"
+  ],
+  "lodge_agent_match_models": [
+    "glm:glm-4.7"
+  ],
+  "lodge_direct_models": [
+    "glm:glm-4.7"
   ]
 }

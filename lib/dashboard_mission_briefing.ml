@@ -9,8 +9,8 @@ let briefing_timeout_sec () =
       try
         let value = int_of_string (String.trim raw) in
         max 3 value
-      with Failure _ -> 8)
-  | None -> 8
+      with Failure _ -> 20)
+  | None -> 20
 
 type cache_state = {
   mutex : Mutex.t;
@@ -44,7 +44,7 @@ let split_csv_nonempty raw =
   |> List.map String.trim
   |> List.filter (fun item -> item <> "")
 
-let compact_text ?(max_len = 180) raw =
+let compact_text ?(max_len = 96) raw =
   let normalized =
     String.trim raw |> String.split_on_char '\n' |> String.concat " " |> String.trim
   in
@@ -93,7 +93,12 @@ let mission_briefing_models () =
           (if glm then [ "glm:glm-4.7-flash" ] else [])
           @ (if gemini then [ "gemini:gemini-2.5-flash" ] else [])
         in
-        [ "llama:qwen3.5-35b-a3b" ] @ cloud @ [ "ollama:glm-4.7-flash" ]
+        [
+          "llama:qwen3.5-35b-a3b-ud-q8-xl";
+          "ollama:glm-4.7-flash";
+          "llama:qwen3.5-35b-a3b";
+        ]
+        @ cloud
   in
   Llm_client.available_model_specs_of_strings defaults
 
@@ -115,6 +120,8 @@ let prompt_for_facts (facts_json : Yojson.Safe.t) =
      Use only the factual snapshot below.\n\
      Never invent facts. If evidence is insufficient, use \"unclear\".\n\
      Judge whether communication looks healthy and whether work appears aligned to the same goal.\n\
+     Keep summaries short. Each summary should be one sentence, optimized for a top-level dashboard card.\n\
+     Keep each evidence list to at most 2 short strings.\n\
      Output strict JSON only with this shape:\n\
      {\n\
        \"communication_status\": \"healthy|watch|risk|unclear\",\n\
@@ -130,7 +137,7 @@ let prompt_for_facts (facts_json : Yojson.Safe.t) =
        }\n\
      }\n\n\
      Factual snapshot JSON follows:\n%s"
-    (Yojson.Safe.pretty_to_string facts_json)
+    (Yojson.Safe.to_string facts_json)
 
 let parse_string_list json key =
   match member_assoc key json with
@@ -141,6 +148,7 @@ let parse_string_list json key =
                let trimmed = String.trim value in
                if trimmed = "" then None else Some trimmed
            | _ -> None)
+      |> take 2
   | _ -> []
 
 let compact_session_json session_json =
@@ -171,7 +179,10 @@ let compact_session_json session_json =
   `Assoc
     [
       ("session_id", member_assoc "session_id" session_json);
-      ("goal", member_assoc "goal" session);
+      ( "goal",
+        match member_assoc "goal" session with
+        | `String value -> `String (compact_text value)
+        | other -> other );
       ("room_id", member_assoc "room_id" session);
       ("status", member_assoc "status" session);
       ("agent_names", member_assoc "agent_names" session);
@@ -200,14 +211,20 @@ let compact_keeper_json keeper_json =
       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper_json);
       ("compaction_count", member_assoc "compaction_count" keeper_json);
       ("handoff_count_total", member_assoc "handoff_count_total" keeper_json);
-      ("current_task", member_assoc "current_task" agent);
+      ( "current_task",
+        match member_assoc "current_task" agent with
+        | `String value -> `String (compact_text value)
+        | other -> other );
       ("last_reply_status", member_assoc "last_reply_status" diagnostic);
       ( "last_reply_preview",
         match member_assoc "last_reply_preview" diagnostic with
         | `String value -> `String (compact_text value)
         | other -> other );
       ("active_goal_ids", member_assoc "active_goal_ids" keeper_json);
-      ("skill_primary", member_assoc "skill_primary" keeper_json);
+      ( "skill_primary",
+        match member_assoc "skill_primary" keeper_json with
+        | `String value -> `String (compact_text value)
+        | other -> other );
     ]
 
 let section_json ~id ~label ~status ~summary ~evidence =
@@ -334,19 +351,19 @@ let compute_briefing_json ~actor_name ~models ~config ~sw ~clock ~proc_mgr () =
                  ("name", `String agent.name);
                  ("agent_type", `String agent.agent_type);
                  ("status", `String (Types.string_of_agent_status agent.status));
-                 ("current_task", option_string_json agent.current_task);
+                 ("current_task", option_string_json (Option.map compact_text agent.current_task));
                  ("joined_at", `String agent.joined_at);
                  ("last_seen", `String agent.last_seen);
-                 ("capabilities", `List (List.map (fun item -> `String item) agent.capabilities));
+                 ("capabilities", `List (List.map (fun item -> `String item) (take 2 agent.capabilities)));
                ])
     in
     let messages_json =
-      Room.get_messages_raw config ~since_seq:0 ~limit:12
+      Room.get_messages_raw config ~since_seq:0 ~limit:4
       |> List.map (fun (message : Types.message) ->
              `Assoc
                [
                  ("from", `String message.from_agent);
-                 ("content", `String (compact_text ~max_len:120 message.content));
+                 ("content", `String (compact_text ~max_len:72 message.content));
                  ("timestamp", `String message.timestamp);
                ])
     in
@@ -365,10 +382,6 @@ let compute_briefing_json ~actor_name ~models ~config ~sw ~clock ~proc_mgr () =
             match member_assoc "top_attention" summary |> member_assoc "summary" with
             | `String value -> `String (compact_text value)
             | other -> other );
-          ( "top_action_reason",
-            match member_assoc "top_action" summary |> member_assoc "reason" with
-            | `String value -> `String (compact_text value)
-            | other -> other );
         ]
     in
     let facts_json =
@@ -376,9 +389,9 @@ let compute_briefing_json ~actor_name ~models ~config ~sw ~clock ~proc_mgr () =
         [
           ("mission", mission_summary_json);
           ("room", member_assoc "room" snapshot_json);
-          ("sessions", `List (take 5 (List.map compact_session_json sessions)));
-          ("keepers", `List (take 6 (List.map compact_keeper_json keepers)));
-          ("agents", `List (take 12 agents_json));
+          ("sessions", `List (take 3 (List.map compact_session_json sessions)));
+          ("keepers", `List (take 3 (List.map compact_keeper_json keepers)));
+          ("agents", `List (take 5 agents_json));
           ("recent_messages", `List messages_json);
         ]
     in
@@ -395,7 +408,7 @@ let compute_briefing_json ~actor_name ~models ~config ~sw ~clock ~proc_mgr () =
                 Llm_client.user_msg prompt;
               ];
             temperature = 0.0;
-            max_tokens = 420;
+            max_tokens = 260;
             tools = [];
             response_format = `Json;
           })

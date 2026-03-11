@@ -1,4 +1,5 @@
 module Agent_swarm_live_harness = Masc_mcp.Agent_swarm_live_harness
+module Env_config = Masc_mcp.Env_config
 
 type cli_args = {
   run_id : string;
@@ -19,7 +20,7 @@ let default_args =
     masc_url = "http://127.0.0.1:8935";
     provider_base_url = "http://127.0.0.1:3034";
     model_id = "qwen3.5-35b-a3b-ud-q8-xl";
-    slot_url = "http://127.0.0.1:8085";
+    slot_url = Env_config.Llama.server_url;
     worker_count = 12;
     min_hot_slots = 10;
     required_final_markers = 12;

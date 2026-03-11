@@ -11,12 +11,12 @@ export interface Agent {
   context_ratio?: number
   joined_at?: string
   last_seen?: string
-  capabilities: string[]
+  capabilities?: string[]
   emoji?: string
   koreanName?: string
   model?: string
-  traits: string[]
-  interests: string[]
+  traits?: string[]
+  interests?: string[]
   activityLevel?: number
   preferredHours?: number[]
   peakHour?: number
@@ -49,6 +49,7 @@ export interface Message {
 export interface BoardPost {
   id: string
   author: string
+  post_kind?: 'human' | 'automation' | 'system'
   title: string
   content: string
   tags: string[]
@@ -736,6 +737,75 @@ export interface DashboardMissionTargets {
   available_actions: OperatorActionDescriptor[]
 }
 
+export interface DashboardMissionAttentionQueueItem {
+  id: string
+  kind: string
+  severity: string
+  summary: string
+  target_type: string
+  target_id?: string | null
+  top_action?: OperatorRecommendedAction | null
+  related_session_ids: string[]
+  related_agent_names: string[]
+  evidence_preview: string[]
+  last_seen_at?: string | null
+}
+
+export interface DashboardMissionSessionBrief {
+  session_id: string
+  goal: string
+  room?: string | null
+  status?: string
+  health?: string
+  member_names: string[]
+  started_at?: string | null
+  elapsed_sec?: number | null
+  last_event_at?: string | null
+  last_event_summary?: string | null
+  communication_summary?: string | null
+  active_count?: number
+  required_count?: number
+  related_attention_count: number
+  top_attention?: OperatorAttentionItem | null
+  top_recommendation?: OperatorRecommendedAction | null
+}
+
+export interface DashboardMissionAgentBrief {
+  agent_name: string
+  status?: string
+  where?: string | null
+  with_whom: string[]
+  current_work?: string | null
+  related_session_id?: string | null
+  related_attention_count: number
+  recent_output_preview?: string | null
+  recent_input_preview?: string | null
+  recent_event?: string | null
+  recent_tool_names: string[]
+}
+
+export interface DashboardMissionKeeperBrief {
+  name: string
+  agent_name?: string | null
+  status?: string
+  generation?: number
+  context_ratio?: number | null
+  last_turn_ago_s?: number | null
+  current_work?: string | null
+  last_autonomous_action_at?: string | null
+}
+
+export interface DashboardMissionInternalSignal {
+  id: string
+  signal_type: 'attention' | 'action'
+  severity: string
+  summary: string
+  target_type: string
+  target_id?: string | null
+  attention?: OperatorAttentionItem | null
+  action?: OperatorRecommendedAction | null
+}
+
 export interface DashboardMissionResponse {
   generated_at?: string
   summary: DashboardMissionSummary
@@ -743,6 +813,11 @@ export interface DashboardMissionResponse {
   recommended_actions: OperatorRecommendedAction[]
   command_focus: DashboardMissionCommandFocus
   operator_targets: DashboardMissionTargets
+  attention_queue: DashboardMissionAttentionQueueItem[]
+  session_briefs: DashboardMissionSessionBrief[]
+  agent_briefs: DashboardMissionAgentBrief[]
+  keeper_briefs: DashboardMissionKeeperBrief[]
+  internal_signals: DashboardMissionInternalSignal[]
 }
 
 export interface DashboardMissionBriefingSection {

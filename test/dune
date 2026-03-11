@@ -49,6 +49,18 @@
  (modules test_notifications)
  (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
 
+; Dashboard mission test (requires Eio)
+(test
+ (name test_dashboard_mission)
+ (modules test_dashboard_mission)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
+; Board TTL + metadata classification tests
+(test
+ (name test_board_ttl)
+ (modules test_board_ttl)
+ (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
+
 ; Agent SDK swarm integration tests (ported from former agent-swarm package)
 (test
  (name test_agent_swarm_masc_tools)

@@ -246,6 +246,10 @@ module Ollama = struct
   (** Default local runtime model — mirrors the centralized default model. *)
   let default_model =
     get_string ~default:"default-model" "MASC_DEFAULT_MODEL"
+
+  (** Ollama server base URL (no trailing slash). *)
+  let server_url =
+    get_string ~default:"http://127.0.0.1:11434" "OLLAMA_URL"
 end
 
 (** {1 llama.cpp Server Configuration} *)

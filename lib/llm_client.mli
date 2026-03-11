@@ -192,6 +192,7 @@ val run_prompt_cascade :
   ?timeout_sec:int ->
   ?ollama_timeout_sec:int ->
   ?accept:(completion_response -> bool) ->
+  ?system:string ->
   model_specs:model_spec list ->
   max_tokens:int ->
   prompt:string ->

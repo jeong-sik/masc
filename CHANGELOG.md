@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.79.0] - 2026-03-11
+
+### Added
+- **Mission Briefing Interactive UI** — full panel with LLM cascade reorder, async SWR (#734, #720, #701)
+- **Live Monitor Tab** — 3-panel real-time swarm/agent view (#688)
+- **Command War Room** — centralized operator console (#681)
+- **Board Gardener Keeper** — force task ops + zombie cascade (#666)
+- **Sentinel Default Resident** — LLM judgment layer for board/task/keeper consumers (#699, #709)
+- **Intent-Backed Predictive Control** — CPv2 intent forecast + correction loop (#668)
+- **Swarm Live Run** — `masc_swarm_live_run` MCP tool for inline benchmark (#689)
+- **64-Agent Structural Gaps** — checkpoint, goal loop, MDAL swarm (#693)
+- **Tool Registry Call Counters** — in-memory counters + `/tools/list` mode filter (#692)
+- **Karpathy Autoresearch** — autonomous experiment loop (#717)
+- **GC Keeper Extensions** — orphan cleanup + team session archiving (#723)
+- **Mode Tool-Category Mapping** — rewrite for effective mode filtering (#721)
+- **Swarm Role-Based Tuning** — per-role temperature and max_tokens in agent_spec (#719)
+- **Keeper Continuity Validation** — harness-level keeper handoff checks (#715)
+- **LLM-Based Semantic Scoring** — capability-match upgrade (#674)
+- **Dashboard Semantic Layer Registry** — typed layer abstraction (#667)
+- **Dashboard Visibility and Board Hygiene** — scoped visibility + board cleanup (#690)
+- **Swarm Session Visibility** — dashboard swarm session panel (#698)
+- **Heuristic LLM Scoring** — heuristic modules enhanced with LLM layer (#687)
+
+### Changed
+- **Command Plane Decomposition** — `command_plane_v2.ml` (6791 lines) split into 7 focused modules (#672)
+- **Dashboard Operator Console** — full rewrite with progressive disclosure + triage-first UX (#675, #676)
+- **Dashboard God Module Decomposition** — CSS/command/TRPG/Ops modules extracted (#704)
+- **Normalize Helpers** consolidated into `common/normalize.ts` shared module (#727)
+- Dashboard components consolidated, dead code removed (#722)
+- Planning tab hierarchy inverted — tasks first, empty features collapsed (#712)
+- Sentinel heuristic fallback removed in favor of LLM-driven consumers (#714)
+- Ollama implicit fallback bias removed — explicit provider selection (#694)
+- Silent error cleanup and code hygiene across modules (#700)
+- Dashboard and workspace runtime config encapsulated (#673)
+
+### Fixed
+- Mission room actions and participants preserved across navigation (#737)
+- Memory tab: post-filter + cursor-based pagination corrected (#735)
+- Keeper internal notes hidden from execution view (#733)
+- Hidden tools bypass mode filter resolved (#724)
+- Planning/swarm contracts tightened (#718)
+- Swarm proof path aligned with canonical harness (#711)
+- Ollama and OpenRouter added to `resolve_provider` (#713)
+- Keeper continuity cleanup hardened (#716)
+- CI-failing tests aligned with actual code (#710)
+- P0 exception narrowing and module extraction (#665)
+- Eio.Mutex for fiber-safe SSE client registry (#683)
+- Agent.create calls adapted to options-record API (#682)
+- `json_int_opt` for LLM token parse failures (#707)
+- Agent SDK aligned with latest pinned version (#708)
+- Dashboard visibility semantics tightened (#697)
+- Managed lane kept visible for live alerts (#671)
+- Stale managed trace residue ignored in swarm status (#670)
+- Intent forecast review regressions addressed (#669)
+- Dashboard operator semantics restored (#679)
+- Missing CSS classes for scroll targets added (#677)
+- `masc_swarm_live_run` registered in tool catalog and mode (#703)
+- Repo dashboard assets preferred over cwd assets (#702)
+
+### Testing
+- Mode end-to-end tool count validation per preset (#725)
+
 ## [2.78.0] - 2026-03-10
 
 ### Added

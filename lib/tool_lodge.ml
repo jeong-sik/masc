@@ -422,16 +422,14 @@ let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
               (string_of_provider cli) e1 (string_of_provider cli2) e2))
   end
 
-(** Call GLM API directly — Z.ai cloud API, 200K context, no VRAM.
-    Uses Llm_direct.call_glm for direct API calls (no proxy). *)
+(** Call GLM API via Llm_client cascade — Z.ai cloud API, 200K context, no VRAM. *)
 let glm_direct ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system prompt =
-  ignore _temp;
-  try
-    let full_prompt = Printf.sprintf "%s\n\n%s" system prompt in
-    let result = Llm_direct.call_glm ~model:"glm-4.7" ~prompt:full_prompt ~timeout_sec:120 ~max_chars:max_tokens () in
-    if String.length result > 0 then Ok result
-    else Error "❌ LLM: GLM returned empty response"
-  with exn -> Error (Printf.sprintf "❌ LLM: GLM exception [%s]" (Printexc.to_string exn))
+  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_direct" () in
+  match Llm_client.run_prompt_cascade ~temperature:_temp ~timeout_sec:120
+      ~system ~model_specs ~max_tokens ~prompt () with
+  | Ok resp when String.length resp.content > 0 -> Ok resp.content
+  | Ok _ -> Error "LLM: GLM returned empty response"
+  | Error e -> Error (Printf.sprintf "LLM: cascade failed [%s]" e)
 
 (** Call local ollama API — DEPRECATED, use glm_direct instead *)
 let ollama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
@@ -457,7 +455,7 @@ let ollama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500) ~sys
     ]) in
     let argv =
       ["curl"; "-sf"; "--max-time"; "120";
-       "-X"; "POST"; "http://127.0.0.1:11434/api/generate";
+       "-X"; "POST"; Env_config.Ollama.server_url ^ "/api/generate";
        "-H"; "Content-Type: application/json";
        "-d"; "@-"]
     in

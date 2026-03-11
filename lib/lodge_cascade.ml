@@ -70,6 +70,9 @@ let default_model_strings ~cascade_name =
       ]
   | "sentinel_board" | "sentinel_task" | "sentinel_keeper" ->
       [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+  | "gardener_spawn" | "lodge_context_rewrite" | "lodge_trait_gen"
+  | "lodge_comment" | "lodge_agent_match" | "lodge_direct" ->
+      [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
   | _ -> []
 
 let model_key_of_cascade cascade_name = cascade_name ^ "_models"

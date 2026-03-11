@@ -660,7 +660,13 @@ let () =
             history
           in
 
-          let summary = Llm_direct.call_glm ~model:"glm-4.7" ~prompt:summary_prompt ~timeout_sec:60 ~max_chars:2000 () in
+          let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_context_rewrite" () in
+          let summary =
+            match Llm_client.run_prompt_cascade ~temperature:0.3 ~timeout_sec:60
+                ~model_specs ~max_tokens:700 ~prompt:summary_prompt () with
+            | Ok resp -> resp.content
+            | Error _ -> ""
+          in
 
           if String.length summary > 50 then begin
             let old_tokens = ctx.token_count in
@@ -1150,7 +1156,13 @@ let generate_agent_traits ~topic ~reason =
 }|}
     topic reason
   in
-  let response = Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:15 ~max_chars:500 () in
+  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_trait_gen" () in
+  let response =
+    match Llm_client.run_prompt_cascade ~temperature:0.5 ~timeout_sec:15
+        ~model_specs ~max_tokens:200 ~prompt () with
+    | Ok resp -> resp.content
+    | Error _ -> ""
+  in
   (* Extract JSON from response *)
   try
     let start = String.index response '{' in
@@ -1863,39 +1875,29 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
   (* Add user message to context *)
   add_to_context ~name:agent_name ~role:User ~content:user_prompt;
 
-  (* Build full prompt with accumulated context *)
-  let full_prompt = build_prompt_with_context ~name:agent_name ~system_prompt ~user_prompt in
+  (* Build system context for LLM *)
+  let ctx = get_agent_context ~name:agent_name ~max_tokens:130000 in
+  if needs_rewrite ~name:agent_name then rewrite_context ~name:agent_name;
+  let context_str = ctx.messages |> List.map (fun m -> m.content) |> String.concat "\n" in
+  let system_with_context =
+    if String.length context_str > 0 then
+      Printf.sprintf "%s\n\n[컨텍스트]\n%s" system_prompt context_str
+    else system_prompt
+  in
 
   (* Log context stats *)
   let (tokens, max_tokens, msg_count) = get_context_stats ~name:agent_name in
   Eio.traceln "   📊 [%s] Context: %d/%d tokens (%d msgs)" agent_name tokens max_tokens msg_count;
 
-  (* Direct GLM call for content generation (no llm-mcp dependency) *)
-  let raw_response = Llm_direct.call_glm ~model:"glm-4.7" ~prompt:full_prompt ~timeout_sec:30 ~max_chars:300 () in
-
-  (* Strip [Extra] metadata and CLI hook outputs from LLM response *)
-  let strip_extra_metadata s =
-    (* Strip [Extra] *)
-    let s = match String.index_opt s '[' with
-      | Some idx when idx > 0 ->
-          let before = String.sub s 0 idx in
-          if String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" then
-            String.trim before
-          else s
-      | _ -> s
-    in
-    (* Strip CLI hook outputs (Gemini, etc.) *)
-    let rec find_hook_start str idx =
-      if idx >= String.length str then None
-      else if String.length str - idx >= 20 &&
-              String.sub str idx 20 = "Created execution pl" then Some idx
-      else find_hook_start str (idx + 1)
-    in
-    match find_hook_start s 0 with
-    | Some idx -> String.trim (String.sub s 0 idx)
-    | None -> s
+  (* LLM call via cascade abstraction *)
+  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_comment" () in
+  let response =
+    match Llm_client.run_prompt_cascade ~temperature:0.7 ~timeout_sec:30
+        ~system:system_with_context ~model_specs ~max_tokens:120
+        ~prompt:user_prompt () with
+    | Ok resp -> resp.content
+    | Error _ -> ""
   in
-  let response = strip_extra_metadata raw_response in
 
   (* Save response to context and thread if successful *)
   (* Filter out empty/invalid responses from LLM *)
@@ -3140,7 +3142,13 @@ let analyze_broadcast_relevance_llm ~content ~available_agents =
      예: dreamer, historian"
     content agents_str
   in
-  let response = Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:15 ~max_chars:500 () in
+  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_agent_match" () in
+  let response =
+    match Llm_client.run_prompt_cascade ~temperature:0.1 ~timeout_sec:15
+        ~model_specs ~max_tokens:200 ~prompt () with
+    | Ok resp -> resp.content
+    | Error _ -> ""
+  in
   (* Parse response to get agent names *)
   if String.length response < 3 || response = "none" then []
   else begin

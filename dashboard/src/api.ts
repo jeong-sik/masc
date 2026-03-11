@@ -8,6 +8,7 @@ import type {
   DashboardMemoryResponse,
   DashboardMissionBriefingResponse,
   DashboardMissionResponse,
+  DashboardMissionSessionDetailResponse,
   DashboardProofResponse,
   DashboardPlanningResponse,
   DashboardShellResponse,
@@ -389,6 +390,11 @@ export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
   return get('/api/v1/dashboard/mission')
+}
+
+export function fetchDashboardMissionSession(sessionId: string): Promise<DashboardMissionSessionDetailResponse> {
+  const query = `?session_id=${encodeURIComponent(sessionId)}`
+  return get(`/api/v1/dashboard/session${query}`)
 }
 
 export function fetchDashboardMissionBriefing(force = false): Promise<DashboardMissionBriefingResponse> {

@@ -271,7 +271,8 @@ export function enrichedKeeperRow(brief: DashboardMissionKeeperBrief): EnrichedK
 export function sessionLookupById() {
   const mission = missionSnapshot.value
   if (!mission) return new Map<string, DashboardMissionSessionBrief>()
-  return new Map(mission.session_briefs.map(item => [item.session_id, item]))
+  const rows = mission.sessions.length > 0 ? mission.sessions : mission.session_briefs
+  return new Map(rows.map(item => [item.session_id, item]))
 }
 
 export function memberPreview(name: string) {
@@ -294,6 +295,7 @@ export function toggleAttention(id: string): void {
 
 export function toggleSession(id: string): void {
   selectedSessionId.value = selectedSessionId.value === id ? null : id
+  selectedAttentionId.value = null
 }
 
 export function clearMissionSelection(): void {

@@ -1,5 +1,9 @@
 import { signal } from '@preact/signals'
-import { fetchDashboardMission, fetchDashboardMissionBriefing } from './api'
+import {
+  fetchDashboardMission,
+  fetchDashboardMissionBriefing,
+  fetchDashboardMissionSession,
+} from './api'
 import type {
   DashboardMissionAgentBrief,
   DashboardMissionAttentionQueueItem,
@@ -8,9 +12,15 @@ import type {
   DashboardMissionBriefingMetadataGap,
   DashboardMissionInternalSignal,
   DashboardMissionKeeperBrief,
+  DashboardMissionKeeperRef,
+  DashboardMissionOperationBadge,
+  DashboardMissionParticipantPreview,
   DashboardMissionResponse,
+  DashboardMissionSessionCard,
+  DashboardMissionSessionDetailResponse,
   DashboardMissionSessionBrief,
   DashboardMissionSummary,
+  DashboardMissionTimelineItem,
   DashboardMissionCommandFocus,
   DashboardMissionTargets,
   OperatorActionDescriptor,
@@ -28,6 +38,9 @@ export const missionError = signal<string | null>(null)
 export const missionBriefing = signal<DashboardMissionBriefingResponse | null>(null)
 export const missionBriefingLoading = signal(false)
 export const missionBriefingError = signal<string | null>(null)
+export const missionSessionDetail = signal<DashboardMissionSessionDetailResponse | null>(null)
+export const missionSessionDetailLoading = signal(false)
+export const missionSessionDetailError = signal<string | null>(null)
 
 let missionBriefingPollTimer: number | null = null
 
@@ -338,6 +351,8 @@ function normalizeSessionBrief(raw: unknown): DashboardMissionSessionBrief | nul
       .filter(Boolean),
     started_at: asString(raw.started_at) ?? null,
     elapsed_sec: asNumber(raw.elapsed_sec) ?? null,
+    operation_id: asString(raw.operation_id) ?? null,
+    blocker_summary: asString(raw.blocker_summary) ?? null,
     last_event_at: asString(raw.last_event_at) ?? null,
     last_event_summary: asString(raw.last_event_summary) ?? null,
     communication_summary: asString(raw.communication_summary) ?? null,
@@ -346,6 +361,69 @@ function normalizeSessionBrief(raw: unknown): DashboardMissionSessionBrief | nul
     related_attention_count: asNumber(raw.related_attention_count) ?? 0,
     top_attention: normalizeAttentionItem(raw.top_attention),
     top_recommendation: normalizeRecommendedAction(raw.top_recommendation),
+  }
+}
+
+function normalizeParticipantPreview(raw: unknown): DashboardMissionParticipantPreview | null {
+  if (!isRecord(raw)) return null
+  const agentName = asString(raw.agent_name)
+  if (!agentName) return null
+  return {
+    agent_name: agentName,
+    status: asString(raw.status),
+    current_work: asString(raw.current_work) ?? null,
+    recent_input_preview: asString(raw.recent_input_preview) ?? null,
+    recent_output_preview: asString(raw.recent_output_preview) ?? null,
+    recent_tool_names: extractArray(raw.recent_tool_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    last_activity_at: asString(raw.last_activity_at) ?? null,
+  }
+}
+
+function normalizeOperationBadge(raw: unknown): DashboardMissionOperationBadge | null {
+  if (!isRecord(raw)) return null
+  const operationId = asString(raw.operation_id)
+  if (!operationId) return null
+  return {
+    operation_id: operationId,
+    status: asString(raw.status),
+    stage: asString(raw.stage) ?? null,
+    detachment_status: asString(raw.detachment_status) ?? null,
+    objective: asString(raw.objective) ?? null,
+    updated_at: asString(raw.updated_at) ?? null,
+  }
+}
+
+function normalizeKeeperRef(raw: unknown): DashboardMissionKeeperRef | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  if (!name) return null
+  return {
+    name,
+    agent_name: asString(raw.agent_name) ?? null,
+    status: asString(raw.status),
+    generation: asNumber(raw.generation),
+    context_ratio: asNumber(raw.context_ratio) ?? null,
+    last_turn_ago_s: asNumber(raw.last_turn_ago_s) ?? null,
+    current_work: asString(raw.current_work) ?? null,
+  }
+}
+
+function normalizeMissionSessionCard(raw: unknown): DashboardMissionSessionCard | null {
+  const base = normalizeSessionBrief(raw)
+  if (!base) return null
+  return {
+    ...base,
+    member_previews: extractArray(isRecord(raw) ? raw.member_previews : undefined)
+      .map(normalizeParticipantPreview)
+      .filter((item): item is DashboardMissionParticipantPreview => item !== null),
+    operation_badges: extractArray(isRecord(raw) ? raw.operation_badges : undefined)
+      .map(normalizeOperationBadge)
+      .filter((item): item is DashboardMissionOperationBadge => item !== null),
+    keeper_refs: extractArray(isRecord(raw) ? raw.keeper_refs : undefined)
+      .map(normalizeKeeperRef)
+      .filter((item): item is DashboardMissionKeeperRef => item !== null),
   }
 }
 
@@ -363,6 +441,7 @@ function normalizeAgentBrief(raw: unknown): DashboardMissionAgentBrief | null {
     current_work: asString(raw.current_work) ?? null,
     related_session_id: asString(raw.related_session_id) ?? null,
     related_attention_count: asNumber(raw.related_attention_count) ?? 0,
+    last_activity_at: asString(raw.last_activity_at) ?? null,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
     recent_event: asString(raw.recent_event) ?? null,
@@ -428,6 +507,13 @@ function normalizeInternalSignal(raw: unknown): DashboardMissionInternalSignal |
 
 function normalizeMission(raw: unknown): DashboardMissionResponse {
   const root = isRecord(raw) ? raw : {}
+  const sessionBriefs = extractArray(root.session_briefs)
+    .map(normalizeSessionBrief)
+    .filter((item): item is DashboardMissionSessionBrief => item !== null)
+  const sessionCards =
+    extractArray(root.sessions)
+      .map(normalizeMissionSessionCard)
+      .filter((item): item is DashboardMissionSessionCard => item !== null)
   return {
     generated_at: asString(root.generated_at),
     summary: normalizeSummary(root.summary),
@@ -442,9 +528,10 @@ function normalizeMission(raw: unknown): DashboardMissionResponse {
     attention_queue: extractArray(root.attention_queue)
       .map(normalizeAttentionQueueItem)
       .filter((item): item is DashboardMissionAttentionQueueItem => item !== null),
-    session_briefs: extractArray(root.session_briefs)
-      .map(normalizeSessionBrief)
-      .filter((item): item is DashboardMissionSessionBrief => item !== null),
+    sessions: sessionCards.length > 0
+      ? sessionCards
+      : sessionBriefs.map(item => ({ ...item, member_previews: [], operation_badges: [], keeper_refs: [] })),
+    session_briefs: sessionBriefs,
     agent_briefs: extractArray(root.agent_briefs)
       .map(normalizeAgentBrief)
       .filter((item): item is DashboardMissionAgentBrief => item !== null),
@@ -454,6 +541,42 @@ function normalizeMission(raw: unknown): DashboardMissionResponse {
     internal_signals: extractArray(root.internal_signals)
       .map(normalizeInternalSignal)
       .filter((item): item is DashboardMissionInternalSignal => item !== null),
+  }
+}
+
+function normalizeTimelineItem(raw: unknown): DashboardMissionTimelineItem | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const summary = asString(raw.summary)
+  if (!id || !summary) return null
+  return {
+    id,
+    timestamp: asString(raw.timestamp) ?? null,
+    event_type: asString(raw.event_type),
+    actor: asString(raw.actor) ?? null,
+    summary,
+  }
+}
+
+function normalizeMissionSessionDetail(raw: unknown): DashboardMissionSessionDetailResponse {
+  const root = isRecord(raw) ? raw : {}
+  return {
+    generated_at: asString(root.generated_at),
+    session_id: asString(root.session_id) ?? '',
+    session: normalizeMissionSessionCard(root.session),
+    timeline: extractArray(root.timeline)
+      .map(normalizeTimelineItem)
+      .filter((item): item is DashboardMissionTimelineItem => item !== null),
+    participants: extractArray(root.participants)
+      .map(normalizeParticipantPreview)
+      .filter((item): item is DashboardMissionParticipantPreview => item !== null),
+    operations: extractArray(root.operations)
+      .map(normalizeOperationBadge)
+      .filter((item): item is DashboardMissionOperationBadge => item !== null),
+    keepers: extractArray(root.keepers)
+      .map(normalizeKeeperRef)
+      .filter((item): item is DashboardMissionKeeperRef => item !== null),
+    error: asString(root.error) ?? null,
   }
 }
 
@@ -565,6 +688,25 @@ export async function refreshMissionSnapshot(): Promise<void> {
     missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'
   } finally {
     missionLoading.value = false
+  }
+}
+
+export async function refreshMissionSessionDetail(sessionId: string | null | undefined): Promise<void> {
+  if (!sessionId) {
+    missionSessionDetail.value = null
+    missionSessionDetailError.value = null
+    missionSessionDetailLoading.value = false
+    return
+  }
+  missionSessionDetailLoading.value = true
+  missionSessionDetailError.value = null
+  try {
+    const raw = await fetchDashboardMissionSession(sessionId)
+    missionSessionDetail.value = normalizeMissionSessionDetail(raw)
+  } catch (err) {
+    missionSessionDetailError.value = err instanceof Error ? err.message : 'Failed to load session detail'
+  } finally {
+    missionSessionDetailLoading.value = false
   }
 }
 

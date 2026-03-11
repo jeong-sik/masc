@@ -14,6 +14,8 @@ import type {
   DashboardMissionAttentionQueueItem,
   DashboardMissionInternalSignal,
   DashboardMissionSessionBrief,
+  DashboardMissionSessionCard,
+  DashboardMissionSessionDetailResponse,
 } from '../types'
 import {
   type EnrichedAgentRow,
@@ -32,7 +34,6 @@ import {
   openActionCommand,
   openSession,
   attentionAsIncident,
-  memberPreview,
 } from './mission-utils'
 
 export function MissionContextBar({
@@ -306,10 +307,10 @@ export function SessionBriefCard({
   brief,
   selected,
 }: {
-  brief: DashboardMissionSessionBrief
+  brief: DashboardMissionSessionCard
   selected: boolean
 }) {
-  const members = brief.member_names.slice(0, 6).map(memberPreview)
+  const members = brief.member_previews.slice(0, 4)
   const action = brief.top_recommendation ?? null
   const incident = brief.top_attention ?? null
 
@@ -336,8 +337,8 @@ export function SessionBriefCard({
             <small>${brief.started_at ? `${relativeTime(brief.started_at)} 시작` : '시작 시각 없음'}</small>
           </div>
           <div class="mission-fact-tile">
-            <span>커뮤니케이션</span>
-            <strong>${brief.communication_summary ? '요약됨' : 'n/a'}</strong>
+            <span>최근 흐름</span>
+            <strong>${brief.last_event_at ? relativeTime(brief.last_event_at) : 'n/a'}</strong>
             <small>${brief.communication_summary ?? '요약 없음'}</small>
           </div>
           <div class="mission-fact-tile">
@@ -348,45 +349,39 @@ export function SessionBriefCard({
         </div>
       </button>
 
+      ${brief.blocker_summary ? html`<div class="mission-inline-note">막힘 · ${brief.blocker_summary}</div>` : null}
+
       <div class="mission-crew-event">
         <span>최근 사건</span>
         <strong>${brief.last_event_summary ?? '최근 session event가 없습니다.'}</strong>
         <small>${brief.last_event_at ? relativeTime(brief.last_event_at) : '시각 없음'}</small>
       </div>
 
-      ${brief.top_attention ? html`<div class="mission-inline-note">attention: ${brief.top_attention.summary}</div>` : null}
+      ${brief.operation_badges.length > 0
+        ? html`
+            <div class="mission-pill-row">
+              ${brief.operation_badges.slice(0, 3).map(operation => html`
+                <span class="mission-pill">
+                  ${operation.operation_id} · ${operation.status ?? 'unknown'}${operation.stage ? ` · ${operation.stage}` : ''}
+                </span>
+              `)}
+            </div>
+          `
+        : null}
 
-      <details class="mission-card-disclosure">
-        <summary>session detail</summary>
-        ${members.length > 0
-          ? html`
-              <div class="mission-pill-row">
-                ${members.map(member => html`
-                  <button class="mission-pill action" onClick=${() => openAgentDetail(member.name)}>
-                    ${member.model !== member.nickname ? `${member.model} · ` : ''}${member.nickname}
-                  </button>
-                `)}
-              </div>
-            `
-          : null}
-
-        ${members.length > 0
-          ? html`
-              <details class="mission-card-disclosure compact">
-                <summary>member output preview</summary>
-                <div class="mission-link-list">
-                  ${members.map(member => html`
-                    <button class="mission-link-row" onClick=${() => openAgentDetail(member.name)}>
-                      <strong>${member.nickname}</strong>
-                      <span>${member.currentTask}</span>
-                      <small>${member.output ?? '최근 출력 없음'}</small>
-                    </button>
-                  `)}
-                </div>
-              </details>
-            `
-          : null}
-      </details>
+      ${members.length > 0
+        ? html`
+            <div class="mission-member-preview-grid">
+              ${members.map(member => html`
+                <button class="mission-member-preview" onClick=${() => openAgentDetail(member.agent_name)}>
+                  <strong>${member.agent_name}</strong>
+                  <span>${member.current_work ?? '현재 작업 없음'}</span>
+                  <small>${member.recent_output_preview ?? member.recent_input_preview ?? '최근 입출력 없음'}</small>
+                </button>
+              `)}
+            </div>
+          `
+        : null}
 
       <div class="mission-card-actions">
         <button class="control-btn ghost" onClick=${() => openSession('intervene', brief.session_id)}>세션 개입 열기</button>
@@ -396,6 +391,129 @@ export function SessionBriefCard({
           : null}
       </div>
     </article>
+  `
+}
+
+export function SessionDetailCard({
+  detail,
+  loading,
+  error,
+}: {
+  detail: DashboardMissionSessionDetailResponse | null
+  loading: boolean
+  error: string | null
+}) {
+  if (loading && !detail) {
+    return html`
+      <${Card} title="세션 상세" class="mission-list-card">
+        <div class="loading-indicator">세션 상세 불러오는 중...</div>
+      <//>
+    `
+  }
+
+  if (error && !detail) {
+    return html`
+      <${Card} title="세션 상세" class="mission-list-card">
+        <div class="empty-state error">${error}</div>
+      <//>
+    `
+  }
+
+  if (!detail?.session) {
+    return null
+  }
+
+  const session = detail.session
+  return html`
+    <${Card} title="세션 상세" class="mission-list-card" semanticId="mission.session_detail">
+      <div class="mission-section-head">
+        <h3>${session.goal}</h3>
+        <p>${session.session_id}${session.room ? ` · ${session.room}` : ''}</p>
+      </div>
+
+      ${error ? html`<div class="mission-inline-note">${error}</div>` : null}
+
+      <div class="mission-detail-grid">
+        <div class="mission-detail-column">
+          <div class="mission-card-head">
+            <strong>타임라인</strong>
+            <span class="command-chip">${detail.timeline.length}</span>
+          </div>
+          <div class="mission-timeline-list">
+            ${detail.timeline.length > 0
+              ? detail.timeline.map(item => html`
+                  <article class="mission-timeline-row">
+                    <div class="mission-card-head">
+                      <strong>${item.summary}</strong>
+                      <span>${item.timestamp ? relativeTime(item.timestamp) : 'n/a'}</span>
+                    </div>
+                    <small>${item.actor ? `${item.actor} · ` : ''}${item.event_type ?? 'event'}</small>
+                  </article>
+                `)
+              : html`<div class="empty-state">표시할 세션 이벤트가 없습니다.</div>`}
+          </div>
+        </div>
+
+        <div class="mission-detail-column">
+          <div class="mission-card-head">
+            <strong>참여자</strong>
+            <span class="command-chip">${detail.participants.length}</span>
+          </div>
+          <div class="mission-activity-list compact">
+            ${detail.participants.length > 0
+              ? detail.participants.map(participant => html`
+                  <button class="mission-member-preview" onClick=${() => openAgentDetail(participant.agent_name)}>
+                    <strong>${participant.agent_name}</strong>
+                    <span>${participant.current_work ?? '현재 작업 없음'}</span>
+                    <small>
+                      ${participant.recent_output_preview ?? participant.recent_input_preview ?? '최근 입출력 없음'}
+                      ${participant.last_activity_at ? ` · ${relativeTime(participant.last_activity_at)}` : ''}
+                    </small>
+                  </button>
+                `)
+              : html`<div class="empty-state">세션 참여자 미리보기가 없습니다.</div>`}
+          </div>
+        </div>
+      </div>
+
+      <div class="mission-detail-grid">
+        <div class="mission-detail-column">
+          <div class="mission-card-head">
+            <strong>연결된 operation</strong>
+            <span class="command-chip">${detail.operations.length}</span>
+          </div>
+          <div class="mission-link-list">
+            ${detail.operations.length > 0
+              ? detail.operations.map(operation => html`
+                  <button class="mission-link-row" onClick=${() => openSession('command', session.session_id)}>
+                    <strong>${operation.operation_id}</strong>
+                    <span>${operation.status ?? 'unknown'}${operation.stage ? ` · ${operation.stage}` : ''}</span>
+                    <small>${operation.detachment_status ?? operation.objective ?? 'detachment 정보 없음'}</small>
+                  </button>
+                `)
+              : html`<div class="empty-state">연결된 operation이 없습니다.</div>`}
+          </div>
+        </div>
+
+        <div class="mission-detail-column">
+          <div class="mission-card-head">
+            <strong>연속성 관찰</strong>
+            <span class="command-chip">${detail.keepers.length}</span>
+          </div>
+          <div class="mission-link-list">
+            ${detail.keepers.length > 0
+              ? detail.keepers.map(keeper => html`
+                  <div class="mission-link-row static">
+                    <strong>${keeper.name}</strong>
+                    <span>${keeper.status ?? 'unknown'}${keeper.generation != null ? ` · gen ${keeper.generation}` : ''}</span>
+                    <small>${keeper.current_work ?? 'current work 없음'}</small>
+                  </div>
+                `)
+              : html`<div class="empty-state">직접 연결된 keeper는 없습니다.</div>`}
+          </div>
+        </div>
+      </div>
+    <//>
   `
 }
 

@@ -5359,6 +5359,26 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
     ~config:state.Mcp_server.room_config ~sw ~clock
     ~proc_mgr:state.Mcp_server.proc_mgr ()
 
+let dashboard_session_http_json ~state ~sw ~clock request =
+  match query_param request "session_id" with
+  | Some session_id when String.trim session_id <> "" ->
+      Dashboard_mission.session_json ?actor:(operator_actor_hint request)
+        ~session_id:(String.trim session_id)
+        ~config:state.Mcp_server.room_config ~sw ~clock
+        ~proc_mgr:state.Mcp_server.proc_mgr ()
+  | _ ->
+      `Assoc
+        [
+          ("generated_at", `String (Types.now_iso ()));
+          ("session_id", `Null);
+          ("session", `Null);
+          ("timeline", `List []);
+          ("participants", `List []);
+          ("operations", `List []);
+          ("keepers", `List []);
+          ("error", `String "session_id is required");
+        ]
+
 let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
   Dashboard_mission_briefing.json ?actor:(operator_actor_hint request)
     ~force:(bool_query_param request "force" ~default:false)
@@ -7267,6 +7287,11 @@ let make_routes ~port ~host ~sw ~clock =
          let json = dashboard_mission_http_json ~state ~sw ~clock req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/session" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = dashboard_session_http_json ~state ~sw ~clock req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission/briefing" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_mission_briefing_http_json ~state ~sw ~clock req in
@@ -8705,6 +8730,11 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/dashboard/mission" ->
           let state = get_server_state () in
           let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/session" ->
+          let state = get_server_state () in
+          let json = dashboard_session_http_json ~state ~sw ~clock httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/mission/briefing" ->

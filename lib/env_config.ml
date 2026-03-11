@@ -250,6 +250,10 @@ module Llama = struct
   (** Default local runtime model id for llama.cpp/OpenAI-compatible servers. *)
   let default_model =
     get_string ~default:"explicit-model-required" "LLAMA_DEFAULT_MODEL"
+
+  (** Global output budget for all local llama-provider requests. *)
+  let max_tokens =
+    get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
 end
 
 (** {1 Federation Configuration} *)

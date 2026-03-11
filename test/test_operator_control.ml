@@ -700,7 +700,22 @@ let test_team_worker_spawn_batch_requires_confirm_then_executes () =
            (fun json ->
              Yojson.Safe.Util.(json |> member "event_type" |> to_string)
              = "team_step_spawn")
-           events))
+           events);
+      let spawn_event =
+        match
+          List.find_opt
+            (fun json ->
+              Yojson.Safe.Util.(json |> member "event_type" |> to_string)
+              = "team_step_spawn")
+            events
+        with
+        | Some json -> json
+        | None -> Alcotest.fail "expected team_step_spawn event"
+      in
+      Alcotest.(check string) "spawn actor falls back to owner" "owner"
+        Yojson.Safe.Util.(
+          spawn_event |> member "detail" |> member "actor" |> to_string)
+    )
 
 let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn () =
   Eio_main.run @@ fun env ->

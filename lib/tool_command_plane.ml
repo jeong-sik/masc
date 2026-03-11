@@ -1433,6 +1433,44 @@ let handle_observe_traces (ctx : (_, _) context) args : result =
     Yojson.Safe.to_string
       (Command_plane_v2.list_traces_json ctx.config ?operation_id ~limit ()))
 
+let swarm_live_run_id_of_args args =
+  match get_string_opt args "run_id" with
+  | Some value -> value
+  | None -> "swarm-live"
+
+let swarm_live_worker_count_of_args args =
+  match Yojson.Safe.Util.member "worker_count" args with
+  | `Int value when value > 0 && value <= 100 -> value
+  | `Int _ -> Agent_swarm_live_harness.default_config.worker_count
+  | _ -> Agent_swarm_live_harness.default_config.worker_count
+
+let persist_swarm_live_summary config ~run_id result_json =
+  let run_dir =
+    Filename.concat
+      (Filename.concat (Cp_paths.control_plane_root_dir config) "swarm-live")
+      (Agent_swarm_live_harness.safe_run_id run_id)
+  in
+  Room_utils.mkdir_p run_dir;
+  Room_utils.write_json_local
+    (Filename.concat run_dir "swarm-live-summary.json")
+    result_json
+
+let handle_swarm_live_run_with_runner config args ~runner : result =
+  let run_id = swarm_live_run_id_of_args args in
+  let worker_count = swarm_live_worker_count_of_args args in
+  let cfg =
+    { Agent_swarm_live_harness.default_config with run_id; worker_count }
+  in
+  try
+    let result_json = runner cfg in
+    persist_swarm_live_summary config ~run_id result_json;
+    (true, Yojson.Safe.to_string result_json)
+  with exn ->
+    ( false,
+      json_error
+        (Printf.sprintf "swarm-live harness failed: %s"
+           (Printexc.to_string exn)) )
+
 let handle_swarm_live_run (ctx : (_, _) context) args : result =
   let run_id =
     match get_string_opt args "run_id" with

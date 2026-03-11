@@ -1153,6 +1153,39 @@ let test_missing_required_args () =
   Alcotest.(check bool) "finalize invalid" false ok14;
   cleanup_dir base_dir
 
+let test_step_actor_must_match_caller () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"step-actor-must-match-caller" |> get_session_id
+  in
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("actor", `String "planner");
+            ("message", `String "spoofed note");
+          ])
+  in
+  Alcotest.(check bool) "step rejects actor mismatch" false ok;
+  let json = parse_json_exn body in
+  Alcotest.(check string) "status error" "error"
+    (json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string) "actor mismatch message"
+    "actor must match the authenticated caller; omit actor to use the current agent"
+    (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
+  cleanup_dir base_dir
+
 let test_step_spawn_requires_proc_mgr () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -2326,6 +2359,8 @@ let () =
             test_prove_requires_multi_actor_turn_coverage;
           Alcotest.test_case "missing-required-args" `Quick
             test_missing_required_args;
+          Alcotest.test_case "step-actor-must-match-caller" `Quick
+            test_step_actor_must_match_caller;
           Alcotest.test_case "step-spawn-requires-proc-mgr" `Quick
             test_step_spawn_requires_proc_mgr;
           Alcotest.test_case "step-spawn-llama-requires-spawn-model" `Quick

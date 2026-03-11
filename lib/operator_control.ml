@@ -370,114 +370,170 @@ let recent_actions_json config =
     in
     `List items
 
-let available_actions_json =
-  `List
+type available_action = {
+  action_type : string;
+  target_type : string;
+  description : string;
+  confirm_required : bool;
+}
+
+let available_actions : available_action list =
+  [
+    {
+      action_type = "broadcast";
+      target_type = "room";
+      description = "Use this when you need a room-wide operator broadcast.";
+      confirm_required = false;
+    };
+    {
+      action_type = "room_pause";
+      target_type = "room";
+      description = "Use this when you need to pause room automation or spawning.";
+      confirm_required = true;
+    };
+    {
+      action_type = "room_resume";
+      target_type = "room";
+      description = "Use this when you need to resume a paused room.";
+      confirm_required = false;
+    };
+    {
+      action_type = "lodge_tick";
+      target_type = "room";
+      description = "Use this when you need to run one immediate Lodge tick and inspect which agents acted or were skipped.";
+      confirm_required = false;
+    };
+    {
+      action_type = "task_inject";
+      target_type = "room";
+      description = "Use this when you need to inject a new backlog task into the room through a preview-confirm path.";
+      confirm_required = true;
+    };
+    {
+      action_type = "team_note";
+      target_type = "team_session";
+      description = "Use this when you need to append a non-broadcast operator note to a team session.";
+      confirm_required = false;
+    };
+    {
+      action_type = "team_broadcast";
+      target_type = "team_session";
+      description = "Use this when you need a broadcast-style orchestration turn in a team session.";
+      confirm_required = false;
+    };
+    {
+      action_type = "team_task_inject";
+      target_type = "team_session";
+      description = "Use this when you need to inject a new task into a running team session.";
+      confirm_required = true;
+    };
+    {
+      action_type = "team_worker_spawn_batch";
+      target_type = "team_session";
+      description = "Use this when you need to spawn or replace one or more team-session workers through a preview-confirm path.";
+      confirm_required = true;
+    };
+    {
+      action_type = "team_stop";
+      target_type = "team_session";
+      description = "Use this when you need to stop a running team session.";
+      confirm_required = true;
+    };
+    {
+      action_type = "keeper_message";
+      target_type = "keeper";
+      description = "Use this when you need to send a direct operator message to a keeper.";
+      confirm_required = false;
+    };
+    {
+      action_type = "keeper_probe";
+      target_type = "keeper";
+      description = "Use this when you need an immediate keeper diagnostic snapshot with health, silence reason, and next suggested action.";
+      confirm_required = false;
+    };
+    {
+      action_type = "keeper_recover";
+      target_type = "keeper";
+      description = "Use this when a keeper is stale, degraded, or offline and you need a safe down/up recovery with before-and-after diagnostics.";
+      confirm_required = false;
+    };
+    {
+      action_type = "swarm_run_continue";
+      target_type = "swarm_run";
+      description = "Use this when a stalled swarm-live run still has resumable managed state and you want a preview-confirm command-plane recovery chain.";
+      confirm_required = true;
+    };
+    {
+      action_type = "swarm_run_rerun";
+      target_type = "swarm_run";
+      description = "Use this when a swarm-live run has no trustworthy resumable state and you want to rerun the harness for the same run_id.";
+      confirm_required = true;
+    };
+    {
+      action_type = "swarm_run_abandon";
+      target_type = "swarm_run";
+      description = "Use this when you want to soft-abandon a swarm-live run without stopping any matched operation.";
+      confirm_required = true;
+    };
+  ]
+
+let available_action_to_yojson (entry : available_action) =
+  `Assoc
     [
-      `Assoc
-        [
-          ("action_type", `String "broadcast");
-          ("target_type", `String "room");
-          ("description", `String "Use this when you need a room-wide operator broadcast.");
-          ("confirm_required", `Bool false);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "room_pause");
-          ("target_type", `String "room");
-          ("description", `String "Use this when you need to pause room automation or spawning.");
-          ("confirm_required", `Bool true);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "room_resume");
-          ("target_type", `String "room");
-          ("description", `String "Use this when you need to resume a paused room.");
-          ("confirm_required", `Bool false);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "lodge_tick");
-          ("target_type", `String "room");
-          ("description", `String "Use this when you need to run one immediate Lodge tick and inspect which agents acted or were skipped.");
-          ("confirm_required", `Bool false);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "team_note");
-          ("target_type", `String "team_session");
-          ("description", `String "Use this when you need to append a non-broadcast operator note to a team session.");
-          ("confirm_required", `Bool false);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "team_broadcast");
-          ("target_type", `String "team_session");
-          ("description", `String "Use this when you need a broadcast-style orchestration turn in a team session.");
-          ("confirm_required", `Bool false);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "team_task_inject");
-          ("target_type", `String "team_session");
-          ("description", `String "Use this when you need to inject a new task into a running team session.");
-          ("confirm_required", `Bool true);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "team_worker_spawn_batch");
-          ("target_type", `String "team_session");
-          ("description", `String "Use this when you need to spawn or replace one or more team-session workers through a preview-confirm path.");
-          ("confirm_required", `Bool true);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "team_stop");
-          ("target_type", `String "team_session");
-          ("description", `String "Use this when you need to stop a running team session.");
-          ("confirm_required", `Bool true);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "keeper_message");
-          ("target_type", `String "keeper");
-          ("description", `String "Use this when you need to send a direct operator message to a keeper.");
-          ("confirm_required", `Bool false);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "keeper_probe");
-          ("target_type", `String "keeper");
-          ("description", `String "Use this when you need an immediate keeper diagnostic snapshot with health, silence reason, and next suggested action.");
-          ("confirm_required", `Bool false);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "keeper_recover");
-          ("target_type", `String "keeper");
-          ("description", `String "Use this when a keeper is stale, degraded, or offline and you need a safe down/up recovery with before-and-after diagnostics.");
-          ("confirm_required", `Bool false);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "swarm_run_continue");
-          ("target_type", `String "swarm_run");
-          ("description", `String "Use this when a stalled swarm-live run still has resumable managed state and you want a preview-confirm command-plane recovery chain.");
-          ("confirm_required", `Bool true);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "swarm_run_rerun");
-          ("target_type", `String "swarm_run");
-          ("description", `String "Use this when a swarm-live run has no trustworthy resumable state and you want to rerun the harness for the same run_id.");
-          ("confirm_required", `Bool true);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "swarm_run_abandon");
-          ("target_type", `String "swarm_run");
-          ("description", `String "Use this when you want to soft-abandon a swarm-live run without stopping any matched operation.");
-          ("confirm_required", `Bool true);
-        ];
+      ("action_type", `String entry.action_type);
+      ("target_type", `String entry.target_type);
+      ("description", `String entry.description);
+      ("confirm_required", `Bool entry.confirm_required);
+    ]
+
+let available_actions_json =
+  `List (List.map available_action_to_yojson available_actions)
+
+let pending_confirm_summary_json ?actor config =
+  let actor_filter =
+    match actor with
+    | Some raw ->
+        let trimmed = String.trim raw in
+        if trimmed = "" then None else Some trimmed
+    | None -> None
+  in
+  let all_entries =
+    read_pending_confirms config
+    |> List.sort (fun (a : pending_confirm) (b : pending_confirm) ->
+           String.compare b.created_at a.created_at)
+  in
+  let visible_entries =
+    match actor_filter with
+    | None -> all_entries
+    | Some value ->
+        List.filter (fun (entry : pending_confirm) -> String.equal value entry.actor) all_entries
+  in
+  let hidden_entries =
+    match actor_filter with
+    | None -> []
+    | Some value ->
+        List.filter (fun (entry : pending_confirm) -> not (String.equal value entry.actor)) all_entries
+  in
+  let hidden_actors =
+    hidden_entries
+    |> List.map (fun (entry : pending_confirm) -> entry.actor)
+    |> List.sort_uniq String.compare
+    |> List.map (fun value -> `String value)
+  in
+  let confirm_required_actions =
+    available_actions
+    |> List.filter (fun (entry : available_action) -> entry.confirm_required)
+    |> List.map available_action_to_yojson
+  in
+  `Assoc
+    [
+      ("actor_filter", string_option_to_json actor_filter);
+      ("filter_active", `Bool (Option.is_some actor_filter));
+      ("visible_count", `Int (List.length visible_entries));
+      ("total_count", `Int (List.length all_entries));
+      ("hidden_count", `Int (List.length hidden_entries));
+      ("hidden_actors", `List hidden_actors);
+      ("confirm_required_actions", `List confirm_required_actions);
     ]
 
 let recent_messages_json config =
@@ -486,15 +542,15 @@ let recent_messages_json config =
   |> fun rows -> `List rows
 
 let keepers_json config =
-  let names = Tool_keeper.resident_keeper_names config in
+  let names = Keeper_types.resident_keeper_names config in
   let rows =
     List.filter_map
       (fun name ->
-        match Tool_keeper.read_meta config name with
+        match Keeper_types.read_meta config name with
         | Error _ | Ok None -> None
         | Ok (Some meta) ->
             let agent_json =
-              Tool_keeper.parse_agent_status config ~agent_name:meta.agent_name
+              Keeper_execution.parse_agent_status config ~agent_name:meta.agent_name
             in
             let agent_status =
               match agent_json |> U.member "status" with
@@ -520,9 +576,9 @@ let keepers_json config =
                   ("context_ratio", `Null);
                   ("context_tokens", `Int meta.last_total_tokens);
                   ("last_model_used", `String meta.last_model_used);
-                  ("active_model", `String (Tool_keeper.active_model_of_meta meta));
+                  ("active_model", `String (Keeper_execution.active_model_of_meta meta));
                   ( "next_model_hint",
-                    string_option_to_json (Tool_keeper.next_model_hint_of_meta meta)
+                    string_option_to_json (Keeper_execution.next_model_hint_of_meta meta)
                   );
                   ("autonomy_level", `String meta.autonomy_level);
                   ( "active_goal_ids",
@@ -540,15 +596,15 @@ let keepers_json config =
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
 let persistent_agents_json config =
-  let names = Tool_keeper.persistent_agent_names config in
+  let names = Keeper_types.persistent_agent_names config in
   let rows =
     List.filter_map
       (fun name ->
-        match Tool_keeper.read_meta config name with
+        match Keeper_types.read_meta config name with
         | Error _ | Ok None -> None
         | Ok (Some meta) ->
             let agent_json =
-              Tool_keeper.parse_agent_status config ~agent_name:meta.agent_name
+              Keeper_execution.parse_agent_status config ~agent_name:meta.agent_name
             in
             let agent_status =
               match agent_json |> U.member "status" with
@@ -574,8 +630,8 @@ let persistent_agents_json config =
                   ("context_ratio", `Null);
                   ("context_tokens", `Int meta.last_total_tokens);
                   ("last_model_used", `String meta.last_model_used);
-                  ("active_model", `String (Tool_keeper.active_model_of_meta meta));
-                  ("next_model_hint", string_option_to_json (Tool_keeper.next_model_hint_of_meta meta));
+                  ("active_model", `String (Keeper_execution.active_model_of_meta meta));
+                  ("next_model_hint", string_option_to_json (Keeper_execution.next_model_hint_of_meta meta));
                   ("autonomy_level", `String meta.autonomy_level);
                   ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
                   ("last_autonomous_action_at",
@@ -1003,7 +1059,7 @@ let summary_of_attention_items (items : attention_item list) =
 let dedup_recommendations (items : recommended_action list) =
   let rec loop seen acc = function
     | [] -> List.rev acc
-    | item :: rest ->
+    | (item : recommended_action) :: rest ->
         let key =
           String.concat "|"
             [
@@ -2239,6 +2295,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
        ("local_runtime", aggregated_local_runtime_json tracked_sessions);
        ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
        ("pending_confirms", pending_confirms_json ?actor config);
+       ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
        ("available_actions", available_actions_json);
        ("recent_actions", recent_actions_json config);
      ]

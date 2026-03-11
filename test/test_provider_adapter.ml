@@ -70,6 +70,22 @@ let test_default_local_model_label () =
           check string "default local label" "glm:glm-4.7"
             (Adapter.default_local_model_label ())))
 
+let test_default_model_provider_prefix_result () =
+  with_env "MASC_DEFAULT_PROVIDER" (Some "glm") (fun () ->
+      with_env "MASC_DEFAULT_MODEL" (Some "glm-4.7") (fun () ->
+          match Adapter.default_model_provider_prefix_result () with
+          | Ok prefix -> check string "default provider prefix" "glm" prefix
+          | Error msg -> fail msg))
+
+let test_default_model_override_label_result () =
+  with_env "MASC_DEFAULT_PROVIDER" (Some "gemini") (fun () ->
+      with_env "MASC_DEFAULT_MODEL" (Some "gemini-2.5-pro") (fun () ->
+          match Adapter.default_model_override_label_result "gemini-2.5-flash" with
+          | Ok label ->
+              check string "override keeps provider" "gemini:gemini-2.5-flash"
+                label
+          | Error msg -> fail msg))
+
 let () =
   run "Provider Adapter"
     [
@@ -84,5 +100,9 @@ let () =
           test_case "vertex base url" `Quick test_vertex_base_url;
           test_case "default cli agent" `Quick test_default_cli_agent_name;
           test_case "default local model label" `Quick test_default_local_model_label;
+          test_case "default provider prefix" `Quick
+            test_default_model_provider_prefix_result;
+          test_case "default override label" `Quick
+            test_default_model_override_label_result;
         ] );
     ]

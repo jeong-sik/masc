@@ -4,6 +4,23 @@ open Alcotest
 open Masc_mcp
 open Masc_mcp.Gardener_types
 
+let test_dir () =
+  let tmp = Filename.temp_file "masc_gardener" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o755;
+  tmp
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun f -> rm (Filename.concat path f));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  rm dir
+
 (** {1 Configuration Tests} *)
 
 let test_load_config () =
@@ -870,6 +887,89 @@ let test_health_json_with_task_backlog () =
   check bool "needs_workers true" true (json |> member "needs_workers" |> to_bool);
   check (float 0.01) "error_rate 0.02" 0.02 (json |> member "system_error_rate" |> to_float)
 
+let test_tick_opens_backlog_triage_session_for_orphans () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room.default_config dir in
+      ignore (Room.init config ~agent_name:(Some "fixture-root"));
+      ignore (Room.join config ~agent_name:"worker-a" ~capabilities:[ "executor" ] ());
+      ignore (Room.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"needs owner");
+      ignore (Room.join config ~agent_name:"worker-orphan" ~capabilities:[ "executor" ] ());
+      ignore (Room.claim_task config ~agent_name:"worker-orphan" ~task_id:"task-001");
+      ignore (Room.leave config ~agent_name:"worker-orphan");
+      let gardener_config =
+        { (Gardener.load_config ()) with
+          enabled = true;
+          use_llm_decision = false;
+          check_interval_sec = 1.0;
+        }
+      in
+      Eio_main.run @@ fun env ->
+      (try
+         Eio.Switch.run (fun sw ->
+           Gardener.tick ~sw ~clock:(Eio.Stdenv.clock env)
+             ~config:gardener_config ~room_config:config;
+           let sessions =
+             Team_session_store.list_sessions config
+             |> List.filter (fun (session : Team_session_types.session) ->
+                    session.created_by = "gardener")
+           in
+           check int "one gardener session" 1 (List.length sessions);
+           let session = List.hd sessions in
+           let expected_agents =
+             Room.get_agents_raw_in_room config (Room.current_room_id config)
+             |> List.map (fun (agent : Types.agent) -> agent.name)
+           in
+           check bool "goal prefixed" true
+             (String.starts_with ~prefix:"[Gardener] Backlog triage" session.goal);
+           check bool "operation attached" true (Option.is_some session.operation_id);
+           check bool "room agents included" true
+             (List.exists
+                (fun name -> List.mem name session.agent_names)
+                expected_agents);
+           check bool "turns injected" true (session.turn_count >= 2);
+           raise Exit)
+       with Exit -> ()))
+
+let test_tick_reuses_existing_backlog_triage_session () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room.default_config dir in
+      ignore (Room.init config ~agent_name:(Some "fixture-root"));
+      ignore (Room.join config ~agent_name:"worker-a" ~capabilities:[ "executor" ] ());
+      ignore (Room.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"needs owner");
+      ignore (Room.join config ~agent_name:"worker-orphan" ~capabilities:[ "executor" ] ());
+      ignore (Room.claim_task config ~agent_name:"worker-orphan" ~task_id:"task-001");
+      ignore (Room.leave config ~agent_name:"worker-orphan");
+      let gardener_config =
+        { (Gardener.load_config ()) with
+          enabled = true;
+          use_llm_decision = false;
+          check_interval_sec = 1.0;
+        }
+      in
+      Eio_main.run @@ fun env ->
+      (try
+         Eio.Switch.run (fun sw ->
+           Gardener.tick ~sw ~clock:(Eio.Stdenv.clock env)
+             ~config:gardener_config ~room_config:config;
+           Gardener.tick ~sw ~clock:(Eio.Stdenv.clock env)
+             ~config:gardener_config ~room_config:config;
+           let sessions =
+             Team_session_store.list_sessions config
+             |> List.filter (fun (session : Team_session_types.session) ->
+                    session.created_by = "gardener"
+                    && String.starts_with ~prefix:"[Gardener] Backlog triage"
+                         session.goal)
+           in
+           check int "reused single gardener session" 1 (List.length sessions);
+           raise Exit)
+       with Exit -> ()))
+
 (** {1 Test Suite} *)
 
 let suite = [
@@ -987,6 +1087,8 @@ let suite = [
   "needs_workers_logic", `Quick, test_needs_workers_logic;
   "needs_workers_false_with_active", `Quick, test_needs_workers_false_with_active;
   "health_json_with_task_backlog", `Quick, test_health_json_with_task_backlog;
+  "tick_opens_backlog_session", `Quick, test_tick_opens_backlog_triage_session_for_orphans;
+  "tick_reuses_backlog_session", `Quick, test_tick_reuses_existing_backlog_triage_session;
 ]
 
 let () =

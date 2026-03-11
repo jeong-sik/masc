@@ -131,7 +131,7 @@ let resident_schemas : tool_schema list = [
         ("models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Model cascade (provider:model). Examples: 'claude:opus', 'gemini:gemini-3.1-pro-preview', 'glm:glm-4.7', 'openrouter:openai/gpt-4o-mini'.");
+          ("description", `String "Model cascade. Accepts 'default' or 'default:<model>' as the primary public path, plus explicit 'provider:model' overrides when needed.");
         ]);
         ("allowed_models", `Assoc [
           ("type", `String "array");
@@ -140,7 +140,7 @@ let resident_schemas : tool_schema list = [
         ]);
         ("active_model", `Assoc [
           ("type", `String "string");
-          ("description", `String "Current persisted model for the keeper. When set, explicit-only keepers use this exact model instead of fallback selection.");
+          ("description", `String "Current persisted model label. Prefer 'default' for adapter-managed selection; explicit-only keepers may still pin a concrete provider:model label.");
         ]);
         ("scope_kind", `Assoc [
           ("type", `String "string");

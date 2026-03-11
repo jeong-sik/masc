@@ -6,6 +6,7 @@ import type {
   OperatorAttentionItem,
   OperatorGuidanceSummary,
   OperatorKeeperSnapshot,
+  OperatorRecommendedAction,
   OperatorResidentJudgeRuntime,
   OperatorSessionSnapshot,
 } from '../../types'
@@ -35,11 +36,12 @@ export const taskTitle = signal('')
 export const taskDescription = signal('')
 export const taskPriority = signal('2')
 export const selectedSessionId = signal('')
-export const teamTurnKind = signal<'note' | 'broadcast' | 'task'>('note')
+export const teamTurnKind = signal<'note' | 'broadcast' | 'task' | 'worker_spawn_batch'>('note')
 export const teamMessage = signal('')
 export const teamTaskTitle = signal('')
 export const teamTaskDescription = signal('')
 export const teamTaskPriority = signal('2')
+export const teamSpawnBatchJson = signal('')
 export const teamStopReason = signal('운영자 중지 요청')
 export const selectedKeeperName = signal('')
 export const keeperMessage = signal('')
@@ -174,6 +176,8 @@ export function actionTypeLabel(value?: string | null): string {
       return '세션 방송'
     case 'team_task_inject':
       return '세션 작업 주입'
+    case 'team_worker_spawn_batch':
+      return '세션 worker 교체'
     case 'task_inject':
       return '작업 주입'
     case 'team_stop':
@@ -243,6 +247,8 @@ export function sessionActionLabel(value: typeof teamTurnKind.value): string {
       return '방송'
     case 'task':
       return '작업'
+    case 'worker_spawn_batch':
+      return 'worker 교체'
     default:
       return value
   }
@@ -259,53 +265,96 @@ function workflowPayloadString(
   return null
 }
 
-function workflowTeamTurnKind(context: DashboardWorkflowContext): typeof teamTurnKind.value {
-  if (context.action_type === 'team_task_inject') return 'task'
-  if (context.action_type === 'team_broadcast') return 'broadcast'
-  if (context.action_type === 'team_note') return 'note'
-  if (context.action_type === 'team_turn') {
-    const requested = workflowPayloadString(context.suggested_payload, 'turn_kind')
-    if (requested === 'broadcast' || requested === 'task') return requested
-  }
-  return 'note'
+function payloadRecord(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  return payload as Record<string, unknown>
 }
 
-export function hydrateOpsWorkflow(context: DashboardWorkflowContext): void {
-  const payload = context.suggested_payload
-  if (context.target_type === 'room') {
-    if (context.action_type === 'broadcast') {
-      broadcastMessage.value = workflowPayloadString(payload, 'message') ?? context.summary
+function spawnBatchJsonString(payload: Record<string, unknown> | null): string {
+  if (!payload) return ''
+  const direct = payload.spawn_batch
+  if (direct !== undefined) return prettyJson(direct)
+  return prettyJson(payload)
+}
+
+function hydrateActionForm(input: {
+  action_type?: string | null
+  target_type?: string | null
+  target_id?: string | null
+  payload?: unknown
+  summary: string
+}): void {
+  const payload = payloadRecord(input.payload)
+  if (input.target_type === 'room') {
+    if (input.action_type === 'broadcast') {
+      broadcastMessage.value = workflowPayloadString(payload, 'message') ?? input.summary
       return
     }
-    if (context.action_type === 'task_inject') {
+    if (input.action_type === 'task_inject') {
       taskTitle.value = workflowPayloadString(payload, 'title') ?? '운영자 주입 작업'
-      taskDescription.value = workflowPayloadString(payload, 'description') ?? context.summary
+      taskDescription.value = workflowPayloadString(payload, 'description') ?? input.summary
       taskPriority.value = workflowPayloadString(payload, 'priority') ?? taskPriority.value
+      return
+    }
+    if (input.action_type === 'room_pause') {
+      pauseReason.value = workflowPayloadString(payload, 'reason') ?? input.summary
     }
     return
   }
 
-  if (context.target_type === 'team_session') {
-    if (context.target_id) selectedSessionId.value = context.target_id
-    if (context.action_type === 'team_stop') {
-      teamStopReason.value = workflowPayloadString(payload, 'reason') ?? context.summary
+  if (input.target_type === 'team_session') {
+    if (input.target_id) selectedSessionId.value = input.target_id
+    if (input.action_type === 'team_stop') {
+      teamStopReason.value = workflowPayloadString(payload, 'reason') ?? input.summary
       return
     }
-    teamTurnKind.value = workflowTeamTurnKind(context)
+    teamTurnKind.value =
+      input.action_type === 'team_worker_spawn_batch'
+        ? 'worker_spawn_batch'
+        : input.action_type === 'team_task_inject'
+          ? 'task'
+          : input.action_type === 'team_broadcast'
+            ? 'broadcast'
+            : 'note'
     const message = workflowPayloadString(payload, 'message')
     if (message) teamMessage.value = message
+    if (teamTurnKind.value === 'worker_spawn_batch') {
+      teamSpawnBatchJson.value = spawnBatchJsonString(payload)
+      return
+    }
     if (teamTurnKind.value === 'task') {
       teamTaskTitle.value = workflowPayloadString(payload, 'task_title') ?? workflowPayloadString(payload, 'title') ?? '운영자 주입 작업'
-      teamTaskDescription.value = workflowPayloadString(payload, 'task_description') ?? workflowPayloadString(payload, 'description') ?? context.summary
+      teamTaskDescription.value = workflowPayloadString(payload, 'task_description') ?? workflowPayloadString(payload, 'description') ?? input.summary
       teamTaskPriority.value = workflowPayloadString(payload, 'task_priority') ?? workflowPayloadString(payload, 'priority') ?? teamTaskPriority.value
     }
     return
   }
 
-  if (context.target_type === 'keeper') {
-    if (context.target_id) selectedKeeperName.value = context.target_id
-    keeperMessage.value = workflowPayloadString(payload, 'message') ?? context.summary
+  if (input.target_type === 'keeper') {
+    if (input.target_id) selectedKeeperName.value = input.target_id
+    keeperMessage.value = workflowPayloadString(payload, 'message') ?? input.summary
   }
+}
+
+export function hydrateOpsWorkflow(context: DashboardWorkflowContext): void {
+  hydrateActionForm({
+    action_type: context.action_type,
+    target_type: context.target_type,
+    target_id: context.target_id,
+    payload: context.suggested_payload,
+    summary: context.summary,
+  })
+}
+
+export function hydrateRecommendedAction(item: OperatorRecommendedAction): void {
+  hydrateActionForm({
+    action_type: item.action_type,
+    target_type: item.target_type,
+    target_id: item.target_id ?? null,
+    payload: item.suggested_payload,
+    summary: item.reason,
+  })
+  showToast('추천 액션 payload를 폼에 채웠습니다', 'success')
 }
 
 export function workflowTargetReady(
@@ -325,7 +374,7 @@ export function workflowTargetReady(
 }
 
 async function executeAction(input: {
-  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_stop' | 'keeper_message'
+  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message'
   target_type: 'room' | 'team_session' | 'keeper'
   target_id?: string
   payload: Record<string, unknown>
@@ -410,6 +459,37 @@ export async function submitTeamTurn() {
     return
   }
   const payload: Record<string, unknown> = {}
+  if (teamTurnKind.value === 'worker_spawn_batch') {
+    const raw = teamSpawnBatchJson.value.trim()
+    if (!raw) {
+      showToast('spawn_batch JSON을 먼저 채우세요', 'warning')
+      return
+    }
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (Array.isArray(parsed)) {
+        payload.spawn_batch = parsed
+      } else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).spawn_batch)) {
+        payload.spawn_batch = (parsed as Record<string, unknown>).spawn_batch
+      } else {
+        showToast('spawn_batch는 배열 또는 { spawn_batch: [...] } 형태여야 합니다', 'warning')
+        return
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'spawn_batch JSON 파싱에 실패했습니다'
+      showToast(message, 'error')
+      return
+    }
+    const result = await executeAction({
+      action_type: 'team_worker_spawn_batch',
+      target_type: 'team_session',
+      target_id: sessionId,
+      payload,
+      successMessage: 'worker 교체 요청을 적용했습니다',
+    })
+    if (result) teamSpawnBatchJson.value = ''
+    return
+  }
   const message = teamMessage.value.trim()
   if (message) payload.message = message
   let actionType: 'team_note' | 'team_broadcast' | 'team_task_inject' = 'team_note'
@@ -474,13 +554,20 @@ export async function submitKeeperMessage() {
   if (result) keeperMessage.value = ''
 }
 
-export async function confirmPending(confirmToken: string) {
+export async function confirmPending(
+  confirmToken: string,
+  decision: 'confirm' | 'deny' = 'confirm',
+) {
   const actor = actorName.value.trim() || 'dashboard'
   try {
-    await confirmOperatorPendingAction(actor, confirmToken)
-    showToast('확인 실행을 완료했습니다', 'success')
+    await confirmOperatorPendingAction(actor, confirmToken, decision)
+    showToast(decision === 'deny' ? '승인 대기를 거부했습니다' : '확인 실행을 완료했습니다', 'success')
   } catch (err) {
-    const message = err instanceof Error ? err.message : '확인 실행에 실패했습니다'
+    const message = err instanceof Error
+      ? err.message
+      : decision === 'deny'
+        ? '승인 대기 거부에 실패했습니다'
+        : '확인 실행에 실패했습니다'
     showToast(message, 'error')
   }
 }

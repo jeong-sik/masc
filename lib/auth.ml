@@ -293,6 +293,8 @@ let permission_for_tool = function
   | "masc_auth_enable" | "masc_auth_disable" | "masc_auth_create_token"
   | "masc_auth_revoke" -> Some CanInit  (* Admin only *)
   | "masc_auth_status" | "masc_auth_refresh" -> Some CanReadState
+  | "masc_tool_admin_snapshot" -> Some CanReadState
+  | "masc_tool_admin_update" -> Some CanAdmin
   | _ -> None
 
 (** Strict tool auth mode:

@@ -16,6 +16,7 @@ import {
   guidanceFreshnessLabel,
   guidanceLayerLabel,
   guidanceLayerTone,
+  hydrateRecommendedAction,
   pauseReason,
   prettyJson,
   runtimeJudgeLabel,
@@ -35,6 +36,14 @@ export function OpsRoomColumn() {
   const roomDigest = operatorRoomDigest.value
   const room = snapshot?.room ?? {}
   const pendingConfirms = snapshot?.pending_confirms ?? []
+  const pendingSummary = snapshot?.pending_confirm_summary
+  const confirmRequiredActions =
+    pendingSummary
+      ? pendingSummary.confirm_required_actions
+      : (snapshot?.available_actions ?? []).filter(action => action.confirm_required)
+  const actorFilter = pendingSummary?.actor_filter?.trim() || null
+  const hiddenCount = pendingSummary?.hidden_count ?? 0
+  const hiddenActors = pendingSummary?.hidden_actors ?? []
   const recentMessages = snapshot?.recent_messages ?? []
   const recommendedActions = roomDigest?.recommended_actions ?? []
   const activeRecommendedActions =
@@ -181,6 +190,13 @@ export function OpsRoomColumn() {
                   <span>${deliveryModeLabel(item.confirm_required)}</span>
                 </div>
                 <div class="ops-log-body">${item.reason}</div>
+                ${item.suggested_payload ? html`
+                  <div class="ops-confirmation-actions">
+                    <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item) }} disabled=${operatorActionBusy.value}>
+                      폼에 채우기
+                    </button>
+                  </div>
+                ` : null}
               </article>
             `)}
           </div>
@@ -194,7 +210,25 @@ export function OpsRoomColumn() {
           <div class="card-title">승인 대기</div>
           <${PanelSemanticDetails} panelId="intervene.pending_confirmations" compact=${true} />
         </div>
-        <p class="ops-context-note">미리보기만 끝났고 아직 사람이 눌러줘야 하는 액션만 남깁니다.</p>
+        <p class="ops-context-note">
+          ${actorFilter
+            ? `현재 actor ${actorFilter} 기준 queue를 읽습니다. 승인 대기는 즉시 실행이 아니라 preview-confirm 경로를 타는 액션만 쌓입니다.`
+            : '승인 대기는 즉시 실행이 아니라 preview-confirm 경로를 타는 액션만 쌓입니다.'}
+        </p>
+        ${confirmRequiredActions.length > 0 ? html`
+          <div class="ops-log-list">
+            ${confirmRequiredActions.map(item => html`
+              <article key=${`${item.action_type}:${item.target_type}`} class="ops-log-entry">
+                <div class="ops-log-head">
+                  <strong>${actionTypeLabel(item.action_type)}</strong>
+                  <span>${targetTypeLabel(item.target_type)}</span>
+                  <span>${deliveryModeLabel(item.confirm_required)}</span>
+                </div>
+                <div class="ops-log-body">${item.description ?? '설명 확인 필요'}</div>
+              </article>
+            `)}
+          </div>
+        ` : null}
         ${pendingConfirms.length > 0 ? html`
           <div class="ops-confirmation-list">
             ${pendingConfirms.map(item => html`
@@ -209,12 +243,21 @@ export function OpsRoomColumn() {
                   <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
                     실행
                   </button>
+                  <button class="control-btn ghost" onClick=${() => { void confirmPending(item.confirm_token, 'deny') }} disabled=${operatorActionBusy.value}>
+                    거부
+                  </button>
                   <span class="ops-token">${item.confirm_token}</span>
                 </div>
               </article>
             `)}
           </div>
-        ` : html`<div class="ops-empty">지금 승인 대기는 없습니다.</div>`}
+        ` : html`
+          <div class="ops-empty">
+            ${hiddenCount > 0 && actorFilter
+              ? `현재 선택한 actor(${actorFilter}) 기준 승인 대기는 0건입니다. 다른 actor 대기 ${hiddenCount}건${hiddenActors.length > 0 ? ` · ${hiddenActors.join(', ')}` : ''}`
+              : '지금 승인 대기는 없습니다. 위 목록의 preview-confirm 액션을 먼저 만들어야 여기에 쌓입니다.'}
+          </div>
+        `}
       </section>
 
       <section class="card ops-panel">

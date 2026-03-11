@@ -194,7 +194,7 @@ let tool_category tool_name =
   | "masc_swarm_live_run"
   (* Mode management - always available *)
   | "masc_switch_mode" | "masc_get_config" -> Core
-  | "masc_tool_help" -> Core
+  | "masc_tool_help" | "masc_tool_admin_snapshot" -> Core
 
   (* ── Communication ── *)
   | "masc_broadcast" | "masc_messages"
@@ -271,7 +271,7 @@ let tool_category tool_name =
   (* ── Authentication & governance ── *)
   | "masc_auth_enable" | "masc_auth_disable" | "masc_auth_status"
   | "masc_auth_create_token" | "masc_auth_refresh" | "masc_auth_revoke"
-  | "masc_auth_list"
+  | "masc_auth_list" | "masc_tool_admin_update"
   | "masc_audit_query" | "masc_audit_stats"
   | "masc_governance_set" | "masc_governance_report"
   | "masc_tool_grant" | "masc_tool_revoke" | "masc_tool_list" -> Auth

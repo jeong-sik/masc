@@ -47,7 +47,7 @@ let test_read_file_tail_lines_drops_partial_first_line () =
   let start = b_index + 2 in
   let max_bytes = len - start in
   with_temp_file contents (fun path ->
-    let lines = Masc_mcp.Tool_keeper.read_file_tail_lines path ~max_bytes ~max_lines:10 in
+    let lines = Masc_mcp.Keeper_memory.read_file_tail_lines path ~max_bytes ~max_lines:10 in
     check (list string) "drops partial fragment" ["CCCCC"; "DDDDD"] lines)
 
 let test_read_file_tail_lines_keeps_line_boundary_start () =
@@ -56,7 +56,7 @@ let test_read_file_tail_lines_keeps_line_boundary_start () =
   let b_index = String.index contents 'B' in
   let max_bytes = len - b_index in
   with_temp_file contents (fun path ->
-    let lines = Masc_mcp.Tool_keeper.read_file_tail_lines path ~max_bytes ~max_lines:10 in
+    let lines = Masc_mcp.Keeper_memory.read_file_tail_lines path ~max_bytes ~max_lines:10 in
     check (list string) "keeps full first line" ["BBBBB"; "CCCCC"; "DDDDD"] lines)
 
 let with_env name value f =
@@ -85,18 +85,18 @@ let test_keeper_fallback_model_labels_prefers_available_remote_models () =
   with_env "ZAI_API_KEY" "zai-test" (fun () ->
       with_env "ANTHROPIC_API_KEY" "" (fun () ->
           with_env "GEMINI_API_KEY" "" (fun () ->
-              let labels = Masc_mcp.Tool_keeper.keeper_fallback_model_labels () in
+              let labels = Masc_mcp.Keeper_types.keeper_fallback_model_labels () in
               check (list string) "glm fallback only" ["glm:glm-4.7"] labels)))
 
 let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
   with_env "ZAI_API_KEY" "zai-test" (fun () ->
       let labels =
-        Masc_mcp.Tool_keeper.maybe_append_keeper_fallback_models
+        Masc_mcp.Keeper_types.maybe_append_keeper_fallback_models
           ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
       in
       let llama_listening =
-        match Masc_mcp.Tool_keeper.model_specs_of_strings ["llama:qwen3.5-35b-a3b-ud-q8-xl"] with
-        | Ok [spec] -> Masc_mcp.Tool_keeper.model_spec_is_available spec
+        match Masc_mcp.Keeper_types.model_specs_of_strings ["llama:qwen3.5-35b-a3b-ud-q8-xl"] with
+        | Ok [spec] -> Masc_mcp.Keeper_types.model_spec_is_available spec
         | _ -> false
       in
       let expected =
@@ -143,7 +143,7 @@ let test_llm_client_sanitize_messages_utf8_preserves_message_count () =
        sanitized)
 
 let test_resolved_keeper_skill_route_marks_agent_judgment () =
-  let fallback_route : Masc_mcp.Tool_keeper.keeper_skill_route = {
+  let fallback_route : Masc_mcp.Keeper_alerting.keeper_skill_route = {
     primary_skill = "masc-heartbeat";
     secondary_skills = [ "masc-keeper-autonomy" ];
     reason = "fallback";
@@ -152,8 +152,8 @@ let test_resolved_keeper_skill_route_marks_agent_judgment () =
     "SKILL: lodge-social (+masc-heartbeat)\nSKILL_REASON: agent-selected\nActual reply body"
   in
   let resolved =
-    Masc_mcp.Tool_keeper.resolved_keeper_skill_route
-      ~selection_mode:Masc_mcp.Tool_keeper.SkillSelectAgent
+    Masc_mcp.Keeper_alerting.resolved_keeper_skill_route
+      ~selection_mode:Masc_mcp.Keeper_alerting.SkillSelectAgent
       ~fallback_route
       ~reply_raw:reply
   in
@@ -162,14 +162,14 @@ let test_resolved_keeper_skill_route_marks_agent_judgment () =
   check string "primary skill" "lodge-social" resolved.route.primary_skill
 
 let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
-  let fallback_route : Masc_mcp.Tool_keeper.keeper_skill_route = {
+  let fallback_route : Masc_mcp.Keeper_alerting.keeper_skill_route = {
     primary_skill = "masc-heartbeat";
     secondary_skills = [ "masc-keeper-autonomy" ];
     reason = "fallback";
   } in
   let resolved =
-    Masc_mcp.Tool_keeper.resolved_keeper_skill_route
-      ~selection_mode:Masc_mcp.Tool_keeper.SkillSelectAgent
+    Masc_mcp.Keeper_alerting.resolved_keeper_skill_route
+      ~selection_mode:Masc_mcp.Keeper_alerting.SkillSelectAgent
       ~fallback_route
       ~reply_raw:"No skill header here"
   in
@@ -386,7 +386,7 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
         | Some result -> result
         | None -> fail ("missing dispatch for " ^ name)
       in
-      let ok, _ =
+      let ok, resident_up_body =
         dispatch "masc_keeper_up"
           (`Assoc
             [
@@ -397,8 +397,9 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
               ("proactive_enabled", `Bool false);
             ])
       in
+      if not ok then fail resident_up_body;
       check bool "resident keeper up" true ok;
-      let ok, _ =
+      let ok, persistent_up_body =
         dispatch "masc_persistent_agent_up"
           (`Assoc
             [
@@ -409,6 +410,7 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
               ("proactive_enabled", `Bool false);
             ])
       in
+      if not ok then fail persistent_up_body;
       check bool "persistent agent up" true ok;
       let ok, resident_body =
         dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool false) ])
@@ -482,8 +484,8 @@ let test_keeper_policy_tools_roundtrip () =
       let policy_json = Yojson.Safe.from_string policy_body in
       check string "policy mode updated" "learned_offline_v1"
         Yojson.Safe.Util.(policy_json |> member "policy_mode" |> to_string);
-      Masc_mcp.Tool_keeper.append_jsonl_line
-        (Masc_mcp.Tool_keeper.keeper_policy_log_path config "sangsu")
+      Masc_mcp.Keeper_types.append_jsonl_line
+        (Masc_mcp.Keeper_types.keeper_policy_log_path config "sangsu")
         (`Assoc
           [
             ("action_id", `String "act-1");

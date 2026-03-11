@@ -190,10 +190,10 @@ let json () =
                   ~ecosystem_function:"Encourages minimal, reversible supervision."
                   [];
                 panel ~id:"intervene.pending_confirmations" ~title:"Pending Confirmations"
-                  ~purpose:"Makes the confirm gate explicit for disruptive actions."
-                  ~problem_solved:"Prevents previewed interventions from being mistaken as executed."
-                  ~when_active:"Only when there are preview tokens."
-                  ~agent_role:"Agents should explain these as governance debt, not completed work."
+                  ~purpose:"Shows the actor-scoped preview queue for confirm-required operator actions."
+                  ~problem_solved:"Prevents previewed interventions from being mistaken as executed and explains when the queue is empty only because another actor owns the token."
+                  ~when_active:"When confirm-required actions exist or when the operator needs to know which actions enter the preview-confirm path."
+                  ~agent_role:"Agents should explain these as incomplete work, call out actor filtering, and distinguish visible from hidden pending tokens."
                   ~ecosystem_function:"Maintains human-in-the-loop control."
                   [];
                 panel ~id:"intervene.session_queue" ~title:"Session Queue"

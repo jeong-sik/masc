@@ -1363,6 +1363,16 @@ export interface OperatorActionDescriptor {
   confirm_required?: boolean
 }
 
+export interface PendingConfirmSummary {
+  actor_filter?: string | null
+  filter_active: boolean
+  visible_count: number
+  total_count: number
+  hidden_count: number
+  hidden_actors: string[]
+  confirm_required_actions: OperatorActionDescriptor[]
+}
+
 export interface OperatorAttentionItem {
   kind: string
   severity: string
@@ -1516,6 +1526,7 @@ export interface OperatorSnapshot {
   swarm_status?: CommandPlaneSwarmStatus
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]
+  pending_confirm_summary?: PendingConfirmSummary
   available_actions: OperatorActionDescriptor[]
 }
 

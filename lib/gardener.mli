@@ -135,6 +135,8 @@ val detect_intervention :
 
     Calculates health, detects intervention needs, and acts if appropriate. *)
 val tick :
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
   config:gardener_config ->
   room_config:Room.config ->
   unit

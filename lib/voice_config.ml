@@ -29,10 +29,16 @@ type stt_config = {
 
 type session_config = { endpoints : endpoint list }
 
+type local_playback_config = {
+  enabled : bool;
+  agents : string list;
+}
+
 type t = {
   tts : tts_config;
   stt : stt_config;
   session : session_config;
+  local_playback : local_playback_config;
 }
 
 let ( let* ) = Result.bind
@@ -48,6 +54,19 @@ let trim_nonempty = function
   | `String value ->
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let string_list_opt = function
+  | `List items ->
+      let rec loop acc = function
+        | [] -> Some (List.rev acc)
+        | item :: rest -> (
+            match trim_nonempty item with
+            | Some value -> loop (value :: acc) rest
+            | None -> None)
+      in
+      loop [] items
+  | `Null -> Some []
   | _ -> None
 
 let bool_or_default default = function
@@ -196,6 +215,21 @@ let parse_session json =
   let* endpoints = parse_endpoints ~ctx:"session.endpoints" [] endpoints_json in
   Ok { endpoints }
 
+let parse_local_playback json =
+  match Yojson.Safe.Util.member "local_playback" json with
+  | `Null -> Ok { enabled = false; agents = [] }
+  | `Assoc local_json ->
+      let enabled =
+        Yojson.Safe.Util.member "enabled" (`Assoc local_json) |> bool_or_default false
+      in
+      let agents =
+        match Yojson.Safe.Util.member "agents" (`Assoc local_json) |> string_list_opt with
+        | Some values -> values
+        | None -> []
+      in
+      Ok { enabled; agents }
+  | _ -> Error "root.local_playback must be object"
+
 let load () =
   let path = config_path () in
   if not (Sys.file_exists path) then
@@ -207,16 +241,18 @@ let load () =
       let* tts = parse_tts json in
       let* stt = parse_stt json in
       let* session = parse_session json in
-      Ok { tts; stt; session }
+      let* local_playback = parse_local_playback json in
+      Ok { tts; stt; session; local_playback }
     with
     | Yojson.Json_error error ->
         Error (Printf.sprintf "invalid voice config json: %s" error)
     | Sys_error error ->
         Error (Printf.sprintf "voice config read failed: %s" error)
 
-let enabled_endpoints endpoints = List.filter (fun endpoint -> endpoint.enabled) endpoints
+let enabled_endpoints (endpoints : endpoint list) =
+  List.filter (fun (endpoint : endpoint) -> endpoint.enabled) endpoints
 
-let select_endpoint ?endpoint_id endpoints =
+let select_endpoint ?endpoint_id (endpoints : endpoint list) =
   let endpoints = enabled_endpoints endpoints in
   match endpoint_id with
   | Some id when String.trim id <> "" -> (
@@ -304,4 +340,12 @@ let public_json config =
           ] );
       ( "session",
         `Assoc [ ("active_endpoint", active_endpoint_json config.session.endpoints) ] );
+      ( "local_playback",
+        `Assoc
+          [
+            ("enabled", `Bool config.local_playback.enabled);
+            ( "agents",
+              `List
+                (List.map (fun agent -> `String agent) config.local_playback.agents) );
+          ] );
     ]

@@ -1,0 +1,133 @@
+(** Keeper_runtime — resident keeper reconciliation and keepalive bootstrap.
+    Runtime-only mutable state stays behind keeper runtime/execution modules. *)
+
+include Keeper_execution
+
+let maybe_promote_live_legacy_keeper config name =
+  match read_meta config name with
+  | Error _ | Ok None -> ()
+  | Ok (Some meta) ->
+      if is_resident_keeper config meta.name then ()
+      else
+        match parse_agent_status config ~agent_name:meta.agent_name with
+        | `Assoc fields -> (
+            let status =
+              match List.assoc_opt "status" fields with
+              | Some (`String value) -> String.lowercase_ascii value
+              | _ -> "offline"
+            in
+            let agent_type =
+              match List.assoc_opt "agent_type" fields with
+              | Some (`String value) -> String.lowercase_ascii value
+              | _ -> ""
+            in
+            if agent_type = "keeper" && List.mem status [ "active"; "busy"; "idle"; "listening" ] then
+              ignore (register_resident_keeper_from_meta config meta))
+        | _ -> ()
+
+let ensure_resident_meta config (spec : resident_keeper_spec) =
+  match read_meta config spec.persistent_name with
+  | Ok (Some meta) -> Ok meta
+  | Ok None -> (
+      match meta_of_json spec.seed_meta with
+      | Ok meta ->
+          let meta =
+            { meta with
+              name = spec.persistent_name;
+              agent_name = keeper_agent_name spec.persistent_name;
+              updated_at = now_iso ();
+            }
+          in
+          (match write_meta config meta with
+          | Ok () -> Ok meta
+          | Error msg -> Error msg)
+      | Error msg -> Error msg)
+  | Error msg -> Error msg
+
+type keeper_bootstrap_stats = {
+  enabled: bool;
+  scanned: int;
+  started: int;
+  stale: int;
+}
+
+let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
+  if not Env_config.KeeperBootstrap.enabled then
+    { enabled = false; scanned = 0; started = 0; stale = 0 }
+  else
+    let dir = keeper_dir ctx.config in
+    (match Safe_ops.list_dir_safe dir with
+    | Ok files ->
+        files
+        |> List.filter (fun f -> Filename.check_suffix f ".json")
+        |> List.iter (fun f ->
+               let name = Filename.remove_extension f in
+               if validate_name name then maybe_promote_live_legacy_keeper ctx.config name)
+    | Error _ -> ());
+    let now_ts = Time_compat.now () in
+    let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
+    let stale_turn_sec =
+      max 0.0 Env_config.KeeperBootstrap.stale_turn_seconds
+    in
+    let max_scan =
+      max 0 Env_config.KeeperBootstrap.max_scan
+    in
+    let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+    let remaining_slots =
+      ref
+        (if max_keepers > 0 then
+           max 0 (max_keepers - running_keepers ())
+         else
+           max_int)
+    in
+    let specs =
+      list_resident_keepers ctx.config
+      |> take max_scan
+    in
+    let (scanned, started, stale) =
+      List.fold_left
+        (fun (scanned_acc, started_acc, stale_acc) spec ->
+          match ensure_resident_meta ctx.config spec with
+          | Error _ -> (scanned_acc + 1, started_acc, stale_acc)
+          | Ok m ->
+              let stale_now =
+                stale_turn_sec > 0.0
+                && (m.last_turn_ts <= 0.0
+                    || now_ts -. m.last_turn_ts >= stale_turn_sec)
+              in
+              let already_running = Hashtbl.mem keepalives m.name in
+              let started_here =
+                if stale_now then false
+                else if already_running then false
+                else if max_keepers > 0 && !remaining_slots <= 0 then false
+                else (
+                  start_keepalive ~proactive_warmup_sec ctx m;
+                  if max_keepers > 0 then remaining_slots := !remaining_slots - 1;
+                  true
+                )
+              in
+              ( scanned_acc + 1,
+                started_acc + (if started_here then 1 else 0),
+                stale_acc + (if stale_now then 1 else 0) ))
+        (0, 0, 0)
+        specs
+    in
+    { enabled = true; scanned; started; stale }
+
+let existing_keepalive_bootstrap_done = ref false
+
+let start_existing_keepalives ctx =
+  if !existing_keepalive_bootstrap_done then ()
+  else begin
+    existing_keepalive_bootstrap_done := true;
+    try
+      let stats = bootstrap_existing_keepers ctx in
+      if keeper_debug then
+        Printf.eprintf
+          "[KEEPER-DEBUG] bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d\n%!"
+          stats.enabled stats.scanned stats.started stats.stale
+    with exn ->
+      (* Retry bootstrap on next keeper tool call if this attempt failed. *)
+      existing_keepalive_bootstrap_done := false;
+      raise exn
+  end

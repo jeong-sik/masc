@@ -362,6 +362,7 @@ let operation_status_of_session (status : Team_session_types.session_status) =
   | Paused -> Paused
   | Completed -> Completed
   | Interrupted -> Cancelled
+  | Cancelled -> Cancelled
   | Failed -> Failed
 
 let choose_unit_for_session units (session : Team_session_types.session) =

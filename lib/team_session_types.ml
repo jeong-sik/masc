@@ -8,6 +8,7 @@ type session_status =
   | Completed
   | Interrupted
   | Failed
+  | Cancelled
 
 type execution_scope =
   | Observe_only
@@ -198,6 +199,7 @@ let status_to_string = function
   | Completed -> "completed"
   | Interrupted -> "interrupted"
   | Failed -> "failed"
+  | Cancelled -> "cancelled"
 
 let status_of_string = function
   | "running" -> Running
@@ -205,6 +207,7 @@ let status_of_string = function
   | "completed" -> Completed
   | "interrupted" -> Interrupted
   | "failed" -> Failed
+  | "cancelled" -> Cancelled
   | _ -> Failed
 
 let execution_scope_to_string = function

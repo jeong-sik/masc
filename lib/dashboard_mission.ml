@@ -120,6 +120,53 @@ let compact_text ?(max_len = 160) raw =
   else if String.length normalized <= max_len then normalized
   else String.sub normalized 0 (max_len - 1) ^ "…"
 
+let string_list_json values =
+  `List (List.map (fun value -> `String value) values)
+
+let tool_audit_json_fields agent_name =
+  let task_snapshot = A2a_tools.latest_heartbeat_task agent_name in
+  let result_snapshot = A2a_tools.latest_heartbeat_result agent_name in
+  let allowed_tool_names =
+    match task_snapshot with
+    | Some snapshot -> snapshot.allowed_tools
+    | None -> []
+  in
+  let latest_tool_names =
+    match result_snapshot with
+    | Some snapshot -> snapshot.tool_names
+    | None -> []
+  in
+  let latest_tool_call_count =
+    match result_snapshot with
+    | Some snapshot -> Some snapshot.tool_call_count
+    | None -> None
+  in
+  let tool_audit_source =
+    match result_snapshot, task_snapshot with
+    | Some _, _ -> Some "heartbeat_result"
+    | None, Some _ -> Some "heartbeat_task"
+    | None, None -> None
+  in
+  let tool_audit_at =
+    match result_snapshot, task_snapshot with
+    | Some snapshot, _ -> Some snapshot.updated_at
+    | None, Some snapshot -> Some snapshot.created_at
+    | None, None -> None
+  in
+  [
+    ("allowed_tool_names", string_list_json allowed_tool_names);
+    ("latest_tool_names", string_list_json latest_tool_names);
+    ( "latest_tool_call_count",
+      option_to_json (fun value -> `Int value) latest_tool_call_count );
+    ("tool_audit_source", json_string_option tool_audit_source);
+    ("tool_audit_at", json_string_option tool_audit_at);
+  ]
+
+let recent_tool_names_for_agent agent_name =
+  match A2a_tools.latest_heartbeat_result agent_name with
+  | Some snapshot -> snapshot.tool_names
+  | None -> []
+
 let parse_iso_opt value =
   match value with
   | Some text when String.trim text <> "" -> Some (Types.parse_iso8601 text)
@@ -755,19 +802,20 @@ let build_agent_briefs config sessions attention_queue room_json =
            last_seen_ts;
            json =
              `Assoc
-               [
-                 ("agent_name", `String agent_name);
-                 ("status", `String status);
-                 ("where", `String where);
-                 ("with_whom", `List (List.map (fun value -> `String value) with_whom));
-                 ("current_work", json_string_option current_work);
-                 ("related_session_id", json_string_option (Option.map (fun s -> s.session_id) related_session));
-                 ("related_attention_count", `Int related_attention_count);
-                 ("recent_output_preview", json_string_option recent_output_preview);
-                 ("recent_input_preview", json_string_option recent_input_preview);
-                 ("recent_event", json_string_option recent_event);
-                 ("recent_tool_names", `List []);
-               ];
+               ([
+                  ("agent_name", `String agent_name);
+                  ("status", `String status);
+                  ("where", `String where);
+                  ("with_whom", `List (List.map (fun value -> `String value) with_whom));
+                  ("current_work", json_string_option current_work);
+                  ("related_session_id", json_string_option (Option.map (fun s -> s.session_id) related_session));
+                  ("related_attention_count", `Int related_attention_count);
+                  ("recent_output_preview", json_string_option recent_output_preview);
+                  ("recent_input_preview", json_string_option recent_input_preview);
+                  ("recent_event", json_string_option recent_event);
+                  ("recent_tool_names", string_list_json (recent_tool_names_for_agent agent_name));
+                ]
+                @ tool_audit_json_fields agent_name);
          } : agent_context))
   |> List.sort (fun (left : agent_context) (right : agent_context) ->
          let by_attention = Int.compare right.related_attention_count left.related_attention_count in
@@ -813,20 +861,24 @@ let build_keeper_briefs snapshot_json =
                  |> Option.value ~default:0.0;
                json =
                  `Assoc
-                   [
-                     ("name", `String name);
-                     ("agent_name", member_assoc "agent_name" keeper);
-                     ("status", `String status);
-                     ("generation", member_assoc "generation" keeper);
-                     ("context_ratio", option_to_json (fun value -> `Float value) context_ratio);
-                     ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
-                     ( "current_work",
-                       json_string_option
-                         (match trim_to_option (string_field "short_goal" keeper) with
-                         | Some value -> Some value
-                         | None -> trim_to_option (string_field "goal" keeper)) );
-                     ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
-                   ];
+                   ([
+                      ("name", `String name);
+                      ("agent_name", member_assoc "agent_name" keeper);
+                      ("status", `String status);
+                      ("generation", member_assoc "generation" keeper);
+                      ("context_ratio", option_to_json (fun value -> `Float value) context_ratio);
+                      ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
+                      ( "current_work",
+                        json_string_option
+                          (match trim_to_option (string_field "short_goal" keeper) with
+                           | Some value -> Some value
+                           | None -> trim_to_option (string_field "goal" keeper)) );
+                      ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
+                    ]
+                    @ tool_audit_json_fields
+                        (match trim_to_option (string_field "agent_name" keeper) with
+                         | Some agent_name -> agent_name
+                         | None -> name));
              })
   |> List.sort (fun left right ->
          let by_pressure = Int.compare right.pressure_rank left.pressure_rank in

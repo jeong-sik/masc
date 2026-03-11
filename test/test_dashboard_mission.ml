@@ -254,6 +254,23 @@ let test_dashboard_mission_projection () =
       let config = Lib.Room_utils.default_config dir in
       let session_id = "ts-mission-fixture-001" in
       seed_room config session_id;
+      Lib.A2a_tools.emit_heartbeat_task
+        ~agent:"llama-local-alpha"
+        ~goal:"Inspect board state with allowed MCP tools."
+        ~context:"fixture context"
+        ~allowed_tools:[ "masc_board_get"; "masc_board_vote"; "lodge_search" ]
+        ();
+      ignore
+        (Lib.A2a_tools.submit_heartbeat_result
+           ~worker_name:"worker-fixture"
+           ~agent:"llama-local-alpha"
+           ~status:"acted"
+           ~summary:"Upvoted the target board post after inspection."
+           ~tool_call_count:2
+           ~tool_names:[ "masc_board_get"; "masc_board_vote" ]
+           ~decision_reason:"fixture result"
+           ~decision_confidence:0.93
+           ());
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
@@ -314,6 +331,16 @@ let test_dashboard_mission_projection () =
           (contains alpha_input "@llama-local-alpha");
         check bool "recent input excludes unrelated beta mention" false
           (contains alpha_input "@llama-local-beta");
+        check bool "allowed tools captured" true
+          (alpha_brief |> member "allowed_tool_names" |> to_list
+           |> List.exists (fun value -> value |> to_string = "masc_board_vote"));
+        check bool "latest tool names captured" true
+          (alpha_brief |> member "latest_tool_names" |> to_list
+           |> List.exists (fun value -> value |> to_string = "masc_board_vote"));
+        check int "latest tool count captured" 2
+          (alpha_brief |> member "latest_tool_call_count" |> to_int);
+        check string "tool audit source" "heartbeat_result"
+          (alpha_brief |> member "tool_audit_source" |> to_string);
         check bool "internal signal includes pending confirm" true
           (internal_signals
            |> List.exists (fun row ->

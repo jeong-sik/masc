@@ -266,6 +266,39 @@ let now_iso8601 () : string =
     tm.Unix.tm_min
     tm.Unix.tm_sec
 
+type heartbeat_task_snapshot = {
+  goal: string;
+  context: string;
+  worker_mode: string;
+  allowed_tools: string list;
+  decision_reason: string option;
+  created_at: string;
+}
+
+type heartbeat_result_snapshot = {
+  status: string;
+  summary: string;
+  worker_name: string;
+  tool_call_count: int;
+  tool_names: string list;
+  decision_reason: string;
+  decision_confidence: float;
+  failure_reason: string option;
+  updated_at: string;
+}
+
+let latest_heartbeat_tasks : (string, heartbeat_task_snapshot) Hashtbl.t =
+  Hashtbl.create 32
+
+let latest_heartbeat_results : (string, heartbeat_result_snapshot) Hashtbl.t =
+  Hashtbl.create 32
+
+let latest_heartbeat_task agent =
+  Hashtbl.find_opt latest_heartbeat_tasks agent
+
+let latest_heartbeat_result agent =
+  Hashtbl.find_opt latest_heartbeat_results agent
+
 (** Discover available agents
 
     Combines local room agents with remote agent card fetching.
@@ -655,6 +688,15 @@ let emit_heartbeat_task
     ?(decision_confidence : float option)
     ?(auth_token : string option)
     () : unit =
+  Hashtbl.replace latest_heartbeat_tasks agent
+    {
+      goal;
+      context;
+      worker_mode;
+      allowed_tools;
+      decision_reason;
+      created_at = now_iso8601 ();
+    };
   let data = `Assoc ([
     ("agent", `String agent);
     ("goal", `String goal);
@@ -739,6 +781,18 @@ let submit_heartbeat_result
   (* Broadcast completion event *)
   (match result with
    | Ok _ ->
+       Hashtbl.replace latest_heartbeat_results agent
+         {
+           status = normalized_status;
+           summary;
+           worker_name;
+           tool_call_count;
+           tool_names;
+           decision_reason;
+           decision_confidence;
+           failure_reason;
+           updated_at = now_iso8601 ();
+         };
        notify_event ~event_type:Completion ~agent
          ~data:(`Assoc [
            ("worker", `String worker_name);

@@ -38,6 +38,8 @@ type loop_state = {
   loop_id : string;
   goal : string;
   metric_fn : string;
+  llm_model : string;
+  target_file : string;  (** File the LLM reads and modifies, relative to workdir *)
   mutable status : status;
   mutable error_message : string option;
   mutable current_cycle : int;
@@ -47,6 +49,7 @@ type loop_state = {
   mutable history : cycle_record list;  (** Most recent first *)
   mutable total_keeps : int;
   mutable total_discards : int;
+  mutable insights : string list;  (** Accumulated experiment insights, FIFO max 10 *)
   start_time : float;
   mutable updated_at : float;
   cycle_timeout_s : float;
@@ -126,6 +129,8 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
     ("loop_id", `String s.loop_id);
     ("goal", `String s.goal);
     ("metric_fn", `String s.metric_fn);
+    ("llm_model", `String s.llm_model);
+    ("target_file", `String s.target_file);
     ("status", `String (status_to_string s.status));
     ("current_cycle", `Int s.current_cycle);
     ("baseline", `Float s.baseline);
@@ -138,6 +143,7 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
     ("workdir", `String s.workdir);
     ("elapsed_s", `Float (Time_compat.now () -. s.start_time));
     ("history_count", `Int (List.length s.history));
+    ("insights_count", `Int (List.length s.insights));
     ("error", match s.error_message with
       | Some e -> `String e | None -> `Null);
   ]
@@ -196,7 +202,7 @@ let save_state ~base_path state =
 let measure_metric ~workdir ~timeout_s metric_fn =
   let timeout_flag = Printf.sprintf "timeout %.0f" timeout_s in
   let cmd = Printf.sprintf "cd %s && %s %s 2>/dev/null | tail -1"
-    (Filename.quote workdir) timeout_flag (Filename.quote metric_fn) in
+    (Filename.quote workdir) timeout_flag metric_fn in
   let start = Time_compat.now () in
   let ic = Unix.open_process_in cmd in
   let output = Fun.protect ~finally:(fun () ->
@@ -206,8 +212,39 @@ let measure_metric ~workdir ~timeout_s metric_fn =
   ) in
   let elapsed_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   match float_of_string_opt (String.trim output) with
-  | Some v -> Ok (v, elapsed_ms)
-  | None -> Error (Printf.sprintf "metric_fn output not a float: %S" output)
+  | Some v -> Result.ok (v, elapsed_ms)
+  | None -> Result.error (Printf.sprintf "metric_fn output not a float: %S" output)
+
+(** Check if [needle] is a substring of [haystack]. *)
+let contains_substring haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  if nlen > hlen then false
+  else
+    let found = ref false in
+    for i = 0 to hlen - nlen do
+      if not !found && String.sub haystack i nlen = needle then
+        found := true
+    done;
+    !found
+
+(** Run metric_fn with retry on transient errors (timeout, connection).
+    Returns Ok (score, total_elapsed_ms) or Error on non-transient failure.
+    max_retries=2 means up to 3 total attempts. *)
+let measure_metric_with_retry ~workdir ~timeout_s ?(max_retries = 2) metric_fn =
+  let is_transient err =
+    let lower = String.lowercase_ascii err in
+    contains_substring lower "timeout" || contains_substring lower "connection"
+  in
+  let rec attempt n =
+    match measure_metric ~workdir ~timeout_s metric_fn with
+    | Ok _ as ok -> ok
+    | Error e when n < max_retries && is_transient e ->
+      Unix.sleepf 1.0;
+      attempt (n + 1)
+    | Error _ as err -> err
+  in
+  attempt 0
 
 (* ================================================================ *)
 (* Git Operations                                                   *)
@@ -224,10 +261,13 @@ let git_head_short ~workdir =
     try Some (String.trim (input_line ic)) with End_of_file -> None
   )
 
-(** Commit all changes with a message. Returns commit hash or None on failure. *)
+(** Commit staged/unstaged changes with a message.
+    Returns commit hash or None if nothing to commit.
+    No --allow-empty: real file changes required. *)
 let git_commit ~workdir ~message =
   let cmd = Printf.sprintf
-    "cd %s && git add -A && git commit --allow-empty -m %s 2>/dev/null && git rev-parse --short HEAD"
+    "cd %s && git add -A && git diff --cached --quiet; \
+     if [ $? -ne 0 ]; then git commit -m %s 2>/dev/null && git rev-parse --short HEAD; fi"
     (Filename.quote workdir) (Filename.quote message) in
   let ic = Unix.open_process_in cmd in
   Fun.protect ~finally:(fun () ->
@@ -249,16 +289,186 @@ let git_reset_last ~workdir =
     (Filename.quote workdir) in
   ignore (Sys.command cmd)
 
+(** Commit with autoresearch-formatted message. *)
+let git_commit_cycle ~workdir ~cycle ~hypothesis ~baseline =
+  let message = Printf.sprintf "[autoresearch] cycle %d: %s (baseline=%.4f)"
+    cycle hypothesis baseline in
+  git_commit ~workdir ~message
+
+(** Tag the current HEAD as the best result so far. *)
+let git_tag_best ~workdir ~cycle ~score =
+  let tag = Printf.sprintf "ar-best-c%d-%.4f" cycle score in
+  let cmd = Printf.sprintf "cd %s && git tag -f %s 2>/dev/null"
+    (Filename.quote workdir) (Filename.quote tag) in
+  ignore (Sys.command cmd)
+
+(* ================================================================ *)
+(* LLM Hypothesis Generation                                        *)
+(* ================================================================ *)
+
+(* ================================================================ *)
+(* Target File Validation & I/O                                     *)
+(* ================================================================ *)
+
+(** Validate target_file: must be relative, no path traversal, must exist.
+    Returns Ok absolute_path or Error reason. *)
+let validate_target_file ~workdir target_file =
+  if String.length target_file = 0 then
+    Result.error "target_file is empty"
+  else if contains_substring target_file ".." then
+    Result.error (Printf.sprintf "target_file contains '..': %s" target_file)
+  else if String.get target_file 0 = '/' then
+    Result.error (Printf.sprintf "target_file must be relative: %s" target_file)
+  else
+    let abs = Filename.concat workdir target_file in
+    if Sys.file_exists abs then Result.ok abs
+    else Result.error (Printf.sprintf "target_file not found: %s" abs)
+
+(** Read entire file contents. *)
+let read_file path =
+  let ic = open_in path in
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+    let n = in_channel_length ic in
+    let buf = Bytes.create n in
+    really_input ic buf 0 n;
+    Bytes.to_string buf
+  )
+
+(** Apply code change: write new_content to target_file.
+    Returns Ok original_content (for rollback reference) or Error reason. *)
+let apply_code_change ~workdir ~target_file ~new_content =
+  match validate_target_file ~workdir target_file with
+  | (Result.Error _) as e -> e
+  | Result.Ok abs_path ->
+    let original = read_file abs_path in
+    let oc = open_out abs_path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc new_content
+    );
+    Result.ok original
+
+(* ================================================================ *)
+(* LLM Code Change Generation                                       *)
+(* ================================================================ *)
+
+(** Build prompt for LLM code change. Exported for testing. *)
+let build_code_change_prompt ~goal ~baseline ~history ~insights
+    ~file_content ~target_file =
+  let recent = List.filteri (fun i _ -> i < 5) history in
+  let history_lines = List.map (fun (r : cycle_record) ->
+    Printf.sprintf "  Cycle %d: %s -> delta=%.4f (%s)"
+      r.cycle r.hypothesis r.delta (decision_to_string r.decision)
+  ) recent in
+  let insight_lines = List.map (fun s -> "  - " ^ s) insights in
+  String.concat "\n" ([
+    "You are an autonomous research assistant optimizing code.";
+    Printf.sprintf "Goal: %s" goal;
+    Printf.sprintf "Current baseline score: %.4f (higher is better)" baseline;
+    Printf.sprintf "Target file: %s" target_file;
+  ] @ (if history_lines <> [] then
+    [""; "Recent experiment history:"] @ history_lines
+  else []) @ (if insight_lines <> [] then
+    [""; "Accumulated insights:"] @ insight_lines
+  else []) @ [
+    "";
+    "<current_code>";
+    file_content;
+    "</current_code>";
+    "";
+    "Modify the code to improve the metric score.";
+    "Reply with exactly:";
+    "1. A <hypothesis> tag containing a one-line description of your change";
+    "2. A <modified_code> tag containing the COMPLETE modified file";
+    "";
+    "Example format:";
+    "<hypothesis>Increase batch size from 32 to 64 for better throughput</hypothesis>";
+    "<modified_code>";
+    "... complete file content ...";
+    "</modified_code>";
+  ])
+
+(** Extract text between XML-style tags. *)
+let extract_tag ~tag text =
+  let open_tag = Printf.sprintf "<%s>" tag in
+  let close_tag = Printf.sprintf "</%s>" tag in
+  let open_len = String.length open_tag in
+  let close_len = String.length close_tag in
+  let text_len = String.length text in
+  let rec find_start i =
+    if i + open_len > text_len then None
+    else if String.sub text i open_len = open_tag then
+      let content_start = i + open_len in
+      find_end content_start content_start
+    else find_start (i + 1)
+  and find_end content_start j =
+    if j + close_len > text_len then None
+    else if String.sub text j close_len = close_tag then
+      Some (String.sub text content_start (j - content_start))
+    else find_end content_start (j + 1)
+  in
+  find_start 0
+
+(** Parse LLM response containing <hypothesis> and <modified_code> tags.
+    Returns Ok (hypothesis, modified_code) or Error reason. *)
+let parse_llm_code_response response =
+  if String.trim response = "" then
+    Result.error "LLM returned empty response"
+  else
+    match extract_tag ~tag:"hypothesis" response with
+    | None -> Result.error "Missing <hypothesis> tag in LLM response"
+    | Some h ->
+      let hypothesis = String.trim h in
+      if hypothesis = "" then Result.error "Empty <hypothesis> tag"
+      else
+        match extract_tag ~tag:"modified_code" response with
+        | None -> Result.error "Missing <modified_code> tag in LLM response"
+        | Some code ->
+          if String.trim code = "" then Result.error "Empty <modified_code> tag"
+          else
+            (* Trim leading/trailing newline from code block *)
+            let trimmed =
+              let s = code in
+              let s = if String.length s > 0 && String.get s 0 = '\n'
+                then String.sub s 1 (String.length s - 1) else s in
+              let len = String.length s in
+              if len > 0 && String.get s (len - 1) = '\n'
+              then String.sub s 0 (len - 1) else s
+            in
+            Result.ok (hypothesis, trimmed)
+
+(** Generate code change by calling Llm_client.complete.
+    Returns Ok (hypothesis, new_code) or Error reason. *)
+let generate_code_change ~goal ~baseline ~history ~insights
+    ~target_file ~file_content ~llm_model =
+  let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
+    ~file_content ~target_file in
+  match Llm_client.model_spec_of_string llm_model with
+  | Result.Error e -> Result.error (Printf.sprintf "Invalid model spec: %s" e)
+  | Result.Ok model ->
+    let req : Llm_client.completion_request = {
+      model;
+      messages = [Llm_client.user_msg prompt];
+      temperature = 0.7;
+      max_tokens = 4096;
+      tools = [];
+      response_format = `Text;
+    } in
+    (match Llm_client.complete ~timeout_sec:120 req with
+    | Result.Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
+    | Result.Ok resp -> parse_llm_code_response resp.content)
+
 (* ================================================================ *)
 (* Loop State Management                                            *)
 (* ================================================================ *)
 
-let create_state ~goal ~metric_fn ~cycle_timeout_s ~max_cycles ~workdir () =
+let create_state ~goal ~metric_fn ?(llm_model = "glm") ~target_file ~cycle_timeout_s ~max_cycles ~workdir () =
   let now = Time_compat.now () in
   {
     loop_id = generate_loop_id ();
     goal;
     metric_fn;
+    llm_model;
+    target_file;
     status = Running;
     error_message = None;
     current_cycle = 0;
@@ -268,12 +478,20 @@ let create_state ~goal ~metric_fn ~cycle_timeout_s ~max_cycles ~workdir () =
     history = [];
     total_keeps = 0;
     total_discards = 0;
+    insights = [];
     start_time = now;
     updated_at = now;
     cycle_timeout_s;
     max_cycles;
     workdir;
   }
+
+(** Append an insight, maintaining FIFO max 10 entries. *)
+let add_insight state msg =
+  let max_insights = 10 in
+  state.insights <- msg :: state.insights;
+  if List.length state.insights > max_insights then
+    state.insights <- List.filteri (fun i _ -> i < max_insights) state.insights
 
 (** Record one completed experiment cycle. *)
 let record_cycle state ~hypothesis ~score_before ~score_after
@@ -301,9 +519,13 @@ let record_cycle state ~hypothesis ~score_before ~score_after
      if score_after > state.best_score then begin
        state.best_score <- score_after;
        state.best_cycle <- state.current_cycle
-     end
+     end;
+     add_insight state
+       (Printf.sprintf "Cycle %d: %s improved +%.4f" state.current_cycle hypothesis delta)
    | Discard ->
-     state.total_discards <- state.total_discards + 1);
+     state.total_discards <- state.total_discards + 1;
+     add_insight state
+       (Printf.sprintf "Cycle %d: %s no improvement (%.4f)" state.current_cycle hypothesis delta));
   record
 
 (** Check if the loop should continue. *)

@@ -426,7 +426,7 @@ let test_start_attached_operation_session () =
   Alcotest.(check bool) "finalize ok" true finalize_ok;
   let finalized_status =
     finalize_body |> parse_json_exn |> result_field
-    |> Yojson.Safe.Util.member "status"
+    |> Yojson.Safe.Util.member "terminal_status"
     |> Yojson.Safe.Util.to_string
   in
   Alcotest.(check bool) "terminal status after finalize" true

@@ -331,6 +331,7 @@ let tool_category tool_name =
   (* Autoresearch *)
   | "masc_autoresearch_start" | "masc_autoresearch_status"
   | "masc_autoresearch_stop" | "masc_autoresearch_inject"
+  | "masc_autoresearch_cycle"
   (* Handover *)
   | "masc_handover_create" | "masc_handover_get"
   | "masc_handover_list" | "masc_handover_claim"

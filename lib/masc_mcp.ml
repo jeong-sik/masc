@@ -204,22 +204,13 @@ module Swarm_checkpoint = Swarm_checkpoint
 module Compression_dict = Compression_dict
 (* Redis_common module removed - PostgreSQL is now the only distributed backend *)
 
-module Sdp = Sdp
-module Dtls = Dtls
-module Dtls_crypto = Dtls_crypto
-module Sctp = Sctp
-module Sctp_transport = Sctp_transport
-module Datachannel = Datachannel
-module Datachannel_eio = Datachannel_eio
-module Sctp_eio = Sctp_eio
+(* WebRTC protocol modules (Sdp, Dtls, Sctp, Datachannel, etc.)
+   removed — use the ocaml-webrtc library directly. *)
 
 module Voice_stream = Voice_stream
 module Voice_session_manager = Voice_session_manager
 module Voice_bridge = Voice_bridge_eio
 module Void = Void
-module Webrtc_bindings = Webrtc_bindings
-module Webrtc_common = Webrtc_common
-module Webrtc_datachannel = Webrtc_datachannel
 module Udp_socket_eio = Udp_socket_eio
 
 (* Tool handler modules (extracted for testability) *)

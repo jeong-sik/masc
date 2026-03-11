@@ -54,10 +54,7 @@
    cp_microarch_summary
    cp_search_fabric
    lodge_dashboard
-   datachannel
-   datachannel_eio
-   dtls
-   dtls_crypto
+   ;; WebRTC modules removed — use ocaml-webrtc library directly
    eio_context
    encryption
    federation
@@ -191,12 +188,10 @@
    team_session_store
    team_session_report
    team_session_engine_eio
-   sctp
-   sctp_eio
-   sctp_transport
+   ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
    safe_ops
    game_view_state
-   sdp
+   ;; sdp removed — in ocaml-webrtc
    session
    shutdown_hooks
    spawn
@@ -280,9 +275,7 @@
   voice_stream
    version
    void
-   webrtc_bindings
-   webrtc_common
-   webrtc_datachannel
+   ;; webrtc_bindings/common/datachannel removed — in ocaml-webrtc
    ;; Keeper Agent Harness (trajectory + eval gates + scenarios)
    trajectory
    eval_gate
@@ -385,8 +378,7 @@
    grpc-direct-core
    h2
    h2-eio
-   ctypes
-   ctypes-foreign
+   ;; ctypes/ctypes-foreign removed (was only used by webrtc_bindings.ml)
    ;; OCaml 5.x Eio concurrency (required for *_eio.ml modules)
    eio
    eio_main

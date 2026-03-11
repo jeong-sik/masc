@@ -42,5 +42,39 @@
   "lodge_agent_match_models": [
     "llama:qwen3.5-35b-a3b-ud-q8-xl",
     "glm:glm-4.7"
+  ],
+  "context_router_models": [
+    "ollama:glm-4.7-flash",
+    "glm:glm-4.7"
+  ],
+  "capability_match_models": [
+    "ollama:glm-4.7-flash",
+    "glm:glm-4.7"
+  ],
+  "tom_models": [
+    "ollama:glm-4.7-flash",
+    "glm:glm-4.7"
+  ],
+  "verifier_models": [
+    "ollama:glm-4.7-flash",
+    "glm:glm-4.7"
+  ],
+  "trpg_intent_models": [
+    "ollama:glm-4.7-flash",
+    "glm:glm-4.7"
+  ],
+  "briefing_models": [
+    "llama:qwen3.5-35b-a3b",
+    "glm:glm-4.7-flash",
+    "gemini:gemini-2.5-flash",
+    "ollama:glm-4.7-flash"
+  ],
+  "walph_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
+    "glm:glm-4.7"
+  ],
+  "classification_models": [
+    "ollama:glm-4.7-flash",
+    "glm:glm-4.7"
   ]
 }

@@ -4,9 +4,17 @@ open Masc_mcp
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
-(** Wrap test body in Eio runtime (Board.global uses Eio.Mutex) *)
+(** Temp directory for test isolation — set before any Board.global call *)
+let test_base_path =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc-test-board-dispatch" in
+  Unix.putenv "MASC_BASE_PATH" dir;
+  dir
+
+(** Wrap test body in Eio runtime with isolated JSONL backend *)
 let with_eio f () =
   Eio_main.run @@ fun _env ->
+  Unix.putenv "MASC_BASE_PATH" test_base_path;
+  Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
   f ()

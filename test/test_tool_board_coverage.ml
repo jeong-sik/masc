@@ -2,6 +2,12 @@ open Masc_mcp
 
 (** {1 Test helpers} *)
 
+(** Temp directory for test isolation — set before any Board.global call *)
+let _test_base_path =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc-test-tool-board" in
+  Unix.putenv "MASC_BASE_PATH" dir;
+  dir
+
 (** Clear all Board global state for test isolation.
     Must call inside Eio_main.run since Board.store contains Eio.Mutex. *)
 let rng_initialized = ref false
@@ -11,17 +17,9 @@ let cleanup () =
     Mirage_crypto_rng_unix.use_default ();
     rng_initialized := true
   end;
+  Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  let store = Board.global () in
-  Hashtbl.reset store.Board.posts;
-  Hashtbl.reset store.Board.comments;
-  Hashtbl.reset store.Board.vote_log;
-  Hashtbl.reset store.Board.comments_by_post;
-  store.Board.post_count := 0;
-  store.Board.karma_cache <- None;
-  store.Board.sorted_posts_cache <- None;
-  store.Board.dirty_posts <- false;
-  store.Board.dirty_comments <- false
+  Board_dispatch.init_jsonl ()
 
 let dispatch name args =
   Tool_board.handle_tool name args

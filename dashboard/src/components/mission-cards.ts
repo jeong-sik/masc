@@ -18,8 +18,6 @@ import type {
 import {
   type EnrichedAgentRow,
   type EnrichedKeeperRow,
-  selectedAttentionId,
-  selectedSessionId,
   toneClass,
   relativeTime,
   formatDuration,

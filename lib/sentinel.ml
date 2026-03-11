@@ -3,12 +3,12 @@
     Ensures at least one agent is always alive when the server runs.
     Integrates Guardian's zombie/gc consumers and adds:
     - Self-heartbeat (room presence)
-    - Board patrol (stale post detection, daily status) — LLM-enhanced
-    - Task hygiene (orphaned/stuck task warnings) — LLM-enhanced
-    - Keeper health monitoring — LLM-enhanced
+    - Board patrol (stale post detection, daily status) — LLM-driven
+    - Task hygiene (orphaned/stuck task warnings) — LLM-driven
+    - Keeper health monitoring — LLM-driven
 
-    Phase 2: LLM judgment layer via Prompt_registry + Lodge_cascade.
-    LLM failure falls back to Phase 1 heuristics.
+    LLM judgment layer via Prompt_registry + Lodge_cascade.
+    When LLM is unavailable, judgment consumers skip silently.
 
     Opt-out via MASC_SENTINEL_ENABLED=false.
     LLM layer opt-out via MASC_SENTINEL_LLM_ENABLED=false. *)
@@ -90,8 +90,8 @@ let make_heartbeat_consumer config : (module Pulse.Consumer) =
         Error msg
   end)
 
-(** Board patrol consumer: posts a daily status summary.
-    Phase 2: LLM generates context-aware summary; heuristic fallback on failure. *)
+(** Board patrol consumer: posts a daily status summary via LLM.
+    Skips posting when LLM is unavailable. *)
 let make_board_patrol_consumer config : (module Pulse.Consumer) =
   let last_daily_post = ref 0 in (* day-of-year of last post *)
   (module struct
@@ -100,23 +100,10 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
     let on_beat _beat =
       try
         let state = Room.read_state config in
-        let backlog = Room.read_backlog config in
-        let agent_count = List.length state.active_agents in
-        let task_count = List.length backlog.tasks in
-        let pending = List.filter (fun (t : Types.task) ->
-          match t.task_status with Types.Todo -> true | _ -> false
-        ) backlog.tasks |> List.length in
-        let in_progress = List.filter (fun (t : Types.task) ->
-          match t.task_status with Types.InProgress _ -> true | _ -> false
-        ) backlog.tasks |> List.length in
-
-        (* Post daily status once per calendar day *)
         let tm = Unix.localtime (Time_compat.now ()) in
         let today = tm.Unix.tm_yday in
         if today <> !last_daily_post then begin
           last_daily_post := today;
-
-          (* LLM-first: ask LLM for a context-aware daily summary *)
           let agent_names = String.concat ", " state.active_agents in
           let board_posts = (try Board_dispatch.list_posts ~limit:50 ()
                              with _ -> []) in
@@ -138,29 +125,23 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
               ("latest_post_age", latest_age);
               ("active_agents", agent_names);
             ] () in
-          let content = match llm_content with
-            | Some json ->
-                let open Yojson.Safe.Util in
-                let summary = json |> member "daily_summary" |> to_string_option
-                              |> Option.value ~default:"" in
-                if String.length summary > 10 then (
-                  log "daily status via LLM";
-                  sprintf "[Sentinel Daily/LLM] %s" summary)
-                else (
-                  log "LLM summary too short, using heuristic";
-                  sprintf "[Sentinel Daily] agents=%d tasks=%d (pending=%d in_progress=%d) paused=%b"
-                    agent_count task_count pending in_progress state.paused)
-            | None ->
-                (* Heuristic fallback *)
-                sprintf "[Sentinel Daily] agents=%d tasks=%d (pending=%d in_progress=%d) paused=%b"
-                  agent_count task_count pending in_progress state.paused
-          in
-          (match Board_dispatch.create_post
-                   ~author:agent_name ~content
-                   ~visibility:Board.Internal
-                   ~hearth:"sentinel" () with
-           | Ok _post -> log "daily status posted"
-           | Error e -> log (sprintf "daily post failed: %s" (Board.show_board_error e)));
+          match llm_content with
+          | Some json ->
+              let open Yojson.Safe.Util in
+              let summary = json |> member "daily_summary" |> to_string_option
+                            |> Option.value ~default:"" in
+              if String.length summary > 10 then begin
+                let content = sprintf "[Sentinel Daily] %s" summary in
+                (match Board_dispatch.create_post
+                         ~author:agent_name ~content
+                         ~visibility:Board.Internal
+                         ~hearth:"sentinel" () with
+                 | Ok _post -> log "daily status posted"
+                 | Error e -> log (sprintf "daily post failed: %s" (Board.show_board_error e)))
+              end else
+                log "LLM summary too short, skipping daily post"
+          | None ->
+              log "LLM unavailable, skipping daily post"
         end;
         Ok ()
       with exn ->
@@ -169,8 +150,8 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
         Error msg
   end)
 
-(** Task hygiene consumer: detects orphaned/stuck tasks and broadcasts warnings.
-    Phase 2: LLM assesses each stuck task for action priority; heuristic fallback. *)
+(** Task hygiene consumer: detects orphaned/stuck tasks via LLM assessment.
+    Skips warnings when LLM is unavailable. *)
 let make_task_hygiene_consumer config : (module Pulse.Consumer) =
   (module struct
     let name = "sentinel-task-hygiene"
@@ -230,11 +211,9 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
                     Some (sprintf "task %s: %s [%s] %s" task_id action priority reason)
                 ) items
             | _ ->
-                (* Heuristic fallback: warn about all candidates *)
-                List.map (fun (id, assignee, age, alive, status) ->
-                  sprintf "task %s may be stuck (%s by %s, %.0fs ago, agent_alive=%b)"
-                    id status assignee age alive
-                ) !candidates
+                log (sprintf "%d candidate stuck tasks, LLM unavailable — skipping"
+                  (List.length !candidates));
+                []
           in
 
           if warnings <> [] then begin
@@ -256,8 +235,8 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
         Error msg
   end)
 
-(** Keeper health consumer: detects stale keepers via bootstrap stats.
-    Phase 2: LLM assesses each stale keeper for action; heuristic fallback. *)
+(** Keeper health consumer: detects stale keepers via LLM assessment.
+    Skips action when LLM is unavailable. *)
 let make_keeper_health_consumer _config : (module Pulse.Consumer) =
   (module struct
     let name = "sentinel-keeper-health"
@@ -318,10 +297,8 @@ let make_keeper_health_consumer _config : (module Pulse.Consumer) =
                     log (sprintf "keeper %s: %s — %s" keeper action reason)
                 ) items
             | _ ->
-                (* Heuristic fallback: log all stale keepers *)
-                log (sprintf "%d stale keeper(s): %s"
-                  (List.length !stale)
-                  (String.concat ", " (List.map fst !stale)))
+                log (sprintf "%d stale keeper(s) detected, LLM unavailable — skipping"
+                  (List.length !stale))
           end
         end;
         Ok ()

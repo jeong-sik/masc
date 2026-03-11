@@ -877,19 +877,201 @@ let detect_intervention ~config ~health : intervention =
   else
     detect_intervention_rule_based ~config ~health
 
+let backlog_goal_prefix = "[Gardener] Backlog triage"
+
+let backlog_objective room_id (backlog : task_backlog_summary) =
+  Printf.sprintf
+    "%s · room=%s · todo=%d · high=%d · orphan=%d"
+    backlog_goal_prefix room_id backlog.todo_count backlog.high_priority_todo
+    backlog.orphan_count
+
+let active_room_agents ~(room_config : Room_utils.config) ~(room_id : string) =
+  Room.get_agents_raw_in_room room_config room_id
+  |> List.filter_map (fun (agent : Types.agent) ->
+         match agent.status with
+         | Types.Active | Types.Busy | Types.Listening -> Some agent.name
+         | Types.Inactive -> None)
+  |> Team_session_types.dedup_strings
+  |> List.sort String.compare
+
+let existing_backlog_session ~(room_config : Room_utils.config) ~(room_id : string) =
+  Team_session_store.list_sessions room_config
+  |> List.find_opt (fun (session : Team_session_types.session) ->
+         String.equal session.created_by "gardener"
+         && String.equal session.room_id room_id
+         &&
+         List.mem session.status
+           [ Team_session_types.Running; Team_session_types.Paused ]
+         && String.starts_with ~prefix:backlog_goal_prefix session.goal)
+
+let top_todo_tasks ~(room_config : Room_utils.config) ~(room_id : string) ~(limit : int) =
+  Room.get_tasks_raw_in_room room_config room_id
+  |> List.filter (fun (task : Types.task) ->
+         match task.task_status with
+         | Types.Todo -> true
+         | _ -> false)
+  |> List.sort (fun (left : Types.task) (right : Types.task) ->
+         let by_priority = Int.compare left.priority right.priority in
+         if by_priority <> 0 then by_priority
+         else String.compare left.created_at right.created_at)
+  |> List.filteri (fun idx _ -> idx < limit)
+
+let backlog_summary_lines backlog orphan_tasks todo_tasks =
+  let orphan_refs =
+    orphan_tasks
+    |> List.map (fun ((task : Types.task), assignee) ->
+           Printf.sprintf "%s(%s→%s)" task.id assignee task.title)
+  in
+  let todo_refs =
+    todo_tasks
+    |> List.map (fun (task : Types.task) ->
+           Printf.sprintf "%s[P%d] %s" task.id task.priority task.title)
+  in
+  Team_session_types.dedup_strings
+    ([
+       Printf.sprintf "TODO %d / high-priority %d / orphan %d / oldest %.1fh"
+         backlog.todo_count backlog.high_priority_todo backlog.orphan_count
+         backlog.oldest_todo_age_hours;
+     ]
+    @
+    if orphan_refs = [] then [] else [ "Orphans: " ^ String.concat ", " orphan_refs ]
+    @
+    if todo_refs = [] then [] else [ "Top TODOs: " ^ String.concat ", " todo_refs ])
+
+let inject_backlog_tasks ~(room_config : Room_utils.config) ~(session_id : string)
+    ~(backlog : task_backlog_summary) ~(orphan_tasks : (Types.task * string) list)
+    ~(todo_tasks : Types.task list) =
+  let record ~turn_kind ?message ?task_title ?task_description ~task_priority () =
+    ignore
+      (Team_session_engine_eio.record_turn ~config:room_config ~session_id
+         ~actor:"gardener" ~turn_kind ~message ~target_agent:None ~task_title
+         ~task_description ~task_priority)
+  in
+  let summary_lines = backlog_summary_lines backlog orphan_tasks todo_tasks in
+  record ~turn_kind:Team_session_types.Turn_note
+    ~message:(String.concat " | " summary_lines) ~task_priority:3 ();
+  let mentions =
+    Team_session_store.load_session room_config session_id
+    |> Option.map Team_session_types.planned_participant_names
+    |> Option.value ~default:[]
+    |> List.map (fun name -> "@" ^ name)
+    |> String.concat " "
+  in
+  record ~turn_kind:Team_session_types.Turn_broadcast
+    ~message:
+      (String.trim
+         (Printf.sprintf
+            "%s backlog triage session started. Reclaim orphaned tasks, claim top TODOs, and leave progress in this session."
+            mentions))
+    ~task_priority:3 ();
+  if backlog.orphan_count > 0 then
+    let orphan_desc =
+      orphan_tasks
+      |> List.map (fun ((task : Types.task), assignee) ->
+             Printf.sprintf "%s claimed by %s: %s" task.id assignee task.title)
+      |> String.concat "\n"
+    in
+    record ~turn_kind:Team_session_types.Turn_task
+      ~task_title:(Printf.sprintf "[Gardener] Reassign %d orphan task(s)" backlog.orphan_count)
+      ~task_description:
+        (Printf.sprintf
+           "Audit and reassign orphaned work in the current room.\n%s"
+           orphan_desc)
+      ~task_priority:1 ();
+  if backlog.high_priority_todo > 0 then
+    let todo_desc =
+      todo_tasks
+      |> List.filter (fun (task : Types.task) -> task.priority <= 2)
+      |> List.map (fun (task : Types.task) ->
+             Printf.sprintf "%s [P%d] %s" task.id task.priority task.title)
+      |> String.concat "\n"
+    in
+    record ~turn_kind:Team_session_types.Turn_task
+      ~task_title:(Printf.sprintf "[Gardener] Claim %d high-priority TODO(s)" backlog.high_priority_todo)
+      ~task_description:
+        (Printf.sprintf
+           "Claim or delegate the highest-priority unassigned backlog items.\n%s"
+           todo_desc)
+      ~task_priority:1 ();
+  if backlog.todo_count > backlog.high_priority_todo then
+    record ~turn_kind:Team_session_types.Turn_task
+      ~task_title:(Printf.sprintf "[Gardener] Triage remaining TODO backlog (%d)" backlog.todo_count)
+      ~task_description:
+        "Review remaining unclaimed tasks, group related work, and leave a checkpoint in the session."
+      ~task_priority:2 ()
+
+let start_backlog_triage_session ~sw ~clock ~(room_config : Room_utils.config)
+    ~(backlog : task_backlog_summary) =
+  let room_id = Room.current_room_id room_config in
+  match existing_backlog_session ~room_config ~room_id with
+  | Some session ->
+      Eio.traceln "[Gardener] Reusing backlog triage session %s" session.session_id;
+      Ok session.session_id
+  | None ->
+      let agents = active_room_agents ~room_config ~room_id in
+      if agents = [] then
+        Error "no active room agents available for backlog triage"
+      else
+        let orphan_tasks = Room.audit_orphan_tasks room_config in
+        let todo_tasks = top_todo_tasks ~room_config ~room_id ~limit:5 in
+        let operation_json =
+          `Assoc
+            [
+              ("assigned_unit_id", `String "company-runtime");
+              ("objective", `String (backlog_objective room_id backlog));
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "decompose");
+              ("search_strategy", `String "best_first_v1");
+              ("note", `String "gardener_backlog_triage");
+              ("artifact_scope", `List []);
+            ]
+        in
+        match Command_plane_v2.start_operation room_config ~actor:"gardener" operation_json with
+        | Error err -> Error err
+        | Ok operation -> (
+            match
+              Team_session_engine_eio.start_session ~sw ~clock ~config:room_config
+                ~created_by:"gardener"
+                ~goal:(backlog_objective room_id backlog)
+                ~duration_seconds:1800
+                ~execution_scope:Team_session_types.Observe_only
+                ~checkpoint_interval_sec:60 ~min_agents:1
+                ~scale_profile:Team_session_types.Scale_standard
+                ~control_profile:Team_session_types.Control_flat
+                ~orchestration_mode:Team_session_types.Assist
+                ~communication_mode:Team_session_types.Comm_broadcast
+                ~model_cascade:[]
+                ~fallback_policy:Team_session_types.Fallback_cascade_then_task
+                ~instruction_profile:Team_session_types.Profile_standard
+                ~alert_channel:Team_session_types.Alert_both ~auto_resume:true
+                ~report_formats:
+                  [ Team_session_types.Markdown; Team_session_types.Json ]
+                ~agent_names:agents ~operation_id:(Some operation.operation_id)
+            with
+            | Error err -> Error err
+            | Ok (`Assoc _ as json) -> (
+                match Yojson.Safe.Util.member "session_id" json with
+                | `String session_id ->
+                    inject_backlog_tasks ~room_config ~session_id ~backlog
+                      ~orphan_tasks ~todo_tasks;
+                    Ok session_id
+                | _ -> Error "backlog triage session missing session_id")
+            | Ok _ -> Error "unexpected backlog triage session response")
+
 (** {1 Background Loop} *)
 
 (** Main gardener loop iteration *)
-let tick ~config ~room_config : unit =
+let tick ~sw ~clock ~config ~room_config : unit =
   if is_circuit_open () then
     Eio.traceln "[Gardener] Circuit open, skipping tick"
   else begin
     let health = calculate_health ~config ~room_config:(Some room_config) in
     let backlog = health.task_backlog in
-    Eio.traceln "[Gardener] Health: agents=%d/%d active=%d idle=%d score=%.2f task_backlog: todo=%d high_pri=%d orphans=%d"
+    Eio.traceln
+      "[Gardener] Health: agents=%d/%d active=%d idle=%d score=%.2f task_backlog: todo=%d high_pri=%d orphans=%d"
       health.total_agents config.target_agents health.active_agents
-      health.idle_agents health.homeostatic_score
-      backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
+      health.idle_agents health.homeostatic_score backlog.todo_count
+      backlog.high_priority_todo backlog.orphan_count;
 
     match detect_intervention ~config ~health with
     | NeedSpawn gap ->
@@ -898,52 +1080,72 @@ let tick ~config ~room_config : unit =
         (match execute_spawn ~decision with
          | Ok name -> Eio.traceln "[Gardener] Spawned: %s" name
          | Error e -> Eio.traceln "[Gardener] Spawn failed: %s" e)
-
     | NeedWorker backlog ->
         Eio.traceln "[Gardener] Task pressure: %d TODO, %d high-pri, %d orphans"
           backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
-        let store = Board.global () in
-        let msg = Printf.sprintf
-          "[Gardener] %d unclaimed tasks (P1-P2: %d, oldest: %.1fh). Worker needed."
-          backlog.todo_count backlog.high_priority_todo backlog.oldest_todo_age_hours in
-        (try ignore (Board.create_post store ~author:"gardener" ~content:msg ~ttl_hours:24 ())
-         with exn -> Eio.traceln "[Gardener] Board post failed: %s" (Printexc.to_string exn));
-        Sse.broadcast (`Assoc [
-          ("type", `String "gardener_need_worker");
-          ("todo_count", `Int backlog.todo_count);
-          ("high_priority_todo", `Int backlog.high_priority_todo);
-          ("orphan_count", `Int backlog.orphan_count);
-        ])
-
+        (match start_backlog_triage_session ~sw ~clock ~room_config ~backlog with
+         | Ok session_id ->
+             Eio.traceln "[Gardener] Started backlog triage session: %s" session_id;
+             Sse.broadcast
+               (`Assoc
+                 [
+                   ("type", `String "gardener_need_worker");
+                   ("session_id", `String session_id);
+                   ("todo_count", `Int backlog.todo_count);
+                   ("high_priority_todo", `Int backlog.high_priority_todo);
+                   ("orphan_count", `Int backlog.orphan_count);
+                 ])
+         | Error err ->
+             Eio.traceln "[Gardener] Backlog triage start failed: %s" err;
+             let store = Board.global () in
+             let msg =
+               Printf.sprintf
+                 "[Gardener] %d unclaimed tasks (P1-P2: %d, oldest: %.1fh). Worker needed. Session start failed: %s"
+                 backlog.todo_count backlog.high_priority_todo
+                 backlog.oldest_todo_age_hours err
+             in
+             (try
+                ignore
+                  (Board.create_post store ~author:"gardener" ~content:msg
+                     ~ttl_hours:24 ())
+              with exn ->
+                Eio.traceln "[Gardener] Board post failed: %s"
+                  (Printexc.to_string exn));
+             Sse.broadcast
+               (`Assoc
+                 [
+                   ("type", `String "gardener_need_worker");
+                   ("error", `String err);
+                   ("todo_count", `Int backlog.todo_count);
+                   ("high_priority_todo", `Int backlog.high_priority_todo);
+                   ("orphan_count", `Int backlog.orphan_count);
+                 ]))
     | NeedRetirement stats ->
         Eio.traceln "[Gardener] Intervention needed: retire %s" stats.name;
         let decision = decide_retire ~config ~health ~agent_stats:stats in
         (match execute_retire ~decision with
          | Ok name -> Eio.traceln "[Gardener] Retirement initiated: %s" name
          | Error e -> Eio.traceln "[Gardener] Retirement failed: %s" e)
-
-    | Balanced ->
-        Eio.traceln "[Gardener] Ecosystem balanced"
+    | Balanced -> Eio.traceln "[Gardener] Ecosystem balanced"
   end
 
 (** Run the gardener background loop (no switch needed — loop is self-contained) *)
-let rec run_loop ~clock ~config ~room_config () =
-  tick ~config ~room_config;
+let rec run_loop ~sw ~clock ~config ~room_config () =
+  tick ~sw ~clock ~config ~room_config;
   Eio.Time.sleep clock config.check_interval_sec;
-  run_loop ~clock ~config ~room_config ()
+  run_loop ~sw ~clock ~config ~room_config ()
 
 (** Start the gardener (called from main server init) *)
 let start ~sw ~clock ~room_config =
   let config = load_config () in
   room_config_ref := Some room_config;
   if config.enabled then begin
-    (* Initialize lock for thread safety before any concurrent access *)
     gardener_lock := Some (Eio.Mutex.create ());
-    Eio.traceln "[Gardener] Starting with config: min=%d target=%d max=%d interval=%.0fs"
-      config.min_agents config.target_agents config.max_agents config.check_interval_sec;
-    Eio.Fiber.fork ~sw (fun () ->
-      run_loop ~clock ~config ~room_config ()
-    )
+    Eio.traceln
+      "[Gardener] Starting with config: min=%d target=%d max=%d interval=%.0fs"
+      config.min_agents config.target_agents config.max_agents
+      config.check_interval_sec;
+    Eio.Fiber.fork ~sw (fun () -> run_loop ~sw ~clock ~config ~room_config ())
   end else
     Eio.traceln "[Gardener] Disabled (set MASC_GARDENER_ENABLED=true to enable)"
 
@@ -959,36 +1161,47 @@ let propose_spawn ~topic ~reason ~urgency : spawn_decision =
   let config = load_config () in
   let health = calculate_health ~config ~room_config:!room_config_ref in
   let now = Time_compat.now () in
-
-  (* Create a synthetic enriched gap *)
-  let gap = {
-    topic;
-    signal_count = 1;
-    proposers = ["manual"];
-    context_snippets = [reason];
-    first_detected = now;
-    maturity_hours = config.gap_maturity_hours;  (* Bypass maturity check for manual *)
-    topic_similarity = 0.0;  (* Assume no overlap for manual *)
-    urgency_score = (match urgency with Critical -> 1.0 | High -> 0.8 | Medium -> 0.5 | Low -> 0.3);
-  } in
-
+  let gap =
+    {
+      topic;
+      signal_count = 1;
+      proposers = [ "manual" ];
+      context_snippets = [ reason ];
+      first_detected = now;
+      maturity_hours = config.gap_maturity_hours;
+      topic_similarity = 0.0;
+      urgency_score =
+        (match urgency with
+        | Critical -> 1.0
+        | High -> 0.8
+        | Medium -> 0.5
+        | Low -> 0.3);
+    }
+  in
   decide_spawn ~config ~health ~gap
 
-let propose_spawn_with_provenance ~topic ~reason ~urgency : spawn_decision * string =
+let propose_spawn_with_provenance ~topic ~reason ~urgency :
+    spawn_decision * string =
   let config = load_config () in
   let health = calculate_health ~config ~room_config:!room_config_ref in
   let now = Time_compat.now () in
-  let gap = {
-    topic;
-    signal_count = 1;
-    proposers = ["manual"];
-    context_snippets = [reason];
-    first_detected = now;
-    maturity_hours = config.gap_maturity_hours;
-    topic_similarity = 0.0;
-    urgency_score =
-      (match urgency with Critical -> 1.0 | High -> 0.8 | Medium -> 0.5 | Low -> 0.3);
-  } in
+  let gap =
+    {
+      topic;
+      signal_count = 1;
+      proposers = [ "manual" ];
+      context_snippets = [ reason ];
+      first_detected = now;
+      maturity_hours = config.gap_maturity_hours;
+      topic_similarity = 0.0;
+      urgency_score =
+        (match urgency with
+        | Critical -> 1.0
+        | High -> 0.8
+        | Medium -> 0.5
+        | Low -> 0.3);
+    }
+  in
   decide_spawn_with_provenance ~config ~health ~gap
 
 (** Propose a retirement (for MCP tool) *)

@@ -8,11 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.80.0] - 2026-03-11
 
 ### Added
+- **Swarm State Persistence (Gap B+C)** — `checkpoint_of_yojson`, `event_entry_of_yojson`, `load_latest_checkpoint`, `read_recent_events`; recovery events now carry checkpoint state and recent event history (#751)
 - **Karpathy Autoresearch Phase 2.5** — real autonomous experiment loop with expanded runtime control (#736)
 
 ### Changed
-- LLM runtime calls consolidated behind `Llm_client` abstraction (#741)
+- LLM runtime calls consolidated behind `Llm_client` abstraction (#741, #745, #746)
 - Contract truth and shared runtime context restored across dashboard/server flows (#743)
+- `tool_keeper.ml` and `tool_trpg.ml` split into smaller focused modules (#744)
+- Runtime singleton state collapsed into shared context (#749)
+- Dashboard oversized components split (Phase D) (#747)
+- Dashboard Side Rail normalized to Korean with `refreshForTab` helper (#750)
 
 ### Fixed
 - Orphan sessions now transition to `Interrupted` on restart instead of lingering in stale state (#739)

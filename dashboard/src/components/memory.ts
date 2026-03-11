@@ -69,6 +69,7 @@ function isLikelyTestPost(post: BoardPost): boolean {
 }
 
 function isAutomationBoardPost(post: BoardPost): boolean {
+  if (post.post_kind) return post.post_kind === 'automation'
   const hearth = (post.hearth ?? '').toLowerCase()
   if (post.visibility !== 'internal' || !post.expires_at || !hearth) return false
   if (hearth.startsWith('mdal')) return true
@@ -80,6 +81,7 @@ function visiblePosts(posts: BoardPost[]): BoardPost[] {
   if (!hideAutomationPosts.value) return posts
   return posts.filter(post => {
     if (isAutomationBoardPost(post)) return false
+    if (post.post_kind) return true
     if (post.hearth || post.visibility || post.expires_at) return true
     return !isLikelyTestPost(post)
   })
@@ -104,6 +106,7 @@ async function loadPostDetail(postId: string) {
       comment_count: data.comment_count,
       created_at: data.created_at,
       updated_at: data.updated_at,
+      post_kind: data.post_kind,
       flair: data.flair,
       hearth: data.hearth,
       visibility: data.visibility,
@@ -238,6 +241,7 @@ function PostCard({ post }: { post: BoardPost }) {
               <div class="post-title">${post.title}</div>
               <div class="post-chip-row">
                 ${isUpdated(post) ? html`<span class="board-meta-chip">Updated</span>` : null}
+                ${post.post_kind && post.post_kind !== 'human' ? html`<span class="board-meta-chip">${post.post_kind}</span>` : null}
                 ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
                 ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
               </div>
@@ -322,9 +326,10 @@ function PostDetail({ post }: { post: BoardPost }) {
             <${TimeAgo} timestamp=${post.created_at} />
             <span>${post.votes ?? 0} votes</span>
           </div>
-          ${(post.hearth || post.visibility || post.expires_at)
+          ${(post.post_kind && post.post_kind !== 'human') || post.hearth || post.visibility || post.expires_at
             ? html`
                 <div class="post-chip-row" style="margin-top:8px;">
+                  ${post.post_kind && post.post_kind !== 'human' ? html`<span class="board-meta-chip">${post.post_kind}</span>` : null}
                   ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
                   ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
                   ${post.expires_at ? html`<span class="board-meta-chip">expires <${TimeAgo} timestamp=${post.expires_at} /></span>` : null}

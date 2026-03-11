@@ -49,6 +49,7 @@ export interface Message {
 export interface BoardPost {
   id: string
   author: string
+  post_kind?: 'human' | 'automation' | 'system'
   title: string
   content: string
   tags: string[]

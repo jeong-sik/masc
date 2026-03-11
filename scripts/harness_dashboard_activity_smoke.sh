@@ -154,7 +154,10 @@ function extractJsonObject(text) {
   });
   checks.push({
     name: 'board reveals automation metadata chips',
-    pass: boardBodyAfterReveal.includes('dashboard-harness') && boardBodyAfterReveal.includes('internal'),
+    pass:
+      boardBodyAfterReveal.includes('automation')
+      && boardBodyAfterReveal.includes('dashboard-harness')
+      && boardBodyAfterReveal.includes('internal'),
     postId,
   });
 

@@ -348,10 +348,50 @@ let visibility_to_string = function
   | Internal -> "internal"
   | Direct -> "direct"
 
+type post_kind =
+  | Human_post
+  | Automation_post
+  | System_post
+
+let post_kind_to_string = function
+  | Human_post -> "human"
+  | Automation_post -> "automation"
+  | System_post -> "system"
+
+let contains_substring haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      if idx + needle_len > hay_len then false
+      else if String.sub haystack idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+
+let classify_post_kind (p : post) =
+  let author = Agent_id.to_string p.author |> String.lowercase_ascii in
+  let hearth =
+    match p.hearth with
+    | Some value -> String.lowercase_ascii (String.trim value)
+    | None -> ""
+  in
+  if author = "lodge-system" || author = "team-session" then
+    System_post
+  else if p.visibility = Internal && p.expires_at > 0.0 && hearth <> ""
+          && (String.starts_with ~prefix:"mdal" hearth
+              || contains_substring hearth "harness")
+  then
+    Automation_post
+  else
+    Human_post
+
 let post_to_yojson (p : post) : Yojson.Safe.t =
   `Assoc ([
     ("id", `String (Post_id.to_string p.id));
     ("author", `String (Agent_id.to_string p.author));
+    ("post_kind", `String (post_kind_to_string (classify_post_kind p)));
     ("content", `String p.content);
     ("visibility", `String (visibility_to_string p.visibility));
     ("created_at", `Float p.created_at);
@@ -1076,6 +1116,7 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("id", `String (Post_id.to_string p.id));
     ("author", `String (Agent_id.to_string p.author));
     ("author_karma", `Int author_karma);
+    ("post_kind", `String (post_kind_to_string (classify_post_kind p)));
     ("content", `String p.content);
     ("flair", flair_json);
     ("visibility", `String (visibility_to_string p.visibility));

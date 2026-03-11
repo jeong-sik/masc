@@ -707,7 +707,34 @@ let test_masc_handover_claim_schema () =
       | None -> Alcotest.fail "masc_handover_claim missing properties"
 
 (* ============================================================ *)
-(* 15. Command Plane V2 Tool Tests                               *)
+(* 15. Legacy Swarm Removal Tests                                *)
+(* ============================================================ *)
+
+let test_legacy_swarm_tools_removed () =
+  let removed_tools =
+    [
+      "masc_swarm_init";
+      "masc_swarm_join";
+      "masc_swarm_leave";
+      "masc_swarm_status";
+      "masc_swarm_evolve";
+      "masc_swarm_propose";
+      "masc_swarm_vote";
+      "masc_swarm_deposit";
+      "masc_swarm_trails";
+      "masc_swarm_walph";
+    ]
+  in
+  List.iter
+    (fun name ->
+      match find_tool name with
+      | None -> ()
+      | Some _ ->
+          Alcotest.fail (Printf.sprintf "%s should be removed from public schemas" name))
+    removed_tools
+
+(* ============================================================ *)
+(* 16. Command Plane V2 Tool Tests                               *)
 (* ============================================================ *)
 
 let test_masc_dispatch_tick_schema () =
@@ -981,6 +1008,10 @@ let () =
       Alcotest.test_case "handover_create" `Quick test_masc_handover_create_schema;
       Alcotest.test_case "handover_list" `Quick test_masc_handover_list_schema;
       Alcotest.test_case "handover_claim" `Quick test_masc_handover_claim_schema;
+    ];
+    "legacy_swarm_removed", [
+      Alcotest.test_case "removed_from_public_schemas" `Quick
+        test_legacy_swarm_tools_removed;
     ];
     "command_plane_tools", [
       Alcotest.test_case "dispatch_tick" `Quick test_masc_dispatch_tick_schema;

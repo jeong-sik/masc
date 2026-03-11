@@ -209,54 +209,52 @@ Decision: SSE with fallback to WebSocket
 ### 구현
 
 ```bash
-# 1. Swarm 초기화
-masc_swarm_init --topic "realtime-protocol" --voters "melchior,balthasar,casper"
+# 1. Debate 시작
+masc_debate_start --topic "WebSocket vs SSE for real-time updates"
 
-# 2. 제안 등록
-masc_swarm_propose --proposal "Use SSE for server-to-client" --proposer balthasar
-masc_swarm_propose --proposal "Use WebSocket for bidirectional" --proposer melchior
+# 2. 관점별 주장 기록
+masc_debate_argue --debate_id debate-123 --position support --content "Use SSE for server-to-client"
+masc_debate_argue --debate_id debate-123 --position oppose --content "Use WebSocket for bidirectional"
 
-# 3. 투표 진행
-masc_swarm_vote --voter melchior --choice "websocket" --reasoning "Lower latency"
-masc_swarm_vote --voter balthasar --choice "sse" --reasoning "Simpler, HTTP-native"
-masc_swarm_vote --voter casper --choice "sse" --reasoning "Industry trend"
+# 3. 합의 세션 시작
+masc_consensus_start --topic "Choose realtime transport"
 
-# 4. 결과 확인
-masc_swarm_status --topic "realtime-protocol"
+# 4. 투표 진행
+masc_consensus_vote --session_id consensus-456 --decision reject --reason "WebSocket is heavier than needed"
+masc_consensus_vote --session_id consensus-456 --decision approve --reason "SSE is simpler and HTTP-native"
+masc_consensus_vote --session_id consensus-456 --decision approve --reason "Industry trend favors SSE for server-push"
+
+# 5. 결과 확인
+masc_consensus_result --session_id consensus-456
 # Result: SSE wins 2-1
 
-# 5. 학습 기록
+# 6. 학습 기록
 masc_consolidate_learning --topic "realtime-protocol" --outcome "sse-chosen"
 ```
 
 ### MCP 호출 예시
 
 ```json
-// Initialize swarm decision
+// Start structured debate
 {
   "method": "tools/call",
   "params": {
-    "name": "masc_swarm_init",
+    "name": "masc_debate_start",
     "arguments": {
-      "topic": "realtime-protocol",
-      "question": "WebSocket vs SSE for real-time updates?",
-      "voters": ["melchior", "balthasar", "casper"],
-      "deadline_seconds": 300
+      "topic": "WebSocket vs SSE for real-time updates?"
     }
   }
 }
 
-// Cast vote with reasoning
+// Cast consensus vote with reasoning
 {
   "method": "tools/call",
   "params": {
-    "name": "masc_swarm_vote",
+    "name": "masc_consensus_vote",
     "arguments": {
-      "topic": "realtime-protocol",
-      "voter": "balthasar",
-      "choice": "sse",
-      "reasoning": "SSE is simpler, HTTP-native, and sufficient for server-push scenarios. WebSocket adds complexity without clear benefit for our use case.",
-      "confidence": 0.85
+      "session_id": "consensus-456",
+      "decision": "approve",
+      "reason": "SSE is simpler, HTTP-native, and sufficient for server-push scenarios. WebSocket adds complexity without clear benefit for our use case."
     }
   }
 }
@@ -308,7 +306,7 @@ masc_consolidate_learning --topic "realtime-protocol" --outcome "sse-chosen"
 |------|-----------|------|
 | PR 리뷰 | Code Review Pipeline | 다양한 관점 확보 |
 | 기술 조사 | Parallel Research | 시간 단축 |
-| 아키텍처 결정 | Swarm Decision | 합의 기반 결정 |
+| 아키텍처 결정 | Consensus / Debate | 합의 기반 결정 |
 | 버그 수정 | Single Agent | 오버헤드 최소화 |
 | 문서 작성 | Single Agent + Review | 효율적 |
 
@@ -320,5 +318,5 @@ masc_consolidate_learning --topic "realtime-protocol" --outcome "sse-chosen"
 └─ Yes → 몇 명의 에이전트?
     ├─ 2명 → Portal (1:1 direct)
     ├─ 3명+ → Broadcast + Claim
-    └─ 투표 필요 → Swarm
+    └─ 투표 필요 → Consensus / Debate
 ```

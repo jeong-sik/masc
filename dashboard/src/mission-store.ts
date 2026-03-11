@@ -5,6 +5,7 @@ import type {
   DashboardMissionAttentionQueueItem,
   DashboardMissionBriefingResponse,
   DashboardMissionBriefingSection,
+  DashboardMissionBriefingMetadataGap,
   DashboardMissionInternalSignal,
   DashboardMissionKeeperBrief,
   DashboardMissionResponse,
@@ -459,9 +460,39 @@ function normalizeBriefingSection(raw: unknown): DashboardMissionBriefingSection
     label,
     status,
     summary,
+    signal_class:
+      asString(raw.signal_class) === 'metadata_gap'
+      || asString(raw.signal_class) === 'mixed'
+      || asString(raw.signal_class) === 'operational_risk'
+        ? (asString(raw.signal_class) as DashboardMissionBriefingSection['signal_class'])
+        : undefined,
+    evidence_quality:
+      asString(raw.evidence_quality) === 'strong'
+      || asString(raw.evidence_quality) === 'partial'
+      || asString(raw.evidence_quality) === 'missing'
+        ? (asString(raw.evidence_quality) as DashboardMissionBriefingSection['evidence_quality'])
+        : undefined,
     evidence: extractArray(raw.evidence)
       .map(item => (typeof item === 'string' ? item.trim() : ''))
       .filter(Boolean),
+  }
+}
+
+function normalizeMetadataGap(raw: unknown): DashboardMissionBriefingMetadataGap | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const summary = asString(raw.summary)
+  const scopeType = asString(raw.scope_type)
+  const severity = asString(raw.severity)
+  if (!kind || !summary || !scopeType || !severity) return null
+  if (scopeType !== 'session' && scopeType !== 'keeper' && scopeType !== 'agent') return null
+  if (severity !== 'info' && severity !== 'watch') return null
+  return {
+    kind,
+    summary,
+    scope_type: scopeType,
+    scope_id: asString(raw.scope_id) ?? null,
+    severity,
   }
 }
 
@@ -494,6 +525,10 @@ function normalizeMissionBriefing(raw: unknown): DashboardMissionBriefingRespons
       agent_count: asNumber(basis.agent_count),
       keeper_count: asNumber(basis.keeper_count),
     },
+    metadata_gap_count: asNumber(root.metadata_gap_count),
+    metadata_gaps: extractArray(root.metadata_gaps)
+      .map(normalizeMetadataGap)
+      .filter((item): item is DashboardMissionBriefingMetadataGap => item !== null),
     sections: extractArray(root.sections)
       .map(normalizeBriefingSection)
       .filter((item): item is DashboardMissionBriefingSection => item !== null),

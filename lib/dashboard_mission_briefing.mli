@@ -7,3 +7,16 @@ val json :
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
   unit ->
   Yojson.Safe.t
+
+module For_test : sig
+  val compact_session_json : Yojson.Safe.t -> Yojson.Safe.t
+  val compact_keeper_json : Yojson.Safe.t -> Yojson.Safe.t
+  val compact_agent_json : Types.agent -> Yojson.Safe.t
+  val relevant_sessions_for_briefing :
+    current_room:string -> now_ts:float -> Yojson.Safe.t list -> Yojson.Safe.t list
+  val collect_metadata_gaps :
+    sessions:Yojson.Safe.t list ->
+    keepers:Yojson.Safe.t list ->
+    agents:Yojson.Safe.t list ->
+    Yojson.Safe.t list
+end

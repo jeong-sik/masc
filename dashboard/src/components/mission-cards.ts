@@ -125,7 +125,15 @@ export function MissionBriefingCard() {
                 <article class="mission-briefing-section ${toneClass(section.status)}">
                   <div class="mission-card-head">
                     <strong>${section.label}</strong>
-                    <span class="command-chip ${toneClass(section.status)}">${section.status}</span>
+                    <div class="mission-briefing-section-chips">
+                      <span class="command-chip ${toneClass(section.status)}">${section.status}</span>
+                      ${section.signal_class === 'metadata_gap'
+                        ? html`<span class="command-chip">metadata gap</span>`
+                        : section.signal_class === 'mixed'
+                          ? html`<span class="command-chip warn">mixed</span>`
+                          : null}
+                      ${section.evidence_quality ? html`<span class="command-chip">${section.evidence_quality}</span>` : null}
+                    </div>
                   </div>
                   <p>${section.summary}</p>
                   ${section.evidence.length > 0
@@ -145,6 +153,25 @@ export function MissionBriefingCard() {
         : (!missionBriefingLoading.value && !missionBriefingError.value
             ? html`<div class="empty-state">판단 레이어 결과가 아직 없습니다.</div>`
             : null)}
+
+      ${briefing && briefing.metadata_gaps.length > 0
+        ? html`
+            <details class="mission-card-disclosure compact mission-briefing-gaps">
+              <summary>Observability Gaps (${briefing.metadata_gap_count ?? briefing.metadata_gaps.length})</summary>
+              <div class="mission-list-stack">
+                ${briefing.metadata_gaps.map(item => html`
+                  <article class="mission-briefing-gap ${item.severity === 'watch' ? 'warn' : ''}">
+                    <div class="mission-card-head">
+                      <strong>${item.scope_type}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
+                      <span class="command-chip ${item.severity === 'watch' ? 'warn' : ''}">${item.severity}</span>
+                    </div>
+                    <p>${item.summary}</p>
+                  </article>
+                `)}
+              </div>
+            </details>
+          `
+        : null}
 
       <div class="mission-card-actions">
         <button class="control-btn ghost" onClick=${() => { void refreshMissionBriefing(retryNeedsForce) }} disabled=${missionBriefingLoading.value}>

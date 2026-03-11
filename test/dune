@@ -55,7 +55,7 @@
  (modules test_dashboard_mission)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
-; Dashboard mission briefing regression tests
+; Dashboard mission briefing normalization tests
 (test
  (name test_dashboard_mission_briefing)
  (modules test_dashboard_mission_briefing)

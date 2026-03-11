@@ -826,6 +826,16 @@ export interface DashboardMissionBriefingSection {
   status: 'ok' | 'healthy' | 'aligned' | 'watch' | 'risk' | 'unclear'
   summary: string
   evidence: string[]
+  signal_class?: 'operational_risk' | 'metadata_gap' | 'mixed'
+  evidence_quality?: 'strong' | 'partial' | 'missing'
+}
+
+export interface DashboardMissionBriefingMetadataGap {
+  kind: string
+  summary: string
+  scope_type: 'session' | 'keeper' | 'agent'
+  scope_id?: string | null
+  severity: 'info' | 'watch'
 }
 
 export interface DashboardMissionBriefingResponse {
@@ -844,6 +854,8 @@ export interface DashboardMissionBriefingResponse {
     agent_count?: number
     keeper_count?: number
   }
+  metadata_gap_count?: number
+  metadata_gaps: DashboardMissionBriefingMetadataGap[]
   sections: DashboardMissionBriefingSection[]
   error?: string | null
   last_error?: string | null

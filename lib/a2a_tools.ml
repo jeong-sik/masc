@@ -267,6 +267,7 @@ let now_iso8601 () : string =
     tm.Unix.tm_sec
 
 type heartbeat_task_snapshot = {
+  seq: int;
   goal: string;
   context: string;
   worker_mode: string;
@@ -276,6 +277,7 @@ type heartbeat_task_snapshot = {
 }
 
 type heartbeat_result_snapshot = {
+  seq: int;
   status: string;
   summary: string;
   worker_name: string;
@@ -292,6 +294,12 @@ let latest_heartbeat_tasks : (string, heartbeat_task_snapshot) Hashtbl.t =
 
 let latest_heartbeat_results : (string, heartbeat_result_snapshot) Hashtbl.t =
   Hashtbl.create 32
+
+let heartbeat_snapshot_seq = ref 0
+
+let next_heartbeat_snapshot_seq () =
+  heartbeat_snapshot_seq := !heartbeat_snapshot_seq + 1;
+  !heartbeat_snapshot_seq
 
 let latest_heartbeat_task agent =
   Hashtbl.find_opt latest_heartbeat_tasks agent
@@ -690,6 +698,7 @@ let emit_heartbeat_task
     () : unit =
   Hashtbl.replace latest_heartbeat_tasks agent
     {
+      seq = next_heartbeat_snapshot_seq ();
       goal;
       context;
       worker_mode;
@@ -783,6 +792,7 @@ let submit_heartbeat_result
    | Ok _ ->
        Hashtbl.replace latest_heartbeat_results agent
          {
+           seq = next_heartbeat_snapshot_seq ();
            status = normalized_status;
            summary;
            worker_name;

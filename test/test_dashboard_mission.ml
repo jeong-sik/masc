@@ -271,6 +271,23 @@ let test_dashboard_mission_projection () =
            ~decision_reason:"fixture result"
            ~decision_confidence:0.93
            ());
+      ignore
+        (Lib.A2a_tools.submit_heartbeat_result
+           ~worker_name:"worker-fixture"
+           ~agent:"llama-local-beta"
+           ~status:"acted"
+           ~summary:"Older result for beta."
+           ~tool_call_count:1
+           ~tool_names:[ "masc_board_get" ]
+           ~decision_reason:"fixture older result"
+           ~decision_confidence:0.61
+           ());
+      Lib.A2a_tools.emit_heartbeat_task
+        ~agent:"llama-local-beta"
+        ~goal:"Fresh assignment for beta."
+        ~context:"fixture context"
+        ~allowed_tools:[ "masc_board_comment" ]
+        ();
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
@@ -295,6 +312,11 @@ let test_dashboard_mission_projection () =
           agent_briefs
           |> List.find (fun row ->
                  row |> member "agent_name" |> to_string = "llama-local-alpha")
+        in
+        let beta_brief =
+          agent_briefs
+          |> List.find (fun row ->
+                 row |> member "agent_name" |> to_string = "llama-local-beta")
         in
         check bool "attention_queue present" true (attention_queue <> []);
         check string "top attention kind" "spawn_failure_present"
@@ -341,6 +363,10 @@ let test_dashboard_mission_projection () =
           (alpha_brief |> member "latest_tool_call_count" |> to_int);
         check string "tool audit source" "heartbeat_result"
           (alpha_brief |> member "tool_audit_source" |> to_string);
+        check string "newer task wins audit source" "heartbeat_task"
+          (beta_brief |> member "tool_audit_source" |> to_string);
+        check bool "newer task suppresses stale observed tools" true
+          ((beta_brief |> member "latest_tool_names" |> to_list) = []);
         check bool "internal signal includes pending confirm" true
           (internal_signals
            |> List.exists (fun row ->

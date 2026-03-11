@@ -126,32 +126,37 @@ let string_list_json values =
 let tool_audit_json_fields agent_name =
   let task_snapshot = A2a_tools.latest_heartbeat_task agent_name in
   let result_snapshot = A2a_tools.latest_heartbeat_result agent_name in
-  let allowed_tool_names =
-    match task_snapshot with
-    | Some snapshot -> snapshot.allowed_tools
-    | None -> []
-  in
-  let latest_tool_names =
-    match result_snapshot with
-    | Some snapshot -> snapshot.tool_names
-    | None -> []
-  in
-  let latest_tool_call_count =
-    match result_snapshot with
-    | Some snapshot -> Some snapshot.tool_call_count
-    | None -> None
-  in
-  let tool_audit_source =
-    match result_snapshot, task_snapshot with
-    | Some _, _ -> Some "heartbeat_result"
-    | None, Some _ -> Some "heartbeat_task"
-    | None, None -> None
-  in
-  let tool_audit_at =
-    match result_snapshot, task_snapshot with
-    | Some snapshot, _ -> Some snapshot.updated_at
-    | None, Some snapshot -> Some snapshot.created_at
-    | None, None -> None
+  let allowed_tool_names, latest_tool_names, latest_tool_call_count,
+      tool_audit_source, tool_audit_at =
+    match task_snapshot, result_snapshot with
+    | Some task, Some result ->
+        if task.seq > result.seq
+        then
+          ( task.allowed_tools,
+            [],
+            None,
+            Some "heartbeat_task",
+            Some task.created_at )
+        else
+          ( task.allowed_tools,
+            result.tool_names,
+            Some result.tool_call_count,
+            Some "heartbeat_result",
+            Some result.updated_at )
+    | Some task, None ->
+        ( task.allowed_tools,
+          [],
+          None,
+          Some "heartbeat_task",
+          Some task.created_at )
+    | None, Some result ->
+        ( [],
+          result.tool_names,
+          Some result.tool_call_count,
+          Some "heartbeat_result",
+          Some result.updated_at )
+    | None, None ->
+        ([], [], None, None, None)
   in
   [
     ("allowed_tool_names", string_list_json allowed_tool_names);

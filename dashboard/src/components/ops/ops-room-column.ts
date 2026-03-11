@@ -33,7 +33,7 @@ export function OpsRoomColumn() {
   const pendingConfirms = snapshot?.pending_confirms ?? []
   const pendingSummary = snapshot?.pending_confirm_summary
   const confirmRequiredActions =
-    pendingSummary?.confirm_required_actions.length
+    pendingSummary
       ? pendingSummary.confirm_required_actions
       : (snapshot?.available_actions ?? []).filter(action => action.confirm_required)
   const actorFilter = pendingSummary?.actor_filter?.trim() || null

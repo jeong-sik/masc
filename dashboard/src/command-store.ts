@@ -67,7 +67,7 @@ import type {
   CommandPlaneUnitKind,
 } from './types'
 import { refreshOperatorSnapshot } from './operator-store'
-import { registerCommandPlaneRefresh } from './store'
+import { registerCommandPlaneRefresh } from './sse-store'
 
 export const commandPlaneSummary = signal<CommandPlaneSummarySnapshot | null>(null)
 export const commandPlaneSnapshot = signal<CommandPlaneSnapshot | null>(null)

@@ -13,14 +13,12 @@ import {
   refreshGoals,
   refreshShell,
   refreshTrpg,
-  setupSSEReaction,
-  startPeriodicRefresh,
-  stopPeriodicRefresh,
   dashboardLoading,
   agents,
   tasks,
   keepers,
 } from './store'
+import { setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { Mission } from './components/mission'
 import { Command } from './components/command'
 import { Ops } from './components/ops'

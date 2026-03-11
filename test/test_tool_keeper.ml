@@ -1,5 +1,23 @@
 open Alcotest
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
+let temp_dir () =
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "keeper-tool-test-%d-%d" (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
+  Unix.mkdir dir 0o755;
+  dir
+
 let with_temp_file contents f =
   let path = Filename.temp_file "keeper-tail" ".log" in
   Fun.protect
@@ -66,7 +84,9 @@ let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
           ["ollama:glm-4.7-flash"]
       in
       let ollama_listening =
-        Sys.command "lsof -iTCP:11434 -sTCP:LISTEN -t >/dev/null 2>&1" = 0
+        match Masc_mcp.Tool_keeper.model_specs_of_strings ["ollama:glm-4.7-flash"] with
+        | Ok [spec] -> Masc_mcp.Tool_keeper.model_spec_is_available spec
+        | _ -> false
       in
       let expected =
         if ollama_listening then
@@ -111,6 +131,69 @@ let test_llm_client_sanitize_messages_utf8_preserves_message_count () =
        (fun (msg : Masc_mcp.Llm_client.message) -> string_is_valid_utf8 msg.content)
        sanitized)
 
+let test_keeper_model_set_persists_active_model () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Maintain Sangsu persona");
+              ("models", `List [ `String "ollama:glm-4.7-flash" ]);
+              ("active_model", `String "ollama:glm-4.7-flash");
+              ("room_scope", `String "all");
+              ("trigger_mode", `String "explicit_only");
+              ("mention_targets", `List [ `String "sangsu" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let ok, body =
+        dispatch "masc_keeper_model_set"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("model", `String "ollama:qwen3.5:35b-a3b");
+            ])
+      in
+      check bool "model set ok" true ok;
+      let json = Yojson.Safe.from_string body in
+      check string "active model updated" "ollama:qwen3.5:35b-a3b"
+        Yojson.Safe.Util.(json |> member "active_model" |> to_string);
+      let ok, status_body =
+        dispatch "masc_keeper_status"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("fast", `Bool true);
+              ("include_context", `Bool false);
+              ("include_metrics_overview", `Bool false);
+              ("include_memory_bank", `Bool false);
+              ("include_history_tail", `Bool false);
+              ("include_compaction_history", `Bool false);
+            ])
+      in
+      check bool "status ok" true ok;
+      let status_json = Yojson.Safe.from_string status_body in
+      check string "status active model" "ollama:qwen3.5:35b-a3b"
+        Yojson.Safe.Util.(status_json |> member "active_model" |> to_string))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -124,5 +207,7 @@ let () =
            test_llm_client_sanitize_message_utf8_repairs_invalid_fields;
          test_case "llm client preserves message list size" `Quick
            test_llm_client_sanitize_messages_utf8_preserves_message_count;
+         test_case "keeper model set persists active model" `Quick
+           test_keeper_model_set_persists_active_model;
        ]);
   ]

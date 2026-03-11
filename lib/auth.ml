@@ -242,6 +242,7 @@ let permission_for_tool = function
   | "masc_broadcast" | "masc_listen" | "masc_heartbeat"
   | "masc_register_capabilities" | "masc_find_by_capability"
   | "masc_agent_update" | "masc_operator_action"
+  | "masc_keeper_model_set"
   | "masc_operator_confirm" | "masc_unit_define"
   | "masc_unit_update" | "masc_unit_reparent"
   | "masc_unit_reassign" | "masc_operation_start"

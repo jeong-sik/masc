@@ -319,6 +319,7 @@ let tool_category tool_name =
   (* Keeper *)
   | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_status"
   | "masc_keeper_list" | "masc_keeper_msg" | "masc_keeper_eval"
+  | "masc_keeper_model_set"
   | "masc_keeper_goals" | "masc_keeper_trajectory"
   | "masc_keeper_autonomy"
   (* Perpetual *)

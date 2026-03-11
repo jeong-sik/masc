@@ -221,6 +221,21 @@ let test_room_enter_moves_agent () =
     check int "move room has agent" 1 (Room.count_agents_in_room config "move-room");
   )
 
+let test_join_in_room_keeps_current_room () =
+  let (config, test_dir) = setup_test_room () in
+  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
+    ignore (Room.init config ~agent_name:None);
+    ignore (Room.room_create config ~name:"Presence Room" ~description:None);
+    ignore
+      (Room.join_in_room config ~room_id:"presence-room" ~agent_name:"sangsu"
+         ~capabilities:["keeper"] ());
+    check (option string) "current room unchanged" (Some "default")
+      (Room.read_current_room config);
+    check int "presence room has keeper" 1
+      (Room.count_agents_in_room config "presence-room");
+    check int "default room still empty" 0
+      (Room.count_agents_in_room config "default"))
+
 let test_room_task_isolation () =
   let (config, test_dir) = setup_test_room () in
   Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
@@ -314,6 +329,7 @@ let () =
     ];
     "room_isolation", [
       test_case "agent moves between rooms" `Quick test_room_enter_moves_agent;
+      test_case "join_in_room keeps current room" `Quick test_join_in_room_keeps_current_room;
       test_case "tasks are isolated per room" `Quick test_room_task_isolation;
       test_case "rooms_list task_count uses active tasks" `Quick test_rooms_list_task_count_active_only;
     ];

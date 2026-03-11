@@ -55,6 +55,35 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Model cascade (provider:model). Examples: 'claude:opus', 'gemini:gemini-3.1-pro-preview', 'glm:glm-4.7', 'openrouter:openai/gpt-4o-mini'.");
         ]);
+        ("allowed_models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Explicitly allowed persistent models for this keeper. Used by exact model switching and explicit-only runtimes.");
+        ]);
+        ("active_model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current persisted model for the keeper. When set, explicit-only keepers use this exact model instead of fallback selection.");
+        ]);
+        ("scope_kind", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "local"; `String "global"]);
+          ("description", `String "Keeper presence scope. 'global' enables room-aware roaming state.");
+        ]);
+        ("room_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "current"; `String "all"]);
+          ("description", `String "Which rooms the keeper should maintain presence in.");
+        ]);
+        ("trigger_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "legacy"; `String "explicit_only"]);
+          ("description", `String "How autonomous room activity is triggered. 'explicit_only' disables heuristic triggers and only reacts to exact direct mentions.");
+        ]);
+        ("mention_targets", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Exact direct-mention tokens that can wake the keeper in room traffic (for example ['sangsu']).");
+        ]);
         ("verify", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Enable verifier model feedback (default: false for keeper).");
@@ -313,6 +342,30 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
         ]);
       ]);
       ("required", `List [`String "name"; `String "message"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_model_set";
+    description = "Change a keeper's persisted active model explicitly. Restarts keepalive with the new exact model selection.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Exact provider:model label to persist as the active model.");
+        ]);
+        ("allowed_models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional persistent allowlist extension to store alongside the newly active model.");
+        ]);
+      ]);
+      ("required", `List [`String "name"; `String "model"]);
     ];
   };
 

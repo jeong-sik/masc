@@ -505,6 +505,50 @@ let test_keeper_policy_tools_roundtrip () =
       check int "replayed count" 1
         Yojson.Safe.Util.(replay_json |> member "replayed_count" |> to_int))
 
+let test_keeper_policy_set_rejects_invalid_mode () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Maintain Sangsu persona");
+              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let ok, body =
+        dispatch "masc_keeper_policy_set"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("policy_mode", `String "learned_offline_v9");
+            ])
+      in
+      check bool "policy set rejected" false ok;
+      check bool "error mentions invalid mode" true
+        (try
+           let _ = Str.search_forward (Str.regexp_string "invalid policy_mode") body 0 in
+           true
+         with Not_found -> false))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -528,5 +572,7 @@ let () =
            test_persona_list_and_create_from_persona;
          test_case "policy tools roundtrip" `Quick
            test_keeper_policy_tools_roundtrip;
+         test_case "policy set rejects invalid mode" `Quick
+           test_keeper_policy_set_rejects_invalid_mode;
        ]);
   ]

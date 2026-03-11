@@ -10082,18 +10082,33 @@ let handle_keeper_model_set ctx args : tool_result =
 
 let handle_keeper_policy_set ctx args : tool_result =
   let name = get_string args "name" "" in
-  let policy_mode = get_string args "policy_mode" "" |> canonical_policy_mode in
-  let action_budget =
-    get_string_opt args "action_budget"
-    |> Option.value ~default:"conversation"
-    |> canonical_policy_action_budget
-  in
+  let policy_mode_raw = get_string args "policy_mode" "" |> String.trim in
+  let action_budget_opt = get_string_opt args "action_budget" |> Option.map String.trim in
   let reward_model_path =
     get_string_opt args "reward_model_path" |> Option.value ~default:"" |> String.trim
   in
+  let policy_mode_result =
+    match policy_mode_raw with
+    | "heuristic" | "learned_offline_v1" -> Ok policy_mode_raw
+    | "" -> Error "policy_mode is required"
+    | other -> Error (Printf.sprintf "invalid policy_mode: %s" other)
+  in
+  let action_budget_result =
+    match action_budget_opt with
+    | None -> Ok "conversation"
+    | Some "conversation" -> Ok "conversation"
+    | Some "board" -> Ok "board"
+    | Some other -> Error (Printf.sprintf "invalid action_budget: %s" other)
+  in
   if not (validate_name name) then
     (false, "❌ invalid keeper name")
+  else if Result.is_error policy_mode_result then
+    (false, "❌ " ^ Result.get_error policy_mode_result)
+  else if Result.is_error action_budget_result then
+    (false, "❌ " ^ Result.get_error action_budget_result)
   else
+    let policy_mode = Result.get_ok policy_mode_result in
+    let action_budget = Result.get_ok action_budget_result in
     match read_meta ctx.config name with
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)

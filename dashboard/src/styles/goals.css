@@ -307,3 +307,85 @@
   color: #666;
 }
 
+/* -- Planning toolbar (compact refresh) -- */
+
+.planning-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 0;
+  margin-bottom: 4px;
+}
+
+/* -- Priority badge (inline P1-P4) -- */
+
+.priority-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.priority-badge--p1 {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+
+.priority-badge--p2 {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.priority-badge--p3 {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.25);
+}
+
+.priority-badge--p4 {
+  background: rgba(255, 255, 255, 0.05);
+  color: #888;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* -- Kanban card header (badge + title row) -- */
+
+.kanban-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+/* -- Task description preview (truncated, expandable) -- */
+
+.task-description-preview {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-left: 8px;
+  padding: 4px 8px;
+  border-left: 2px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: color 0.15s;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.task-description-preview:hover {
+  color: var(--text-body);
+}
+
+.task-description-preview--expanded {
+  white-space: normal;
+  text-overflow: unset;
+}
+

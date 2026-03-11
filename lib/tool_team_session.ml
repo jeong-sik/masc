@@ -2128,40 +2128,24 @@ let handle_finalize ctx args : result =
       | Error e -> (false, json_error e)
       | Ok () ->
           let reason = get_string args "reason" "finalize" in
-          let wait_timeout_sec = get_int args "wait_timeout_sec" 45 in
+          let _wait_timeout_sec = get_int args "wait_timeout_sec" 45 in
           let generate_report = get_bool args "generate_report" true in
           let generate_proof = get_bool args "generate_proof" true in
           let proof_level = parse_proof_level args in
           match
-            Team_session_engine_eio.stop_session ~config:ctx.config ~session_id
-              ~reason ~generate_report
+            Team_session_engine_eio.finalize_session ~config:ctx.config ~session_id
+              ~final_status:Team_session_types.Interrupted ~reason
+              ~generate_report
           with
-          | Error e -> (false, json_error e)
-          | Ok stop_json ->
-              let rec wait_terminal remaining last_status =
-                if remaining <= 0 then
-                  Error
-                    (Printf.sprintf
-                       "timeout waiting for terminal state (last_status=%s)"
-                       last_status)
-                else
-                  match
-                    Team_session_engine_eio.status_session ~config:ctx.config
-                      ~session_id
-                  with
-                  | Error e -> Error e
-                  | Ok status_json ->
-                      let status = status_of_engine_status_json status_json in
-                      if String.equal status "running" then (
-                        Eio.Time.sleep ctx.clock 0.2;
-                        wait_terminal (remaining - 1) status)
-                      else
-                        Ok (status, status_json)
+          | None -> (false, json_error ("team session not found: " ^ session_id))
+          | Some finalized_session ->
+              let terminal_status =
+                Team_session_types.status_to_string finalized_session.status
               in
-              let polls = max 1 (wait_timeout_sec * 5) in
-              match wait_terminal polls "running" with
-              | Error e -> (false, json_error e)
-              | Ok (terminal_status, status_json) ->
+              let status_json =
+                Team_session_engine_eio.session_status_json ctx.config
+                  finalized_session
+              in
                   let report_json =
                     if generate_report then
                       match
@@ -2222,19 +2206,21 @@ let handle_finalize ctx args : result =
                       match proof_error with
                       | Some e -> (false, json_error e)
                       | None ->
+                          let payload =
+                            `Assoc
+                              [
+                                ("session_id", `String session_id);
+                                ("terminal_status", `String terminal_status);
+                                ("status", `String terminal_status);
+                                ("status_detail", status_json);
+                                ("report", report_json);
+                                ("proof", proof_json);
+                              ]
+                          in
                           ( true,
                             json_ok
                               [
-                                ( "result",
-                                  `Assoc
-                                    [
-                                      ("session_id", `String session_id);
-                                      ("terminal_status", `String terminal_status);
-                                      ("stop", stop_json);
-                                      ("status", status_json);
-                                      ("report", report_json);
-                                      ("proof", proof_json);
-                                    ] );
+                                ("result", payload);
                               ] )))
 
 let handle_events ctx args : result =

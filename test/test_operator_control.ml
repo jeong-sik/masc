@@ -731,6 +731,57 @@ let test_team_worker_spawn_batch_requires_confirm_then_executes () =
           spawn_event |> member "detail" |> member "actor" |> to_string)
     )
 
+let test_confirm_keeps_pending_token_when_delegated_action_fails () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let pending_dir = Filename.concat (Room.masc_dir config) "operator" in
+      let path = Filename.concat pending_dir "pending_confirms.json" in
+      Masc_mcp.Room_utils.mkdir_p pending_dir;
+      let token = "retry-token" in
+      let entry_json =
+        `Assoc
+          [
+            ("token", `String token);
+            ("trace_id", `String "trace-retry");
+            ("actor", `String "operator");
+            ("action_type", `String "team_stop");
+            ("target_type", `String "team_session");
+            ("target_id", `String "missing-session");
+            ("payload", `Assoc []);
+            ("delegated_tool", `String "masc_team_session_stop");
+            ("created_at", `String (Types.now_iso ()));
+            ("expires_at", `Null);
+          ]
+      in
+      Masc_mcp.Room_utils.write_json config path (`List [ entry_json ]);
+      let ctx = operator_ctx env sw config "operator" in
+      (match
+         Operator_control.confirm_json ctx
+           (`Assoc
+             [
+               ("actor", `String "operator");
+               ("confirm_token", `String token);
+             ])
+       with
+      | Ok _ -> Alcotest.fail "expected delegated action failure"
+      | Error err ->
+          Alcotest.(check bool) "non-empty error" true (String.length err > 0));
+      let pending_confirms =
+        Operator_control.pending_confirms_json ~actor:"operator" config
+        |> Yojson.Safe.Util.to_list
+      in
+      Alcotest.(check int) "pending confirm retained" 1
+        (List.length pending_confirms);
+      Alcotest.(check string) "same token retained" token
+        Yojson.Safe.Util.(
+          List.hd pending_confirms |> member "token" |> to_string))
+
 let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1061,6 +1112,8 @@ let () =
             test_team_task_inject_requires_confirm_then_executes;
           Alcotest.test_case "team worker spawn batch confirm flow" `Quick
             test_team_worker_spawn_batch_requires_confirm_then_executes;
+          Alcotest.test_case "confirm keeps token on delegated failure" `Quick
+            test_confirm_keeps_pending_token_when_delegated_action_fails;
           Alcotest.test_case "digest recommends worker spawn batch" `Quick
             test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn;
           Alcotest.test_case "snapshot exposes keeper and lodge actions" `Quick

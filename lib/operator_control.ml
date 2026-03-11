@@ -3027,8 +3027,8 @@ let confirm_json ?actor_hint (ctx : 'a context) args =
             };
           Error "actor is not allowed to confirm this action"
       | Some entry ->
-          remove_pending_confirm ctx.config confirm_token;
           if String.equal decision "deny" then (
+            remove_pending_confirm ctx.config confirm_token;
             append_action_log ctx.config
               {
                 trace_id = entry.trace_id;
@@ -3063,6 +3063,7 @@ let confirm_json ?actor_hint (ctx : 'a context) args =
               }
             in
             let* executed = execute_action ctx request in
+            remove_pending_confirm ctx.config confirm_token;
             let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
             append_action_log ctx.config
               {

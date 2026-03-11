@@ -1843,16 +1843,46 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
                     true))
             in
             if should_start then begin
+              let checkpoint_detail =
+                match
+                  Team_session_store.load_latest_checkpoint config
+                    session.session_id
+                with
+                | None -> [ ("last_checkpoint", `Null) ]
+                | Some cp ->
+                    [
+                      ( "last_checkpoint",
+                        Team_session_types.checkpoint_to_yojson cp );
+                      ("progress_at_restart", `Float cp.progress_pct);
+                      ("done_at_restart", `Int cp.done_delta_total);
+                    ]
+              in
+              let recent_events =
+                Team_session_store.read_recent_events config
+                  session.session_id ~max_count:10
+              in
+              let event_context =
+                [
+                  ( "recent_events_before_restart",
+                    `List
+                      (List.map Team_session_types.event_entry_to_yojson
+                         recent_events) );
+                  ( "event_count_before_restart",
+                    `Int (List.length recent_events) );
+                ]
+              in
               Team_session_store.append_event config session.session_id
                 ~event_type:"recovered_after_restart"
                 ~detail:
                   (`Assoc
-                    [
-                      ( "remaining_sec",
-                        `Int
-                          (int_of_float (session.planned_end_at -. now)) );
-                      ("ts_iso", `String (now_iso ()));
-                    ]);
+                    ([
+                       ( "remaining_sec",
+                         `Int
+                           (int_of_float (session.planned_end_at -. now))
+                       );
+                       ("ts_iso", `String (now_iso ()));
+                     ]
+                    @ checkpoint_detail @ event_context));
               start_runtime_loop ~sw ~clock ~config
                 ~session_id:session.session_id
             end

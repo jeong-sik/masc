@@ -5935,22 +5935,12 @@ let command_plane_swarm_http_json ~state request =
 let command_plane_actor request =
   Option.value ~default:"dashboard" (operator_actor_hint request)
 
-(** Eio switch and clock references for MCP handlers *)
-let current_sw : Eio.Switch.t option ref = ref None
-let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
-let current_net : _ Eio.Net.t option ref = ref None
-
-let get_switch () = match !current_sw with
-  | Some s -> s
-  | None -> failwith "Eio switch not initialized"
-
-let get_clock () = match !current_clock with
-  | Some c -> c
-  | None -> failwith "Eio clock not initialized"
-
-let get_net () = match !current_net with
-  | Some n -> n
-  | None -> failwith "Eio net not initialized"
+(** Shared runtime access for MCP handlers.
+    main_eio delegates to the shared Eio_context instead of storing another
+    copy of switch/clock/net state. *)
+let get_switch () = Masc_mcp.Eio_context.get_switch ()
+let get_clock () = Masc_mcp.Eio_context.get_clock ()
+let get_net () = Masc_mcp.Eio_context.get_net ()
 
 let command_plane_tool_ctx ~state request : (_, _) Masc_mcp.Tool_command_plane.context =
   {
@@ -7961,7 +7951,7 @@ let handle_get_mcp ?legacy_messages_endpoint ?(profile = Mcp_eio.Full) request r
        | None -> ());
 
       (* Keep-alive ping loop *)
-      (match !current_sw, !current_clock with
+      (match Masc_mcp.Eio_context.get_switch_opt (), Masc_mcp.Eio_context.get_clock_opt () with
        | Some sw, Some clock ->
            Eio.Fiber.fork ~sw (fun () ->
              let is_cancelled exn =
@@ -8106,7 +8096,7 @@ let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
          | Error _ -> ());
 
         (* Start polling fiber for new events + keepalive *)
-        (match !current_sw, !current_clock with
+        (match Masc_mcp.Eio_context.get_switch_opt (), Masc_mcp.Eio_context.get_clock_opt () with
          | Some sw, Some clock ->
              Eio.Fiber.fork ~sw (fun () ->
                let is_cancelled = function
@@ -8378,7 +8368,7 @@ let make_routes ~port ~host ~sw ~clock =
             | None -> ());
 
            (* Keep-alive ping *)
-           (match !current_sw, !current_clock with
+           (match Masc_mcp.Eio_context.get_switch_opt (), Masc_mcp.Eio_context.get_clock_opt () with
             | Some sw, Some clock ->
               Eio.Fiber.fork ~sw (fun () ->
                 let rec loop () =
@@ -8826,7 +8816,7 @@ let make_routes ~port ~host ~sw ~clock =
            let agent_name =
              Option.value ~default:"dashboard" (agent_from_request req)
            in
-           match !current_sw, !current_clock with
+           match Masc_mcp.Eio_context.get_switch_opt (), Masc_mcp.Eio_context.get_clock_opt () with
            | Some sw, Some clock -> (
                match
                  trpg_round_run_json
@@ -9897,11 +9887,6 @@ let run_server ~sw ~env ~port ~base_path =
   let domain_mgr = Eio.Stdenv.domain_mgr env in
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let fs = Eio.Stdenv.fs env in
-
-  (* Store switch, clock, and net references for handlers *)
-  current_sw := Some sw;
-  current_clock := Some clock;
-  current_net := Some net;
 
   (* Set net and clock references in Mcp_eio for async operations *)
   Mcp_eio.set_net net;
@@ -11456,7 +11441,7 @@ let run_server ~sw ~env ~port ~base_path =
                 ~default:"dashboard"
                 (agent_from_request httpun_request)
             in
-            match !current_sw, !current_clock with
+            match Masc_mcp.Eio_context.get_switch_opt (), Masc_mcp.Eio_context.get_clock_opt () with
             | Some sw, Some clock -> (
                 match
                   trpg_round_run_json
@@ -11600,7 +11585,7 @@ let run_server ~sw ~env ~port ~base_path =
                  | Error _ -> ());
 
                 (* Poll loop *)
-                (match !current_sw, !current_clock with
+                (match Masc_mcp.Eio_context.get_switch_opt (), Masc_mcp.Eio_context.get_clock_opt () with
                  | Some sw, Some clock ->
                      Eio.Fiber.fork ~sw (fun () ->
                        let is_cancelled = function

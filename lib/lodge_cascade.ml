@@ -62,18 +62,52 @@ let default_config_path () =
   | None -> List.hd candidates
 
 let default_model_strings ~cascade_name =
+  let llama_glm =
+    [
+      "llama:qwen3.5-35b-a3b-ud-q8-xl";
+      Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+    ]
+  in
+  let ollama_glm =
+    [
+      Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
+      Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+    ]
+  in
   match cascade_name with
-  | "heartbeat_action" | "heartbeat_wake" ->
+  (* heartbeat — llama first, glm fallback *)
+  | "heartbeat_action" | "heartbeat_wake" -> llama_glm
+  (* sentinel — llama first, glm fallback *)
+  | "sentinel_board" | "sentinel_task" | "sentinel_keeper" -> llama_glm
+  (* lodge subsystems — llama first, glm fallback *)
+  | "lodge_direct" | "lodge_context_rewrite" | "lodge_trait_gen"
+  | "lodge_comment" | "lodge_agent_match" ->
+      llama_glm
+  (* gardener — llama first, glm fallback *)
+  | "gardener_spawn" -> llama_glm
+  (* classification — ollama (fast local), glm fallback *)
+  | "classification" | "context_router" | "capability_match" -> ollama_glm
+  (* theory of mind — ollama, glm fallback *)
+  | "tom" -> ollama_glm
+  (* verifier — ollama, glm fallback *)
+  | "verifier" -> ollama_glm
+  (* trpg — ollama, glm fallback *)
+  | "trpg_intent" -> ollama_glm
+  (* briefing — llama first, flash-tier cloud chain, ollama final fallback *)
+  | "briefing" ->
       [
-        "llama:qwen3.5-35b-a3b-ud-q8-xl";
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+        "llama:qwen3.5-35b-a3b";
+        "glm:glm-4.7-flash";
+        "gemini:gemini-2.5-flash";
+        "ollama:glm-4.7-flash";
       ]
-  | "sentinel_board" | "sentinel_task" | "sentinel_keeper" ->
-      [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
-  | "gardener_spawn" | "lodge_context_rewrite" | "lodge_trait_gen"
-  | "lodge_comment" | "lodge_agent_match" | "lodge_direct" ->
-      [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
-  | _ -> []
+  (* walph — default execution models *)
+  | "walph" -> llama_glm
+  (* spawn glm — cloud cascade for spawn_eio direct client path *)
+  | "spawn_glm" ->
+      [ "glm:glm-4.7"; "glm:glm-4.7-flash"; "glm:glm-5"; "glm:glm-5-code" ]
+  (* unregistered cascade: llama + glm as safety net *)
+  | _ -> llama_glm
 
 let model_key_of_cascade cascade_name = cascade_name ^ "_models"
 
@@ -126,9 +160,33 @@ let get_cascade ?(config_path = "") ~cascade_name () :
   if specs <> [] then specs
   else
     let defaults = default_model_strings ~cascade_name in
-    if configured = defaults then []
+    if configured = defaults then (
+      eprintf
+        "[cascade] %s: no callable models from built-in defaults\n%!"
+        cascade_name;
+      [])
     else (
       eprintf
         "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!"
         cascade_name;
       Llm_client.available_model_specs_of_strings defaults)
+
+let call ~cascade_name ~prompt
+    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
+    ?(max_tokens = 500) ?(accept = fun _ -> true) () =
+  let specs = get_cascade ~config_path ~cascade_name () in
+  if specs = [] then
+    Error (Printf.sprintf "[cascade] no callable models for %s" cascade_name)
+  else
+    match
+      Llm_client.run_prompt_cascade ~temperature
+        ~timeout_sec ~model_specs:specs ~max_tokens ~accept ~prompt ()
+    with
+    | Ok resp ->
+        Ok
+          {
+            response = resp.Llm_client.content;
+            llm_used = resp.Llm_client.model_used;
+            duration_ms = resp.Llm_client.latency_ms;
+          }
+    | Error msg -> Error msg

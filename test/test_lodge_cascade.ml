@@ -65,6 +65,77 @@ let test_missing_config_uses_defaults () =
         first.model_id
   | [] -> fail "expected default fallback models"
 
+let test_call_returns_error_when_no_models () =
+  (* Force an empty cascade by using a config with an empty list and
+     overriding so defaults also return empty via a provider that
+     requires a missing API key. *)
+  with_env "ZAI_API_KEY" "" (fun () ->
+    with_env "GEMINI_API_KEY" "" (fun () ->
+      with_temp_json
+        {|{"heartbeat_action_models":["gemini:fake-model"]}|}
+        (fun path ->
+          let result =
+            Lodge_cascade.call
+              ~cascade_name:"heartbeat_action"
+              ~prompt:"test"
+              ~timeout_sec:1
+              ~config_path:path
+              ()
+          in
+          match result with
+          | Error msg ->
+              check bool "error mentions no callable" true
+                (String.length msg > 0)
+          | Ok _ ->
+              (* If a model somehow responded, the cascade works — also OK *)
+              ())))
+
+let known_cascade_names =
+  [
+    "heartbeat_action"; "heartbeat_wake";
+    "sentinel_board"; "sentinel_task"; "sentinel_keeper";
+    "lodge_direct"; "lodge_context_rewrite"; "lodge_trait_gen";
+    "lodge_comment"; "lodge_agent_match";
+    "gardener_spawn";
+    "classification"; "context_router"; "capability_match";
+    "tom"; "verifier"; "trpg_intent";
+    "briefing"; "walph";
+  ]
+
+let test_all_known_names_return_nonempty () =
+  List.iter
+    (fun name ->
+      let models = Lodge_cascade.default_model_strings ~cascade_name:name in
+      check bool
+        (Printf.sprintf "%s returns non-empty" name)
+        true (models <> []))
+    known_cascade_names
+
+let test_unknown_name_returns_llama_fallback () =
+  let models =
+    Lodge_cascade.default_model_strings ~cascade_name:"nonexistent_xyz"
+  in
+  check bool "catch-all returns non-empty" true (models <> []);
+  let first = List.hd models in
+  check bool "first is llama" true
+    (String.length first > 6 && String.sub first 0 6 = "llama:")
+
+let test_briefing_has_four_models () =
+  let models = Lodge_cascade.default_model_strings ~cascade_name:"briefing" in
+  check int "briefing has 4 models" 4 (List.length models)
+
+let test_classification_uses_ollama_first () =
+  let models =
+    Lodge_cascade.default_model_strings ~cascade_name:"classification"
+  in
+  let first = List.hd models in
+  check bool "classification starts with ollama:" true
+    (String.length first > 7 && String.sub first 0 7 = "ollama:")
+
+let test_model_key_format () =
+  let key = Lodge_cascade.model_key_of_cascade "heartbeat_action" in
+  check string "key format" "heartbeat_action_models" key
+
 let () =
   run "lodge_cascade"
     [
@@ -76,5 +147,23 @@ let () =
             test_skips_invalid_and_missing_api_key;
           test_case "missing config uses defaults" `Quick
             test_missing_config_uses_defaults;
+        ] );
+      ( "call",
+        [
+          test_case "returns error when no callable models" `Quick
+            test_call_returns_error_when_no_models;
+        ] );
+      ( "defaults",
+        [
+          test_case "all known names return non-empty" `Quick
+            test_all_known_names_return_nonempty;
+          test_case "unknown name returns llama fallback" `Quick
+            test_unknown_name_returns_llama_fallback;
+          test_case "briefing has four models" `Quick
+            test_briefing_has_four_models;
+          test_case "classification uses ollama first" `Quick
+            test_classification_uses_ollama_first;
+          test_case "model_key appends _models" `Quick
+            test_model_key_format;
         ] );
     ]

@@ -36,6 +36,18 @@ let test_run_argv_with_stdin_fallback_preserves_input () =
   in
   check string "stdin content round-trips" "ping\n" output
 
+let test_init_exposes_complete_runtime () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  M.Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  check bool "initialized" true (M.Process_eio.is_initialized ());
+  check bool "proc_mgr available" true
+    (match M.Process_eio.get_proc_mgr () with Ok _ -> true | Error _ -> false);
+  check bool "clock available" true
+    (match M.Process_eio.get_clock () with Ok _ -> true | Error _ -> false)
+
 let () =
   run "Process_eio coverage"
     [
@@ -49,5 +61,7 @@ let () =
             test_run_argv_fallback_preserves_env;
           test_case "argv-with-stdin-fallback-preserves-input" `Quick
             test_run_argv_with_stdin_fallback_preserves_input;
+          test_case "init-exposes-complete-runtime" `Quick
+            test_init_exposes_complete_runtime;
         ] );
     ]

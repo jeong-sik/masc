@@ -42,6 +42,7 @@
    dashboard_semantics
    dashboard_mission
    dashboard_mission_briefing
+   drift_guard
    web_dashboard
    credits_dashboard
    cp_microarch_summary
@@ -207,7 +208,6 @@
    tempo
    tools
    tool_args
-   tool_swarm
    tool_plan
    tool_run
    tool_cache
@@ -285,6 +285,10 @@
    keeper_verifier
    keeper_schema
    keeper_config
+   keeper_types
+   keeper_memory
+   keeper_alerting
+   keeper_execution
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
@@ -298,6 +302,10 @@
    tool_shard
    tool_keeper
    trpg_schema
+   trpg_types
+   trpg_action
+   trpg_round
+   trpg_handlers
    tool_trpg
    trpg_store
    trpg_preset_store

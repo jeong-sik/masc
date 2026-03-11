@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.81.0] - 2026-03-11
+
+### Added
+- **Persona-backed Keeper Creation** — `masc_persona_list` and `masc_keeper_create_from_persona` expose deterministic persona-to-keeper creation for agents and dashboards
+- **Explicit Keeper Model Switching** — `masc_keeper_model_set` persists exact active-model changes without heuristic fallback
+
+### Changed
+- Keeper runtime can now load defaults from `ME_ROOT/personas/<name>/profile.json`
+- Explicit-only keepers can maintain room-aware presence across rooms while reacting only to exact direct mentions
+
+### Fixed
+- Keeper room presence no longer depends on mutating repo-global `current_room`
+
+## [2.80.0] - 2026-03-11
+
+### Added
+- **Karpathy Autoresearch Phase 2.5** — real autonomous experiment loop with expanded runtime control (#736)
+
+### Changed
+- LLM runtime calls consolidated behind `Llm_client` abstraction (#741)
+- Contract truth and shared runtime context restored across dashboard/server flows (#743)
+
+### Fixed
+- Orphan sessions now transition to `Interrupted` on restart instead of lingering in stale state (#739)
+- Mission briefing runtime hardened against failure and drift during live refresh (#742)
+
+### Removed
+- Legacy public `masc_swarm_*` MCP tools removed; canonical swarm path remains CPv2, `team_session`, `operator`, and `masc_swarm_live_run` (#748)
+
 ## [2.79.0] - 2026-03-11
 
 ### Added

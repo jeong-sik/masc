@@ -1,24 +1,14 @@
-(** MASC WebRTC DataChannel - NAT Traversal and P2P Audio
+(** MASC WebRTC DataChannel - simulation compatibility surface
 
-    Provides WebRTC DataChannel support for peer-to-peer audio streaming.
-    Complements Voice_stream's WebSocket server with P2P capabilities.
+    This module currently exposes an in-memory simulation of peer connections
+    and channels. It is useful for tests and local experimentation, but it is
+    not a truthful P2P transport layer.
 
-    Architecture:
-    {v
-    ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-    │ Agent A      │────▶│ STUN/TURN    │◀────│ Agent B      │
-    │ (DataChannel)│     │ Server       │     │ (DataChannel)│
-    └──────────────┘     └──────────────┘     └──────────────┘
-           │                                          │
-           └──────────── P2P Audio Stream ───────────┘
-    v}
-
-    Backend Options:
-    - Native: libdatachannel C bindings (requires system library)
-    - Stub: WebSocket fallback (always available)
-
-    Based on libdatachannel C API:
-    https://github.com/paullouisageneau/libdatachannel
+    Important contract:
+    - active runtime behavior is stub/simulation only
+    - native bindings may be detected, but they are not wired into the active
+      data path here
+    - callers must not treat this module as production WebRTC networking
 
     @author Second Brain
     @since MASC v3.0
@@ -99,8 +89,8 @@ type data_channel
 
 (** Backend implementation type *)
 type backend =
-  | Native    (** libdatachannel C bindings *)
-  | Stub      (** WebSocket fallback *)
+  | Native    (** Reserved for future libdatachannel wiring *)
+  | Stub      (** Active in-memory simulation backend *)
 
 (** {1 Configuration Defaults} *)
 
@@ -123,11 +113,15 @@ val audio_reliability : reliability
 
     @param level Log level (default: Warning)
     @param log_callback Optional callback for log messages
-    @param prefer_native If true (default), use native libdatachannel when available
-    @return Currently active backend type *)
+    @param prefer_native Retained for compatibility; native bindings are not
+           wired into the active backend selection yet
+    @return Currently active backend type (currently always [Stub]) *)
 val init : ?level:log_level -> ?log_callback:(log_level -> string -> unit) -> ?prefer_native:bool -> unit -> backend
 
 (** Check if native WebRTC is available.
+
+    This only reports whether libdatachannel bindings are detectable on the
+    host. It does not mean this module will activate a native backend.
 
     @return true if libdatachannel is linked *)
 val is_native_available : unit -> bool

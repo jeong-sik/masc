@@ -118,7 +118,7 @@
 | `local64 runtime pool` | Canonical substrate | local llama path |
 | `Search Fabric V1` | Mainline policy | 기본 `coding_task`, explicit `research_pipeline` |
 | `SWARM-RISC` | Experimental / research | 개념 참고용 |
-| legacy `masc_swarm_*` public flow | Deprecated | CPv2로 수렴 |
+| removed `masc_swarm_*` public flow | Retired | CPv2로 수렴 |
 
 ## Current Direction
 

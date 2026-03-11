@@ -3,34 +3,62 @@
 (** Global Eio context for shared network/clock access.
     Set during server startup (main_eio.ml). *)
 
-type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
+type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
 let current_net : eio_net option ref = ref None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
 let current_sw : Eio.Switch.t option ref = ref None
+let net_initialized : bool ref = ref false
+let global_ctx_mutex = Eio.Mutex.create ()
 
-let set_net net = current_net := Some (net :> eio_net)
-let set_clock clock = current_clock := Some clock
-let set_switch sw = current_sw := Some sw
+let set_net net =
+  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
+      current_net := Some (net :> eio_net);
+      net_initialized := true)
 
-let get_net_opt () : eio_net option = !current_net
-let get_clock_opt () = !current_clock
-let get_switch_opt () = !current_sw
+let set_clock clock =
+  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
+      current_clock := Some clock)
+
+let set_switch sw =
+  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
+      current_sw := Some sw)
+
+let get_net_opt () : eio_net option =
+  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_net)
+
+let get_clock_opt () =
+  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_clock)
+
+let get_switch_opt () =
+  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_sw)
 
 let get_net () : eio_net =
-  match !current_net with
-  | Some net -> net
-  | None -> invalid_arg "Eio net not initialized - ensure set_net is called during server startup"
+  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+      match !current_net with
+      | Some net -> net
+      | None ->
+          if !net_initialized then
+            invalid_arg "Eio net was set but is now None (unexpected state)"
+          else
+            invalid_arg
+              "Eio net not initialized - ensure set_net is called during server startup")
 
 let get_clock () =
-  match !current_clock with
-  | Some clock -> clock
-  | None -> invalid_arg "Eio clock not initialized - ensure set_clock is called during server startup"
+  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+      match !current_clock with
+      | Some clock -> clock
+      | None ->
+          invalid_arg
+            "Eio clock not initialized - ensure set_clock is called during server startup")
 
 let get_switch () =
-  match !current_sw with
-  | Some sw -> sw
-  | None -> invalid_arg "Eio switch not initialized - ensure set_switch is called during server startup"
+  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+      match !current_sw with
+      | Some sw -> sw
+      | None ->
+          invalid_arg
+            "Eio switch not initialized - ensure set_switch is called during server startup")
 
 (** TLS connector for Cohttp_eio HTTPS support. *)
 let https_connector :

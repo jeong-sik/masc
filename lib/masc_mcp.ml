@@ -22,6 +22,7 @@ module Notify = Notify
 
 module Message_schema = Message_schema
 module Verification = Verification
+module Drift_guard = Drift_guard
 module Lamport = Lamport
 module Trace = Trace
 module Room_utils = Room_utils
@@ -214,7 +215,6 @@ module Webrtc_datachannel = Webrtc_datachannel
 module Udp_socket_eio = Udp_socket_eio
 
 (* Tool handler modules (extracted for testability) *)
-module Tool_swarm = Tool_swarm
 module Tool_plan = Tool_plan
 module Tool_run = Tool_run
 module Tool_cache = Tool_cache

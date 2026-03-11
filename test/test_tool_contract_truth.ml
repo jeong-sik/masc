@@ -1,0 +1,123 @@
+open Alcotest
+
+module Mcp_eio = Masc_mcp.Mcp_server_eio
+module Config = Masc_mcp.Config
+module Mode = Masc_mcp.Mode
+module Room = Masc_mcp.Room
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_tool_contract_truth_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  rm dir
+
+let response_tools response =
+  let open Yojson.Safe.Util in
+  response |> member "result" |> member "tools" |> to_list
+
+let tool_string_field tool field =
+  match tool with
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`String value) -> value
+      | _ -> fail ("missing string field: " ^ field))
+  | _ -> fail "tool must be object"
+
+let find_tool_exn tools name =
+  List.find
+    (function
+      | `Assoc fields -> (
+          match List.assoc_opt "name" fields with
+          | Some (`String tool_name) -> String.equal tool_name name
+          | _ -> false)
+      | _ -> false)
+    tools
+
+let tools_list_response ~clock ~sw ?(include_hidden = false) ?names state =
+  let names_json =
+    match names with
+    | Some values -> [ ("names", `List (List.map (fun value -> `String value) values)) ]
+    | None -> []
+  in
+  let hidden_json =
+    if include_hidden then [ ("include_hidden", `Bool true) ] else []
+  in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 1);
+          ("method", `String "tools/list");
+          ("params", `Assoc (names_json @ hidden_json));
+        ])
+  in
+  Mcp_eio.handle_request ~clock ~sw state request
+
+let test_visible_tools_expose_only_truthful_statuses () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let tools = tools_list_response ~clock ~sw state |> response_tools in
+      List.iter
+        (fun tool ->
+          let status = tool_string_field tool "implementationStatus" in
+          check bool ("truthful visible status: " ^ tool_string_field tool "name")
+            true
+            (String.equal status "real" || String.equal status "adapter"))
+        tools)
+
+let test_hidden_tools_report_contract_status () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let room_path = Room.masc_dir state.room_config in
+      ignore (Config.switch_mode room_path Mode.Full);
+      let tools =
+        tools_list_response ~clock ~sw ~include_hidden:true
+          ~names:
+            [
+              "masc_archive_save";
+              "masc_claim";
+              "masc_transition";
+              "masc_verify_handoff";
+            ]
+          state
+        |> response_tools
+      in
+      let placeholder = find_tool_exn tools "masc_archive_save" in
+      check string "archive_save placeholder" "placeholder"
+        (tool_string_field placeholder "implementationStatus");
+      let alias = find_tool_exn tools "masc_claim" in
+      check string "claim adapter" "adapter"
+        (tool_string_field alias "implementationStatus");
+      let canonical = find_tool_exn tools "masc_transition" in
+      check string "transition real" "real"
+        (tool_string_field canonical "implementationStatus");
+      let verify_handoff = find_tool_exn tools "masc_verify_handoff" in
+      check string "verify_handoff real" "real"
+        (tool_string_field verify_handoff "implementationStatus"))
+
+let () =
+  run "tool contract truth"
+    [
+      ("visible", [ test_case "visible tools stay truthful" `Quick test_visible_tools_expose_only_truthful_statuses ]);
+      ("hidden", [ test_case "hidden metadata exposes implementation status" `Quick test_hidden_tools_report_contract_status ]);
+    ]

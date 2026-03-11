@@ -1,10 +1,11 @@
-(** MASC WebRTC DataChannel - Stub Implementation
+(** MASC WebRTC DataChannel - simulation-only compatibility layer
 
-    This is a stub implementation that simulates WebRTC DataChannel behavior.
-    It can be replaced with native libdatachannel bindings when available.
+    The active implementation is an in-memory simulation used for tests and
+    local experimentation. Native bindings may be present on the host, but this
+    module does not yet route real network traffic through them.
 
     Current: Stub backend (in-memory simulation)
-    Future: Native backend (libdatachannel C bindings via ctypes)
+    Reserved: Native backend tag for future libdatachannel wiring
 
     @author Second Brain
     @since MASC v3.0
@@ -196,7 +197,7 @@ let string_of_channel_state = function
   | ChannelClosed -> "closed"
 
 let string_of_backend = function
-  | Native -> "native (libdatachannel)"
+  | Native -> "native (reserved)"
   | Stub -> "stub (simulation)"
 
 (** {1 Initialization} *)
@@ -208,22 +209,10 @@ let get_backend () = !current_backend
 let init ?(level = Log_warning) ?log_callback ?(prefer_native = true) () =
   log_level_ref := level;
   log_callback_ref := log_callback;
-  (* Try native backend if available and preferred *)
-  let backend =
-    if prefer_native && is_native_available () then begin
-      (* Initialize native logger *)
-      (match Webrtc_bindings.rtc_init_logger with
-       | Some init_fn ->
-         let level_int = match level with
-           | Log_none -> 0 | Log_fatal -> 1 | Log_error -> 2 | Log_warning -> 3
-           | Log_info -> 4 | Log_debug -> 5 | Log_verbose -> 6
-         in
-         init_fn level_int None
-       | None -> ());
-      Native
-    end else
-      Stub
-  in
+  if prefer_native && is_native_available () then
+    log Log_warning
+      "[WebRTC] Native bindings detected, but this module is still simulation-only; using stub backend";
+  let backend = Stub in
   current_backend := backend;
   log Log_info (Printf.sprintf "[WebRTC] Initialized with %s backend" (string_of_backend backend));
   backend

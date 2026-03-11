@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import { Card } from './common/card'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { extractAgentInfo, isKeeperAgent } from './common/agent-info'
@@ -584,6 +585,18 @@ function MissionBriefingCard() {
   `
 }
 
+function StaleCrewSection({ rows }: { rows: CrewRow[] }) {
+  const [open, setOpen] = useState(false)
+  return html`
+    <div class="mission-stale-section">
+      <button class="mission-stale-toggle" onClick=${() => setOpen(!open)}>
+        ${open ? '▾' : '▸'} 종료/중단된 세션 (${rows.length})
+      </button>
+      ${open ? rows.map(row => html`<${CrewCard} key=${row.session.session_id} row=${row} />`) : null}
+    </div>
+  `
+}
+
 function CrewCard({ row }: { row: CrewRow }) {
   const memberRows = row.memberNames.slice(0, 4).map(name => {
     const agent = agents.value.find(item => item.name === name)
@@ -593,7 +606,7 @@ function CrewCard({ row }: { row: CrewRow }) {
       name,
       model: info.model,
       nickname: info.nickname,
-      currentTask: agent ? taskLabel(agent, tasks.value) : 'agent snapshot 없음',
+      currentTask: agent ? taskLabel(agent, tasks.value) : '서버 재시작 후 상태 소실',
       output: trimText(output?.content, 96),
     }
   })
@@ -606,6 +619,8 @@ function CrewCard({ row }: { row: CrewRow }) {
           <div class="mission-card-target">${row.session.session_id}${row.room ? ` · ${row.room}` : ''}</div>
         </div>
         <span class="command-chip ${toneClass(row.status)}">${row.status}</span>
+        ${row.status === 'interrupted' ? html`<small class="mission-stale-reason">서버 재시작으로 중단됨</small>` : null}
+        ${row.status === 'completed' ? html`<small class="mission-stale-reason">정상 완료</small>` : null}
       </div>
 
       <div class="mission-fact-grid">
@@ -867,9 +882,17 @@ export function Mission() {
             <p>team session 단위로 목표, 멤버, 최근 사건, 커뮤니케이션 흔적을 바로 보여줍니다.</p>
           </div>
           <div class="mission-list-stack">
-            ${crews.length > 0
-              ? crews.map(row => html`<${CrewCard} key=${row.session.session_id} row=${row} />`)
-              : html`<div class="empty-state">지금 열려 있는 crew / session 이 없습니다.</div>`}
+            ${(() => {
+              const active = crews.filter(r => r.status !== 'interrupted' && r.status !== 'completed')
+              const stale = crews.filter(r => r.status === 'interrupted' || r.status === 'completed')
+              if (active.length === 0 && stale.length === 0) {
+                return html`<div class="empty-state">지금 열려 있는 crew / session 이 없습니다.</div>`
+              }
+              return html`
+                ${active.map(row => html`<${CrewCard} key=${row.session.session_id} row=${row} />`)}
+                ${stale.length > 0 ? html`<${StaleCrewSection} rows=${stale} />` : null}
+              `
+            })()}
           </div>
         <//>
 

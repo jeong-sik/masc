@@ -429,8 +429,35 @@ button.monitor-row.bad.state-quiet {
 }
 
 .mission-crew-card.ok { border-color: rgba(74,222,128,0.22); }
-.mission-crew-card.warn { border-color: rgba(251,191,36,0.24); }
+.mission-crew-card.warn { border-color: rgba(251,191,36,0.24); opacity: 0.72; }
 .mission-crew-card.bad { border-color: rgba(248,113,113,0.28); }
+
+.mission-stale-section {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding-top: 8px;
+}
+
+.mission-stale-toggle {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.52);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 6px 4px;
+  width: 100%;
+  text-align: left;
+}
+
+.mission-stale-toggle:hover {
+  color: rgba(255,255,255,0.78);
+}
+
+.mission-stale-reason {
+  display: block;
+  color: rgba(255,255,255,0.48);
+  font-size: 11px;
+  font-weight: 400;
+}
 
 .mission-fact-grid {
   display: grid;

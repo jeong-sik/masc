@@ -13,20 +13,27 @@ type task_backend =
   | Jsonl
   | Postgres of Task_pg.t
 
-(** Current backend. Set once at server startup. *)
-let current_backend : task_backend option ref = ref None
-let initialized = ref false
+type backend_state =
+  | Uninitialized
+  | Active of task_backend
+
+(** Current backend state. Single ref avoids contradictory initialized/backend pairs. *)
+let backend_state : backend_state ref = ref Uninitialized
+
+let is_initialized () =
+  match !backend_state with
+  | Active _ -> true
+  | Uninitialized -> false
 
 (** Initialize PostgreSQL backend if URL is available *)
 let init_pg pool =
-  if !initialized then begin
+  if is_initialized () then begin
     Printf.eprintf "[Task_dispatch] WARNING: already initialized, ignoring init_pg\n%!";
     Ok ()
   end else
   match Task_pg.create pool with
   | Ok t ->
-      current_backend := Some (Postgres t);
-      initialized := true;
+      backend_state := Active (Postgres t);
       Printf.eprintf "[Task_dispatch] PostgreSQL backend initialized.\n%!";
       Ok ()
   | Error e ->
@@ -36,26 +43,26 @@ let init_pg pool =
 
 (** Initialize JSONL backend. Default fallback. *)
 let init_jsonl () =
-  if !initialized then
+  if is_initialized () then
     Printf.eprintf "[Task_dispatch] WARNING: already initialized, ignoring init_jsonl\n%!"
   else begin
-    current_backend := Some Jsonl;
-    initialized := true;
+    backend_state := Active Jsonl;
     Printf.eprintf "[Task_dispatch] JSONL backend initialized (using Room.* functions).\n%!"
   end
 
 (** Reset for testing *)
 let reset_for_test () =
-  current_backend := None;
-  initialized := false
+  backend_state := Uninitialized
 
 (** Get current backend, auto-init JSONL if not set *)
 let backend () =
-  match !current_backend with
-  | Some b -> b
-  | None ->
+  match !backend_state with
+  | Active backend -> backend
+  | Uninitialized ->
       init_jsonl ();
-      Jsonl  (* Always succeeds *)
+      match !backend_state with
+      | Active backend -> backend
+      | Uninitialized -> Jsonl
 
 (** Check if PostgreSQL backend is active *)
 let is_postgres () =
@@ -65,8 +72,8 @@ let is_postgres () =
 
 (** Get PostgreSQL pool if available *)
 let get_pg_pool () =
-  match !current_backend with
-  | Some (Postgres t) -> Some (Task_pg.get_pool t)
+  match !backend_state with
+  | Active (Postgres t) -> Some (Task_pg.get_pool t)
   | _ -> None
 
 (** {1 Dispatch Functions} *)

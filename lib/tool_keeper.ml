@@ -827,6 +827,16 @@ let env_present name =
   | Some value -> String.trim value <> ""
   | None -> false
 
+let ollama_port_listening () =
+  try
+    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Fun.protect
+      ~finally:(fun () -> (try Unix.close sock with Unix.Unix_error _ -> ()))
+      (fun () ->
+        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 11434));
+        true)
+  with Unix.Unix_error _ -> false
+
 let model_spec_is_local_runtime (model : Llm_client.model_spec) =
   match model.provider with
   | Llm_client.Llama -> true
@@ -8955,7 +8965,8 @@ let handle_keeper_msg ctx args : tool_result =
             in
             let run_cascade requests =
               match timeout_sec_opt with
-              | Some timeout_sec -> Llm_client.cascade ~timeout_sec requests
+              | Some timeout_sec ->
+                  Llm_client.cascade ~timeout_sec requests
               | None -> Llm_client.cascade requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in

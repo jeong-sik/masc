@@ -1450,12 +1450,16 @@ let has_nonempty_env name =
 let trpg_default_fast_keeper_models () : string list =
   let glm_available = has_nonempty_env "ZAI_API_KEY" in
   let gemini_available = has_nonempty_env "GEMINI_API_KEY" in
+  let llama_models =
+    match Masc_mcp.Provider_adapter.explicit_llama_model_label_result () with
+    | Ok label -> [ label ]
+    | Error _ -> []
+  in
   match (glm_available, gemini_available) with
-  | true, true ->
-      [ "glm:glm-4.7"; "gemini:gemini-2.5-flash"; Masc_mcp.Provider_adapter.explicit_llama_model_label () ]
-  | true, false -> [ "glm:glm-4.7"; Masc_mcp.Provider_adapter.explicit_llama_model_label () ]
-  | false, true -> [ "gemini:gemini-2.5-flash"; Masc_mcp.Provider_adapter.explicit_llama_model_label () ]
-  | false, false -> [ Masc_mcp.Provider_adapter.explicit_llama_model_label () ]
+  | true, true -> [ "glm:glm-4.7"; "gemini:gemini-2.5-flash" ] @ llama_models
+  | true, false -> [ "glm:glm-4.7" ] @ llama_models
+  | false, true -> [ "gemini:gemini-2.5-flash" ] @ llama_models
+  | false, false -> llama_models
 
 let trpg_keeper_models_override_csv () : string option =
   match Sys.getenv_opt "MASC_TRPG_KEEPER_MODELS" with

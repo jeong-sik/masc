@@ -264,24 +264,33 @@ let git_head_short ~workdir =
 (** Commit staged/unstaged changes with a message.
     Returns commit hash or None if nothing to commit.
     No --allow-empty: real file changes required. *)
-let git_commit ~workdir ~message =
+(** Git commit result: Ok (Some hash) on success, Ok None when no diff,
+    Error msg when git commit itself fails (e.g. missing identity, hooks). *)
+let git_commit ~workdir ~message
+  : (string option, string) Stdlib.result =
   let cmd = Printf.sprintf
-    "cd %s && git add -A && git diff --cached --quiet; \
-     if [ $? -ne 0 ]; then git commit -m %s 2>/dev/null && git rev-parse --short HEAD; fi"
-    (Filename.quote workdir) (Filename.quote message) in
-  let ic = Unix.open_process_in cmd in
-  Fun.protect ~finally:(fun () ->
-    ignore (Unix.close_process_in ic)
-  ) (fun () ->
-    try
-      let lines = ref [] in
-      (try while true do lines := input_line ic :: !lines done
-       with End_of_file -> ());
-      match !lines with
-      | hash :: _ -> Some (String.trim hash)
-      | [] -> None
-    with _ -> None
-  )
+    "cd %s && git add -A && git diff --cached --quiet"
+    (Filename.quote workdir) in
+  if Sys.command cmd = 0 then
+    (* No staged changes — nothing to commit *)
+    Result.ok None
+  else
+    let commit_cmd = Printf.sprintf
+      "cd %s && git commit -m %s 2>&1 && git rev-parse --short HEAD"
+      (Filename.quote workdir) (Filename.quote message) in
+    let ic = Unix.open_process_in commit_cmd in
+    let lines = ref [] in
+    (try while true do lines := input_line ic :: !lines done
+     with End_of_file -> ());
+    let status = Unix.close_process_in ic in
+    match status with
+    | Unix.WEXITED 0 ->
+      (match !lines with
+       | hash :: _ -> Result.ok (Some (String.trim hash))
+       | [] -> Result.error "git commit succeeded but no hash returned")
+    | _ ->
+      let output = String.concat "\n" (List.rev !lines) in
+      Result.error (Printf.sprintf "git commit failed: %s" output)
 
 (** Reset to HEAD~1, discarding the last commit. *)
 let git_reset_last ~workdir =
@@ -331,6 +340,8 @@ let validate_target_file ~workdir target_file =
     let abs = Filename.concat workdir target_file in
     if not (Sys.file_exists abs) then
       Result.error (Printf.sprintf "target_file not found: %s" abs)
+    else if Sys.is_directory abs then
+      Result.error (Printf.sprintf "target_file is a directory: %s" target_file)
     else
       let real_path = Unix.realpath abs in
       let real_workdir = Unix.realpath workdir in

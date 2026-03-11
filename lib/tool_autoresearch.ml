@@ -363,19 +363,25 @@ let handle_cycle ctx args =
         let file_content = Autoresearch.read_file abs_path in
         (* 2. Generate code change: injected hypothesis > arg > LLM *)
         let code_result =
-          match Hashtbl.find_opt pending_hypotheses id with
-          | Some h ->
-            Hashtbl.remove pending_hypotheses id;
-            (* Injected hypothesis: use it as-is, keep file unchanged *)
-            Ok (h, file_content)
-          | None ->
-            match get_string_opt args "hypothesis" with
-            | Some h -> Ok (h, file_content)
-            | None ->
-              let generate = get_generator id in
-              generate ~goal:state.goal ~baseline:state.baseline
-                ~history:state.history ~insights:state.insights
-                ~target_file ~file_content ~llm_model:state.llm_model
+          let forced_hypothesis =
+            match Hashtbl.find_opt pending_hypotheses id with
+            | Some h -> Hashtbl.remove pending_hypotheses id; Some h
+            | None -> get_string_opt args "hypothesis"
+          in
+          let generate = get_generator id in
+          (match forced_hypothesis with
+           | Some h ->
+             (* Injected/explicit hypothesis: pass it to generator
+                so LLM produces actual code changes for this hypothesis *)
+             generate ~goal:(Printf.sprintf "%s\n\nApply this hypothesis: %s" state.goal h)
+               ~baseline:state.baseline
+               ~history:state.history ~insights:state.insights
+               ~target_file ~file_content ~llm_model:state.llm_model
+             |> Result.map (fun (_generated_hyp, code) -> (h, code))
+           | None ->
+             generate ~goal:state.goal ~baseline:state.baseline
+               ~history:state.history ~insights:state.insights
+               ~target_file ~file_content ~llm_model:state.llm_model)
         in
         match code_result with
         | Error e ->
@@ -406,10 +412,19 @@ let handle_cycle ctx args =
                ]
              | Ok _original ->
                (* 5. Git commit (real changes, no --allow-empty) *)
-               let commit_hash = Autoresearch.git_commit_cycle
+               let commit_result = Autoresearch.git_commit_cycle
                  ~workdir ~cycle:state.current_cycle ~hypothesis ~baseline:score_before in
-               (match commit_hash with
-                | None ->
+               (match commit_result with
+                | Error git_err ->
+                  (* Git commit failed (e.g. missing identity, hooks).
+                     Revert file change to keep working tree clean. *)
+                  Autoresearch.git_reset_last ~workdir;
+                  `Assoc [
+                    ("error", `String (Printf.sprintf "git commit failed: %s" git_err));
+                    ("loop_id", `String id);
+                    ("cycle", `Int state.current_cycle);
+                  ]
+                | Ok None ->
                   (* No diff: LLM produced identical code. Discard. *)
                   let record = Autoresearch.record_cycle state
                     ~hypothesis ~score_before ~score_after:score_before
@@ -426,7 +441,8 @@ let handle_cycle ctx args =
                     ("reason", `String "no diff produced");
                     ("baseline", `Float state.baseline);
                   ]
-                | Some _ ->
+                | Ok (Some _) ->
+                  let commit_hash = (match commit_result with Ok h -> h | _ -> None) in
                   (* 6. Measure score_after *)
                   let after_result = Autoresearch.measure_metric_with_retry
                     ~workdir ~timeout_s state.metric_fn in

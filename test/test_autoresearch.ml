@@ -477,7 +477,7 @@ let test_git_commit_cycle_format () =
     output_string oc "print('hello')";
     close_out oc;
     match AR.git_commit_cycle ~workdir ~cycle:5 ~hypothesis:"use dropout" ~baseline:0.85 with
-    | Some hash ->
+    | Ok (Some hash) ->
       check bool "hash non-empty" true (String.length hash > 0);
       let cmd = Printf.sprintf "cd %s && git log -1 --format=%%s" (Filename.quote workdir) in
       let ic = Unix.open_process_in cmd in
@@ -487,7 +487,8 @@ let test_git_commit_cycle_format () =
       check bool "contains [autoresearch]" true (AR.contains_substring msg "[autoresearch]");
       check bool "contains cycle 5" true (AR.contains_substring msg "cycle 5");
       check bool "contains hypothesis" true (AR.contains_substring msg "use dropout")
-    | None -> fail "expected commit hash"
+    | Ok None -> fail "expected commit hash, got Ok None (no diff)"
+    | Error e -> fail (Printf.sprintf "expected commit hash, got Error: %s" e)
   )
 
 (* ============================================ *)
@@ -784,6 +785,17 @@ let test_validate_target_file_symlink_escape () =
     | Ok _ -> fail "symlink escaping workdir should be rejected"
   )
 
+(* A directory path should be rejected — only regular files are valid *)
+let test_validate_target_file_directory () =
+  with_tmpdir (fun workdir ->
+    let dir = Filename.concat workdir "subdir" in
+    Unix.mkdir dir 0o755;
+    match AR.validate_target_file ~workdir "subdir" with
+    | Error msg ->
+      check bool "mentions directory" true (AR.contains_substring msg "directory")
+    | Ok _ -> fail "directory should be rejected as target_file"
+  )
+
 (* ============================================ *)
 (* apply_code_change                            *)
 (* ============================================ *)
@@ -1049,6 +1061,7 @@ let () =
       test_case "empty" `Quick test_validate_target_file_empty;
       test_case "dotdot prefix" `Quick test_validate_target_file_dotdot_prefix;
       test_case "symlink escape" `Quick test_validate_target_file_symlink_escape;
+      test_case "directory" `Quick test_validate_target_file_directory;
     ]);
     ("apply_code_change", [
       test_case "writes file" `Quick test_apply_code_change_writes;

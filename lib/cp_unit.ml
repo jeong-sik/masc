@@ -394,11 +394,7 @@ let choose_unit_for_session units (session : Team_session_types.session) =
   |> List.map (fun ((unit : unit_record), _, _, _) -> unit.unit_id)
   |> list_hd_opt
 
-let iso_of_unix unix_ts =
-  let tm = Unix.gmtime unix_ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour
-    tm.Unix.tm_min tm.Unix.tm_sec
+let iso_of_unix = Dashboard_utils.iso_of_unix
 
 let days_from_civil year month day =
   let year = if month <= 2 then year - 1 else year in

@@ -17,11 +17,7 @@ let rec drop n items =
   | rows when n <= 0 -> rows
   | _ :: rest -> drop (n - 1) rest
 
-let iso_of_unix unix_ts =
-  let tm = Unix.gmtime unix_ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour
-    tm.Unix.tm_min tm.Unix.tm_sec
+let iso_of_unix = Dashboard_utils.iso_of_unix
 
 let max_opt left right =
   match left, right with

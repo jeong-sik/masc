@@ -409,11 +409,7 @@ let list_alerts_json_from_state config (state : snapshot_state) =
 let list_alerts_json config =
   list_alerts_json_from_state config (build_snapshot_state config)
 
-let iso_of_unix timestamp =
-  let tm = Unix.gmtime timestamp in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-    tm.tm_hour tm.tm_min tm.tm_sec
+let iso_of_unix = Dashboard_utils.iso_of_unix
 
 let file_mtime path =
   try Some (Unix.stat path).st_mtime with Unix.Unix_error _ -> None

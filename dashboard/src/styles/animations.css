@@ -373,6 +373,13 @@ button.monitor-row.bad.state-quiet {
   gap: 8px;
 }
 
+.mission-briefing-section-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .mission-briefing-section.ok,
 .mission-briefing-section.healthy,
 .mission-briefing-section.aligned {
@@ -417,6 +424,29 @@ button.monitor-row.bad.state-quiet {
 .mission-briefing-criteria summary {
   cursor: pointer;
   color: rgba(255,255,255,0.72);
+}
+
+.mission-briefing-gaps {
+  margin-top: 12px;
+}
+
+.mission-briefing-gap {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  display: grid;
+  gap: 8px;
+}
+
+.mission-briefing-gap.warn {
+  border-color: rgba(251,191,36,0.24);
+}
+
+.mission-briefing-gap p {
+  margin: 0;
+  color: rgba(255,255,255,0.78);
+  line-height: 1.45;
 }
 
 .mission-selection-bar {

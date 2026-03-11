@@ -827,6 +827,7 @@ export function Mission() {
     .map(enrichedAgentRow)
 
   const keeperRows = mission.keeper_briefs.slice(0, 6).map(enrichedKeeperRow)
+  const attentionQueueCount = mission.attention_queue.length
   const attentionQueue = mission.attention_queue.slice(0, 6)
   const internalSignals = mission.internal_signals.slice(0, 3)
   const liveOutputs =
@@ -857,7 +858,7 @@ export function Mission() {
       <${MissionBriefingCard} />
 
       <div class="mission-stat-grid">
-        <${SummaryStat} label="주의 큐" value=${attentionQueue.length} detail="개입 판단이 필요한 issue" tone=${attentionQueue[0]?.severity ?? 'ok'} />
+        <${SummaryStat} label="주의 큐" value=${attentionQueueCount} detail="개입 판단이 필요한 issue" tone=${attentionQueue[0]?.severity ?? 'ok'} />
         <${SummaryStat} label="영향 session" value=${sessionRows.length} detail="현재 선택 기준으로 좁힌 흐름" tone=${sessionRows[0]?.top_attention?.severity ?? sessionRows[0]?.health ?? 'ok'} />
         <${SummaryStat} label="영향 agent" value=${agentRows.length} detail="선택된 흐름에 연결된 actor" tone=${agentRows[0]?.brief.status ?? 'ok'} />
         <${SummaryStat} label="Keeper watch" value=${keeperRows.length} detail="continuity lane 관찰 대상" tone=${keeperRows[0]?.brief.status ?? 'ok'} />

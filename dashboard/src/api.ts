@@ -534,6 +534,13 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   return {
     id,
     author,
+    post_kind:
+      (() => {
+        const rawKind = asString(raw.post_kind, '').trim().toLowerCase()
+        return rawKind === 'automation' || rawKind === 'system' || rawKind === 'human'
+          ? rawKind
+          : undefined
+      })(),
     title,
     content,
     tags,
@@ -596,6 +603,7 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
     const post = normalizeBoardPost(postRaw) ?? {
       id: postId,
       author: 'unknown',
+      post_kind: 'human',
       title: 'Post',
       content: '',
       tags: [],

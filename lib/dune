@@ -43,6 +43,7 @@
    dashboard_mission
    dashboard_mission_briefing
    drift_guard
+   server_command_plane_http
    web_dashboard
    credits_dashboard
    cp_microarch_summary

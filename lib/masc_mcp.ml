@@ -166,6 +166,7 @@ module Dashboard = Dashboard
 module Dashboard_semantics = Dashboard_semantics
 module Dashboard_mission = Dashboard_mission
 module Dashboard_mission_briefing = Dashboard_mission_briefing
+module Server_command_plane_http = Server_command_plane_http
 module Swarm_status = Swarm_status
 module Tempo = Tempo
 module Federation = Federation

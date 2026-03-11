@@ -22,6 +22,7 @@ module Notify = Notify
 
 module Message_schema = Message_schema
 module Verification = Verification
+module Drift_guard = Drift_guard
 module Lamport = Lamport
 module Trace = Trace
 module Room_utils = Room_utils

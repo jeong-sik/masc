@@ -14,20 +14,27 @@ type board_backend =
   | Jsonl of Board.store
   | Postgres of Board_pg.t
 
-(** Current backend. Set once at server startup, guarded against double-init. *)
-let current_backend : board_backend option ref = ref None
-let initialized = ref false
+type backend_state =
+  | Uninitialized
+  | Active of board_backend
+
+(** Current backend state. Single ref avoids contradictory initialized/backend pairs. *)
+let backend_state : backend_state ref = ref Uninitialized
+
+let is_initialized () =
+  match !backend_state with
+  | Active _ -> true
+  | Uninitialized -> false
 
 (** Initialize PostgreSQL backend. Call during server startup when PG pool is available. *)
 let init_pg pool =
-  if !initialized then begin
+  if is_initialized () then begin
     Printf.eprintf "[Board_dispatch] WARNING: already initialized, ignoring init_pg\n%!";
     Ok ()
   end else
   match Board_pg.create pool with
   | Ok t ->
-      current_backend := Some (Postgres t);
-      initialized := true;
+      backend_state := Active (Postgres t);
       Printf.eprintf "[Board_dispatch] PostgreSQL backend initialized.\n%!";
       Ok ()
   | Error e ->
@@ -37,35 +44,32 @@ let init_pg pool =
 
 (** Initialize JSONL backend. Default fallback. *)
 let init_jsonl () =
-  if !initialized then
+  if is_initialized () then
     Printf.eprintf "[Board_dispatch] WARNING: already initialized, ignoring init_jsonl\n%!"
   else begin
-    current_backend := Some (Jsonl (Board.global ()));
-    initialized := true;
+    backend_state := Active (Jsonl (Board.global ()));
     Printf.eprintf "[Board_dispatch] JSONL backend initialized.\n%!"
   end
 
 (** Reset for testing. Clears backend state so init can be called again. *)
 let reset_for_test () =
-  current_backend := None;
-  initialized := false
+  backend_state := Uninitialized
 
 (** Get backend or fail *)
 let backend () =
-  match !current_backend with
-  | Some b -> b
-  | None ->
+  match !backend_state with
+  | Active backend -> backend
+  | Uninitialized ->
       (* Auto-init JSONL as safe default *)
       init_jsonl ();
-      (* init_jsonl always sets current_backend *)
-      match !current_backend with
-      | Some b -> b
-      | None -> failwith "[Board_dispatch] init_jsonl failed to set backend"
+      match !backend_state with
+      | Active backend -> backend
+      | Uninitialized -> failwith "[Board_dispatch] init_jsonl failed to activate backend"
 
 (** Get PostgreSQL pool if PG backend is active (for Board_listener) *)
 let get_pg_pool () =
-  match !current_backend with
-  | Some (Postgres t) -> Some (Board_pg.get_pool t)
+  match !backend_state with
+  | Active (Postgres t) -> Some (Board_pg.get_pool t)
   | _ -> None
 
 (** {1 In-memory sort for JSONL mode} *)
@@ -198,8 +202,8 @@ let search ~query ~limit =
 
 (** Flush dirty state (JSONL only, PG commits immediately) *)
 let flush () =
-  match !current_backend with
-  | Some (Jsonl store) -> Board.flush_dirty store
+  match !backend_state with
+  | Active (Jsonl store) -> Board.flush_dirty store
   | _ -> ()
 
 (** Sweep expired posts and comments *)
@@ -226,7 +230,7 @@ let post_to_yojson_with_karma (p : Board.post) ~author_karma =
 
 (** Backend name for diagnostics *)
 let backend_name () =
-  match !current_backend with
-  | Some (Jsonl _) -> "jsonl"
-  | Some (Postgres _) -> "postgresql"
-  | None -> "uninitialized"
+  match !backend_state with
+  | Active (Jsonl _) -> "jsonl"
+  | Active (Postgres _) -> "postgresql"
+  | Uninitialized -> "uninitialized"

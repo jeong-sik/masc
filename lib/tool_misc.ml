@@ -33,10 +33,20 @@ let handle_dashboard ctx args =
       in
       (true, output)
 
-(* Note: verify_handoff requires tokenize/jaccard/cosine functions from mcp_server_eio.ml
-   and is kept there for now. This is a stub. *)
-let handle_verify_handoff _ctx _args =
-  (false, "verify_handoff requires complex similarity functions - use mcp_server_eio directly")
+let handle_verify_handoff _ctx args =
+  let original = get_string args "original" "" in
+  let received = get_string args "received" "" in
+  if original = "" || received = "" then
+    (false, "❌ original and received are required")
+  else
+    let threshold =
+      get_float args "threshold" (Level2_config.Drift_guard.default_threshold ())
+    in
+    let result =
+      Drift_guard.verify_handoff ~original ~received ~threshold ()
+      |> Drift_guard.result_to_json
+    in
+    (true, Yojson.Safe.pretty_to_string result)
 
 let handle_gc ctx args =
   let days = get_int args "days" 7 in
@@ -58,8 +68,8 @@ let handle_tool_stats _ctx args =
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_dashboard" -> Some (handle_dashboard ctx args)
+  | "masc_verify_handoff" -> Some (handle_verify_handoff ctx args)
   | "masc_gc" -> Some (handle_gc ctx args)
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ctx args)
   | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
-  (* Note: verify_handoff needs tokenize/jaccard/cosine - kept in mcp_server_eio.ml *)
   | _ -> None

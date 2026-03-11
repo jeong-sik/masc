@@ -42,6 +42,7 @@
    dashboard_semantics
    dashboard_mission
    dashboard_mission_briefing
+   drift_guard
    web_dashboard
    credits_dashboard
    cp_microarch_summary

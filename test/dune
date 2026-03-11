@@ -457,12 +457,37 @@
  (modules test_board_dispatch)
  (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
 
+(test
+ (name test_task_dispatch)
+ (modules test_task_dispatch)
+ (libraries masc_mcp alcotest unix))
+
 ; Board PostgreSQL backend tests (skipped when MASC_POSTGRES_URL is absent)
 (test
  (name test_board_pg)
  (modules test_board_pg)
  (libraries masc_mcp alcotest eio eio_main yojson uri caqti caqti-eio caqti-eio.unix
             caqti-driver-postgresql mirage-crypto-rng mirage-crypto-rng.unix))
+
+(test
+ (name test_drift_guard_core)
+ (modules test_drift_guard_core)
+ (libraries masc_mcp alcotest unix yojson))
+
+(test
+ (name test_verify_handoff_tool)
+ (modules test_verify_handoff_tool)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
+(test
+ (name test_tool_contract_truth)
+ (modules test_tool_contract_truth)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
+(test
+ (name test_webrtc_contract)
+ (modules test_webrtc_contract)
+ (libraries masc_mcp alcotest))
 
 ; ============================================================
 ; Disabled: Lwt-based tests (require cohttp-lwt-unix, ppx_lwt)

@@ -149,6 +149,19 @@ let test_type_compatibility () =
   cleanup_dir base_path;
   Alcotest.(check pass) "types are compatible" () ()
 
+let test_eio_context_delegation () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Mcp_eio.set_net net;
+  Mcp_eio.set_clock clock;
+  let delegated_net = Masc_mcp.Eio_context.get_net_opt () in
+  let alias_clock = Mcp_eio.get_clock () in
+  Alcotest.(check bool) "net delegated to shared Eio_context" true
+    (Option.is_some delegated_net);
+  Alcotest.(check bool) "clock delegated to shared Eio_context" true
+    (Masc_mcp.Eio_context.get_clock () == alias_clock)
+
 (* ===== Unit Tests for Protocol Helpers ===== *)
 
 let test_is_jsonrpc_v2 () =
@@ -1325,6 +1338,7 @@ let test_handle_request_method_not_found () =
 let state_tests = [
   "create_state", `Quick, test_create_state;
   "type compatibility", `Quick, test_type_compatibility;
+  "eio context delegation", `Quick, test_eio_context_delegation;
 ]
 
 let protocol_tests = [

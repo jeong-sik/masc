@@ -22,60 +22,14 @@ type tool_profile =
 (** Type alias for generic Eio network capability *)
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
-(** Global Eio network reference for Walph chain execution.
-    Set by main_eio.ml during server initialization.
-    Used by walph_loop for direct LLM API calls.
-
-    Initialization order is enforced:
-    - set_net MUST be called before any get_net usage
-    - Callers should use get_net_opt for graceful degradation *)
-let current_net : eio_net option ref = ref None
-let net_initialized : bool ref = ref false
-
-(** Eio clock reference for async sleep *)
-let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
-
-(** Mutex protecting global network/clock refs from concurrent fiber access.
-    Required because parallel MCP calls spawn fibers that read/write these refs. *)
-let global_ctx_mutex = Eio.Mutex.create ()
-
-(** Set the Eio network reference. Called from main_eio.ml. *)
-let set_net net =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
-    current_net := Some (net :> eio_net);
-    net_initialized := true)
-
-(** Set the Eio clock reference. Called from main_eio.ml. *)
-let set_clock clock =
-  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
-    current_clock := Some clock)
-
-(** Get the Eio clock reference optionally. *)
-let get_clock_opt () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_clock)
-
-(** Get the Eio clock reference. Raises if not set. *)
-let get_clock () =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
-    match !current_clock with
-    | Some clock -> clock
-    | None -> invalid_arg "Eio clock not initialized")
-
-(** Get the Eio network reference optionally - for graceful handling *)
-let get_net_opt () : eio_net option =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () -> !current_net)
-
-(** Get the Eio network reference. Raises if not set.
-    @raise Failure if set_net was not called *)
-let get_net () : eio_net =
-  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
-    match !current_net with
-    | Some net -> net
-    | None ->
-      if !net_initialized then
-        invalid_arg "Eio net was set but is now None (unexpected state)"
-      else
-        invalid_arg "Eio net not initialized - ensure set_net is called during server startup")
+(** Compatibility wrappers around the shared Eio_context singleton.
+    Mcp_server_eio no longer owns a separate copy of these refs. *)
+let set_net net = Eio_context.set_net net
+let set_clock clock = Eio_context.set_clock clock
+let get_clock_opt () = Eio_context.get_clock_opt ()
+let get_clock () = Eio_context.get_clock ()
+let get_net_opt () : eio_net option = Eio_context.get_net_opt ()
+let get_net () : eio_net = Eio_context.get_net ()
 
 (** Re-export pure functions from Mcp_server *)
 let create_state ?test_mode:_ ~base_path () =
@@ -712,68 +666,12 @@ let save_mcp_sessions (config : Room.config) (sessions : mcp_session_record list
   Room_utils.write_json config (mcp_sessions_path config) json
 
 (* ============================================ *)
-(* Drift Guard: similarity helpers              *)
+(* Drift Guard helpers (compat aliases)         *)
 (* ============================================ *)
 
-let tokenize (s : string) : string list =
-  let trimmed = String.trim s in
-  if trimmed = "" then []
-  else
-    let tokens = Str.split (Str.regexp "[ \t\r\n]+") trimmed in
-    let trim_punct token =
-      let is_punct = function
-        | '.' | ',' | ';' | ':' | '!' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | '-' | '_' | '/' | '\\' -> true
-        | _ -> false
-      in
-      let len = String.length token in
-      if len = 0 then token
-      else
-        let rec left i =
-          if i >= len then len
-          else if is_punct token.[i] then left (i + 1) else i
-        in
-        let rec right i =
-          if i < 0 then -1
-          else if is_punct token.[i] then right (i - 1) else i
-        in
-        let l = left 0 in
-        let r = right (len - 1) in
-        if r < l then "" else String.sub token l (r - l + 1)
-    in
-    tokens
-    |> List.map String.lowercase_ascii
-    |> List.map trim_punct
-    |> List.filter (fun t -> t <> "")
-
-let jaccard_similarity a b =
-  let set_a = Hashtbl.create 128 in
-  let set_b = Hashtbl.create 128 in
-  List.iter (fun t -> Hashtbl.replace set_a t ()) a;
-  List.iter (fun t -> Hashtbl.replace set_b t ()) b;
-  let intersection = Hashtbl.fold (fun k _ acc -> if Hashtbl.mem set_b k then acc + 1 else acc) set_a 0 in
-  let union = (Hashtbl.length set_a) + (Hashtbl.length set_b) - intersection in
-  if union = 0 then 1.0 else float_of_int intersection /. float_of_int union
-
-let cosine_similarity a b =
-  let freq tbl t =
-    let v = match Hashtbl.find_opt tbl t with Some n -> n | None -> 0 in
-    Hashtbl.replace tbl t (v + 1)
-  in
-  let fa = Hashtbl.create 128 in
-  let fb = Hashtbl.create 128 in
-  List.iter (freq fa) a;
-  List.iter (freq fb) b;
-  let dot = Hashtbl.fold (fun k va acc ->
-    match Hashtbl.find_opt fb k with
-    | Some vb -> acc +. (float_of_int (va * vb))
-    | None -> acc
-  ) fa 0.0 in
-  let norm tbl =
-    Hashtbl.fold (fun _ v acc -> acc +. (float_of_int (v * v))) tbl 0.0 |> sqrt
-  in
-  let na = norm fa in
-  let nb = norm fb in
-  if na = 0.0 || nb = 0.0 then 0.0 else dot /. (na *. nb)
+let tokenize = Drift_guard.tokenize
+let jaccard_similarity = Drift_guard.jaccard_similarity
+let cosine_similarity = Drift_guard.cosine_similarity
 
 (** Execute tool - Eio native version.
 
@@ -790,6 +688,7 @@ let read_only_tools =
    "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
    "masc_worktree_list"; "masc_pending_interrupts";
    "masc_cost_report"; "masc_portal_status";
+   "masc_verify_handoff";
    "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
    "masc_team_session_list"; "masc_team_session_compare";
    "masc_team_session_events"; "masc_team_session_prove";
@@ -1153,7 +1052,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   if agent_name <> "unknown" then begin
     Session.update_activity registry ~agent_name ();
     (* Keep read-only/fast tools non-blocking; heartbeat is best-effort. *)
-    let skip_heartbeat = is_read_only || String.equal name "masc_archive_save" in
+    let skip_heartbeat =
+      is_read_only
+      || Tool_catalog.is_placeholder name
+      || match Tool_catalog.implementation_status name with
+         | Tool_catalog.Simulation -> true
+         | Tool_catalog.Real | Tool_catalog.Adapter | Tool_catalog.Placeholder ->
+             false
+    in
     if (not skip_heartbeat) && Room.is_initialized config then
       try
         ignore (Room.heartbeat config ~agent_name)
@@ -1480,9 +1386,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match Tool_cost.dispatch simple_ctx_cost ~name ~args:arguments with
   | Some result -> result
   | None ->
-  match Tool_walph.dispatch (Lazy.force simple_ctx_walph) ~name ~args:arguments with
-  | Some result -> result
-  | None ->
+  if String.length name >= 11 && String.equal (String.sub name 0 11) "masc_walph_" then
+    match Tool_walph.dispatch (Lazy.force simple_ctx_walph) ~name ~args:arguments with
+    | Some result -> result
+    | None -> (false, Printf.sprintf "Unknown Walph tool: %s" name)
+  else
   match Tool_agent.dispatch simple_ctx_agent ~name ~args:arguments with
   | Some result -> result
   | None ->
@@ -1847,26 +1755,6 @@ Time: %s
 
 
 
-  | "masc_verify_handoff" ->
-      let original = arg_get_string "original" "" in
-      let received = arg_get_string "received" "" in
-      let threshold = arg_get_float "threshold" (Level2_config.Drift_guard.default_threshold ()) in
-      let tokens_a = tokenize original in
-      let tokens_b = tokenize received in
-      let jacc = jaccard_similarity tokens_a tokens_b in
-      let cos = cosine_similarity tokens_a tokens_b in
-      let weights = Level2_config.Drift_guard.weights () in
-      let combined = (weights.jaccard *. jacc)
-                     +. (weights.cosine *. cos) in
-      let passed = combined >= threshold in
-      let json = `Assoc [
-        ("similarity", `Float combined);
-        ("jaccard", `Float jacc);
-        ("cosine", `Float cos);
-        ("threshold", `Float threshold);
-        ("passed", `Bool passed);
-      ] in
-      (true, Yojson.Safe.pretty_to_string json)
   | "masc_verify_request" | "masc_verify_submit" | "masc_verify_status"
   | "masc_verify_pending" | "masc_verify_auto" ->
       Tool_verification.dispatch config agent_name name arguments

@@ -466,7 +466,7 @@ let _local_llama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500
   | Yojson.Json_error msg -> Error (Printf.sprintf "❌ Parse: JSON error [%s]" msg)
   | exn -> Error (Printf.sprintf "❌ LLM: llama exception [%s]" (Printexc.to_string exn))
 
-(** Smart LLM generate — CLI rotation with ollama fallback *)
+(** Smart LLM generate — CLI rotation with cloud GLM fallback *)
 let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
   (* 1. Try CLI first (rotation: gemini → claude → codex) *)
   let cli = next_cli_provider () in

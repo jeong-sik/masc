@@ -271,166 +271,6 @@ let parse_codex_output output =
   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (None, None, None, None)
 
-(** Parse GLM (Z.ai) output for token tracking - OpenAI-compatible format
-    Format: {"choices": [...], "usage": {"prompt_tokens": N, "completion_tokens": M}} *)
-let parse_glm_output output =
-  try
-    let json = Yojson.Safe.from_string output in
-    let open Yojson.Safe.Util in
-    let usage = json |> member "usage" in
-    let input_tokens = usage |> member "prompt_tokens" |> to_int_option in
-    let output_tokens = usage |> member "completion_tokens" |> to_int_option in
-    (* GLM-4.7: Z.ai Coding Plan pricing is subscription-based, estimate $0 per token *)
-    let cost = Some 0.0 in
-    (input_tokens, output_tokens, cost)
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
-    (None, None, None)
-
-let split_csv_nonempty raw =
-  raw
-  |> String.split_on_char ','
-  |> List.map String.trim
-  |> List.filter (fun s -> s <> "")
-
-let unique_preserve_order items =
-  let rec loop acc = function
-    | [] -> List.rev acc
-    | x :: xs ->
-        if List.mem x acc then loop acc xs
-        else loop (x :: acc) xs
-  in
-  loop [] items
-
-let normalize_glm_model_alias raw =
-  let s = raw |> String.trim |> String.lowercase_ascii in
-  match s with
-  | "" -> None
-  | "4.7" -> Some "glm-4.7"
-  | "4.7-flash" -> Some "glm-4.7-flash"
-  | "4.7-flashx" -> Some "glm-4.7-flashx"
-  | "4.6" -> Some "glm-4.6"
-  | "4.5" -> Some "glm-4.5"
-  | "4.5-flash" -> Some "glm-4.5-flash"
-  | "4.5-air" -> Some "glm-4.5-air"
-  | "4.5-airx" -> Some "glm-4.5-airx"
-  | "4.5v" -> Some "glm-4.5v"
-  | "5" -> Some "glm-5"
-  | "5-code" | "5-coder" | "glm-5-coder" -> Some "glm-5-code"
-  | _ when String.starts_with ~prefix:"glm-" s -> Some s
-  | _ -> Some s
-
-let default_glm_spawn_cascade_models =
-  [ "glm-4.7"; "glm-4.7-flash"; "glm-4.7-flashx"; "glm-5"; "glm-5-code" ]
-
-let glm_spawn_cascade_models () =
-  let configured =
-    match Sys.getenv_opt "MASC_GLM_SPAWN_CASCADE" with
-    | None -> []
-    | Some raw -> split_csv_nonempty raw |> List.filter_map normalize_glm_model_alias
-  in
-  let base =
-    if configured = [] then default_glm_spawn_cascade_models else configured
-  in
-  let preferred =
-    match Sys.getenv_opt "MASC_GLM_DEFAULT_MODEL" with
-    | Some raw -> normalize_glm_model_alias raw
-    | None -> None
-  in
-  let merged =
-    match preferred with
-    | Some m -> m :: base
-    | None -> base
-  in
-  unique_preserve_order merged
-
-let extract_glm_message_text (json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
-  let texts_from_content = function
-    | `String s -> Some s
-    | `List items ->
-        let texts =
-          List.filter_map
-            (fun item ->
-              match item |> member "type" |> to_string_option with
-              | Some "text" -> item |> member "text" |> to_string_option
-              | _ -> None)
-            items
-        in
-        if texts = [] then None else Some (String.concat "\n" texts)
-    | _ -> None
-  in
-  let from_chat =
-    match member "choices" json with
-    | `List ((`Assoc _ as first) :: _) ->
-        first |> member "message" |> member "content" |> texts_from_content
-    | _ -> None
-  in
-  match from_chat with
-  | Some text when String.trim text <> "" -> Some text
-  | _ ->
-      (match json |> member "result" |> member "content" with
-      | `List items ->
-          let texts =
-            List.filter_map
-              (fun item ->
-                match item |> member "type" |> to_string_option with
-                | Some "text" -> item |> member "text" |> to_string_option
-                | _ -> None)
-              items
-          in
-          if texts = [] then None else Some (String.concat "\n" texts)
-      | _ -> None)
-
-let glm_error_message output =
-  try
-    let json = Yojson.Safe.from_string output in
-    let open Yojson.Safe.Util in
-    match member "error" json with
-    | `Null -> None
-    | `String s when String.trim s <> "" -> Some s
-    | `Assoc _ as e -> Some (Yojson.Safe.to_string e)
-    | e -> Some (Yojson.Safe.to_string e)
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
-    None
-
-let glm_context_tokens model =
-  match String.lowercase_ascii (String.trim model) with
-  | "glm-5"
-  | "glm-5-code"
-  | "glm-4.7"
-  | "glm-4.7-flash"
-  | "glm-4.7-flashx"
-  | "glm-4.6"
-  | "glm-4.5-flash" -> Some 200_000
-  | "glm-4.6v"
-  | "glm-4.6v-flash"
-  | "glm-4.6v-flashx"
-  | "glm-4.5"
-  | "glm-4.5-air"
-  | "glm-4.5-airx"
-  | "glm-4.5v"
-  | "glm-4-32b-0414-128k" -> Some 128_000
-  | _ -> None
-
-let glm_min_context_tokens () =
-  match Sys.getenv_opt "MASC_GLM_MIN_CONTEXT_TOKENS" with
-  | None -> 200_000
-  | Some raw ->
-      let trimmed = String.trim raw in
-      (match int_of_string_opt trimmed with
-      | Some n when n > 0 -> n
-      | _ -> 200_000)
-
-let glm_spawn_cascade_models_for_policy () =
-  let min_context = glm_min_context_tokens () in
-  let configured = glm_spawn_cascade_models () in
-  List.filter
-    (fun model ->
-      match glm_context_tokens model with
-      | Some ctx -> ctx >= min_context
-      | None -> false)
-    configured
-
 let default_configs = [
   ("claude", {
     agent_name = "claude";
@@ -467,14 +307,13 @@ let default_configs = [
     working_dir = None;
     mcp_tools = masc_mcp_tools;
   });
-  (* GLM uses Z.ai API directly - no llm-mcp dependency *)
+  (* GLM uses Llm_client cascade via Lodge_cascade — no direct curl *)
   ("glm", {
     agent_name = "glm";
-    (* Direct Z.ai API call - requires ZAI_API_KEY env var *)
-    command = "curl -s -X POST https://api.z.ai/api/coding/paas/v4/chat/completions -H 'Content-Type: application/json' -H \"Authorization: Bearer $ZAI_API_KEY\" -d";
+    command = "glm:via-llm-client";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
-    mcp_tools = [];  (* GLM has no MCP support *)
+    mcp_tools = [];
   });
 ]
 
@@ -514,142 +353,14 @@ let add_default_model_arg agent_name argv =
       argv @ [ Provider_adapter.explicit_ollama_model_id () ])
   | _ -> argv
 
-type glm_spawn_success = {
-  model_used: string;
-  response_text: string;
-  input_tokens_used: int option;
-  output_tokens_used: int option;
-  cost_estimate_usd: float option;
-}
-
-let spawn_cache_schema_version = "1.0.0"
-
-let int_opt_to_json = function
-  | Some n -> `Int n
-  | None -> `Null
-
-let float_opt_to_json = function
-  | Some v -> `Float v
-  | None -> `Null
-
-let spawn_result_to_cache_json (resp : spawn_result) : Yojson.Safe.t =
-  `Assoc [
-    ("schema_version", `String spawn_cache_schema_version);
-    ("kind", `String "spawn_glm_response");
-    ("response", `Assoc [
-      ("success", `Bool resp.success);
-      ("output", `String resp.output);
-      ("exit_code", `Int resp.exit_code);
-      ("input_tokens", int_opt_to_json resp.input_tokens);
-      ("output_tokens", int_opt_to_json resp.output_tokens);
-      ("cache_creation_tokens", int_opt_to_json resp.cache_creation_tokens);
-      ("cache_read_tokens", int_opt_to_json resp.cache_read_tokens);
-      ("cost_usd", float_opt_to_json resp.cost_usd);
-    ]);
-  ]
-
-let spawn_result_of_cache_json (json : Yojson.Safe.t) : (spawn_result, string) result =
-  let open Yojson.Safe.Util in
-  try
-    let schema = json |> member "schema_version" |> to_string in
-    if not (String.equal schema spawn_cache_schema_version) then
-      Error (Printf.sprintf "schema mismatch: expected=%s actual=%s"
-               spawn_cache_schema_version schema)
-    else
-      let kind = json |> member "kind" |> to_string in
-      if not (String.equal kind "spawn_glm_response") then
-        Error ("unexpected cache kind: " ^ kind)
-      else
-        let body = json |> member "response" in
-        Ok {
-          success = body |> member "success" |> to_bool;
-          output = body |> member "output" |> to_string;
-          exit_code = body |> member "exit_code" |> to_int;
-          elapsed_ms = 0;
-          input_tokens = body |> member "input_tokens" |> to_int_option;
-          output_tokens = body |> member "output_tokens" |> to_int_option;
-          cache_creation_tokens = body |> member "cache_creation_tokens" |> to_int_option;
-          cache_read_tokens = body |> member "cache_read_tokens" |> to_int_option;
-          cost_usd = body |> member "cost_usd" |> to_float_option;
-        }
-  with exn -> Error (Printexc.to_string exn)
-
-let record_cache_bypass reason =
-  Prometheus.inc_counter "masc_llm_cache_bypass_total" ();
-  Prometheus.inc_counter "masc_llm_cache_bypass_total"
-    ~labels:[("reason", reason)] ()
-
-let glm_spawn_cache_key prompt =
-  let fingerprint =
-    `Assoc [
-      ("schema_version", `String spawn_cache_schema_version);
-      ("kind", `String "spawn_glm");
-      ("prompt", `String prompt);
-      ("models", `List (List.map (fun m -> `String m) (glm_spawn_cascade_models_for_policy ())));
-      ("min_context_tokens", `Int (glm_min_context_tokens ()));
-    ]
-  in
-  Llm_response_cache.make_key ~namespace:"spawn_glm"
-    ~content:(Yojson.Safe.to_string fingerprint)
-
-let call_glm_once ~api_key ~model ~prompt ~timeout_sec : (glm_spawn_success, string) result =
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("model", `String model);
-          ( "messages",
-            `List [ `Assoc [ ("role", `String "user"); ("content", `String prompt) ] ] );
-          ("stream", `Bool false);
-        ])
-  in
-  try
-    let raw =
-      Process_eio.run_argv_with_stdin
-        ~timeout_sec:(Float.of_int timeout_sec +. 5.0)
-        ~stdin_content:body
-        [
-          "curl";
-          "-sS";
-          "--max-time";
-          string_of_int timeout_sec;
-          "-X";
-          "POST";
-          "https://api.z.ai/api/coding/paas/v4/chat/completions";
-          "-H";
-          "Content-Type: application/json";
-          "-H";
-          Printf.sprintf "Authorization: Bearer %s" api_key;
-          "-d";
-          "@-";
-        ]
-    in
-    match glm_error_message raw with
-    | Some msg -> Error msg
-    | None -> (
-        try
-          let json = Yojson.Safe.from_string raw in
-          match extract_glm_message_text json with
-          | Some text when String.trim text <> "" ->
-              let input_tokens, output_tokens, cost_usd = parse_glm_output raw in
-              Ok
-                {
-                  model_used = model;
-                  response_text = text;
-                  input_tokens_used = input_tokens;
-                  output_tokens_used = output_tokens;
-                  cost_estimate_usd = cost_usd;
-                }
-          | _ -> Error "empty glm response content"
-        with Yojson.Json_error e -> Error (Printf.sprintf "invalid glm json: %s" e))
-  with exn -> Error (Printexc.to_string exn)
-
-let spawn_glm_with_cascade ~prompt ~timeout ~start_time : spawn_result =
-  let api_key = Sys.getenv_opt "ZAI_API_KEY" |> Option.value ~default:"" in
-  if String.trim api_key = "" then
+(** Spawn GLM agent via Llm_client cascade.
+    Uses Lodge_cascade config for model selection, Llm_client for cache + metrics. *)
+let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
+  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"spawn_glm" () in
+  if model_specs = [] then
     {
       success = false;
-      output = "Spawn error (GLM): ZAI_API_KEY is not set";
+      output = "GLM cascade: no models available (check ZAI_API_KEY and config/llm_cascade.json)";
       exit_code = 1;
       elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
       input_tokens = None;
@@ -659,123 +370,39 @@ let spawn_glm_with_cascade ~prompt ~timeout ~start_time : spawn_result =
       cost_usd = None;
     }
   else
-    let models = glm_spawn_cascade_models_for_policy () in
-    if models = [] then
-      let configured = glm_spawn_cascade_models () in
-      {
-        success = false;
-        output =
-          Printf.sprintf
-            "GLM cascade aborted: no models satisfy min context %d tokens (configured=%s)"
-            (glm_min_context_tokens ())
-            (String.concat "," configured);
-        exit_code = 1;
-        elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
-        input_tokens = None;
-        output_tokens = None;
-        cache_creation_tokens = None;
-        cache_read_tokens = None;
-        cost_usd = None;
-      }
-    else
-    let deadline = start_time +. float_of_int timeout in
-    let rec try_models errors = function
-      | [] ->
-          let summary =
-            errors
-            |> List.rev
-            |> List.map (fun (m, e) -> Printf.sprintf "%s: %s" m e)
-            |> String.concat " | "
-          in
-          {
-            success = false;
-            output = Printf.sprintf "GLM cascade failed (%s)" summary;
-            exit_code = 1;
-            elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
-            input_tokens = None;
-            output_tokens = None;
-            cache_creation_tokens = None;
-            cache_read_tokens = None;
-            cost_usd = None;
-          }
-      | model :: rest ->
-          let raw_remaining = int_of_float (Float.ceil (deadline -. Time_compat.now ())) in
-          if raw_remaining <= 0 then
-            try_models (("timeout", "overall timeout exceeded") :: errors) []
-          else
-            let remaining = max 5 raw_remaining in
-            match call_glm_once ~api_key ~model ~prompt ~timeout_sec:remaining with
-            | Ok ok_resp ->
-                {
-                  success = true;
-                  output = ok_resp.response_text;
-                  exit_code = 0;
-                  elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
-                  input_tokens = ok_resp.input_tokens_used;
-                  output_tokens = ok_resp.output_tokens_used;
-                  cache_creation_tokens = None;
-                  cache_read_tokens = None;
-                  cost_usd = ok_resp.cost_estimate_usd;
-                }
-            | Error e -> try_models ((model, e) :: errors) rest
-    in
-    try_models [] models
+    match
+      Llm_client.run_prompt_cascade ~temperature:0.7
+        ~timeout_sec:timeout ~model_specs ~max_tokens:4096 ~prompt ()
+    with
+    | Ok resp ->
+        {
+          success = true;
+          output = resp.Llm_client.content;
+          exit_code = 0;
+          elapsed_ms = resp.Llm_client.latency_ms;
+          input_tokens = Some resp.Llm_client.usage.Llm_client.input_tokens;
+          output_tokens = Some resp.Llm_client.usage.Llm_client.output_tokens;
+          cache_creation_tokens =
+            (let v = resp.Llm_client.usage.Llm_client.cache_creation_input_tokens in
+             if v > 0 then Some v else None);
+          cache_read_tokens =
+            (let v = resp.Llm_client.usage.Llm_client.cache_read_input_tokens in
+             if v > 0 then Some v else None);
+          cost_usd = None;
+        }
+    | Error e ->
+        {
+          success = false;
+          output = Printf.sprintf "GLM cascade failed: %s" e;
+          exit_code = 1;
+          elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+          input_tokens = None;
+          output_tokens = None;
+          cache_creation_tokens = None;
+          cache_read_tokens = None;
+          cost_usd = None;
+        }
 
-let spawn_glm_with_cache ~prompt ~timeout ~start_time : spawn_result =
-  let cache_reason =
-    if not Env_config.Llm.cache_enabled then Some "disabled"
-    else if not (String.equal Env_config.Llm.spawn_cache_policy "safe_only") then Some "spawn_policy"
-    else if String.length prompt > Env_config.Llm.cache_max_prompt_chars then Some "prompt_too_large"
-    else None
-  in
-  match cache_reason with
-  | Some reason ->
-      record_cache_bypass reason;
-      spawn_glm_with_cascade ~prompt ~timeout ~start_time
-  | None ->
-      let key = glm_spawn_cache_key prompt in
-      (match Llm_response_cache.get_json ~key with
-       | Ok (Some cached_json) ->
-           (match spawn_result_of_cache_json cached_json with
-            | Ok cached ->
-                Prometheus.inc_counter "masc_llm_cache_hits_total" ();
-                { cached with elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) }
-            | Error e ->
-                Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-                let _ = Llm_response_cache.delete ~key in
-                Eio.traceln "[spawn_eio] glm cache decode error: %s" e;
-                let fresh = spawn_glm_with_cascade ~prompt ~timeout ~start_time in
-                if fresh.success then (
-                  match
-                    Llm_response_cache.set_json ~key
-                      ~ttl_seconds:Env_config.Llm.cache_ttl_seconds
-                      (spawn_result_to_cache_json fresh)
-                  with
-                  | Ok () -> Prometheus.inc_counter "masc_llm_cache_writes_total" ()
-                  | Error write_e ->
-                      Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-                      Eio.traceln "[spawn_eio] glm cache write error: %s" write_e
-                );
-                fresh)
-       | Ok None ->
-           Prometheus.inc_counter "masc_llm_cache_misses_total" ();
-           let fresh = spawn_glm_with_cascade ~prompt ~timeout ~start_time in
-           if fresh.success then (
-             match
-               Llm_response_cache.set_json ~key
-                 ~ttl_seconds:Env_config.Llm.cache_ttl_seconds
-                 (spawn_result_to_cache_json fresh)
-             with
-             | Ok () -> Prometheus.inc_counter "masc_llm_cache_writes_total" ()
-             | Error e ->
-                 Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-                 Eio.traceln "[spawn_eio] glm cache write error: %s" e
-           );
-           fresh
-       | Error e ->
-           Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-           Eio.traceln "[spawn_eio] glm cache read error: %s" e;
-           spawn_glm_with_cascade ~prompt ~timeout ~start_time)
 
 (** Spawn an agent using Eio.Process (direct execution, no shell)
 
@@ -832,10 +459,10 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
 
   let augmented_prompt = prompt ^ institution_memory ^ masc_lifecycle_suffix in
 
-  (* GLM agents use dedicated cascade function (no chdir needed — direct HTTP).
+  (* GLM agents use Llm_client cascade (no chdir needed — direct HTTP).
      Non-GLM agents need chdir + fork protected by mutex. *)
   if agent_name = "glm" then
-    spawn_glm_with_cache ~prompt:augmented_prompt ~timeout ~start_time
+    spawn_glm_via_client ~prompt:augmented_prompt ~timeout ~start_time
   else if agent_name = "llama" then
     let worker_name =
       match runtime_agent_name with

@@ -54,9 +54,52 @@ let () =
     Printf.printf "✓ Sweeper removed 0 permanent posts\n"
   in
 
+  let test_post_kind_human_default () =
+    let store = create_store () in
+    match create_post store ~author:"test-agent" ~content:"Human post" () with
+    | Ok post ->
+        let json = post_to_yojson post in
+        let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
+        assert (String.equal kind "human");
+        Printf.printf "✓ Default board post kind is human\n"
+    | Error e ->
+        Printf.printf "✗ Failed to create human post: %s\n" (show_board_error e);
+        assert false
+  in
+
+  let test_post_kind_automation_contract () =
+    let store = create_store () in
+    match create_post store ~author:"dashboard-harness-bot" ~content:"Harness post"
+            ~visibility:Internal ~ttl_hours:1 ~hearth:"dashboard-harness" () with
+    | Ok post ->
+        let json = post_to_yojson post in
+        let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
+        assert (String.equal kind "automation");
+        Printf.printf "✓ Harness metadata classifies post as automation\n"
+    | Error e ->
+        Printf.printf "✗ Failed to create automation post: %s\n" (show_board_error e);
+        assert false
+  in
+
+  let test_post_kind_system_author () =
+    let store = create_store () in
+    match create_post store ~author:"lodge-system" ~content:"System post" () with
+    | Ok post ->
+        let json = post_to_yojson post in
+        let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
+        assert (String.equal kind "system");
+        Printf.printf "✓ System author classifies post as system\n"
+    | Error e ->
+        Printf.printf "✗ Failed to create system post: %s\n" (show_board_error e);
+        assert false
+  in
+
   (* Run Eio tests *)
   test_permanent_post ();
   test_expiring_post ();
   test_sweeper_skips_permanent ();
+  test_post_kind_human_default ();
+  test_post_kind_automation_contract ();
+  test_post_kind_system_author ();
 
   Printf.printf "\n✅ All Board TTL tests passed!\n\n"

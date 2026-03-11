@@ -71,6 +71,7 @@ function isLikelyTestPost(post: BoardPost): boolean {
 }
 
 function isAutomationBoardPost(post: BoardPost): boolean {
+  if (post.post_kind) return post.post_kind === 'automation'
   const hearth = (post.hearth ?? '').toLowerCase()
   if (post.visibility !== 'internal' || !post.expires_at || !hearth) return false
   if (hearth.startsWith('mdal')) return true
@@ -82,6 +83,7 @@ function visiblePosts(posts: BoardPost[]): BoardPost[] {
   if (!hideAutomationPosts.value) return posts
   return posts.filter(post => {
     if (isAutomationBoardPost(post)) return false
+    if (post.post_kind) return true
     if (post.hearth || post.visibility || post.expires_at) return true
     return !isLikelyTestPost(post)
   })
@@ -106,6 +108,7 @@ async function loadPostDetail(postId: string) {
       comment_count: data.comment_count,
       created_at: data.created_at,
       updated_at: data.updated_at,
+      post_kind: data.post_kind,
       flair: data.flair,
       hearth: data.hearth,
       visibility: data.visibility,

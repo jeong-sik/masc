@@ -11,6 +11,7 @@ type cache_state = {
   mutex : Mutex.t;
   mutable cached_at : float;
   mutable cached_json : Yojson.Safe.t option;
+  mutable refresh_in_flight : bool;
   mutable last_error : string option;
 }
 
@@ -19,6 +20,7 @@ let cache =
     mutex = Mutex.create ();
     cached_at = 0.0;
     cached_json = None;
+    refresh_in_flight = false;
     last_error = None;
   }
 
@@ -610,6 +612,18 @@ module For_test = struct
   let relevant_sessions_for_briefing = relevant_sessions_for_briefing
   let collect_metadata_gaps = collect_metadata_gaps
   let build_briefing_sections = build_briefing_sections
+  let reset_cache () =
+    with_cache_lock (fun () ->
+        cache.cached_at <- 0.0;
+        cache.cached_json <- None;
+        cache.refresh_in_flight <- false;
+        cache.last_error <- None)
+  let seed_cache ?(cached_at = 0.0) ?last_error ?(refresh_in_flight = false) json =
+    with_cache_lock (fun () ->
+        cache.cached_at <- cached_at;
+        cache.cached_json <- Some json;
+        cache.refresh_in_flight <- refresh_in_flight;
+        cache.last_error <- last_error)
 end
 
 let error_json ~now ~reason =
@@ -630,6 +644,26 @@ let error_json ~now ~reason =
       ("sections", `List []);
       ("error", `String reason);
       ("last_error", option_string_json (Some reason));
+    ]
+
+let pending_json ~now ~last_error =
+  `Assoc
+    [
+      ("generated_at", `String now);
+      ("cached", `Bool false);
+      ("stale", `Bool false);
+      ("refreshing", `Bool true);
+      ("status", `String "pending");
+      ("summary", `String "Generating mission briefing from the latest snapshot.");
+      ("provenance", `String "narrative");
+      ("authoritative", `Bool false);
+      ("provenance_summary", mission_briefing_surface_contract_json);
+      ("model", `Null);
+      ("ttl_sec", `Int (int_of_float cache_ttl_sec));
+      ("criteria", criteria_json ());
+      ("sections", `List []);
+      ("error", `Null);
+      ("last_error", option_string_json last_error);
     ]
 let with_cached_flag cached json =
   match json with
@@ -754,6 +788,43 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
           ("last_error", `Null);
         ])
 
+let start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr () =
+  let should_start =
+    with_cache_lock (fun () ->
+        if cache.refresh_in_flight then
+          false
+        else (
+          cache.refresh_in_flight <- true;
+          true))
+  in
+  let refresh_sw =
+    match Eio_context.get_switch_opt () with
+    | Some server_sw -> server_sw
+    | None -> sw
+  in
+  if should_start then
+    Eio.Fiber.fork_daemon ~sw:refresh_sw (fun () ->
+        (try
+           match
+             compute_briefing_json ~actor_name ~config ~sw:refresh_sw ~clock
+               ~proc_mgr ()
+           with
+           | Ok result_json ->
+               with_cache_lock (fun () ->
+                   cache.cached_json <- Some result_json;
+                   cache.cached_at <- Unix.gettimeofday ();
+                   cache.refresh_in_flight <- false;
+                   cache.last_error <- None)
+           | Error reason ->
+               with_cache_lock (fun () ->
+                   cache.refresh_in_flight <- false;
+                   cache.last_error <- Some reason)
+         with exn ->
+           with_cache_lock (fun () ->
+               cache.refresh_in_flight <- false;
+               cache.last_error <- Some (Printexc.to_string exn)));
+        `Stop_daemon)
+
 let actor_name = function
   | Some value when String.trim value <> "" -> String.trim value
   | _ -> "dashboard"
@@ -762,7 +833,7 @@ let json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
   let now_ts = Unix.gettimeofday () in
   let now_iso = Types.now_iso () in
   let actor_name = actor_name actor in
-  let cached_json, is_fresh, last_error =
+  let cached_json, is_fresh, refresh_in_flight, last_error =
     with_cache_lock (fun () ->
         let cached_json = cache.cached_json in
         let is_fresh =
@@ -770,17 +841,25 @@ let json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
           | Some _ -> now_ts -. cache.cached_at < cache_ttl_sec
           | None -> false
         in
-        (cached_json, is_fresh, cache.last_error))
+        (cached_json, is_fresh, cache.refresh_in_flight, cache.last_error))
   in
   match cached_json with
   | Some cached_json ->
       if not force && is_fresh then
         annotate_delivery_state cached_json ~cached:true ~stale:false
-          ~refreshing:false ~last_error
+          ~refreshing:refresh_in_flight ~last_error
       else (
-        match
-          compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr ()
-        with
+        if not refresh_in_flight then
+          start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr ();
+        annotate_delivery_state cached_json ~cached:true ~stale:true
+          ~refreshing:true ~last_error)
+  | None ->
+      if force then (
+        if not refresh_in_flight then
+          start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr ();
+        pending_json ~now:now_iso ~last_error)
+      else
+        match compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () with
         | Ok result_json ->
             with_cache_lock (fun () ->
                 cache.cached_json <- Some result_json;
@@ -789,16 +868,4 @@ let json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
             result_json
         | Error reason ->
             with_cache_lock (fun () -> cache.last_error <- Some reason);
-            annotate_delivery_state cached_json ~cached:true ~stale:true
-              ~refreshing:false ~last_error:(Some reason))
-  | None ->
-      match compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () with
-      | Ok result_json ->
-          with_cache_lock (fun () ->
-              cache.cached_json <- Some result_json;
-              cache.cached_at <- Unix.gettimeofday ();
-              cache.last_error <- None);
-          result_json
-      | Error reason ->
-          with_cache_lock (fun () -> cache.last_error <- Some reason);
-          error_json ~now:now_iso ~reason
+            error_json ~now:now_iso ~reason

@@ -8230,6 +8230,8 @@ let run_server ~sw ~env ~port ~base_path =
   Masc_mcp.Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator;
   (* Lodge world heartbeat - wakes agents every 60s *)
   Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
+  (* Gardener — self-organizing agent ecosystem (task-aware, LLM-primary) *)
+  Masc_mcp.Gardener.start ~sw ~clock ~room_config:state.room_config;
   (* Internal guardian loops (no external watchdog dependency) *)
   Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
   Masc_mcp.Dashboard_governance_judge.start ~sw ~clock

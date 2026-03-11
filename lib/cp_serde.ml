@@ -114,6 +114,26 @@ let validate_workload_profile raw =
   | "coding_task" | "research_pipeline" as value -> Ok value
   | other -> Error (Printf.sprintf "unsupported workload_profile: %s" other)
 
+let normalize_workload_template = function
+  | Some value ->
+      let trimmed = String.trim value |> String.lowercase_ascii in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let validate_workload_template raw =
+  match normalize_workload_template (Some raw) with
+  | Some ("coding_team" | "research_team" | "ops_governance_team" as value) ->
+      Ok value
+  | Some other ->
+      Error (Printf.sprintf "unsupported workload_template: %s" other)
+  | None -> Error "unsupported workload_template: "
+
+let workload_template_defaults = function
+  | "coding_team" -> Some ("coding_task", Some "decompose")
+  | "research_team" -> Some ("research_pipeline", Some "normalize")
+  | "ops_governance_team" -> Some ("research_pipeline", Some "audit")
+  | _ -> None
+
 let normalize_stage = function
   | Some value ->
       let trimmed = String.trim value |> String.lowercase_ascii in
@@ -422,6 +442,10 @@ let operation_to_json (operation : operation_record) =
       ("autonomy_level", `String operation.autonomy_level);
       ("policy_class", `String operation.policy_class);
       ("budget_class", `String operation.budget_class);
+      ( "workload_template",
+        match operation.workload_template with
+        | Some value -> `String value
+        | None -> `Null );
       ("workload_profile", `String (operation_workload_profile operation));
       ("stage", match operation.stage with Some value -> `String value | None -> `Null);
       ("artifact_scope", json_list_of_strings operation.artifact_scope);
@@ -497,6 +521,8 @@ let operation_of_json json =
             autonomy_level = get_string_default json "autonomy_level" "L4_Autonomous";
             policy_class = get_string_default json "policy_class" "strict";
             budget_class = get_string_default json "budget_class" "standard";
+            workload_template =
+              normalize_workload_template (get_string_opt json "workload_template");
             workload_profile =
               Cp_search_fabric.normalized_workload_profile
                 (get_string_default json "workload_profile" "coding_task");

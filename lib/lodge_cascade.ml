@@ -104,6 +104,14 @@ let default_model_strings ~cascade_name =
   | "governance_judge" -> llama_glm
   (* walph — default execution models *)
   | "walph" -> llama_glm
+  (* auto_responder — agent_type-specific cascades *)
+  | "auto_responder_claude" ->
+      [ "claude:sonnet"; Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+  | "auto_responder_gemini" ->
+      [ "gemini:flash"; Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+  | "auto_responder_glm" ->
+      [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+  | "auto_responder" -> llama_glm
   (* spawn glm — cloud cascade for spawn_eio direct client path *)
   | "spawn_glm" ->
       [ "glm:glm-4.7"; "glm:glm-4.7-flash"; "glm:glm-5"; "glm:glm-5-code" ]

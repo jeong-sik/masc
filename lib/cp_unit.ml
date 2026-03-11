@@ -362,6 +362,7 @@ let operation_status_of_session (status : Team_session_types.session_status) =
   | Paused -> Paused
   | Completed -> Completed
   | Interrupted -> Cancelled
+  | Cancelled -> Cancelled
   | Failed -> Failed
 
 let choose_unit_for_session units (session : Team_session_types.session) =
@@ -474,6 +475,7 @@ let projected_team_session_operations config units managed_operations =
              Team_session_types.execution_scope_to_string session.execution_scope;
            budget_class =
              Team_session_types.communication_mode_to_string session.communication_mode;
+           workload_template = None;
            workload_profile = "coding_task";
            stage = Some "implement";
            artifact_scope = [];
@@ -536,6 +538,7 @@ let projected_swarm_operations config units managed_operations =
             autonomy_level = "L5_Independent";
             policy_class = "swarm";
             budget_class = "adaptive";
+            workload_template = None;
             workload_profile = "coding_task";
             stage = None;
             artifact_scope = [];

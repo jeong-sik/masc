@@ -64,12 +64,6 @@ let predict_from_signature
 
 (* ── LLM SimToM Prediction ─────────────────────────────────────────── *)
 
-(** Model specs for ToM LLM classification.
-    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
-    Override via config/llm_cascade.json key "tom_models". *)
-let tom_model_specs () =
-  Lodge_cascade.get_cascade ~cascade_name:"tom" ()
-
 (** Format agent signature into a concise behavioral profile string. *)
 let format_agent_profile (sig_ : Lodge_reaction.agent_signature) : string =
   let top_topics =
@@ -187,15 +181,11 @@ let predict_with_llm (sig_ : Lodge_reaction.agent_signature)
     : (Lodge_reaction.reaction_type * float * string, string) result =
   let prompt = build_tom_prompt sig_ post_content in
   match
-    Llm_client.run_prompt_cascade
-      ~temperature:0.2
-      ~timeout_sec:15
-      ~accept:tom_response_is_valid
-      ~model_specs:(tom_model_specs ())
-      ~max_tokens:200
-      ~prompt ()
+    Lodge_cascade.call ~cascade_name:"tom" ~prompt
+      ~temperature:0.2 ~timeout_sec:15 ~max_tokens:200
+      ~accept:tom_response_is_valid ()
   with
-  | Ok resp -> parse_tom_response resp.content
+  | Ok r -> parse_tom_response r.response
   | Error err -> Error err
 
 (** {1 Core Functions} *)

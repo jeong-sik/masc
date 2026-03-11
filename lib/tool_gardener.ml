@@ -51,6 +51,7 @@ let handle_health _ctx _args : result =
       ("recommendations", `List (
         (if health.needs_spawn then [`String "Consider spawning new agents"] else []) @
         (if health.needs_retirement then [`String "Consider retiring idle agents"] else []) @
+        (if health.needs_workers then [`String (Printf.sprintf "Task pressure: %d unclaimed tasks, workers needed" health.task_backlog.todo_count)] else []) @
         (if health.homeostatic_score < 0.5 then [`String "Ecosystem imbalanced, intervention recommended"] else [])
       ));
     ] in

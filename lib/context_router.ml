@@ -56,12 +56,6 @@ let get_router_mode () : router_mode =
   | Some "hybrid" -> Hybrid_mode
   | _ -> Heuristic
 
-(** Model specs for context router LLM classification.
-    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
-    Override via config/llm_cascade.json key "context_router_models". *)
-let router_model_specs () =
-  Lodge_cascade.get_cascade ~cascade_name:"context_router" ()
-
 (* ---------- Intent Classification (Heuristic) ---------- *)
 
 (** Conversational patterns — no retrieval needed *)
@@ -200,16 +194,12 @@ let intent_response_is_valid (resp : Llm_client.completion_response) : bool =
 let classify_intent_llm (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
-    Llm_client.run_prompt_cascade
-      ~temperature:0.1
-      ~timeout_sec:10
-      ~accept:intent_response_is_valid
-      ~model_specs:(router_model_specs ())
-      ~max_tokens:20
-      ~prompt ()
+    Lodge_cascade.call ~cascade_name:"context_router" ~prompt
+      ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
+      ~accept:intent_response_is_valid ()
   with
-  | Ok resp -> (
-      match parse_intent_response resp.content with
+  | Ok r -> (
+      match parse_intent_response r.response with
       | Some result -> result
       | None -> (Coordination, 0.3))  (* unparseable → low-confidence fallback *)
   | Error _err -> (Coordination, 0.3)  (* LLM error → low-confidence fallback *)
@@ -218,16 +208,12 @@ let classify_intent_llm (query : string) : query_intent * float =
 let classify_intent_hybrid (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
-    Llm_client.run_prompt_cascade
-      ~temperature:0.1
-      ~timeout_sec:10
-      ~accept:intent_response_is_valid
-      ~model_specs:(router_model_specs ())
-      ~max_tokens:20
-      ~prompt ()
+    Lodge_cascade.call ~cascade_name:"context_router" ~prompt
+      ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
+      ~accept:intent_response_is_valid ()
   with
-  | Ok resp -> (
-      match parse_intent_response resp.content with
+  | Ok r -> (
+      match parse_intent_response r.response with
       | Some result -> result
       | None -> classify_intent_heuristic query)
   | Error _err -> classify_intent_heuristic query

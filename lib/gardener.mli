@@ -61,7 +61,7 @@ val can_retire : config:gardener_config -> bool
     - Recent posts/comments from Board
 
     @return Current health state with homeostatic score *)
-val calculate_health : config:gardener_config -> ecosystem_health
+val calculate_health : config:gardener_config -> room_config:Room_utils.config option -> ecosystem_health
 
 (** Convenience function for MCP tools — uses default config *)
 val get_health : unit -> ecosystem_health

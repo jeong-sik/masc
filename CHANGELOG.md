@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.83.0] - 2026-03-11
+
+### Added
+- **Gardener Signal Observation** — full signal-based observation with LLM-primary decision making for spawn/retire (#773)
+- **CP Workload Templates** — `masc_operation_start` accepts workload templates and attached team sessions (#769)
+
+### Changed
+- **Cascade Phase 3** — distributed-pattern modules (`auto_chain`, `walph`) migrated to `Lodge_cascade.call` (#772)
+- **WebRTC Deduplication** — removed duplicated WebRTC code in favor of `ocaml-webrtc` library (#778)
+
+### Fixed
+- Mission briefing async refresh UX with loading states and error recovery (#774)
+
 ## [2.82.0] - 2026-03-11
 
 ### Changed
@@ -19,23 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.81.1] - 2026-03-11
 
+### Added
+- **Workload Templates for CPv2** — `masc_operation_start` now accepts `workload_template` (`coding_team`, `research_team`, `ops_governance_team`) and normalizes default workload/stage pairs.
+- **Attached Team Sessions** — `masc_team_session_start(operation_id=...)` can bind a team session to a managed CPv2 operation and exposes `command_plane.operation_id` / `operation_path` in session status.
+- **AI Front Door Docs** — added `llms.txt` and `llms-full.txt`, and surfaced them from the command-plane help/readme entrypoints.
+
+### Changed
+- `/api/v1/command-plane/help` now includes workload templates and an attached-team-session golden path for the managed execution spine.
+
 ### Fixed
 - Board test isolation: `ref(lazy)` singleton pattern prevents test JSONL data from polluting production board path (#759)
 - Thread-safe resettable singleton via `Lazy.force` atomic CAS + `ref` wrapping for test reset
 - `MASC_BASE_PATH` temp directory isolation in `test_board_dispatch` and `test_tool_board_coverage`
-
-## [2.81.0] - 2026-03-11
-
-### Added
-- **Persona-backed Keeper Creation** — `masc_persona_list` and `masc_keeper_create_from_persona` expose deterministic persona-to-keeper creation for agents and dashboards
-- **Explicit Keeper Model Switching** — `masc_keeper_model_set` persists exact active-model changes without heuristic fallback
-
-### Changed
-- Keeper runtime can now load defaults from `ME_ROOT/personas/<name>/profile.json`
-- Explicit-only keepers can maintain room-aware presence across rooms while reacting only to exact direct mentions
-
-### Fixed
-- Keeper room presence no longer depends on mutating repo-global `current_room`
+- Attached team session validation now rejects duplicate operation attachment based on the nested operation card shape rather than a broken top-level lookup.
 ## [2.80.0] - 2026-03-11
 
 ### Added

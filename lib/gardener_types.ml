@@ -63,6 +63,42 @@ let agent_stats_to_yojson s = `Assoc [
   ("thompson_beta", `Float s.thompson_beta);
 ]
 
+(** {1 Task Backlog Summary} *)
+
+(** Summary of MASC task backlog state for ecosystem health assessment *)
+type task_backlog_summary = {
+  total_tasks: int;               (** Total tasks in backlog *)
+  todo_count: int;                (** Unclaimed TODO tasks *)
+  claimed_count: int;             (** Claimed but not started *)
+  in_progress_count: int;         (** Currently in progress *)
+  done_count: int;                (** Completed tasks *)
+  orphan_count: int;              (** Claimed/in_progress with offline assignee *)
+  oldest_todo_age_hours: float;   (** Age of oldest unclaimed task in hours *)
+  high_priority_todo: int;        (** P1-P2 unclaimed tasks *)
+} [@@deriving show]
+
+let task_backlog_summary_to_yojson b = `Assoc [
+  ("total_tasks", `Int b.total_tasks);
+  ("todo_count", `Int b.todo_count);
+  ("claimed_count", `Int b.claimed_count);
+  ("in_progress_count", `Int b.in_progress_count);
+  ("done_count", `Int b.done_count);
+  ("orphan_count", `Int b.orphan_count);
+  ("oldest_todo_age_hours", `Float b.oldest_todo_age_hours);
+  ("high_priority_todo", `Int b.high_priority_todo);
+]
+
+let empty_task_backlog = {
+  total_tasks = 0;
+  todo_count = 0;
+  claimed_count = 0;
+  in_progress_count = 0;
+  done_count = 0;
+  orphan_count = 0;
+  oldest_todo_age_hours = 0.0;
+  high_priority_todo = 0;
+}
+
 (** {1 Ecosystem Health} *)
 
 (** Comprehensive health metrics for the agent ecosystem *)
@@ -87,6 +123,11 @@ type ecosystem_health = {
   last_retirement: float option;  (** Unix timestamp of last retirement *)
   spawns_today: int;           (** Spawns in last 24h *)
   retirements_today: int;      (** Retirements in last 24h *)
+
+  (* Task-aware fields *)
+  task_backlog: task_backlog_summary;  (** MASC task backlog state *)
+  system_error_rate: float;    (** Error rate from telemetry (0.0-1.0) *)
+  needs_workers: bool;         (** todo > 0 AND no available workers *)
 } [@@deriving show]
 
 let ecosystem_health_to_yojson h = `Assoc [
@@ -107,6 +148,9 @@ let ecosystem_health_to_yojson h = `Assoc [
   ("last_retirement", match h.last_retirement with Some t -> `Float t | None -> `Null);
   ("spawns_today", `Int h.spawns_today);
   ("retirements_today", `Int h.retirements_today);
+  ("task_backlog", task_backlog_summary_to_yojson h.task_backlog);
+  ("system_error_rate", `Float h.system_error_rate);
+  ("needs_workers", `Bool h.needs_workers);
 ]
 
 (** {1 Enriched Gap Signal} *)
@@ -304,7 +348,8 @@ let gardener_config_to_yojson c = `Assoc [
 
 (** Type of intervention needed *)
 type intervention =
-  | NeedSpawn of enriched_gap   (** Should spawn a new agent *)
-  | NeedRetirement of agent_stats  (** Should retire an agent *)
-  | Balanced                    (** Ecosystem is healthy *)
+  | NeedSpawn of enriched_gap        (** Should spawn a new agent *)
+  | NeedWorker of task_backlog_summary  (** Task pressure requires workers *)
+  | NeedRetirement of agent_stats    (** Should retire an agent *)
+  | Balanced                         (** Ecosystem is healthy *)
 [@@deriving show]

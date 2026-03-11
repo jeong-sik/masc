@@ -184,12 +184,6 @@ let agent_profile_of_identity (id : Agent_identity.t) : agent_profile =
 
 (* ---------- LLM Scoring ---------- *)
 
-(** Model specs for capability match LLM scoring.
-    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
-    Override via config/llm_cascade.json key "capability_match_models". *)
-let match_model_specs () =
-  Lodge_cascade.get_cascade ~cascade_name:"capability_match" ()
-
 (** Build the LLM prompt for agent-task compatibility scoring. *)
 let build_scoring_prompt (agent : agent_profile) (task : task_profile) : string =
   let traits_str = match agent.traits with
@@ -260,18 +254,14 @@ let score_with_llm (agent : agent_profile) (task : task_profile)
     : (float, string) result =
   let prompt = build_scoring_prompt agent task in
   match
-    Llm_client.run_prompt_cascade
-      ~temperature:0.1
-      ~timeout_sec:15
-      ~accept:llm_score_is_valid
-      ~model_specs:(match_model_specs ())
-      ~max_tokens:20
-      ~prompt ()
+    Lodge_cascade.call ~cascade_name:"capability_match" ~prompt
+      ~temperature:0.1 ~timeout_sec:15 ~max_tokens:20
+      ~accept:llm_score_is_valid ()
   with
-  | Ok resp -> (
-      match parse_llm_score resp.content with
+  | Ok r -> (
+      match parse_llm_score r.response with
       | Some f -> Ok f
-      | None -> Error (Printf.sprintf "unparseable LLM response: %s" resp.content))
+      | None -> Error (Printf.sprintf "unparseable LLM response: %s" r.response))
   | Error err -> Error err
 
 (* ---------- Keyword Scoring ---------- *)

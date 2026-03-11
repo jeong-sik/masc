@@ -28,12 +28,14 @@ function safeStorage(): Storage | null {
 
 export interface DashboardWorkflowContext {
   id: string
-  source_surface: 'mission'
+  source_surface: 'mission' | 'execution'
   source_label: string
   action_type: string | null
   target_type: string | null
   target_id: string | null
   focus_kind: string | null
+  operation_id: string | null
+  command_surface: string | null
   summary: string
   payload_preview: string | null
   suggested_payload: Record<string, unknown> | null
@@ -66,15 +68,17 @@ function parseStoredContext(raw: string | null): DashboardWorkflowContext | null
     const sourceLabel = asString(parsed.source_label)
     const summary = asString(parsed.summary)
     const createdAt = asString(parsed.created_at)
-    if (!id || sourceSurface !== 'mission' || !sourceLabel || !summary || !createdAt) return null
+    if (!id || (sourceSurface !== 'mission' && sourceSurface !== 'execution') || !sourceLabel || !summary || !createdAt) return null
     return {
       id,
-      source_surface: 'mission',
+      source_surface: sourceSurface,
       source_label: sourceLabel,
       action_type: asString(parsed.action_type),
       target_type: asString(parsed.target_type),
       target_id: asString(parsed.target_id),
       focus_kind: asString(parsed.focus_kind),
+      operation_id: asString(parsed.operation_id),
+      command_surface: asString(parsed.command_surface),
       summary,
       payload_preview: asString(parsed.payload_preview),
       suggested_payload: normalizePayload(parsed.suggested_payload),
@@ -148,21 +152,24 @@ export function summarizePayloadPreview(payload?: Record<string, unknown> | null
   return null
 }
 
-function missionContextId(
+function workflowContextId(
+  sourceSurface: DashboardWorkflowContext['source_surface'],
   sourceLabel: string,
   actionType: string | null,
   targetType: string | null,
   targetId: string | null,
   focusKind: string | null,
+  operationId: string | null,
   createdAt: string,
 ): string {
   return [
-    'mission',
+    sourceSurface,
     sourceLabel,
     actionType ?? 'action',
     targetType ?? 'target',
     targetId ?? 'room',
     focusKind ?? 'focus',
+    operationId ?? 'operation',
     createdAt,
   ].join(':')
 }
@@ -179,13 +186,15 @@ export function createMissionWorkflowContext(
   const focusKind = incident?.kind ?? action?.action_type ?? null
   const summary = action?.reason ?? incident?.summary ?? sourceLabel
   return {
-    id: missionContextId(sourceLabel, action?.action_type ?? null, targetType, targetId, focusKind, createdAt),
+    id: workflowContextId('mission', sourceLabel, action?.action_type ?? null, targetType, targetId, focusKind, null, createdAt),
     source_surface: 'mission',
     source_label: sourceLabel,
     action_type: action?.action_type ?? null,
     target_type: targetType,
     target_id: targetId,
     focus_kind: focusKind,
+    operation_id: null,
+    command_surface: null,
     summary,
     payload_preview: summarizePayloadPreview(payload),
     suggested_payload: payload,
@@ -195,43 +204,35 @@ export function createMissionWorkflowContext(
   }
 }
 
-function matchesRouteParams(
-  context: DashboardWorkflowContext,
-  params: Record<string, string>,
-): boolean {
-  return (
-    params.source === 'mission'
-    && (params.action_type ?? null) === (context.action_type ?? null)
-    && (params.target_type ?? null) === (context.target_type ?? null)
-    && (params.target_id ?? null) === (context.target_id ?? null)
-    && (params.focus_kind ?? null) === (context.focus_kind ?? null)
-  )
-}
-
-export function workflowContextForRoute(routeState: Pick<RouteState, 'params'>): DashboardWorkflowContext | null {
-  const { params } = routeState
-  if (params.source !== 'mission') return null
-  const stored = dashboardWorkflowContext.value
-  if (stored && contextIsFresh(stored) && matchesRouteParams(stored, params)) return stored
+export function createExecutionWorkflowContext({
+  targetType,
+  targetId,
+  focusKind,
+  sourceLabel = 'Execution 진단',
+  summary,
+  operationId = null,
+  commandSurface = null,
+}: {
+  targetType: string
+  targetId: string
+  focusKind: string
+  sourceLabel?: string
+  summary: string
+  operationId?: string | null
+  commandSurface?: string | null
+}): DashboardWorkflowContext {
   const createdAt = new Date().toISOString()
   return {
-    id: missionContextId(
-      '상황판 이어보기',
-      params.action_type ?? null,
-      params.target_type ?? null,
-      params.target_id ?? null,
-      params.focus_kind ?? null,
-      createdAt,
-    ),
-    source_surface: 'mission',
-    source_label: '상황판 이어보기',
-    action_type: params.action_type ?? null,
-    target_type: params.target_type ?? null,
-    target_id: params.target_id ?? null,
-    focus_kind: params.focus_kind ?? params.action_type ?? null,
-    summary: params.focus_kind
-      ? `${params.focus_kind} 기준으로 열린 컨텍스트입니다.`
-      : '상황판에서 이어진 컨텍스트입니다.',
+    id: workflowContextId('execution', sourceLabel, null, targetType, targetId, focusKind, operationId, createdAt),
+    source_surface: 'execution',
+    source_label: sourceLabel,
+    action_type: null,
+    target_type: targetType,
+    target_id: targetId,
+    focus_kind: focusKind,
+    operation_id: operationId,
+    command_surface: commandSurface,
+    summary,
     payload_preview: null,
     suggested_payload: null,
     preview: null,
@@ -240,17 +241,75 @@ export function workflowContextForRoute(routeState: Pick<RouteState, 'params'>):
   }
 }
 
-export function missionInterveneParams(context: DashboardWorkflowContext): Record<string, string> {
+function matchesRouteParams(
+  context: DashboardWorkflowContext,
+  params: Record<string, string>,
+): boolean {
+  return (
+    (params.source === 'mission' || params.source === 'execution')
+    && (params.action_type ?? null) === (context.action_type ?? null)
+    && (params.target_type ?? null) === (context.target_type ?? null)
+    && (params.target_id ?? null) === (context.target_id ?? null)
+    && (params.focus_kind ?? null) === (context.focus_kind ?? null)
+    && (params.operation_id ?? null) === (context.operation_id ?? null)
+  )
+}
+
+export function workflowContextForRoute(routeState: Pick<RouteState, 'params'>): DashboardWorkflowContext | null {
+  const { params } = routeState
+  if (params.source !== 'mission' && params.source !== 'execution') return null
+  const stored = dashboardWorkflowContext.value
+  if (stored && contextIsFresh(stored) && matchesRouteParams(stored, params)) return stored
+  const createdAt = new Date().toISOString()
+  const sourceSurface = params.source === 'execution' ? 'execution' : 'mission'
   return {
-    source: 'mission',
+    id: workflowContextId(
+      sourceSurface,
+      sourceSurface === 'execution' ? 'Execution 이어보기' : '상황판 이어보기',
+      params.action_type ?? null,
+      params.target_type ?? null,
+      params.target_id ?? null,
+      params.focus_kind ?? null,
+      params.operation_id ?? null,
+      createdAt,
+    ),
+    source_surface: sourceSurface,
+    source_label: sourceSurface === 'execution' ? 'Execution 이어보기' : '상황판 이어보기',
+    action_type: params.action_type ?? null,
+    target_type: params.target_type ?? null,
+    target_id: params.target_id ?? null,
+    focus_kind: params.focus_kind ?? params.action_type ?? null,
+    operation_id: params.operation_id ?? null,
+    command_surface: params.surface ?? null,
+    summary:
+      sourceSurface === 'execution'
+        ? (params.focus_kind
+            ? `${params.focus_kind} 기준으로 열린 execution 컨텍스트입니다.`
+            : 'Execution에서 이어진 컨텍스트입니다.')
+        : (params.focus_kind
+            ? `${params.focus_kind} 기준으로 열린 컨텍스트입니다.`
+            : '상황판에서 이어진 컨텍스트입니다.'),
+    payload_preview: null,
+    suggested_payload: null,
+    preview: null,
+    evidence: null,
+    created_at: createdAt,
+  }
+}
+
+export function workflowInterveneParams(context: DashboardWorkflowContext): Record<string, string> {
+  return {
+    source: context.source_surface,
     ...(context.action_type ? { action_type: context.action_type } : {}),
     ...(context.target_type ? { target_type: context.target_type } : {}),
     ...(context.target_id ? { target_id: context.target_id } : {}),
     ...(context.focus_kind ? { focus_kind: context.focus_kind } : {}),
+    ...(context.operation_id ? { operation_id: context.operation_id } : {}),
   }
 }
 
 export function commandSurfaceForContext(context: DashboardWorkflowContext): string {
+  if (context.command_surface) return context.command_surface
   const focus = [context.focus_kind, context.summary, context.action_type]
     .filter((value): value is string => typeof value === 'string' && value.trim() !== '')
     .join(' ')
@@ -272,18 +331,28 @@ export function commandSurfaceForContext(context: DashboardWorkflowContext): str
   ) {
     return 'swarm'
   }
+  if (context.focus_kind === 'operation' || context.target_type === 'operation') return 'operations'
   return context.target_type === 'room' ? 'summary' : 'swarm'
 }
 
-export function missionCommandParams(context: DashboardWorkflowContext): Record<string, string> {
+export function workflowCommandParams(context: DashboardWorkflowContext): Record<string, string> {
   return {
-    source: 'mission',
+    source: context.source_surface,
     surface: commandSurfaceForContext(context),
     ...(context.action_type ? { action_type: context.action_type } : {}),
     ...(context.target_type ? { target_type: context.target_type } : {}),
     ...(context.target_id ? { target_id: context.target_id } : {}),
     ...(context.focus_kind ? { focus_kind: context.focus_kind } : {}),
+    ...(context.operation_id ? { operation_id: context.operation_id } : {}),
   }
+}
+
+export function missionInterveneParams(context: DashboardWorkflowContext): Record<string, string> {
+  return workflowInterveneParams(context)
+}
+
+export function missionCommandParams(context: DashboardWorkflowContext): Record<string, string> {
+  return workflowCommandParams(context)
 }
 
 export function workflowTargetLabel(context?: DashboardWorkflowContext | null): string {

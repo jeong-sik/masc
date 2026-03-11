@@ -229,20 +229,21 @@ export function isCommandSurface(value: string | undefined): value is CommandPla
 
 // ── Route helpers (signal-dependent) ──────────
 
-function inheritedMissionRouteParams(): Record<string, string> {
+function inheritedWorkflowRouteParams(): Record<string, string> {
   const params = route.value.params
-  if (params.source !== 'mission') return {}
+  if (params.source !== 'mission' && params.source !== 'execution') return {}
   return {
-    source: 'mission',
+    source: params.source,
     ...(params.action_type ? { action_type: params.action_type } : {}),
     ...(params.target_type ? { target_type: params.target_type } : {}),
     ...(params.target_id ? { target_id: params.target_id } : {}),
     ...(params.focus_kind ? { focus_kind: params.focus_kind } : {}),
+    ...(params.operation_id ? { operation_id: params.operation_id } : {}),
   }
 }
 
 export function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
-  const inherited = inheritedMissionRouteParams()
+  const inherited = inheritedWorkflowRouteParams()
   if (surface === 'operations') return inherited
   if (surface === 'chains') {
     const operationId = commandPlaneChainFocusOperationId.value

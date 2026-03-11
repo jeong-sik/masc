@@ -40,6 +40,7 @@
    context_router
    dashboard
    dashboard_semantics
+   dashboard_execution
    dashboard_mission
    dashboard_proof
    dashboard_mission_briefing

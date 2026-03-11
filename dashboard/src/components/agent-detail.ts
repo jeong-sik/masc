@@ -166,6 +166,7 @@ export function AgentDetailOverlay() {
   return html`
     <div
       class="agent-detail-overlay"
+      data-testid="agent-detail-overlay"
       onClick=${(e: Event) => {
         if ((e.target as HTMLElement).classList.contains('agent-detail-overlay')) closeAgentDetail()
       }}

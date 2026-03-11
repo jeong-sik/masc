@@ -652,10 +652,145 @@ export interface DashboardShellResponse {
   }
 }
 
+export type DashboardExecutionTone = 'ok' | 'warn' | 'bad'
+export type DashboardExecutionWorkerState = 'working' | 'watching' | 'quiet' | 'offline'
+export type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
+export type DashboardExecutionQueueKind = 'session' | 'operation'
+
+export interface DashboardExecutionSummary {
+  active_sessions?: number
+  blocked_sessions?: number
+  active_operations?: number
+  blocked_operations?: number
+  runtime_pressure?: number
+  worker_alerts?: number
+  continuity_alerts?: number
+  priority_items?: number
+  todo_tasks?: number
+  claimed_tasks?: number
+  running_tasks?: number
+  done_tasks?: number
+  cancelled_tasks?: number
+  keepers?: number
+}
+
+export interface DashboardExecutionHandoff {
+  surface: 'intervene' | 'command'
+  label: string
+  target_type: string
+  target_id: string
+  focus_kind: string
+  operation_id?: string | null
+  command_surface?: string | null
+}
+
+export interface DashboardExecutionQueueItem {
+  id: string
+  kind: DashboardExecutionQueueKind
+  severity: DashboardExecutionTone
+  status?: string
+  summary: string
+  target_type: string
+  target_id: string
+  linked_session_id?: string | null
+  linked_operation_id?: string | null
+  last_seen_at?: string | null
+  top_handoff?: DashboardExecutionHandoff | null
+  intervene_handoff?: DashboardExecutionHandoff | null
+  command_handoff?: DashboardExecutionHandoff | null
+}
+
+export interface DashboardExecutionSessionBrief {
+  session_id: string
+  goal: string
+  room?: string | null
+  status?: string
+  health?: string
+  member_names: string[]
+  linked_operation_id?: string | null
+  linked_detachment_id?: string | null
+  runtime_blocker?: string | null
+  worker_gap_summary?: string | null
+  last_activity_at?: string | null
+  last_activity_summary?: string | null
+  communication_summary?: string | null
+  active_count?: number
+  required_count?: number
+  top_handoff?: DashboardExecutionHandoff | null
+  intervene_handoff?: DashboardExecutionHandoff | null
+  command_handoff?: DashboardExecutionHandoff | null
+}
+
+export interface DashboardExecutionOperationBrief {
+  operation_id: string
+  objective: string
+  status?: string
+  stage?: string | null
+  assigned_unit_id?: string | null
+  assigned_unit_label?: string | null
+  linked_session_id?: string | null
+  linked_detachment_id?: string | null
+  blocker_summary?: string | null
+  search_status?: string | null
+  next_tool?: string | null
+  updated_at?: string | null
+  top_handoff?: DashboardExecutionHandoff | null
+  command_handoff?: DashboardExecutionHandoff | null
+}
+
+export interface DashboardExecutionWorkerSupportBrief {
+  name: string
+  agent_name?: string
+  status?: Agent['status'] | string
+  tone: DashboardExecutionTone
+  state: DashboardExecutionWorkerState
+  note: string
+  focus: string
+  last_signal_at?: string | null
+  active_task_count?: number
+  related_session_id?: string | null
+  related_operation_id?: string | null
+  emoji?: string
+  korean_name?: string | null
+  model?: string | null
+  recent_output_preview?: string | null
+  recent_event?: string | null
+}
+
+export interface DashboardExecutionContinuityBrief {
+  name: string
+  agent_name?: string | null
+  status?: string
+  tone: DashboardExecutionTone
+  state: DashboardExecutionContinuityState
+  note: string
+  focus: string
+  last_signal_at?: string | null
+  last_autonomous_action_at?: string | null
+  generation?: number
+  turn_count?: number
+  context_ratio?: number | null
+  continuity?: string | null
+  lifecycle?: string | null
+  related_session_id?: string | null
+  model?: string | null
+  emoji?: string
+  korean_name?: string | null
+  skill_reason?: string | null
+}
+
 export interface DashboardExecutionResponse {
   generated_at?: string
   status?: ServerStatus
-  summary?: Record<string, unknown>
+  summary?: DashboardExecutionSummary
+  execution_queue?: unknown[]
+  session_briefs?: unknown[]
+  operation_briefs?: unknown[]
+  worker_support_briefs?: unknown[]
+  priority_queue?: unknown[]
+  worker_briefs?: unknown[]
+  continuity_briefs?: unknown[]
+  offline_worker_briefs?: unknown[]
   agents?: unknown[]
   tasks?: unknown[]
   messages?: unknown[]

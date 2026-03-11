@@ -16,10 +16,10 @@ let pass name = Printf.printf "  PASS %s\n%!" name
 let fail name msg = Printf.printf "  FAIL %s: %s\n%!" name msg; exit 1
 
 let dummy_model : Llm_client.model_spec = {
-  provider = Ollama;
+  provider = Llm_client.Llama;
   model_id = "test-fast-model";
   max_context = 4096;
-  api_url = "http://localhost:11434";
+  api_url = "http://localhost:8085";
   api_key_env = None;
   cost_per_1k_input = 0.0;
   cost_per_1k_output = 0.0;

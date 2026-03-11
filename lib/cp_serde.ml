@@ -1,22 +1,12 @@
 include Cp_paths
 
-module StringSet = Set.Make (String)
-
 let nonempty_string = function
   | Some raw ->
       let value = String.trim raw in
       if value = "" then None else Some value
   | None -> None
 
-let dedup_strings xs =
-  let _, acc =
-    List.fold_left
-      (fun (seen, acc) x ->
-        if StringSet.mem x seen then (seen, acc)
-        else (StringSet.add x seen, x :: acc))
-      (StringSet.empty, []) xs
-  in
-  List.rev acc
+let dedup_strings = Dashboard_utils.dedup_strings
 
 let filter_nonempty_strings xs =
   xs

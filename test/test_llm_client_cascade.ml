@@ -142,14 +142,26 @@ let test_available_model_specs_filters_invalid_and_missing_keys () =
   with_env "GEMINI_API_KEY" "" (fun () ->
       let specs =
         Llm_client.available_model_specs_of_strings
-          [ "invalid"; "gemini:gemini-2.5-pro"; "ollama:glm-4.7-flash" ]
+          [ "invalid"; "gemini:gemini-2.5-pro"; "llama:qwen3.5-35b-a3b-ud-q8-xl" ]
       in
-      check int "only ollama survives" 1 (List.length specs);
+      check int "only llama survives" 1 (List.length specs);
       match specs with
       | [ only ] ->
-          check bool "provider" true (only.provider = Llm_client.Ollama);
-          check string "model id" "glm-4.7-flash" only.model_id
+          check bool "provider" true (only.provider = Llm_client.Llama);
+          check string "model id" "qwen3.5-35b-a3b-ud-q8-xl" only.model_id
       | _ -> fail "expected one filtered model")
+
+let test_model_spec_of_string_rejects_bare_ollama_provider () =
+  match Llm_client.model_spec_of_string "ollama:glm-4.7-flash" with
+  | Ok _ -> fail "expected ollama: prefix to be rejected"
+  | Error _ -> ()
+
+let test_model_spec_of_string_parses_llama_provider () =
+  match Llm_client.model_spec_of_string "llama:glm-4.7-flash" with
+  | Ok spec ->
+      check bool "provider" true (spec.provider = Llm_client.Llama);
+      check string "model id" "glm-4.7-flash" spec.model_id
+  | Error e -> fail ("expected llama: provider to parse: " ^ e)
 
 let test_run_prompt_cascade_uses_same_request_shape () =
   with_temp_cwd (fun () ->
@@ -198,6 +210,10 @@ let () =
         [
           test_case "filters invalid and missing keys" `Quick
             test_available_model_specs_filters_invalid_and_missing_keys;
+          test_case "rejects bare ollama provider" `Quick
+            test_model_spec_of_string_rejects_bare_ollama_provider;
+          test_case "parses llama provider" `Quick
+            test_model_spec_of_string_parses_llama_provider;
           test_case "run_prompt_cascade request shape" `Quick
             test_run_prompt_cascade_uses_same_request_shape;
         ] );

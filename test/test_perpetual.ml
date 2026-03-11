@@ -48,8 +48,6 @@ let group name f =
 let test_llm_client () = group "LLM Client" (fun () ->
 
   (* 1. Provider string roundtrip *)
-  assert_equal "provider_string:ollama"
-    "ollama" (Llm_client.string_of_provider Ollama);
   assert_equal "provider_string:llama"
     "llama" (Llm_client.string_of_provider Llama);
   assert_equal "provider_string:claude"
@@ -60,12 +58,12 @@ let test_llm_client () = group "LLM Client" (fun () ->
     "gemini" (Llm_client.string_of_provider Gemini);
 
   (* 2. Model spec parsing *)
-  (match Llm_client.model_spec_of_string "ollama:glm-4.7-flash" with
+  (match Llm_client.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl" with
    | Ok m ->
-     assert_equal "parse_model:ollama_id" "glm-4.7-flash" m.model_id;
-     assert_true "parse_model:ollama_provider"
-       (m.provider = Llm_client.Ollama)
-   | Error _ -> assert_true "parse_model:ollama" false);
+     assert_equal "parse_model:llama_local_id" "qwen3.5-35b-a3b-ud-q8-xl" m.model_id;
+     assert_true "parse_model:llama_local_provider"
+       (m.provider = Llm_client.Llama)
+   | Error _ -> assert_true "parse_model:llama_local" false);
 
   (match Llm_client.model_spec_of_string "claude:opus" with
    | Ok m ->
@@ -81,12 +79,12 @@ let test_llm_client () = group "LLM Client" (fun () ->
        (m.provider = Llm_client.Gemini)
    | Error _ -> assert_true "parse_model:gemini" false);
 
-  (match Llm_client.model_spec_of_string "ollama:glm-4.7-flash:latest" with
+  (match Llm_client.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl:latest" with
    | Ok m ->
-     assert_equal "parse_model:ollama_tagged_id" "glm-4.7-flash:latest" m.model_id;
-     assert_true "parse_model:ollama_tagged_provider"
-       (m.provider = Llm_client.Ollama)
-   | Error _ -> assert_true "parse_model:ollama_tagged" false);
+     assert_equal "parse_model:llama_tagged_id" "qwen3.5-35b-a3b-ud-q8-xl:latest" m.model_id;
+     assert_true "parse_model:llama_tagged_provider"
+       (m.provider = Llm_client.Llama)
+   | Error _ -> assert_true "parse_model:llama_tagged" false);
 
   (match Llm_client.model_spec_of_string "llama:qwen3.5-coder" with
    | Ok m ->
@@ -137,7 +135,7 @@ let test_llm_client () = group "LLM Client" (fun () ->
    | Error _ -> assert_true "parse_model:invalid" true
    | Ok _ -> assert_true "parse_model:invalid_should_fail" false);
 
-  (match Llm_client.model_spec_of_string "ollama:" with
+  (match Llm_client.model_spec_of_string "llama:" with
    | Error _ -> assert_true "parse_model:empty_model_rejected" true
    | Ok _ -> assert_true "parse_model:empty_model_should_fail" false);
 
@@ -183,8 +181,8 @@ let test_llm_client () = group "LLM Client" (fun () ->
   assert_true "token_estimate:reasonable" (tokens < 100);
 
   (* 6. Built-in model specs *)
-  assert_true "builtin:ollama_glm_context"
-    (Llm_client.ollama_glm.max_context = 202000);
+  assert_true "builtin:llama_default_context"
+    (Llm_client.llama_default.max_context = 128000);
   assert_true "builtin:claude_opus_cost"
     (Llm_client.claude_opus.cost_per_1k_input > 0.0);
   assert_true "builtin:gemini_pro_provider"
@@ -193,14 +191,16 @@ let test_llm_client () = group "LLM Client" (fun () ->
     (Llm_client.openai_default.provider = Llm_client.OpenAI);
   assert_true "builtin:llama_default_provider"
     (Llm_client.llama_default.provider = Llm_client.Llama);
-  (* Set env vars so default_local_model_spec returns Ollama regardless of CI env *)
+  (* Set env vars so default_local_model_spec resolves llama regardless of CI env *)
   let prev_provider = Sys.getenv_opt "MASC_DEFAULT_PROVIDER" in
   let prev_model = Sys.getenv_opt "MASC_DEFAULT_MODEL" in
-  Unix.putenv "MASC_DEFAULT_PROVIDER" "ollama";
+  let prev_llama_model = Sys.getenv_opt "LLAMA_DEFAULT_MODEL" in
+  Unix.putenv "MASC_DEFAULT_PROVIDER" "llama";
   Unix.putenv "MASC_DEFAULT_MODEL" "default-model";
+  Unix.putenv "LLAMA_DEFAULT_MODEL" "default-model";
   let default_local = Llm_client.default_local_model_spec () in
   assert_true "builtin:default_local_provider"
-    (default_local.provider = Llm_client.Ollama);
+    (default_local.provider = Llm_client.Llama);
   assert_equal "builtin:default_local_model_id"
     "default-model" default_local.model_id;
   (* Restore env vars *)
@@ -210,6 +210,9 @@ let test_llm_client () = group "LLM Client" (fun () ->
   (match prev_model with
    | Some v -> Unix.putenv "MASC_DEFAULT_MODEL" v
    | None -> (try Unix.putenv "MASC_DEFAULT_MODEL" "" with _ -> ()));
+  (match prev_llama_model with
+   | Some v -> Unix.putenv "LLAMA_DEFAULT_MODEL" v
+   | None -> (try Unix.putenv "LLAMA_DEFAULT_MODEL" "" with _ -> ()));
 )
 
 (* ================================================================ *)
@@ -441,17 +444,17 @@ let test_succession () = group "Succession" (fun () ->
    | Error _ -> assert_true "dna_invalid:error" true
    | Ok _ -> assert_true "dna_invalid:should_fail" false);
 
-  (* 5. Cross-model normalization: Ollama *)
+  (* 5. Cross-model normalization: Llama *)
   let msgs = [
     Llm_client.user_msg "hello";
     Llm_client.tool_msg ~name:"grep" ~call_id:"c1" "results";
     Llm_client.assistant_msg "done";
   ] in
-  let normalized = Succession.normalize_for_model msgs Llm_client.ollama_glm in
-  (* Tool messages should be converted to user messages for Ollama *)
+  let normalized = Succession.normalize_for_model msgs Llm_client.llama_default in
+  (* Tool messages should be converted to user messages for local llama runtimes *)
   let tool_msgs = List.filter (fun (m : Llm_client.message) ->
     m.role = Llm_client.Tool) normalized in
-  assert_equal "normalize:ollama_no_tool" 0 (List.length tool_msgs);
+  assert_equal "normalize:llama_no_tool" 0 (List.length tool_msgs);
 
   (* 6. Cross-model normalization: Claude merges consecutive *)
   let msgs2 = [
@@ -465,7 +468,7 @@ let test_succession () = group "Succession" (fun () ->
 
   (* 7. Hydrate from DNA *)
   let spec = Succession.{
-    model = Llm_client.ollama_glm;
+    model = Llm_client.llama_default;
     inherit_tools = true;
     context_budget = 0.3;
   } in
@@ -485,7 +488,7 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
 
   (* 1. Default config *)
   let config = Perpetual_loop.default_config
-    ~goal:"test" ~models:[Llm_client.ollama_glm] () in
+    ~goal:"test" ~models:[Llm_client.llama_default] () in
   assert_equal "config:goal" "test" config.initial_goal;
   assert_float_near "config:compact" 0.5 config.compact_threshold 0.01;
   assert_float_near "config:handoff" 0.85 config.handoff_threshold 0.01;
@@ -515,7 +518,7 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
 
   (* 5. Run turn on stopped state returns false *)
   let fresh_config = Perpetual_loop.default_config
-    ~goal:"test" ~models:[Llm_client.ollama_glm] () in
+    ~goal:"test" ~models:[Llm_client.llama_default] () in
   let fresh_state = Perpetual_loop.create_state fresh_config in
   fresh_state.running <- false;
   let should_continue = Perpetual_loop.run_turn ~config:fresh_config ~state:fresh_state in
@@ -552,7 +555,11 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
   (* 10. Multiple model cascade *)
   let config3 = Perpetual_loop.default_config
     ~goal:"multi"
-    ~models:[Llm_client.ollama_glm; Llm_client.ollama_lfm]
+    ~models:
+      [
+        Llm_client.llama_default;
+        { Llm_client.llama_default with model_id = "qwen3.5-9b" };
+      ]
     () in
   assert_equal "cascade:model_count" 2
     (List.length config3.model_cascade);
@@ -644,7 +651,7 @@ let test_integration () = group "Integration" (fun () ->
   assert_equal "integration:dna_goal" "integration test" dna.goal;
 
   let spec = Succession.{
-    model = Llm_client.ollama_glm;
+    model = Llm_client.llama_default;
     inherit_tools = true;
     context_budget = 0.5;
   } in

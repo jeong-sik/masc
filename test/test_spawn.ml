@@ -25,8 +25,8 @@ let test_get_config_known_agents () =
   let codex_alias = Spawn.get_config "codex-cli" in
   Alcotest.(check bool) "codex-cli alias exists" true (Option.is_some codex_alias);
 
-  let ollama = Spawn.get_config "ollama" in
-  Alcotest.(check bool) "ollama config exists" true (Option.is_some ollama);
+  let llama = Spawn.get_config "llama" in
+  Alcotest.(check bool) "llama config exists" true (Option.is_some llama);
   ()
 
 let test_get_config_unknown_agent () =
@@ -34,6 +34,10 @@ let test_get_config_unknown_agent () =
   let unknown = Spawn.get_config "unknown-agent" in
   Alcotest.(check bool) "unknown config is None" true (Option.is_none unknown);
   ()
+
+let test_get_config_bare_ollama_removed () =
+  let ollama = Spawn.get_config "ollama" in
+  Alcotest.(check bool) "ollama config removed" true (Option.is_none ollama)
 
 let contains s1 s2 =
   try
@@ -120,13 +124,23 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools);
   ()
 
+let test_spawn_bare_ollama_rejected () =
+  let result = Spawn.spawn ~agent_name:"ollama" ~prompt:"test" () in
+  Alcotest.(check bool) "spawn rejected" false result.Spawn.success;
+  Alcotest.(check int) "exit code" 2 result.Spawn.exit_code;
+  Alcotest.(check bool) "migration message" true
+    (contains result.Spawn.output "llama:<model>")
+
 let tests = [
   Alcotest.test_case "get_config known agents" `Quick test_get_config_known_agents;
   Alcotest.test_case "get_config unknown agent" `Quick test_get_config_unknown_agent;
+  Alcotest.test_case "bare ollama config removed" `Quick
+    test_get_config_bare_ollama_removed;
   Alcotest.test_case "result_to_string success" `Quick test_result_to_string_success;
   Alcotest.test_case "result_to_string failure" `Quick test_result_to_string_failure;
   Alcotest.test_case "result_to_json" `Quick test_result_to_json;
   Alcotest.test_case "masc_mcp_tools populated" `Quick test_masc_mcp_tools;
+  Alcotest.test_case "bare ollama rejected" `Quick test_spawn_bare_ollama_rejected;
 ]
 
 let () =

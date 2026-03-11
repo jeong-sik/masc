@@ -43,7 +43,7 @@ let test_calculate_fitness () =
     task_completion_rate = 0.8;    (* 80% *)
     error_rate = 0.2;              (* 20% *)
     handoff_success_rate = 0.9;    (* 90% *)
-    unique_collaborators = ["gemini"; "codex"; "ollama"];  (* 3 collaborators *)
+    unique_collaborators = ["gemini"; "codex"; "llama"];  (* 3 collaborators *)
   } in
   let result = Fitness.calculate_fitness metrics in
 

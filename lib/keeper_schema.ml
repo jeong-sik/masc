@@ -2,7 +2,7 @@
 
 open Types
 
-let schemas : tool_schema list = [
+let resident_schemas : tool_schema list = [
   {
     name = "masc_persona_list";
     description = "List available personas that have structured profile.json data. Use this before creating a keeper from a persona.";
@@ -19,7 +19,7 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_keeper_create_from_persona";
-    description = "Create or dry-run a keeper configuration from a persona profile.json using deterministic field merging only. Explicit arguments override persona defaults.";
+    description = "Create or dry-run a resident keeper configuration from a persona profile.json. Resident keepers are desired always-on keepers.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -84,8 +84,7 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_keeper_up";
-    description = "Create or update a persistent keeper agent (event-driven). \
-Stores context on disk and keeps presence alive. Auto-handoff is enabled by default.";
+    description = "Create or update a resident keeper. Resident keepers are desired always-on keepers and are reconciled back into live presence.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -238,7 +237,7 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
 
   {
     name = "masc_keeper_status";
-    description = "Get keeper status (meta + current context stats + monitoring tails).";
+    description = "Get resident keeper status (desired/live/reconcile state plus current context and monitoring tails).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -293,8 +292,7 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
 
   {
     name = "masc_keeper_msg";
-    description = "Send a message to a keeper and get a reply. \
-Persists context + checkpoints. Auto-handoff is applied when needed.";
+    description = "Send a message to a resident keeper and get a reply. Resident keepers keep durable context and should already be live.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -358,10 +356,6 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
         ("timeout_sec", `Assoc [
           ("type", `String "number");
           ("description", `String "Optional: overall cascade timeout (sec) for this keeper message call");
-        ]);
-        ("ollama_timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Optional: override Ollama timeout (sec) for this keeper message call");
         ]);
         ("no_skill_route", `Assoc [
           ("type", `String "boolean");
@@ -571,7 +565,7 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
 
   {
     name = "masc_keeper_down";
-    description = "Stop keeper presence keepalive and optionally remove keeper files.";
+    description = "Stop a resident keeper and remove it from resident desired state. Optionally remove underlying files.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -594,7 +588,7 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
 
   {
     name = "masc_keeper_list";
-    description = "List keepers from .masc/perpetual-keepers.";
+    description = "List resident keepers from the resident desired-state registry.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -697,3 +691,33 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
     ];
   };
 ]
+
+let persistent_alias_name = function
+  | "masc_keeper_create_from_persona" -> Some "masc_persistent_agent_create_from_persona"
+  | name when String.starts_with ~prefix:"masc_keeper_" name ->
+      Some
+        ("masc_persistent_agent_"
+        ^ String.sub name (String.length "masc_keeper_")
+            (String.length name - String.length "masc_keeper_"))
+  | _ -> None
+
+let persistent_alias_description schema =
+  "Persistent agent alias for "
+  ^ schema.name
+  ^ ". Uses the current event-driven stateful assistant behavior."
+
+let persistent_agent_alias_schemas =
+  resident_schemas
+  |> List.filter_map (fun (schema : tool_schema) ->
+         match persistent_alias_name schema.name with
+         | None -> None
+         | Some alias_name ->
+             Some
+               {
+                 schema with
+                 name = alias_name;
+                 description = persistent_alias_description schema;
+               })
+
+let schemas : tool_schema list =
+  resident_schemas @ persistent_agent_alias_schemas

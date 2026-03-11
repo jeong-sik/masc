@@ -20,7 +20,7 @@ let mode_to_string = function
   | Broadcast s -> Printf.sprintf "Broadcast(%s)" s
   | None -> "None"
 
-(** Extract agent type from mention (e.g., "ollama-gentle-gecko" → "ollama") *)
+(** Extract agent type from mention (e.g., "llama-gentle-gecko" → "llama") *)
 let agent_type_of_mention mention =
   let parts = String.split_on_char '-' mention in
   match parts with
@@ -98,7 +98,7 @@ let resolve_targets mode ~available_agents =
       |> List.filter (fun name -> agent_type_of_mention name = agent_type)
 
 (** Agent types that can be auto-spawned by Auto-Responder *)
-let spawnable_agents = ["gemini"; "codex"; "claude"; "ollama"; "glm"]
+let spawnable_agents = ["gemini"; "codex"; "claude"; "llama"; "glm"]
 
 (** Check if an agent type is spawnable *)
 let is_spawnable mention =

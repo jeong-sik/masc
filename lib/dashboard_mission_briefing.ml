@@ -99,9 +99,7 @@ let option_string_json = function
   | _ -> `Null
 
 let trim_to_option = function
-  | Some value ->
-      let trimmed = String.trim value in
-      if trimmed = "" then None else Some trimmed
+  | Some text -> Dashboard_utils.trim_to_option text
   | None -> None
 
 let mission_briefing_criteria =
@@ -117,10 +115,7 @@ let mission_briefing_criteria =
 let criteria_json () =
   `List (List.map (fun item -> `String item) mission_briefing_criteria)
 
-let parse_iso_opt value =
-  match value with
-  | Some text when String.trim text <> "" -> Some (Types.parse_iso8601 text)
-  | _ -> None
+let parse_iso_opt = Dashboard_utils.parse_iso_opt
 
 let status_is_live value =
   List.mem

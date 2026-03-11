@@ -253,6 +253,10 @@ export interface KeeperStatusDetail {
 
 export interface Keeper {
   name: string
+  runtime_class?: 'resident_keeper' | 'persistent_agent'
+  desired?: boolean
+  resident_registered?: boolean
+  reconcile_status?: string | null
   emoji?: string
   koreanName?: string
   agent_name?: string
@@ -779,16 +783,7 @@ export interface LodgeRuntimeStatus {
   active_self_heartbeats?: string[]
 }
 
-// --- Dashboard batch response ---
-
-export interface DashboardData {
-  agents: { agents: Agent[] }
-  tasks: { tasks: Task[] }
-  messages: { messages: Message[] }
-  status: ServerStatus
-  keepers: Keeper[] | { keepers: Keeper[] }
-  perpetual: PerpetualStatus
-}
+// --- Dashboard projection responses ---
 
 export interface DashboardShellResponse {
   generated_at?: string
@@ -1278,6 +1273,9 @@ export interface OperatorSessionSnapshot {
 
 export interface OperatorKeeperSnapshot {
   name: string
+  runtime_class?: 'resident_keeper' | 'persistent_agent'
+  desired?: boolean
+  resident_registered?: boolean
   agent_name?: string
   status?: string
   autonomy_level?: string
@@ -1399,6 +1397,7 @@ export interface OperatorSnapshot {
   room: OperatorRoomSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
+  persistent_agents?: OperatorKeeperSnapshot[]
   command_plane?: CommandPlaneSnapshot
   swarm_status?: CommandPlaneSwarmStatus
   recent_messages: Message[]

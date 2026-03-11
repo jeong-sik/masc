@@ -529,24 +529,13 @@ let env_present name =
   | Some value -> String.trim value <> ""
   | None -> false
 
-let ollama_port_listening () =
-  try
-    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect
-      ~finally:(fun () -> (try Unix.close sock with Unix.Unix_error _ -> ()))
-      (fun () ->
-        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 11434));
-        true)
-  with Unix.Unix_error _ -> false
-
 let model_spec_is_local_runtime (model : Llm_client.model_spec) =
   match model.provider with
-  | Llm_client.Ollama | Llm_client.Llama -> true
+  | Llm_client.Llama -> true
   | _ -> false
 
 let model_spec_is_available (model : Llm_client.model_spec) =
   match model.provider with
-  | Llm_client.Ollama -> ollama_port_listening ()
   | Llm_client.Llama -> true
   | _ -> true
 
@@ -595,4 +584,3 @@ let ensure_api_keys (models : Llm_client.model_spec list) : (unit, string) resul
   match missing with
   | [] -> Ok ()
   | xs -> Error (Printf.sprintf "Missing API key env vars: %s" (String.concat ", " xs))
-

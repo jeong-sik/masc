@@ -229,7 +229,11 @@ let model_runner_of_string raw =
   | "claude" | "claude-cli" | "opus" | "opus-4" -> direct "claude:opus"
   | "sonnet" -> direct "claude:sonnet"
   | "haiku" | "haiku-4.5" -> direct "claude:haiku"
-  | "ollama" -> direct (Provider_adapter.explicit_ollama_model_label ())
+  | "ollama" -> Error (Provider_adapter.bare_ollama_migration_message ())
+  | "llama" -> (
+      match Provider_adapter.explicit_llama_model_label_result () with
+      | Ok label -> direct label
+      | Error msg -> Error msg)
   | "glm" | "glm-4.7" -> direct "glm:glm-4.7"
   | "stub" | "mock" -> Ok Stub
   | "codex" | "gpt-5.2" -> Ok (Spawn "codex")
@@ -237,7 +241,7 @@ let model_runner_of_string raw =
   | value -> (
       match Llm_client.model_spec_of_string model with
       | Ok parsed -> Ok (Direct parsed)
-      | Error _ when starts_with ~prefix:"ollama:" value -> direct model
+      | Error _ when starts_with ~prefix:"llama:" value -> direct model
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model
       | Error _ when starts_with ~prefix:"claude:" value -> direct model
       | Error _ when starts_with ~prefix:"glm:" value -> direct model
@@ -362,29 +366,31 @@ let call_named_tool_model (runtime : runtime) ~tool_name ~(args : Yojson.Safe.t)
     | `Int value -> max 1 value
     | _ -> 120
   in
-  let model =
+  let model_result =
     match tool_name with
     | "gemini" ->
-        assoc_get_string_opt args "model" |> Option.value ~default:"gemini:pro"
+        Ok (assoc_get_string_opt args "model" |> Option.value ~default:"gemini:pro")
     | "claude" | "claude-cli" ->
-        assoc_get_string_opt args "model" |> Option.value ~default:"claude:opus"
+        Ok (assoc_get_string_opt args "model" |> Option.value ~default:"claude:opus")
     | "codex" ->
-        assoc_get_string_opt args "model" |> Option.value ~default:"codex"
-    | "ollama" ->
+        Ok (assoc_get_string_opt args "model" |> Option.value ~default:"codex")
+    | "llama" ->
         (match assoc_get_string_opt args "model" with
-        | Some value when starts_with ~prefix:"ollama:" (String.lowercase_ascii value) ->
-            value
-        | Some value -> "ollama:" ^ value
-        | None -> Provider_adapter.explicit_ollama_model_label ())
+        | Some value when starts_with ~prefix:"llama:" (String.lowercase_ascii value) ->
+            Ok value
+        | Some value -> Ok ("llama:" ^ value)
+        | None -> Provider_adapter.explicit_llama_model_label_result ())
     | "glm" ->
         let default_model = "glm:glm-4.7" in
-        (match assoc_get_string_opt args "model" with
+        Ok (match assoc_get_string_opt args "model" with
         | Some value when starts_with ~prefix:"glm:" (String.lowercase_ascii value) -> value
         | Some value -> "glm:" ^ value
         | None -> default_model)
-    | _ -> tool_name
+    | _ -> Ok tool_name
   in
-  call_llm_text runtime ~model ?system ~prompt ~timeout_sec ()
+  match model_result with
+  | Ok model -> call_llm_text runtime ~model ?system ~prompt ~timeout_sec ()
+  | Error msg -> Error msg
 
 let exec_tool (runtime : runtime) ~name ~(args : Yojson.Safe.t) =
   match String.lowercase_ascii (trim name) with
@@ -394,7 +400,7 @@ let exec_tool (runtime : runtime) ~name ~(args : Yojson.Safe.t) =
       in
       Ok input
   | "identity" -> Ok (Yojson.Safe.to_string args)
-  | "gemini" | "claude" | "claude-cli" | "codex" | "ollama" | "glm" as model_tool ->
+  | "gemini" | "claude" | "claude-cli" | "codex" | "llama" | "glm" as model_tool ->
       call_named_tool_model runtime ~tool_name:model_tool ~args
   | raw when starts_with ~prefix:"masc." raw || starts_with ~prefix:"masc_" raw ->
       exec_masc_tool runtime ~name:raw ~args

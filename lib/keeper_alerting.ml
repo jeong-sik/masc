@@ -105,10 +105,7 @@ let run_alert_channel_with_retry
     in
     loop 1 None
 
-let dedup_strings (xs : string list) : string list =
-  List.fold_left
-    (fun acc x -> if List.mem x acc then acc else acc @ [ x ])
-    [] xs
+let dedup_strings = Dashboard_utils.dedup_strings
 
 let keeper_alert_signal
     ~(message : string)

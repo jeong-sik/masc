@@ -67,7 +67,6 @@ let worker_name_for_state (state : Mdal.loop_state) =
   sprintf "mdal-%s-%02d" safe_loop (state.current_iteration + 1)
 
 let model_provider_label = function
-  | Llm_client.Ollama -> "ollama"
   | Llm_client.Llama -> "llama"
   | Llm_client.Claude -> "claude"
   | Llm_client.OpenAI -> "openai"
@@ -85,14 +84,13 @@ let validate_model_spec (spec : Llm_client.model_spec) :
   | Llm_client.Claude
   | Llm_client.OpenAI
   | Llm_client.Gemini
-  | Llm_client.Ollama
   | Llm_client.Llama
   | Llm_client.Glm_cloud -> Ok spec
   | Llm_client.OpenRouter
   | Llm_client.Custom _ ->
       Error
         (sprintf
-           "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, ollama, llama, or glm."
+           "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
            (model_provider_label spec.provider))
 
 let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
@@ -116,7 +114,8 @@ let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
         | "openai" | "codex-api" ->
             Ok (Llm_client.openai_default, model_label Llm_client.openai_default)
         | "gemini" -> Ok (Llm_client.gemini_pro, model_label Llm_client.gemini_pro)
-        | "ollama" -> Ok (Llm_client.ollama_glm, model_label Llm_client.ollama_glm)
+        | "ollama" ->
+            Error (Provider_adapter.bare_ollama_migration_message ())
         | "glm" ->
             Ok (Llm_client.glm_cloud, model_label Llm_client.glm_cloud)
         | "llama" ->

@@ -224,8 +224,8 @@ let test_is_spawnable_codex () =
 let test_is_spawnable_claude () =
   check bool "claude is spawnable" true (Mention.is_spawnable "claude")
 
-let test_is_spawnable_ollama () =
-  check bool "ollama is spawnable" true (Mention.is_spawnable "ollama")
+let test_is_spawnable_llama () =
+  check bool "llama is spawnable" true (Mention.is_spawnable "llama")
 
 let test_is_spawnable_glm () =
   check bool "glm is spawnable" true (Mention.is_spawnable "glm")
@@ -247,7 +247,9 @@ let test_is_spawnable_empty () =
 let test_spawnable_agents_list () =
   check bool "list not empty" true (List.length Mention.spawnable_agents > 0);
   check bool "contains claude" true (List.mem "claude" Mention.spawnable_agents);
-  check bool "contains gemini" true (List.mem "gemini" Mention.spawnable_agents)
+  check bool "contains gemini" true (List.mem "gemini" Mention.spawnable_agents);
+  check bool "does not contain bare ollama" false
+    (List.mem "ollama" Mention.spawnable_agents)
 
 (* ============================================================
    Test Runners
@@ -308,7 +310,7 @@ let () =
       test_case "gemini" `Quick test_is_spawnable_gemini;
       test_case "codex" `Quick test_is_spawnable_codex;
       test_case "claude" `Quick test_is_spawnable_claude;
-      test_case "ollama" `Quick test_is_spawnable_ollama;
+      test_case "llama" `Quick test_is_spawnable_llama;
       test_case "glm" `Quick test_is_spawnable_glm;
       test_case "unknown" `Quick test_is_spawnable_unknown;
       test_case "nickname" `Quick test_is_spawnable_nickname;

@@ -50,8 +50,8 @@ type config = {
   check_interval_s: float;
   heartbeat_interval_s: float;
   reflection_interval_s: float;
-  ollama_url: string;
-  ollama_model: string;
+  local_url: string;
+  local_model: string;
   neo4j_enabled: bool;
 }
 
@@ -62,8 +62,8 @@ let default_config = {
   check_interval_s = 60.0;
   heartbeat_interval_s = 30.0;
   reflection_interval_s = 3600.0;  (* 1 hour *)
-  ollama_url = Env_config.Ollama.server_url;
-  ollama_model = Env_config.Ollama.default_model;
+  local_url = Env_config.Llama.server_url;
+  local_model = Env_config.Llama.default_model;
   neo4j_enabled = true;
 }
 
@@ -84,8 +84,8 @@ let load_config () =
     check_interval_s = get_env_float "MASC_LODGE_CHECK_INTERVAL" 60.0;
     heartbeat_interval_s = get_env_float "MASC_LODGE_HEARTBEAT_INTERVAL" 30.0;
     reflection_interval_s = get_env_float "MASC_LODGE_REFLECTION_INTERVAL" 3600.0;
-    ollama_url = Env_config.Ollama.server_url;
-    ollama_model = Env_config.Ollama.default_model;
+    local_url = Env_config.Llama.server_url;
+    local_model = Env_config.Llama.default_model;
     neo4j_enabled = get_env_bool "MASC_LODGE_NEO4J_ENABLED" true;
   }
 
@@ -261,12 +261,12 @@ RETURN r.content AS reflection
 let init ~config =
   if config.enabled then
     Printf.printf "[Lodge Daemon] Initializing with interval=%.0fs, model=%s\n%!"
-      config.check_interval_s config.ollama_model
+      config.check_interval_s config.local_model
 
 (** Patrol once for a specific agent - Phase 2 will add actual LLM call *)
 let patrol_once ~config ~agent_name =
   if config.enabled then begin
-    Printf.printf "[Lodge Daemon] Patrol: %s (model: %s)\n%!" agent_name config.ollama_model;
+    Printf.printf "[Lodge Daemon] Patrol: %s (model: %s)\n%!" agent_name config.local_model;
     mark_patrolled agent_name
   end
 

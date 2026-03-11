@@ -9,6 +9,7 @@ import type {
   DashboardMemoryResponse,
   DashboardMissionBriefingResponse,
   DashboardMissionResponse,
+  DashboardProofResponse,
   DashboardPlanningResponse,
   DashboardShellResponse,
   BoardPost,
@@ -321,6 +322,17 @@ export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
 export function fetchDashboardMissionBriefing(force = false): Promise<DashboardMissionBriefingResponse> {
   const query = force ? '?force=1' : ''
   return get(`/api/v1/dashboard/mission/briefing${query}`)
+}
+
+export function fetchDashboardProof(
+  sessionId?: string | null,
+  operationId?: string | null,
+): Promise<DashboardProofResponse> {
+  const params = new URLSearchParams()
+  if (sessionId) params.set('session_id', sessionId)
+  if (operationId) params.set('operation_id', operationId)
+  const query = params.toString()
+  return get(`/api/v1/dashboard/proof${query ? `?${query}` : ''}`)
 }
 
 export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {

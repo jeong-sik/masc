@@ -4370,6 +4370,21 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
       ]);
     ];
   };
+
+  {
+    name = "masc_tool_help";
+    description = "Return canonical help and metadata for a specific MASC tool.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("tool_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Exact MCP tool name to explain");
+        ]);
+      ]);
+      ("required", `List [`String "tool_name"]);
+    ];
+  };
 ]
 
 let all_schemas : tool_schema list = raw_schemas

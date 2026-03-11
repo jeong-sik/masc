@@ -218,6 +218,56 @@ let json () =
                   ~ecosystem_function:"Makes ecosystem steering explicit and auditable."
                   [];
               ];
+            surface ~id:"proof" ~label:"Proof"
+              ~purpose:"Shows collaboration evidence, actor contributions, and managed backing artifacts in one read-only surface."
+              ~problem_solved:"Stops swarm or session success claims from floating free of auditable evidence."
+              ~when_active:"Used when the operator wants to verify who did what, with which tools, toward which goal."
+              ~agent_role:"Agents can use it to justify claims with timeline and artifact evidence instead of narration alone."
+              ~ecosystem_function:"Creates a deterministic proof layer between mission narration and command truth."
+              [
+                panel ~id:"proof.summary" ~title:"3-Line Proof Summary"
+                  ~purpose:"Compresses the proof verdict into one human-readable headline."
+                  ~problem_solved:"Prevents operators from digging through raw timelines before knowing whether evidence is strong enough."
+                  ~when_active:"Top of Proof."
+                  ~agent_role:"Agents should start with this before elaborating on evidence."
+                  ~ecosystem_function:"Makes collaboration proof fast to scan."
+                  [];
+                panel ~id:"proof.timeline" ~title:"Collaboration Timeline"
+                  ~purpose:"Merges team-session events and command-plane traces into one evidence stream."
+                  ~problem_solved:"Prevents collaboration and execution evidence from being read in isolation."
+                  ~when_active:"Proof timeline section."
+                  ~agent_role:"Agents can explain what happened in order rather than by abstraction."
+                  ~ecosystem_function:"Preserves chronological causality."
+                  [];
+                panel ~id:"proof.contributions" ~title:"Actor Contributions"
+                  ~purpose:"Shows who contributed inputs, outputs, and tool evidence."
+                  ~problem_solved:"Avoids vague claims that a team worked together without naming contributions."
+                  ~when_active:"Proof contribution section."
+                  ~agent_role:"Agents can point to specific actors instead of generic group language."
+                  ~ecosystem_function:"Keeps collaboration legible at actor granularity."
+                  [];
+                panel ~id:"proof.goal_binding" ~title:"Goal Binding"
+                  ~purpose:"Shows how the observed activity maps back to the stated session or operation goal."
+                  ~problem_solved:"Prevents busy evidence from masquerading as aligned work."
+                  ~when_active:"Proof goal section."
+                  ~agent_role:"Agents can distinguish activity from aligned progress."
+                  ~ecosystem_function:"Maintains goal-traceability."
+                  [];
+                panel ~id:"proof.backing" ~title:"CPv2 Backing Evidence"
+                  ~purpose:"Shows the managed execution backing for the selected proof target."
+                  ~problem_solved:"Prevents collaboration proof from being mistaken for managed execution proof."
+                  ~when_active:"When an operation or synthetic detachment link exists."
+                  ~agent_role:"Agents can ground collaboration claims in CPv2 state when available."
+                  ~ecosystem_function:"Connects session proof to command truth."
+                  [];
+                panel ~id:"proof.artifacts" ~title:"Artifacts"
+                  ~purpose:"Lists the stored report/proof/session artifacts behind the current proof view."
+                  ~problem_solved:"Makes it obvious whether evidence is persisted or only inferred live."
+                  ~when_active:"Proof artifacts section."
+                  ~agent_role:"Agents can cite concrete files instead of ephemeral memory."
+                  ~ecosystem_function:"Supports replayable auditing."
+                  [];
+              ];
             surface ~id:"command" ~label:"Command"
               ~purpose:"Provides the direct operational truth surface for command-plane, swarm, chains, alerts, and policy."
               ~problem_solved:"Stops swarm and execution claims from floating free of managed evidence."

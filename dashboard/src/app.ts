@@ -20,6 +20,7 @@ import {
 } from './store'
 import { setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { Mission } from './components/mission'
+import { Proof } from './components/proof'
 import { Command } from './components/command'
 import { Ops } from './components/ops'
 import { Memory } from './components/memory'
@@ -35,6 +36,7 @@ import { PanelSemanticDetails, SurfaceSemanticIntro } from './components/common/
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from './config/navigation'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionBriefing, refreshMissionSnapshot } from './mission-store'
+import { refreshProofSnapshot } from './proof-store'
 import {
   commandPlaneSurface,
   refreshCommandPlaneChainSummary,
@@ -67,6 +69,9 @@ function refreshForTab(tab: string) {
   if (tab === 'mission') {
     refreshMissionSnapshot()
     refreshMissionBriefing()
+  }
+  if (tab === 'proof') {
+    refreshProofSnapshot(route.value.params.session_id, route.value.params.operation_id)
   }
   if (tab === 'execution') refreshExecution()
   if (tab === 'intervene') {
@@ -223,6 +228,8 @@ function TabContent() {
   switch (tab) {
     case 'mission':
       return html`<${Mission} />`
+    case 'proof':
+      return html`<${Proof} />`
     case 'execution':
       return html`<${Execution} />`
     case 'live':

@@ -41,6 +41,7 @@
    dashboard
    dashboard_semantics
    dashboard_mission
+   dashboard_proof
    dashboard_mission_briefing
    drift_guard
    server_command_plane_http
@@ -137,6 +138,7 @@
    mdal_swarm
    mdal_worker
    mcp_protocol
+   mcp_prompt_surface
    mcp_server
    mcp_server_eio
    mcp_session
@@ -250,6 +252,7 @@
    tool_gardener
    tool_library
    tool_catalog
+   tool_help_registry
    tool_registry
    library_bridge
    tool_council

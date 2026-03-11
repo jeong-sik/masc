@@ -183,6 +183,24 @@ let handle_read_resource_eio state id params =
 
         let (mime_type, text_opt) =
           match resource_id with
+          | "tool-help-index" ->
+              ( "text/markdown",
+                Some
+                  (Tool_help_registry.index_markdown Config.raw_all_tool_schemas) )
+          | s when String.starts_with ~prefix:"tool-help/" s ->
+              let tool_name =
+                String.sub s (String.length "tool-help/")
+                  (String.length s - String.length "tool-help/")
+              in
+              let text =
+                match
+                  Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name
+                with
+                | Some entry -> Tool_help_registry.entry_markdown entry
+                | None ->
+                    Printf.sprintf "# %s\n\nUnknown tool." tool_name
+              in
+              ("text/markdown", Some text)
           | "status" -> ("text/markdown", Some (Room.status config))
           | "status.json" ->
               let state_json = Types.room_state_to_yojson (Room.read_state config) in
@@ -688,7 +706,7 @@ let read_only_tools =
    "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
    "masc_worktree_list"; "masc_pending_interrupts";
    "masc_cost_report"; "masc_portal_status";
-   "masc_verify_handoff";
+   "masc_verify_handoff"; "masc_tool_help";
    "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
    "masc_team_session_list"; "masc_team_session_compare";
    "masc_team_session_events"; "masc_team_session_prove";
@@ -3122,7 +3140,22 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
   make_response ~id (`Assoc result_fields)
 
 let handle_list_resources_eio id =
-  let resources_json = List.map Mcp_server.resource_to_json Mcp_server.resources in
+  let tool_help_resources =
+    Config.raw_all_tool_schemas
+    |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
+           String.compare a.name b.name)
+    |> List.map (fun (schema : Types.tool_schema) ->
+           let entry = Tool_help_registry.entry_of_schema schema in
+           {
+             Mcp_server.uri = "masc://tool-help/" ^ schema.name;
+             name = schema.name ^ " Help";
+             description = entry.short_description;
+             mime_type = "text/markdown";
+           })
+  in
+  let resources_json =
+    List.map Mcp_server.resource_to_json (Mcp_server.resources @ tool_help_resources)
+  in
   make_response ~id (`Assoc [("resources", `List resources_json)])
 
 let handle_list_resource_templates_eio id =
@@ -3130,7 +3163,29 @@ let handle_list_resource_templates_eio id =
   make_response ~id (`Assoc [("resourceTemplates", `List templates_json)])
 
 let handle_list_prompts_eio id =
-  make_response ~id (`Assoc [("prompts", `List [])])
+  make_response ~id (Mcp_prompt_surface.list_json ())
+
+let handle_get_prompt_eio state id params =
+  match params with
+  | None -> make_error ~id (-32602) "Missing params"
+  | Some (`Assoc _ as payload) -> (
+      let open Yojson.Safe.Util in
+      match payload |> member "name" with
+      | `String name -> (
+          let arguments =
+            match payload |> member "arguments" with
+            | `Assoc _ as args -> args
+            | `Null -> `Assoc []
+            | _ -> `Assoc []
+          in
+          match
+            Mcp_prompt_surface.get_json ~config:state.Mcp_server.room_config
+              ~name ~arguments Config.raw_all_tool_schemas
+          with
+          | Ok json -> make_response ~id json
+          | Error msg -> make_error ~id (-32602) msg)
+      | _ -> make_error ~id (-32602) "Invalid params: name must be a string")
+  | Some _ -> make_error ~id (-32602) "Invalid params: expected object"
 
 (** Handle incoming JSON-RPC request - Pure Eio Native
 
@@ -3180,6 +3235,7 @@ let handle_request
                        handle_read_resource_eio state id req.params
                    | "resources/templates/list" -> handle_list_resource_templates_eio id
                    | "prompts/list" -> handle_list_prompts_eio id
+                   | "prompts/get" -> handle_get_prompt_eio state id req.params
                    | "tools/list" -> (
                        match requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg

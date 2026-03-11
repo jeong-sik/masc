@@ -84,7 +84,7 @@ let dedupe_schemas (schemas : Types.tool_schema list) =
         true))
     schemas
 
-let all_tool_schemas : Types.tool_schema list =
+let raw_all_tool_schemas : Types.tool_schema list =
   dedupe_schemas
     (Tools.raw_schemas
     @ Tool_board.tools
@@ -102,6 +102,9 @@ let all_tool_schemas : Types.tool_schema list =
     @ Tool_trpg.schemas
     @ Tool_risc.schemas
     @ Tool_autoresearch.schemas)
+
+let all_tool_schemas : Types.tool_schema list =
+  Tool_help_registry.canonicalize_schemas raw_all_tool_schemas
 
 let is_tool_visible tool_name =
   Tool_catalog.is_visible tool_name

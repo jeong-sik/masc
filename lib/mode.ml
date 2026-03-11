@@ -105,7 +105,7 @@ let mode_of_string = function
   | "custom" -> Some Custom
   | _ -> None
 
-(** All categories *)
+(** All categories (Unknown intentionally excluded — unmapped tools are blocked) *)
 let all_categories = [
   Core; Comm; Portal; Worktree; Code; Health; Discovery;
   Voting; Interrupt; Cost; Auth; RateLimit; Encryption;
@@ -241,6 +241,8 @@ let tool_category tool_name =
   | "masc_metrics_compare" | "masc_metrics_record"
   | "masc_recall_search" | "masc_sessions"
   | "masc_tool_stats"
+  | "masc_notification_count" | "masc_check_notifications"
+  | "masc_consume_notifications"
   (* Verification tools *)
   | "masc_verify_auto" | "masc_verify_pending"
   | "masc_verify_request" | "masc_verify_status"
@@ -269,7 +271,8 @@ let tool_category tool_name =
   | "masc_auth_create_token" | "masc_auth_refresh" | "masc_auth_revoke"
   | "masc_auth_list"
   | "masc_audit_query" | "masc_audit_stats"
-  | "masc_governance_set" | "masc_governance_report" -> Auth
+  | "masc_governance_set" | "masc_governance_report"
+  | "masc_tool_grant" | "masc_tool_revoke" | "masc_tool_list" -> Auth
 
   (* ── Rate limiting ── *)
   | "masc_rate_limit_status" | "masc_rate_limit_config" -> RateLimit
@@ -365,14 +368,12 @@ let tool_category tool_name =
   | "masc_risc_cache_status" | "masc_risc_cache_metrics"
   | "masc_risc_metrics" | "masc_risc_ooo_metrics" -> RISC
 
-  (* ── Deprecated swarm tools (hidden via tool_catalog) ── *)
+  (* ── Deprecated/archived tools (hidden via tool_catalog, excluded from presets) ── *)
   | "masc_swarm_init" | "masc_swarm_join" | "masc_swarm_leave"
   | "masc_swarm_propose" | "masc_swarm_vote" | "masc_swarm_status"
   | "masc_swarm_deposit" | "masc_swarm_trails" | "masc_swarm_evolve"
-  | "masc_swarm_walph" -> Core
-
-  (* ── Archived/hidden tools ── *)
-  | "masc_archive_save" -> Core
+  | "masc_swarm_walph"
+  | "masc_archive_save" -> Unknown
 
   (* ── Prefix-based fallbacks for legacy dot-separated names ── *)
   | _ when String.starts_with ~prefix:"lodge_" tool_name -> Comm

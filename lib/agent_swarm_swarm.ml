@@ -19,6 +19,7 @@ type agent_spec = {
   tools: Tool.t list;
   max_tokens: int option;
   max_turns: int;
+  temperature: float option;
   include_masc_tools: bool;
   managed_task: managed_task option;
   expected_final_marker: string option;
@@ -343,6 +344,7 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
                   Option.value spec.max_tokens
                     ~default:Types.default_config.max_tokens;
                 max_turns = spec.max_turns;
+                temperature = spec.temperature;
               } in
               let agent =
                 Agent.create ~net ~config ~tools:all_tools

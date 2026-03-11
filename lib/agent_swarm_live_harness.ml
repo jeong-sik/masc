@@ -244,6 +244,7 @@ let worker_spec cfg plan : Agent_swarm_swarm.agent_spec =
     tools = [];
     max_tokens = Some 256;
     max_turns = cfg.max_turns;
+    temperature = None;
     include_masc_tools = false;
     managed_task =
       Some

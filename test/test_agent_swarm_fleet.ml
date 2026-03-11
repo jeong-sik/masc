@@ -36,6 +36,7 @@ let test_fleet_member_variant () =
     tools = [];
     max_tokens = None;
     max_turns = 5;
+    temperature = None;
     include_masc_tools = true;
     managed_task = None;
     expected_final_marker = None;
@@ -122,7 +123,15 @@ let test_run_full_plan () =
   Alcotest.(check bool) "worker turn budget" true
     (List.for_all
        (fun spec -> spec.Agent_swarm_swarm.max_turns = 7)
-       plan.worker_specs)
+       plan.worker_specs);
+  Alcotest.(check (option (float 0.01))) "planner temperature" (Some 1.0)
+    plan.planner_spec.Agent_swarm_swarm.temperature;
+  Alcotest.(check (option (float 0.01))) "worker temperature" (Some 0.6)
+    (List.hd plan.worker_specs).Agent_swarm_swarm.temperature;
+  Alcotest.(check (option int)) "planner max_tokens" (Some 16384)
+    plan.planner_spec.Agent_swarm_swarm.max_tokens;
+  Alcotest.(check (option int)) "worker max_tokens" (Some 8192)
+    (List.hd plan.worker_specs).Agent_swarm_swarm.max_tokens
 
 let test_run_full_plan_rejects_zero_members () =
   Alcotest.check_raises "zero members rejected"

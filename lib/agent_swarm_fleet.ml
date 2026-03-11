@@ -46,8 +46,9 @@ let planner_spec ~provider ~goal =
     provider;
     system_prompt = Agent_swarm_prompts.fleet_planner ~goal;
     tools = [];
-    max_tokens = None;
+    max_tokens = Some 16384;
     max_turns = 10;
+    temperature = Some 1.0;
     include_masc_tools = true;
     managed_task = None;
     expected_final_marker = None;
@@ -61,8 +62,9 @@ let worker_specs ~provider ~num_members ~workdir ~max_turns =
         provider;
         system_prompt = Agent_swarm_prompts.fleet_worker ~name ~workdir;
         tools = [];
-        max_tokens = None;
+        max_tokens = Some 8192;
         max_turns;
+        temperature = Some 0.6;
         include_masc_tools = true;
         managed_task = None;
         expected_final_marker = None;

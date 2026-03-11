@@ -193,8 +193,6 @@ let participant_merge_cypher ~thread_id ~participant ~role =
 type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
 type eio_clock = float Eio.Time.clock_ty Eio.Resource.t
 
-let current_net : eio_net option ref = ref None
-let current_clock : eio_clock option ref = ref None
 type https_connector =
   | Https_connector :
       (Uri.t ->
@@ -202,17 +200,27 @@ type https_connector =
        [> Eio.Flow.two_way_ty ] Eio.Resource.t)
       -> https_connector
 
-let current_https_connector : https_connector option ref = ref None
+type eio_context = {
+  net : eio_net;
+  clock : eio_clock option;
+  https_connector : https_connector option;
+}
+
+let current_eio_context : eio_context option ref = ref None
 
 let set_eio_context ?clock ?https_connector (net : _ Eio.Net.t) =
-  current_net := Some (net :> eio_net);
-  current_clock := clock;
-  current_https_connector := Option.map (fun c -> Https_connector c) https_connector
+  current_eio_context :=
+    Some
+      {
+        net = (net :> eio_net);
+        clock;
+        https_connector =
+          Option.map (fun connector -> Https_connector connector)
+            https_connector;
+      }
 
 let clear_eio_context () =
-  current_net := None;
-  current_clock := None;
-  current_https_connector := None
+  current_eio_context := None
 
 let truncate_for_log s =
   let max_len = 500 in
@@ -278,10 +286,11 @@ let neo4j_auth_header () : (string * string, string) result =
     Returns Ok json_response on success, Error msg on failure.
     Uses environment variables: NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD *)
 let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
-  match !current_net with
+  match !current_eio_context with
   | None ->
       Error "Eio net not initialized (Neo4j persistence disabled)"
-  | Some net ->
+  | Some ctx ->
+      let net = ctx.net in
       let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
       let* endpoint_uri = neo4j_tx_commit_uri () in
       let* auth_header = neo4j_auth_header () in
@@ -305,7 +314,7 @@ let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
           let client =
             if not is_https then Cohttp_eio.Client.make ~https:None net
             else
-              match !current_https_connector with
+              match ctx.https_connector with
               | Some (Https_connector c) ->
                   Cohttp_eio.Client.make ~https:(Some c) net
               | None ->
@@ -352,7 +361,7 @@ let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
                    (Printexc.to_string e)))
       in
 
-      (match !current_clock with
+      (match ctx.clock with
       | Some clock -> (
           try Eio.Time.with_timeout_exn clock timeout_sec run
           with

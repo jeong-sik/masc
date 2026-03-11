@@ -22,6 +22,12 @@ let test_category_to_string () =
   check string "ratelimit" "ratelimit" (Mode.category_to_string Mode.RateLimit);
   check string "encryption" "encryption" (Mode.category_to_string Mode.Encryption);
   check string "code" "code" (Mode.category_to_string Mode.Code);
+  check string "board" "board" (Mode.category_to_string Mode.Board);
+  check string "plan" "plan" (Mode.category_to_string Mode.Plan);
+  check string "consensus" "consensus" (Mode.category_to_string Mode.Consensus);
+  check string "ecosystem" "ecosystem" (Mode.category_to_string Mode.Ecosystem);
+  check string "trpg" "trpg" (Mode.category_to_string Mode.TRPG);
+  check string "risc" "risc" (Mode.category_to_string Mode.RISC);
   check string "unknown" "unknown" (Mode.category_to_string Mode.Unknown)
 
 let test_category_of_string_valid () =
@@ -37,7 +43,13 @@ let test_category_of_string_valid () =
   check (option bool) "auth" (Some true) (Option.map (fun c -> c = Mode.Auth) (Mode.category_of_string "auth"));
   check (option bool) "ratelimit" (Some true) (Option.map (fun c -> c = Mode.RateLimit) (Mode.category_of_string "ratelimit"));
   check (option bool) "encryption" (Some true) (Option.map (fun c -> c = Mode.Encryption) (Mode.category_of_string "encryption"));
-  check (option bool) "code" (Some true) (Option.map (fun c -> c = Mode.Code) (Mode.category_of_string "code"))
+  check (option bool) "code" (Some true) (Option.map (fun c -> c = Mode.Code) (Mode.category_of_string "code"));
+  check (option bool) "board" (Some true) (Option.map (fun c -> c = Mode.Board) (Mode.category_of_string "board"));
+  check (option bool) "plan" (Some true) (Option.map (fun c -> c = Mode.Plan) (Mode.category_of_string "plan"));
+  check (option bool) "consensus" (Some true) (Option.map (fun c -> c = Mode.Consensus) (Mode.category_of_string "consensus"));
+  check (option bool) "ecosystem" (Some true) (Option.map (fun c -> c = Mode.Ecosystem) (Mode.category_of_string "ecosystem"));
+  check (option bool) "trpg" (Some true) (Option.map (fun c -> c = Mode.TRPG) (Mode.category_of_string "trpg"));
+  check (option bool) "risc" (Some true) (Option.map (fun c -> c = Mode.RISC) (Mode.category_of_string "risc"))
 
 let test_category_of_string_invalid () =
   check (option bool) "invalid" None (Option.map (fun _ -> true) (Mode.category_of_string "invalid"));
@@ -90,7 +102,7 @@ let test_mode_roundtrip () =
    ============================================================ *)
 
 let test_all_categories_count () =
-  check int "13 categories" 13 (List.length Mode.all_categories)
+  check int "19 categories" 19 (List.length Mode.all_categories)
 
 let test_all_categories_unique () =
   let rec has_duplicates = function
@@ -115,7 +127,9 @@ let test_categories_standard () =
   check bool "has comm" true (List.mem Mode.Comm cats);
   check bool "has worktree" true (List.mem Mode.Worktree cats);
   check bool "has health" true (List.mem Mode.Health cats);
-  check int "count" 4 (List.length cats)
+  check bool "has plan" true (List.mem Mode.Plan cats);
+  check bool "has board" true (List.mem Mode.Board cats);
+  check int "count" 6 (List.length cats)
 
 let test_categories_parallel () =
   let cats = Mode.categories_for_mode Mode.Parallel in
@@ -127,11 +141,14 @@ let test_categories_parallel () =
   check bool "has discovery" true (List.mem Mode.Discovery cats);
   check bool "has voting" true (List.mem Mode.Voting cats);
   check bool "has interrupt" true (List.mem Mode.Interrupt cats);
-  check int "count" 8 (List.length cats)
+  check bool "has plan" true (List.mem Mode.Plan cats);
+  check bool "has board" true (List.mem Mode.Board cats);
+  check bool "has consensus" true (List.mem Mode.Consensus cats);
+  check int "count" 11 (List.length cats)
 
 let test_categories_full () =
   let cats = Mode.categories_for_mode Mode.Full in
-  check int "all categories" 13 (List.length cats)
+  check int "all categories" 19 (List.length cats)
 
 let test_categories_solo () =
   let cats = Mode.categories_for_mode Mode.Solo in
@@ -233,10 +250,12 @@ let test_tool_category_code () =
 
 let test_tool_category_namespace_mapping () =
   check bool "lodge namespace" true (Mode.tool_category "lodge_heartbeat" = Mode.Comm);
-  check bool "trpg namespace" true (Mode.tool_category "trpg.dice.roll" = Mode.Core);
-  check bool "experiment namespace" true (Mode.tool_category "experiment.start" = Mode.Core);
-  check bool "decision namespace" true (Mode.tool_category "decision.create" = Mode.Core);
-  check bool "client namespace" true (Mode.tool_category "client.session.open" = Mode.Core)
+  check bool "trpg namespace" true (Mode.tool_category "trpg.dice.roll" = Mode.TRPG);
+  check bool "experiment namespace" true (Mode.tool_category "experiment.start" = Mode.Ecosystem);
+  check bool "decision namespace" true (Mode.tool_category "decision.create" = Mode.Consensus);
+  check bool "decision underscore" true (Mode.tool_category "decision_consensus" = Mode.Consensus);
+  check bool "client namespace" true (Mode.tool_category "client.session.open" = Mode.Core);
+  check bool "client underscore" true (Mode.tool_category "client_input_submit" = Mode.Core)
 
 let test_tool_category_unknown () =
   check bool "unknown is Unknown" true

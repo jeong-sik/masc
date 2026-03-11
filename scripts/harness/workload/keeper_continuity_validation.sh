@@ -41,6 +41,8 @@ SERVER_PID=""
 SERVER_LOG="$RUN_DIR/server.log"
 TEMP_BASE_PATH=""
 VALIDATION_EXIT_CODE=1
+KEEPER_CREATED=0
+KEEPER_STOPPED=0
 
 BOOTSTRAP_PASS=0
 LIVENESS_PASS=0
@@ -373,7 +375,11 @@ stop_keeper() {
   local args
   args="$(jq -cn --arg name "$KEEPER_NAME" --argjson remove_meta "$remove_meta" --argjson remove_session "$remove_session" \
     '{name:$name,remove_meta:$remove_meta,remove_session:$remove_session}')"
-  call_mcp_tool 1101 "masc_keeper_down" "$args" 30
+  if call_mcp_tool 1101 "masc_keeper_down" "$args" 30; then
+    KEEPER_STOPPED=1
+    return 0
+  fi
+  return 1
 }
 
 phase_status_string() {
@@ -425,6 +431,9 @@ run_dry_run() {
 }
 
 cleanup() {
+  if [[ "$(normalize_bool "$DRY_RUN")" != "1" && "$KEEPER_CREATED" == "1" && "$KEEPER_STOPPED" != "1" && -n "${MCP_URL:-}" ]]; then
+    stop_keeper false false >/dev/null 2>&1 || true
+  fi
   if [[ "$(normalize_bool "$KEEP_SERVER")" != "1" ]]; then
     harness_stop_server "$SERVER_PID" 10
   fi
@@ -614,7 +623,7 @@ EOF
 real_run() {
   local models_json_payload status_json heartbeat_output snapshot_info snapshot_file heartbeat_file room_file
   local baseline_continuity_ts baseline_compactions baseline_generation baseline_handoffs baseline_trace
-  local turn status_after heartbeat_after down_status_json agent_name compaction_done handoff_done
+  local turn status_after heartbeat_after agent_name compaction_done handoff_done
 
   require_cmd jq || { echo "jq is required" >&2; return 1; }
   require_cmd curl || { echo "curl is required" >&2; return 1; }
@@ -649,6 +658,7 @@ real_run() {
     append_phase "bootstrap" "fail" "keeper creation failed: $LAST_TOOL_ERROR" "" ""
     return 1
   fi
+  KEEPER_CREATED=1
   if ! wait_for_bootstrap; then
     snapshot_info="$(capture_snapshot bootstrap)"
     snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
@@ -704,10 +714,10 @@ real_run() {
   snapshot_info="$(capture_snapshot baseline)"
   snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
   status_json="$(cat "$snapshot_file")"
-  baseline_continuity_ts="$(printf '%s' "$status_json" | jq -r '.meta.last_continuity_update_ts')"
-  baseline_compactions="$(printf '%s' "$status_json" | jq -r '.compaction_count')"
-  baseline_generation="$(printf '%s' "$status_json" | jq -r '.generation')"
-  baseline_handoffs="$(printf '%s' "$status_json" | jq -r '.handoff_count_total')"
+  baseline_continuity_ts="$(printf '%s' "$status_json" | jq -r '(.meta.last_continuity_update_ts | tonumber?) // 0')"
+  baseline_compactions="$(printf '%s' "$status_json" | jq -r '(.compaction_count | tonumber?) // 0')"
+  baseline_generation="$(printf '%s' "$status_json" | jq -r '(.generation | tonumber?) // 0')"
+  baseline_handoffs="$(printf '%s' "$status_json" | jq -r '(.handoff_count_total | tonumber?) // 0')"
   baseline_trace="$(printf '%s' "$status_json" | jq -r '.meta.trace_id')"
   compaction_done=0
   handoff_done=0
@@ -726,11 +736,11 @@ real_run() {
     heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
     status_json="$(cat "$snapshot_file")"
     refresh_latest_evidence_from_status "$status_json"
-    if [[ "$(printf '%s' "$status_json" | jq -r '.meta.last_continuity_update_ts > ($old | tonumber)' --arg old "$baseline_continuity_ts")" == "true" ]] \
+    if [[ "$(printf '%s' "$status_json" | jq -r '(((.meta.last_continuity_update_ts | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_continuity_ts")" == "true" ]] \
       && [[ "$(printf '%s' "$status_json" | jq -r '(.continuity_summary // "") | length > 0')" == "true" ]]; then
       CONTINUITY_PASS=1
       append_phase "continuity" "pass" "continuity summary and timestamp advanced after a real turn" "$snapshot_file" "$heartbeat_file"
-      baseline_continuity_ts="$(printf '%s' "$status_json" | jq -r '.meta.last_continuity_update_ts')"
+      baseline_continuity_ts="$(printf '%s' "$status_json" | jq -r '(.meta.last_continuity_update_ts | tonumber?) // 0')"
     else
       append_phase "continuity" "fail" "continuity summary did not advance after a real turn" "$snapshot_file" "$heartbeat_file"
       return 1
@@ -752,22 +762,22 @@ real_run() {
     refresh_latest_evidence_from_status "$status_after"
 
     if [[ $compaction_done -eq 0 ]] \
-      && [[ "$(printf '%s' "$status_after" | jq -r '.compaction_count > ($old | tonumber)' --arg old "$baseline_compactions")" == "true" ]]; then
+      && [[ "$(printf '%s' "$status_after" | jq -r '(((.compaction_count | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_compactions")" == "true" ]]; then
       COMPACTION_PASS=1
       compaction_done=1
       append_phase "compaction" "pass" "compaction counter increased under isolated pressure" "$snapshot_file" "$heartbeat_file"
-      baseline_compactions="$(printf '%s' "$status_after" | jq -r '.compaction_count')"
+      baseline_compactions="$(printf '%s' "$status_after" | jq -r '(.compaction_count | tonumber?) // 0')"
     fi
 
     if [[ $handoff_done -eq 0 ]] \
-      && { [[ "$(printf '%s' "$status_after" | jq -r '.generation > ($old | tonumber)' --arg old "$baseline_generation")" == "true" ]] \
-        || [[ "$(printf '%s' "$status_after" | jq -r '.handoff_count_total > ($old | tonumber)' --arg old "$baseline_handoffs")" == "true" ]] \
+      && { [[ "$(printf '%s' "$status_after" | jq -r '(((.generation | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_generation")" == "true" ]] \
+        || [[ "$(printf '%s' "$status_after" | jq -r '(((.handoff_count_total | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_handoffs")" == "true" ]] \
         || [[ "$(printf '%s' "$status_after" | jq -r '.meta.trace_id != $old' --arg old "$baseline_trace")" == "true" ]]; }; then
       HANDOFF_PASS=1
       handoff_done=1
       append_phase "handoff" "pass" "handoff/generation evidence changed under isolated pressure" "$snapshot_file" "$heartbeat_file"
-      baseline_generation="$(printf '%s' "$status_after" | jq -r '.generation')"
-      baseline_handoffs="$(printf '%s' "$status_after" | jq -r '.handoff_count_total')"
+      baseline_generation="$(printf '%s' "$status_after" | jq -r '(.generation | tonumber?) // 0')"
+      baseline_handoffs="$(printf '%s' "$status_after" | jq -r '(.handoff_count_total | tonumber?) // 0')"
       baseline_trace="$(printf '%s' "$status_after" | jq -r '.meta.trace_id')"
     fi
 
@@ -802,37 +812,39 @@ real_run() {
       append_phase "recovery" "fail" "keeper_down failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
     else
       sleep 1
-      down_status_json="$(keeper_status_json)"
       if ! call_mcp_tool 1500 "masc_keeper_up" "$(jq -cn --arg name "$KEEPER_NAME" '{name:$name,presence_keepalive:true}')" 30; then
         snapshot_info="$(capture_snapshot recovery-up)"
         snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
         heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
         append_phase "recovery" "fail" "keeper_up restart failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
-      elif ! wait_for_restarted_heartbeat "$agent_name"; then
-        snapshot_info="$(capture_snapshot recovery-restart)"
-        snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
-        heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
-        append_phase "recovery" "fail" "heartbeat did not return after keeper restart" "$snapshot_file" "$heartbeat_file"
-      elif ! send_keeper_message 1501 "$(short_prompt recovery)"; then
-        snapshot_info="$(capture_snapshot recovery-turn)"
-        snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
-        heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
-        append_phase "recovery" "fail" "keeper did not accept a post-restart turn: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
       else
-        sleep "$PRESSURE_PAUSE_SEC"
-        snapshot_info="$(capture_snapshot recovery)"
-        snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
-        heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
-        status_after="$(cat "$snapshot_file")"
-        refresh_latest_evidence_from_status "$status_after"
-        if [[ "$(printf '%s' "$status_after" | jq -r '.keepalive_running')" == "true" ]] \
-          && [[ "$(printf '%s' "$status_after" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
-          && [[ "$(printf '%s' "$status_after" | jq -r '(.continuity_summary // "") | length > 0')" == "true" ]] \
-          && [[ "$(printf '%s' "$status_after" | jq -r '.agent.exists')" == "true" ]]; then
-          RECOVERY_PASS=1
-          append_phase "recovery" "pass" "keeper restarted on the same name and resumed live turns with continuity intact" "$snapshot_file" "$heartbeat_file"
+        KEEPER_STOPPED=0
+        if ! wait_for_restarted_heartbeat "$agent_name"; then
+          snapshot_info="$(capture_snapshot recovery-restart)"
+          snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
+          heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
+          append_phase "recovery" "fail" "heartbeat did not return after keeper restart" "$snapshot_file" "$heartbeat_file"
+        elif ! send_keeper_message 1501 "$(short_prompt recovery)"; then
+          snapshot_info="$(capture_snapshot recovery-turn)"
+          snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
+          heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
+          append_phase "recovery" "fail" "keeper did not accept a post-restart turn: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
         else
-          append_phase "recovery" "fail" "keeper restarted but continuity/liveness did not fully recover" "$snapshot_file" "$heartbeat_file"
+          sleep "$PRESSURE_PAUSE_SEC"
+          snapshot_info="$(capture_snapshot recovery)"
+          snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
+          heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
+          status_after="$(cat "$snapshot_file")"
+          refresh_latest_evidence_from_status "$status_after"
+          if [[ "$(printf '%s' "$status_after" | jq -r '.keepalive_running')" == "true" ]] \
+            && [[ "$(printf '%s' "$status_after" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
+            && [[ "$(printf '%s' "$status_after" | jq -r '(.continuity_summary // "") | length > 0')" == "true" ]] \
+            && [[ "$(printf '%s' "$status_after" | jq -r '.agent.exists')" == "true" ]]; then
+            RECOVERY_PASS=1
+            append_phase "recovery" "pass" "keeper restarted on the same name and resumed live turns with continuity intact" "$snapshot_file" "$heartbeat_file"
+          else
+            append_phase "recovery" "fail" "keeper restarted but continuity/liveness did not fully recover" "$snapshot_file" "$heartbeat_file"
+          fi
         fi
       fi
     fi

@@ -24,11 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ollama Runtime Removal** — removed Ollama runtime path, LLM calls go through `Lodge_cascade` only (#785)
 - **Dashboard Utils Extraction** — deduplicated 5 utility functions from 12 files into `Dashboard_utils` module (#791)
 - **Transport Deps Injection** — Eio context passed via deps record instead of global singleton (#793)
+- **Keeper Resident Split** — split resident keepers from persistent agents for independent lifecycle (#799)
+- **Dashboard Assets Rebuild** — rebuild stale assets and remove dead batch endpoint code (#798)
 
 ### Fixed
 - Mission briefing async refresh UX with loading states and error recovery (#774)
 - GC archive logic now includes cancelled team-sessions (#777)
 - Team-session `stop_session` directly finalizes instead of deferring to runtime loop (#784, #786)
+- Prevent crash when `LLAMA_DEFAULT_MODEL` unset after Ollama removal (#795)
+- Align migration message test assertions with production code (#794)
 
 ## [2.82.0] - 2026-03-11
 

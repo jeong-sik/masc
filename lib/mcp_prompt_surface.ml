@@ -79,6 +79,44 @@ let assoc_string args key =
       if trimmed = "" then None else Some trimmed
   | _ -> None
 
+let string_contains ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      if idx + needle_len > haystack_len then false
+      else if String.sub haystack idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+
+let string_contains_ci ~needle haystack =
+  string_contains ~needle:(String.lowercase_ascii needle)
+    (String.lowercase_ascii haystack)
+
+let run_tokens run_id =
+  let safe = Room_utils.safe_filename run_id |> String.lowercase_ascii in
+  [ run_id; safe; "run_id=" ^ run_id; "run_id=" ^ safe; "swarm-live:" ^ run_id; "swarm-live:" ^ safe ]
+
+let rec json_contains_run_tokens tokens = function
+  | `String value -> List.exists (fun token -> string_contains_ci ~needle:token value) tokens
+  | `Assoc fields -> List.exists (fun (_, value) -> json_contains_run_tokens tokens value) fields
+  | `List items -> List.exists (json_contains_run_tokens tokens) items
+  | _ -> false
+
+let filter_traces_json_by_run_id run_id = function
+  | `Assoc fields as json -> (
+      match List.assoc_opt "events" fields with
+      | Some (`List events) ->
+          let filtered =
+            events
+            |> List.filter (json_contains_run_tokens (run_tokens run_id))
+          in
+          `Assoc (("events", `List filtered) :: List.remove_assoc "events" fields)
+      | _ -> json)
+  | json -> json
+
 let message_json text =
   `Assoc
     [
@@ -134,9 +172,24 @@ let team_session_proof_text ~config ~session_id ~operation_id =
     ]
 
 let command_truth_text ~config ?operation_id ?run_id () =
-  let summary = Cp_snapshot.summary_json config |> Yojson.Safe.pretty_to_string in
+  let summary_json =
+    match run_id with
+    | Some value ->
+        `Assoc
+          [
+            ("scope", `String "run");
+            ("run_id", `String value);
+            ("operation_id", match operation_id with Some id -> `String id | None -> `Null);
+            ("traces_filtered", `Bool true);
+          ]
+    | None -> Cp_snapshot.summary_json config
+  in
+  let summary = summary_json |> Yojson.Safe.pretty_to_string in
+  let traces_json = Cp_snapshot.list_traces_json config ?operation_id ~limit:20 () in
   let traces =
-    Cp_snapshot.list_traces_json config ?operation_id ~limit:20 ()
+    (match run_id with
+    | Some value -> filter_traces_json_by_run_id value traces_json
+    | None -> traces_json)
     |> Yojson.Safe.pretty_to_string
   in
   String.concat "\n"

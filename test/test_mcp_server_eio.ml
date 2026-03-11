@@ -1410,6 +1410,51 @@ let test_handle_request_prompts_get_tool_help () =
     (messages <> []);
   cleanup_dir base_path
 
+let test_handle_request_prompts_get_command_truth_filters_run_id () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_path in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "fixture-root"));
+      let append_event ~trace_id ~operation_id ~message ~ts =
+        let event : Masc_mcp.Command_plane_v2.event_record =
+          {
+            event_id = Masc_mcp.Command_plane_v2.next_event_id "trace";
+            trace_id;
+            event_type = "operation_progress";
+            operation_id = Some operation_id;
+            unit_id = None;
+            actor = Some "tester";
+            source = "managed";
+            ts;
+            detail = `Assoc [ ("message", `String message) ];
+          }
+        in
+        Masc_mcp.Command_plane_v2.append_event config event
+      in
+      append_event ~trace_id:"trace-run-alpha" ~operation_id:"op-run-alpha"
+        ~message:"run_id=run-alpha expected event" ~ts:"2026-03-11T09:00:01Z";
+      append_event ~trace_id:"trace-run-beta" ~operation_id:"op-run-beta"
+        ~message:"run_id=run-beta unrelated event" ~ts:"2026-03-11T09:00:02Z";
+      let result =
+        match
+          Masc_mcp.Mcp_prompt_surface.get_json ~config ~name:"command_truth"
+            ~arguments:(`Assoc [ ("run_id", `String "run-alpha") ])
+            []
+        with
+        | Ok json -> json
+        | Error msg -> Alcotest.failf "prompts/get command_truth failed: %s" msg
+      in
+      let text =
+        Yojson.Safe.Util.(
+          result |> member "messages" |> index 0 |> member "content" |> member "text" |> to_string)
+      in
+      Alcotest.(check bool) "run-alpha trace retained" true
+        (contains_substring text "run-alpha");
+      Alcotest.(check bool) "run-beta trace filtered" false
+        (contains_substring text "run-beta"))
+
 let test_handle_request_resources_list_includes_tool_help () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -1541,6 +1586,8 @@ let eio_tests = [
   "handle tools/list", `Quick, test_handle_request_tools_list;
   "handle prompts/list non-empty", `Quick, test_handle_request_prompts_list_non_empty;
   "handle prompts/get tool_help", `Quick, test_handle_request_prompts_get_tool_help;
+  "handle prompts/get command_truth filters run_id", `Quick,
+    test_handle_request_prompts_get_command_truth_filters_run_id;
   "handle resources/list includes tool-help", `Quick, test_handle_request_resources_list_includes_tool_help;
   "handle resources/read tool-help", `Quick, test_handle_request_tool_help_resource_read;
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;

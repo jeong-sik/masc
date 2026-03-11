@@ -176,8 +176,47 @@ let test_dashboard_proof_projection () =
       check bool "cp backing present" true
         (json |> U.member "cp_backing_evidence" <> `Null))
 
+let test_timeline_json_orders_command_plane_events_by_timestamp () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-fixture-ordered" in
+      seed_session_artifacts config session_id;
+      let cp_event : Lib.Command_plane_v2.event_record =
+        {
+          event_id = Lib.Command_plane_v2.next_event_id "trace";
+          trace_id = "trace-proof-order";
+          event_type = "operation_progress";
+          operation_id = Some ("detachment-" ^ session_id);
+          unit_id = None;
+          actor = Some "cp-agent";
+          source = "managed";
+          ts = "2026-03-11T09:00:01Z";
+          detail = `Assoc [ ("message", `String "early cp event") ];
+        }
+      in
+      Lib.Command_plane_v2.append_event config cp_event;
+      let timeline =
+        Lib.Dashboard_proof.json ~config ~session_id ()
+        |> U.member "timeline"
+        |> U.to_list
+      in
+      let first = List.hd timeline in
+      check string "first item source" "command_plane"
+        (first |> U.member "source" |> U.to_string);
+      check string "first item timestamp" "2026-03-11T09:00:01Z"
+        (first |> U.member "timestamp" |> U.to_string))
+
 let () =
   Alcotest.run "dashboard_proof"
     [
-      ("projection", [ test_case "builds collaboration proof projection" `Quick test_dashboard_proof_projection ]);
+      ( "projection",
+        [
+          test_case "builds collaboration proof projection" `Quick test_dashboard_proof_projection;
+          test_case "orders merged timeline chronologically" `Quick
+            test_timeline_json_orders_command_plane_events_by_timestamp;
+        ] );
     ]

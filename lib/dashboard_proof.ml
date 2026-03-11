@@ -277,7 +277,33 @@ let timeline_json ?session_id ?operation_id events cp_events =
                  ])
     | _ -> []
   in
-  `List (session_items @ cp_items)
+  let timestamp_of_item json =
+    match string_field "timestamp" json with
+    | Some value -> Room.parse_iso_time_opt value
+    | None -> None
+  in
+  let seq_of_item ~fallback json =
+    match U.member "seq" json with
+    | `Int value -> value
+    | `Intlit value -> (match int_of_string_opt value with Some v -> v | None -> fallback)
+    | _ -> fallback
+  in
+  let compare_items (left_idx, left) (right_idx, right) =
+    match timestamp_of_item left, timestamp_of_item right with
+    | Some left_ts, Some right_ts ->
+        let cmp = Float.compare left_ts right_ts in
+        if cmp <> 0 then cmp
+        else compare (seq_of_item ~fallback:left_idx left) (seq_of_item ~fallback:right_idx right)
+    | Some _, None -> -1
+    | None, Some _ -> 1
+    | None, None ->
+        compare (seq_of_item ~fallback:left_idx left) (seq_of_item ~fallback:right_idx right)
+  in
+  session_items @ cp_items
+  |> List.mapi (fun idx item -> (idx, item))
+  |> List.sort compare_items
+  |> List.map snd
+  |> fun items -> `List items
 
 let artifact_ref_json kind path =
   `Assoc

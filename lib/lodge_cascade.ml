@@ -169,9 +169,9 @@ let get_cascade ?(config_path = "") ~cascade_name () :
       Llm_client.available_model_specs_of_strings defaults)
 
 let call ~cascade_name ~prompt
-    ?(temperature = 0.3) ?(timeout_sec = 30) ?(max_tokens = 500)
-    ?(accept = fun _ -> true) () =
-  let specs = get_cascade ~cascade_name () in
+    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
+    ?(max_tokens = 500) ?(accept = fun _ -> true) () =
+  let specs = get_cascade ~config_path ~cascade_name () in
   if specs = [] then
     Error (Printf.sprintf "[cascade] no callable models for %s" cascade_name)
   else

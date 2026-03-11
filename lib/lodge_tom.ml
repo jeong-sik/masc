@@ -65,18 +65,10 @@ let predict_from_signature
 (* ── LLM SimToM Prediction ─────────────────────────────────────────── *)
 
 (** Model specs for ToM LLM classification.
-    Override with MASC_TOM_MODELS. *)
-let tom_model_strings () =
-  match Sys.getenv_opt "MASC_TOM_MODELS" with
-  | Some s -> String.split_on_char ',' s |> List.map String.trim
-  | None ->
-      [
-        Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-      ]
-
+    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
+    Override via config/llm_cascade.json key "tom_models". *)
 let tom_model_specs () =
-  Llm_client.available_model_specs_of_strings (tom_model_strings ())
+  Lodge_cascade.get_cascade ~cascade_name:"tom" ()
 
 (** Format agent signature into a concise behavioral profile string. *)
 let format_agent_profile (sig_ : Lodge_reaction.agent_signature) : string =

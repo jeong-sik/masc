@@ -264,12 +264,11 @@ let get_chain_id_for_preset = function
   | "figma" -> Some "walph-figma"
   | _ -> None
 
-(** Default LLM dispatcher for Walph loop. Exposed as overridable parameter for tests. *)
-let walph_default_model_strings () =
-  Llm_client.default_execution_model_labels ()
-
+(** Model specs for Walph loop LLM dispatch.
+    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
+    Override via config/llm_cascade.json key "walph_models". *)
 let walph_available_model_specs () =
-  Llm_client.available_model_specs_of_strings (walph_default_model_strings ())
+  Lodge_cascade.get_cascade ~cascade_name:"walph" ()
 
 let walph_response_is_valid (resp : Llm_client.completion_response) =
   let content = String.trim resp.content in

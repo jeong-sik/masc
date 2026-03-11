@@ -55,6 +55,12 @@
  (modules test_dashboard_mission)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
+; Dashboard mission briefing regression tests
+(test
+ (name test_dashboard_mission_briefing)
+ (modules test_dashboard_mission_briefing)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
 ; Board TTL + metadata classification tests
 (test
  (name test_board_ttl)

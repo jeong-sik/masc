@@ -1281,6 +1281,9 @@ let test_summary_json_swarm_proof_prefers_artifact () =
           [
             ("pass", `Bool true);
             ("worker_count", `Int 4);
+            ("joined_workers", `Int 4);
+            ("current_task_bound", `Int 4);
+            ("fresh_heartbeats", `Int 4);
             ("completed_workers", `Int 3);
             ("final_markers_seen", `Int 2);
           ]);
@@ -1299,6 +1302,18 @@ let test_summary_json_swarm_proof_prefers_artifact () =
       Alcotest.(check int) "artifact worker expected" 4
         (proof |> Yojson.Safe.Util.member "workers"
        |> Yojson.Safe.Util.member "expected"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "artifact worker joined" 4
+        (proof |> Yojson.Safe.Util.member "workers"
+       |> Yojson.Safe.Util.member "joined"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "artifact task bound" 4
+        (proof |> Yojson.Safe.Util.member "workers"
+       |> Yojson.Safe.Util.member "current_task_bound"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "artifact fresh heartbeats" 4
+        (proof |> Yojson.Safe.Util.member "workers"
+       |> Yojson.Safe.Util.member "fresh_heartbeats"
        |> Yojson.Safe.Util.to_int);
       Alcotest.(check int) "artifact peak hot slots" 5
         (proof |> Yojson.Safe.Util.member "peak_hot_slots"

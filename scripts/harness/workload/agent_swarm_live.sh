@@ -429,6 +429,50 @@ print(json.dumps(payload))
 PY
 }
 
+write_live_swarm_summary() {
+  python3 - "$SWARM_SUMMARY_FILE" "$RUN_ID" "$WORKER_COUNT" "$MIN_HOT_SLOTS" "$REQUIRED_FINAL_MARKERS" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+summary_path = Path(sys.argv[1])
+swarm = json.loads(sys.stdin.read())
+summary = swarm.get("summary") or {}
+provider = swarm.get("provider") or {}
+
+payload = {
+    "run_id": sys.argv[2],
+    "worker_count": int(sys.argv[3]),
+    "min_hot_slots": int(sys.argv[4]),
+    "required_final_markers": int(sys.argv[5]),
+    "expected_workers": int(summary.get("expected_workers") or 0),
+    "joined_workers": int(summary.get("joined_workers") or 0),
+    "live_workers": int(summary.get("live_workers") or 0),
+    "current_task_bound": int(summary.get("current_task_bound") or 0),
+    "fresh_heartbeats": int(summary.get("fresh_heartbeats") or 0),
+    "completed_workers": int(summary.get("completed_workers") or 0),
+    "final_markers_seen": int(summary.get("final_markers_seen") or 0),
+    "peak_hot_slots": int(summary.get("peak_hot_slots") or 0),
+    "pass_hot_concurrency": bool(summary.get("pass_hot_concurrency")),
+    "pass_end_to_end": bool(summary.get("pass_end_to_end")),
+    "pass": bool(summary.get("pass")),
+    "provider_reachable": provider.get("provider_reachable"),
+    "provider_model_id": provider.get("provider_model_id"),
+    "actual_model_id": provider.get("actual_model_id"),
+    "expected_slots": provider.get("expected_slots"),
+    "actual_slots": provider.get("actual_slots"),
+    "expected_ctx": provider.get("expected_ctx"),
+    "actual_ctx": provider.get("actual_ctx"),
+    "runtime_blocker": provider.get("runtime_blocker"),
+    "detail": provider.get("detail"),
+    "recommended_next_tool": swarm.get("recommended_next_tool"),
+}
+
+summary_path.write_text(json.dumps(payload, indent=2))
+print(json.dumps(payload))
+PY
+}
+
 write_failure_summary() {
   [ -n "$SWARM_SUMMARY_FILE" ] || return 0
   python3 - "$RUN_ID" "$WORKER_COUNT" "$MIN_HOT_SLOTS" "$REQUIRED_FINAL_MARKERS" \
@@ -645,6 +689,7 @@ call_tool_checked 90130 "masc_operation_checkpoint" "$(jq -cn --arg operation_id
 
 SWARM_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}&operation_id=${OPERATION_ID_QUERY}")"
 require_json "$SWARM_JSON"
+printf "%s" "$SWARM_JSON" | write_live_swarm_summary >/dev/null
 PASS="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.pass // false')"
 JOINED="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.joined_workers // 0')"
 TASK_BOUND="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.current_task_bound // 0')"

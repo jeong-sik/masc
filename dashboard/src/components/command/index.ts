@@ -181,6 +181,23 @@ export function Command() {
     }
   }, [])
 
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return
+      const surface = commandPlaneSurface.value
+      if (surface !== 'swarm' && surface !== 'warroom') return
+      void refreshCommandPlaneCurrentSurface()
+      void refreshCommandPlaneSwarm()
+      if (surface === 'warroom') {
+        void refreshOperatorSnapshot()
+      }
+    }, 5000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [])
+
   return html`
     <section class="dashboard-panel command-plane-view">
       <div class="panel-header">

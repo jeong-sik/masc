@@ -518,6 +518,29 @@ let test_rest_generate_openapi_paths () =
     (try let _ = Str.search_forward (Str.regexp "masc_join") json_str 0 in true
      with Not_found -> false)
 
+let test_rest_generate_openapi_document () =
+  let open Yojson.Safe.Util in
+  let doc = Transport.Rest.generate_openapi_document () in
+  check string "openapi version" "3.1.0" (doc |> member "openapi" |> to_string);
+  let mcp_post = doc |> member "paths" |> member "/mcp" |> member "post" in
+  check string "mcp operation id" "mcp_tools_call"
+    (mcp_post |> member "operationId" |> to_string);
+  let operations = mcp_post |> member "x-mcp-operations" |> to_list in
+  let status_entry =
+    operations
+    |> List.find (fun row ->
+           row |> member "operationId" |> to_string = "masc_status")
+  in
+  check bool "status summary non-empty" true
+    (String.length (status_entry |> member "summary" |> to_string) > 0);
+  let sdk_aliases =
+    status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list
+  in
+  check bool "has sdk alias masc_room_status" true
+    (List.exists
+       (fun row -> row |> member "name" |> to_string = "masc_room_status")
+       sdk_aliases)
+
 (* ============================================================
    get_bindings Tests
    ============================================================ *)
@@ -798,6 +821,7 @@ let () =
     ];
     "rest.generate_openapi_paths", [
       test_case "paths" `Quick test_rest_generate_openapi_paths;
+      test_case "document" `Quick test_rest_generate_openapi_document;
     ];
     "get_bindings", [
       test_case "nonempty" `Quick test_get_bindings_nonempty;

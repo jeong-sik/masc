@@ -75,6 +75,7 @@
    level2_config
    level4_config
    local_runtime_pool
+   agent_swarm_contract
    local_agent_eio
    agent_swarm_client
    agent_swarm_dev_tools

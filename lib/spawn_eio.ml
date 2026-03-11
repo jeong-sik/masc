@@ -343,7 +343,9 @@ let parse_command cmd =
 let add_default_model_arg agent_name argv =
   match Provider_adapter.resolve_direct_adapter agent_name with
   | Some adapter when adapter.canonical_name = "llama" -> (
-      argv @ [ Provider_adapter.explicit_llama_model_id () ])
+      match Provider_adapter.explicit_llama_model_id_result () with
+      | Ok model_id -> argv @ [ model_id ]
+      | Error _ -> argv)
   | _ -> argv
 
 (** Spawn GLM agent via Llm_client cascade.

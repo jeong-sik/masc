@@ -2251,7 +2251,7 @@ Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
         ]);
         ("target_agent", `Assoc [
           ("type", `String "string");
-          ("description", `String "Agent to spawn: 'claude'|'gemini'|'codex'|'llama' (default: claude). Bare 'ollama' is unsupported; use llama:<model> in model fields.");
+          ("description", `String "Agent to spawn: 'claude'|'gemini'|'codex'|'llama' (default: claude). Bare 'ollama' is unsupported; use ollama:<model> only in model fields.");
         ]);
         ("async", `Assoc [
           ("type", `String "boolean");
@@ -3013,7 +3013,7 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
         ]);
         ("agent_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Agent to spawn (claude, gemini, codex, llama). Bare 'ollama' is unsupported; use llama:<model> in model fields.");
+          ("description", `String "Agent to spawn (claude, gemini, codex, llama). Bare 'ollama' is unsupported; use ollama:<model> only in model fields.");
         ]);
         ("additional_instructions", `Assoc [
           ("type", `String "string");

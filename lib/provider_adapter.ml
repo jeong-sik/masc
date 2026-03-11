@@ -233,7 +233,7 @@ let dedupe_keep_order items =
     items
 
 let bare_ollama_migration_message () =
-  "Bare `ollama` is no longer supported. Use `llama:<model>` for local execution, or choose another supported provider label explicitly."
+  "Bare `ollama` is no longer supported. Use `ollama:<model>` for provider selection, or use `llama`/`glm` for local execution."
 
 let is_bare_ollama_label label =
   String.equal (normalize_label label) "ollama"

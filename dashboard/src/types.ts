@@ -1077,6 +1077,11 @@ export interface DashboardMissionAgentBrief {
   recent_input_preview?: string | null
   recent_event?: string | null
   recent_tool_names: string[]
+  allowed_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
 }
 
 export interface DashboardMissionKeeperBrief {
@@ -1088,6 +1093,11 @@ export interface DashboardMissionKeeperBrief {
   last_turn_ago_s?: number | null
   current_work?: string | null
   last_autonomous_action_at?: string | null
+  allowed_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
 }
 
 export interface DashboardMissionInternalSignal {

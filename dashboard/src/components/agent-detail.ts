@@ -8,7 +8,8 @@ import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import { agents, keepers, serverStatus, tasks } from '../store'
 import { fetchRoomMessages, fetchTaskHistory, sendBroadcast } from '../api'
-import type { Agent, Keeper, Task } from '../types'
+import { missionSnapshot } from '../mission-store'
+import type { Agent, DashboardMissionAgentBrief, Keeper, Task } from '../types'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
@@ -52,6 +53,13 @@ function assignedTasks(agentName: string | null): Task[] {
 function keeperForAgent(agentName: string | null): Keeper | null {
   if (!agentName) return null
   return keepers.value.find(keeper => keeper.agent_name === agentName || keeper.name === agentName) ?? null
+}
+
+function missionAgentBrief(agentName: string | null): DashboardMissionAgentBrief | null {
+  if (!agentName) return null
+  const mission = missionSnapshot.value
+  if (!mission) return null
+  return mission.agent_briefs.find(brief => brief.agent_name === agentName) ?? null
 }
 
 function windowTopTools(keeper: Keeper | null): string[] {
@@ -154,10 +162,16 @@ export function AgentDetailOverlay() {
 
   const agent = selectedAgent()
   const keeper = keeperForAgent(agentName)
+  const missionBrief = missionAgentBrief(agentName)
   const ownedTasks = assignedTasks(agentName)
   const lines = roomActivity.value
   const recentTools = recentToolsForAgent(agentName)
   const topTools = windowTopTools(keeper)
+  const allowedTools = missionBrief?.allowed_tool_names ?? []
+  const observedTools = missionBrief?.latest_tool_names ?? []
+  const toolCallCount = missionBrief?.latest_tool_call_count
+  const auditSource = missionBrief?.tool_audit_source
+  const auditAt = missionBrief?.tool_audit_at
   const capabilities = agent?.capabilities ?? []
   const room = serverStatus.value?.room ?? 'default'
   const project = serverStatus.value?.project ?? '확인 없음'
@@ -252,7 +266,7 @@ export function AgentDetailOverlay() {
           <//>
         </div>
 
-        <${Card} title="Capabilities & Tools">
+        <${Card} title="Capabilities & Tool Audit">
           <div style="display:flex; flex-direction:column; gap:12px;">
             <div>
               <div style="font-size:12px; color:#888; margin-bottom:6px;">Capabilities</div>
@@ -263,17 +277,41 @@ export function AgentDetailOverlay() {
               </div>
             </div>
             <div>
-              <div style="font-size:12px; color:#888; margin-bottom:6px;">Recent tools</div>
+              <div style="font-size:12px; color:#888; margin-bottom:6px;">Allowed tools</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                ${allowedTools.length > 0
+                  ? allowedTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
+                  : html`<span class="empty-state" style="font-size:12px;">No allowlist reported</span>`}
+              </div>
+            </div>
+            <div>
+              <div style="font-size:12px; color:#888; margin-bottom:6px;">Observed tools</div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                ${observedTools.length > 0
+                  ? observedTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
+                  : html`<span class="empty-state" style="font-size:12px;">No observed tool-use evidence</span>`}
+              </div>
+            </div>
+            <div class="agent-detail-sub">
+              <span>Tool calls: ${typeof toolCallCount === 'number' ? toolCallCount : '—'}</span>
+              <span>Evidence source: ${auditSource ?? 'unreported'}</span>
+              <span>
+                Observed at:
+                ${auditAt ? html` <${TimeAgo} timestamp=${auditAt} />` : ' unreported'}
+              </span>
+            </div>
+            <div>
+              <div style="font-size:12px; color:#888; margin-bottom:6px;">Linked keeper recent tools</div>
               <div style="display:flex; flex-wrap:wrap; gap:6px;">
                 ${recentTools.length > 0
                   ? recentTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
-                  : html`<span class="empty-state" style="font-size:12px;">No tool telemetry</span>`}
+                  : html`<span class="empty-state" style="font-size:12px;">No keeper tool telemetry</span>`}
               </div>
             </div>
-            ${recentTools.length === 0 && topTools.length > 0
+            ${topTools.length > 0
               ? html`
                   <div>
-                    <div style="font-size:12px; color:#888; margin-bottom:6px;">Window top tools</div>
+                    <div style="font-size:12px; color:#888; margin-bottom:6px;">Keeper window top tools</div>
                     <div style="display:flex; flex-wrap:wrap; gap:6px;">
                       ${topTools.map((tool: string) => html`<span class="pill">${tool}</span>`)}
                     </div>

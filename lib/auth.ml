@@ -235,7 +235,8 @@ let permission_for_tool = function
   | "masc_policy_status" | "masc_dispatch_plan" | "masc_dispatch_route"
   | "masc_observe_topology" | "masc_observe_operations"
   | "masc_observe_capacity" | "masc_observe_alerts"
-  | "masc_observe_traces" ->
+  | "masc_observe_traces"
+  | "masc_voice_sessions" | "masc_voice_agent" | "masc_voice_transcript" ->
       Some CanReadState
   | "masc_add_task" -> Some CanAddTask
   | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
@@ -251,6 +252,9 @@ let permission_for_tool = function
   | "masc_keeper_policy_set"
   | "masc_keeper_feedback_record"
   | "masc_keeper_dataset_export"
+  | "masc_voice_speak" | "masc_voice_session_start"
+  | "masc_voice_session_end" | "masc_voice_conference_start"
+  | "masc_voice_conference_end"
   | "masc_operator_confirm" | "masc_unit_define"
   | "masc_unit_update" | "masc_unit_reparent"
   | "masc_unit_reassign" | "masc_operation_start"

@@ -259,6 +259,7 @@
    tool_experiment
    tool_suspend
    tool_notifications
+   tool_voice
    debate
    social
    tool_social

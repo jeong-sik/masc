@@ -324,6 +324,11 @@ let tool_category tool_name =
   | "masc_keeper_model_set" | "masc_keeper_policy_set"
   | "masc_keeper_feedback_record" | "masc_keeper_dataset_export"
   | "masc_keeper_action_explain" | "masc_keeper_eval_replay"
+  | "masc_keeper_model_set"
+  | "masc_voice_speak" | "masc_voice_session_start"
+  | "masc_voice_session_end" | "masc_voice_sessions"
+  | "masc_voice_agent" | "masc_voice_transcript"
+  | "masc_voice_conference_start" | "masc_voice_conference_end"
   | "masc_keeper_goals" | "masc_keeper_trajectory"
   | "masc_keeper_autonomy"
   (* Perpetual *)

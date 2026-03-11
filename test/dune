@@ -78,6 +78,12 @@
  (name test_dashboard_execution)
  (modules test_dashboard_execution)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
+
+; Voice tool wrapper tests
+(test
+ (name test_tool_voice)
+ (modules test_tool_voice)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 ; Board TTL + metadata classification tests
 (test
  (name test_board_ttl)

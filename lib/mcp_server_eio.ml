@@ -37,8 +37,8 @@ let create_state ?test_mode:_ ~base_path () =
   Mcp_server.create_state ~base_path
 
 (** Create state with Eio context - required for PostgresNative backend *)
-let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path =
-  let state = Mcp_server.create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path in
+let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
+  let state = Mcp_server.create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net:(net :> Eio_context.eio_net) ~base_path in
   (* Recover any previously running team sessions after server restart. *)
   (try Team_session_engine_eio.recover_running_sessions ~sw ~clock ~config:state.Mcp_server.room_config
    with exn ->
@@ -1143,7 +1143,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       agent_name;
       sw = Some sw;
       clock = Some clock;
-      net = get_net_opt ();
+      net = state.Mcp_server.net;
       mcp_state = Some state;
       mcp_session_id;
       auth_token;
@@ -1200,7 +1200,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_audit : Tool_audit.context = { config } in
   let simple_ctx_rate_limit : Tool_rate_limit.context = { config; agent_name; registry } in
   let simple_ctx_cost : Tool_cost.context = { agent_name } in
-  let simple_ctx_walph = lazy ({ config; agent_name; net = get_net (); clock } : _ Tool_walph.context) in
+  let simple_ctx_walph = lazy (
+    match state.Mcp_server.net with
+    | Some net -> ({ config; agent_name; net; clock } : _ Tool_walph.context)
+    | None -> failwith "walph requires net (server_state.net is None)"
+  ) in
   let simple_ctx_agent : Tool_agent.context = { config; agent_name } in
   let simple_ctx_task : Tool_task.context = { config; agent_name } in
   let simple_ctx_room : Tool_room.context = { config; agent_name } in
@@ -1281,7 +1285,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | exn -> `Error (Printexc.to_string exn)
   in
   let trpg_dm_voice_emit ~agent_id ~message ~provider : Tool_trpg.dm_voice_emit_result =
-    let net = get_net () in
+    match state.Mcp_server.net with
+    | None -> Error "trpg voice requires net (server_state.net is None)"
+    | Some net ->
     let provider =
       match provider |> Option.map String.trim with
       | Some p when p <> "" && not (String.equal (String.lowercase_ascii p) "auto") ->
@@ -2501,8 +2507,9 @@ Time: %s
   | "lodge_research" | "lodge_profile"
   (* New: Search, Like, Progress *)
   | "lodge_search" | "lodge_comment_like" | "lodge_progress" ->
-      let net = get_net () in
-      Tool_lodge.handle_tool ~net name arguments
+      (match state.Mcp_server.net with
+       | Some net -> Tool_lodge.handle_tool ~net name arguments
+       | None -> (false, "lodge tools require net (server_state.net is None)"))
 
   (* ============================================ *)
   (* Conversation Tools - Persistent Agent Dialogue *)

@@ -370,10 +370,6 @@ let tool_category tool_name =
   | "masc_risc_metrics" | "masc_risc_ooo_metrics" -> RISC
 
   (* ── Deprecated/archived tools (hidden via tool_catalog, excluded from presets) ── *)
-  | "masc_swarm_init" | "masc_swarm_join" | "masc_swarm_leave"
-  | "masc_swarm_propose" | "masc_swarm_vote" | "masc_swarm_status"
-  | "masc_swarm_deposit" | "masc_swarm_trails" | "masc_swarm_evolve"
-  | "masc_swarm_walph"
   | "masc_archive_save" -> Unknown
 
   (* ── Prefix-based fallbacks for legacy dot-separated names ── *)

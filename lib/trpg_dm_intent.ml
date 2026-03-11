@@ -2,9 +2,9 @@
 
     Extracts DM's narrative intent from their action text.
     Supports three modes via MASC_TRPG_DM_INTENT_MODE:
-    - keyword (default): Pure keyword matching, zero latency
+    - keyword: Pure keyword matching, zero latency
     - llm: LLM structured classification via Llm_client cascade
-    - hybrid: LLM with keyword fallback on failure
+    - hybrid (default): LLM with keyword fallback on failure
 
     @since 2.70.0 *)
 
@@ -24,6 +24,8 @@ type dm_intent = {
   secondary : intent_category option;
   confidence : float;
   keywords_matched : string list;
+  mode : string;
+  provenance : string;
 }
 
 (* ── Match Mode ─────────────────────────────────────────────────────── *)
@@ -33,8 +35,33 @@ type match_mode = Keyword | Llm | Hybrid
 let get_match_mode () : match_mode =
   match Sys.getenv_opt "MASC_TRPG_DM_INTENT_MODE" with
   | Some "llm" -> Llm
-  | Some "hybrid" -> Hybrid
-  | _ -> Keyword
+  | Some "keyword" -> Keyword
+  | _ -> Hybrid
+
+let match_mode_to_string = function
+  | Keyword -> "keyword"
+  | Llm -> "llm"
+  | Hybrid -> "hybrid"
+
+type intent_provenance =
+  | Judgment
+  | Derived
+  | Fallback
+
+let intent_provenance_to_string = function
+  | Judgment -> "judgment"
+  | Derived -> "derived"
+  | Fallback -> "fallback"
+
+let make_intent ~mode ~provenance ~primary ~secondary ~confidence ~keywords_matched =
+  {
+    primary;
+    secondary;
+    confidence;
+    keywords_matched;
+    mode = match_mode_to_string mode;
+    provenance = intent_provenance_to_string provenance;
+  }
 
 (* ── Keyword tables ─────────────────────────────────────────────────── *)
 
@@ -151,15 +178,14 @@ let extract_keyword (text : string) : dm_intent =
         secondary = None;
         confidence = 0.0;
         keywords_matched = [];
+        mode = match_mode_to_string Keyword;
+        provenance = intent_provenance_to_string Derived;
       }
   | best :: rest ->
       if best.confidence < primary_threshold then
-        {
-          primary = Unknown;
-          secondary = None;
-          confidence = 0.0;
-          keywords_matched = [];
-        }
+        make_intent ~mode:Keyword ~provenance:Derived
+          ~primary:Unknown ~secondary:None ~confidence:0.0
+          ~keywords_matched:[]
       else
         let secondary =
           match rest with
@@ -169,12 +195,9 @@ let extract_keyword (text : string) : dm_intent =
               Some second.category
           | _ -> None
         in
-        {
-          primary = best.category;
-          secondary;
-          confidence = best.confidence;
-          keywords_matched = best.matched;
-        }
+        make_intent ~mode:Keyword ~provenance:Derived
+          ~primary:best.category ~secondary ~confidence:best.confidence
+          ~keywords_matched:best.matched
 
 (* ── LLM Classification ────────────────────────────────────────────── *)
 
@@ -246,7 +269,9 @@ let intent_of_json (json : Yojson.Safe.t) : (dm_intent, string) result =
             List.filter_map (function `String s -> Some s | _ -> None) items
         | _ -> []
       in
-      Ok { primary; secondary; confidence; keywords_matched }
+      Ok
+        (make_intent ~mode:Llm ~provenance:Judgment
+           ~primary ~secondary ~confidence ~keywords_matched)
   | _ -> Error "LLM response is not a JSON object"
 
 (** Parse dm_intent from LLM text response.
@@ -304,12 +329,17 @@ let extract (text : string) : dm_intent =
        | Ok intent -> intent
        | Error _ ->
            (* LLM-only mode still returns Unknown on failure *)
-           { primary = Unknown; secondary = None;
-             confidence = 0.0; keywords_matched = [] })
+           make_intent ~mode:Llm ~provenance:Judgment
+             ~primary:Unknown ~secondary:None ~confidence:0.0
+             ~keywords_matched:[] )
   | Hybrid ->
       (match extract_with_llm text with
        | Ok intent -> intent
-       | Error _ -> extract_keyword text)
+       | Error _ ->
+           let keyword_intent = extract_keyword text in
+           { keyword_intent with
+             mode = match_mode_to_string Hybrid;
+             provenance = intent_provenance_to_string Fallback })
 
 let string_of_category = function
   | Combat_setup -> "combat_setup"
@@ -359,4 +389,6 @@ let to_yojson (intent : dm_intent) : Yojson.Safe.t =
       ("secondary", secondary_json);
       ("confidence", `Float intent.confidence);
       ("keywords_matched", keywords_json);
+      ("mode", `String intent.mode);
+      ("provenance", `String intent.provenance);
     ]

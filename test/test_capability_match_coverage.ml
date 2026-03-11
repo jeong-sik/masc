@@ -4,6 +4,19 @@ open Masc_mcp.Capability_match
 
 let () = Printexc.record_backtrace true
 
+let with_env key value f =
+  let old = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some prev -> Unix.putenv key prev
+      | None -> Unix.putenv key "")
+    f
+
+let with_keyword_mode f =
+  with_env "MASC_CAPABILITY_MATCH_MODE" "keyword" f
+
 (* ---------- Test Agents ---------- *)
 
 let security_agent = {
@@ -133,86 +146,100 @@ let test_overlap_substring () =
 (* ---------- Scoring Tests ---------- *)
 
 let test_score_perfect_match () =
-  let m = score security_agent security_task in
-  assert (m.total_score > 0.0);
-  assert (m.agent_name = "claude-security");
-  assert (m.task_id = "task-sec-001")
+  with_keyword_mode (fun () ->
+      let m = score security_agent security_task in
+      assert (m.total_score > 0.0);
+      assert (m.agent_name = "claude-security");
+      assert (m.task_id = "task-sec-001"))
 
 let test_score_no_match () =
-  let m = score generalist_agent security_task in
-  assert (m.total_score < 0.01)
+  with_keyword_mode (fun () ->
+      let m = score generalist_agent security_task in
+      assert (m.total_score < 0.01))
 
 let test_score_cross_domain () =
-  let m = score security_agent frontend_task in
-  let m2 = score frontend_agent frontend_task in
-  (* Frontend agent should score higher on frontend task *)
-  assert (m2.total_score > m.total_score)
+  with_keyword_mode (fun () ->
+      let m = score security_agent frontend_task in
+      let m2 = score frontend_agent frontend_task in
+      (* Frontend agent should score higher on frontend task *)
+      assert (m2.total_score > m.total_score))
 
 (* ---------- Ranking Tests ---------- *)
 
 let test_rank_agents_for_task () =
-  let agents = [generalist_agent; frontend_agent; security_agent; devops_agent] in
-  let ranked = rank_agents_for_task agents security_task in
-  assert (List.length ranked = 4);
-  (* Security agent should be first *)
-  assert ((List.hd ranked).agent_name = "claude-security")
+  with_keyword_mode (fun () ->
+      let agents = [generalist_agent; frontend_agent; security_agent; devops_agent] in
+      let ranked = rank_agents_for_task agents security_task in
+      assert (List.length ranked = 4);
+      (* Security agent should be first *)
+      assert ((List.hd ranked).agent_name = "claude-security"))
 
 let test_rank_tasks_for_agent () =
-  let tasks = [frontend_task; devops_task; security_task] in
-  let ranked = rank_tasks_for_agent security_agent tasks in
-  assert (List.length ranked = 3);
-  (* Security task should be first *)
-  assert ((List.hd ranked).task_id = "task-sec-001")
+  with_keyword_mode (fun () ->
+      let tasks = [frontend_task; devops_task; security_task] in
+      let ranked = rank_tasks_for_agent security_agent tasks in
+      assert (List.length ranked = 3);
+      (* Security task should be first *)
+      assert ((List.hd ranked).task_id = "task-sec-001"))
 
 let test_rank_devops_task () =
-  let agents = [security_agent; frontend_agent; devops_agent] in
-  let ranked = rank_agents_for_task agents devops_task in
-  (* DevOps agent should rank first *)
-  assert ((List.hd ranked).agent_name = "claude-devops")
+  with_keyword_mode (fun () ->
+      let agents = [security_agent; frontend_agent; devops_agent] in
+      let ranked = rank_agents_for_task agents devops_task in
+      (* DevOps agent should rank first *)
+      assert ((List.hd ranked).agent_name = "claude-devops"))
 
 let test_rank_frontend_task () =
-  let agents = [security_agent; frontend_agent; devops_agent] in
-  let ranked = rank_agents_for_task agents frontend_task in
-  (* Frontend agent should rank first *)
-  assert ((List.hd ranked).agent_name = "claude-frontend")
+  with_keyword_mode (fun () ->
+      let agents = [security_agent; frontend_agent; devops_agent] in
+      let ranked = rank_agents_for_task agents frontend_task in
+      (* Frontend agent should rank first *)
+      assert ((List.hd ranked).agent_name = "claude-frontend"))
 
 (* ---------- Best Agent / Suggest Task ---------- *)
 
 let test_best_agent () =
-  let agents = [generalist_agent; security_agent] in
-  let best = best_agent_for_task agents security_task in
-  assert (best <> None);
-  assert ((Option.get best).agent_name = "claude-security")
+  with_keyword_mode (fun () ->
+      let agents = [generalist_agent; security_agent] in
+      let best = best_agent_for_task agents security_task in
+      assert (best <> None);
+      assert ((Option.get best).agent_name = "claude-security"))
 
 let test_best_agent_min_score () =
-  let agents = [generalist_agent] in
-  let best = best_agent_for_task ~min_score:0.5 agents security_task in
-  (* Generalist has 0.0 score, should return None *)
-  assert (best = None)
+  with_keyword_mode (fun () ->
+      let agents = [generalist_agent] in
+      let best = best_agent_for_task ~min_score:0.5 agents security_task in
+      (* Generalist has 0.0 score, should return None *)
+      assert (best = None))
 
 let test_suggest_task () =
-  let tasks = [frontend_task; devops_task; security_task] in
-  let suggested = suggest_task_for_agent security_agent tasks in
-  assert (suggested <> None);
-  assert ((Option.get suggested).task_id = "task-sec-001")
+  with_keyword_mode (fun () ->
+      let tasks = [frontend_task; devops_task; security_task] in
+      let suggested = suggest_task_for_agent security_agent tasks in
+      assert (suggested <> None);
+      assert ((Option.get suggested).task_id = "task-sec-001"))
 
 (* ---------- JSON Serialization ---------- *)
 
 let test_match_score_to_json () =
-  let m = score security_agent security_task in
-  let json = match_score_to_json m in
-  let open Yojson.Safe.Util in
-  assert (json |> member "agentName" |> to_string = "claude-security");
-  assert (json |> member "taskId" |> to_string = "task-sec-001");
-  assert (json |> member "totalScore" |> to_float >= 0.0)
+  with_keyword_mode (fun () ->
+      let m = score security_agent security_task in
+      let json = match_score_to_json m in
+      let open Yojson.Safe.Util in
+      assert (json |> member "agentName" |> to_string = "claude-security");
+      assert (json |> member "taskId" |> to_string = "task-sec-001");
+      assert (json |> member "totalScore" |> to_float >= 0.0);
+      assert (json |> member "mode" |> to_string <> "");
+      assert (json |> member "provenance" |> to_string <> ""))
 
 let test_ranking_to_json () =
-  let agents = [security_agent; frontend_agent] in
-  let ranked = rank_agents_for_task agents security_task in
-  let json = ranking_to_json ranked in
-  match json with
-  | `List items -> assert (List.length items = 2)
-  | _ -> failwith "Expected JSON list"
+  with_keyword_mode (fun () ->
+      let agents = [security_agent; frontend_agent] in
+      let ranked = rank_agents_for_task agents security_task in
+      let json = ranking_to_json ranked in
+      match json with
+      | `List items -> assert (List.length items = 2)
+      | _ -> failwith "Expected JSON list")
 
 (* ---------- Agent Profile from JSON ---------- *)
 
@@ -302,8 +329,8 @@ let test_match_mode_dispatch () =
   let mode = get_match_mode () in
   match Sys.getenv_opt "MASC_CAPABILITY_MATCH_MODE" with
   | Some "llm" -> assert (mode = Llm)
-  | Some "hybrid" -> assert (mode = Hybrid)
-  | _ -> assert (mode = Keyword)
+  | Some "keyword" -> assert (mode = Keyword)
+  | _ -> assert (mode = Hybrid)
 
 let test_score_keyword_direct () =
   (* score_keyword should behave identically to old score *)

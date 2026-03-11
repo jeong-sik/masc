@@ -14,9 +14,9 @@
     (e.g. "security" ↔ "cybersecurity", "frontend" ↔ "UI").
 
     Mode selection via MASC_CAPABILITY_MATCH_MODE:
-      - keyword (default): existing heuristic, 0-latency
+      - keyword: existing heuristic, 0-latency
       - llm: LLM-only scoring
-      - hybrid: LLM with keyword fallback on failure
+      - hybrid (default): LLM with keyword fallback on failure
 
     @see "Orchestrating Human-AI Teams" — capability-based assignment
     @see arXiv 2601.04748 — semantic confusability in agent routing
@@ -53,6 +53,8 @@ type match_score = {
   interest_score: float;    (** 0.0-1.0: how well interests match *)
   capability_score: float;  (** 0.0-1.0: direct capability match *)
   total_score: float;       (** Weighted combination *)
+  mode: string;             (** Active scoring mode *)
+  provenance: string;       (** judgment | derived | fallback *)
 } [@@deriving show, eq]
 
 (* ---------- Match Mode ---------- *)
@@ -63,8 +65,36 @@ type match_mode = Keyword | Llm | Hybrid
 let get_match_mode () : match_mode =
   match Sys.getenv_opt "MASC_CAPABILITY_MATCH_MODE" with
   | Some "llm" -> Llm
-  | Some "hybrid" -> Hybrid
-  | _ -> Keyword
+  | Some "keyword" -> Keyword
+  | _ -> Hybrid
+
+let match_mode_to_string = function
+  | Keyword -> "keyword"
+  | Llm -> "llm"
+  | Hybrid -> "hybrid"
+
+type score_provenance =
+  | Judgment
+  | Derived
+  | Fallback
+
+let score_provenance_to_string = function
+  | Judgment -> "judgment"
+  | Derived -> "derived"
+  | Fallback -> "fallback"
+
+let make_match_score ~mode ~provenance ~agent_name ~task_id
+    ~trait_score ~interest_score ~capability_score ~total_score =
+  {
+    agent_name;
+    task_id;
+    trait_score;
+    interest_score;
+    capability_score;
+    total_score;
+    mode = match_mode_to_string mode;
+    provenance = score_provenance_to_string provenance;
+  }
 
 (* ---------- Keyword Extraction ---------- *)
 
@@ -288,52 +318,53 @@ let score_keyword (agent : agent_profile) (task : task_profile) : match_score =
     +. capability_score *. 0.2
   in
   let total_score = if role_ok then base_score else 0.0 in
-  {
-    agent_name = agent.name;
-    task_id = task.task_id;
-    trait_score;
-    interest_score;
-    capability_score;
-    total_score;
-  }
+  make_match_score ~mode:Keyword ~provenance:Derived
+    ~agent_name:agent.name ~task_id:task.task_id
+    ~trait_score ~interest_score ~capability_score ~total_score
 
 (** Compute LLM-based match score. Falls back to keyword on parse failure. *)
 let score_llm (agent : agent_profile) (task : task_profile) : match_score =
   let role_ok = Agent_identity.role_satisfies
     ~required:task.required_role ~agent_role:agent.role in
   if not role_ok then
-    { agent_name = agent.name; task_id = task.task_id;
-      trait_score = 0.0; interest_score = 0.0;
-      capability_score = 0.0; total_score = 0.0 }
+    make_match_score ~mode:Llm ~provenance:Judgment
+      ~agent_name:agent.name ~task_id:task.task_id
+      ~trait_score:0.0 ~interest_score:0.0
+      ~capability_score:0.0 ~total_score:0.0
   else
     match score_with_llm agent task with
     | Ok llm_score ->
-        { agent_name = agent.name; task_id = task.task_id;
-          trait_score = llm_score; interest_score = llm_score;
-          capability_score = llm_score; total_score = llm_score }
+        make_match_score ~mode:Llm ~provenance:Judgment
+          ~agent_name:agent.name ~task_id:task.task_id
+          ~trait_score:llm_score ~interest_score:llm_score
+          ~capability_score:llm_score ~total_score:llm_score
     | Error _err ->
         (* LLM failed — return zero rather than silently falling back *)
-        { agent_name = agent.name; task_id = task.task_id;
-          trait_score = 0.0; interest_score = 0.0;
-          capability_score = 0.0; total_score = 0.0 }
+        make_match_score ~mode:Llm ~provenance:Judgment
+          ~agent_name:agent.name ~task_id:task.task_id
+          ~trait_score:0.0 ~interest_score:0.0
+          ~capability_score:0.0 ~total_score:0.0
 
 (** Compute hybrid match score: LLM first, keyword fallback on failure. *)
 let score_hybrid (agent : agent_profile) (task : task_profile) : match_score =
   let role_ok = Agent_identity.role_satisfies
     ~required:task.required_role ~agent_role:agent.role in
   if not role_ok then
-    { agent_name = agent.name; task_id = task.task_id;
-      trait_score = 0.0; interest_score = 0.0;
-      capability_score = 0.0; total_score = 0.0 }
+    make_match_score ~mode:Hybrid ~provenance:Fallback
+      ~agent_name:agent.name ~task_id:task.task_id
+      ~trait_score:0.0 ~interest_score:0.0
+      ~capability_score:0.0 ~total_score:0.0
   else
     match score_with_llm agent task with
     | Ok llm_score ->
-        { agent_name = agent.name; task_id = task.task_id;
-          trait_score = llm_score; interest_score = llm_score;
-          capability_score = llm_score; total_score = llm_score }
+        make_match_score ~mode:Hybrid ~provenance:Judgment
+          ~agent_name:agent.name ~task_id:task.task_id
+          ~trait_score:llm_score ~interest_score:llm_score
+          ~capability_score:llm_score ~total_score:llm_score
     | Error _err ->
         (* LLM unavailable — fall back to keyword heuristic *)
-        score_keyword agent task
+        let keyword = score_keyword agent task in
+        { keyword with mode = match_mode_to_string Hybrid; provenance = "fallback" }
 
 (** Compute match score using the active mode (env var dispatch). *)
 let score (agent : agent_profile) (task : task_profile) : match_score =
@@ -381,6 +412,8 @@ let match_score_to_json (m : match_score) : Yojson.Safe.t =
     ("interestScore", `Float m.interest_score);
     ("capabilityScore", `Float m.capability_score);
     ("totalScore", `Float m.total_score);
+    ("mode", `String m.mode);
+    ("provenance", `String m.provenance);
   ]
 
 let ranking_to_json (scores : match_score list) : Yojson.Safe.t =

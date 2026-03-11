@@ -30,8 +30,14 @@ let test_supervised_trace_only_does_not_make_lane_present () =
   let supervised = find_lane json "supervised" in
   check bool "supervised lane absent" false
     (supervised |> U.member "present" |> U.to_bool);
+  check string "lane provenance" "derived"
+    (supervised |> U.member "provenance" |> U.to_string);
   check int "no supervised hard flags" 0
     (supervised |> U.member "hard_flags" |> U.to_list |> List.length);
+  check string "root recommendation provenance" "fallback"
+    (json |> U.member "recommended_next_action" |> U.member "provenance" |> U.to_string);
+  check string "timeline provenance contract" "truth"
+    (json |> U.member "provenance_summary" |> U.member "timeline" |> U.to_string);
   check bool "do not recommend team session inspection" false
     (String.equal "masc_team_session_status"
        (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string))
@@ -87,7 +93,9 @@ let test_active_managed_operation_keeps_lane_present () =
   in
   let managed = find_lane json "managed" in
   check bool "managed lane present for active operation" true
-    (managed |> U.member "present" |> U.to_bool)
+    (managed |> U.member "present" |> U.to_bool);
+  check string "overview provenance" "derived"
+    (json |> U.member "overview" |> U.member "provenance" |> U.to_string)
 
 let test_managed_alert_only_keeps_lane_present () =
   let now = M.Time_compat.now () in

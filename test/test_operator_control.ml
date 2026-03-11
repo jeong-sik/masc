@@ -99,6 +99,12 @@ let test_snapshot_has_expected_sections () =
         (Yojson.Safe.Util.member "attention_summary" json <> `Null);
       Alcotest.(check bool) "recommendation summary present" true
         (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
+      Alcotest.(check string) "judgment owner" "fallback_read_model"
+        Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
+      Alcotest.(check bool) "no authoritative judgment" false
+        Yojson.Safe.Util.(json |> member "authoritative_judgment_available" |> to_bool);
+      Alcotest.(check string) "command plane provenance" "truth"
+        Yojson.Safe.Util.(json |> member "provenance_summary" |> member "command_plane" |> to_string);
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with
          | `List _ -> true
@@ -157,6 +163,12 @@ let test_digest_room_exposes_pending_confirm_attention () =
              Yojson.Safe.Util.(item |> member "kind" |> to_string)
              = "pending_confirm_waiting")
            attention_items);
+      Alcotest.(check bool) "attention provenance present" true
+        (List.for_all
+           (fun item ->
+             String.equal "derived"
+               Yojson.Safe.Util.(item |> member "provenance" |> to_string))
+           attention_items);
       Alcotest.(check bool) "command attention present" true
         (List.exists
            (fun item ->
@@ -190,6 +202,8 @@ let test_digest_team_session_shape () =
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "target_id" session_id
         Yojson.Safe.Util.(digest |> member "target_id" |> to_string);
+      Alcotest.(check string) "recommendation provenance summary" "fallback"
+        Yojson.Safe.Util.(digest |> member "provenance_summary" |> member "recommended_actions" |> to_string);
       Alcotest.(check bool) "swarm_status present" true
         (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
       Alcotest.(check bool) "command_plane present" true
@@ -794,7 +808,9 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
       Alcotest.(check string) "spawn_agent" "llama"
         Yojson.Safe.Util.(worker |> member "spawn_agent" |> to_string);
       Alcotest.(check string) "spawn_role" "implementer-a"
-        Yojson.Safe.Util.(worker |> member "spawn_role" |> to_string))
+        Yojson.Safe.Util.(worker |> member "spawn_role" |> to_string);
+      Alcotest.(check string) "recommendation provenance" "fallback"
+        Yojson.Safe.Util.(recommendation |> member "provenance" |> to_string))
 
 let test_confirm_rejects_expired_token () =
   Eio_main.run @@ fun env ->

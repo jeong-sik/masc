@@ -130,6 +130,7 @@ type session = {
   goal : string;
   created_by : string;
   room_id : string;
+  operation_id : string option;
   status : session_status;
   duration_seconds : int;
   execution_scope : execution_scope;
@@ -790,6 +791,7 @@ let session_to_yojson (s : session) =
       ("goal", `String s.goal);
       ("created_by", `String s.created_by);
       ("room_id", `String s.room_id);
+      ("operation_id", Option.fold ~none:`Null ~some:(fun v -> `String v) s.operation_id);
       ("status", `String (status_to_string s.status));
       ("duration_seconds", `Int s.duration_seconds);
       ("execution_scope", `String (execution_scope_to_string s.execution_scope));
@@ -856,6 +858,7 @@ let session_of_yojson json =
         goal = json |> member "goal" |> to_string;
         created_by = json |> member "created_by" |> to_string_option |> Option.value ~default:"unknown";
         room_id = json |> member "room_id" |> to_string_option |> Option.value ~default:"default";
+        operation_id = json |> member "operation_id" |> to_string_option;
         status = json |> member "status" |> to_string_option |> Option.value ~default:"failed" |> status_of_string;
         duration_seconds;
         execution_scope =

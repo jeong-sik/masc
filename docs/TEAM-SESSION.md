@@ -27,6 +27,7 @@
 입력:
 
 - `goal` (required)
+- `operation_id` (optional, managed CPv2 operation attachment)
 - `duration_seconds` (default `3600`)
 - `execution_scope` (`observe_only` | `limited_code_change`, default `observe_only`)
 - `checkpoint_interval_sec` (default `60`)
@@ -38,6 +39,7 @@
 출력:
 
 - `session_id`
+- `operation_id` (if attached)
 - `status` (`running`)
 - `started_at`
 - `planned_end_at`
@@ -53,7 +55,17 @@
 - 런타임 상태(`runtime_running`)
 - 진행 요약(`summary`): elapsed, remaining, progress, done delta
 - LLM 캐시 메트릭(`llm_cache_metrics`): hits/misses/writes/bypass/errors/hit_rate
+- command-plane 링크(`command_plane`): attached operation id/path
 - 보고서 경로(`report_paths`)
+
+### Attached Session Mode
+
+`masc_team_session_start(operation_id="op-...")`를 사용하면 team session이 managed CPv2 operation에 연결됩니다.
+
+- operation의 `detachment_session_id`가 session id로 갱신됩니다.
+- `masc_team_session_status`의 `command_plane.operation_id` / `operation_path`로 연결 상태를 읽을 수 있습니다.
+- 이미 다른 session이 연결된 operation에는 새 session을 attach할 수 없습니다.
+- `operation_id` 없이 시작한 session은 기존처럼 projected session으로 해석됩니다.
 
 ### `masc_team_session_stop`
 

@@ -7,6 +7,8 @@ type runtime_state = {
   mutable generate_report_on_finalize : bool;
 }
 
+let ( let* ) = Result.bind
+
 let runtimes : (string, runtime_state) Hashtbl.t = Hashtbl.create 16
 let runtimes_mutex = Eio.Mutex.create ()
 let finalize_mutex = Eio.Mutex.create ()
@@ -249,6 +251,30 @@ let session_has_attached_actor ~(config : Room.config) ~(session_id : string)
              | `String attached -> String.equal attached actor
              | _ -> false)
          | _ -> false)
+
+let validate_operation_attachment ~(config : Room.config) ~(operation_id : string)
+    : (unit, string) result =
+  let open Yojson.Safe.Util in
+  let operations_json = Command_plane_v2.list_operations_json ~operation_id config in
+  match operations_json |> member "operations" with
+  | `List [] ->
+      Error (Printf.sprintf "operation not found: %s" operation_id)
+  | `List ((`Assoc _ as row) :: _) -> (
+      match
+        row |> member "operation" |> member "detachment_session_id"
+        |> to_string_option
+      with
+      | Some session_id when String.trim session_id <> "" ->
+          Error
+            (Printf.sprintf
+               "operation already attached to team session: %s"
+               session_id)
+      | _ -> Ok ())
+  | _ ->
+      Error
+        (Printf.sprintf
+           "operation lookup failed for attachment: %s"
+           operation_id)
 
 let compute_live_done_delta (config : Room.config)
     (session : Team_session_types.session) =
@@ -507,6 +533,20 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
       ("cascade_metrics", cascade_metrics);
       ("local_runtime", local_runtime);
       ("llm_cache_metrics", llm_cache_metrics);
+      ( "command_plane",
+        `Assoc
+          [
+            ( "operation_id",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                session.operation_id );
+            ( "operation_path",
+              Option.fold ~none:`Null
+                ~some:(fun value ->
+                  `String
+                    (Printf.sprintf "/api/v1/command-plane/operations?operation_id=%s"
+                       value))
+                session.operation_id );
+          ] );
       ( "report_paths",
         `Assoc
           [
@@ -1026,7 +1066,8 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     ~(instruction_profile : Team_session_types.instruction_profile)
     ~(alert_channel : Team_session_types.alert_channel) ~(auto_resume : bool)
     ~(report_formats : Team_session_types.report_format list)
-    ~(agent_names : string list) : (Yojson.Safe.t, string) result =
+    ~(agent_names : string list) ~(operation_id : string option)
+    : (Yojson.Safe.t, string) result =
   try
     Room_utils.ensure_initialized config;
     let duration_seconds = clamp_int ~min_v:60 ~max_v:28800 duration_seconds in
@@ -1037,6 +1078,11 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     let now = Time_compat.now () in
     let session_id = Team_session_store.make_session_id () in
     Team_session_store.ensure_session_dirs config session_id;
+    let* () =
+      match operation_id with
+      | Some value -> validate_operation_attachment ~config ~operation_id:value
+      | None -> Ok ()
+    in
     let room_id =
       Room_utils.read_current_room config |> Option.value ~default:"default"
     in
@@ -1057,6 +1103,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         goal;
         created_by;
         room_id;
+        operation_id;
         status = Team_session_types.Running;
         duration_seconds;
         execution_scope;
@@ -1102,6 +1149,31 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         updated_at_iso = now_iso ();
       }
     in
+    let* () =
+      match operation_id with
+      | Some value -> (
+          match
+            Command_plane_v2.update_operation config ~actor:created_by
+              ~operation_id:value ~event_type:"team_session_attached"
+              ~detail:
+                (`Assoc
+                  [
+                    ("session_id", `String session_id);
+                    ("goal", `String goal);
+                  ])
+              (fun current ->
+                { current with
+                  detachment_session_id = Some session_id;
+                  note =
+                    (match current.note with
+                    | Some note when String.trim note <> "" -> Some note
+                    | _ -> Some ("team_session:" ^ session_id))
+                })
+          with
+          | Ok _ -> Ok ()
+          | Error err -> Error err)
+      | None -> Ok ()
+    in
     Team_session_store.save_session config session;
     Team_session_store.append_event config session_id ~event_type:"session_started"
       ~detail:
@@ -1109,6 +1181,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
           [
             ("goal", `String goal);
             ("created_by", `String created_by);
+            ("operation_id", Option.fold ~none:`Null ~some:(fun value -> `String value) operation_id);
             ("duration_seconds", `Int duration_seconds);
             ("agent_count", `Int (List.length selected_agents));
             ( "scale_profile",
@@ -1162,6 +1235,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
           ("started_at", `Float now);
           ("planned_end_at", `Float session.planned_end_at);
           ("artifacts_dir", `String session.artifacts_dir);
+          ("operation_id", Option.fold ~none:`Null ~some:(fun value -> `String value) operation_id);
           ( "orchestration_mode",
             `String
               (Team_session_types.orchestration_mode_to_string orchestration_mode)

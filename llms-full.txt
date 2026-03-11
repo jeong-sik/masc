@@ -1,0 +1,107 @@
+# MASC-MCP LLM Front Door Full
+
+This file is the AI-friendly narrow waist for `masc-mcp`.
+
+## Goal
+
+Use `CPv2 command plane` as the single source of execution truth. Other orchestration surfaces should attach to it instead of bypassing it.
+
+## Primary entities
+
+- `room`: repo-root coordination scope
+- `task`: backlog work item
+- `operation`: managed execution unit
+- `detachment`: runtime materialization of an operation
+- `team session`: long-running worker capsule that can attach to an operation
+- `policy decision`: approval gate for strict actions
+- `trace`: lineage across operation, dispatch, checkpoint, and policy events
+
+## Canonical golden paths
+
+### 1. Room / task hygiene
+
+Use this before any real work:
+
+1. `masc_set_room`
+2. `masc_join`
+3. `masc_status`
+4. `masc_claim` or `masc_add_task`
+5. `masc_plan_set_task`
+6. `masc_heartbeat`
+
+### 2. Managed large-team orchestration
+
+Use this for benchmark runs or large autonomous teams:
+
+1. `masc_unit_define`
+2. `masc_operation_start`
+3. `masc_dispatch_tick`
+4. `masc_detachment_status`
+5. `masc_observe_topology` / `masc_observe_operations` / `masc_observe_traces`
+6. `masc_policy_approve` or `masc_policy_deny` when blocked
+7. `masc_operation_checkpoint`
+8. `masc_operation_finalize`
+
+### 3. Attached team session
+
+Use this when a managed operation needs a real worker team:
+
+1. Start operation with `masc_operation_start`
+2. Start session with `masc_team_session_start(operation_id="op-...")`
+3. Record work through `masc_team_session_step`
+4. Monitor with `masc_team_session_status`
+5. Use `/mcp/operator` for guided intervention when needed
+6. Finalize operation and session artifacts
+
+## Workload templates
+
+### `coding_team`
+
+- normalized workload profile: `coding_task`
+- default stage: `decompose`
+- intended use: planner / implementer / verifier / reviewer teams
+
+### `research_team`
+
+- normalized workload profile: `research_pipeline`
+- default stage: `normalize`
+- intended use: collect / verify / curate / rank / audit teams
+
+### `ops_governance_team`
+
+- normalized workload profile: `research_pipeline`
+- default stage: `audit`
+- intended use: operator-heavy audit, intervention, approval, and governance flows
+
+## Important constraints
+
+- `workload_template` and explicit `workload_profile` must belong to the same family.
+- An operation can only attach to one team session at a time.
+- `claim` does not set `current_task`; call `masc_plan_set_task`.
+- `dispatch_tick` is required after starting an operation.
+- `team_session` without `operation_id` is valid, but it will be treated as a projected session rather than a managed attached session.
+
+## Operator surface
+
+Use `/mcp/operator` when you want:
+
+- a small tool surface
+- read-first supervision
+- preview/confirm intervention
+- safer human-in-the-loop control
+
+Do not mix operator explanations with benchmark explanations in the same response unless the user explicitly asks for both.
+
+## Secondary surfaces
+
+Treat these as secondary unless the task explicitly calls for them:
+
+- `Lodge`
+- `TRPG`
+- `RISC`
+- concept/vision documents
+
+## Discoverability
+
+- `/api/v1/command-plane/help` exposes current concepts, golden paths, templates, examples, and pitfalls.
+- `tools/list` may hide low-value or deprecated tools; prefer canonical replacements.

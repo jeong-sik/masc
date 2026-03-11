@@ -131,6 +131,89 @@ let test_generic_alias_normalizes_to_coding_task_and_keeps_artifact_scope () =
         [ "lib/command_plane_v2.ml"; "test/test_command_plane_v2.ml" ]
         operation.artifact_scope)
 
+let test_workload_template_defaults_apply_expected_profile_and_stage () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let coding_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Run coding team");
+              ("workload_template", `String "coding_team");
+            ])
+      in
+      Alcotest.(check (option string)) "coding template stored"
+        (Some "coding_team") coding_op.workload_template;
+      Alcotest.(check string) "coding template workload" "coding_task"
+        (Command_plane_v2.operation_workload_profile coding_op);
+      Alcotest.(check (option string)) "coding template stage"
+        (Some "decompose") coding_op.stage;
+      let research_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Run research team");
+              ("workload_template", `String "research_team");
+            ])
+      in
+      Alcotest.(check (option string)) "research template stored"
+        (Some "research_team") research_op.workload_template;
+      Alcotest.(check string) "research template workload" "research_pipeline"
+        (Command_plane_v2.operation_workload_profile research_op);
+      Alcotest.(check (option string)) "research template stage"
+        (Some "normalize") research_op.stage;
+      let ops_op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Run ops governance team");
+              ("workload_template", `String "ops_governance_team");
+            ])
+      in
+      Alcotest.(check (option string)) "ops template stored"
+        (Some "ops_governance_team") ops_op.workload_template;
+      Alcotest.(check string) "ops template workload" "research_pipeline"
+        (Command_plane_v2.operation_workload_profile ops_op);
+      Alcotest.(check (option string)) "ops template stage"
+        (Some "audit") ops_op.stage)
+
+let test_workload_template_rejects_mismatched_workload_profile () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      match
+        Command_plane_v2.start_operation config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Mismatch template/profile");
+              ("workload_template", `String "coding_team");
+              ("workload_profile", `String "research_pipeline");
+            ])
+      with
+      | Error message ->
+          Alcotest.(check string)
+            "template/profile mismatch"
+            "workload_template coding_team requires workload_profile=coding_task"
+            message
+      | Ok _ -> Alcotest.fail "expected workload_template mismatch to fail")
+
 let test_coding_verify_and_review_require_expected_dependencies () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1825,6 +1908,14 @@ let () =
             "generic alias normalizes to coding_task and keeps artifact scope"
             `Quick
             test_generic_alias_normalizes_to_coding_task_and_keeps_artifact_scope;
+          Alcotest.test_case
+            "workload template defaults apply expected profile and stage"
+            `Quick
+            test_workload_template_defaults_apply_expected_profile_and_stage;
+          Alcotest.test_case
+            "workload template rejects mismatched workload profile"
+            `Quick
+            test_workload_template_rejects_mismatched_workload_profile;
           Alcotest.test_case
             "coding verify and review require expected dependencies"
             `Quick

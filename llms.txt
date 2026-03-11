@@ -1,0 +1,39 @@
+# MASC-MCP LLM Front Door
+
+`masc-mcp` has many tools. Do not start from the full surface.
+
+## Canonical paths
+
+1. `Room / Task Hygiene`
+   - `masc_set_room`
+   - `masc_join`
+   - `masc_status`
+   - `masc_claim` or `masc_add_task`
+   - `masc_plan_set_task`
+   - `masc_heartbeat`
+
+2. `CPv2 direct`
+   - Use for managed operations, benchmark runs, and large-team orchestration.
+   - Start with `masc_unit_define`, `masc_operation_start`, `masc_dispatch_tick`.
+
+3. `Attached Team Session`
+   - Use when a managed operation needs a worker team.
+   - Start operation first, then call `masc_team_session_start(operation_id=...)`.
+
+4. `Supervisor path`
+   - Use `/mcp/operator` for `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`.
+
+## Workload templates
+
+- `coding_team` -> `coding_task` / default stage `decompose`
+- `research_team` -> `research_pipeline` / default stage `normalize`
+- `ops_governance_team` -> `research_pipeline` / default stage `audit`
+
+## Rules
+
+- Prefer `masc_operation_start` over ad-hoc swarm stories.
+- Prefer `masc_team_session_start(operation_id=...)` over standalone sessions when command-plane truth matters.
+- Treat `Lodge`, `TRPG`, and `RISC` as secondary surfaces unless the task explicitly needs them.
+- Use `/api/v1/command-plane/help` for the current golden paths and pitfalls.
+
+See `llms-full.txt` for the expanded contract.

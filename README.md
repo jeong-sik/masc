@@ -268,6 +268,8 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 
 | 문서 | 설명 |
 |------|------|
+| `llms.txt` | AI/LLM용 최소 canonical front door |
+| `llms-full.txt` | AI/LLM용 확장 orchestration contract |
 | `docs/QUICKSTART.md` | 빠른 시작 |
 | `docs/SETUP.md` | 설치/실행/백엔드 설정 |
 | `docs/SPEC.md` | 동작 스펙과 데이터 모델 |

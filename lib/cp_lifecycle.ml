@@ -2410,8 +2410,50 @@ let start_operation config ~(actor : string) json =
   match unit_guard_json config assigned_unit_id with
   | Error message -> Error message
   | Ok _ ->
+      let workload_template =
+        match get_string_opt json "workload_template" with
+        | Some value ->
+            let* validated = validate_workload_template value in
+            Ok (Some validated)
+        | None -> Ok None
+      in
+      let* workload_template = workload_template in
+      let inferred_workload_profile, inferred_stage =
+        match workload_template with
+        | Some template -> (
+            match workload_template_defaults template with
+            | Some defaults -> defaults
+            | None -> ("coding_task", None))
+        | None -> ("coding_task", None)
+      in
+      let explicit_workload_profile = get_string_opt json "workload_profile" in
+      let* () =
+        match workload_template, explicit_workload_profile with
+        | Some template, Some explicit_profile -> (
+            let expected_profile, _ =
+              match workload_template_defaults template with
+              | Some defaults -> defaults
+              | None -> ("coding_task", None)
+            in
+            let* normalized_explicit = validate_workload_profile explicit_profile in
+            if String.equal normalized_explicit expected_profile then
+              Ok ()
+            else
+              Error
+                (Printf.sprintf
+                   "workload_template %s requires workload_profile=%s"
+                   template expected_profile))
+        | _ -> Ok ()
+      in
       let workload_profile_raw =
-        get_string_default json "workload_profile" "coding_task"
+        match explicit_workload_profile with
+        | Some value -> value
+        | None -> inferred_workload_profile
+      in
+      let requested_stage =
+        match get_string_opt json "stage" with
+        | Some value -> Some value
+        | None -> inferred_stage
       in
       let search_strategy_raw =
         get_string_default json "search_strategy" (room_search_strategy_default config)
@@ -2421,7 +2463,7 @@ let start_operation config ~(actor : string) json =
       let raw_artifact_scope = get_string_list json "artifact_scope" in
       let* workload_profile = validate_workload_profile workload_profile_raw in
       let* stage =
-        validate_stage_for_workload ~workload_profile (get_string_opt json "stage")
+        validate_stage_for_workload ~workload_profile requested_stage
       in
       let* search_strategy = validate_search_strategy search_strategy_raw in
       let* intent_binding =
@@ -2494,6 +2536,7 @@ let start_operation config ~(actor : string) json =
           autonomy_level = get_string_default json "autonomy_level" "L4_Autonomous";
           policy_class = get_string_default json "policy_class" "strict";
           budget_class = get_string_default json "budget_class" "standard";
+          workload_template;
           workload_profile;
           stage;
           artifact_scope;
@@ -2536,6 +2579,10 @@ let start_operation config ~(actor : string) json =
             ("intent_id", match operation.intent_id with Some value -> `String value | None -> `Null);
             ("autonomy_level", `String operation.autonomy_level);
             ("policy_class", `String operation.policy_class);
+            ( "workload_template",
+              match operation.workload_template with
+              | Some value -> `String value
+              | None -> `Null );
             ("workload_profile", `String (operation_workload_profile operation));
             ("stage", match operation.stage with Some value -> `String value | None -> `Null);
             ("artifact_scope", json_list_of_strings operation.artifact_scope);

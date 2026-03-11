@@ -76,7 +76,7 @@ let seed_room config session_id =
       goal = "Validate local64 swarm role coverage, runtime visibility, and operator census";
       created_by = "fixture-root";
       room_id = "default";
-      operation_id = None;
+      operation_id = Some "op-mission-fixture-001";
       status = Interrupted;
       duration_seconds = 2700;
       execution_scope = Observe_only;
@@ -301,6 +301,7 @@ let test_dashboard_mission_projection () =
         in
         let open Yojson.Safe.Util in
         let attention_queue = json |> member "attention_queue" |> to_list in
+        let sessions = json |> member "sessions" |> to_list in
         let session_briefs = json |> member "session_briefs" |> to_list in
         let agent_briefs = json |> member "agent_briefs" |> to_list in
         let internal_signals = json |> member "internal_signals" |> to_list in
@@ -331,6 +332,16 @@ let test_dashboard_mission_projection () =
            |> member "top_action" |> member "action_type" |> to_string);
         check string "session brief id" session_id
           (session_briefs |> List.hd |> member "session_id" |> to_string);
+        check string "session card id" session_id
+          (sessions |> List.hd |> member "session_id" |> to_string);
+        check bool "session blocker summary comes from attention" true
+          (contains
+             (sessions |> List.hd |> member "blocker_summary" |> to_string)
+             "failed spawn");
+        check bool "session card keeps member previews" true
+          ((sessions |> List.hd |> member "member_previews" |> to_list) <> []);
+        check bool "session card keeps operation badge" true
+          ((sessions |> List.hd |> member "operation_badges" |> to_list) <> []);
         check bool "session brief keeps summary-only participant" true
           (session_briefs
            |> List.exists (fun row ->
@@ -385,6 +396,24 @@ let test_dashboard_mission_projection () =
         in
         check bool "multiple room actions survive internal matching" true
           (List.length room_action_reasons >= 2);
+        let session_detail =
+          Lib.Dashboard_mission.session_json
+            ~actor:"test-dashboard"
+            ~session_id
+            ~config
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~proc_mgr:None
+            ()
+        in
+        check string "session detail id" session_id
+          (session_detail |> member "session_id" |> to_string);
+        check bool "session detail participants present" true
+          ((session_detail |> member "participants" |> to_list) <> []);
+        check bool "session detail timeline present" true
+          ((session_detail |> member "timeline" |> to_list) <> []);
+        check bool "session detail operation preserved" true
+          ((session_detail |> member "operations" |> to_list) <> []);
       ))
 
 let () =

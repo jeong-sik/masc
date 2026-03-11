@@ -153,6 +153,13 @@ let json () =
                   ~agent_role:"Agents can decide which session deserves direct supervision."
                   ~ecosystem_function:"Allocates supervisory attention across sessions."
                   [];
+                panel ~id:"mission.session_detail" ~title:"세션 상세"
+                  ~purpose:"Presents one session as the primary observational unit."
+                  ~problem_solved:"Lets the operator read goal, actors, recent events, and linked execution in one view."
+                  ~when_active:"When a session is selected or auto-focused on Mission."
+                  ~agent_role:"Agents should explain a session as one coherent unit instead of scattering details across surfaces."
+                  ~ecosystem_function:"Unifies collaboration and execution evidence around the chosen session."
+                  [];
                 panel ~id:"mission.targets" ~title:"바로 개입할 대상"
                   ~purpose:"Lists keepers or sessions that are immediate intervention candidates."
                   ~problem_solved:"Turns mission signal into actionable target selection."

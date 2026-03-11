@@ -102,10 +102,20 @@ function formatContext(value?: number | null): string {
   return `${Math.round(value * 100)}%`
 }
 
+function sanitizeKeeperNote(value?: string | null): string | null {
+  const text = (value ?? '')
+    .replace(/\[STATE\][\s\S]*?\[\/STATE\]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!text) return null
+  return text.length > 120 ? `${text.slice(0, 119)}…` : text
+}
+
 function keeperFocus(keeper: Keeper): string {
   return keeper.agent?.current_task?.trim()
+    || keeper.continuity_summary?.trim()
     || keeper.skill_primary?.trim()
-    || keeper.last_proactive_reason?.trim()
+    || sanitizeKeeperNote(keeper.memory_recent_note)
     || '현재 포커스 없음'
 }
 
@@ -316,7 +326,6 @@ function KeeperWatchRow({ row }: { row: KeeperMonitorRow }) {
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
-      ${keeper.skill_reason ? html`<div class="monitor-footnote">스킬 라우팅: ${keeper.skill_reason}</div>` : null}
     </button>
   `
 }

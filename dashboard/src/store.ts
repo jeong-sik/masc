@@ -502,6 +502,7 @@ function normalizeKeepers(raw: unknown, serverStatusValue?: ServerStatus | null)
         last_handoff_ago_s: asNumber(row.last_handoff_ago_s),
         last_compaction_ago_s: asNumber(row.last_compaction_ago_s),
         last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
+        continuity_summary: asString(row.continuity_summary) ?? null,
         last_proactive_preview: asString(row.last_proactive_preview) ?? null,
         context_ratio: contextRatio,
         context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),

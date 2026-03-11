@@ -552,16 +552,164 @@ export interface CouncilSession {
   created_at?: string
 }
 
-export interface CouncilDebateSummary {
+export interface GovernanceContextRef {
+  board_post_id?: string | null
+  task_id?: string | null
+  operation_id?: string | null
+  team_session_id?: string | null
+}
+
+export interface GovernanceResolvedAction {
+  action_kind?: string
+  resolved_tool?: string | null
+  target_type?: string | null
+  target_id?: string | null
+  reason?: string
+  payload_preview?: unknown
+}
+
+export interface GovernanceExecutedRoute {
+  action_type?: string
+  delegated_tool?: string | null
+  confirmation_state?: string
+  created_at?: string | null
+}
+
+export interface GovernanceGuardrailState {
+  requires_human_gate?: boolean
+  pending_confirm?: PendingConfirmation | null
+  pending_confirm_token?: string | null
+  ready_to_execute?: boolean
+}
+
+export interface GovernanceJudgment {
+  judgment_id?: string
+  target_kind?: string
+  target_id?: string
+  status?: string
+  summary?: string
+  confidence?: number | null
+  generated_at?: string | null
+  expires_at?: string | null
+  model_used?: string | null
+  keeper_name?: string | null
+  evidence_refs?: string[]
+  recommended_action?: GovernanceResolvedAction | null
+  guardrail_state?: GovernanceGuardrailState | null
+  executed_route?: GovernanceExecutedRoute | null
+}
+
+export interface GovernanceDecisionItem {
+  kind: 'debate' | 'consensus' | string
   id: string
   topic: string
   status: string
-  support_count: number
-  oppose_count: number
-  neutral_count: number
-  total_arguments: number
-  created_at?: string
-  summary_text?: string
+  last_activity_at?: string | null
+  truth_summary?: string
+  judgment_summary?: string | null
+  confidence?: number | null
+  related_agents: string[]
+  context?: GovernanceContextRef
+  linked_board_post_id?: string | null
+  linked_task_id?: string | null
+  linked_operation_id?: string | null
+  linked_session_id?: string | null
+  recommended_action?: GovernanceResolvedAction | null
+  executed_route?: GovernanceExecutedRoute | null
+  guardrail_state?: GovernanceGuardrailState | null
+  evidence_refs: string[]
+  approve_count?: number
+  reject_count?: number
+  abstain_count?: number
+  votes?: number
+  quorum?: number
+  threshold?: number
+}
+
+export interface GovernanceTimelineEvent {
+  kind: string
+  item_kind?: string
+  item_id?: string
+  topic?: string
+  created_at?: string | null
+  summary?: string
+  actor?: string | null
+  index?: number
+  decision?: string | null
+}
+
+export interface GovernanceJudgeSummary {
+  judge_online?: boolean
+  refreshing?: boolean
+  generated_at?: string | null
+  expires_at?: string | null
+  model_used?: string | null
+  keeper_name?: string | null
+  last_error?: string | null
+}
+
+export interface CouncilDebateArgument {
+  index: number
+  agent: string
+  position: string
+  content: string
+  evidence: string[]
+  reply_to?: number | null
+  mentions: string[]
+  archetype?: string | null
+  created_at?: string | null
+}
+
+export interface CouncilDebateSummary {
+  debate: {
+    id: string
+    topic: string
+    status: string
+    created_at?: string | null
+    closed_at?: string | null
+  }
+  arguments: CouncilDebateArgument[]
+  summary: {
+    support_count: number
+    oppose_count: number
+    neutral_count: number
+    total_arguments: number
+    summary_text?: string
+  }
+  context?: GovernanceContextRef
+  judgment?: GovernanceJudgment | null
+}
+
+export interface CouncilSessionVote {
+  agent: string
+  decision: string
+  reason: string
+  timestamp?: string | null
+  weight?: number
+  archetype?: string | null
+}
+
+export interface CouncilSessionSummary {
+  session: {
+    id: string
+    topic: string
+    state: string
+    initiator: string
+    quorum: number
+    threshold: number
+    created_at?: string | null
+    closed_at?: string | null
+  }
+  votes: CouncilSessionVote[]
+  summary: {
+    approve_count: number
+    reject_count: number
+    abstain_count: number
+    quorum_met: boolean
+    result?: string | null
+  }
+  context?: GovernanceContextRef
+  judgment?: GovernanceJudgment | null
 }
 
 export interface BoardMonitoring {
@@ -816,9 +964,21 @@ export interface DashboardGovernanceResponse {
   summary?: {
     debates?: number
     voting_sessions?: number
+    debates_open?: number
+    sessions_active?: number
+    sessions_without_quorum?: number
+    ready_to_execute?: number
+    oldest_open_debate_age_s?: number | null
+    last_activity_age_s?: number | null
+    judge_online?: boolean
+    judge_last_seen_at?: string | null
   }
   debates?: CouncilDebate[]
   sessions?: CouncilSession[]
+  items?: GovernanceDecisionItem[]
+  activity?: GovernanceTimelineEvent[]
+  judge?: GovernanceJudgeSummary
+  pending_actions?: PendingConfirmation[]
 }
 
 export interface DashboardPlanningResponse {

@@ -24,7 +24,17 @@ import type {
   CouncilDebate,
   CouncilDebateSummary,
   CouncilSession,
+  CouncilSessionSummary,
+  GovernanceContextRef,
+  GovernanceDecisionItem,
+  GovernanceExecutedRoute,
+  GovernanceGuardrailState,
+  GovernanceJudgeSummary,
+  GovernanceJudgment,
+  GovernanceResolvedAction,
+  GovernanceTimelineEvent,
   BoardSortMode,
+  PendingConfirmation,
   OperatorActionRequest,
   OperatorActionResult,
   OperatorDigest,
@@ -308,7 +318,76 @@ export function fetchDashboardMemory(
 }
 
 export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
-  return get('/api/v1/dashboard/governance')
+  return withRetries('fetchDashboardGovernance', async () => {
+    const raw = await get<Record<string, unknown>>('/api/v1/dashboard/governance')
+    const items = Array.isArray(raw.items)
+      ? raw.items
+          .map(item => normalizeGovernanceDecisionItem(item))
+          .filter((item): item is GovernanceDecisionItem => item !== null)
+      : []
+    const pendingActions = Array.isArray(raw.pending_actions)
+      ? raw.pending_actions
+          .map(item => normalizePendingConfirmation(item))
+          .filter((item): item is PendingConfirmation => item !== null)
+      : []
+    const debates = items
+      .filter(item => item.kind === 'debate')
+      .map(item => ({
+        id: item.id,
+        topic: item.topic,
+        status: item.status,
+        argument_count: item.evidence_refs.length,
+        created_at: item.last_activity_at ?? undefined,
+      }))
+    const sessions = items
+      .filter(item => item.kind === 'consensus')
+      .map(item => ({
+        id: item.id,
+        topic: item.topic,
+        initiator: item.related_agents[0] || 'system',
+        votes: item.votes ?? 0,
+        quorum: item.quorum ?? 0,
+        threshold: item.threshold,
+        state: item.status,
+        created_at: item.last_activity_at ?? undefined,
+      }))
+    return {
+      generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
+      summary: isRecord(raw.summary)
+        ? {
+            debates: asInt(raw.summary.debates) ?? undefined,
+            voting_sessions: asInt(raw.summary.voting_sessions) ?? undefined,
+            debates_open: asInt(raw.summary.debates_open) ?? undefined,
+            sessions_active: asInt(raw.summary.sessions_active) ?? undefined,
+            sessions_without_quorum: asInt(raw.summary.sessions_without_quorum) ?? undefined,
+            ready_to_execute: asInt(raw.summary.ready_to_execute) ?? undefined,
+            oldest_open_debate_age_s:
+              typeof raw.summary.oldest_open_debate_age_s === 'number'
+                ? raw.summary.oldest_open_debate_age_s
+                : null,
+            last_activity_age_s:
+              typeof raw.summary.last_activity_age_s === 'number'
+                ? raw.summary.last_activity_age_s
+                : null,
+            judge_online:
+              typeof raw.summary.judge_online === 'boolean'
+                ? raw.summary.judge_online
+                : undefined,
+            judge_last_seen_at: asNullableIsoTimestamp(raw.summary.judge_last_seen_at),
+          }
+        : undefined,
+      debates,
+      sessions,
+      items,
+      activity: Array.isArray(raw.activity)
+        ? raw.activity
+            .map(item => normalizeGovernanceTimelineEvent(item))
+            .filter((item): item is GovernanceTimelineEvent => item !== null)
+        : [],
+      judge: normalizeGovernanceJudgeSummary(raw.judge),
+      pending_actions: pendingActions,
+    }
+  })
 }
 
 export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
@@ -477,10 +556,15 @@ export function runOperatorAction(body: OperatorActionRequest): Promise<Operator
   return post('/api/v1/operator/action', body, undefined, operatorActionTimeoutMs(body))
 }
 
-export function confirmOperatorAction(actor: string, confirmToken: string): Promise<OperatorActionResult> {
+export function confirmOperatorAction(
+  actor: string,
+  confirmToken: string,
+  decision: 'confirm' | 'deny' = 'confirm',
+): Promise<OperatorActionResult> {
   return post('/api/v1/operator/confirm', {
     actor,
     confirm_token: confirmToken,
+    decision,
   })
 }
 // --- Board ---
@@ -492,6 +576,185 @@ function toIsoTimestamp(value: unknown): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return new Date().toISOString()
   const ms = value < 1_000_000_000_000 ? value * 1000 : value
   return new Date(ms).toISOString()
+}
+
+function asNullableIsoTimestamp(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed ? trimmed : null
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const ms = value < 1_000_000_000_000 ? value * 1000 : value
+    return new Date(ms).toISOString()
+  }
+  return null
+}
+
+function asNullableString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
+}
+
+function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
+  if (!isRecord(raw)) return null
+  const confirmToken = asString(raw.confirm_token ?? raw.token, '').trim()
+  if (!confirmToken) return null
+  return {
+    confirm_token: confirmToken,
+    actor: asNullableString(raw.actor) ?? undefined,
+    action_type: asNullableString(raw.action_type) ?? undefined,
+    target_type: asNullableString(raw.target_type) ?? undefined,
+    target_id: asNullableString(raw.target_id),
+    delegated_tool: asNullableString(raw.delegated_tool) ?? undefined,
+    created_at: asNullableIsoTimestamp(raw.created_at) ?? undefined,
+    preview: raw.preview,
+  }
+}
+
+function normalizeGovernanceContextRef(raw: unknown): GovernanceContextRef {
+  if (!isRecord(raw)) return {}
+  return {
+    board_post_id: asNullableString(raw.board_post_id),
+    task_id: asNullableString(raw.task_id),
+    operation_id: asNullableString(raw.operation_id),
+    team_session_id: asNullableString(raw.team_session_id),
+  }
+}
+
+function normalizeGovernanceResolvedAction(raw: unknown): GovernanceResolvedAction | null {
+  if (!isRecord(raw)) return null
+  const actionKind = asNullableString(raw.action_kind)
+  const resolvedTool = asNullableString(raw.resolved_tool)
+  const targetType = asNullableString(raw.target_type)
+  const targetId = asNullableString(raw.target_id)
+  const reason = asNullableString(raw.reason)
+  if (!actionKind && !resolvedTool && !targetType && !reason) return null
+  return {
+    action_kind: actionKind ?? undefined,
+    resolved_tool: resolvedTool,
+    target_type: targetType,
+    target_id: targetId,
+    reason: reason ?? undefined,
+    payload_preview: raw.payload_preview,
+  }
+}
+
+function normalizeGovernanceExecutedRoute(raw: unknown): GovernanceExecutedRoute | null {
+  if (!isRecord(raw)) return null
+  const actionType = asNullableString(raw.action_type)
+  const delegatedTool = asNullableString(raw.delegated_tool)
+  const confirmationState = asNullableString(raw.confirmation_state)
+  const createdAt = asNullableIsoTimestamp(raw.created_at)
+  if (!actionType && !delegatedTool && !confirmationState && !createdAt) return null
+  return {
+    action_type: actionType ?? undefined,
+    delegated_tool: delegatedTool,
+    confirmation_state: confirmationState ?? undefined,
+    created_at: createdAt,
+  }
+}
+
+function normalizeGovernanceGuardrailState(raw: unknown): GovernanceGuardrailState | null {
+  if (!isRecord(raw)) return null
+  const pendingConfirm = normalizePendingConfirmation(raw.pending_confirm)
+  const pendingConfirmToken =
+    asNullableString(raw.pending_confirm_token) ?? pendingConfirm?.confirm_token ?? null
+  return {
+    requires_human_gate:
+      typeof raw.requires_human_gate === 'boolean' ? raw.requires_human_gate : undefined,
+    pending_confirm: pendingConfirm,
+    pending_confirm_token: pendingConfirmToken,
+    ready_to_execute:
+      typeof raw.ready_to_execute === 'boolean' ? raw.ready_to_execute : undefined,
+  }
+}
+
+function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | null {
+  if (!isRecord(raw)) return null
+  const summary = asNullableString(raw.summary)
+  const targetId = asNullableString(raw.target_id)
+  if (!summary && !targetId) return null
+  return {
+    judgment_id: asNullableString(raw.judgment_id) ?? undefined,
+    target_kind: asNullableString(raw.target_kind) ?? undefined,
+    target_id: targetId ?? undefined,
+    status: asNullableString(raw.status) ?? undefined,
+    summary: summary ?? undefined,
+    confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
+    generated_at: asNullableIsoTimestamp(raw.generated_at),
+    expires_at: asNullableIsoTimestamp(raw.expires_at),
+    model_used: asNullableString(raw.model_used),
+    keeper_name: asNullableString(raw.keeper_name),
+    evidence_refs: asStringList(raw.evidence_refs),
+    recommended_action: normalizeGovernanceResolvedAction(raw.recommended_action),
+    guardrail_state: normalizeGovernanceGuardrailState(raw.guardrail_state),
+    executed_route: normalizeGovernanceExecutedRoute(raw.executed_route),
+  }
+}
+
+function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisionItem | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const topic = asString(raw.topic, '').trim()
+  if (!id || !topic) return null
+  const context = normalizeGovernanceContextRef(raw.context)
+  return {
+    kind: asString(raw.kind, 'debate'),
+    id,
+    topic,
+    status: asString(raw.status ?? raw.state, 'open'),
+    last_activity_at: asNullableIsoTimestamp(raw.last_activity_at),
+    truth_summary: asNullableString(raw.truth_summary) ?? undefined,
+    judgment_summary: asNullableString(raw.judgment_summary),
+    confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
+    related_agents: asStringList(raw.related_agents),
+    context,
+    linked_board_post_id: asNullableString(raw.linked_board_post_id) ?? context.board_post_id ?? null,
+    linked_task_id: asNullableString(raw.linked_task_id) ?? context.task_id ?? null,
+    linked_operation_id: asNullableString(raw.linked_operation_id) ?? context.operation_id ?? null,
+    linked_session_id: asNullableString(raw.linked_session_id) ?? context.team_session_id ?? null,
+    recommended_action: normalizeGovernanceResolvedAction(raw.recommended_action),
+    executed_route: normalizeGovernanceExecutedRoute(raw.executed_route),
+    guardrail_state: normalizeGovernanceGuardrailState(raw.guardrail_state),
+    evidence_refs: asStringList(raw.evidence_refs),
+    approve_count: asInt(raw.approve_count),
+    reject_count: asInt(raw.reject_count),
+    abstain_count: asInt(raw.abstain_count),
+    votes: asInt(raw.votes),
+    quorum: asInt(raw.quorum),
+    threshold: typeof raw.threshold === 'number' ? raw.threshold : undefined,
+  }
+}
+
+function normalizeGovernanceTimelineEvent(raw: unknown): GovernanceTimelineEvent | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind, '').trim()
+  if (!kind) return null
+  return {
+    kind,
+    item_kind: asNullableString(raw.item_kind) ?? undefined,
+    item_id: asNullableString(raw.item_id) ?? undefined,
+    topic: asNullableString(raw.topic) ?? undefined,
+    created_at: asNullableIsoTimestamp(raw.created_at),
+    summary: asNullableString(raw.summary) ?? undefined,
+    actor: asNullableString(raw.actor),
+    index: asInt(raw.index),
+    decision: asNullableString(raw.decision),
+  }
+}
+
+function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSummary | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    judge_online: typeof raw.judge_online === 'boolean' ? raw.judge_online : undefined,
+    refreshing: typeof raw.refreshing === 'boolean' ? raw.refreshing : undefined,
+    generated_at: asNullableIsoTimestamp(raw.generated_at),
+    expires_at: asNullableIsoTimestamp(raw.expires_at),
+    model_used: asNullableString(raw.model_used),
+    keeper_name: asNullableString(raw.keeper_name),
+    last_error: asNullableString(raw.last_error),
+  }
 }
 
 function isSystemBoardAuthor(author: string): boolean {
@@ -1705,18 +1968,89 @@ export async function fetchDebateStatus(debateId: string): Promise<CouncilDebate
     const safeId = encodeURIComponent(debateId)
     const raw = await get<Record<string, unknown>>(`/api/v1/council/debates/${safeId}/summary`)
     if (!isRecord(raw)) return null
-    const id = asString(raw.id, '').trim()
-    if (!id) return null
+    const debateRaw = isRecord(raw.debate) ? raw.debate : raw
+    const debateIdValue = asString(debateRaw.id, '').trim()
+    const topic = asString(debateRaw.topic, '').trim()
+    if (!debateIdValue || !topic) return null
     return {
-      id,
-      topic: asString(raw.topic, ''),
-      status: asString(raw.status, 'open'),
-      support_count: asNumber(raw.support_count, 0),
-      oppose_count: asNumber(raw.oppose_count, 0),
-      neutral_count: asNumber(raw.neutral_count, 0),
-      total_arguments: asNumber(raw.total_arguments, 0),
-      created_at: toIsoTimestamp(raw.created_at_iso ?? raw.created_at),
-      summary_text: asString(raw.summary_text, ''),
+      debate: {
+        id: debateIdValue,
+        topic,
+        status: asString(debateRaw.status, 'open'),
+        created_at: asNullableIsoTimestamp(debateRaw.created_at_iso ?? debateRaw.created_at),
+        closed_at: asNullableIsoTimestamp(debateRaw.closed_at),
+      },
+      arguments: Array.isArray(raw.arguments)
+        ? raw.arguments.flatMap(item => {
+            if (!isRecord(item)) return []
+            return [{
+              index: asNumber(item.index, 0),
+              agent: asString(item.agent, 'unknown'),
+              position: asString(item.position, 'neutral'),
+              content: asString(item.content, ''),
+              evidence: asStringList(item.evidence),
+              reply_to: asInt(item.reply_to) ?? null,
+              mentions: asStringList(item.mentions),
+              archetype: asNullableString(item.archetype),
+              created_at: asNullableIsoTimestamp(item.created_at),
+            }]
+          })
+        : [],
+      summary: {
+        support_count: isRecord(raw.summary) ? asNumber(raw.summary.support_count, 0) : asNumber(raw.support_count, 0),
+        oppose_count: isRecord(raw.summary) ? asNumber(raw.summary.oppose_count, 0) : asNumber(raw.oppose_count, 0),
+        neutral_count: isRecord(raw.summary) ? asNumber(raw.summary.neutral_count, 0) : asNumber(raw.neutral_count, 0),
+        total_arguments: isRecord(raw.summary) ? asNumber(raw.summary.total_arguments, 0) : asNumber(raw.total_arguments, 0),
+        summary_text: isRecord(raw.summary) ? asString(raw.summary.summary_text, '') : asString(raw.summary_text, ''),
+      },
+      context: normalizeGovernanceContextRef(raw.context),
+      judgment: normalizeGovernanceJudgment(raw.judgment),
+    }
+  })
+}
+
+export async function fetchConsensusSessionSummary(sessionId: string): Promise<CouncilSessionSummary | null> {
+  return withRetries('fetchConsensusSessionSummary', async () => {
+    const safeId = encodeURIComponent(sessionId)
+    const raw = await get<Record<string, unknown>>(`/api/v1/council/sessions/${safeId}/summary`)
+    if (!isRecord(raw) || !isRecord(raw.session)) return null
+    const session = raw.session
+    const id = asString(session.id, '').trim()
+    const topic = asString(session.topic, '').trim()
+    if (!id || !topic) return null
+    return {
+      session: {
+        id,
+        topic,
+        state: asString(session.state, 'open'),
+        initiator: asString(session.initiator, 'system'),
+        quorum: asNumber(session.quorum, 0),
+        threshold: asNumber(session.threshold, 0),
+        created_at: asNullableIsoTimestamp(session.created_at),
+        closed_at: asNullableIsoTimestamp(session.closed_at),
+      },
+      votes: Array.isArray(raw.votes)
+        ? raw.votes.flatMap(item => {
+            if (!isRecord(item)) return []
+            return [{
+              agent: asString(item.agent, 'unknown'),
+              decision: asString(item.decision, 'abstain'),
+              reason: asString(item.reason, ''),
+              timestamp: asNullableIsoTimestamp(item.timestamp),
+              weight: typeof item.weight === 'number' ? item.weight : undefined,
+              archetype: asNullableString(item.archetype),
+            }]
+          })
+        : [],
+      summary: {
+        approve_count: isRecord(raw.summary) ? asNumber(raw.summary.approve_count, 0) : 0,
+        reject_count: isRecord(raw.summary) ? asNumber(raw.summary.reject_count, 0) : 0,
+        abstain_count: isRecord(raw.summary) ? asNumber(raw.summary.abstain_count, 0) : 0,
+        quorum_met: isRecord(raw.summary) ? asBoolean(raw.summary.quorum_met, false) : false,
+        result: isRecord(raw.summary) ? asNullableString(raw.summary.result) : null,
+      },
+      context: normalizeGovernanceContextRef(raw.context),
+      judgment: normalizeGovernanceJudgment(raw.judgment),
     }
   })
 }

@@ -756,7 +756,10 @@ export interface DashboardMissionBriefingSection {
 export interface DashboardMissionBriefingResponse {
   generated_at?: string
   cached?: boolean
-  status?: 'ok' | 'unavailable' | 'error'
+  stale?: boolean
+  refreshing?: boolean
+  status?: 'ok' | 'pending' | 'unavailable' | 'error'
+  summary?: string | null
   model?: string | null
   ttl_sec?: number
   criteria: string[]
@@ -768,6 +771,7 @@ export interface DashboardMissionBriefingResponse {
   }
   sections: DashboardMissionBriefingSection[]
   error?: string | null
+  last_error?: string | null
 }
 
 export interface OperatorRoomSnapshot {

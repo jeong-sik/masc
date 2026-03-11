@@ -24,7 +24,7 @@ if $include_compact_protocol; then
 fi
 
 opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
-opam pin add agent_sdk https://github.com/jeong-sik/oas.git#main -n -y
+opam pin add agent_sdk https://github.com/jeong-sik/oas.git#fcf418d6be4b34e23bf76da0c99b798ef7843a41 -n -y
 opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
 opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
 opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y

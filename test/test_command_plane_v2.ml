@@ -1281,6 +1281,9 @@ let test_summary_json_swarm_proof_prefers_artifact () =
           [
             ("pass", `Bool true);
             ("worker_count", `Int 4);
+            ("joined_workers", `Int 4);
+            ("current_task_bound", `Int 4);
+            ("fresh_heartbeats", `Int 4);
             ("completed_workers", `Int 3);
             ("final_markers_seen", `Int 2);
           ]);
@@ -1299,6 +1302,18 @@ let test_summary_json_swarm_proof_prefers_artifact () =
       Alcotest.(check int) "artifact worker expected" 4
         (proof |> Yojson.Safe.Util.member "workers"
        |> Yojson.Safe.Util.member "expected"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "artifact worker joined" 4
+        (proof |> Yojson.Safe.Util.member "workers"
+       |> Yojson.Safe.Util.member "joined"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "artifact task bound" 4
+        (proof |> Yojson.Safe.Util.member "workers"
+       |> Yojson.Safe.Util.member "current_task_bound"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "artifact fresh heartbeats" 4
+        (proof |> Yojson.Safe.Util.member "workers"
+       |> Yojson.Safe.Util.member "fresh_heartbeats"
        |> Yojson.Safe.Util.to_int);
       Alcotest.(check int) "artifact peak hot slots" 5
         (proof |> Yojson.Safe.Util.member "peak_hot_slots"
@@ -1711,6 +1726,92 @@ let test_invalid_search_strategy_is_rejected () =
           Alcotest.(check string) "validation error"
             "unsupported search_strategy: made_up_strategy" message)
 
+let test_swarm_live_run_with_runner_persists_summary () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      let ok, body =
+        Tool_command_plane.handle_swarm_live_run_with_runner config
+          (`Assoc
+            [
+              ("run_id", `String "swarm-live-wrapper");
+              ("worker_count", `Int 3);
+            ])
+          ~runner:(fun cfg ->
+            `Assoc
+              [
+                ("run_id", `String cfg.Agent_swarm_live_harness.run_id);
+                ("worker_count", `Int cfg.worker_count);
+              ])
+      in
+      Alcotest.(check bool) "wrapper success" true ok;
+      let json = Yojson.Safe.from_string body in
+      Alcotest.(check string) "run_id preserved" "swarm-live-wrapper"
+        Yojson.Safe.Util.(json |> member "run_id" |> to_string);
+      Alcotest.(check int) "worker_count preserved" 3
+        Yojson.Safe.Util.(json |> member "worker_count" |> to_int);
+      let summary_path =
+        Filename.concat
+          (Filename.concat
+             (Filename.concat base_dir ".masc/control-plane/swarm-live")
+             (Agent_swarm_live_harness.safe_run_id "swarm-live-wrapper"))
+          "swarm-live-summary.json"
+      in
+      Alcotest.(check bool) "summary persisted" true (Sys.file_exists summary_path);
+      let persisted = Yojson.Safe.from_file summary_path in
+      Alcotest.(check string) "persisted run_id" "swarm-live-wrapper"
+        Yojson.Safe.Util.(persisted |> member "run_id" |> to_string))
+
+let test_swarm_live_run_with_runner_returns_error_on_exception () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      let ok, body =
+        Tool_command_plane.handle_swarm_live_run_with_runner config
+          (`Assoc [ ("run_id", `String "failing-run") ])
+          ~runner:(fun _ -> failwith "runner exploded")
+      in
+      Alcotest.(check bool) "wrapper failure" false ok;
+      let json = Yojson.Safe.from_string body in
+      Alcotest.(check string) "status error" "error"
+        Yojson.Safe.Util.(json |> member "status" |> to_string);
+      Alcotest.(check bool) "error mentions runner" true
+        (String.length Yojson.Safe.Util.(json |> member "message" |> to_string) > 0))
+
+let test_swarm_live_run_rejects_invalid_run_id () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      let ctx : _ Tool_command_plane.context =
+        {
+          config;
+          agent_name = "tester";
+          sw = None;
+          clock = None;
+          net = None;
+          mcp_state = None;
+          mcp_session_id = None;
+          auth_token = None;
+        }
+      in
+      let ok, body =
+        Tool_command_plane.handle_swarm_live_run ctx
+          (`Assoc [ ("run_id", `String "bad run id") ])
+      in
+      Alcotest.(check bool) "invalid run id fails" false ok;
+      let json = Yojson.Safe.from_string body in
+      Alcotest.(check string) "status error" "error"
+        Yojson.Safe.Util.(json |> member "status" |> to_string);
+      Alcotest.(check string) "invalid run id message"
+        "invalid chain run_id: only [A-Za-z0-9_-] are allowed"
+        Yojson.Safe.Util.(json |> member "message" |> to_string))
+
 let () =
   Alcotest.run "Command_plane_v2"
     [
@@ -1775,6 +1876,12 @@ let () =
             test_swarm_live_json_reads_custom_worker_count_from_operation_note;
           Alcotest.test_case "swarm live reads runtime doctor and blockers" `Quick
             test_swarm_live_json_reads_runtime_doctor_and_blockers;
+          Alcotest.test_case "swarm live wrapper persists summary" `Quick
+            test_swarm_live_run_with_runner_persists_summary;
+          Alcotest.test_case "swarm live wrapper reports runner exceptions" `Quick
+            test_swarm_live_run_with_runner_returns_error_on_exception;
+          Alcotest.test_case "swarm live wrapper rejects invalid run_id" `Quick
+            test_swarm_live_run_rejects_invalid_run_id;
           Alcotest.test_case "summary json omits heavy arrays" `Quick
             test_summary_json_omits_heavy_arrays_and_keeps_summaries;
           Alcotest.test_case "summary swarm proof prefers artifact" `Quick

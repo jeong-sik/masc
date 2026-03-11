@@ -8,6 +8,9 @@ export CURL_RETRY_COUNT
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/test_framework.sh"
 
+echo "[0/5] switch to full mode for harness"
+call_tool 1000 "masc_switch_mode" "{\"mode\":\"full\"}" >/dev/null
+
 echo "[1/5] experiment.start without decision.finalize => expect PRECONDITION_REQUIRED"
 r1="$(call_tool 1001 "experiment.start" "{\"session_id\":\"$SESSION_ID\",\"hypothesis\":\"h\"}")"
 if ! printf "%s" "$r1" | jq -er 'try (.result.content[0].text | fromjson | tostring | contains("PRECONDITION_REQUIRED")) catch false' >/dev/null; then

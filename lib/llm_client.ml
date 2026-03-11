@@ -656,10 +656,17 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
     );
     (* Parse usage *)
     let usage_json = json |> member "usage" in
+    let parse_token key =
+      match Safe_ops.json_int_opt key usage_json with
+      | Some n -> n
+      | None ->
+        Printf.eprintf "[llm] token field missing or wrong type: %s\n%!" key;
+        0
+    in
     let usage = {
-      input_tokens = Safe_ops.json_int "prompt_tokens" usage_json;
-      output_tokens = Safe_ops.json_int "completion_tokens" usage_json;
-      total_tokens = Safe_ops.json_int "total_tokens" usage_json;
+      input_tokens = parse_token "prompt_tokens";
+      output_tokens = parse_token "completion_tokens";
+      total_tokens = parse_token "total_tokens";
       cache_creation_input_tokens = 0;
       cache_read_input_tokens = 0;
     } in

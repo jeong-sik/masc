@@ -37,6 +37,8 @@ let resolve_provider name =
   | "sonnet" -> Some (Provider.anthropic_sonnet ())
   | "haiku" -> Some (Provider.anthropic_haiku ())
   | "opus" -> Some (Provider.anthropic_opus ())
+  | "ollama" -> Some (Provider.ollama ())
+  | "openrouter" -> Some (Provider.openrouter ())
   | _ -> None
 
 let parse_args argv =
@@ -78,6 +80,7 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
   let base_url = match provider_cfg.provider with
     | Provider.Local { base_url } -> base_url
     | Provider.Anthropic -> Api.default_base_url
+    | Provider.Ollama { base_url; _ } -> base_url
     | Provider.OpenAICompat { base_url; _ } -> base_url in
   let dev_tools =
     Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir:config.workdir ()

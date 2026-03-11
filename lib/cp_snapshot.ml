@@ -572,6 +572,12 @@ let read_runtime_doctor_json run_dir =
           }
 
 let swarm_proof_json config =
+  let int_member json key =
+    match U.member key json with
+    | `Int value -> Some value
+    | `Intlit value -> int_of_string_opt value
+    | _ -> None
+  in
   let workers_json
       ?expected ?joined ?current_task_bound ?fresh_heartbeats ?done_workers
       ?final_markers () =
@@ -619,21 +625,13 @@ let swarm_proof_json config =
                 | None -> `Null );
               ( "workers",
                 workers_json
-                  ?expected:
-                    (match U.member "worker_count" summary_json with
-                    | `Int value -> Some value
-                    | `Intlit value -> int_of_string_opt value
-                    | _ -> None)
-                  ?done_workers:
-                    (match U.member "completed_workers" summary_json with
-                    | `Int value -> Some value
-                    | `Intlit value -> int_of_string_opt value
-                    | _ -> None)
-                  ?final_markers:
-                    (match U.member "final_markers_seen" summary_json with
-                    | `Int value -> Some value
-                    | `Intlit value -> int_of_string_opt value
-                    | _ -> None)
+                  ?expected:(option_or_else (int_member summary_json "expected_workers")
+                               (fun () -> int_member summary_json "worker_count"))
+                  ?joined:(int_member summary_json "joined_workers")
+                  ?current_task_bound:(int_member summary_json "current_task_bound")
+                  ?fresh_heartbeats:(int_member summary_json "fresh_heartbeats")
+                  ?done_workers:(int_member summary_json "completed_workers")
+                  ?final_markers:(int_member summary_json "final_markers_seen")
                   () );
               ("artifact_ref", `String summary_artifact.path);
               ("missing_reason", `Null);

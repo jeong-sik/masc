@@ -21,6 +21,7 @@ let test_join_failure_returns_error () =
     tools = [];
     max_tokens = None;
     max_turns = 1;
+    temperature = None;
     include_masc_tools = true;
     managed_task = None;
     expected_final_marker = None;

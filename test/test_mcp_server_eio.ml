@@ -289,26 +289,25 @@ let test_handle_request_tools_list () =
                         | _ -> None)
                    |> List.filter_map (function `String s -> Some s | _ -> None)
                  in
+                 (* TRPG tools are in TRPG category, not in Standard mode *)
                  Alcotest.(check bool)
-                   "contains trpg.dice.roll"
-                   true
+                   "trpg.dice.roll excluded from standard"
+                   false
                    (List.mem "trpg.dice.roll" names);
                  Alcotest.(check bool)
-                   "contains trpg.turn.advance"
-                   true
+                   "trpg.turn.advance excluded from standard"
+                   false
                    (List.mem "trpg.turn.advance" names);
+                 (* Plan category IS in Standard mode *)
                  Alcotest.(check bool)
-                   "contains trpg.stream.read"
-                   true
-                   (List.mem "trpg.stream.read" names);
-                 Alcotest.(check bool)
-                   "contains trpg.round.run"
-                   true
-                   (List.mem "trpg.round.run" names);
-                 Alcotest.(check bool)
-                   "contains masc_goal_upsert"
+                   "contains masc_goal_upsert (Plan category)"
                    true
                    (List.mem "masc_goal_upsert" names);
+                 (* Board category IS in Standard mode *)
+                 Alcotest.(check bool)
+                   "contains masc_board_post (Board category)"
+                   true
+                   (List.mem "masc_board_post" names);
                  Alcotest.(check bool)
                    "legacy masc_trpg_dice_roll hidden from list"
                    false
@@ -350,6 +349,10 @@ let test_handle_request_tools_list_mdal_descriptions () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* MDAL tools are Ecosystem category — not in Standard mode.
+     Switch to Full so the names filter can find them. *)
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Full in
   let response =
     tools_list_response ~clock ~sw
       ~names:[ "masc_mdal_start"; "masc_mdal_iterate" ]
@@ -779,6 +782,9 @@ let test_execute_tool_trpg_flow () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* TRPG tools are in TRPG category — switch to Full mode to pass mode gate *)
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Full in
 
   let (ok_roll, roll_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock state
@@ -982,6 +988,9 @@ let test_execute_tool_trpg_validation () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* TRPG tools are in TRPG category — switch to Full mode to pass mode gate *)
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Full in
 
   let (ok_missing, msg_missing) =
     Mcp_eio.execute_tool_eio ~sw ~clock state
@@ -1173,6 +1182,9 @@ let test_convo_start_uses_current_room () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  (* Convo tools are Consensus category — switch to Full mode to pass mode gate *)
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Full in
   let sid = "mcp-convo-room-regression" in
   let room_id = "convo-proof-room" in
 
@@ -1199,6 +1211,11 @@ let test_convo_start_uses_current_room () =
       ])
   in
   Alcotest.(check bool) "room enter success" true ok_enter;
+
+  (* After entering a new room, its mode defaults to Standard.
+     Convo tools are Consensus category — switch the new room to Full. *)
+  let new_room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode new_room_path Mode.Full in
 
   let (ok_start, start_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state

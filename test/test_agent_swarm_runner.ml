@@ -90,7 +90,7 @@ let test_parse_members_zero () =
     (Error "Invalid --members: 0") (parse_args argv)
 
 let test_provider_resolve () =
-  let known = ["local-qwen"; "local-mlx"; "sonnet"; "haiku"; "opus"] in
+  let known = ["local-qwen"; "local-mlx"; "sonnet"; "haiku"; "opus"; "ollama"; "openrouter"] in
   List.iter (fun name ->
     let result = resolve_provider name in
     Alcotest.(check bool) (Printf.sprintf "%s resolves" name)

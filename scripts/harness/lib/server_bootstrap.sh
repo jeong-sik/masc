@@ -4,15 +4,33 @@ set -euo pipefail
 harness_find_server_exe() {
   local repo_root="$1"
   local explicit="${2:-}"
+  local common_root=""
   if [[ -n "$explicit" && -x "$explicit" ]]; then
     printf '%s\n' "$explicit"
     return 0
+  fi
+
+  if command -v git >/dev/null 2>&1; then
+    local common_dir
+    common_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || true)"
+    if [[ -n "$common_dir" ]]; then
+      if [[ "$common_dir" != /* ]]; then
+        common_dir="$repo_root/$common_dir"
+      fi
+      common_root="$(cd "$(dirname "$common_dir")" && pwd)"
+    fi
   fi
 
   local -a candidates=(
     "${repo_root}/_build/default/bin/main_eio.exe"
     "${repo_root}/bin/main_eio.exe"
   )
+  if [[ -n "$common_root" && "$common_root" != "$repo_root" ]]; then
+    candidates+=(
+      "${common_root}/_build/default/bin/main_eio.exe"
+      "${common_root}/bin/main_eio.exe"
+    )
+  fi
   local candidate
   for candidate in "${candidates[@]}"; do
     if [[ -x "$candidate" ]]; then

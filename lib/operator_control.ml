@@ -2365,6 +2365,13 @@ let dispatch_team_session_json_as (ctx : 'a context) ~session_id ~requested_acto
         else
           Ok session.created_by
   in
+  let args =
+    match args with
+    | `Assoc fields ->
+        `Assoc
+          (("actor", `String authorized_actor) :: List.remove_assoc "actor" fields)
+    | other -> other
+  in
   let team_ctx : _ Tool_team_session.context =
     {
       config = ctx.config;

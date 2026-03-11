@@ -62,6 +62,7 @@
    hat
    heartbeat
    guardian
+   sentinel
    heartbeat_smart
    hebbian_eio
    http_server_eio
@@ -131,6 +132,7 @@
    masc_mcp
    masc_pb
    mdal
+   mdal_swarm
    mdal_worker
    mcp_protocol
    mcp_server
@@ -167,6 +169,7 @@
    goal_guard
    goal_orchestrator
    goal_scheduler
+   swarm_goal_loop
    resilience
    response
    room
@@ -198,6 +201,7 @@
    subscriptions
    swarm_status
    swarm_behaviors_eio
+   swarm_checkpoint
    swarm_eio
    telemetry_eio
    tempo
@@ -320,6 +324,9 @@
    json_util
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
+   ;; Autoresearch — Karpathy-inspired autonomous experiment loop
+   autoresearch
+   tool_autoresearch
    ;; SWARM-RISC Agent ISA (Phase 1: types + pipeline + tools)
    risc_types
    risc_pipeline

@@ -2,13 +2,14 @@
 
 ## 결론 (요약)
 - 현재 상태는 **로컬/신뢰 네트워크 전제의 개인용 협업 서버**로는 충분하다.
-- **대시보드 통합 및 멀티머신 운영**을 목표로 하면, **보안/권한, API 계약, 관측성**이 부족하다.
+- **Internal Ops 제품**을 목표로 하면, **보안 기본값, API 계약, swarm proof 진실성**을 먼저 고정해야 한다.
+- `/.well-known/agent-card.json` 와 `/metrics` 경로는 Eio 서버에 이미 존재한다. 현재 문제는 경로 부재가 아니라 **운영 기본값과 release gate**다.
 - 실사용 기준에서 **즉시 막히는 P0**는 3가지다.
 
 ## P0 차단 요소
-- 인증/권한이 도구 호출과 REST/SSE에 **강제되지 않는다**.
-- REST API가 **페이지네이션/필터**가 없어 대시보드 통합 시 데이터 폭증이 발생한다.
-- Eio 서버에서 **Agent Card(.well-known)** 와 **/metrics** 경로가 노출되지 않는다.
+- hermetic required gate가 항상 초록이어야 한다. `dune test`, `test_sse_storm_e2e`, contract harness 중 하나라도 깨지면 internal ops 제품 기준으로는 불합격이다.
+- 인증/권한이 여전히 **opt-in strict mode** 중심이라서, 신뢰 네트워크 밖으로 나가는 순간 운영 기본값이 약하다.
+- swarm proof artifact와 live read model이 어긋나면 operator가 같은 run을 두 개의 진실로 보게 된다.
 
 ## P1 위험 요소
 - SSE 이벤트 타입이 **UI 기대값과 불일치**한다.
@@ -33,7 +34,7 @@
 - SSE 버퍼 크기가 작아(100) 장시간 연결 시 유실 가능.
 
 ## 관측/운영성 평가
-- Prometheus 모듈은 있으나 Eio 경로에 실제 노출이 없음.
+- Prometheus는 `/metrics`로 노출된다.
 - Telemetry 기록 옵션은 존재하나, 외부 대시보드 연동 가이드 부족.
 
 ## 보안/권한 평가
@@ -46,12 +47,12 @@
 - 현재 웹 대시보드는 내부용이며, 외부 제품 통합용 스펙이 부재.
 
 ## 강제 개선안 (핵심)
-- Auth 강제 적용: tools/call + REST/SSE/GraphQL.
+- Auth 강제 적용: tools/call + REST/SSE/GraphQL의 non-local default를 strict로 수렴.
 - REST 계약: limit/offset/filters, error schema, versioning.
-- Agent Card/metrics 노출: Eio 서버에 공식 엔드포인트 추가.
-- SSE 계약 정리: event type, payload schema 고정.
+- Swarm proof SSOT: canonical harness와 summary/live read model을 같은 pass 규칙으로 묶기.
+- SSE 계약 정리: event type, payload schema 고정 + operator/warroom freshness 보강.
 
 ## 판단
 - **개인/로컬 협업 제품으로는 합격.**
-- **대시보드 제품 통합/운영 환경 기준으로는 현재는 불합격.**
-- 개선 3단계(문서→보안/REST→성능/SLO) 후 재평가 필요.
+- **Internal Ops 운영 환경 기준으로는 개선 진행 중이지만 아직 보안 기본값과 API 계약이 남아 있다.**
+- 다음 재평가 기준은 `required gates green + strict auth posture + truthful swarm proof`다.

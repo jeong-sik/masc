@@ -7,12 +7,15 @@ type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
 
 let current_net : eio_net option ref = ref None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+let current_sw : Eio.Switch.t option ref = ref None
 
 let set_net net = current_net := Some (net :> eio_net)
 let set_clock clock = current_clock := Some clock
+let set_switch sw = current_sw := Some sw
 
 let get_net_opt () : eio_net option = !current_net
 let get_clock_opt () = !current_clock
+let get_switch_opt () = !current_sw
 
 let get_net () : eio_net =
   match !current_net with
@@ -23,6 +26,11 @@ let get_clock () =
   match !current_clock with
   | Some clock -> clock
   | None -> invalid_arg "Eio clock not initialized - ensure set_clock is called during server startup"
+
+let get_switch () =
+  match !current_sw with
+  | Some sw -> sw
+  | None -> invalid_arg "Eio switch not initialized - ensure set_switch is called during server startup"
 
 (** TLS connector for Cohttp_eio HTTPS support. *)
 let https_connector :

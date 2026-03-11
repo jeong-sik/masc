@@ -134,7 +134,7 @@ let schemas : tool_schema list =
     {
       name = "masc_goal_dispatch";
       description =
-        "Build or execute hierarchical dispatch plan (child/grandchild). Uses approval gate when enabled.";
+        "Build or execute hierarchical dispatch plan (child/grandchild). Task runtime creates backlog tasks only; callers must still claim one and call masc_plan_set_task. Uses approval gate when enabled.";
       input_schema =
         `Assoc
           [
@@ -322,6 +322,12 @@ let handle_goal_refresh ctx args =
 let filter_goal_ids goals ids =
   if ids = [] then goals
   else List.filter (fun g -> List.mem g.Goal_store.id ids) goals
+
+let unknown_goal_ids goals ids =
+  if ids = [] then []
+  else
+    let known_ids = List.map (fun g -> g.Goal_store.id) goals in
+    List.filter (fun goal_id -> not (List.mem goal_id known_ids)) ids
 
 type keeper_call_outcome = {
   node_id : string;
@@ -537,13 +543,17 @@ let handle_goal_dispatch ctx args =
   in
   let fallback_to_task = get_bool args "fallback_to_task" true in
   let keeper_prefix = get_string args "keeper_prefix" "goal" in
-  let goals =
-    Goal_store.active_goals ctx.config
-    |> fun goals -> filter_goal_ids goals goal_ids
-  in
+  let active_goals = Goal_store.active_goals ctx.config in
+  let missing_goal_ids = unknown_goal_ids active_goals goal_ids in
   match runtime_opt with
   | None -> (false, error_result_json "runtime must be task|keeper")
+  | Some _ when missing_goal_ids <> [] ->
+      ( false,
+        error_result_json
+          (Printf.sprintf "unknown goal_ids: %s"
+             (String.concat ", " missing_goal_ids)) )
   | Some runtime ->
+  let goals = filter_goal_ids active_goals goal_ids in
   let plan =
     Goal_orchestrator.build_plan ~goals
       {
@@ -585,6 +595,10 @@ let handle_goal_dispatch ctx args =
         [
           ("runtime", `String runtime);
           ("approval_required", `Bool false);
+          ("current_task_bound", `Bool false);
+          ( "message",
+            `String
+              "dispatch created backlog tasks only; claim one and call masc_plan_set_task to bind current_task" );
           ("plan", Goal_orchestrator.dispatch_plan_to_yojson plan);
           ("execution", Goal_orchestrator.execution_summary_to_yojson summary);
         ] )

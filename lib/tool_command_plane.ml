@@ -32,6 +32,105 @@ let json_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, json_error message)
 
+let assoc_field key value = (key, value)
+
+let merge_env_overrides overrides =
+  let override_keys = List.map fst overrides in
+  let is_override entry =
+    match String.index_opt entry '=' with
+    | None -> false
+    | Some idx ->
+        let key = String.sub entry 0 idx in
+        List.mem key override_keys
+  in
+  let base =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun entry -> not (is_override entry))
+  in
+  let injected =
+    overrides |> List.map (fun (key, value) -> key ^ "=" ^ value)
+  in
+  Array.of_list (base @ injected)
+
+let read_all ic =
+  let buf = Buffer.create 1024 in
+  (try
+     while true do
+       Buffer.add_channel buf ic 4096
+     done
+   with End_of_file -> ());
+  Buffer.contents buf
+
+let tail_text ?(max_chars = 4000) text =
+  let len = String.length text in
+  if len <= max_chars then text
+  else String.sub text (len - max_chars) max_chars
+
+let rec find_repo_root_with_script dir depth =
+  if depth < 0 then None
+  else
+    let script_path =
+      Filename.concat dir "scripts/harness/workload/agent_swarm_live.sh"
+    in
+    if Sys.file_exists script_path then Some script_path
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None
+      else find_repo_root_with_script parent (depth - 1)
+
+let resolve_swarm_live_script () =
+  match Sys.getenv_opt "MASC_SWARM_LIVE_SCRIPT" with
+  | Some value when String.trim value <> "" ->
+      let path = String.trim value in
+      if Sys.file_exists path then Some path else None
+  | _ ->
+      let seeds =
+        [ Sys.getcwd (); Filename.dirname Sys.executable_name ]
+        |> List.sort_uniq String.compare
+      in
+      List.find_map (fun seed -> find_repo_root_with_script seed 8) seeds
+
+type process_result = {
+  exit_code : int;
+  stdout : string;
+  stderr : string;
+}
+
+let run_process ~prog ~argv ~env =
+  let ic, oc, ec =
+    Unix.open_process_args_full prog (Array.of_list argv) env
+  in
+  close_out_noerr oc;
+  let stdout = read_all ic in
+  let stderr = read_all ec in
+  let exit_code =
+    match Unix.close_process_full (ic, oc, ec) with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED code -> 128 + code
+    | Unix.WSTOPPED code -> 256 + code
+  in
+  { exit_code; stdout; stderr }
+
+let json_with_process_metadata json ({ exit_code; stdout; stderr } : process_result) =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        @ [
+            assoc_field "harness_exit_code" (`Int exit_code);
+            assoc_field "harness_stdout_tail" (`String (tail_text stdout));
+            assoc_field "harness_stderr_tail" (`String (tail_text stderr));
+          ])
+  | other ->
+      `Assoc
+        [
+          assoc_field "result" other;
+          assoc_field "harness_exit_code" (`Int exit_code);
+          assoc_field "harness_stdout_tail" (`String (tail_text stdout));
+          assoc_field "harness_stderr_tail" (`String (tail_text stderr));
+        ]
+
 let handle_unit_define (ctx : (_, _) context) args : result =
   try
     match Command_plane_v2.upsert_unit ctx.config ~actor:ctx.agent_name args with
@@ -1334,44 +1433,115 @@ let handle_observe_traces (ctx : (_, _) context) args : result =
     Yojson.Safe.to_string
       (Command_plane_v2.list_traces_json ctx.config ?operation_id ~limit ()))
 
+let swarm_live_run_id_of_args args =
+  match get_string_opt args "run_id" with
+  | Some value -> value
+  | None -> "swarm-live"
+
+let swarm_live_worker_count_of_args args =
+  match Yojson.Safe.Util.member "worker_count" args with
+  | `Int value when value > 0 && value <= 100 -> value
+  | `Int _ -> Agent_swarm_live_harness.default_config.worker_count
+  | _ -> Agent_swarm_live_harness.default_config.worker_count
+
+let persist_swarm_live_summary config ~run_id result_json =
+  let run_dir =
+    Filename.concat
+      (Filename.concat (Cp_paths.control_plane_root_dir config) "swarm-live")
+      (Agent_swarm_live_harness.safe_run_id run_id)
+  in
+  Room_utils.mkdir_p run_dir;
+  Room_utils.write_json_local
+    (Filename.concat run_dir "swarm-live-summary.json")
+    result_json
+
+let handle_swarm_live_run_with_runner config args ~runner : result =
+  let run_id = swarm_live_run_id_of_args args in
+  let worker_count = swarm_live_worker_count_of_args args in
+  let cfg =
+    { Agent_swarm_live_harness.default_config with run_id; worker_count }
+  in
+  try
+    let result_json = runner cfg in
+    persist_swarm_live_summary config ~run_id result_json;
+    (true, Yojson.Safe.to_string result_json)
+  with exn ->
+    ( false,
+      json_error
+        (Printf.sprintf "swarm-live harness failed: %s"
+           (Printexc.to_string exn)) )
+
 let handle_swarm_live_run (ctx : (_, _) context) args : result =
-  match ctx.sw, ctx.clock, ctx.net with
-  | Some sw, Some clock, Some net ->
-      let run_id =
-        match get_string_opt args "run_id" with
-        | Some value -> value
-        | None -> "swarm-live"
-      in
+  let run_id =
+    match get_string_opt args "run_id" with
+    | Some value -> value
+    | None -> "swarm-live"
+  in
+  match validate_run_id run_id with
+  | Error message -> (false, json_error message)
+  | Ok run_id ->
       let worker_count =
         match Yojson.Safe.Util.member "worker_count" args with
         | `Int value when value > 0 && value <= 100 -> value
-        | `Int _ -> Agent_swarm_live_harness.default_config.worker_count
         | _ -> Agent_swarm_live_harness.default_config.worker_count
       in
-      let cfg =
-        { Agent_swarm_live_harness.default_config with run_id; worker_count }
+      let base_url =
+        try Ok (Env_config.masc_http_base_url ())
+        with Failure message ->
+          Error
+            (Printf.sprintf
+               "swarm-live harness requires MASC_HTTP_BASE_URL in server runtime: %s"
+               message)
       in
-      (try
-        let result_json = Agent_swarm_live_harness.run ~sw ~net ~clock cfg in
-        let run_dir =
-          Filename.concat
-            (Filename.concat
-               (Cp_paths.control_plane_root_dir ctx.config)
-               "swarm-live")
-            (Agent_swarm_live_harness.safe_run_id run_id)
-        in
-        Room_utils.mkdir_p run_dir;
-        Room_utils.write_json_local
-          (Filename.concat run_dir "swarm-live-summary.json")
-          result_json;
-        (true, Yojson.Safe.to_string result_json)
-      with exn ->
-        (false, json_error (Printf.sprintf "swarm-live harness failed: %s"
-          (Printexc.to_string exn))))
-  | _ ->
-      ( false,
-        json_error
-          "swarm-live harness requires server runtime context (sw, clock, net)" )
+      (match base_url with
+      | Error message -> (false, json_error message)
+      | Ok base_url -> (
+          match resolve_swarm_live_script () with
+          | None ->
+              ( false,
+                json_error
+                  "Unable to locate scripts/harness/workload/agent_swarm_live.sh relative to the running binary." )
+          | Some script_path ->
+              let env =
+                merge_env_overrides
+                  [
+                    ("RUN_ID", run_id);
+                    ("WORKER_COUNT", string_of_int worker_count);
+                    ("BASE_PATH", ctx.config.base_path);
+                    ("MASC_URL", base_url);
+                    ("MCP_URL", base_url ^ "/mcp");
+                    ("START_SERVER", "0");
+                  ]
+              in
+              let proc =
+                run_process ~prog:"/bin/bash"
+                  ~argv:[ "bash"; script_path ] ~env
+              in
+              let run_dir =
+                Filename.concat
+                  (Filename.concat
+                     (Cp_paths.control_plane_root_dir ctx.config)
+                     "swarm-live")
+                  (Agent_swarm_live_harness.safe_run_id run_id)
+              in
+              let artifact_exists =
+                Sys.file_exists (Filename.concat run_dir "swarm-live-summary.json")
+                || Sys.file_exists (Filename.concat run_dir "runtime-doctor.json")
+              in
+              let detailed_json =
+                Command_plane_v2.swarm_live_json ctx.config ~run_id ()
+              in
+              if proc.exit_code <> 0 && not artifact_exists then
+                ( false,
+                  json_error
+                    (Printf.sprintf
+                       "swarm-live harness exited with %d and produced no readable swarm state. stderr: %s"
+                       proc.exit_code (tail_text proc.stderr)) )
+              else
+                let payload =
+                  json_with_process_metadata detailed_json proc
+                in
+                (true, Yojson.Safe.to_string payload)))
 
 let handle_unit_update (ctx : (_, _) context) args : result =
   json_result (Command_plane_v2.unit_update_json ctx.config ~actor:ctx.agent_name args)

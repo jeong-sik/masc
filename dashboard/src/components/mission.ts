@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
+import { extractAgentInfo, isKeeperAgent } from './common/agent-info'
 import { navigate } from '../router'
 import {
   missionBriefing,
@@ -224,7 +225,7 @@ function memberNamesForSession(session: OperatorSessionSnapshot): string[] {
     ...stringArray(rawSession.agent_names),
     ...stringArray(summary.active_agents),
     ...stringArray(summary.planned_participants),
-  ])
+  ]).filter(name => !isKeeperAgent(name))
 }
 
 function sessionGoal(session: OperatorSessionSnapshot): string {
@@ -340,7 +341,11 @@ function crewRowsFromMission(): CrewRow[] {
 
 function keeperToolNames(keeper: Keeper): string[] {
   if (keeper.recent_tool_names && keeper.recent_tool_names.length > 0) return keeper.recent_tool_names
-  return []
+  const metrics = isRecord(keeper.metrics_window) ? keeper.metrics_window : {}
+  const topTools = Array.isArray(metrics.top_tools) ? metrics.top_tools : []
+  return topTools
+    .map(item => (isRecord(item) ? asString(item.tool) : null))
+    .filter((item): item is string => item !== null)
 }
 
 function keeperForAgent(agentName: string): Keeper | null {
@@ -505,6 +510,11 @@ function SummaryStat({
 
 function MissionBriefingCard() {
   const briefing = missionBriefing.value
+  const briefingTone = toneClass(briefing?.status ?? (missionBriefingError.value ? 'bad' : 'warn'))
+  const showEmpty = !briefing || briefing.sections.length === 0
+  const retryNeedsForce =
+    briefing?.status === 'error'
+    || (briefing?.status === 'unavailable' && !briefing?.cached)
   return html`
     <${Card} title="LLM 판단 레이어" class="mission-briefing-card" semanticId="mission.llm_briefing">
       <div class="mission-section-head">
@@ -513,16 +523,22 @@ function MissionBriefingCard() {
       </div>
 
       <div class="mission-briefing-meta">
-        <span class="command-chip ${toneClass(briefing?.status ?? (missionBriefingError.value ? 'bad' : 'warn'))}">
+        <span class="command-chip ${briefingTone}">
           ${briefing?.status ?? (missionBriefingError.value ? 'error' : 'loading')}
         </span>
         ${briefing?.model ? html`<span class="command-chip">${briefing.model}</span>` : null}
         ${briefing?.generated_at ? html`<span class="command-chip">${relativeTime(briefing.generated_at)}</span>` : null}
         ${briefing?.cached ? html`<span class="command-chip">cached</span>` : null}
+        ${briefing?.stale ? html`<span class="command-chip warn">stale</span>` : null}
+        ${briefing?.refreshing ? html`<span class="command-chip warn">refreshing</span>` : null}
       </div>
 
       ${missionBriefingError.value ? html`<div class="empty-state error">${missionBriefingError.value}</div>` : null}
       ${briefing?.error ? html`<div class="empty-state error">${briefing.error}</div>` : null}
+      ${briefing?.summary ? html`<div class="mission-inline-note">${briefing.summary}</div>` : null}
+      ${briefing?.last_error && !briefing.error
+        ? html`<div class="mission-inline-note">최근 refresh 실패: ${briefing.last_error}</div>`
+        : null}
 
       ${briefing && briefing.sections.length > 0
         ? html`
@@ -545,8 +561,14 @@ function MissionBriefingCard() {
               `)}
             </div>
           `
-        : (!missionBriefingLoading.value && !missionBriefingError.value
-            ? html`<div class="empty-state">아직 판단 레이어를 불러오지 못했습니다.</div>`
+        : (!missionBriefingLoading.value && !missionBriefingError.value && showEmpty
+            ? html`
+                <div class="empty-state">
+                  ${briefing?.status === 'pending'
+                    ? '최신 스냅샷으로 브리핑을 생성 중입니다. 마지막 성공 결과가 생기면 자동으로 다시 읽습니다.'
+                    : '아직 판단 레이어를 불러오지 못했습니다.'}
+                </div>
+              `
             : null)}
 
       ${briefing?.criteria && briefing.criteria.length > 0
@@ -561,8 +583,8 @@ function MissionBriefingCard() {
         : null}
 
       <div class="mission-card-actions">
-        <button class="control-btn ghost" onClick=${() => { void refreshMissionBriefing(false) }} disabled=${missionBriefingLoading.value}>
-          ${missionBriefingLoading.value ? '판단 불러오는 중…' : '판단 다시 읽기'}
+        <button class="control-btn ghost" onClick=${() => { void refreshMissionBriefing(retryNeedsForce) }} disabled=${missionBriefingLoading.value}>
+          ${missionBriefingLoading.value ? '응답 기다리는 중…' : '판단 다시 읽기'}
         </button>
         <button class="control-btn ghost" onClick=${() => { void refreshMissionBriefing(true) }} disabled=${missionBriefingLoading.value}>
           강제 갱신
@@ -576,8 +598,11 @@ function CrewCard({ row }: { row: CrewRow }) {
   const memberRows = row.memberNames.slice(0, 4).map(name => {
     const agent = agents.value.find(item => item.name === name)
     const output = latestMessageFrom(name, messages.value)
+    const info = extractAgentInfo(name)
     return {
       name,
+      model: info.model,
+      nickname: info.nickname,
       currentTask: agent ? taskLabel(agent, tasks.value) : 'agent snapshot 없음',
       output: trimText(output?.content, 96),
     }
@@ -627,7 +652,7 @@ function CrewCard({ row }: { row: CrewRow }) {
             <div class="mission-member-stack">
               ${memberRows.map(member => html`
                 <button class="mission-member-row" onClick=${() => openAgentDetail(member.name)}>
-                  <strong>${member.name}</strong>
+                  <strong>${member.model !== member.nickname ? html`<span class="model-badge">${member.model}</span> ` : ''}${member.nickname}</strong>
                   <span>${member.currentTask}</span>
                   <small>${member.output ?? '최근 출력 없음'}</small>
                 </button>

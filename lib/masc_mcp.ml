@@ -131,6 +131,7 @@ module Spawn_registry = Spawn_registry
 module Glm_pool = Glm_pool
 module Bounded = Bounded
 module Mdal = Mdal
+module Mdal_swarm = Mdal_swarm
 module Mdal_store = Mdal_store
 module Mdal_worker = Mdal_worker
 module Orchestrator = Orchestrator
@@ -154,6 +155,7 @@ module Mention = Mention
 module Hat = Hat
 module Heartbeat = Heartbeat
 module Guardian = Guardian
+module Sentinel = Sentinel
 module Mitosis = Mitosis
 module Mitosis_metrics = Mitosis_metrics
 module Generational_metrics = Generational_metrics
@@ -188,6 +190,8 @@ module Operator_control = Operator_control
 module Goal_guard = Goal_guard
 module Goal_orchestrator = Goal_orchestrator
 module Goal_scheduler = Goal_scheduler
+module Swarm_goal_loop = Swarm_goal_loop
+module Swarm_checkpoint = Swarm_checkpoint
 module Compression_dict = Compression_dict
 (* Redis_common module removed - PostgreSQL is now the only distributed backend *)
 
@@ -309,6 +313,10 @@ module Trpg_bdi = Trpg_bdi
 module Trpg_harness = Trpg_harness
 module Trpg_dm_intent = Trpg_dm_intent
 module Trpg_actor_match = Trpg_actor_match
+
+(* Autoresearch — Karpathy-inspired autonomous experiment loop *)
+module Autoresearch = Autoresearch
+module Tool_autoresearch = Tool_autoresearch
 
 (* SWARM-RISC Agent ISA (Phase 1: types + pipeline + tools) *)
 module Risc_types = Risc_types

@@ -703,6 +703,19 @@ let command_plane_help_http_json () =
         ("tools", str_list tools);
       ]
   in
+  let workload_template ~id ~title ~summary ~workload_profile ~default_stage
+      ~autonomy_target ~recommended_tools =
+    `Assoc
+      [
+        ("id", `String id);
+        ("title", `String title);
+        ("summary", `String summary);
+        ("workload_profile", `String workload_profile);
+        ("default_stage", `String default_stage);
+        ("autonomy_target", `String autonomy_target);
+        ("recommended_tools", str_list recommended_tools);
+      ]
+  in
   let pitfall ~id ~title ~symptom ~why ~fix_tool ~fix_summary =
     `Assoc
       [
@@ -752,6 +765,16 @@ let command_plane_help_http_json () =
               [
                 ("title", `String "Swarm Delivery Runbook");
                 ("path", `String "docs/SWARM-DELIVERY-RUNBOOK.md");
+              ];
+            `Assoc
+              [
+                ("title", `String "LLM Front Door");
+                ("path", `String "llms.txt");
+              ];
+            `Assoc
+              [
+                ("title", `String "LLM Front Door Full");
+                ("path", `String "llms-full.txt");
               ];
           ] );
       ( "concepts",
@@ -885,6 +908,63 @@ let command_plane_help_http_json () =
                     ~success_signals:[ "intervention trace appended"; "team-session reflects the change" ]
                     ~pitfalls:[ "do not mix this path with CPv2 benchmark commands in the same explanation" ];
                 ];
+            path ~id:"attached_team_session" ~title:"Attached Team Session"
+              ~summary:
+                "Attach a team session to a managed CPv2 operation so execution and truth stay on the same spine."
+              ~when_to_use:
+                "Use this for hybrid execution where a managed operation owns the objective and a team session materializes the worker team."
+              ~steps:
+                [
+                  step ~id:"start-managed-operation"
+                    ~title:"Start managed operation" ~tool:"masc_operation_start"
+                    ~summary:
+                      "Create the operation first, optionally with workload_template for coding, research, or governance teams."
+                    ~success_signals:
+                      [ "operation_id issued"; "workload_profile/stage normalized"; "trace_id issued" ]
+                    ~pitfalls:
+                      [ "workload_template and workload_profile must stay in the same family" ];
+                  step ~id:"start-attached-session"
+                    ~title:"Start attached team session" ~tool:"masc_team_session_start"
+                    ~summary:
+                      "Start a team session with operation_id so the operation detachment_session_id points back to the session."
+                    ~success_signals:
+                      [ "team session response includes operation_id"; "command-plane operation references session_id" ]
+                    ~pitfalls:
+                      [ "an operation can only be attached to one team session at a time" ];
+                  step ~id:"observe-attached-runtime"
+                    ~title:"Observe hybrid runtime" ~tool:"masc_team_session_status"
+                    ~summary:
+                      "Read team-session status together with command-plane operation state."
+                    ~success_signals:
+                      [ "team session command_plane block returns operation_path"; "operation/detachment visibility is consistent" ]
+                    ~pitfalls:
+                      [ "do not treat projected detached sessions as the same as attached managed sessions" ];
+                ];
+          ] );
+      ( "workload_templates",
+        `List
+          [
+            workload_template ~id:"coding_team" ~title:"Coding Team"
+              ~summary:
+                "Planner -> implementer -> verifier/reviewer style team. Defaults to coding_task/decompose."
+              ~workload_profile:"coding_task" ~default_stage:"decompose"
+              ~autonomy_target:"L3_Guided -> L5_Independent"
+              ~recommended_tools:
+                [ "masc_operation_start"; "masc_team_session_start"; "masc_operator_digest"; "masc_operation_finalize" ];
+            workload_template ~id:"research_team" ~title:"Research Team"
+              ~summary:
+                "Collect -> verify -> curate -> rank -> audit style team. Defaults to research_pipeline/normalize."
+              ~workload_profile:"research_pipeline" ~default_stage:"normalize"
+              ~autonomy_target:"L3_Guided -> L5_Independent"
+              ~recommended_tools:
+                [ "masc_operation_start"; "masc_dispatch_tick"; "masc_observe_operations"; "masc_operation_finalize" ];
+            workload_template ~id:"ops_governance_team" ~title:"Ops / Governance Team"
+              ~summary:
+                "Audit, intervention, approval, and operator-heavy team. Defaults to research_pipeline/audit for decision-heavy work."
+              ~workload_profile:"research_pipeline" ~default_stage:"audit"
+              ~autonomy_target:"L2_Suggestive -> L4_Autonomous"
+              ~recommended_tools:
+                [ "masc_operation_start"; "masc_team_session_start"; "masc_operator_snapshot"; "masc_policy_approve" ];
           ] );
       ( "tool_groups",
         `List

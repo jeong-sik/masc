@@ -364,7 +364,7 @@ let test_spawn_bare_ollama_rejected () =
     (try
        let _ =
          Str.search_forward
-           (Str.regexp_string "ollama:<model>")
+           (Str.regexp_string "llama:<model>")
            result.output 0
        in
        true

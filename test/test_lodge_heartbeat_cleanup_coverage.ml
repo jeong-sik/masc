@@ -99,7 +99,7 @@ let test_lodge_heartbeat_updates_self_summary () =
 let test_lodge_heartbeat_uses_shared_prompt_cascade () =
   check bool "heartbeat uses shared prompt cascade"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "Llm_client.run_prompt_cascade")
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_cascade.call")
 
 let test_lodge_heartbeat_uses_runtime_verifier_mode () =
   check bool "heartbeat uses verifier auto mode for posts"

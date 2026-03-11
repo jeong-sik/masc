@@ -424,10 +424,9 @@ let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
 
 (** Call GLM API via Llm_client cascade — Z.ai cloud API, 200K context, no VRAM. *)
 let glm_direct ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system prompt =
-  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_direct" () in
-  match Llm_client.run_prompt_cascade ~temperature:_temp ~timeout_sec:120
-      ~system ~model_specs ~max_tokens ~prompt () with
-  | Ok resp when String.length resp.content > 0 -> Ok resp.content
+  match Lodge_cascade.call ~cascade_name:"lodge_direct"
+      ~prompt ~temperature:_temp ~timeout_sec:120 ~max_tokens ~system () with
+  | Ok r when String.length r.response > 0 -> Ok r.response
   | Ok _ -> Error "LLM: GLM returned empty response"
   | Error e -> Error (Printf.sprintf "LLM: cascade failed [%s]" e)
 

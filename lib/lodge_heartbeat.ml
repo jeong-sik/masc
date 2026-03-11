@@ -660,11 +660,11 @@ let () =
             history
           in
 
-          let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_context_rewrite" () in
           let summary =
-            match Llm_client.run_prompt_cascade ~temperature:0.3 ~timeout_sec:60
-                ~model_specs ~max_tokens:700 ~prompt:summary_prompt () with
-            | Ok resp -> resp.content
+            match Lodge_cascade.call ~cascade_name:"lodge_context_rewrite"
+                ~prompt:summary_prompt ~temperature:0.3 ~timeout_sec:60
+                ~max_tokens:700 () with
+            | Ok r -> r.response
             | Error _ -> ""
           in
 
@@ -1156,11 +1156,10 @@ let generate_agent_traits ~topic ~reason =
 }|}
     topic reason
   in
-  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_trait_gen" () in
   let response =
-    match Llm_client.run_prompt_cascade ~temperature:0.5 ~timeout_sec:15
-        ~model_specs ~max_tokens:200 ~prompt () with
-    | Ok resp -> resp.content
+    match Lodge_cascade.call ~cascade_name:"lodge_trait_gen"
+        ~prompt ~temperature:0.5 ~timeout_sec:15 ~max_tokens:200 () with
+    | Ok r -> r.response
     | Error _ -> ""
   in
   (* Extract JSON from response *)
@@ -1890,12 +1889,11 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
   Eio.traceln "   📊 [%s] Context: %d/%d tokens (%d msgs)" agent_name tokens max_tokens msg_count;
 
   (* LLM call via cascade abstraction *)
-  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_comment" () in
   let response =
-    match Llm_client.run_prompt_cascade ~temperature:0.7 ~timeout_sec:30
-        ~system:system_with_context ~model_specs ~max_tokens:120
-        ~prompt:user_prompt () with
-    | Ok resp -> resp.content
+    match Lodge_cascade.call ~cascade_name:"lodge_comment"
+        ~prompt:user_prompt ~temperature:0.7 ~timeout_sec:30
+        ~max_tokens:120 ~system:system_with_context () with
+    | Ok r -> r.response
     | Error _ -> ""
   in
 
@@ -2170,32 +2168,13 @@ let heartbeat_response_accepted ?(require_json = false)
   heartbeat_response_is_valid ~require_json resp.content
 
 let run_heartbeat_llm_once ?(require_json = false) ~agent_name ~prompt () =
-  let models = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
-  let heartbeat_max_tokens = 1200 in
-  let started_at = Time_compat.now () in
-  let result =
-    if models = [] then (
-      Printf.printf
-        "   ⚠️ [%s] No heartbeat model pool available, skipping\n%!" agent_name;
-      Error "no heartbeat model pool available")
-    else
-      Llm_client.run_prompt_cascade ~timeout_sec:60
-        ~accept:(heartbeat_response_accepted ~require_json)
-        ~model_specs:models ~max_tokens:heartbeat_max_tokens ~prompt ()
-  in
-  let duration_ms =
-    int_of_float ((Time_compat.now () -. started_at) *. 1000.0)
-  in
-  match result with
-  | Ok resp ->
-      {
-        Lodge_cascade.response = resp.content;
-        llm_used = resp.model_used;
-        duration_ms;
-      }
+  let accept = heartbeat_response_accepted ~require_json in
+  match Lodge_cascade.call ~cascade_name:"heartbeat_action"
+      ~prompt ~temperature:0.7 ~timeout_sec:60 ~max_tokens:1200 ~accept () with
+  | Ok r -> r
   | Error err ->
       Printf.printf "   ❌ [%s] Heartbeat cascade failed: %s\n%!" agent_name err;
-      { Lodge_cascade.response = ""; llm_used = "none"; duration_ms }
+      { Lodge_cascade.response = ""; llm_used = "none"; duration_ms = 0 }
 
 let run_heartbeat_llm_traced ?(require_json = false) ~agent_name ~phase ~prompt () =
   let tick_id =
@@ -3142,11 +3121,10 @@ let analyze_broadcast_relevance_llm ~content ~available_agents =
      예: dreamer, historian"
     content agents_str
   in
-  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"lodge_agent_match" () in
   let response =
-    match Llm_client.run_prompt_cascade ~temperature:0.1 ~timeout_sec:15
-        ~model_specs ~max_tokens:200 ~prompt () with
-    | Ok resp -> resp.content
+    match Lodge_cascade.call ~cascade_name:"lodge_agent_match"
+        ~prompt ~temperature:0.1 ~timeout_sec:15 ~max_tokens:200 () with
+    | Ok r -> r.response
     | Error _ -> ""
   in
   (* Parse response to get agent names *)

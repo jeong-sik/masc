@@ -173,14 +173,14 @@ let get_cascade ?(config_path = "") ~cascade_name () :
 
 let call ~cascade_name ~prompt
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
-    ?(max_tokens = 500) ?(accept = fun _ -> true) () =
+    ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
   let specs = get_cascade ~config_path ~cascade_name () in
   if specs = [] then
     Error (Printf.sprintf "[cascade] no callable models for %s" cascade_name)
   else
     match
       Llm_client.run_prompt_cascade ~temperature
-        ~timeout_sec ~model_specs:specs ~max_tokens ~accept ~prompt ()
+        ~timeout_sec ~model_specs:specs ~max_tokens ~accept ?system ~prompt ()
     with
     | Ok resp ->
         Ok

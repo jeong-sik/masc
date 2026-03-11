@@ -363,7 +363,9 @@ let collect_task_signals ~(room_config : Room_utils.config) : task_backlog_summa
       oldest_todo_age_hours = !oldest_todo_age;
       high_priority_todo = !high_priority_todo;
     }
-  with _ -> empty_task_backlog
+  with exn ->
+    Eio.traceln "[Gardener] collect_task_signals failed: %s" (Printexc.to_string exn);
+    empty_task_backlog
 
 (** Calculate comprehensive ecosystem health *)
 let calculate_health ~config ~room_config : ecosystem_health =
@@ -406,11 +408,11 @@ let calculate_health ~config ~room_config : ecosystem_health =
     | None -> empty_task_backlog
   in
 
-  (* No heuristic pre-computation — these fields are purely informational.
+  (* No heuristic gates — these fields are purely informational summaries.
      All decision-making is delegated to LLM (primary) or rule-based inline (fallback).
      Raw signals (agent counts, task_backlog, Board data) flow directly to the decision layer. *)
   let needs_spawn = false in
-  let needs_workers = false in
+  let needs_workers = task_backlog.todo_count > 0 && active_agents < 2 in
   let needs_retirement = false in
 
   let state = get_state () in
@@ -837,7 +839,9 @@ let decide_intervention_with_llm ~config ~health : intervention =
       let json = Yojson.Safe.from_string json_str in
       let module U = Yojson.Safe.Util in
       json |> U.member "action" |> U.to_string
-    with _ -> "none"
+    with exn ->
+      Eio.traceln "[Gardener] LLM intervention JSON parse failed: %s" (Printexc.to_string exn);
+      "none"
   in
 
   match action with

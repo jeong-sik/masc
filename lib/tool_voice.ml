@@ -10,6 +10,8 @@ type 'a context = {
 
 type result = bool * string
 
+let schema_properties entries = `Assoc entries
+
 let json_string_of_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message ->
@@ -17,14 +19,14 @@ let json_string_of_result = function
         Yojson.Safe.to_string
           (`Assoc [ ("status", `String "error"); ("message", `String message) ]) )
 
-let schema_properties entries = `Assoc entries
+let string_assoc key value = (key, `String value)
 
 let schemas : tool_schema list =
   [
     {
       name = "masc_voice_speak";
       description =
-        "Send text to the voice bridge for an agent. Uses the agent's configured voice and may fall back to text_fallback when voice is unavailable.";
+        "Send text to the voice bridge for an agent. Uses the configured voice and may fall back to text_fallback when voice is unavailable.";
       input_schema =
         `Assoc
           [
@@ -91,7 +93,7 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_voice_transcript";
-      description = "Get the current voice transcript from the voice bridge.";
+      description = "Get the current transcript payload from the voice bridge.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
     };
@@ -119,7 +121,8 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_voice_conference_end";
-      description = "End a multi-agent voice conference for the given agents.";
+      description =
+        "End a multi-agent voice conference for the given agents.";
       input_schema =
         `Assoc
           [
@@ -144,15 +147,17 @@ let require_net_or_error (ctx : 'a context) =
   | Some net -> Ok net
   | None -> Error "voice bridge requires net (server_state.net is None)"
 
+let message_preview message =
+  String.sub message 0 (min 50 (String.length message))
+
 let text_fallback_json ~agent_id ~message =
   let voice = Voice_bridge.get_voice_for_agent agent_id in
   `Assoc
     [
       ("status", `String "text_fallback");
-      ("agent_id", `String agent_id);
-      ("voice", `String voice);
-      ( "message_preview",
-        `String (String.sub message 0 (min 50 (String.length message))) );
+      string_assoc "agent_id" agent_id;
+      string_assoc "voice" voice;
+      string_assoc "message_preview" (message_preview message);
     ]
 
 let handle_voice_speak (ctx : 'a context) args : result =
@@ -160,7 +165,9 @@ let handle_voice_speak (ctx : 'a context) args : result =
   let message = get_string args "message" "" in
   let provider = get_string_opt args "provider" |> Option.map String.trim in
   let provider =
-    match provider with Some p when p <> "" -> Some p | _ -> None
+    match provider with
+    | Some p when p <> "" -> Some p
+    | _ -> None
   in
   let priority = max 1 (get_int args "priority" 1) in
   if agent_id = "" || String.trim message = "" then
@@ -177,7 +184,9 @@ let handle_voice_session_start (ctx : 'a context) args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
   let session_name = get_string_opt args "session_name" |> Option.map String.trim in
   let session_name =
-    match session_name with Some s when s <> "" -> Some s | _ -> None
+    match session_name with
+    | Some name when name <> "" -> Some name
+    | _ -> None
   in
   if agent_id = "" then
     (false, "Error: agent_id is required")
@@ -240,10 +249,16 @@ let handle_voice_transcript (ctx : 'a context) _args : result =
           (`Assoc [ ("transcript", `List []); ("turn_count", `Int 0) ]) )
 
 let handle_voice_conference_start (ctx : 'a context) args : result =
-  let agent_ids = get_string_list args "agent_ids" |> List.map String.trim |> List.filter (( <> ) "") in
+  let agent_ids =
+    get_string_list args "agent_ids"
+    |> List.map String.trim
+    |> List.filter (fun item -> item <> "")
+  in
   let conference_name = get_string_opt args "conference_name" |> Option.map String.trim in
   let conference_name =
-    match conference_name with Some s when s <> "" -> Some s | _ -> None
+    match conference_name with
+    | Some name when name <> "" -> Some name
+    | _ -> None
   in
   if agent_ids = [] then
     (false, "Error: agent_ids must include at least one agent")
@@ -256,7 +271,11 @@ let handle_voice_conference_start (ctx : 'a context) args : result =
              ~agent_ids ?conference_name ())
 
 let handle_voice_conference_end (ctx : 'a context) args : result =
-  let agent_ids = get_string_list args "agent_ids" |> List.map String.trim |> List.filter (( <> ) "") in
+  let agent_ids =
+    get_string_list args "agent_ids"
+    |> List.map String.trim
+    |> List.filter (fun item -> item <> "")
+  in
   if agent_ids = [] then
     (false, "Error: agent_ids must include at least one agent")
   else
@@ -269,7 +288,10 @@ let handle_voice_conference_end (ctx : 'a context) args : result =
         ( true,
           Yojson.Safe.to_string
             (`Assoc
-              [ ("ended", `Int 0); ("total", `Int (List.length agent_ids)) ]) )
+              [
+                ("ended", `Int 0);
+                ("total", `Int (List.length agent_ids));
+              ]) )
 
 let dispatch (ctx : 'a context) ~name ~args : result option =
   match name with

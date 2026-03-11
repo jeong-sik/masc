@@ -56,9 +56,49 @@ let update_state config f =
     new_state
   )
 
+let state_path_in_room config room_id =
+  Filename.concat (room_dir_for config room_id) "state.json"
+
+let read_state_in_room config room_id =
+  let json = read_json config (state_path_in_room config room_id) in
+  match room_state_of_yojson json with
+  | Ok state -> state
+  | Error _ ->
+      {
+        protocol_version = "0.1.0";
+        project = Filename.basename config.base_path;
+        started_at = now_iso ();
+        message_seq = 0;
+        active_agents = [];
+        paused = false;
+        pause_reason = None;
+        paused_by = None;
+        paused_at = None;
+        search_strategy_default = Some "best_first_v1";
+        speculation_enabled = false;
+        speculation_budget = None;
+      }
+
+let write_state_in_room config room_id state =
+  write_json config (state_path_in_room config room_id) (room_state_to_yojson state)
+
+let update_state_in_room config room_id f =
+  with_file_lock config (state_path_in_room config room_id) (fun () ->
+    let state = read_state_in_room config room_id in
+    let new_state = f state in
+    write_state_in_room config room_id new_state;
+    new_state
+  )
+
 (** Get next message sequence *)
 let next_seq config =
   let state = update_state config (fun s -> { s with message_seq = s.message_seq + 1 }) in
+  state.message_seq
+
+let next_seq_in_room config room_id =
+  let state =
+    update_state_in_room config room_id (fun s -> { s with message_seq = s.message_seq + 1 })
+  in
   state.message_seq
 
 (** Check if room is paused - placed before broadcast since it doesn't need broadcast *)
@@ -220,6 +260,110 @@ let resolve_agent_name config agent_name =
       | None -> agent_name
     else
       agent_name
+  end
+
+let resolve_agent_name_in_room config ~room_id agent_name =
+  let exact_file =
+    Filename.concat (agents_dir_in_room config room_id) (safe_filename agent_name ^ ".json")
+  in
+  if Sys.file_exists exact_file then
+    agent_name
+  else begin
+    let dir = agents_dir_in_room config room_id in
+    if Sys.file_exists dir then
+      let files = Sys.readdir dir in
+      let prefix = agent_name ^ "-" in
+      match Array.find_opt (fun f ->
+        String.length f > String.length prefix &&
+        String.sub f 0 (String.length prefix) = prefix
+      ) files with
+      | Some file -> String.sub file 0 (String.length file - 5)
+      | None -> agent_name
+    else
+      agent_name
+  end
+
+let ensure_room_bootstrap config room_id =
+  let root_dir = masc_root_dir config in
+  let root_agents_dir = Filename.concat root_dir "agents" in
+  let root_tasks_dir = Filename.concat root_dir "tasks" in
+  let root_messages_dir = Filename.concat root_dir "messages" in
+  let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
+  List.iter mkdir_p [ root_agents_dir; root_tasks_dir; root_messages_dir; rooms_root_dir config ];
+  if not (path_exists_root config (root_state_path config)) then begin
+    let root_state = {
+      protocol_version = "0.1.0";
+      project = Filename.basename config.base_path;
+      started_at = now_iso ();
+      message_seq = 0;
+      active_agents = [];
+      paused = false;
+      pause_reason = None;
+      paused_by = None;
+      paused_at = None;
+      search_strategy_default = Some "best_first_v1";
+      speculation_enabled = false;
+      speculation_budget = None;
+    } in
+    write_json_root config (root_state_path config) (room_state_to_yojson root_state)
+  end;
+  if not (path_exists_root config root_backlog_path) then begin
+    let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
+    write_json_root config root_backlog_path (backlog_to_yojson root_backlog)
+  end;
+  if room_id = "default" then begin
+    List.iter mkdir_p [ agents_dir_in_room config room_id; tasks_dir_in_room config room_id; messages_dir_in_room config room_id ];
+    if not (path_exists config (state_path_in_room config room_id)) then begin
+      let state = {
+        protocol_version = "0.1.0";
+        project = Filename.basename config.base_path;
+        started_at = now_iso ();
+        message_seq = 0;
+        active_agents = [];
+        paused = false;
+        pause_reason = None;
+        paused_by = None;
+        paused_at = None;
+        search_strategy_default = Some "best_first_v1";
+        speculation_enabled = false;
+        speculation_budget = None;
+      } in
+      write_state_in_room config room_id state
+    end;
+    if not (path_exists config (backlog_path_in_room config room_id)) then begin
+      let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
+      write_json config (backlog_path_in_room config room_id) (backlog_to_yojson backlog)
+    end
+  end
+  else begin
+    let room_path = room_dir_for config room_id in
+    let agents_path = agents_dir_in_room config room_id in
+    let tasks_path = tasks_dir_in_room config room_id in
+    let messages_path = messages_dir_in_room config room_id in
+    let state_path = state_path_in_room config room_id in
+    let backlog_path = backlog_path_in_room config room_id in
+    List.iter mkdir_p [ room_path; agents_path; tasks_path; messages_path ];
+    if not (Sys.file_exists state_path) then begin
+      let state = {
+        protocol_version = "0.1.0";
+        project = Filename.basename config.base_path;
+        started_at = now_iso ();
+        message_seq = 0;
+        active_agents = [];
+        paused = false;
+        pause_reason = None;
+        paused_by = None;
+        paused_at = None;
+        search_strategy_default = Some "best_first_v1";
+        speculation_enabled = false;
+        speculation_budget = None;
+      } in
+      write_state_in_room config room_id state
+    end;
+    if not (Sys.file_exists backlog_path) then begin
+      let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
+      write_json config backlog_path (backlog_to_yojson backlog)
+    end
   end
 
 (** Initialize MASC room *)
@@ -416,6 +560,77 @@ and join config ~agent_name ?(agent_type_override=None) ~capabilities
 |} nickname nickname agent_type session_id
   end
 
+and join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
+    ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
+  ensure_room_bootstrap config room_id;
+
+  let agent_type = match agent_type_override with
+    | Some t -> t
+    | None ->
+        if Nickname.is_generated_nickname agent_name then
+          Option.value (Nickname.extract_agent_type agent_name) ~default:agent_name
+        else
+          agent_name
+  in
+  let nickname =
+    if Nickname.is_generated_nickname agent_name then agent_name
+    else Nickname.generate agent_type
+  in
+  let agent_file_dedup =
+    Filename.concat (agents_dir_in_room config room_id) (safe_filename nickname ^ ".json")
+  in
+  if Sys.file_exists agent_file_dedup then begin
+    let existing_json = read_json config agent_file_dedup in
+    (match agent_of_yojson existing_json with
+     | Ok existing_agent ->
+         let updated = { existing_agent with last_seen = now_iso () } in
+         write_json config agent_file_dedup (agent_to_yojson updated)
+     | Error _ -> ());
+    Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname room_id
+  end else begin
+    let session_id = generate_session_id () in
+    let meta : agent_meta = {
+      session_id;
+      agent_type;
+      pid;
+      hostname = (match hostname with Some h -> Some h | None -> get_hostname ());
+      tty = (match tty with Some t -> Some t | None -> get_tty ());
+      worktree;
+      parent_task;
+    } in
+    let agent_file =
+      Filename.concat (agents_dir_in_room config room_id) (safe_filename nickname ^ ".json")
+    in
+    let agent = {
+      name = nickname;
+      agent_type;
+      status = Active;
+      capabilities;
+      current_task = None;
+      joined_at = now_iso ();
+      last_seen = now_iso ();
+      meta = Some meta;
+    } in
+    write_json config agent_file (agent_to_yojson agent);
+    let _ = update_state_in_room config room_id (fun s ->
+      let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
+      { s with active_agents = agents }
+    ) in
+    let _ =
+      broadcast_in_room config ~room_id ~from_agent:nickname
+        ~content:(Printf.sprintf "👋 %s joined the room" nickname)
+    in
+    log_event config (Printf.sprintf
+      "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
+      room_id
+      nickname
+      agent_type
+      session_id
+      (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
+      (now_iso ()));
+    Printf.sprintf "✅ %s joined room %s" nickname room_id
+  end
+
 (** Leave room *)
 and leave config ~agent_name =
   ensure_initialized config;
@@ -464,16 +679,15 @@ and leave config ~agent_name =
 (** Broadcast message *)
 and broadcast config ~from_agent ~content =
   ensure_initialized config;
+  broadcast_in_room config ~room_id:(current_room_id config) ~from_agent ~content
 
-  let seq = next_seq config in
+and broadcast_in_room config ~room_id ~from_agent ~content =
+  ensure_room_bootstrap config room_id;
+  let seq = next_seq_in_room config room_id in
 
-  (* Use Mention module for consistent parsing (Stateless/Stateful/Broadcast) *)
   let mention = Mention.extract content in
-
-  (* Sanitize content to prevent XSS attacks *)
   let safe_content = sanitize_message content in
   let safe_agent = sanitize_agent_name from_agent in
-
   let msg = {
     seq;
     from_agent = safe_agent;
@@ -482,15 +696,16 @@ and broadcast config ~from_agent ~content =
     mention;
     timestamp = now_iso ();
   } in
-
-  let msg_file = Filename.concat (messages_dir config)
-    (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent)) in
+  let msg_file =
+    Filename.concat (messages_dir_in_room config room_id)
+      (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
+  in
   write_json config msg_file (message_to_yojson msg);
-
-  (* Publish to distributed backend if available *)
-  let _ = backend_publish config ~channel:"broadcast" ~message:(Yojson.Safe.to_string (message_to_yojson msg)) in
-
-  Printf.sprintf "📢 [%s] %s" safe_agent safe_content
+  let _ =
+    backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
+      ~message:(Yojson.Safe.to_string (message_to_yojson msg))
+  in
+  Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 (** Pause the room - stops orchestrator from spawning new agents *)
 let pause config ~by ~reason =
@@ -1769,31 +1984,24 @@ let audit_orphan_tasks config : (Types.task * string) list =
       | _ -> None
     ) backlog.tasks
 
+let is_agent_joined_in_room config ~room_id ~agent_name =
+  if not (root_is_initialized config) then false
+  else
+    let filename = safe_filename agent_name ^ ".json" in
+    (* Check room-scoped path first *)
+    let room_agents = agents_dir_in_room config room_id in
+    let room_path = Filename.concat room_agents filename in
+    if path_exists config room_path then true
+    else
+      (* Fallback: check root agents_dir (where default join writes) *)
+      let root_agents = agents_dir config in
+      let root_path = Filename.concat root_agents filename in
+      path_exists config root_path
+
 (** Check if an agent has joined the room *)
 let is_agent_joined config ~agent_name =
   ensure_initialized config;
-  (* For PostgreSQL backend: check masc_kv first (HTTP state persistence) *)
-  if is_pg_backend config then begin
-    let agent_key = Printf.sprintf "agents:%s" (safe_filename agent_name) in
-    if backend_exists config ~key:agent_key then true
-    else begin
-      (* Fallback to filesystem for backward compatibility *)
-      let agents_path = agents_dir config in
-      if not (Sys.file_exists agents_path) then false
-      else
-        let filename = safe_filename agent_name ^ ".json" in
-        let path = Filename.concat agents_path filename in
-        Sys.file_exists path
-    end
-  end else begin
-    (* For FileSystem/Memory backend: check filesystem directly *)
-    let agents_path = agents_dir config in
-    if not (Sys.file_exists agents_path) then false
-    else
-      let filename = safe_filename agent_name ^ ".json" in
-      let path = Filename.concat agents_path filename in
-      Sys.file_exists path
-  end
+  is_agent_joined_in_room config ~room_id:(current_room_id config) ~agent_name
 
 (** Check if filename is valid (no special characters) *)
 let is_valid_filename name =
@@ -1966,25 +2174,35 @@ include Room_worktree
    and is_zombie_agent are defined earlier in the file for use in status *)
 
 (** Update agent heartbeat - must be called periodically *)
-let heartbeat config ~agent_name =
-  ensure_initialized config;
-
-  (* Support both exact nickname and agent_type prefix match *)
-  let actual_name = resolve_agent_name config agent_name in
-  let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
-  if Sys.file_exists agent_file then begin
+let heartbeat_in_room config ~room_id ~agent_name =
+  ensure_room_bootstrap config room_id;
+  let actual_name = resolve_agent_name_in_room config ~room_id agent_name in
+  let filename = safe_filename actual_name ^ ".json" in
+  (* Check room-scoped path first, fallback to root agents_dir *)
+  let room_file = Filename.concat (agents_dir_in_room config room_id) filename in
+  let root_file = Filename.concat (agents_dir config) filename in
+  let agent_file =
+    if path_exists config room_file then room_file
+    else if path_exists config root_file then root_file
+    else room_file (* will fail gracefully below *)
+  in
+  if path_exists config agent_file then begin
     with_file_lock config agent_file (fun () ->
       let json = read_json config agent_file in
       match agent_of_yojson json with
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
           write_json config agent_file (agent_to_yojson updated);
-          Printf.sprintf "💓 %s heartbeat updated" actual_name
+          Printf.sprintf "💓 %s heartbeat updated in %s" actual_name room_id
       | Error _ ->
-          Printf.sprintf "⚠ Invalid agent file for %s" actual_name
+          Printf.sprintf "⚠ Invalid agent file for %s in %s" actual_name room_id
     )
   end else
-    Printf.sprintf "⚠ Agent %s not found" agent_name
+    Printf.sprintf "⚠ Agent %s not found in %s" agent_name room_id
+
+let heartbeat config ~agent_name =
+  ensure_initialized config;
+  heartbeat_in_room config ~room_id:(current_room_id config) ~agent_name
 
 (** Cleanup zombie agents - removes stale agents *)
 let is_keeper_runtime_agent_name (name : string) =

@@ -265,6 +265,16 @@ let test_permission_for_tool_operator_confirm () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
+let test_permission_for_tool_persona_list () =
+  match Auth.permission_for_tool "masc_persona_list" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_keeper_create_from_persona () =
+  match Auth.permission_for_tool "masc_keeper_create_from_persona" with
+  | Some Types.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
+
 let test_permission_for_tool_unknown () =
   match Auth.permission_for_tool "unknown_tool_xyz" with
   | None -> ()
@@ -339,6 +349,9 @@ let () =
       test_case "operator_digest" `Quick test_permission_for_tool_operator_digest;
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
+      test_case "persona_list" `Quick test_permission_for_tool_persona_list;
+      test_case "keeper_create_from_persona" `Quick
+        test_permission_for_tool_keeper_create_from_persona;
       test_case "unknown" `Quick test_permission_for_tool_unknown;
       test_case "empty" `Quick test_permission_for_tool_empty;
     ];

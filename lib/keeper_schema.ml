@@ -4,6 +4,85 @@ open Types
 
 let schemas : tool_schema list = [
   {
+    name = "masc_persona_list";
+    description = "List available personas that have structured profile.json data. Use this before creating a keeper from a persona.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("detailed", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, return persona summaries with profile path and keeper availability. If false, return persona names only.");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_create_from_persona";
+    description = "Create or dry-run a keeper configuration from a persona profile.json using deterministic field merging only. Explicit arguments override persona defaults.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("persona_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Persona handle under ME_ROOT/personas/<persona_name>/profile.json");
+        ]);
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional keeper handle. Defaults to persona_name.");
+        ]);
+        ("dry_run", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, return the resolved keeper args and validation errors without creating the keeper.");
+        ]);
+        ("goal", `Assoc [("type", `String "string")]);
+        ("short_goal", `Assoc [("type", `String "string")]);
+        ("mid_goal", `Assoc [("type", `String "string")]);
+        ("long_goal", `Assoc [("type", `String "string")]);
+        ("instructions", `Assoc [("type", `String "string")]);
+        ("soul_profile", `Assoc [("type", `String "string")]);
+        ("will", `Assoc [("type", `String "string")]);
+        ("needs", `Assoc [("type", `String "string")]);
+        ("desires", `Assoc [("type", `String "string")]);
+        ("models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("allowed_models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("active_model", `Assoc [("type", `String "string")]);
+        ("room_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "current"; `String "all"]);
+        ]);
+        ("scope_kind", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "local"; `String "global"]);
+        ]);
+        ("trigger_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "legacy"; `String "explicit_only"]);
+        ]);
+        ("mention_targets", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("presence_keepalive", `Assoc [("type", `String "boolean")]);
+        ("presence_keepalive_sec", `Assoc [("type", `String "integer")]);
+        ("proactive_enabled", `Assoc [("type", `String "boolean")]);
+        ("verify", `Assoc [("type", `String "boolean")]);
+        ("auto_handoff", `Assoc [("type", `String "boolean")]);
+        ("handoff_threshold", `Assoc [("type", `String "number")]);
+        ("handoff_cooldown_sec", `Assoc [("type", `String "integer")]);
+        ("context_budget", `Assoc [("type", `String "number")]);
+      ]);
+      ("required", `List [`String "persona_name"]);
+    ];
+  };
+
+  {
     name = "masc_keeper_up";
     description = "Create or update a persistent keeper agent (event-driven). \
 Stores context on disk and keeps presence alive. Auto-handoff is enabled by default.";
@@ -54,6 +133,35 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Model cascade (provider:model). Examples: 'claude:opus', 'gemini:gemini-3.1-pro-preview', 'glm:glm-4.7', 'openrouter:openai/gpt-4o-mini'.");
+        ]);
+        ("allowed_models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Explicitly allowed persistent models for this keeper. Used by exact model switching and explicit-only runtimes.");
+        ]);
+        ("active_model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current persisted model for the keeper. When set, explicit-only keepers use this exact model instead of fallback selection.");
+        ]);
+        ("scope_kind", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "local"; `String "global"]);
+          ("description", `String "Keeper presence scope. 'global' enables room-aware roaming state.");
+        ]);
+        ("room_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "current"; `String "all"]);
+          ("description", `String "Which rooms the keeper should maintain presence in.");
+        ]);
+        ("trigger_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "legacy"; `String "explicit_only"]);
+          ("description", `String "How autonomous room activity is triggered. 'explicit_only' disables heuristic triggers and only reacts to exact direct mentions.");
+        ]);
+        ("mention_targets", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Exact direct-mention tokens that can wake the keeper in room traffic (for example ['sangsu']).");
         ]);
         ("verify", `Assoc [
           ("type", `String "boolean");
@@ -313,6 +421,30 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
         ]);
       ]);
       ("required", `List [`String "name"; `String "message"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_model_set";
+    description = "Change a keeper's persisted active model explicitly. Restarts keepalive with the new exact model selection.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Exact provider:model label to persist as the active model.");
+        ]);
+        ("allowed_models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional persistent allowlist extension to store alongside the newly active model.");
+        ]);
+      ]);
+      ("required", `List [`String "name"; `String "model"]);
     ];
   };
 

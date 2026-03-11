@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.81.0] - Unreleased
+## [2.81.0] - 2026-03-11
+
+### Added
+- **Persona-backed Keeper Creation** — `masc_persona_list` and `masc_keeper_create_from_persona` expose deterministic persona-to-keeper creation for agents and dashboards
+- **Explicit Keeper Model Switching** — `masc_keeper_model_set` persists exact active-model changes without heuristic fallback
+
+### Changed
+- Keeper runtime can now load defaults from `ME_ROOT/personas/<name>/profile.json`
+- Explicit-only keepers can maintain room-aware presence across rooms while reacting only to exact direct mentions
+
+### Fixed
+- Keeper room presence no longer depends on mutating repo-global `current_room`
 
 ## [2.80.0] - 2026-03-11
 

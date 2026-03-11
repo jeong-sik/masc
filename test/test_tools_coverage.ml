@@ -641,6 +641,27 @@ let test_masc_team_session_step_spawn_batch_schema () =
             (List.mem_assoc "spawn_batch" props)
       | None -> Alcotest.fail "masc_team_session_step missing properties"
 
+let test_masc_persona_list_schema () =
+  match find_tool "masc_persona_list" with
+  | None -> Alcotest.fail "masc_persona_list not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has detailed" true (List.mem_assoc "detailed" props)
+      | None -> Alcotest.fail "masc_persona_list missing properties"
+
+let test_masc_keeper_create_from_persona_schema () =
+  match find_tool "masc_keeper_create_from_persona" with
+  | None -> Alcotest.fail "masc_keeper_create_from_persona not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has persona_name" true
+            (List.mem_assoc "persona_name" props);
+          Alcotest.(check bool) "has dry_run" true
+            (List.mem_assoc "dry_run" props)
+      | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
+
 (* ============================================================ *)
 (* 13. Cache Tool Tests                                          *)
 (* ============================================================ *)
@@ -991,6 +1012,9 @@ let () =
       Alcotest.test_case "mitosis_status" `Quick test_masc_mitosis_status_schema;
       Alcotest.test_case "mitosis_divide" `Quick test_masc_mitosis_divide_schema;
       Alcotest.test_case "spawn" `Quick test_masc_spawn_schema;
+      Alcotest.test_case "persona-list" `Quick test_masc_persona_list_schema;
+      Alcotest.test_case "keeper-create-from-persona" `Quick
+        test_masc_keeper_create_from_persona_schema;
       Alcotest.test_case "llama-models" `Quick test_masc_llama_models_schema;
       Alcotest.test_case "team-session-step-spawn-selection-note" `Quick
         test_masc_team_session_step_spawn_selection_note_schema;

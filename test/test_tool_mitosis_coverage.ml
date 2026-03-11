@@ -135,7 +135,7 @@ let test_dispatch_mitosis_handoff_rejects_bare_ollama_target () =
         (try
            let _ =
              Str.search_forward
-               (Str.regexp_string "ollama:<model>")
+               (Str.regexp_string "llama:<model>")
                result 0
            in
            true

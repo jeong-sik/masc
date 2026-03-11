@@ -129,7 +129,7 @@ let test_spawn_bare_ollama_rejected () =
   Alcotest.(check bool) "spawn rejected" false result.Spawn.success;
   Alcotest.(check int) "exit code" 2 result.Spawn.exit_code;
   Alcotest.(check bool) "migration message" true
-    (contains result.Spawn.output "ollama:<model>")
+    (contains result.Spawn.output "llama:<model>")
 
 let tests = [
   Alcotest.test_case "get_config known agents" `Quick test_get_config_known_agents;

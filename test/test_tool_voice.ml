@@ -3,6 +3,7 @@
 open Alcotest
 
 module Tool_voice = Masc_mcp.Tool_voice
+module Voice_bridge = Masc_mcp.Voice_bridge
 
 let contains haystack needle =
   let text = String.lowercase_ascii haystack in
@@ -218,6 +219,10 @@ let test_voice_conference_end_with_unavailable_server_counts_skipped () =
         "enabled": true
       }
     ]
+  },
+  "local_playback": {
+    "enabled": true,
+    "agents": ["sangsu"]
   }
 }
 |}
@@ -280,6 +285,10 @@ let test_voice_public_config_json () =
         "enabled": true
       }
     ]
+  },
+  "local_playback": {
+    "enabled": true,
+    "agents": ["sangsu"]
   }
 }
 |}
@@ -295,9 +304,51 @@ let test_voice_public_config_json () =
         (json |> member "tts" |> member "preview_url" |> to_string);
       check string "active endpoint id" "railway-proxy"
         (json |> member "tts" |> member "active_endpoint" |> member "id" |> to_string);
+      check bool "local playback enabled" true
+        (json |> member "local_playback" |> member "enabled" |> to_bool);
+      check bool "local playback agent sangsu" true
+        (json |> member "local_playback" |> member "agents" |> to_list
+         |> List.exists (function `String "sangsu" -> true | _ -> false));
       check bool "includes sangsu voice" true
         (json |> member "tts" |> member "available_voices" |> to_list
          |> List.exists (function `String "Josh" -> true | _ -> false))
+
+let touch_executable dir name =
+  let path = Filename.concat dir name in
+  let oc = open_out path in
+  output_string oc "#!/bin/sh\nexit 0\n";
+  close_out oc;
+  Unix.chmod path 0o755;
+  path
+
+let test_local_playback_argv_prefers_ffplay () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let ffplay = touch_executable dir "ffplay" in
+      ignore (touch_executable dir "mpg123");
+      let argv =
+        Voice_bridge.local_playback_argv ~path_value:dir
+          ~audio_file:"/tmp/sample.mp3" ()
+      in
+      check (option (list string)) "ffplay selected first"
+        (Some [ ffplay; "-nodisp"; "-autoexit"; "-loglevel"; "error"; "/tmp/sample.mp3" ])
+        argv)
+
+let test_local_playback_argv_falls_back_to_open () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let open_cmd = touch_executable dir "open" in
+      let argv =
+        Voice_bridge.local_playback_argv ~path_value:dir
+          ~audio_file:"/tmp/sample.mp3" ()
+      in
+      check (option (list string)) "open fallback selected"
+        (Some [ open_cmd; "/tmp/sample.mp3" ])
+        argv)
 
 let () =
   run "Tool_voice"
@@ -318,5 +369,9 @@ let () =
             test_voice_conference_end_with_unavailable_server_counts_skipped;
           test_case "voice public config json" `Quick
             test_voice_public_config_json;
+          test_case "local playback argv prefers ffplay" `Quick
+            test_local_playback_argv_prefers_ffplay;
+          test_case "local playback argv falls back to open" `Quick
+            test_local_playback_argv_falls_back_to_open;
         ] );
     ]

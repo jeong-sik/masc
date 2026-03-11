@@ -136,6 +136,84 @@ let log_error msg =
 let log_debug msg =
   Log.debug "%s %s" log_prefix msg
 
+let local_playback_enabled config ~agent_id =
+  config.Voice_config.local_playback.enabled
+  &&
+  (match config.local_playback.agents with
+  | [] -> true
+  | agents -> List.mem agent_id agents)
+
+let split_path_env value =
+  String.split_on_char ':' value
+  |> List.filter (fun entry -> String.trim entry <> "")
+
+let find_executable_in_path ?path_value executable =
+  let path_value =
+    match path_value with
+    | Some value -> value
+    | None -> Option.value (Sys.getenv_opt "PATH") ~default:""
+  in
+  let candidates =
+    split_path_env path_value
+    |> List.map (fun dir -> Filename.concat dir executable)
+  in
+  List.find_opt (fun path -> Sys.file_exists path && not (Sys.is_directory path)) candidates
+
+let local_playback_argv ?path_value ~audio_file () =
+  let commands =
+    [
+      ("ffplay", [ "-nodisp"; "-autoexit"; "-loglevel"; "error" ]);
+      ("mpg123", [ "-q" ]);
+      ("play", [ "-q" ]);
+      ("open", []);
+    ]
+  in
+  let rec pick = function
+    | [] -> None
+    | (executable, args) :: rest -> (
+        match find_executable_in_path ?path_value executable with
+        | Some path -> Some (path :: args @ [ audio_file ])
+        | None -> pick rest)
+  in
+  pick commands
+
+let start_local_playback ~sw ~agent_id ~audio_file =
+  match load_voice_config () with
+  | Error _ -> ()
+  | Ok config ->
+      if not (local_playback_enabled config ~agent_id) then
+        ()
+      else
+        match local_playback_argv ~audio_file () with
+        | None ->
+            log_error
+              "local voice playback unavailable: no ffplay/mpg123/play/open executable found"
+        | Some argv ->
+          Eio.Fiber.fork ~sw (fun () ->
+              match Process_eio.run_argv_with_status ~timeout_sec:180.0 argv with
+              | Unix.WEXITED 0, _ ->
+                  log_info
+                    (Printf.sprintf "local voice playback finished: agent=%s file=%s via=%s"
+                       agent_id audio_file (List.hd argv))
+              | Unix.WEXITED code, output ->
+                  log_error
+                    (Printf.sprintf
+                       "local voice playback failed (exit=%d): %s%s"
+                       code (String.concat " " argv)
+                       (if String.trim output = "" then "" else " :: " ^ String.trim output))
+              | Unix.WSTOPPED signal, output ->
+                  log_error
+                    (Printf.sprintf
+                       "local voice playback stopped (sig=%d): %s%s"
+                       signal (String.concat " " argv)
+                       (if String.trim output = "" then "" else " :: " ^ String.trim output))
+              | Unix.WSIGNALED signal, output ->
+                  log_error
+                    (Printf.sprintf
+                       "local voice playback signaled (sig=%d): %s%s"
+                       signal (String.concat " " argv)
+                       (if String.trim output = "" then "" else " :: " ^ String.trim output)))
+
 (** Get voice for agent, defaults to "Sarah" if config is unavailable *)
 let get_voice_for_agent agent_id =
   let voices = agent_voices () in
@@ -687,6 +765,7 @@ let attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
            ~output_file:audio_file
        with
       | Ok file_size ->
+          start_local_playback ~sw ~agent_id ~audio_file;
           Ok
             (append_provider_metadata
                (`Assoc
@@ -711,6 +790,7 @@ let attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
            ~output_file:audio_file
        with
       | Ok file_size ->
+          start_local_playback ~sw ~agent_id ~audio_file;
           Ok
             (append_provider_metadata
                (`Assoc

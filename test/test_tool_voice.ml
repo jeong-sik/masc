@@ -39,6 +39,18 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let with_temp_voice_config config_json f =
+  let root = temp_dir () in
+  let masc_dir = Filename.concat root ".masc" in
+  Unix.mkdir masc_dir 0o755;
+  let config_path = Filename.concat masc_dir "voice_config.json" in
+  let oc = open_out config_path in
+  output_string oc config_json;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir root)
+    (fun () -> with_env "ME_ROOT" root f)
+
 let with_ctx_no_net f =
   Eio_main.run (fun env ->
       Eio.Switch.run (fun sw ->
@@ -167,20 +179,50 @@ let test_voice_conference_end_without_net_returns_zero () =
         (match json_field "failed" body with Some (`Int n) -> Some n | _ -> None))
 
 let test_voice_conference_end_with_unavailable_server_counts_skipped () =
-  let root = temp_dir () in
-  let masc_dir = Filename.concat root ".masc" in
-  Unix.mkdir masc_dir 0o755;
-  let config_path = Filename.concat masc_dir "voice_config.json" in
   let config_json =
-    {|{"server":{"host":"127.0.0.1","port":1},"agent_voices":{"claude":"Sarah","gemini":"Roger"}}|}
+    {|
+{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "Sarah",
+    "agent_voices": {
+      "claude": "Sarah",
+      "gemini": "Roger"
+    },
+    "endpoints": [
+      {
+        "id": "test-tts",
+        "kind": "openai_compat",
+        "base_url": "http://127.0.0.1:1/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      {
+        "id": "test-stt",
+        "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      {
+        "id": "test-session",
+        "kind": "voice_mcp",
+        "base_url": "http://127.0.0.1:1",
+        "enabled": true
+      }
+    ]
+  }
+}
+|}
   in
-  let oc = open_out config_path in
-  output_string oc config_json;
-  close_out oc;
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir root)
-    (fun () ->
-      with_env "ME_ROOT" root @@ fun () ->
+  with_temp_voice_config config_json @@ fun () ->
       with_ctx_net @@ fun ctx ->
       let ok, body =
         dispatch_exn ctx ~name:"masc_voice_conference_end"
@@ -195,7 +237,67 @@ let test_voice_conference_end_with_unavailable_server_counts_skipped () =
         (match json_field "skipped" body with Some (`Int n) -> Some n | _ -> None);
       check (option int) "failed"
         (Some 0)
-        (match json_field "failed" body with Some (`Int n) -> Some n | _ -> None))
+        (match json_field "failed" body with Some (`Int n) -> Some n | _ -> None)
+
+let test_voice_public_config_json () =
+  let config_json =
+    {|
+{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "Sarah",
+    "agent_voices": {
+      "claude": "Sarah",
+      "gemini": "Roger",
+      "sangsu": "Josh"
+    },
+    "endpoints": [
+      {
+        "id": "railway-proxy",
+        "kind": "openai_compat",
+        "base_url": "https://example.test/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      {
+        "id": "openai-stt",
+        "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      {
+        "id": "local-session",
+        "kind": "voice_mcp",
+        "base_url": "http://127.0.0.1:8936",
+        "enabled": true
+      }
+    ]
+  }
+}
+|}
+  in
+  with_temp_voice_config config_json @@ fun () ->
+  match Masc_mcp.Voice_bridge.public_config_json () with
+  | Error json ->
+      failf "expected Ok, got Error: %s" (Yojson.Safe.to_string json)
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      check string "status" "ok" (json |> member "status" |> to_string);
+      check string "preview url" "/api/v1/trpg/tts"
+        (json |> member "tts" |> member "preview_url" |> to_string);
+      check string "active endpoint id" "railway-proxy"
+        (json |> member "tts" |> member "active_endpoint" |> member "id" |> to_string);
+      check bool "includes sangsu voice" true
+        (json |> member "tts" |> member "available_voices" |> to_list
+         |> List.exists (function `String "Josh" -> true | _ -> false))
 
 let () =
   run "Tool_voice"
@@ -214,5 +316,7 @@ let () =
           test_case "conference end no net" `Quick test_voice_conference_end_without_net_returns_zero;
           test_case "conference end unavailable server counts skipped" `Quick
             test_voice_conference_end_with_unavailable_server_counts_skipped;
+          test_case "voice public config json" `Quick
+            test_voice_public_config_json;
         ] );
     ]

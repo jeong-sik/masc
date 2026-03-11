@@ -314,6 +314,10 @@ module Trpg_harness = Trpg_harness
 module Trpg_dm_intent = Trpg_dm_intent
 module Trpg_actor_match = Trpg_actor_match
 
+(* Autoresearch — Karpathy-inspired autonomous experiment loop *)
+module Autoresearch = Autoresearch
+module Tool_autoresearch = Tool_autoresearch
+
 (* SWARM-RISC Agent ISA (Phase 1: types + pipeline + tools) *)
 module Risc_types = Risc_types
 module Risc_pipeline = Risc_pipeline

@@ -698,6 +698,12 @@
  (modules test_tool_experiment_coverage)
  (libraries masc_mcp alcotest yojson str unix))
 
+; Autoresearch — Karpathy-inspired autonomous experiment loop
+(test
+ (name test_autoresearch)
+ (modules test_autoresearch)
+ (libraries masc_mcp alcotest yojson unix mirage-crypto-rng mirage-crypto-rng.unix))
+
 ; SWARM-RISC Agent ISA Phase 1 tests (pipeline, hazards, tools)
 (test
  (name test_risc)

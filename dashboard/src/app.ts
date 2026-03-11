@@ -70,6 +70,9 @@ function refreshForTab(tab: string) {
     refreshMissionSnapshot()
     refreshMissionBriefing()
   }
+  if (tab === 'proof') {
+    refreshProofSnapshot(route.value.params.session_id, route.value.params.operation_id)
+  }
   if (tab === 'execution') refreshExecution()
   if (tab === 'intervene') {
     refreshOperatorSnapshot()

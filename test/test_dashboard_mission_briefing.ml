@@ -22,16 +22,6 @@ let cleanup_dir dir =
   in
   rm dir
 
-let with_env key value f =
-  let old = Sys.getenv_opt key in
-  Unix.putenv key value;
-  Fun.protect
-    ~finally:(fun () ->
-      match old with
-      | Some prev -> Unix.putenv key prev
-      | None -> Unix.putenv key "")
-    f
-
 let get_field key = function
   | `Assoc fields -> List.assoc key fields
   | _ -> fail ("expected assoc for key " ^ key)
@@ -60,6 +50,16 @@ let check_list_field json key expected_len =
   in
   check int key expected_len actual_len
 
+let find_section sections id =
+  sections
+  |> List.find_opt (fun json ->
+         match get_field "id" json with
+         | `String value -> String.equal value id
+         | _ -> false)
+  |> function
+  | Some json -> json
+  | None -> fail ("missing section " ^ id)
+
 let iso_of_unix ts =
   let tm = Unix.gmtime ts in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
@@ -67,7 +67,7 @@ let iso_of_unix ts =
     (tm.Unix.tm_mon + 1)
     tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
-let test_disabled_override_returns_unavailable () =
+let test_briefing_is_model_free_and_synchronous () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -77,23 +77,23 @@ let test_disabled_override_returns_unavailable () =
     (fun () ->
       let config = Room.default_config base_path in
       ignore (Room.init config ~agent_name:None);
-      with_env "MASC_DASHBOARD_BRIEFING_MODELS" "disabled" (fun () ->
-        let json =
-          Dashboard_mission_briefing.json
-            ~config ~sw ~clock ~proc_mgr:None ()
-        in
-        let open Yojson.Safe.Util in
-        check string "status" "unavailable"
-          (json |> member "status" |> to_string);
-        check bool "refreshing false" false
-          (json |> member "refreshing" |> to_bool);
-        check string "provenance" "narrative"
-          (json |> member "provenance" |> to_string);
-        check bool "not authoritative" false
-          (json |> member "authoritative" |> to_bool);
-        check string "error reason"
-          "No dashboard briefing model is available in the current environment."
-          (json |> member "error" |> to_string)))
+      let json =
+        Dashboard_mission_briefing.json
+          ~config ~sw ~clock ~proc_mgr:None ()
+      in
+      let open Yojson.Safe.Util in
+      check string "status" "ok"
+        (json |> member "status" |> to_string);
+      check bool "refreshing false" false
+        (json |> member "refreshing" |> to_bool);
+      check string "model" "deterministic"
+        (json |> member "model" |> to_string);
+      check string "provenance" "narrative"
+        (json |> member "provenance" |> to_string);
+      check bool "not authoritative" false
+        (json |> member "authoritative" |> to_bool);
+      check int "section count" 3
+        (json |> member "sections" |> to_list |> List.length))
 
 let test_compact_session_json_normalizes_missing_fields () =
   let json =
@@ -280,13 +280,108 @@ let test_collect_metadata_gaps_ignores_inactive_agents () =
   | [ json ] -> check_string_field json "kind" "agent_focus_missing"
   | _ -> fail "expected one live agent focus gap"
 
+let test_build_briefing_sections_demotes_metadata_only_communication () =
+  let mission_summary_json =
+    `Assoc
+      [
+        ("room_health", `String "ok");
+        ("incident_count", `Int 0);
+        ("recommended_action_count", `Int 0);
+        ("top_attention_summary", `String "");
+      ]
+  in
+  let watch_summary, sections =
+    Briefing.build_briefing_sections ~mission_summary_json ~sessions:[]
+      ~agents:[] ~recent_messages:[]
+      ~metadata_gaps:
+        [
+          `Assoc
+            [
+              ("kind", `String "keeper_last_reply_missing");
+              ("summary", `String "Keeper last reply status is not recorded.");
+              ("scope_type", `String "keeper");
+              ("scope_id", `String "keeper-a");
+              ("severity", `String "info");
+            ];
+        ]
+  in
+  let communication = find_section sections "communication" in
+  let watch = find_section sections "watch" in
+  check string "watch summary" "No immediate operator action is flagged by the room summary."
+    watch_summary;
+  check_string_field communication "status" "unclear";
+  check_string_field communication "signal_class" "metadata_gap";
+  check_string_field communication "evidence_quality" "missing";
+  check_string_field watch "status" "ok"
+
+let test_build_briefing_sections_keeps_metadata_evidence_visible () =
+  let mission_summary_json =
+    `Assoc
+      [
+        ("room_health", `String "ok");
+        ("incident_count", `Int 0);
+        ("recommended_action_count", `Int 0);
+        ("top_attention_summary", `String "");
+      ]
+  in
+  let session =
+    `Assoc
+      [
+        ("session_id", `String "sess-live");
+        ("goal", `String "goal-a");
+        ("room_id", `String "default");
+        ("status", `String "running");
+        ("agent_names", `List []);
+        ("elapsed_sec", `Int 10);
+        ("progress_pct", `Float 0.1);
+        ("done_delta_total", `Int 0);
+        ("team_health", `String "ok");
+        ("active_agents_count", `Int 1);
+        ("required_agents", `Int 1);
+        ("communication_mode", `String "broadcast");
+        ("broadcast_count", `Int 1);
+        ("portal_count", `Int 0);
+        ("communication_summary", `String "broadcast · broadcast 1 · portal 0");
+        ("last_event", `Assoc []);
+      ]
+  in
+  let _watch_summary, sections =
+    Briefing.build_briefing_sections ~mission_summary_json ~sessions:[ session ]
+      ~agents:[] ~recent_messages:[ `Assoc [ ("from", `String "agent-a") ] ]
+      ~metadata_gaps:
+        [
+          `Assoc
+            [
+              ("kind", `String "keeper_last_reply_missing");
+              ("summary", `String "Keeper last reply status is not recorded.");
+              ("scope_type", `String "keeper");
+              ("scope_id", `String "keeper-a");
+              ("severity", `String "info");
+            ];
+        ]
+  in
+  let communication = find_section sections "communication" in
+  check_string_field communication "status" "watch";
+  match get_field "evidence" communication with
+  | `List items ->
+      let found =
+        List.exists
+          (function
+            | `String value ->
+                String.equal value "Keeper last reply status is not recorded."
+            | _ -> false)
+          items
+      in
+      check bool "metadata evidence remains visible" true found
+  | _ -> fail "expected communication evidence list"
+
 let () =
   run "Dashboard Mission Briefing"
     [
-      ( "env override",
+      ( "deterministic",
         [
-          test_case "disabled override returns unavailable" `Quick
-            test_disabled_override_returns_unavailable;
+          test_case "briefing is model-free and synchronous" `Quick
+            test_briefing_is_model_free_and_synchronous;
         ] );
       ( "normalization",
         [
@@ -305,5 +400,9 @@ let () =
             test_collect_metadata_gaps_separates_null_like_inputs;
           test_case "inactive agents ignored for focus gaps" `Quick
             test_collect_metadata_gaps_ignores_inactive_agents;
+          test_case "metadata-only communication becomes unclear" `Quick
+            test_build_briefing_sections_demotes_metadata_only_communication;
+          test_case "metadata evidence remains visible in communication" `Quick
+            test_build_briefing_sections_keeps_metadata_evidence_visible;
         ] );
     ]

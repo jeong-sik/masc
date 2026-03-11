@@ -461,6 +461,7 @@ type server_state = {
   fs: Eio.Fs.dir_ty Eio.Path.t option; (* For filesystem access *)
   clock: float Eio.Time.clock_ty Eio.Resource.t option; (* For timestamps/sleep *)
   env: Caqti_eio.stdenv option; (* For DB/HTTP access - Agent Being Protocol *)
+  net: Eio_context.eio_net option; (* For network calls - P3a: replaces global ref *)
 }
 
 let create_state ~base_path =
@@ -482,10 +483,11 @@ let create_state ~base_path =
     fs = None;
     clock = None;
     env = None;
+    net = None;
   }
 
 (** Create state with Eio context - required for PostgresNative backend *)
-let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path =
+let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
   let config = Room.default_config_eio ~sw ~env base_path in
   let registry = Session.create () in
   let agents_path = Filename.concat config.base_path ".masc/agents" in
@@ -503,6 +505,7 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path =
     fs = Some fs;
     clock = Some clock;
     env = Some env;
+    net = Some net;
   }
 
 (** Register SSE broadcast callback *)

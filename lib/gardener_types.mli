@@ -47,6 +47,26 @@ val agent_stats_to_yojson : agent_stats -> Yojson.Safe.t
 val pp_agent_stats : Format.formatter -> agent_stats -> unit
 val show_agent_stats : agent_stats -> string
 
+(** {1 Task Backlog Summary} *)
+
+(** Summary of MASC task backlog state for ecosystem health assessment *)
+type task_backlog_summary = {
+  total_tasks: int;               (** Total tasks in backlog *)
+  todo_count: int;                (** Unclaimed TODO tasks *)
+  claimed_count: int;             (** Claimed but not started *)
+  in_progress_count: int;         (** Currently in progress *)
+  done_count: int;                (** Completed tasks *)
+  orphan_count: int;              (** Claimed/in_progress with offline assignee *)
+  oldest_todo_age_hours: float;   (** Age of oldest unclaimed task in hours *)
+  high_priority_todo: int;        (** P1-P2 unclaimed tasks *)
+}
+
+val task_backlog_summary_to_yojson : task_backlog_summary -> Yojson.Safe.t
+val pp_task_backlog_summary : Format.formatter -> task_backlog_summary -> unit
+val show_task_backlog_summary : task_backlog_summary -> string
+
+val empty_task_backlog : task_backlog_summary
+
 (** {1 Ecosystem Health} *)
 
 (** Comprehensive health metrics for the agent ecosystem.
@@ -77,6 +97,11 @@ type ecosystem_health = {
   last_retirement: float option;  (** Unix timestamp of last retirement *)
   spawns_today: int;           (** Spawns in last 24h *)
   retirements_today: int;      (** Retirements in last 24h *)
+
+  (* Task-aware fields *)
+  task_backlog: task_backlog_summary;  (** MASC task backlog state *)
+  system_error_rate: float;    (** Error rate from telemetry (0.0-1.0) *)
+  needs_workers: bool;         (** todo > 0 AND no available workers *)
 }
 
 val ecosystem_health_to_yojson : ecosystem_health -> Yojson.Safe.t
@@ -245,9 +270,10 @@ val show_gardener_config : gardener_config -> string
 
 (** Type of intervention needed based on health assessment *)
 type intervention =
-  | NeedSpawn of enriched_gap   (** Should spawn a new agent *)
-  | NeedRetirement of agent_stats  (** Should retire an agent *)
-  | Balanced                    (** Ecosystem is healthy *)
+  | NeedSpawn of enriched_gap        (** Should spawn a new agent *)
+  | NeedWorker of task_backlog_summary  (** Task pressure requires workers *)
+  | NeedRetirement of agent_stats    (** Should retire an agent *)
+  | Balanced                         (** Ecosystem is healthy *)
 
 val pp_intervention : Format.formatter -> intervention -> unit
 val show_intervention : intervention -> string

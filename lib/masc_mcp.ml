@@ -166,6 +166,7 @@ module Handoff_quality = Handoff_quality
 module Adaptive_thresholds = Adaptive_thresholds
 module Dashboard = Dashboard
 module Dashboard_semantics = Dashboard_semantics
+module Dashboard_execution = Dashboard_execution
 module Dashboard_mission = Dashboard_mission
 module Dashboard_proof = Dashboard_proof
 module Dashboard_mission_briefing = Dashboard_mission_briefing

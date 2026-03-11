@@ -1,86 +1,62 @@
-// Execution surface — live worker and keeper continuity monitoring
+// Execution surface — session/operation-first execution diagnostics
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { StatusBadge } from './common/status-badge'
 import { MitosisRing } from './common/mitosis-ring'
 import { TimeAgo } from './common/time-ago'
-import type { AgentMotionSnapshot } from './common/agent-motion'
 import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
+import { navigate } from '../router'
 import {
-  agents,
+  executionSummary,
+  executionQueue,
+  executionSessionBriefs,
+  executionOperationBriefs,
+  executionWorkerSupportBriefs,
+  executionContinuityBriefs,
+  executionOfflineWorkerBriefs,
   keepers,
-  keeperLifecycles,
-  staleKeepers,
-  agentMotionMap,
 } from '../store'
-import type { Agent, Keeper, KeeperLifecycleState } from '../types'
+import type {
+  DashboardExecutionQueueItem,
+  DashboardExecutionSessionBrief,
+  DashboardExecutionOperationBrief,
+  DashboardExecutionWorkerSupportBrief,
+  DashboardExecutionContinuityBrief,
+  DashboardExecutionHandoff,
+  Keeper,
+} from '../types'
+import {
+  createExecutionWorkflowContext,
+  workflowCommandParams,
+  workflowInterveneParams,
+  persistWorkflowContext,
+} from '../workflow-context'
 
-const QUIET_AGENT_MS = 10 * 60 * 1000
-const STALE_AGENT_MS = 20 * 60 * 1000
-const HOT_KEEPER_RATIO = 0.8
+const selectedQueueId = signal<string | null>(null)
+const selectedSessionId = signal<string | null>(null)
+const selectedOperationId = signal<string | null>(null)
 
-type MonitorTone = 'ok' | 'warn' | 'bad'
-type AgentMonitorState = 'working' | 'watching' | 'quiet' | 'offline'
-type KeeperMonitorState = 'healthy' | 'warning' | 'critical'
-
-interface AgentMonitorRow {
-  agent: Agent
-  motion: AgentMotionSnapshot
-  lastSignalAt: string | null
-  activeTaskCount: number
-  state: AgentMonitorState
-  tone: MonitorTone
-  focus: string
-  note: string
+function toneClass(tone?: string | null): string {
+  if (tone === 'bad' || tone === 'critical' || tone === 'offline') return 'bad'
+  if (tone === 'warn' || tone === 'paused' || tone === 'blocked' || tone === 'interrupted') return 'warn'
+  return 'ok'
 }
 
-interface KeeperMonitorRow {
-  keeper: Keeper
-  lifecycle: KeeperLifecycleState | 'idle'
-  state: KeeperMonitorState
-  tone: MonitorTone
-  focus: string
-  note: string
+function formatContext(value?: number | null): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
+  return `${Math.round(value * 100)}%`
 }
 
-type AttentionItem =
-  | {
-      kind: 'agent'
-      key: string
-      tone: MonitorTone
-      title: string
-      subtitle: string
-      timestamp: string | null
-      agent: Agent
-    }
-  | {
-      kind: 'keeper'
-      key: string
-      tone: MonitorTone
-      title: string
-      subtitle: string
-      timestamp: string | null
-      keeper: Keeper
-    }
-
-function toEpoch(value: string | number | null | undefined): number {
-  if (value == null) return 0
-  const parsed = typeof value === 'number' ? value : Date.parse(value)
-  return Number.isNaN(parsed) ? 0 : parsed
+function findKeeper(name?: string | null): Keeper | null {
+  if (!name) return null
+  return keepers.value.find(keeper => keeper.name === name || keeper.agent_name === name) ?? null
 }
 
-function toneRank(tone: MonitorTone): number {
-  switch (tone) {
-    case 'bad': return 2
-    case 'warn': return 1
-    default: return 0
-  }
-}
-
-function agentStateLabel(state: AgentMonitorState): string {
+function agentStateLabel(state: DashboardExecutionWorkerSupportBrief['state']): string {
   switch (state) {
     case 'working': return '작업 중'
     case 'watching': return '대기 중'
@@ -89,7 +65,7 @@ function agentStateLabel(state: AgentMonitorState): string {
   }
 }
 
-function keeperStateLabel(state: KeeperMonitorState): string {
+function continuityStateLabel(state: DashboardExecutionContinuityBrief['state']): string {
   switch (state) {
     case 'critical': return '위험'
     case 'warning': return '주의'
@@ -97,119 +73,24 @@ function keeperStateLabel(state: KeeperMonitorState): string {
   }
 }
 
-function formatContext(value?: number | null): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
-  return `${Math.round(value * 100)}%`
-}
-
-function keeperFocus(keeper: Keeper): string {
-  return keeper.agent?.current_task?.trim()
-    || keeper.skill_primary?.trim()
-    || keeper.last_proactive_reason?.trim()
-    || '현재 포커스 없음'
-}
-
-function keeperContinuity(keeper: Keeper): string {
-  const pieces = [
-    `Gen ${keeper.generation ?? '—'}`,
-    `Turns ${keeper.turn_count ?? 0}`,
-    `Handoffs ${keeper.handoff_count_total ?? 0}`,
-  ]
-  if ((keeper.compaction_count ?? 0) > 0) {
-    pieces.push(`Compactions ${keeper.compaction_count}`)
-  }
-  return pieces.join(' · ')
-}
-
-function buildAgentRow(agent: Agent): AgentMonitorRow {
-  const motion = agentMotionMap.value.get(agent.name.trim().toLowerCase())
-    ?? { activeAssignedCount: 0, lastActivityAt: null, lastActivityText: null }
-  const lastSignalAt = motion.lastActivityAt ?? agent.last_seen ?? null
-  const signalAgeMs = lastSignalAt ? Math.max(0, Date.now() - toEpoch(lastSignalAt)) : Number.POSITIVE_INFINITY
-  const hasWork = Boolean(agent.current_task?.trim()) || motion.activeAssignedCount > 0
-
-  let state: AgentMonitorState = 'watching'
-  let tone: MonitorTone = 'ok'
-  let note = 'Healthy live signal'
-
-  if (agent.status === 'offline' || agent.status === 'inactive') {
-    state = 'offline'
-    tone = 'bad'
-    note = lastSignalAt ? 'Offline or inactive' : 'No recent presence'
-  } else if (signalAgeMs > STALE_AGENT_MS) {
-    state = 'quiet'
-    tone = 'bad'
-    note = hasWork ? 'Working without a fresh signal' : 'No fresh agent signal'
-  } else if (hasWork) {
-    state = 'working'
-    tone = signalAgeMs > QUIET_AGENT_MS ? 'warn' : 'ok'
-    note = signalAgeMs > QUIET_AGENT_MS ? 'Execution looks quiet for too long' : 'Task and live signal aligned'
-  } else if (signalAgeMs > QUIET_AGENT_MS) {
-    state = 'quiet'
-    tone = 'warn'
-    note = 'Quiet but still reachable'
-  } else if (agent.status === 'idle') {
-    state = 'watching'
-    tone = 'ok'
-    note = 'Standing by for the next task'
-  }
-
-  return {
-    agent,
-    motion,
-    lastSignalAt,
-    activeTaskCount: motion.activeAssignedCount,
-    state,
-    tone,
-    focus:
-      agent.current_task?.trim()
-      || (motion.activeAssignedCount > 0
-        ? `${motion.activeAssignedCount} claimed tasks waiting for explicit current_task`
-        : motion.lastActivityText
-          ?? 'Idle / waiting for assignment'),
-    note,
-  }
-}
-
-function buildKeeperRow(keeper: Keeper): KeeperMonitorRow {
-  const lifecycle = keeperLifecycles.value.get(keeper.name) ?? 'idle'
-  const isStale = staleKeepers.value.has(keeper.name)
-  const ratio = keeper.context_ratio ?? 0
-
-  let state: KeeperMonitorState = 'healthy'
-  let tone: MonitorTone = 'ok'
-  let note = '하트비트와 컨텍스트 상태가 안정적입니다'
-
-  if (keeper.status === 'offline' || isStale || lifecycle === 'handoff-imminent') {
-    state = 'critical'
-    tone = 'bad'
-    note = isStale
-      ? '하트비트 지연'
-      : lifecycle === 'handoff-imminent'
-        ? '핸드오프 임박'
-        : 'keeper 오프라인'
-  } else if (
-    lifecycle === 'preparing'
-    || lifecycle === 'compacting'
-    || ratio >= HOT_KEEPER_RATIO
-  ) {
-    state = 'warning'
-    tone = 'warn'
-    note = ratio >= HOT_KEEPER_RATIO
-      ? '컨텍스트 압력이 높습니다'
-      : lifecycle === 'compacting'
-        ? '컴팩팅 진행 중'
-        : '핸드오프 준비 중'
-  }
-
-  return {
-    keeper,
-    lifecycle,
-    state,
-    tone,
-    focus: keeperFocus(keeper),
-    note,
-  }
+function openHandoff(handoff: DashboardExecutionHandoff | null | undefined): void {
+  if (!handoff) return
+  const context = createExecutionWorkflowContext({
+    targetType: handoff.target_type,
+    targetId: handoff.target_id,
+    focusKind: handoff.focus_kind,
+    operationId: handoff.operation_id ?? null,
+    commandSurface: handoff.command_surface ?? null,
+    sourceLabel: 'Execution 진단',
+    summary: handoff.label,
+  })
+  persistWorkflowContext(context)
+  navigate(
+    handoff.surface,
+    handoff.surface === 'intervene'
+      ? workflowInterveneParams(context)
+      : workflowCommandParams(context),
+  )
 }
 
 function MonitorStat({
@@ -232,209 +113,393 @@ function MonitorStat({
   `
 }
 
-function AttentionRow({ item }: { item: AttentionItem }) {
-  const onClick =
-    item.kind === 'agent'
-      ? () => openAgentDetail(item.agent.name)
-      : () => openKeeperDetail(item.keeper)
-
+function HandoffButtons({
+  intervene,
+  command,
+}: {
+  intervene?: DashboardExecutionHandoff | null
+  command?: DashboardExecutionHandoff | null
+}) {
   return html`
-    <button class="monitor-alert ${item.tone}" onClick=${onClick}>
-      <div class="monitor-alert-main">
-        <div class="monitor-alert-title">${item.title}</div>
-        <div class="monitor-alert-subtitle">${item.subtitle}</div>
+    <div class="control-row">
+      ${intervene
+        ? html`
+            <button
+              class="control-btn ghost"
+              data-testid="execution.handoff-intervene"
+              onClick=${(event: Event) => {
+                event.stopPropagation()
+                openHandoff(intervene)
+              }}
+            >
+              ${intervene.label}
+            </button>
+          `
+        : null}
+      ${command
+        ? html`
+            <button
+              class="control-btn ghost"
+              data-testid="execution.handoff-command"
+              onClick=${(event: Event) => {
+                event.stopPropagation()
+                openHandoff(command)
+              }}
+            >
+              ${command.label}
+            </button>
+          `
+        : null}
+    </div>
+  `
+}
+
+function QueueCard({ item, selected }: { item: DashboardExecutionQueueItem; selected: boolean }) {
+  return html`
+    <button
+      class="mission-card-select ${selected ? 'active' : ''}"
+      data-testid="execution.queue-card"
+      onClick=${() => {
+        selectedQueueId.value = selected ? null : item.id
+        selectedSessionId.value = null
+        selectedOperationId.value = null
+      }}
+    >
+      <div class="mission-card-head">
+        <div>
+          <div class="mission-card-target">${item.kind === 'session' ? item.target_id : item.linked_session_id ?? item.target_id}</div>
+          <div class="mission-card-title">${item.summary}</div>
+        </div>
+        <span class="command-chip ${toneClass(item.severity)}">${item.status ?? item.severity}</span>
       </div>
-      <div class="monitor-alert-meta">
-        <span class="monitor-pill ${item.tone}">
-          ${item.kind === 'agent' ? '에이전트' : 'keeper'}
-        </span>
-        ${item.timestamp ? html`<span><${TimeAgo} timestamp=${item.timestamp} /></span>` : html`<span>신호 없음</span>`}
+      <div class="mission-card-meta">
+        <span>${item.kind}</span>
+        ${item.linked_operation_id ? html`<span>linked op · ${item.linked_operation_id}</span>` : null}
+        ${item.last_seen_at ? html`<span><${TimeAgo} timestamp=${item.last_seen_at} /></span>` : null}
       </div>
+      <${HandoffButtons} intervene=${item.intervene_handoff} command=${item.command_handoff} />
     </button>
   `
 }
 
-function AgentWatchRow({ row }: { row: AgentMonitorRow }) {
-  const { agent, motion } = row
-
+function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrief; selected: boolean }) {
   return html`
-    <button class="monitor-row ${row.tone} state-${row.state}" onClick=${() => openAgentDetail(agent.name)}>
+    <button
+      class="mission-card-select ${selected ? 'active' : ''}"
+      data-testid="execution.session-card"
+      onClick=${() => {
+        selectedSessionId.value = selected ? null : brief.session_id
+        selectedOperationId.value = null
+      }}
+    >
+      <div class="mission-card-head">
+        <div>
+          <div class="mission-card-target">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
+          <div class="mission-card-title">${brief.goal}</div>
+        </div>
+        <span class="command-chip ${toneClass(brief.health ?? brief.status)}">${brief.status ?? 'unknown'}</span>
+      </div>
+      <div class="mission-card-meta">
+        <span>health · ${brief.health ?? 'ok'}</span>
+        ${brief.linked_operation_id ? html`<span>op · ${brief.linked_operation_id}</span>` : null}
+        ${brief.last_activity_at ? html`<span><${TimeAgo} timestamp=${brief.last_activity_at} /></span>` : null}
+      </div>
+      ${brief.runtime_blocker
+        ? html`<div class="mission-card-detail">${brief.runtime_blocker}</div>`
+        : brief.last_activity_summary
+          ? html`<div class="mission-card-detail">${brief.last_activity_summary}</div>`
+          : null}
+      ${brief.worker_gap_summary ? html`<div class="monitor-footnote">${brief.worker_gap_summary}</div>` : null}
+      <${HandoffButtons} intervene=${brief.intervene_handoff} command=${brief.command_handoff} />
+    </button>
+  `
+}
+
+function OperationCard({ brief, selected }: { brief: DashboardExecutionOperationBrief; selected: boolean }) {
+  return html`
+    <button
+      class="mission-card-select ${selected ? 'active' : ''}"
+      data-testid="execution.operation-card"
+      onClick=${() => {
+        selectedOperationId.value = selected ? null : brief.operation_id
+        selectedSessionId.value = brief.linked_session_id ?? null
+      }}
+    >
+      <div class="mission-card-head">
+        <div>
+          <div class="mission-card-target">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
+          <div class="mission-card-title">${brief.objective}</div>
+        </div>
+        <span class="command-chip ${toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${brief.status ?? 'unknown'}</span>
+      </div>
+      <div class="mission-card-meta">
+        ${brief.stage ? html`<span>stage · ${brief.stage}</span>` : null}
+        ${brief.linked_session_id ? html`<span>session · ${brief.linked_session_id}</span>` : null}
+        ${brief.updated_at ? html`<span><${TimeAgo} timestamp=${brief.updated_at} /></span>` : null}
+      </div>
+      ${brief.blocker_summary ? html`<div class="mission-card-detail">${brief.blocker_summary}</div>` : null}
+      ${brief.next_tool ? html`<div class="monitor-footnote">next tool · ${brief.next_tool}</div>` : null}
+      <${HandoffButtons} command=${brief.command_handoff} />
+    </button>
+  `
+}
+
+function WorkerSupportRow({
+  row,
+  testId,
+}: {
+  row: DashboardExecutionWorkerSupportBrief
+  testId: string
+}) {
+  return html`
+    <button class="monitor-row ${row.tone} state-${row.state}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
       <div class="monitor-row-header">
-        <span class="agent-emoji">${agent.emoji ?? ''}</span>
+        <span class="agent-emoji">${row.emoji ?? ''}</span>
         <div class="monitor-row-title">
           <div class="monitor-name-line">
-            <span class="monitor-title">${agent.name}</span>
-            ${agent.koreanName ? html`<span class="monitor-sub">${agent.koreanName}</span>` : null}
+            <span class="monitor-title">${row.name}</span>
+            ${row.korean_name ? html`<span class="monitor-sub">${row.korean_name}</span>` : null}
           </div>
           <div class="monitor-note">${row.note}</div>
         </div>
-        <${MitosisRing} ratio=${agent.context_ratio} size=${34} stroke=${4} />
-        <${StatusBadge} status=${agent.status} />
+        <${StatusBadge} status=${row.status ?? 'unknown'} />
         <span class="monitor-pill ${row.tone} state-${row.state}">${agentStateLabel(row.state)}</span>
       </div>
 
       <div class="monitor-meta">
-        ${row.lastSignalAt ? html`<span>신호 <${TimeAgo} timestamp=${row.lastSignalAt} /></span>` : html`<span>최근 신호 없음</span>`}
-        <span>${row.activeTaskCount > 0 ? `활성 작업 ${row.activeTaskCount}개` : '활성 작업 없음'}</span>
-        ${agent.model ? html`<span>${agent.model}</span>` : null}
-        ${agent.last_seen ? html`<span>마지막 감지 <${TimeAgo} timestamp=${agent.last_seen} /></span>` : null}
+        ${row.last_signal_at ? html`<span>신호 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 신호 없음</span>`}
+        <span>${(row.active_task_count ?? 0) > 0 ? `활성 작업 ${row.active_task_count}개` : '활성 작업 없음'}</span>
+        ${row.related_session_id ? html`<span>session · ${row.related_session_id}</span>` : null}
+        ${row.related_operation_id ? html`<span>op · ${row.related_operation_id}</span>` : null}
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
-      ${motion.lastActivityText && motion.lastActivityText !== row.focus
-        ? html`<div class="monitor-footnote">최근 상세: ${motion.lastActivityText}</div>`
+      ${row.recent_output_preview && row.recent_output_preview !== row.focus
+        ? html`<div class="monitor-footnote">최근 상세: ${row.recent_output_preview}</div>`
         : null}
     </button>
   `
 }
 
-function KeeperWatchRow({ row }: { row: KeeperMonitorRow }) {
-  const { keeper } = row
+function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
+  const onClick = () => {
+    const keeper = findKeeper(row.name)
+    if (keeper) openKeeperDetail(keeper)
+  }
 
   return html`
-    <button class="monitor-row ${row.tone} state-${row.state}" onClick=${() => openKeeperDetail(keeper)}>
+    <button class="monitor-row ${row.tone} state-${row.state}" data-testid="execution.continuity-card" onClick=${onClick}>
       <div class="monitor-row-header">
-        <span class="agent-emoji">${keeper.emoji ?? ''}</span>
+        <span class="agent-emoji">${row.emoji ?? ''}</span>
         <div class="monitor-row-title">
           <div class="monitor-name-line">
-            <span class="monitor-title">${keeper.name}</span>
-            ${keeper.koreanName ? html`<span class="monitor-sub">${keeper.koreanName}</span>` : null}
+            <span class="monitor-title">${row.name}</span>
+            ${row.korean_name ? html`<span class="monitor-sub">${row.korean_name}</span>` : null}
           </div>
           <div class="monitor-note">${row.note}</div>
         </div>
-        <${MitosisRing} ratio=${keeper.context_ratio} size=${34} stroke=${4} />
-        <${StatusBadge} status=${keeper.status} />
-        <span class="monitor-pill ${row.tone}">${keeperStateLabel(row.state)}</span>
+        <${MitosisRing} ratio=${row.context_ratio ?? 0} size=${34} stroke=${4} />
+        <${StatusBadge} status=${row.status ?? 'unknown'} />
+        <span class="monitor-pill ${row.tone}">${continuityStateLabel(row.state)}</span>
       </div>
 
       <div class="monitor-meta">
-        ${keeper.last_heartbeat ? html`<span>하트비트 <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>` : html`<span>하트비트 없음</span>`}
-        <span>${keeperContinuity(keeper)}</span>
-        <span>라이프사이클 ${row.lifecycle}</span>
-        <span>컨텍스트 ${formatContext(keeper.context_ratio)}</span>
-        ${keeper.model ? html`<span>${keeper.model}</span>` : null}
+        ${row.last_signal_at ? html`<span>최근 활동 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 활동 없음</span>`}
+        ${row.related_session_id ? html`<span>session · ${row.related_session_id}</span>` : null}
+        ${row.continuity ? html`<span>${row.continuity}</span>` : null}
+        ${row.lifecycle ? html`<span>라이프사이클 ${row.lifecycle}</span>` : null}
+        <span>컨텍스트 ${formatContext(row.context_ratio)}</span>
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
-      ${keeper.skill_reason ? html`<div class="monitor-footnote">스킬 라우팅: ${keeper.skill_reason}</div>` : null}
+      ${row.skill_reason ? html`<div class="monitor-footnote">연속성 이유: ${row.skill_reason}</div>` : null}
     </button>
   `
 }
 
 export function Execution() {
-  const agentRows = [...agents.value]
-    .map(buildAgentRow)
-    .sort((a, b) => {
-      const toneDiff = toneRank(b.tone) - toneRank(a.tone)
-      if (toneDiff !== 0) return toneDiff
-      const taskDiff = b.activeTaskCount - a.activeTaskCount
-      if (taskDiff !== 0) return taskDiff
-      return toEpoch(b.lastSignalAt) - toEpoch(a.lastSignalAt)
-    })
+  const summary = executionSummary.value
+  const queueRows = executionQueue.value
+  const sessionRowsAll = executionSessionBriefs.value
+  const operationRowsAll = executionOperationBriefs.value
+  const workerSupportAll = executionWorkerSupportBriefs.value
+  const continuityAll = executionContinuityBriefs.value
+  const offlineRowsAll = executionOfflineWorkerBriefs.value
 
-  const keeperRows = [...keepers.value]
-    .map(buildKeeperRow)
-    .sort((a, b) => {
-      const toneDiff = toneRank(b.tone) - toneRank(a.tone)
-      if (toneDiff !== 0) return toneDiff
-      const ratioDiff = (b.keeper.context_ratio ?? 0) - (a.keeper.context_ratio ?? 0)
-      if (ratioDiff !== 0) return ratioDiff
-      return toEpoch(b.keeper.last_heartbeat) - toEpoch(a.keeper.last_heartbeat)
-    })
+  if (selectedQueueId.value && !queueRows.some(item => item.id === selectedQueueId.value)) {
+    selectedQueueId.value = null
+  }
+  if (selectedSessionId.value && !sessionRowsAll.some(item => item.session_id === selectedSessionId.value)) {
+    selectedSessionId.value = null
+  }
+  if (selectedOperationId.value && !operationRowsAll.some(item => item.operation_id === selectedOperationId.value)) {
+    selectedOperationId.value = null
+  }
 
-  const aliveRows = agentRows.filter(r => r.state !== 'offline')
-  const offlineRows = agentRows.filter(r => r.state === 'offline')
+  const activeQueue = selectedQueueId.value
+    ? queueRows.find(item => item.id === selectedQueueId.value) ?? null
+    : null
 
-  const onlineAgents = aliveRows.length
-  const workingAgents = agentRows.filter(row => row.state === 'working').length
-  const freshSignals = agentRows.filter(row => row.lastSignalAt && (Date.now() - toEpoch(row.lastSignalAt)) <= 120_000).length
-  const agentAlerts = agentRows.filter(row => row.tone !== 'ok')
-  const keeperAlerts = keeperRows.filter(row => row.tone !== 'ok')
+  const activeSessionId = (() => {
+    if (selectedSessionId.value) return selectedSessionId.value
+    if (!activeQueue) return null
+    if (activeQueue.kind === 'session') return activeQueue.target_id
+    return activeQueue.linked_session_id ?? null
+  })()
 
-  const attentionItems: AttentionItem[] = [
-    ...keeperAlerts.map(row => ({
-      kind: 'keeper' as const,
-      key: `keeper-${row.keeper.name}`,
-      tone: row.tone,
-      title: row.keeper.name,
-      subtitle: `${row.note} · ${row.focus}`,
-      timestamp: row.keeper.last_heartbeat ?? null,
-      keeper: row.keeper,
-    })),
-    ...agentAlerts.map(row => ({
-      kind: 'agent' as const,
-      key: `agent-${row.agent.name}`,
-      tone: row.tone,
-      title: row.agent.name,
-      subtitle: `${row.note} · ${row.focus}`,
-      timestamp: row.lastSignalAt,
-      agent: row.agent,
-    })),
-  ]
-    .sort((a, b) => {
-      const toneDiff = toneRank(b.tone) - toneRank(a.tone)
-      if (toneDiff !== 0) return toneDiff
-      return toEpoch(b.timestamp) - toEpoch(a.timestamp)
-    })
-    .slice(0, 8)
+  const activeOperationId = (() => {
+    if (selectedOperationId.value) return selectedOperationId.value
+    if (!activeQueue) return null
+    if (activeQueue.kind === 'operation') return activeQueue.target_id
+    return activeQueue.linked_operation_id ?? null
+  })()
+
+  const sessionRows =
+    activeSessionId
+      ? sessionRowsAll.filter(item => item.session_id === activeSessionId)
+      : activeOperationId
+        ? sessionRowsAll.filter(item => item.linked_operation_id === activeOperationId)
+        : sessionRowsAll
+
+  const operationRows =
+    activeOperationId
+      ? operationRowsAll.filter(item => item.operation_id === activeOperationId)
+      : activeSessionId
+        ? operationRowsAll.filter(item => item.linked_session_id === activeSessionId || item.operation_id === sessionRows[0]?.linked_operation_id)
+        : operationRowsAll
+
+  const workerSupportRows =
+    activeSessionId || activeOperationId
+      ? workerSupportAll.filter(item =>
+          (activeSessionId ? item.related_session_id === activeSessionId : false)
+          || (activeOperationId ? item.related_operation_id === activeOperationId : false))
+      : workerSupportAll
+
+  const continuityRows =
+    activeSessionId
+      ? continuityAll.filter(item => item.related_session_id === activeSessionId || item.tone !== 'ok')
+      : continuityAll
+
+  const offlineRows =
+    activeSessionId || activeOperationId
+      ? offlineRowsAll.filter(item =>
+          (activeSessionId ? item.related_session_id === activeSessionId : false)
+          || (activeOperationId ? item.related_operation_id === activeOperationId : false)
+          || item.tone !== 'ok')
+      : offlineRowsAll
 
   return html`
     <div class="agents-monitor">
       <${SurfaceSemanticIntro} surfaceId="execution" />
       <div class="stats-grid">
-        <${MonitorStat} label="온라인 worker" value=${onlineAgents} color="#4ade80" caption="활성 + 대기 실행 주체" />
-        <${MonitorStat} label="지금 작업 중" value=${workingAgents} color="#fbbf24" caption="작업 또는 할당된 부하" />
-        <${MonitorStat} label="신선한 신호" value=${freshSignals} color="#22d3ee" caption="최근 2분 이내 신호" />
-        <${MonitorStat} label="worker 경고" value=${agentAlerts.length} color=${agentAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="실행 주체 경고" />
-        <${MonitorStat} label="연속성 경고" value=${keeperAlerts.length} color=${keeperAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="keeper 연속성 경고" />
+        <${MonitorStat} label="활성 세션" value=${summary?.active_sessions ?? sessionRowsAll.length} color="#4ade80" caption="실행 관점의 session" />
+        <${MonitorStat} label="막힌 세션" value=${summary?.blocked_sessions ?? sessionRowsAll.filter(item => toneClass(item.health ?? item.status) !== 'ok').length} color="#fbbf24" caption="개입 후보 session" />
+        <${MonitorStat} label="활성 작전" value=${summary?.active_operations ?? operationRowsAll.length} color="#22d3ee" caption="command-plane operation" />
+        <${MonitorStat} label="막힌 작전" value=${summary?.blocked_operations ?? operationRowsAll.filter(item => item.blocker_summary).length} color="#fb7185" caption="원인 분석이 필요한 작전" />
+        <${MonitorStat} label="worker 경고" value=${summary?.worker_alerts ?? workerSupportAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="supporting worker pressure" />
+        <${MonitorStat} label="연속성 경고" value=${summary?.continuity_alerts ?? continuityAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="keeper continuity pressure" />
       </div>
 
-      <${Card} title="Execution Priorities" class="section" semanticId="execution.priority_queue">
+      <${Card}
+        title="Execution Queue"
+        class="section"
+        semanticId="execution.queue"
+        testId="execution.queue"
+      >
         <div class="monitor-section-head">
-          <h2 class="monitor-headline">지금 실행 관점에서 먼저 봐야 할 대상</h2>
-          <p class="monitor-subheadline">worker 드리프트와 keeper 연속성 위험은 여기서 함께 우선순위를 매기고, 아래 섹션에서 각각 따로 진단합니다.</p>
+          <h2 class="monitor-headline">지금 막힌 실행과 다음 handoff</h2>
+          <p class="monitor-subheadline">session과 operation을 한 queue로 보고, 어디를 먼저 Intervene/Command로 넘길지 판단합니다.</p>
         </div>
         <div class="monitor-alert-list">
-          ${attentionItems.length === 0
-            ? html`<div class="empty-state">지금은 실행 경고가 없습니다</div>`
-            : attentionItems.map(item => html`<${AttentionRow} key=${item.key} item=${item} />`)}
+          ${queueRows.length === 0
+            ? html`<div class="empty-state">지금은 막힌 실행이 없습니다</div>`
+            : queueRows.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)}
         </div>
       <//>
 
       <div class="agents-workbench">
-        <${Card} title="Workers" class="section" semanticId="execution.workers">
+        <${Card}
+          title="Affected Sessions"
+          class="section"
+          semanticId="execution.sessions"
+          testId="execution.session-briefs"
+        >
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">단기 실행 모니터</h2>
-            <p class="monitor-subheadline">현재 살아 있는 worker를 먼저 묶어서, 누가 일을 잃었는지 오프라인 이력보다 먼저 보이게 합니다.</p>
+            <h2 class="monitor-headline">영향받는 session</h2>
+            <p class="monitor-subheadline">queue에서 고른 실행이 어떤 session 목표와 runtime blocker를 갖는지 요약합니다.</p>
           </div>
           <div class="monitor-list">
-            ${aliveRows.length === 0
-              ? html`<div class="empty-state">보이는 활성 worker가 없습니다</div>`
-              : aliveRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
+            ${sessionRows.length === 0
+              ? html`<div class="empty-state">선택된 실행과 연결된 session이 없습니다</div>`
+              : sessionRows.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)}
           </div>
         <//>
 
-        <${Card} title="Continuity" class="section" semanticId="execution.continuity">
+        <${Card}
+          title="Affected Operations"
+          class="section"
+          semanticId="execution.operations"
+          testId="execution.operation-briefs"
+        >
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">장기 keeper 연속성</h2>
-            <p class="monitor-subheadline">하트비트, 컨텍스트 압력, 핸드오프 상태를 worker 실행 드리프트와 분리해서 봅니다.</p>
+            <h2 class="monitor-headline">영향받는 작전</h2>
+            <p class="monitor-subheadline">command-plane operation의 blocker와 next tool을 얇게 보여주고, deep truth는 Command로 넘깁니다.</p>
           </div>
           <div class="monitor-list">
-            ${keeperRows.length === 0
-              ? html`<div class="empty-state">활성 keeper가 없습니다</div>`
-              : keeperRows.map(row => html`<${KeeperWatchRow} key=${row.keeper.name} row=${row} />`)}
+            ${operationRows.length === 0
+              ? html`<div class="empty-state">선택된 실행과 연결된 operation이 없습니다</div>`
+              : operationRows.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)}
           </div>
         <//>
 
-        <${Card} title="Offline Workers" class="section" semanticId="execution.offline">
+        <${Card}
+          title="Worker Support"
+          class="section"
+          semanticId="execution.worker_support"
+          testId="execution.worker-support"
+        >
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">라이브 루프에서 빠진 worker</h2>
-            <p class="monitor-subheadline">오프라인 row를 분리해서, 활성 실행 모니터가 묻히지 않게 합니다.</p>
+            <h2 class="monitor-headline">지원 worker</h2>
+            <p class="monitor-subheadline">선택된 session/operation에 연결된 worker만 보이고, 전체 worker wall은 더 이상 첫 화면을 차지하지 않습니다.</p>
+          </div>
+          <div class="monitor-list">
+            ${workerSupportRows.length === 0
+              ? html`<div class="empty-state">연결된 worker가 없습니다</div>`
+              : workerSupportRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.worker-card" />`)}
+          </div>
+        <//>
+
+        <${Card}
+          title="Continuity"
+          class="section"
+          semanticId="execution.continuity"
+          testId="execution.continuity"
+        >
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">연속성 보조 lane</h2>
+            <p class="monitor-subheadline">keeper continuity는 supporting lane으로만 남기고, unhealthy keeper 위주로 노출합니다.</p>
+          </div>
+          <div class="monitor-list">
+            ${continuityRows.length === 0
+              ? html`<div class="empty-state">지금은 연속성 경고가 없습니다</div>`
+              : continuityRows.map(row => html`<${ContinuityRow} key=${row.name} row=${row} />`)}
+          </div>
+        <//>
+
+        <${Card}
+          title="Offline Workers"
+          class="section"
+          semanticId="execution.offline"
+          testId="execution.offline-workers"
+        >
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">오프라인 worker</h2>
+            <p class="monitor-subheadline">빠진 worker는 하단 lane으로 분리해 활성 실행 판단을 방해하지 않게 유지합니다.</p>
           </div>
           <div class="monitor-list">
             ${offlineRows.length === 0
               ? html`<div class="empty-state">지금은 오프라인 worker가 없습니다</div>`
-              : offlineRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
+              : offlineRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.offline-worker-card" />`)}
           </div>
         <//>
       </div>

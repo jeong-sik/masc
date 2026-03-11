@@ -21,6 +21,7 @@ module Tool_keeper = Masc_mcp.Tool_keeper
 module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
 module Command_plane_v2 = Masc_mcp.Command_plane_v2
+module Dashboard_execution = Masc_mcp.Dashboard_execution
 module Dashboard_mission = Masc_mcp.Dashboard_mission
 module Dashboard_proof = Masc_mcp.Dashboard_proof
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
@@ -5531,52 +5532,11 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
           ] );
     ]
 
-let dashboard_execution_http_json (config : Room.config) : Yojson.Safe.t =
-  let tasks = dashboard_tasks_safe config in
-  let agents = dashboard_agents_safe config in
-  let messages = dashboard_messages_safe config ~since_seq:0 ~limit:50 in
-  let keepers_json = keepers_dashboard_json ~compact:true config in
-  let keepers = json_list_field "keepers" keepers_json in
-  let active_agents =
-    List.fold_left
-      (fun acc (agent : Types.agent) ->
-        match agent.status with
-        | Types.Active | Types.Busy | Types.Listening -> acc + 1
-        | Types.Inactive -> acc)
-      0 agents
-  in
-  let task_rollup =
-    List.fold_left
-      (fun (todo, claimed, running, done_count, cancelled) (task : Types.task) ->
-        match task.task_status with
-        | Todo -> (todo + 1, claimed, running, done_count, cancelled)
-        | Claimed _ -> (todo, claimed + 1, running, done_count, cancelled)
-        | InProgress _ -> (todo, claimed, running + 1, done_count, cancelled)
-        | Done _ -> (todo, claimed, running, done_count + 1, cancelled)
-        | Cancelled _ -> (todo, claimed, running, done_count, cancelled + 1))
-      (0, 0, 0, 0, 0) tasks
-  in
-  let (todo_count, claimed_count, running_count, done_count, cancelled_count) = task_rollup in
-  `Assoc
-    [
-      ("generated_at", `String (Types.now_iso ()));
-      ("status", dashboard_shell_status_json config);
-      ( "summary",
-        `Assoc
-          [
-            ("active_agents", `Int active_agents);
-            ("todo_tasks", `Int todo_count);
-            ("claimed_tasks", `Int claimed_count);
-            ("running_tasks", `Int running_count);
-            ("done_tasks", `Int done_count);
-            ("cancelled_tasks", `Int cancelled_count);
-            ("keepers", `Int (List.length keepers));
-          ] );
-      ("agents", `List (List.map dashboard_agent_json agents));
-      ("tasks", `List (List.map dashboard_task_json tasks));
-      ("messages", `List (List.map dashboard_message_json messages));
-      ("keepers", `List keepers);
-    ]
+let dashboard_execution_http_json ~state ~sw ~clock request =
+  let fixture = query_param request "fixture" in
+  Dashboard_execution.json ?actor:(operator_actor_hint request) ?fixture
+    ~config:state.Mcp_server.room_config ~sw ~clock
+    ~proc_mgr:state.Mcp_server.proc_mgr ()
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in
@@ -7356,7 +7316,7 @@ let make_routes ~port ~host ~sw ~clock =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_execution_http_json state.Mcp_server.room_config in
+         let json = dashboard_execution_http_json ~state ~sw ~clock request in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/memory" (fun request reqd ->
@@ -8764,7 +8724,7 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `GET, "/api/v1/dashboard/execution" ->
           let state = get_server_state () in
-          let json = dashboard_execution_http_json state.Mcp_server.room_config in
+          let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/dashboard/memory" ->

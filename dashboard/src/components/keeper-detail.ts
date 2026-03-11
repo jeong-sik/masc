@@ -561,6 +561,7 @@ export function KeeperDetailOverlay() {
   return html`
     <div
       class="keeper-detail-overlay"
+      data-testid="keeper-detail-overlay"
       style="display:flex; align-items:center; justify-content:center; padding:20px;"
       onClick=${(e: Event) => {
         if ((e.target as HTMLElement).classList.contains('keeper-detail-overlay')) {

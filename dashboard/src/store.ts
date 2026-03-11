@@ -23,6 +23,13 @@ import type {
   DashboardSemanticSurface,
   DashboardSemanticPanel,
   DashboardSemanticSurfaceId,
+  DashboardExecutionHandoff,
+  DashboardExecutionSummary,
+  DashboardExecutionQueueItem,
+  DashboardExecutionSessionBrief,
+  DashboardExecutionOperationBrief,
+  DashboardExecutionWorkerSupportBrief,
+  DashboardExecutionContinuityBrief,
 } from './types'
 import {
   fetchDashboardExecution,
@@ -46,6 +53,13 @@ export const messages = signal<Message[]>([])
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
 export const perpetualStatus = signal<PerpetualStatus | null>(null)
+export const executionSummary = signal<DashboardExecutionSummary | null>(null)
+export const executionQueue = signal<DashboardExecutionQueueItem[]>([])
+export const executionSessionBriefs = signal<DashboardExecutionSessionBrief[]>([])
+export const executionOperationBriefs = signal<DashboardExecutionOperationBrief[]>([])
+export const executionWorkerSupportBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
+export const executionContinuityBriefs = signal<DashboardExecutionContinuityBrief[]>([])
+export const executionOfflineWorkerBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
 
 // --- Keeper heartbeat tracking (name -> last heartbeat timestamp ms) ---
 
@@ -297,6 +311,189 @@ function normalizeMessage(raw: unknown): Message | null {
     content,
     timestamp,
     type: asString(raw.type),
+  }
+}
+
+function normalizeExecutionTone(value: unknown): DashboardExecutionQueueItem['severity'] {
+  const raw = typeof value === 'string' ? value.toLowerCase() : ''
+  if (raw === 'ok' || raw === 'warn' || raw === 'bad') return raw
+  return 'ok'
+}
+
+function normalizeExecutionSummary(raw: unknown): DashboardExecutionSummary | null {
+  if (!isRecord(raw)) return null
+  return {
+    active_sessions: asNumber(raw.active_sessions),
+    blocked_sessions: asNumber(raw.blocked_sessions),
+    active_operations: asNumber(raw.active_operations),
+    blocked_operations: asNumber(raw.blocked_operations),
+    runtime_pressure: asNumber(raw.runtime_pressure),
+    worker_alerts: asNumber(raw.worker_alerts),
+    continuity_alerts: asNumber(raw.continuity_alerts),
+    priority_items: asNumber(raw.priority_items),
+    todo_tasks: asNumber(raw.todo_tasks),
+    claimed_tasks: asNumber(raw.claimed_tasks),
+    running_tasks: asNumber(raw.running_tasks),
+    done_tasks: asNumber(raw.done_tasks),
+    cancelled_tasks: asNumber(raw.cancelled_tasks),
+    keepers: asNumber(raw.keepers),
+  }
+}
+
+function normalizeExecutionHandoff(raw: unknown): DashboardExecutionHandoff | null {
+  if (!isRecord(raw)) return null
+  const surface = asString(raw.surface)
+  const label = asString(raw.label)
+  const targetType = asString(raw.target_type)
+  const targetId = asString(raw.target_id)
+  const focusKind = asString(raw.focus_kind)
+  if (!surface || !label || !targetType || !targetId || !focusKind) return null
+  return {
+    surface: surface === 'command' ? 'command' : 'intervene',
+    label,
+    target_type: targetType,
+    target_id: targetId,
+    focus_kind: focusKind,
+    operation_id: asString(raw.operation_id) ?? null,
+    command_surface: asString(raw.command_surface) ?? null,
+  }
+}
+
+function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQueueItem | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const kind = asString(raw.kind)
+  const summary = asString(raw.summary)
+  const targetType = asString(raw.target_type)
+  const targetId = asString(raw.target_id)
+  if (!id || !summary || !targetType || !targetId || (kind !== 'session' && kind !== 'operation')) {
+    return null
+  }
+  return {
+    id,
+    kind,
+    severity: normalizeExecutionTone(raw.severity),
+    status: asString(raw.status),
+    summary,
+    target_type: targetType,
+    target_id: targetId,
+    linked_session_id: asString(raw.linked_session_id) ?? null,
+    linked_operation_id: asString(raw.linked_operation_id) ?? null,
+    last_seen_at: asString(raw.last_seen_at) ?? null,
+    top_handoff: normalizeExecutionHandoff(raw.top_handoff),
+    intervene_handoff: normalizeExecutionHandoff(raw.intervene_handoff),
+    command_handoff: normalizeExecutionHandoff(raw.command_handoff),
+  }
+}
+
+function normalizeExecutionSessionBrief(raw: unknown): DashboardExecutionSessionBrief | null {
+  if (!isRecord(raw)) return null
+  const sessionId = asString(raw.session_id)
+  const goal = asString(raw.goal)
+  if (!sessionId || !goal) return null
+  return {
+    session_id: sessionId,
+    goal,
+    room: asString(raw.room) ?? null,
+    status: asString(raw.status),
+    health: asString(raw.health),
+    member_names: asStringArray(raw.member_names),
+    linked_operation_id: asString(raw.linked_operation_id) ?? null,
+    linked_detachment_id: asString(raw.linked_detachment_id) ?? null,
+    runtime_blocker: asString(raw.runtime_blocker) ?? null,
+    worker_gap_summary: asString(raw.worker_gap_summary) ?? null,
+    last_activity_at: asString(raw.last_activity_at) ?? null,
+    last_activity_summary: asString(raw.last_activity_summary) ?? null,
+    communication_summary: asString(raw.communication_summary) ?? null,
+    active_count: asNumber(raw.active_count),
+    required_count: asNumber(raw.required_count),
+    top_handoff: normalizeExecutionHandoff(raw.top_handoff),
+    intervene_handoff: normalizeExecutionHandoff(raw.intervene_handoff),
+    command_handoff: normalizeExecutionHandoff(raw.command_handoff),
+  }
+}
+
+function normalizeExecutionOperationBrief(raw: unknown): DashboardExecutionOperationBrief | null {
+  if (!isRecord(raw)) return null
+  const operationId = asString(raw.operation_id)
+  const objective = asString(raw.objective)
+  if (!operationId || !objective) return null
+  return {
+    operation_id: operationId,
+    objective,
+    status: asString(raw.status),
+    stage: asString(raw.stage) ?? null,
+    assigned_unit_id: asString(raw.assigned_unit_id) ?? null,
+    assigned_unit_label: asString(raw.assigned_unit_label) ?? null,
+    linked_session_id: asString(raw.linked_session_id) ?? null,
+    linked_detachment_id: asString(raw.linked_detachment_id) ?? null,
+    blocker_summary: asString(raw.blocker_summary) ?? null,
+    search_status: asString(raw.search_status) ?? null,
+    next_tool: asString(raw.next_tool) ?? null,
+    updated_at: asString(raw.updated_at) ?? null,
+    top_handoff: normalizeExecutionHandoff(raw.top_handoff),
+    command_handoff: normalizeExecutionHandoff(raw.command_handoff),
+  }
+}
+
+function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionWorkerSupportBrief | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name) ?? asString(raw.agent_name)
+  const note = asString(raw.note)
+  const focus = asString(raw.focus)
+  const state = asString(raw.state)
+  if (!name || !note || !focus || (state !== 'working' && state !== 'watching' && state !== 'quiet' && state !== 'offline')) {
+    return null
+  }
+  return {
+    name,
+    agent_name: asString(raw.agent_name),
+    status: asString(raw.status),
+    tone: normalizeExecutionTone(raw.tone),
+    state,
+    note,
+    focus,
+    last_signal_at: asString(raw.last_signal_at) ?? null,
+    active_task_count: asNumber(raw.active_task_count),
+    related_session_id: asString(raw.related_session_id) ?? null,
+    related_operation_id: asString(raw.related_operation_id) ?? null,
+    emoji: asString(raw.emoji),
+    korean_name: asString(raw.korean_name),
+    model: asString(raw.model) ?? null,
+    recent_output_preview: asString(raw.recent_output_preview) ?? null,
+    recent_event: asString(raw.recent_event) ?? null,
+  }
+}
+
+function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecutionContinuityBrief | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  const note = asString(raw.note)
+  const focus = asString(raw.focus)
+  const state = asString(raw.state)
+  if (!name || !note || !focus || (state !== 'healthy' && state !== 'warning' && state !== 'critical')) {
+    return null
+  }
+  return {
+    name,
+    agent_name: asString(raw.agent_name) ?? null,
+    status: asString(raw.status),
+    tone: normalizeExecutionTone(raw.tone),
+    state,
+    note,
+    focus,
+    last_signal_at: asString(raw.last_signal_at) ?? null,
+    last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
+    generation: asNumber(raw.generation),
+    turn_count: asNumber(raw.turn_count),
+    context_ratio: asNumber(raw.context_ratio) ?? null,
+    continuity: asString(raw.continuity) ?? null,
+    lifecycle: asString(raw.lifecycle) ?? null,
+    related_session_id: asString(raw.related_session_id) ?? null,
+    model: asString(raw.model) ?? null,
+    emoji: asString(raw.emoji),
+    korean_name: asString(raw.korean_name),
+    skill_reason: asString(raw.skill_reason) ?? null,
   }
 }
 
@@ -745,6 +942,25 @@ export async function refreshExecution(): Promise<void> {
       .filter((row): row is Message => row !== null)
     messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
     keepers.value = normalizeKeepers(data.keepers, normalizedStatus ?? serverStatus.value)
+    executionSummary.value = normalizeExecutionSummary(data.summary)
+    executionQueue.value = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])
+      .map(normalizeExecutionQueueItem)
+      .filter((row): row is DashboardExecutionQueueItem => row !== null)
+    executionSessionBriefs.value = (Array.isArray(data.session_briefs) ? data.session_briefs : [])
+      .map(normalizeExecutionSessionBrief)
+      .filter((row): row is DashboardExecutionSessionBrief => row !== null)
+    executionOperationBriefs.value = (Array.isArray(data.operation_briefs) ? data.operation_briefs : [])
+      .map(normalizeExecutionOperationBrief)
+      .filter((row): row is DashboardExecutionOperationBrief => row !== null)
+    executionWorkerSupportBriefs.value = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
+      .map(normalizeExecutionWorkerSupportBrief)
+      .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
+    executionContinuityBriefs.value = (Array.isArray(data.continuity_briefs) ? data.continuity_briefs : [])
+      .map(normalizeExecutionContinuityBrief)
+      .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
+    executionOfflineWorkerBriefs.value = (Array.isArray(data.offline_worker_briefs) ? data.offline_worker_briefs : [])
+      .map(normalizeExecutionWorkerSupportBrief)
+      .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
     perpetualStatus.value = null
     lastDashboardRefreshAt.value = new Date().toISOString()
   } catch (err) {

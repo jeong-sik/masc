@@ -67,6 +67,12 @@
  (name test_dashboard_proof)
  (modules test_dashboard_proof)
  (libraries masc_mcp alcotest yojson unix))
+
+; Dashboard execution test (requires Eio)
+(test
+ (name test_dashboard_execution)
+ (modules test_dashboard_execution)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 ; Board TTL + metadata classification tests
 (test
  (name test_board_ttl)

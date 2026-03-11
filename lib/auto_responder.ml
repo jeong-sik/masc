@@ -137,17 +137,8 @@ let run_cli_agent ~agent_type ~prompt =
 
 (* --- LLM mode: shared cascade + in-process MASC HTTP tools/call --- *)
 
-let auto_responder_model_strings ~agent_type =
-  match agent_type with
-  | "claude" -> [ "claude:sonnet"; Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
-  | "gemini" ->
-      [ "gemini:flash"; Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
-  | "glm" -> [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
-  | "codex" | "ollama" | _ -> Llm_client.default_execution_model_labels ()
-
-let available_model_specs_for_agent_type ~agent_type =
-  Llm_client.available_model_specs_of_strings
-    (auto_responder_model_strings ~agent_type)
+let cascade_name_for_agent_type agent_type =
+  Printf.sprintf "auto_responder_%s" agent_type
 
 let llm_response_is_valid (resp : Llm_client.completion_response) =
   let s = String.trim resp.content in
@@ -159,18 +150,17 @@ let llm_response_is_valid (resp : Llm_client.completion_response) =
   && not (len >= 9 && String.sub s 0 9 = "{\"error\":")
 
 let call_llm_direct_sync ~agent_type ~prompt =
+  let cascade_name = cascade_name_for_agent_type agent_type in
   try
     match
-      Llm_client.run_prompt_cascade ~timeout_sec:30
-        ~accept:llm_response_is_valid
-        ~model_specs:(available_model_specs_for_agent_type ~agent_type)
-        ~max_tokens:500 ~prompt ()
+      Lodge_cascade.call ~cascade_name ~prompt
+        ~accept:llm_response_is_valid ~timeout_sec:30 ~max_tokens:500 ()
     with
-    | Ok resp ->
+    | Ok result ->
         debug_log
-          (Printf.sprintf "LLM_MODEL_USED %s for agent_type=%s" resp.model_used
+          (Printf.sprintf "LLM_MODEL_USED %s for agent_type=%s" result.llm_used
              agent_type);
-        if String.trim resp.content = "" then "no response" else resp.content
+        if String.trim result.response = "" then "no response" else result.response
     | Error err ->
         Printf.eprintf "[auto_responder] LLM cascade failed: %s\n%!" err;
         "no response"

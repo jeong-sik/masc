@@ -127,6 +127,8 @@ export function actionTypeLabel(value?: string | null): string {
       return '세션 방송'
     case 'team_task_inject':
       return '세션 작업 주입'
+    case 'team_worker_spawn_batch':
+      return '세션 worker 교체'
     case 'task_inject':
       return '작업 주입'
     case 'team_stop':
@@ -427,13 +429,20 @@ export async function submitKeeperMessage() {
   if (result) keeperMessage.value = ''
 }
 
-export async function confirmPending(confirmToken: string) {
+export async function confirmPending(
+  confirmToken: string,
+  decision: 'confirm' | 'deny' = 'confirm',
+) {
   const actor = actorName.value.trim() || 'dashboard'
   try {
-    await confirmOperatorPendingAction(actor, confirmToken)
-    showToast('확인 실행을 완료했습니다', 'success')
+    await confirmOperatorPendingAction(actor, confirmToken, decision)
+    showToast(decision === 'deny' ? '승인 대기를 거부했습니다' : '확인 실행을 완료했습니다', 'success')
   } catch (err) {
-    const message = err instanceof Error ? err.message : '확인 실행에 실패했습니다'
+    const message = err instanceof Error
+      ? err.message
+      : decision === 'deny'
+        ? '승인 대기 거부에 실패했습니다'
+        : '확인 실행에 실패했습니다'
     showToast(message, 'error')
   }
 }

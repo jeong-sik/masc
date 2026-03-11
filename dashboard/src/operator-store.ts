@@ -3,6 +3,7 @@ import { confirmOperatorAction, fetchOperatorDigest, fetchOperatorSnapshot, runO
 import type {
   Message,
   OperatorActionLogEntry,
+  OperatorActionDescriptor,
   OperatorActionRequest,
   OperatorActionResult,
   OperatorAttentionItem,
@@ -13,6 +14,7 @@ import type {
   OperatorSessionCard,
   OperatorSnapshot,
   OperatorRoomSnapshot,
+  PendingConfirmSummary,
   PendingConfirmation,
   OperatorWorkerCard,
 } from './types'
@@ -250,6 +252,34 @@ function normalizePendingConfirm(raw: unknown): PendingConfirmation | null {
   }
 }
 
+function normalizeActionDescriptor(raw: unknown): OperatorActionDescriptor | null {
+  if (!isRecord(raw)) return null
+  const actionType = asString(raw.action_type)
+  const targetType = asString(raw.target_type)
+  if (!actionType || !targetType) return null
+  return {
+    action_type: actionType,
+    target_type: targetType,
+    description: asString(raw.description),
+    confirm_required: asBoolean(raw.confirm_required),
+  }
+}
+
+function normalizePendingConfirmSummary(raw: unknown): PendingConfirmSummary | null {
+  if (!isRecord(raw)) return null
+  return {
+    actor_filter: asString(raw.actor_filter) ?? null,
+    filter_active: asBoolean(raw.filter_active) ?? false,
+    visible_count: asNumber(raw.visible_count) ?? 0,
+    total_count: asNumber(raw.total_count) ?? 0,
+    hidden_count: asNumber(raw.hidden_count) ?? 0,
+    hidden_actors: asStringArray(raw.hidden_actors),
+    confirm_required_actions: extractArray(raw.confirm_required_actions)
+      .map(normalizeActionDescriptor)
+      .filter((item): item is OperatorActionDescriptor => item !== null),
+  }
+}
+
 function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
   const root = isRecord(raw) ? raw : {}
   return {
@@ -269,14 +299,10 @@ function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
     pending_confirms: extractArray(root.pending_confirms, ['items', 'confirms'])
       .map(normalizePendingConfirm)
       .filter((item): item is PendingConfirmation => item !== null),
+    pending_confirm_summary: normalizePendingConfirmSummary(root.pending_confirm_summary) ?? undefined,
     available_actions: extractArray(root.available_actions, ['actions'])
-      .filter(isRecord)
-      .map(item => ({
-        action_type: asString(item.action_type) ?? 'unknown',
-        target_type: asString(item.target_type) ?? 'unknown',
-        description: asString(item.description),
-        confirm_required: asBoolean(item.confirm_required),
-      })),
+      .map(normalizeActionDescriptor)
+      .filter((item): item is OperatorActionDescriptor => item !== null),
   }
 }
 

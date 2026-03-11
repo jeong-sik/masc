@@ -47,42 +47,63 @@ function ConnectionStatus() {
   return html`
     <div class="connection-status ${isConnected ? 'connected' : 'disconnected'}">
       <span class="status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
-      <span class="status-text">${isConnected ? 'Live' : 'Reconnecting...'}</span>
+      <span class="status-text">${isConnected ? 'Live' : '재연결 중...'}</span>
       <span class="event-count">${eventCount.value} events</span>
     </div>
   `
 }
 
-function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string; currentSectionLabel: string }) {
+function refreshForTab(tab: string) {
+  if (tab === 'command') {
+    refreshCommandPlaneCurrentSurface()
+    refreshCommandPlaneChainSummary()
+    if (commandPlaneSurface.value === 'swarm' || commandPlaneSurface.value === 'warroom') {
+      refreshCommandPlaneSwarm()
+    }
+    if (commandPlaneSurface.value === 'warroom') {
+      refreshOperatorSnapshot()
+    }
+  }
+  if (tab === 'mission') {
+    refreshMissionSnapshot()
+    refreshMissionBriefing()
+  }
+  if (tab === 'execution') refreshExecution()
+  if (tab === 'intervene') {
+    refreshOperatorSnapshot()
+    refreshOperatorRoomDigest()
+  }
+  if (tab === 'memory') refreshBoard()
+  if (tab === 'planning') refreshGoals()
+  if (tab === 'lab') refreshTrpg()
+}
+
+function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
   return html`
     <section class="rail-card">
       <div class="rail-card-head">
-        <h3>Snapshot</h3>
+        <h3>현황</h3>
         <${PanelSemanticDetails} panelId="side_rail.snapshot" compact=${true} />
         <span class="rail-section-chip ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? 'Live' : 'Offline'}</span>
       </div>
       <div class="rail-stat-grid">
         <div class="rail-stat-card">
-          <span>Agents</span>
+          <span>Agent</span>
           <strong>${agents.value.length}</strong>
         </div>
         <div class="rail-stat-card">
-          <span>Keepers</span>
+          <span>Keeper</span>
           <strong>${keepers.value.length}</strong>
         </div>
         <div class="rail-stat-card">
-          <span>Tasks</span>
+          <span>Task</span>
           <strong>${tasks.value.length}</strong>
         </div>
         <div class="rail-stat-card">
-          <span>Events</span>
+          <span>Event</span>
           <strong>${eventCount.value}</strong>
         </div>
-      </div>
-      <div class="rail-snapshot-copy">
-        <span>Connection ${liveConnected ? 'healthy' : 'recovering'}</span>
-        <span>${currentSectionLabel} workspace active</span>
       </div>
       <div class="rail-inline-actions">
         <button
@@ -90,41 +111,13 @@ function SnapshotCard({ currentTab, currentSectionLabel }: { currentTab: string;
           onClick=${() => {
             refreshDashboard()
             refreshDashboardSemantics()
-            if (currentTab === 'command') {
-              refreshCommandPlaneCurrentSurface()
-              refreshCommandPlaneChainSummary()
-              if (
-                commandPlaneSurface.value === 'swarm'
-                || commandPlaneSurface.value === 'warroom'
-              ) {
-                refreshCommandPlaneSwarm()
-              }
-              if (commandPlaneSurface.value === 'warroom') {
-                refreshOperatorSnapshot()
-              }
-            }
-            if (currentTab === 'mission') {
-              refreshMissionSnapshot()
-              refreshMissionBriefing()
-            }
-            if (currentTab === 'execution') {
-              refreshExecution()
-            }
-            if (currentTab === 'intervene') {
-              refreshOperatorSnapshot()
-              refreshOperatorRoomDigest()
-            }
-            if (currentTab === 'memory') refreshBoard()
-            if (currentTab === 'planning') {
-              refreshGoals()
-            }
-            if (currentTab === 'lab') refreshTrpg()
+            refreshForTab(currentTab)
           }}
         >
-          Refresh Now
+          새로고침
         </button>
         <button class="rail-secondary-btn" onClick=${() => navigate('intervene')}>
-          Open Intervene
+          개입 열기
         </button>
       </div>
     </section>
@@ -141,11 +134,7 @@ function InterveneRailCard() {
       <div class="rail-card-head">
         <h3>개입 바로가기</h3>
         <${PanelSemanticDetails} panelId="side_rail.quick_actions" compact=${true} />
-        <span class="rail-section-chip ${pendingConfirms > 0 ? 'warn' : 'ok'}">${pendingConfirms > 0 ? '확인 필요' : '준비됨'}</span>
-      </div>
-      <div class="rail-snapshot-copy">
-        <span>구조화된 개입은 전용 화면에서 처리합니다</span>
-        <span>rail은 요약만, 실제 조작은 Intervene에서</span>
+        <span class="rail-section-chip ${pendingConfirms > 0 ? 'warn' : 'ok'}">${pendingConfirms > 0 ? '확인 필요' : '정상'}</span>
       </div>
       <div class="rail-stat-grid">
         <div class="rail-stat-card">
@@ -153,11 +142,11 @@ function InterveneRailCard() {
           <strong>${pendingConfirms}</strong>
         </div>
         <div class="rail-stat-card">
-          <span>세션</span>
+          <span>Session</span>
           <strong>${sessionCount}</strong>
         </div>
         <div class="rail-stat-card">
-          <span>keepers</span>
+          <span>Keeper</span>
           <strong>${keeperCount}</strong>
         </div>
       </div>
@@ -189,7 +178,7 @@ function SideRail() {
       <${SurfaceSemanticIntro} surfaceId="side_rail" compact=${true} />
       <section class="rail-card">
         <div class="rail-card-head">
-          <h3>Navigate</h3>
+          <h3>탐색</h3>
           <${PanelSemanticDetails} panelId="side_rail.navigate" compact=${true} />
           ${currentSection ? html`<span class="rail-section-chip">${currentSection.label}</span>` : null}
         </div>
@@ -216,13 +205,13 @@ function SideRail() {
           </div>
         `)}
         <div class="rail-view-note">
-          <div class="rail-view-note-label">Current focus</div>
+          <div class="rail-view-note-label">현재 화면</div>
           <strong>${currentView?.label ?? current}</strong>
-          <p>${currentView?.description ?? 'Live operational view'}</p>
+          <p>${currentView?.description ?? '운영 화면'}</p>
         </div>
       </section>
 
-      <${SnapshotCard} currentTab=${current} currentSectionLabel=${currentSection?.label ?? 'Observe'} />
+      <${SnapshotCard} currentTab=${current} />
       <${InterveneRailCard} />
     </aside>
   `
@@ -282,74 +271,13 @@ export function App() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const tab = route.value.tab
-      if (tab === 'command') {
-        void refreshCommandPlaneCurrentSurface()
-        void refreshCommandPlaneChainSummary()
-        if (
-          commandPlaneSurface.value === 'swarm'
-          || commandPlaneSurface.value === 'warroom'
-        ) {
-          void refreshCommandPlaneSwarm()
-        }
-        if (commandPlaneSurface.value === 'warroom') {
-          void refreshOperatorSnapshot()
-        }
-      }
-      else if (tab === 'mission') {
-        void refreshMissionSnapshot()
-      }
-      else if (tab === 'execution') {
-        void refreshExecution()
-      }
-      else if (tab === 'intervene') {
-        void refreshOperatorSnapshot()
-        void refreshOperatorRoomDigest()
-      }
-      else if (tab === 'memory') void refreshBoard()
-      else if (tab === 'planning') {
-        void refreshGoals()
-      }
-      else if (tab === 'lab') void refreshTrpg()
+      refreshForTab(route.value.tab)
     }, 15000)
-
-    return () => {
-      clearInterval(interval)
-    }
+    return () => { clearInterval(interval) }
   }, [])
 
-  // Fetch tab-specific data when tab changes
   useEffect(() => {
-    const tab = route.value.tab
-    if (tab === 'command') {
-      refreshCommandPlaneCurrentSurface()
-      refreshCommandPlaneChainSummary()
-      if (
-        commandPlaneSurface.value === 'swarm'
-        || commandPlaneSurface.value === 'warroom'
-      ) {
-        refreshCommandPlaneSwarm()
-      }
-      if (commandPlaneSurface.value === 'warroom') {
-        refreshOperatorSnapshot()
-      }
-    }
-    if (tab === 'mission') {
-      refreshMissionSnapshot()
-      refreshMissionBriefing()
-    }
-    if (tab === 'execution') {
-      refreshExecution()
-    }
-    if (tab === 'intervene') {
-      refreshOperatorSnapshot()
-      refreshOperatorRoomDigest()
-    }
-    if (tab === 'memory') refreshBoard()
-    if (tab === 'planning') {
-      refreshGoals()
-    }
-    if (tab === 'lab') refreshTrpg()
+    refreshForTab(route.value.tab)
   }, [route.value.tab])
 
   const currentTab = route.value.tab
@@ -363,7 +291,7 @@ export function App() {
             MASC Dashboard
             <span class="version-badge">SPA</span>
           </h1>
-          <p class="header-subtitle">${currentView?.description ?? 'Operator-first decision and execution console'}</p>
+          <p class="header-subtitle">${currentView?.description ?? '운영자 의사결정 및 실행 콘솔'}</p>
         </div>
         <div class="header-right">
           <${ConnectionStatus} />

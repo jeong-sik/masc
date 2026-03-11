@@ -1208,7 +1208,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
               [
                 ("name", `String keeper_name);
                 ("goal", `String "Probe keeper runtime");
-                ("models", `List [ `String "ollama:glm-4.7-flash" ]);
+                ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
                 ("presence_keepalive", `Bool false);
                 ("proactive_enabled", `Bool false);
               ])

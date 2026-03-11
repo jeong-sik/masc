@@ -3,11 +3,12 @@
     Inspired by Karpathy's autoresearch pattern: autonomous experiment cycles
     that generate hypotheses, measure metrics, and keep/discard changes via git.
 
-    Provides 4 MCP tools:
+    Provides 5 MCP tools:
     - masc_autoresearch_start  — Start an autoresearch loop with goal + metric_fn
     - masc_autoresearch_status — Get current loop state (cycle, baseline, history)
     - masc_autoresearch_stop   — Stop a running loop
     - masc_autoresearch_inject — Inject a hypothesis into a running loop
+    - masc_autoresearch_cycle  — Run one experiment cycle (the Karpathy loop turn)
 
     @since 2.80.0 *)
 
@@ -21,7 +22,7 @@ let schemas : Types.tool_schema list = [
   {
     name = "masc_autoresearch_start";
     description = "Start an autonomous experiment loop (inspired by Karpathy's autoresearch). \
-Each cycle: measure baseline → apply change → measure again → keep if improved, discard if not. \
+Each cycle: measure baseline -> apply change -> measure again -> keep if improved, discard if not. \
 Changes are tracked via git commits. Results are logged to JSONL. \
 Requires: goal (what to optimize), metric_fn (shell command that outputs a float on the last line).";
     input_schema = `Assoc [
@@ -53,8 +54,17 @@ Requires: goal (what to optimize), metric_fn (shell command that outputs a float
           ("type", `String "number");
           ("description", `String "Initial baseline score. If omitted, measured by running metric_fn once.");
         ]);
+        ("llm_model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "LLM model for code change generation (default: 'glm')");
+        ]);
+        ("target_file", `Assoc [
+          ("type", `String "string");
+          ("description", `String "File that the LLM will read and modify (relative to workdir). \
+The LLM receives the full file, generates a modified version, and writes it back.");
+        ]);
       ]);
-      ("required", `List [`String "goal"; `String "metric_fn"]);
+      ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);
     ];
   };
 
@@ -112,6 +122,27 @@ Useful for directing the research based on human insight.";
       ("required", `List [`String "hypothesis"]);
     ];
   };
+
+  {
+    name = "masc_autoresearch_cycle";
+    description = "Run one experiment cycle of a Karpathy-style autoresearch loop. \
+Steps: read target file -> LLM generates modified code -> measure before -> write file -> \
+git commit -> measure after -> keep if improved (update baseline), git reset --hard HEAD~1 if not. \
+Call this repeatedly to drive the autonomous loop.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("loop_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Loop ID (optional, uses latest)");
+        ]);
+        ("hypothesis", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Hypothesis to test (optional, auto-generates via LLM if omitted)");
+        ]);
+      ]);
+    ];
+  };
 ]
 
 (* ================================================================ *)
@@ -138,6 +169,48 @@ let latest_loop_id : string option ref = ref None
 let pending_hypotheses : (string, string) Hashtbl.t =
   Hashtbl.create 4
 
+(** Code generator type for test injection.
+    Returns Ok (hypothesis, new_code) or Error reason. *)
+type code_generator =
+  goal:string -> baseline:float ->
+  history:Autoresearch.cycle_record list ->
+  insights:string list ->
+  target_file:string -> file_content:string ->
+  llm_model:string ->
+  (string * string, string) Stdlib.result
+
+(** Per-loop code generator override (for tests). *)
+let custom_generators : (string, code_generator) Hashtbl.t =
+  Hashtbl.create 4
+
+(** Set a custom code generator for a loop (used in tests). *)
+let set_generator loop_id gen =
+  Hashtbl.replace custom_generators loop_id gen
+
+(** Get the code generator for a loop. Falls back to Autoresearch.generate_code_change. *)
+let get_generator loop_id =
+  match Hashtbl.find_opt custom_generators loop_id with
+  | Some gen -> gen
+  | None -> Autoresearch.generate_code_change
+
+(* ================================================================ *)
+(* SSE Broadcast                                                    *)
+(* ================================================================ *)
+
+let broadcast_cycle_result (state : Autoresearch.loop_state) (record : Autoresearch.cycle_record) =
+  try Sse.broadcast (`Assoc [
+    ("type", `String "autoresearch_cycle");
+    ("loop_id", `String state.loop_id);
+    ("cycle", `Int record.cycle);
+    ("hypothesis", `String record.hypothesis);
+    ("decision", `String (Autoresearch.decision_to_string record.decision));
+    ("score_before", `Float record.score_before);
+    ("score_after", `Float record.score_after);
+    ("delta", `Float record.delta);
+    ("baseline", `Float state.baseline);
+    ("best_score", `Float state.best_score);
+  ]) with _ -> ()
+
 (* ================================================================ *)
 (* Handlers                                                         *)
 (* ================================================================ *)
@@ -145,14 +218,23 @@ let pending_hypotheses : (string, string) Hashtbl.t =
 let handle_start ctx args =
   let goal = get_string args "goal" "" in
   let metric_fn = get_string args "metric_fn" "" in
+  let target_file = get_string args "target_file" "" in
   let workdir = get_string args "workdir" ctx.base_path in
   let max_cycles = get_int args "max_cycles" 100 in
   let cycle_timeout_s = get_float args "cycle_timeout_s" 300.0 in
+  let llm_model = get_string args "llm_model" "glm" in
   if goal = "" then
     `Assoc [("error", `String "goal is required")]
   else if metric_fn = "" then
     `Assoc [("error", `String "metric_fn is required")]
+  else if target_file = "" then
+    `Assoc [("error", `String "target_file is required")]
   else begin
+    (* Validate target_file exists *)
+    match Autoresearch.validate_target_file ~workdir target_file with
+    | Error e ->
+      `Assoc [("error", `String (Printf.sprintf "Invalid target_file: %s" e))]
+    | Ok _abs_path ->
     (* Measure initial baseline if not provided *)
     let baseline = match get_float_opt args "baseline" with
       | Some b -> Ok b
@@ -166,7 +248,7 @@ let handle_start ctx args =
       `Assoc [("error", `String (Printf.sprintf "Failed to measure baseline: %s" e))]
     | Ok baseline_val ->
       let state = Autoresearch.create_state
-        ~goal ~metric_fn ~cycle_timeout_s ~max_cycles ~workdir () in
+        ~goal ~metric_fn ~llm_model ~target_file ~cycle_timeout_s ~max_cycles ~workdir () in
       state.baseline <- baseline_val;
       state.best_score <- baseline_val;
       Autoresearch.save_state ~base_path:ctx.base_path state;
@@ -177,6 +259,8 @@ let handle_start ctx args =
         ("status", `String "running");
         ("goal", `String goal);
         ("metric_fn", `String metric_fn);
+        ("target_file", `String target_file);
+        ("llm_model", `String llm_model);
         ("baseline", `Float baseline_val);
         ("max_cycles", `Int max_cycles);
         ("cycle_timeout_s", `Float cycle_timeout_s);
@@ -242,6 +326,186 @@ let handle_inject _ctx args =
           ]
         end
 
+(** Run one experiment cycle: the real Karpathy loop turn.
+    Steps: read file -> generate code change -> fresh metric before ->
+    apply change -> git commit -> metric after -> keep/discard -> persist. *)
+let handle_cycle ctx args =
+  match resolve_loop_id args with
+  | None -> `Assoc [("error", `String "No autoresearch loop running")]
+  | Some id ->
+    match Hashtbl.find_opt active_loops id with
+    | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
+    | Some state ->
+      if state.status <> Autoresearch.Running then
+        `Assoc [("error", `String "Loop is not running")]
+      else if not (Autoresearch.should_continue state) then begin
+        state.status <- Autoresearch.Completed;
+        Autoresearch.save_state ~base_path:ctx.base_path state;
+        `Assoc [
+          ("loop_id", `String id);
+          ("status", `String "completed");
+          ("reason", `String "max_cycles reached");
+          ("best_score", `Float state.best_score);
+          ("best_cycle", `Int state.best_cycle);
+        ]
+      end else begin
+        let workdir = state.workdir in
+        let timeout_s = state.cycle_timeout_s in
+        let target_file = state.target_file in
+        (* 1. Read target file *)
+        match Autoresearch.validate_target_file ~workdir target_file with
+        | Error e ->
+          `Assoc [
+            ("error", `String (Printf.sprintf "target_file invalid: %s" e));
+            ("loop_id", `String id);
+          ]
+        | Ok abs_path ->
+        let file_content = Autoresearch.read_file abs_path in
+        (* 2. Generate code change: injected hypothesis > arg > LLM *)
+        let code_result =
+          let forced_hypothesis =
+            match Hashtbl.find_opt pending_hypotheses id with
+            | Some h -> Hashtbl.remove pending_hypotheses id; Some h
+            | None -> get_string_opt args "hypothesis"
+          in
+          let generate = get_generator id in
+          (match forced_hypothesis with
+           | Some h ->
+             (* Injected/explicit hypothesis: pass it to generator
+                so LLM produces actual code changes for this hypothesis *)
+             generate ~goal:(Printf.sprintf "%s\n\nApply this hypothesis: %s" state.goal h)
+               ~baseline:state.baseline
+               ~history:state.history ~insights:state.insights
+               ~target_file ~file_content ~llm_model:state.llm_model
+             |> Result.map (fun (_generated_hyp, code) -> (h, code))
+           | None ->
+             generate ~goal:state.goal ~baseline:state.baseline
+               ~history:state.history ~insights:state.insights
+               ~target_file ~file_content ~llm_model:state.llm_model)
+        in
+        match code_result with
+        | Error e ->
+          `Assoc [
+            ("error", `String (Printf.sprintf "Code generation failed: %s" e));
+            ("loop_id", `String id);
+            ("cycle", `Int state.current_cycle);
+          ]
+        | Ok (hypothesis, new_code) ->
+          (* 3. Measure FRESH score_before *)
+          let before_result = Autoresearch.measure_metric_with_retry
+            ~workdir ~timeout_s state.metric_fn in
+          match before_result with
+          | Error e ->
+            `Assoc [
+              ("error", `String (Printf.sprintf "Pre-metric failed: %s" e));
+              ("loop_id", `String id);
+              ("cycle", `Int state.current_cycle);
+            ]
+          | Ok (score_before, _) ->
+            (* 4. Apply code change to disk *)
+            (match Autoresearch.apply_code_change ~workdir ~target_file ~new_content:new_code with
+             | Error e ->
+               `Assoc [
+                 ("error", `String (Printf.sprintf "apply_code_change failed: %s" e));
+                 ("loop_id", `String id);
+                 ("cycle", `Int state.current_cycle);
+               ]
+             | Ok _original ->
+               (* 5. Git commit (real changes, no --allow-empty) *)
+               let commit_result = Autoresearch.git_commit_cycle
+                 ~workdir ~cycle:state.current_cycle ~hypothesis ~baseline:score_before in
+               (match commit_result with
+                | Error git_err ->
+                  (* Git commit failed (e.g. missing identity, hooks).
+                     Revert file change to keep working tree clean. *)
+                  Autoresearch.git_reset_last ~workdir;
+                  `Assoc [
+                    ("error", `String (Printf.sprintf "git commit failed: %s" git_err));
+                    ("loop_id", `String id);
+                    ("cycle", `Int state.current_cycle);
+                  ]
+                | Ok None ->
+                  (* No diff: LLM produced identical code. Discard. *)
+                  let record = Autoresearch.record_cycle state
+                    ~hypothesis ~score_before ~score_after:score_before
+                    ~commit_hash:None ~elapsed_ms:0 ~model_used:state.llm_model in
+                  Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
+                  state.current_cycle <- state.current_cycle + 1;
+                  Autoresearch.save_state ~base_path:ctx.base_path state;
+                  broadcast_cycle_result state record;
+                  `Assoc [
+                    ("loop_id", `String id);
+                    ("cycle", `Int record.cycle);
+                    ("hypothesis", `String hypothesis);
+                    ("decision", `String "discard");
+                    ("reason", `String "no diff produced");
+                    ("baseline", `Float state.baseline);
+                  ]
+                | Ok (Some _) ->
+                  let commit_hash = (match commit_result with Ok h -> h | _ -> None) in
+                  (* 6. Measure score_after *)
+                  let after_result = Autoresearch.measure_metric_with_retry
+                    ~workdir ~timeout_s state.metric_fn in
+                  match after_result with
+                  | Error e ->
+                    (* Metric failed: git reset to undo *)
+                    Autoresearch.git_reset_last ~workdir;
+                    let record = Autoresearch.record_cycle state
+                      ~hypothesis ~score_before ~score_after:score_before
+                      ~commit_hash ~elapsed_ms:0 ~model_used:state.llm_model in
+                    Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
+                    state.current_cycle <- state.current_cycle + 1;
+                    Autoresearch.save_state ~base_path:ctx.base_path state;
+                    broadcast_cycle_result state record;
+                    `Assoc [
+                      ("loop_id", `String id);
+                      ("cycle", `Int record.cycle);
+                      ("hypothesis", `String hypothesis);
+                      ("decision", `String "discard");
+                      ("reason", `String (Printf.sprintf "metric_fn failed: %s" e));
+                      ("baseline", `Float state.baseline);
+                    ]
+                  | Ok (score_after, elapsed_ms) ->
+                    (* 7. Compare and decide *)
+                    let record = Autoresearch.record_cycle state
+                      ~hypothesis ~score_before ~score_after
+                      ~commit_hash ~elapsed_ms ~model_used:state.llm_model in
+                    (* 8. Keep or discard *)
+                    (match record.decision with
+                     | Autoresearch.Discard ->
+                       (* Karpathy ratchet: git reset --hard HEAD~1 reverts commit + files *)
+                       Autoresearch.git_reset_last ~workdir
+                     | Autoresearch.Keep ->
+                       if score_after >= state.best_score then
+                         Autoresearch.git_tag_best ~workdir
+                           ~cycle:state.current_cycle ~score:score_after);
+                    (* 9. Persist cycle record first, then update in-memory state.
+                       Baseline mutation after append_cycle ensures disk has the
+                       decision record even if save_state fails. *)
+                    Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
+                    (if record.decision = Autoresearch.Keep then
+                       state.baseline <- score_after);
+                    state.current_cycle <- state.current_cycle + 1;
+                    Autoresearch.save_state ~base_path:ctx.base_path state;
+                    (* 10. SSE broadcast *)
+                    broadcast_cycle_result state record;
+                    (* 11. Return result *)
+                    `Assoc [
+                      ("loop_id", `String id);
+                      ("cycle", `Int record.cycle);
+                      ("hypothesis", `String hypothesis);
+                      ("score_before", `Float score_before);
+                      ("score_after", `Float score_after);
+                      ("delta", `Float record.delta);
+                      ("decision", `String (Autoresearch.decision_to_string record.decision));
+                      ("commit_hash", match record.commit_hash with
+                        | Some h -> `String h | None -> `Null);
+                      ("baseline", `Float state.baseline);
+                      ("best_score", `Float state.best_score);
+                      ("cycles_remaining", `Int (state.max_cycles - state.current_cycle));
+                    ]))
+      end
+
 (* ================================================================ *)
 (* Dispatch                                                         *)
 (* ================================================================ *)
@@ -263,4 +527,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_autoresearch_status" -> Some (wrap_result (handle_status ctx args))
   | "masc_autoresearch_stop" -> Some (wrap_result (handle_stop ctx args))
   | "masc_autoresearch_inject" -> Some (wrap_result (handle_inject ctx args))
+  | "masc_autoresearch_cycle" -> Some (wrap_result (handle_cycle ctx args))
   | _ -> None

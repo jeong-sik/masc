@@ -12,11 +12,11 @@ open Tool_args
 
 type result = bool * string
 
-let spawn_decision_provenance ~(use_llm_decision : bool)
-    (decision : spawn_decision) =
-  match decision with
-  | SpawnApproved _ when use_llm_decision -> "judgment"
-  | SpawnApproved _ | SpawnDeferred _ | SpawnRejected _ -> "fallback"
+let spawn_decision_provenance ~(decision_path : string)
+    (_decision : spawn_decision) =
+  match String.lowercase_ascii (String.trim decision_path) with
+  | "judgment" -> "judgment"
+  | _ -> "fallback"
 
 let retirement_decision_provenance (_decision : retirement_decision) =
   "fallback"
@@ -77,11 +77,11 @@ let handle_propose_spawn _ctx args : result =
       let urgency_str = get_string args "urgency" "medium" in
       let urgency = urgency_of_string urgency_str in
 
-      let decision = Gardener.propose_spawn ~topic ~reason ~urgency in
+      let decision, decision_path =
+        Gardener.propose_spawn_with_provenance ~topic ~reason ~urgency
+      in
       let decision_provenance =
-        spawn_decision_provenance
-          ~use_llm_decision:(Gardener.get_config ()).use_llm_decision
-          decision
+        spawn_decision_provenance ~decision_path decision
       in
 
       let json = `Assoc [
@@ -166,7 +166,9 @@ let handle_execute_spawn _ctx args : result =
       let urgency = urgency_of_string urgency_str in
 
       (* First get approval *)
-      let decision = Gardener.propose_spawn ~topic ~reason ~urgency in
+      let decision, _decision_path =
+        Gardener.propose_spawn_with_provenance ~topic ~reason ~urgency
+      in
 
       (* Then execute if approved *)
       match decision with

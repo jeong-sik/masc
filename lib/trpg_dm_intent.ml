@@ -326,7 +326,7 @@ let extract (text : string) : dm_intent =
   | Keyword -> extract_keyword text
   | Llm ->
       (match extract_with_llm text with
-       | Ok intent -> intent
+       | Ok intent -> { intent with mode = match_mode_to_string Llm }
        | Error _ ->
            (* LLM-only mode still returns Unknown on failure *)
            make_intent ~mode:Llm ~provenance:Judgment
@@ -334,7 +334,7 @@ let extract (text : string) : dm_intent =
              ~keywords_matched:[] )
   | Hybrid ->
       (match extract_with_llm text with
-       | Ok intent -> intent
+       | Ok intent -> { intent with mode = match_mode_to_string Hybrid }
        | Error _ ->
            let keyword_intent = extract_keyword text in
            { keyword_intent with

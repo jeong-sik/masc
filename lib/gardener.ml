@@ -590,6 +590,16 @@ let decide_spawn ~config ~health ~gap : spawn_decision =
   else
     decide_spawn_rule_based ~config ~health ~gap
 
+let decide_spawn_with_provenance ~config ~health ~gap : spawn_decision * string =
+  if not (can_spawn ~config) then
+    (decide_spawn ~config ~health ~gap, "fallback")
+  else if health.total_agents >= config.max_agents then
+    (decide_spawn ~config ~health ~gap, "fallback")
+  else if config.use_llm_decision then
+    (decide_spawn_with_llm ~config ~health ~gap, "judgment")
+  else
+    (decide_spawn_rule_based ~config ~health ~gap, "fallback")
+
 (** {1 Retirement Decision Logic} *)
 
 (** Decide retirement for an agent *)
@@ -798,6 +808,23 @@ let propose_spawn ~topic ~reason ~urgency : spawn_decision =
   } in
 
   decide_spawn ~config ~health ~gap
+
+let propose_spawn_with_provenance ~topic ~reason ~urgency : spawn_decision * string =
+  let config = load_config () in
+  let health = calculate_health ~config in
+  let now = Time_compat.now () in
+  let gap = {
+    topic;
+    signal_count = 1;
+    proposers = ["manual"];
+    context_snippets = [reason];
+    first_detected = now;
+    maturity_hours = config.gap_maturity_hours;
+    topic_similarity = 0.0;
+    urgency_score =
+      (match urgency with Critical -> 1.0 | High -> 0.8 | Medium -> 0.5 | Low -> 0.3);
+  } in
+  decide_spawn_with_provenance ~config ~health ~gap
 
 (** Propose a retirement (for MCP tool) *)
 let propose_retire ~agent_name : retirement_decision =

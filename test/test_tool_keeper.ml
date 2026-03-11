@@ -142,6 +142,41 @@ let test_llm_client_sanitize_messages_utf8_preserves_message_count () =
        (fun (msg : Masc_mcp.Llm_client.message) -> string_is_valid_utf8 msg.content)
        sanitized)
 
+let test_resolved_keeper_skill_route_marks_agent_judgment () =
+  let fallback_route : Masc_mcp.Tool_keeper.keeper_skill_route = {
+    primary_skill = "masc-heartbeat";
+    secondary_skills = [ "masc-keeper-autonomy" ];
+    reason = "fallback";
+  } in
+  let reply =
+    "SKILL: lodge-social (+masc-heartbeat)\nSKILL_REASON: agent-selected\nActual reply body"
+  in
+  let resolved =
+    Masc_mcp.Tool_keeper.resolved_keeper_skill_route
+      ~selection_mode:Masc_mcp.Tool_keeper.SkillSelectAgent
+      ~fallback_route
+      ~reply_raw:reply
+  in
+  check string "selection mode" "agent" resolved.selection_mode;
+  check string "provenance" "judgment" resolved.provenance;
+  check string "primary skill" "lodge-social" resolved.route.primary_skill
+
+let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
+  let fallback_route : Masc_mcp.Tool_keeper.keeper_skill_route = {
+    primary_skill = "masc-heartbeat";
+    secondary_skills = [ "masc-keeper-autonomy" ];
+    reason = "fallback";
+  } in
+  let resolved =
+    Masc_mcp.Tool_keeper.resolved_keeper_skill_route
+      ~selection_mode:Masc_mcp.Tool_keeper.SkillSelectAgent
+      ~fallback_route
+      ~reply_raw:"No skill header here"
+  in
+  check string "selection mode" "heuristic" resolved.selection_mode;
+  check string "provenance" "fallback" resolved.provenance;
+  check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
+
 let test_keeper_model_set_persists_active_model () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -316,6 +351,10 @@ let () =
            test_llm_client_sanitize_message_utf8_repairs_invalid_fields;
          test_case "llm client preserves message list size" `Quick
            test_llm_client_sanitize_messages_utf8_preserves_message_count;
+         test_case "resolved skill route uses agent judgment" `Quick
+           test_resolved_keeper_skill_route_marks_agent_judgment;
+         test_case "resolved skill route falls back when parse missing" `Quick
+           test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing;
          test_case "keeper model set persists active model" `Quick
            test_keeper_model_set_persists_active_model;
          test_case "persona list and create from persona" `Quick

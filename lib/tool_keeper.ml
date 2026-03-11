@@ -2988,6 +2988,12 @@ type keeper_skill_selection_mode =
   | SkillSelectHeuristic
   | SkillSelectAgent
 
+type keeper_skill_route_resolution = {
+  route: keeper_skill_route;
+  selection_mode: string;
+  provenance: string;
+}
+
 let keeper_skill_selection_mode () : keeper_skill_selection_mode =
   match Sys.getenv_opt "MASC_KEEPER_SKILL_SELECTION" with
   | None -> SkillSelectAgent
@@ -3227,6 +3233,20 @@ let agent_selected_skill_route_from_reply (raw : string) : keeper_skill_route op
              |> Option.value ~default:"agent-selected"
            in
            Some { primary_skill = primary; secondary_skills = secondary; reason })
+
+let resolved_keeper_skill_route
+    ~(selection_mode : keeper_skill_selection_mode)
+    ~(fallback_route : keeper_skill_route)
+    ~(reply_raw : string) : keeper_skill_route_resolution =
+  match selection_mode with
+  | SkillSelectHeuristic ->
+      { route = fallback_route; selection_mode = "heuristic"; provenance = "fallback" }
+  | SkillSelectAgent ->
+      (match agent_selected_skill_route_from_reply reply_raw with
+       | Some route ->
+           { route; selection_mode = "agent"; provenance = "judgment" }
+       | None ->
+           { route = fallback_route; selection_mode = "heuristic"; provenance = "fallback" })
 
 let skill_route_system_prompt_heuristic
     ~(base_system_prompt : string)
@@ -6498,6 +6518,8 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
 	                                       (fun s -> `String s)
 	                                       proactive_skill_route.secondary_skills));
 	                                ("skill_reason", `String proactive_skill_route.reason);
+                                ("skill_selection_mode", `String "heuristic");
+                                ("skill_provenance", `String "fallback");
 	                                ("memory_check", memory_check_default_json ());
 	                                ("proactive", `Assoc [
                                   ("performed", `Bool true);
@@ -8815,14 +8837,13 @@ let handle_keeper_msg ctx args : tool_result =
 	                    "Request processed. (generation=%d, trace=%s, model=%s)"
 	                    meta.generation meta.trace_id final_model_used
 	              in
-		              let effective_skill_route =
-		                match skill_selection_mode with
-		                | SkillSelectHeuristic -> fallback_skill_route
-		                | SkillSelectAgent ->
-		                    (match agent_selected_skill_route_from_reply safe_reply_raw with
-		                     | Some parsed -> parsed
-		                     | None -> fallback_skill_route)
+		              let skill_route_resolution =
+                        resolved_keeper_skill_route
+                          ~selection_mode:skill_selection_mode
+                          ~fallback_route:fallback_skill_route
+                          ~reply_raw:safe_reply_raw
 		              in
+                      let effective_skill_route = skill_route_resolution.route in
 			              let safe_reply_with_skill =
 			                if no_skill_route then
                             strip_skill_route_lines safe_reply_raw
@@ -9057,6 +9078,10 @@ let handle_keeper_msg ctx args : tool_result =
 		                     ("skill_secondary",
 		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 			                     ("skill_reason", `String effective_skill_route.reason);
+                             ("skill_selection_mode",
+                               `String skill_route_resolution.selection_mode);
+                             ("skill_provenance",
+                               `String skill_route_resolution.provenance);
 		                     ("memory_check", memory_check_json);
                      ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
                      ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
@@ -9169,6 +9194,10 @@ let handle_keeper_msg ctx args : tool_result =
 		                  ("skill_secondary",
 		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 			                  ("skill_reason", `String effective_skill_route.reason);
+                          ("skill_selection_mode",
+                            `String skill_route_resolution.selection_mode);
+                          ("skill_provenance",
+                            `String skill_route_resolution.provenance);
 			                  ("memory_check", memory_check_json);
                   ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
                   ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
@@ -9305,6 +9334,10 @@ let handle_keeper_msg ctx args : tool_result =
 		                     ("skill_secondary",
 		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 			                     ("skill_reason", `String effective_skill_route.reason);
+                             ("skill_selection_mode",
+                               `String skill_route_resolution.selection_mode);
+                             ("skill_provenance",
+                               `String skill_route_resolution.provenance);
 			                     ("memory_check", memory_check_json);
                      ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
                      ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
@@ -9401,6 +9434,10 @@ let handle_keeper_msg ctx args : tool_result =
 		                  ("skill_secondary",
 		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 			                  ("skill_reason", `String effective_skill_route.reason);
+                          ("skill_selection_mode",
+                            `String skill_route_resolution.selection_mode);
+                          ("skill_provenance",
+                            `String skill_route_resolution.provenance);
 			                  ("memory_check", memory_check_json);
                   ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
                   ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
@@ -9734,9 +9771,9 @@ let handle_keeper_list ctx args : tool_result =
 	            in
 	            let skill_route_json =
 	              let open Yojson.Safe.Util in
-                  let selection_mode = keeper_skill_selection_mode () in
-                  let selection_mode_string, selection_provenance =
-                    match selection_mode with
+                  let configured_selection_mode = keeper_skill_selection_mode () in
+                  let fallback_selection_mode_string, fallback_selection_provenance =
+                    match configured_selection_mode with
                     | SkillSelectAgent -> ("agent", "judgment")
                     | SkillSelectHeuristic -> ("heuristic", "fallback")
                   in
@@ -9757,8 +9794,14 @@ let handle_keeper_list ctx args : tool_result =
 	                    ("primary", match primary with Some s -> `String s | None -> `Null);
 	                    ("secondary", `List (List.map (fun s -> `String s) secondary));
 	                    ("reason", match reason with Some s -> `String s | None -> `Null);
-                        ("selection_mode", `String selection_mode_string);
-                        ("provenance", `String selection_provenance);
+                        ( "selection_mode",
+                          `String
+                            (Safe_ops.json_string_opt "skill_selection_mode" metrics
+                             |> Option.value ~default:fallback_selection_mode_string) );
+                        ( "provenance",
+                          `String
+                            (Safe_ops.json_string_opt "skill_provenance" metrics
+                             |> Option.value ~default:fallback_selection_provenance) );
                         ("authoritative", `Bool false);
 	                  ]
 	            in

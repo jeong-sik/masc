@@ -100,14 +100,14 @@ let test_spawn_decision_provenance_uses_decision_path () =
     Masc_mcp.Gardener_types.SpawnRejected
       { topic = "security"; reason = "population cap"; }
   in
-  Alcotest.(check string) "approved with llm uses judgment" "judgment"
-    (Tool_gardener.spawn_decision_provenance ~use_llm_decision:true approved);
-  Alcotest.(check string) "approved without llm uses fallback" "fallback"
-    (Tool_gardener.spawn_decision_provenance ~use_llm_decision:false approved);
-  Alcotest.(check string) "deferred stays fallback" "fallback"
-    (Tool_gardener.spawn_decision_provenance ~use_llm_decision:true deferred);
-  Alcotest.(check string) "rejected stays fallback" "fallback"
-    (Tool_gardener.spawn_decision_provenance ~use_llm_decision:true rejected)
+  Alcotest.(check string) "approved with judgment path uses judgment" "judgment"
+    (Tool_gardener.spawn_decision_provenance ~decision_path:"judgment" approved);
+  Alcotest.(check string) "approved with fallback path uses fallback" "fallback"
+    (Tool_gardener.spawn_decision_provenance ~decision_path:"fallback" approved);
+  Alcotest.(check string) "deferred judgment path stays judgment" "judgment"
+    (Tool_gardener.spawn_decision_provenance ~decision_path:"judgment" deferred);
+  Alcotest.(check string) "rejected judgment path stays judgment" "judgment"
+    (Tool_gardener.spawn_decision_provenance ~decision_path:"judgment" rejected)
 
 let test_retirement_decision_provenance_always_fallback () =
   let approved =

@@ -4,10 +4,6 @@
     Delegates shared types and meta I/O to {!Keeper_types}. *)
 
 open Tool_args
-include Keeper_types
-include Keeper_memory
-include Keeper_alerting
-
 include Keeper_execution
 
 (* Presence keepalive fibers keyed by keeper name. *)

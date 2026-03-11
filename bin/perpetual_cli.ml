@@ -96,7 +96,7 @@ let rec parse_args args acc =
     eprintf "Usage: perpetual_cli --goal GOAL --models MODEL1,MODEL2 [OPTIONS]\n\n\
 Options:\n\
   --goal GOAL           Goal for the agent\n\
-  --models M1,M2,...    Model cascade (provider:model format)\n\
+  --models M1,M2,...    Model cascade ('default' or provider:model)\n\
   --no-verify           Disable action verification\n\
   --verify-with MODEL   Verifier model (default: provider-aware auto selection)\n\
   --heartbeat SECS      Heartbeat interval (default: 30)\n\

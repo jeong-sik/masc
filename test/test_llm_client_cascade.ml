@@ -163,6 +163,24 @@ let test_model_spec_of_string_parses_llama_provider () =
       check string "model id" "glm-4.7-flash" spec.model_id
   | Error e -> fail ("expected llama: provider to parse: " ^ e)
 
+let test_model_spec_of_string_resolves_default_label () =
+  with_env "MASC_DEFAULT_PROVIDER" "glm" (fun () ->
+      with_env "MASC_DEFAULT_MODEL" "glm-4.7" (fun () ->
+          match Llm_client.model_spec_of_string "default" with
+          | Ok spec ->
+              check bool "provider" true (spec.provider = Llm_client.Glm_cloud);
+              check string "model id" "glm-4.7" spec.model_id
+          | Error e -> fail ("expected default to resolve: " ^ e)))
+
+let test_model_spec_of_string_resolves_default_override () =
+  with_env "MASC_DEFAULT_PROVIDER" "gemini" (fun () ->
+      with_env "MASC_DEFAULT_MODEL" "gemini-2.5-pro" (fun () ->
+          match Llm_client.model_spec_of_string "default:gemini-2.5-flash" with
+          | Ok spec ->
+              check bool "provider" true (spec.provider = Llm_client.Gemini);
+              check string "model id" "gemini-2.5-flash" spec.model_id
+          | Error e -> fail ("expected default override to resolve: " ^ e)))
+
 let test_run_prompt_cascade_uses_same_request_shape () =
   with_temp_cwd (fun () ->
       Cache.clear_l1 ();
@@ -214,6 +232,10 @@ let () =
             test_model_spec_of_string_rejects_bare_ollama_provider;
           test_case "parses llama provider" `Quick
             test_model_spec_of_string_parses_llama_provider;
+          test_case "resolves default label" `Quick
+            test_model_spec_of_string_resolves_default_label;
+          test_case "resolves default override" `Quick
+            test_model_spec_of_string_resolves_default_override;
           test_case "run_prompt_cascade request shape" `Quick
             test_run_prompt_cascade_uses_same_request_shape;
         ] );

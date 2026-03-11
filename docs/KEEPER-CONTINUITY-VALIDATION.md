@@ -58,7 +58,7 @@ Real isolated validation:
 
 ```bash
 cd ~/me/workspace/yousleepwhen/masc-mcp
-KEEPER_MODELS="ollama:glm-4.7-flash" \
+KEEPER_MODELS="default" \
 scripts/harness_keeper_continuity_validation.sh
 ```
 
@@ -68,7 +68,7 @@ Use an existing MCP server instead of starting a temp one:
 cd ~/me/workspace/yousleepwhen/masc-mcp
 START_SERVER=0 \
 MCP_URL="http://127.0.0.1:8935/mcp" \
-KEEPER_MODELS="ollama:glm-4.7-flash" \
+KEEPER_MODELS="default" \
 scripts/harness_keeper_continuity_validation.sh
 ```
 

@@ -759,6 +759,31 @@ let test_validate_target_file_empty () =
     check bool "mentions empty" true (AR.contains_substring msg "empty")
   | Ok _ -> fail "expected error for empty target_file"
 
+(* ..foo is a legitimate filename, not path traversal *)
+let test_validate_target_file_dotdot_prefix () =
+  with_tmpdir (fun workdir ->
+    let path = Filename.concat workdir "..foo" in
+    let oc = open_out path in
+    output_string oc "ok\n";
+    close_out oc;
+    match AR.validate_target_file ~workdir "..foo" with
+    | Ok abs_path ->
+      check bool "returns absolute" true (String.get abs_path 0 = '/');
+      check bool "ends with ..foo" true (AR.contains_substring abs_path "..foo")
+    | Error e -> fail ("..foo should be allowed: " ^ e)
+  )
+
+(* symlink pointing outside workdir should be rejected *)
+let test_validate_target_file_symlink_escape () =
+  with_tmpdir (fun workdir ->
+    let link = Filename.concat workdir "escape.py" in
+    Unix.symlink "/etc/hosts" link;
+    match AR.validate_target_file ~workdir "escape.py" with
+    | Error msg ->
+      check bool "mentions symlink" true (AR.contains_substring msg "symlink")
+    | Ok _ -> fail "symlink escaping workdir should be rejected"
+  )
+
 (* ============================================ *)
 (* apply_code_change                            *)
 (* ============================================ *)
@@ -1022,6 +1047,8 @@ let () =
       test_case "absolute" `Quick test_validate_target_file_absolute;
       test_case "ok" `Quick test_validate_target_file_ok;
       test_case "empty" `Quick test_validate_target_file_empty;
+      test_case "dotdot prefix" `Quick test_validate_target_file_dotdot_prefix;
+      test_case "symlink escape" `Quick test_validate_target_file_symlink_escape;
     ]);
     ("apply_code_change", [
       test_case "writes file" `Quick test_apply_code_change_writes;

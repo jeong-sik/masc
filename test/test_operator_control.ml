@@ -166,6 +166,63 @@ let test_snapshot_has_expected_sections () =
       Alcotest.(check bool) "swarm_status present" true
         (Yojson.Safe.Util.member "swarm_status" json <> `Null))
 
+let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      let ctx = operator_ctx env sw config "owner" in
+      let inject_task actor title =
+        match
+          Operator_control.action_json ctx
+            (`Assoc
+              [
+                ("actor", `String actor);
+                ("action_type", `String "task_inject");
+                ("target_type", `String "room");
+                ( "payload",
+                  `Assoc
+                    [
+                      ("title", `String title);
+                      ("description", `String "created by operator");
+                      ("priority", `Int 2);
+                    ] );
+              ])
+        with
+        | Ok _ -> ()
+        | Error err -> Alcotest.fail err
+      in
+      inject_task "operator-a" "alpha preview";
+      inject_task "operator-b" "beta preview";
+      let snapshot = Operator_control.snapshot_json ~actor:"operator-a" ctx in
+      let summary = Yojson.Safe.Util.(snapshot |> member "pending_confirm_summary") in
+      Alcotest.(check string) "actor filter" "operator-a"
+        Yojson.Safe.Util.(summary |> member "actor_filter" |> to_string);
+      Alcotest.(check bool) "filter active" true
+        Yojson.Safe.Util.(summary |> member "filter_active" |> to_bool);
+      Alcotest.(check int) "visible count" 1
+        Yojson.Safe.Util.(summary |> member "visible_count" |> to_int);
+      Alcotest.(check int) "total count" 2
+        Yojson.Safe.Util.(summary |> member "total_count" |> to_int);
+      Alcotest.(check int) "hidden count" 1
+        Yojson.Safe.Util.(summary |> member "hidden_count" |> to_int);
+      Alcotest.(check bool) "hidden actor listed" true
+        (List.mem (`String "operator-b")
+           Yojson.Safe.Util.(summary |> member "hidden_actors" |> to_list));
+      let confirm_required_actions =
+        Yojson.Safe.Util.(summary |> member "confirm_required_actions" |> to_list)
+      in
+      Alcotest.(check bool) "task inject listed" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "action_type" |> to_string)
+             = "task_inject")
+           confirm_required_actions))
+
 let test_digest_room_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1295,6 +1352,8 @@ let () =
         [
           Alcotest.test_case "snapshot sections" `Quick
             test_snapshot_has_expected_sections;
+          Alcotest.test_case "snapshot pending confirm summary tracks actor scope" `Quick
+            test_snapshot_pending_confirm_summary_tracks_actor_scope;
           Alcotest.test_case "digest room pending confirm attention" `Quick
             test_digest_room_exposes_pending_confirm_attention;
           Alcotest.test_case "digest team session shape" `Quick

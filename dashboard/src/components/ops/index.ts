@@ -49,6 +49,11 @@ export function Ops() {
   const sessions = snapshot?.sessions ?? []
   const keepers = snapshot?.keepers ?? []
   const pendingConfirms = snapshot?.pending_confirms ?? []
+  const pendingSummary = snapshot?.pending_confirm_summary
+  const visiblePendingCount = pendingSummary?.visible_count ?? pendingConfirms.length
+  const totalPendingCount = pendingSummary?.total_count ?? pendingConfirms.length
+  const hiddenPendingCount = pendingSummary?.hidden_count ?? 0
+  const pendingActorFilter = pendingSummary?.actor_filter?.trim() || null
   const selectedSession = sessions.find(session => session.session_id === selectedSessionId.value) ?? sessions[0] ?? null
   const roomAttention = roomDigest?.attention_items ?? []
   const sessionAttention = roomAttention.filter(isSessionAttention)
@@ -101,11 +106,13 @@ export function Ops() {
     {
       key: 'confirm',
       label: '확인 대기',
-      value: pendingConfirms.length,
-      detail: pendingConfirms.length > 0
+      value: hiddenPendingCount > 0 ? `${visiblePendingCount}/${totalPendingCount}` : visiblePendingCount,
+      detail: visiblePendingCount > 0
         ? '미리보기만 된 개입이 아직 사람 확인을 기다리고 있습니다'
-        : '지금 막혀 있는 확인 대기는 없습니다',
-      tone: pendingConfirms.length > 0 ? 'warn' : 'ok',
+        : hiddenPendingCount > 0 && pendingActorFilter
+          ? `현재 actor(${pendingActorFilter}) 기준으로는 비어 있고, 다른 actor 대기 ${hiddenPendingCount}건이 있습니다`
+          : '지금 막혀 있는 확인 대기는 없습니다',
+      tone: totalPendingCount > 0 ? 'warn' : 'ok',
     },
     {
       key: 'session',
@@ -203,11 +210,15 @@ export function Ops() {
 
       ${(() => {
         const actions: Array<{ label: string; desc: string; tone: OpsPriorityTone; onClick: () => void }> = []
-        if (pendingConfirms.length > 0) {
+        if (visiblePendingCount > 0 || hiddenPendingCount > 0) {
           actions.push({
-            label: `확인 대기 ${pendingConfirms.length}건 처리`,
-            desc: '승인 또는 거부가 필요한 개입이 대기 중입니다',
-            tone: 'bad',
+            label: hiddenPendingCount > 0
+              ? `확인 대기 ${visiblePendingCount}/${totalPendingCount}건 확인`
+              : `확인 대기 ${visiblePendingCount}건 처리`,
+            desc: hiddenPendingCount > 0 && pendingActorFilter
+              ? `현재 actor(${pendingActorFilter}) 기준으로 보이는 queue를 먼저 확인합니다`
+              : '승인 또는 거부가 필요한 개입이 대기 중입니다',
+            tone: visiblePendingCount > 0 ? 'bad' : 'warn',
             onClick: () => {
               const el = document.querySelector('.ops-pending-section')
               el?.scrollIntoView({ behavior: 'smooth' })

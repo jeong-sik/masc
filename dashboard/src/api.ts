@@ -54,11 +54,22 @@ function getQueryParams(): URLSearchParams {
   return new URLSearchParams(window.location.search)
 }
 
+const DASHBOARD_AGENT_NAME_KEY = 'masc_dashboard_agent_name'
+
+function readStoredAgentName(): string | null {
+  try {
+    return localStorage.getItem(DASHBOARD_AGENT_NAME_KEY)?.trim() || null
+  } catch {
+    return null
+  }
+}
+
 function authHeaders(): Record<string, string> {
   const params = getQueryParams()
   const headers: Record<string, string> = {}
   const token = params.get('token')
-  const agent = params.get('agent') ?? params.get('agent_name')
+  const storedAgent = readStoredAgentName()
+  const agent = params.get('agent') ?? params.get('agent_name') ?? storedAgent
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (agent) headers['X-MASC-Agent'] = agent
   return headers

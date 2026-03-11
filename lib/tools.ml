@@ -4385,6 +4385,98 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
       ("required", `List [`String "tool_name"]);
     ];
   };
+
+  {
+    name = "masc_tool_admin_snapshot";
+    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, mode gates, keeper policy, and command-plane policy surfaces.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("include_hidden", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include hidden tools in tool_inventory (default: true)");
+          ("default", `Bool true);
+        ]);
+        ("include_deprecated", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include deprecated tools in tool_inventory (default: true)");
+          ("default", `Bool true);
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_tool_admin_update";
+    description = "Apply mode, auth, unit-policy, or keeper-policy updates through a single admin entrypoint.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("section", `Assoc [
+          ("type", `String "string");
+          ("description", `String "One of: mode, auth, unit_policy, keeper_policy, persistent_agent_policy");
+        ]);
+        ("mode", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Preset mode to switch to for section=mode");
+        ]);
+        ("enabled_categories", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Custom category set for section=mode");
+        ]);
+        ("enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable or disable auth for section=auth");
+        ]);
+        ("require_token", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Require tokens for section=auth");
+        ]);
+        ("default_role", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Default role for unauthenticated agents: reader|worker|admin");
+        ]);
+        ("token_expiry_hours", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Token expiry in hours for section=auth");
+        ]);
+        ("unit_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Managed unit id for section=unit_policy");
+        ]);
+        ("policy", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Unit policy envelope for section=unit_policy");
+        ]);
+        ("budget", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Unit budget envelope for section=unit_policy");
+        ]);
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper or persistent agent name for policy updates");
+        ]);
+        ("policy_mode", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper policy mode: heuristic | learned_offline_v1");
+        ]);
+        ("action_budget", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper action budget: conversation | board");
+        ]);
+        ("autonomy_level", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper autonomy level such as L2_Suggestive or L4_Autonomous");
+        ]);
+        ("reward_model_path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reward model path for learned_offline_v1 keeper policy");
+        ]);
+      ]);
+      ("required", `List [`String "section"]);
+    ];
+  };
 ]
 
 let all_schemas : tool_schema list = raw_schemas

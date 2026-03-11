@@ -196,6 +196,56 @@ let manual_help_entry name =
             ];
           prompt_hints = [ "Use prompt 'command_truth' to summarize the resulting proof." ];
         }
+  | "masc_tool_admin_snapshot" ->
+      Some
+        {
+          name;
+          short_description =
+            "Return a unified admin snapshot covering tool inventory, auth, mode, keeper policy, and command-plane policy surfaces.";
+          when_to_use =
+            "Use when you need one truthful view of what tools exist, what is visible, what auth/RBAC applies, and which policy surfaces are enforced versus advisory.";
+          key_constraints =
+            [
+              "Tool catalog visibility metadata is read-only in this snapshot.";
+              "Command-plane tool/model allowlists are reported as advisory until runtime enforcement is wired.";
+            ];
+          details_markdown =
+            "Provides a room-scoped control snapshot: current mode/category gates, auth config and credentials, keeper policy-derived tool gates, command-plane policy topology, and the full tool inventory with metadata and permission hints.";
+          doc_refs =
+            [
+              "docs/COMMAND-PLANE-RUNBOOK.md";
+              "docs/SUPERVISOR-MODE.md";
+            ];
+          prompt_hints =
+            [
+              "Use before changing auth, mode, unit policy, or keeper policy to confirm what is actually enforced.";
+            ];
+        }
+  | "masc_tool_admin_update" ->
+      Some
+        {
+          name;
+          short_description =
+            "Apply mode, auth, unit-policy, or keeper-policy updates through a single admin entrypoint.";
+          when_to_use =
+            "Use when you need to change mode/auth settings, update a unit policy envelope, or adjust keeper policy without bouncing between multiple tools.";
+          key_constraints =
+            [
+              "Section must be one of mode, auth, unit_policy, keeper_policy, persistent_agent_policy.";
+              "Unit tool/model allowlists are stored and surfaced, but remain advisory until runtime enforcement is added.";
+            ];
+          details_markdown =
+            "Delegates to the existing truthful write paths: Config mode updates, Auth config persistence, CPv2 unit policy updates, and keeper meta policy updates. Returns warnings for advisory-only fields.";
+          doc_refs =
+            [
+              "docs/COMMAND-PLANE-RUNBOOK.md";
+              "docs/SUPERVISOR-MODE.md";
+            ];
+          prompt_hints =
+            [
+              "Run masc_tool_admin_snapshot first, then apply the smallest necessary section update.";
+            ];
+        }
   | _ -> None
 
 let derived_short_description name original =

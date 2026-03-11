@@ -3,6 +3,7 @@
 open Masc_mcp
 
 let () = Random.self_init ()
+let () = Mirage_crypto_rng_unix.use_default ()
 
 let () = Printf.printf "\n=== Tool_misc Coverage Tests ===\n"
 
@@ -17,6 +18,10 @@ let str_contains s sub =
       else loop (i + 1)
     in
     loop 0
+
+let parse_json s =
+  try Yojson.Safe.from_string s
+  with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
 
 (* Test helper *)
 let test name f =
@@ -136,6 +141,148 @@ let () = test "dispatch_cleanup_zombies" (fun () ->
       assert success;
       assert (String.length result > 0)
   | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_tool_admin_snapshot" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [] in
+  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_snapshot" ~args with
+  | Some (success, result) ->
+      assert success;
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.member "tool_inventory" json <> `Null);
+      assert (Yojson.Safe.Util.member "auth" json <> `Null);
+      assert (Yojson.Safe.Util.member "mode" json <> `Null);
+      assert (Yojson.Safe.Util.member "keeper_policies" json <> `Null);
+      assert (Yojson.Safe.Util.member "command_plane" json <> `Null)
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_tool_admin_update_mode" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc
+      [
+        ("section", `String "mode");
+        ("enabled_categories", `List [ `String "core"; `String "auth" ]);
+      ]
+  in
+  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
+  | Some (success, result) ->
+      assert success;
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "mode");
+      let cfg = Config.load (Room.masc_dir ctx.config) in
+      assert (cfg.mode = Mode.Custom);
+      assert (List.mem Mode.Core cfg.enabled_categories);
+      assert (List.mem Mode.Auth cfg.enabled_categories)
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_tool_admin_update_auth" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc
+      [
+        ("section", `String "auth");
+        ("enabled", `Bool true);
+        ("require_token", `Bool true);
+        ("default_role", `String "reader");
+        ("token_expiry_hours", `Int 12);
+      ]
+  in
+  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
+  | Some (success, result) ->
+      assert success;
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "auth");
+      let cfg = Auth.load_auth_config ctx.config.base_path in
+      assert cfg.enabled;
+      assert cfg.require_token;
+      assert (cfg.default_role = Types.Reader);
+      assert (cfg.token_expiry_hours = 12)
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_tool_admin_update_unit_policy" (fun () ->
+  let ctx = make_test_ctx () in
+  let define_args =
+    `Assoc
+      [
+        ("unit_id", `String "squad-admin-test");
+        ("kind", `String "squad");
+        ("label", `String "Admin Test Squad");
+        ("parent_unit_id", `String "company-runtime");
+      ]
+  in
+  ignore (Command_plane_v2.upsert_unit ctx.config ~actor:ctx.agent_name define_args);
+  let args =
+    `Assoc
+      [
+        ("section", `String "unit_policy");
+        ("unit_id", `String "squad-admin-test");
+        ( "policy",
+          `Assoc
+            [
+              ("tool_allowlist", `List [ `String "masc_board_post" ]);
+              ("model_allowlist", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("approval_class", `String "guarded");
+            ] );
+      ]
+  in
+  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
+  | Some (success, result) ->
+      assert success;
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "unit_policy");
+      let warnings = Yojson.Safe.Util.(json |> member "warnings" |> to_list) in
+      assert (List.length warnings = 2)
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let ctx = make_test_ctx () in
+  let keeper_ctx : _ Tool_keeper.context =
+    { config = ctx.config; sw; clock = Eio.Stdenv.clock env }
+  in
+  match
+    Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
+      ~args:
+        (`Assoc
+          [
+            ("name", `String "admin-keeper");
+            ("goal", `String "Admin tool policy test");
+            ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+            ("presence_keepalive", `Bool false);
+            ("proactive_enabled", `Bool false);
+          ])
+  with
+  | Some (true, _) -> (
+      let args =
+        `Assoc
+          [
+            ("section", `String "keeper_policy");
+            ("name", `String "admin-keeper");
+            ("autonomy_level", `String "L4_Autonomous");
+            ("policy_mode", `String "heuristic");
+            ("action_budget", `String "board");
+          ]
+      in
+      match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
+      | Some (success, result) ->
+          assert success;
+          let json = parse_json result in
+          assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "keeper_policy");
+          (match Tool_keeper.read_meta ctx.config "admin-keeper" with
+          | Ok (Some meta) ->
+              assert (meta.autonomy_level = "l4_autonomous" || meta.autonomy_level = "L4_Autonomous");
+              assert (meta.policy_action_budget = "board")
+          | _ -> failwith "expected updated keeper meta")
+      | None -> failwith "dispatch returned None")
+  | Some (false, err) -> failwith err
+  | None -> failwith "keeper up dispatch returned None"
 )
 
 (* Test helper functions *)

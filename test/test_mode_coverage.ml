@@ -233,7 +233,13 @@ let test_tool_category_cost () =
 
 let test_tool_category_auth () =
   check bool "auth_enable" true (Mode.tool_category "masc_auth_enable" = Mode.Auth);
-  check bool "auth_status" true (Mode.tool_category "masc_auth_status" = Mode.Auth)
+  check bool "auth_status" true (Mode.tool_category "masc_auth_status" = Mode.Auth);
+  check bool "tool_admin_update" true
+    (Mode.tool_category "masc_tool_admin_update" = Mode.Auth)
+
+let test_tool_category_core_admin_snapshot () =
+  check bool "tool_admin_snapshot" true
+    (Mode.tool_category "masc_tool_admin_snapshot" = Mode.Core)
 
 let test_tool_category_ratelimit () =
   check bool "rate_limit_status" true (Mode.tool_category "masc_rate_limit_status" = Mode.RateLimit);
@@ -405,6 +411,7 @@ let () =
       test_case "interrupt tools" `Quick test_tool_category_interrupt;
       test_case "cost tools" `Quick test_tool_category_cost;
       test_case "auth tools" `Quick test_tool_category_auth;
+      test_case "core admin snapshot" `Quick test_tool_category_core_admin_snapshot;
       test_case "ratelimit tools" `Quick test_tool_category_ratelimit;
       test_case "encryption tools" `Quick test_tool_category_encryption;
       test_case "code tools" `Quick test_tool_category_code;

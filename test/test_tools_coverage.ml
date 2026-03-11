@@ -722,6 +722,30 @@ let test_masc_keeper_eval_replay_schema () =
             (List.mem_assoc "limit" props)
       | None -> Alcotest.fail "masc_keeper_eval_replay missing properties"
 
+let test_masc_tool_admin_snapshot_schema () =
+  match find_tool "masc_tool_admin_snapshot" with
+  | None -> Alcotest.fail "masc_tool_admin_snapshot not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has include_hidden" true
+            (List.mem_assoc "include_hidden" props);
+          Alcotest.(check bool) "has include_deprecated" true
+            (List.mem_assoc "include_deprecated" props)
+      | None -> Alcotest.fail "masc_tool_admin_snapshot missing properties"
+
+let test_masc_tool_admin_update_schema () =
+  match find_tool "masc_tool_admin_update" with
+  | None -> Alcotest.fail "masc_tool_admin_update not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has section" true (List.mem_assoc "section" props);
+          Alcotest.(check bool) "has policy" true (List.mem_assoc "policy" props);
+          Alcotest.(check bool) "has autonomy_level" true
+            (List.mem_assoc "autonomy_level" props)
+      | None -> Alcotest.fail "masc_tool_admin_update missing properties"
+
 (* ============================================================ *)
 (* 13. Cache Tool Tests                                          *)
 (* ============================================================ *)
@@ -1107,6 +1131,10 @@ let () =
         test_masc_keeper_action_explain_schema;
       Alcotest.test_case "keeper-eval-replay" `Quick
         test_masc_keeper_eval_replay_schema;
+      Alcotest.test_case "tool-admin-snapshot" `Quick
+        test_masc_tool_admin_snapshot_schema;
+      Alcotest.test_case "tool-admin-update" `Quick
+        test_masc_tool_admin_update_schema;
       Alcotest.test_case "llama-models" `Quick test_masc_llama_models_schema;
       Alcotest.test_case "team-session-step-spawn-selection-note" `Quick
         test_masc_team_session_step_spawn_selection_note_schema;

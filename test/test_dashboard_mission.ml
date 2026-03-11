@@ -59,6 +59,8 @@ let seed_room config session_id =
             ~capabilities:[ "worker"; "local64"; "metacog" ] ());
   ignore (Lib.Room.join config ~agent_name:"llama-local-gamma"
             ~capabilities:[ "worker"; "local64"; "executor" ] ());
+  ignore (Lib.Room.join config ~agent_name:"llama-local-delta"
+            ~capabilities:[ "worker"; "local64"; "observer" ] ());
   ignore
     (Lib.Room.broadcast config ~from_agent:"team-session-local64-smoke"
        ~content:"@llama-local-alpha recover failed worker coverage");
@@ -159,6 +161,26 @@ let seed_room config session_id =
             routing_reason = Some "executor covers direct runtime checks";
             routing_escalated = false;
           };
+          {
+            spawn_agent = "llama";
+            runtime_actor = Some "llama-local-delta";
+            spawn_role = Some "observer";
+            spawn_model = Some "qwen9-swarm";
+            worker_class = Some Worker_scout;
+            parent_actor = Some "team-session-local64-smoke";
+            capsule_mode = Some Capsule_fresh;
+            runtime_pool = Some "local64";
+            lane_id = Some "lane-observer";
+            controller_level = Some Controller_worker;
+            control_domain = Some Domain_runtime;
+            supervisor_actor = Some "llama-local-alpha";
+            model_tier = Some Tier_9b;
+            task_profile = Some Profile_extract;
+            risk_level = Some Risk_low;
+            routing_confidence = Some 0.72;
+            routing_reason = Some "observer preserves room-level runtime census";
+            routing_escalated = false;
+          };
         ];
       broadcast_count = 2;
       portal_count = 0;
@@ -247,22 +269,68 @@ let test_dashboard_mission_projection () =
         let session_briefs = json |> member "session_briefs" |> to_list in
         let agent_briefs = json |> member "agent_briefs" |> to_list in
         let internal_signals = json |> member "internal_signals" |> to_list in
+        let attention_by_kind kind =
+          attention_queue
+          |> List.find (fun row -> row |> member "kind" |> to_string = kind)
+        in
+        let alpha_brief =
+          agent_briefs
+          |> List.find (fun row ->
+                 row |> member "agent_name" |> to_string = "llama-local-alpha")
+        in
         check bool "attention_queue present" true (attention_queue <> []);
         check string "top attention kind" "spawn_failure_present"
           (attention_queue |> List.hd |> member "kind" |> to_string);
         check string "top action type" "team_task_inject"
           (attention_queue |> List.hd |> member "top_action" |> member "action_type" |> to_string);
+        check string "local64 gap action type" "team_worker_spawn_batch"
+          (attention_by_kind "local64_role_gap"
+           |> member "top_action" |> member "action_type" |> to_string);
+        check string "routing escalation action type" "team_note"
+          (attention_by_kind "routing_escalation_present"
+           |> member "top_action" |> member "action_type" |> to_string);
         check string "session brief id" session_id
           (session_briefs |> List.hd |> member "session_id" |> to_string);
+        check bool "session brief keeps summary-only participant" true
+          (session_briefs
+           |> List.exists (fun row ->
+                  row |> member "session_id" |> to_string = session_id
+                  && (row |> member "member_names" |> to_list
+                     |> List.exists (fun value ->
+                            value |> to_string = "llama-local-delta"))));
         check bool "agent brief linked to fixture session" true
           (agent_briefs
            |> List.exists (fun row ->
                 row |> member "agent_name" |> to_string = "llama-local-alpha"
                 && row |> member "related_session_id" |> to_string = session_id));
+        check bool "summary-only participant links back to session" true
+          (agent_briefs
+           |> List.exists (fun row ->
+                  row |> member "agent_name" |> to_string = "llama-local-delta"
+                  && row |> member "related_session_id" |> to_string = session_id));
+        let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
+        check bool "recent input preserves exact alpha mention" true
+          (contains alpha_input "@llama-local-alpha");
+        check bool "recent input excludes unrelated beta mention" false
+          (contains alpha_input "@llama-local-beta");
         check bool "internal signal includes pending confirm" true
           (internal_signals
            |> List.exists (fun row ->
                 contains (row |> member "summary" |> to_string) "pending confirmation"));
+        let room_action_reasons =
+          internal_signals
+          |> List.filter_map (fun row ->
+                 match row |> member "action" with
+                 | `Assoc _ as action ->
+                     if action |> member "target_type" |> to_string = "room"
+                        && action |> member "action_type" |> to_string = "broadcast"
+                     then Some (action |> member "reason" |> to_string)
+                     else None
+                 | _ -> None)
+          |> List.sort_uniq String.compare
+        in
+        check bool "multiple room actions survive internal matching" true
+          (List.length room_action_reasons >= 2);
       ))
 
 let () =

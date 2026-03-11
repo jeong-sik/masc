@@ -787,6 +787,158 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   with exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
 
+type resident_keeper_spec = {
+  name : string;
+  persistent_name : string;
+  desired : bool;
+  seed_meta : Yojson.Safe.t;
+  created_at : string;
+  updated_at : string;
+}
+
+let resident_keeper_dir (config : Room.config) =
+  let d = Filename.concat (Filename.concat config.base_path ".masc") "resident-keepers" in
+  mkdir_p d;
+  d
+
+let resident_keeper_path config name =
+  Filename.concat (resident_keeper_dir config) (name ^ ".json")
+
+let resident_keeper_to_json (spec : resident_keeper_spec) =
+  `Assoc
+    [
+      ("name", `String spec.name);
+      ("persistent_name", `String spec.persistent_name);
+      ("desired", `Bool spec.desired);
+      ("seed_meta", spec.seed_meta);
+      ("created_at", `String spec.created_at);
+      ("updated_at", `String spec.updated_at);
+    ]
+
+let resident_keeper_of_json (json : Yojson.Safe.t) :
+    (resident_keeper_spec, string) result =
+  try
+    let open Yojson.Safe.Util in
+    let name = json |> member "name" |> to_string in
+    let persistent_name =
+      match json |> member "persistent_name" |> to_string_option with
+      | Some value -> value
+      | None -> name
+    in
+    let desired =
+      match json |> member "desired" with
+      | `Bool value -> value
+      | _ -> true
+    in
+    let seed_meta =
+      match json |> member "seed_meta" with
+      | `Assoc _ as value -> value
+      | _ -> `Assoc []
+    in
+    let created_at =
+      match json |> member "created_at" |> to_string_option with
+      | Some value -> value
+      | None -> now_iso ()
+    in
+    let updated_at =
+      match json |> member "updated_at" |> to_string_option with
+      | Some value -> value
+      | None -> created_at
+    in
+    Ok { name; persistent_name; desired; seed_meta; created_at; updated_at }
+  with Yojson.Safe.Util.Type_error (msg, _) | Failure msg ->
+    Error ("resident keeper parse error: " ^ msg)
+
+let write_resident_keeper config (spec : resident_keeper_spec) :
+    (unit, string) result =
+  let path = resident_keeper_path config spec.name in
+  let content = Yojson.Safe.pretty_to_string (resident_keeper_to_json spec) in
+  try
+    let oc = open_out path in
+    Common.protect ~module_name:"tool_keeper" ~finally_label:"close_out"
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc content);
+    Ok ()
+  with exn ->
+    Error
+      (Printf.sprintf "failed to write resident keeper %s: %s" path
+         (Printexc.to_string exn))
+
+let read_resident_keeper config name : (resident_keeper_spec option, string) result
+    =
+  let path = resident_keeper_path config name in
+  if not (Sys.file_exists path) then Ok None
+  else
+    try
+      let json = Room_utils.read_json_local path in
+      match resident_keeper_of_json json with
+      | Ok spec -> Ok (Some spec)
+      | Error msg -> Error msg
+    with exn ->
+      Error
+        (Printf.sprintf "failed to read resident keeper %s: %s" path
+           (Printexc.to_string exn))
+
+let remove_resident_keeper config name =
+  Safe_ops.remove_file_logged ~context:"resident_keeper_remove"
+    (resident_keeper_path config name)
+
+let list_resident_keepers config : resident_keeper_spec list =
+  let dir = resident_keeper_dir config in
+  match Safe_ops.list_dir_safe dir with
+  | Error _ -> []
+  | Ok files ->
+      files
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.map Filename.remove_extension
+      |> List.filter validate_name
+      |> List.filter_map (fun name ->
+             match read_resident_keeper config name with
+             | Ok (Some spec) -> Some spec
+             | _ -> None)
+      |> List.sort (fun a b -> String.compare a.name b.name)
+
+let resident_keeper_names config =
+  list_resident_keepers config |> List.map (fun spec -> spec.name)
+
+let is_resident_keeper config name =
+  List.mem name (resident_keeper_names config)
+
+let register_resident_keeper_from_meta config (meta : keeper_meta) :
+    (unit, string) result =
+  let existing =
+    match read_resident_keeper config meta.name with
+    | Ok (Some spec) -> Some spec
+    | _ -> None
+  in
+  let created_at =
+    match existing with
+    | Some spec -> spec.created_at
+    | None -> now_iso ()
+  in
+  write_resident_keeper config
+    {
+      name = meta.name;
+      persistent_name = meta.name;
+      desired = true;
+      seed_meta = meta_to_json meta;
+      created_at;
+      updated_at = now_iso ();
+    }
+
+let persistent_agent_names config =
+  let dir = keeper_dir config in
+  let resident = resident_keeper_names config in
+  match Safe_ops.list_dir_safe dir with
+  | Error _ -> []
+  | Ok files ->
+      files
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.map Filename.remove_extension
+      |> List.filter validate_name
+      |> List.filter (fun name -> not (List.mem name resident))
+      |> List.sort String.compare
+
 let write_meta config (m : keeper_meta) : (unit, string) result =
   let path = keeper_meta_path config m.name in
   let content = Yojson.Safe.pretty_to_string (meta_to_json m) in
@@ -839,12 +991,11 @@ let ollama_port_listening () =
 
 let model_spec_is_local_runtime (model : Llm_client.model_spec) =
   match model.provider with
-  | Llm_client.Ollama | Llm_client.Llama -> true
+  | Llm_client.Llama -> true
   | _ -> false
 
 let model_spec_is_available (model : Llm_client.model_spec) =
   match model.provider with
-  | Llm_client.Ollama -> ollama_port_listening ()
   | Llm_client.Llama -> true
   | _ -> true
 
@@ -2799,10 +2950,7 @@ let run_alert_channel_with_retry
     in
     loop 1 None
 
-let dedup_strings (xs : string list) : string list =
-  List.fold_left
-    (fun acc x -> if List.mem x acc then acc else acc @ [ x ])
-    [] xs
+let dedup_strings = Dashboard_utils.dedup_strings
 
 let keeper_alert_signal
     ~(message : string)
@@ -8486,12 +8634,6 @@ let handle_keeper_msg ctx args : tool_result =
              let sec = int_of_float (Float.ceil v) in
              max 5 (min 300 sec))
     in
-    let ollama_timeout_sec_opt =
-      Safe_ops.json_float_opt "ollama_timeout_sec" args
-      |> Option.map (fun v ->
-             let sec = int_of_float (Float.ceil v) in
-             max 10 (min 300 sec))
-    in
     match inline_soul_profile_res, new_soul_profile_res with
     | Error e, _ | _, Error e -> (false, "❌ " ^ e)
     | Ok inline_soul_profile, Ok new_soul_profile ->
@@ -8974,14 +9116,10 @@ let handle_keeper_msg ctx args : tool_result =
               ) specs
             in
             let run_cascade requests =
-              match timeout_sec_opt, ollama_timeout_sec_opt with
-              | Some timeout_sec, Some ollama_timeout_sec ->
-                  Llm_client.cascade ~timeout_sec ~ollama_timeout_sec requests
-              | Some timeout_sec, None ->
+              match timeout_sec_opt with
+              | Some timeout_sec ->
                   Llm_client.cascade ~timeout_sec requests
-              | None, Some ollama_timeout_sec ->
-                  Llm_client.cascade ~ollama_timeout_sec requests
-              | None, None -> Llm_client.cascade requests
+              | None -> Llm_client.cascade requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
             match run_cascade requests with
@@ -10022,6 +10160,16 @@ let handle_keeper_msg ctx args : tool_result =
                 (true, Yojson.Safe.pretty_to_string json)
               end))
 
+let annotate_keeper_json ~runtime_class ~desired ~resident_registered json =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (("runtime_class", `String runtime_class)
+        :: ("desired", `Bool desired)
+        :: ("resident_registered", `Bool resident_registered)
+        :: fields)
+  | other -> other
+
 let handle_keeper_model_set ctx args : tool_result =
   let name = get_string args "name" "" in
   let model = get_string args "model" "" |> String.trim in
@@ -10076,9 +10224,30 @@ let handle_keeper_model_set ctx args : tool_result =
                           ("allowed_models",
                             `List
                               (List.map (fun item -> `String item) updated.allowed_models));
-                      ("room_scope", `String updated.room_scope);
-                      ("trigger_mode", `String updated.trigger_mode);
+                  ("room_scope", `String updated.room_scope);
+                  ("trigger_mode", `String updated.trigger_mode);
                     ]) ))
+
+let handle_resident_keeper_model_set ctx args : tool_result =
+  let name = get_string args "name" "" in
+  match read_resident_keeper ctx.config name with
+  | Error e -> (false, "❌ " ^ e)
+  | Ok None -> (false, Printf.sprintf "resident keeper not found: %s" name)
+  | Ok (Some _spec) ->
+      let ok, body = handle_keeper_model_set ctx args in
+      if not ok then (ok, body)
+      else begin
+        (match read_meta ctx.config name with
+        | Ok (Some meta) -> ignore (register_resident_keeper_from_meta ctx.config meta)
+        | _ -> ());
+        let json =
+          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+        in
+        (true,
+         Yojson.Safe.pretty_to_string
+           (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
+              ~resident_registered:true json))
+      end
 
 let handle_keeper_policy_set ctx args : tool_result =
   let name = get_string args "name" "" in
@@ -10539,6 +10708,59 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           in
           (true, Yojson.Safe.pretty_to_string json)
 
+let handle_resident_keeper_create_from_persona ctx args : tool_result =
+  match resolved_keeper_args_from_persona args with
+  | Error e -> (false, "❌ " ^ e)
+  | Ok (persona, resolved_args) ->
+      let dry_run = get_bool args "dry_run" false in
+      if dry_run then
+        let json =
+          `Assoc
+            [
+              ("persona", persona_summary_to_json persona);
+              ("created", `Bool false);
+              ("resident", `Bool true);
+              ("resolved_args", resolved_args);
+            ]
+        in
+        (true, Yojson.Safe.pretty_to_string json)
+      else
+        let ok, body = handle_keeper_up ctx resolved_args in
+        if not ok then
+          (false, body)
+        else
+          let name =
+            match resolved_args with
+            | `Assoc fields -> (
+                match List.assoc_opt "name" fields with
+                | Some (`String value) -> value
+                | _ -> "")
+            | _ -> ""
+          in
+          let register_result =
+            match read_meta ctx.config name with
+            | Ok (Some meta) -> register_resident_keeper_from_meta ctx.config meta
+            | Ok None -> Error "resident keeper meta missing after persona create"
+            | Error e -> Error e
+          in
+          (match register_result with
+          | Error e -> (false, "❌ " ^ e)
+          | Ok () ->
+              let created_json =
+                try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+              in
+              let json =
+                `Assoc
+                  [
+                    ("persona", persona_summary_to_json persona);
+                    ("created", `Bool true);
+                    ("resident", `Bool true);
+                    ("result", annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true ~resident_registered:true created_json);
+                    ("resolved_args", resolved_args);
+                  ]
+              in
+              (true, Yojson.Safe.pretty_to_string json))
+
 let handle_keeper_down ctx args : tool_result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -10825,6 +11047,257 @@ let handle_keeper_list ctx args : tool_result =
       ] in
       (true, Yojson.Safe.pretty_to_string json)
 
+let maybe_promote_live_legacy_keeper config name =
+  match read_meta config name with
+  | Error _ | Ok None -> ()
+  | Ok (Some meta) ->
+      if is_resident_keeper config meta.name then ()
+      else
+        match parse_agent_status config ~agent_name:meta.agent_name with
+        | `Assoc fields -> (
+            let status =
+              match List.assoc_opt "status" fields with
+              | Some (`String value) -> String.lowercase_ascii value
+              | _ -> "offline"
+            in
+            let agent_type =
+              match List.assoc_opt "agent_type" fields with
+              | Some (`String value) -> String.lowercase_ascii value
+              | _ -> ""
+            in
+            if agent_type = "keeper" && List.mem status [ "active"; "busy"; "idle"; "listening" ] then
+              ignore (register_resident_keeper_from_meta config meta))
+        | _ -> ()
+
+let ensure_resident_meta config (spec : resident_keeper_spec) =
+  match read_meta config spec.persistent_name with
+  | Ok (Some meta) -> Ok meta
+  | Ok None -> (
+      match meta_of_json spec.seed_meta with
+      | Ok meta ->
+          let meta =
+            { meta with
+              name = spec.persistent_name;
+              agent_name = keeper_agent_name spec.persistent_name;
+              updated_at = now_iso ();
+            }
+          in
+          (match write_meta config meta with
+          | Ok () -> Ok meta
+          | Error msg -> Error msg)
+      | Error msg -> Error msg)
+  | Error msg -> Error msg
+
+let handle_resident_keeper_up ctx args : tool_result =
+  let ok, body = handle_keeper_up ctx args in
+  if not ok then (ok, body)
+  else
+    let name = get_string args "name" "" in
+    match read_meta ctx.config name with
+    | Error e -> (false, "❌ " ^ e)
+    | Ok None -> (false, "❌ resident keeper meta missing after up")
+    | Ok (Some meta) ->
+        (match register_resident_keeper_from_meta ctx.config meta with
+        | Error e -> (false, "❌ " ^ e)
+        | Ok () ->
+            let json =
+              try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+            in
+            (true,
+             Yojson.Safe.pretty_to_string
+               (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
+                  ~resident_registered:true json)))
+
+let handle_resident_keeper_status ctx args : tool_result =
+  let name = get_string args "name" "" in
+  if validate_name name then maybe_promote_live_legacy_keeper ctx.config name;
+  match read_resident_keeper ctx.config name with
+  | Error e -> (false, "❌ " ^ e)
+  | Ok None -> (false, Printf.sprintf "resident keeper not found: %s" name)
+  | Ok (Some _spec) ->
+      let ok, body = handle_keeper_status ctx args in
+      if not ok then (ok, body)
+      else
+        let json =
+          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+        in
+        (true,
+         Yojson.Safe.pretty_to_string
+           (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
+              ~resident_registered:true json))
+
+let handle_resident_keeper_msg ctx args : tool_result =
+  let name = get_string args "name" "" in
+  if validate_name name then maybe_promote_live_legacy_keeper ctx.config name;
+  let ensure_result =
+    match read_resident_keeper ctx.config name with
+    | Ok (Some _) -> Ok ()
+    | _ ->
+        let ok, body = handle_resident_keeper_up ctx args in
+        if ok then Ok () else Error body
+  in
+  match ensure_result with
+  | Error err -> (false, err)
+  | Ok _ ->
+      let ok, body = handle_keeper_msg ctx args in
+      if not ok then (ok, body)
+      else begin
+        (match read_meta ctx.config name with
+        | Ok (Some meta) ->
+            ignore (register_resident_keeper_from_meta ctx.config meta)
+        | _ -> ());
+        let json =
+          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+        in
+        (true,
+         Yojson.Safe.pretty_to_string
+           (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
+              ~resident_registered:true json))
+      end
+
+let handle_resident_keeper_down ctx args : tool_result =
+  let name = get_string args "name" "" in
+  if validate_name name then remove_resident_keeper ctx.config name;
+  handle_keeper_down ctx args
+
+let handle_resident_keeper_list ctx args : tool_result =
+  let limit = max 0 (get_int args "limit" 50) in
+  let detailed = get_bool args "detailed" false in
+  let resident =
+    resident_keeper_names ctx.config
+    |> take limit
+  in
+  if not detailed then
+    let json =
+      `Assoc
+        [
+          ("count", `Int (List.length resident));
+          ("keepers", `List (List.map (fun name -> `String name) resident));
+        ]
+    in
+    (true, Yojson.Safe.pretty_to_string json)
+  else
+    let rows =
+      resident
+      |> List.filter_map (fun name ->
+             let status_args =
+               `Assoc
+                 [
+                   ("name", `String name);
+                   ("tail_turns", `Int 3);
+                   ("tail_messages", `Int 5);
+                   ("tail_compactions", `Int 10);
+                   ("tail_bytes", `Int 60000);
+                 ]
+             in
+             let ok, body = handle_resident_keeper_status ctx status_args in
+             if not ok then None
+             else
+               try Some (Yojson.Safe.from_string body)
+               with Yojson.Json_error _ -> None)
+    in
+    let json =
+      `Assoc
+        [
+          ("count", `Int (List.length rows));
+          ("keepers", `List rows);
+        ]
+    in
+    (true, Yojson.Safe.pretty_to_string json)
+
+let handle_persistent_agent_list ctx args : tool_result =
+  let limit = max 0 (get_int args "limit" 50) in
+  let detailed = get_bool args "detailed" false in
+  let names = persistent_agent_names ctx.config |> take limit in
+  if not detailed then
+    let json =
+      `Assoc
+        [
+          ("count", `Int (List.length names));
+          ("persistent_agents", `List (List.map (fun name -> `String name) names));
+        ]
+    in
+    (true, Yojson.Safe.pretty_to_string json)
+  else
+    let rows =
+      names
+      |> List.filter_map (fun name ->
+             let status_args =
+               `Assoc
+                 [
+                   ("name", `String name);
+                   ("tail_turns", `Int 3);
+                   ("tail_messages", `Int 5);
+                   ("tail_compactions", `Int 10);
+                   ("tail_bytes", `Int 60000);
+                 ]
+             in
+             let ok, body = handle_keeper_status ctx status_args in
+             if not ok then None
+             else
+               try
+                 let json = Yojson.Safe.from_string body in
+                 Some
+                   (annotate_keeper_json ~runtime_class:"persistent_agent"
+                      ~desired:false ~resident_registered:false json)
+               with Yojson.Json_error _ -> None)
+    in
+    let json =
+      `Assoc
+        [
+          ("count", `Int (List.length rows));
+          ("persistent_agents", `List rows);
+        ]
+    in
+    (true, Yojson.Safe.pretty_to_string json)
+
+let handle_persistent_agent_up ctx args : tool_result =
+  let ok, body = handle_keeper_up ctx args in
+  if not ok then (ok, body)
+  else
+    let json =
+      try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+    in
+    (true,
+     Yojson.Safe.pretty_to_string
+       (annotate_keeper_json ~runtime_class:"persistent_agent" ~desired:false
+          ~resident_registered:false json))
+
+let handle_persistent_agent_status ctx args : tool_result =
+  let ok, body = handle_keeper_status ctx args in
+  if not ok then (ok, body)
+  else
+    let name = get_string args "name" "" in
+    let json =
+      try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+    in
+    (true,
+     Yojson.Safe.pretty_to_string
+       (annotate_keeper_json ~runtime_class:"persistent_agent" ~desired:false
+          ~resident_registered:(validate_name name && is_resident_keeper ctx.config name)
+          json))
+
+let handle_persistent_agent_msg ctx args : tool_result =
+  let ok, body = handle_keeper_msg ctx args in
+  if not ok then (ok, body)
+  else
+    let json =
+      try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+    in
+    (true,
+     Yojson.Safe.pretty_to_string
+       (annotate_keeper_json ~runtime_class:"persistent_agent" ~desired:false
+          ~resident_registered:false json))
+
+let handle_persistent_agent_down ctx args : tool_result =
+  handle_keeper_down ctx args
+
+let handle_persistent_agent_model_set ctx args : tool_result =
+  handle_keeper_model_set ctx args
+
+let handle_persistent_agent_create_from_persona ctx args : tool_result =
+  handle_keeper_create_from_persona ctx args
+
 (* Start keepalive fibers for existing keepers (best-effort). *)
 type keeper_bootstrap_stats = {
   enabled: bool;
@@ -10838,61 +11311,63 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     { enabled = false; scanned = 0; started = 0; stale = 0 }
   else
     let dir = keeper_dir ctx.config in
-    match Safe_ops.list_dir_safe dir with
-    | Error _ -> { enabled = true; scanned = 0; started = 0; stale = 0 }
+    (match Safe_ops.list_dir_safe dir with
     | Ok files ->
-        let now_ts = Time_compat.now () in
-        let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
-        let stale_turn_sec =
-          max 0.0 Env_config.KeeperBootstrap.stale_turn_seconds
-        in
-        let max_scan =
-          max 0 Env_config.KeeperBootstrap.max_scan
-        in
-        let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
-        let remaining_slots =
-          ref
-            (if max_keepers > 0 then
-               max 0 (max_keepers - running_keepers ())
-             else
-               max_int)
-        in
-        let names =
-          files
-          |> List.filter (fun f -> Filename.check_suffix f ".json")
-          |> List.sort String.compare
-          |> take max_scan
-        in
-        let (scanned, started, stale) =
-          List.fold_left
-            (fun (scanned_acc, started_acc, stale_acc) f ->
-              let name = Filename.remove_extension f in
-              match read_meta ctx.config name with
-              | Ok (Some m) ->
-                  let stale_now =
-                    stale_turn_sec > 0.0
-                    && (m.last_turn_ts <= 0.0
-                        || now_ts -. m.last_turn_ts >= stale_turn_sec)
-                  in
-                  let already_running = Hashtbl.mem keepalives m.name in
-                  let started_here =
-                    if stale_now then false
-                    else if already_running then false
-                    else if max_keepers > 0 && !remaining_slots <= 0 then false
-                    else (
-                      start_keepalive ~proactive_warmup_sec ctx m;
-                      if max_keepers > 0 then remaining_slots := !remaining_slots - 1;
-                      true
-                    )
-                  in
-                  ( scanned_acc + 1,
-                    started_acc + (if started_here then 1 else 0),
-                    stale_acc + (if stale_now then 1 else 0) )
-              | _ -> (scanned_acc, started_acc, stale_acc))
-            (0, 0, 0)
-            names
-        in
-        { enabled = true; scanned; started; stale }
+        files
+        |> List.filter (fun f -> Filename.check_suffix f ".json")
+        |> List.iter (fun f ->
+               let name = Filename.remove_extension f in
+               if validate_name name then maybe_promote_live_legacy_keeper ctx.config name)
+    | Error _ -> ());
+    let now_ts = Time_compat.now () in
+    let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
+    let stale_turn_sec =
+      max 0.0 Env_config.KeeperBootstrap.stale_turn_seconds
+    in
+    let max_scan =
+      max 0 Env_config.KeeperBootstrap.max_scan
+    in
+    let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+    let remaining_slots =
+      ref
+        (if max_keepers > 0 then
+           max 0 (max_keepers - running_keepers ())
+         else
+           max_int)
+    in
+    let specs =
+      list_resident_keepers ctx.config
+      |> take max_scan
+    in
+    let (scanned, started, stale) =
+      List.fold_left
+        (fun (scanned_acc, started_acc, stale_acc) spec ->
+          match ensure_resident_meta ctx.config spec with
+          | Error _ -> (scanned_acc + 1, started_acc, stale_acc)
+          | Ok m ->
+              let stale_now =
+                stale_turn_sec > 0.0
+                && (m.last_turn_ts <= 0.0
+                    || now_ts -. m.last_turn_ts >= stale_turn_sec)
+              in
+              let already_running = Hashtbl.mem keepalives m.name in
+              let started_here =
+                if stale_now then false
+                else if already_running then false
+                else if max_keepers > 0 && !remaining_slots <= 0 then false
+                else (
+                  start_keepalive ~proactive_warmup_sec ctx m;
+                  if max_keepers > 0 then remaining_slots := !remaining_slots - 1;
+                  true
+                )
+              in
+              ( scanned_acc + 1,
+                started_acc + (if started_here then 1 else 0),
+                stale_acc + (if stale_now then 1 else 0) ))
+        (0, 0, 0)
+        specs
+    in
+    { enabled = true; scanned; started; stale }
 
 let existing_keepalive_bootstrap_done = ref false
 
@@ -11115,25 +11590,47 @@ let handle_keeper_eval ctx args : tool_result =
         (true, Yojson.Safe.pretty_to_string json)
 
 let dispatch ctx ~name ~args : tool_result option =
-  (* Lazy boot: when any keeper tool is used, attach keepalives for existing keepers. *)
+  (* Resident keepers are bootstrapped lazily on tool use as a fallback.
+     Server startup also calls bootstrap_existing_keepers for always-on presence. *)
   (try start_existing_keepalives ctx with exn ->
     Printf.eprintf "[keeper] start_existing_keepalives failed: %s\n%!" (Printexc.to_string exn));
   match name with
   | "masc_persona_list" -> Some (handle_persona_list ctx args)
-  | "masc_keeper_create_from_persona" -> Some (handle_keeper_create_from_persona ctx args)
-  | "masc_keeper_up" -> Some (handle_keeper_up ctx args)
-  | "masc_keeper_status" -> Some (handle_keeper_status ctx args)
-  | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)
-  | "masc_keeper_model_set" -> Some (handle_keeper_model_set ctx args)
+  | "masc_keeper_create_from_persona" -> Some (handle_resident_keeper_create_from_persona ctx args)
+  | "masc_keeper_up" -> Some (handle_resident_keeper_up ctx args)
+  | "masc_keeper_status" -> Some (handle_resident_keeper_status ctx args)
+  | "masc_keeper_msg" -> Some (handle_resident_keeper_msg ctx args)
+  | "masc_keeper_model_set" -> Some (handle_resident_keeper_model_set ctx args)
   | "masc_keeper_policy_set" -> Some (handle_keeper_policy_set ctx args)
   | "masc_keeper_feedback_record" -> Some (handle_keeper_feedback_record ctx args)
   | "masc_keeper_dataset_export" -> Some (handle_keeper_dataset_export ctx args)
   | "masc_keeper_action_explain" -> Some (handle_keeper_action_explain ctx args)
   | "masc_keeper_eval_replay" -> Some (handle_keeper_eval_replay ctx args)
-  | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
-  | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
+  | "masc_keeper_down" -> Some (handle_resident_keeper_down ctx args)
+  | "masc_keeper_list" -> Some (handle_resident_keeper_list ctx args)
   | "masc_keeper_autonomy" -> Some (handle_keeper_autonomy ctx args)
   | "masc_keeper_goals" -> Some (handle_keeper_goals ctx args)
   | "masc_keeper_trajectory" -> Some (handle_keeper_trajectory ctx args)
   | "masc_keeper_eval" -> Some (handle_keeper_eval ctx args)
+  | "masc_persistent_agent_create_from_persona" ->
+      Some (handle_persistent_agent_create_from_persona ctx args)
+  | "masc_persistent_agent_up" -> Some (handle_persistent_agent_up ctx args)
+  | "masc_persistent_agent_status" -> Some (handle_persistent_agent_status ctx args)
+  | "masc_persistent_agent_msg" -> Some (handle_persistent_agent_msg ctx args)
+  | "masc_persistent_agent_model_set" -> Some (handle_persistent_agent_model_set ctx args)
+  | "masc_persistent_agent_policy_set" -> Some (handle_keeper_policy_set ctx args)
+  | "masc_persistent_agent_feedback_record" ->
+      Some (handle_keeper_feedback_record ctx args)
+  | "masc_persistent_agent_dataset_export" ->
+      Some (handle_keeper_dataset_export ctx args)
+  | "masc_persistent_agent_action_explain" ->
+      Some (handle_keeper_action_explain ctx args)
+  | "masc_persistent_agent_eval_replay" ->
+      Some (handle_keeper_eval_replay ctx args)
+  | "masc_persistent_agent_down" -> Some (handle_persistent_agent_down ctx args)
+  | "masc_persistent_agent_list" -> Some (handle_persistent_agent_list ctx args)
+  | "masc_persistent_agent_autonomy" -> Some (handle_keeper_autonomy ctx args)
+  | "masc_persistent_agent_goals" -> Some (handle_keeper_goals ctx args)
+  | "masc_persistent_agent_trajectory" -> Some (handle_keeper_trajectory ctx args)
+  | "masc_persistent_agent_eval" -> Some (handle_keeper_eval ctx args)
   | _ -> None

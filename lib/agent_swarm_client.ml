@@ -119,28 +119,36 @@ let call_rpc ~sw t ~masc_method ~arguments =
   with exn ->
     Error (Printf.sprintf "Network error: %s" (Printexc.to_string exn))
 
+let call_operation_assoc ~sw t ~operation_id ~arguments =
+  call_rpc ~sw t ~masc_method:operation_id ~arguments
+
+let call_operation_json ~sw t ~operation_id ~arguments_json =
+  match arguments_json with
+  | `Assoc arguments -> call_operation_assoc ~sw t ~operation_id ~arguments
+  | _ -> Error "arguments must be a JSON object"
+
 (* --- Room lifecycle --- *)
 
 let join ~sw t =
-  call_rpc ~sw t ~masc_method:"masc_join"
+  call_operation_assoc ~sw t ~operation_id:"masc_join"
     ~arguments:[("agent_name", `String t.agent_name)]
 
 let leave ~sw t =
-  call_rpc ~sw t ~masc_method:"masc_leave"
+  call_operation_assoc ~sw t ~operation_id:"masc_leave"
     ~arguments:[("agent_name", `String t.agent_name)]
 
 let status ~sw t =
-  call_rpc ~sw t ~masc_method:"masc_status"
+  call_operation_assoc ~sw t ~operation_id:"masc_status"
     ~arguments:[]
 
 (* --- Task operations --- *)
 
 let list_tasks ~sw t =
-  call_rpc ~sw t ~masc_method:"masc_tasks"
+  call_operation_assoc ~sw t ~operation_id:"masc_tasks"
     ~arguments:[]
 
 let add_task ~sw t ~title ~description =
-  call_rpc ~sw t ~masc_method:"masc_add_task"
+  call_operation_assoc ~sw t ~operation_id:"masc_add_task"
     ~arguments:[
       ("title", `String title);
       ("description", `String description);
@@ -155,11 +163,11 @@ let batch_add_tasks ~sw t ~tasks =
              [ ("title", `String title); ("description", `String description) ])
          tasks)
   in
-  call_rpc ~sw t ~masc_method:"masc_batch_add_tasks"
+  call_operation_assoc ~sw t ~operation_id:"masc_batch_add_tasks"
     ~arguments:[("tasks", tasks_json)]
 
 let claim ~sw t ~task_id =
-  call_rpc ~sw t ~masc_method:"masc_transition"
+  call_operation_assoc ~sw t ~operation_id:"masc_transition"
     ~arguments:[
       ("action", `String "claim");
       ("agent_name", `String t.agent_name);
@@ -167,17 +175,17 @@ let claim ~sw t ~task_id =
     ]
 
 let claim_next ~sw t =
-  call_rpc ~sw t ~masc_method:"masc_claim_next"
+  call_operation_assoc ~sw t ~operation_id:"masc_claim_next"
     ~arguments:[("agent_name", `String t.agent_name)]
 
 let set_current_task ~sw t ~task_id =
-  call_rpc ~sw t ~masc_method:"masc_plan_set_task"
+  call_operation_assoc ~sw t ~operation_id:"masc_plan_set_task"
     ~arguments:[
       ("task_id", `String task_id);
     ]
 
 let done_task ~sw t ~task_id =
-  call_rpc ~sw t ~masc_method:"masc_transition"
+  call_operation_assoc ~sw t ~operation_id:"masc_transition"
     ~arguments:[
       ("action", `String "done");
       ("agent_name", `String t.agent_name);
@@ -185,7 +193,7 @@ let done_task ~sw t ~task_id =
     ]
 
 let release_task ~sw t ~task_id =
-  call_rpc ~sw t ~masc_method:"masc_transition"
+  call_operation_assoc ~sw t ~operation_id:"masc_transition"
     ~arguments:[
       ("action", `String "release");
       ("agent_name", `String t.agent_name);
@@ -193,7 +201,7 @@ let release_task ~sw t ~task_id =
     ]
 
 let cancel_task ~sw t ~task_id ~reason =
-  call_rpc ~sw t ~masc_method:"masc_transition"
+  call_operation_assoc ~sw t ~operation_id:"masc_transition"
     ~arguments:[
       ("action", `String "cancel");
       ("agent_name", `String t.agent_name);
@@ -204,7 +212,7 @@ let cancel_task ~sw t ~task_id ~reason =
 (* --- Communication --- *)
 
 let broadcast ~sw t ~message =
-  call_rpc ~sw t ~masc_method:"masc_broadcast"
+  call_operation_assoc ~sw t ~operation_id:"masc_broadcast"
     ~arguments:[
       ("agent_name", `String t.agent_name);
       ("message", `String message);
@@ -213,7 +221,7 @@ let broadcast ~sw t ~message =
 (** Send a direct message to a specific agent. Unlike broadcast (room-wide),
     this is private 1:1 delivery. *)
 let send_direct ~sw t ~target ~message =
-  call_rpc ~sw t ~masc_method:"masc_a2a_delegate"
+  call_operation_assoc ~sw t ~operation_id:"masc_a2a_delegate"
     ~arguments:[
       ("target_agent", `String target);
       ("task_type", `String "async");
@@ -224,7 +232,7 @@ let send_direct ~sw t ~target ~message =
     events: list of event type strings, e.g. ["broadcast"; "task_update"] *)
 let subscribe ~sw t ~events =
   let events_json = `List (List.map (fun e -> `String e) events) in
-  call_rpc ~sw t ~masc_method:"masc_a2a_subscribe"
+  call_operation_assoc ~sw t ~operation_id:"masc_a2a_subscribe"
     ~arguments:[
       ("agent_name", `String t.agent_name);
       ("events", events_json);
@@ -232,14 +240,14 @@ let subscribe ~sw t ~events =
 
 (** Poll buffered events from an active subscription. *)
 let poll_events ~sw t ~subscription_id =
-  call_rpc ~sw t ~masc_method:"masc_poll_events"
+  call_operation_assoc ~sw t ~operation_id:"masc_poll_events"
     ~arguments:[
       ("subscription_id", `String subscription_id);
     ]
 
 (** Send a heartbeat to keep this agent's presence alive in the room. *)
 let heartbeat ~sw t =
-  call_rpc ~sw t ~masc_method:"masc_heartbeat"
+  call_operation_assoc ~sw t ~operation_id:"masc_heartbeat"
     ~arguments:[
       ("agent_name", `String t.agent_name);
     ]

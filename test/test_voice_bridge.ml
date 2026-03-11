@@ -11,7 +11,7 @@ let test_get_voice_for_known_agent () =
   Alcotest.(check string) "claude voice" "Sarah" (get_voice_for_agent "claude");
   Alcotest.(check string) "gemini voice" "Roger" (get_voice_for_agent "gemini");
   Alcotest.(check string) "codex voice" "George" (get_voice_for_agent "codex");
-  Alcotest.(check string) "ollama voice" "Laura" (get_voice_for_agent "ollama")
+  Alcotest.(check string) "llama voice" "Laura" (get_voice_for_agent "llama")
 
 let test_get_voice_for_unknown_agent () =
   (* Test that unknown agents get default voice *)

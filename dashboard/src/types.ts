@@ -253,6 +253,10 @@ export interface KeeperStatusDetail {
 
 export interface Keeper {
   name: string
+  runtime_class?: 'resident_keeper' | 'persistent_agent'
+  desired?: boolean
+  resident_registered?: boolean
+  reconcile_status?: string | null
   emoji?: string
   koreanName?: string
   agent_name?: string
@@ -779,16 +783,7 @@ export interface LodgeRuntimeStatus {
   active_self_heartbeats?: string[]
 }
 
-// --- Dashboard batch response ---
-
-export interface DashboardData {
-  agents: { agents: Agent[] }
-  tasks: { tasks: Task[] }
-  messages: { messages: Message[] }
-  status: ServerStatus
-  keepers: Keeper[] | { keepers: Keeper[] }
-  perpetual: PerpetualStatus
-}
+// --- Dashboard projection responses ---
 
 export interface DashboardShellResponse {
   generated_at?: string
@@ -1062,6 +1057,8 @@ export interface DashboardMissionSessionBrief {
   member_names: string[]
   started_at?: string | null
   elapsed_sec?: number | null
+  operation_id?: string | null
+  blocker_summary?: string | null
   last_event_at?: string | null
   last_event_summary?: string | null
   communication_summary?: string | null
@@ -1072,6 +1069,41 @@ export interface DashboardMissionSessionBrief {
   top_recommendation?: OperatorRecommendedAction | null
 }
 
+export interface DashboardMissionParticipantPreview {
+  agent_name: string
+  status?: string
+  current_work?: string | null
+  recent_input_preview?: string | null
+  recent_output_preview?: string | null
+  recent_tool_names: string[]
+  last_activity_at?: string | null
+}
+
+export interface DashboardMissionOperationBadge {
+  operation_id: string
+  status?: string
+  stage?: string | null
+  detachment_status?: string | null
+  objective?: string | null
+  updated_at?: string | null
+}
+
+export interface DashboardMissionKeeperRef {
+  name: string
+  agent_name?: string | null
+  status?: string
+  generation?: number
+  context_ratio?: number | null
+  last_turn_ago_s?: number | null
+  current_work?: string | null
+}
+
+export interface DashboardMissionSessionCard extends DashboardMissionSessionBrief {
+  member_previews: DashboardMissionParticipantPreview[]
+  operation_badges: DashboardMissionOperationBadge[]
+  keeper_refs: DashboardMissionKeeperRef[]
+}
+
 export interface DashboardMissionAgentBrief {
   agent_name: string
   status?: string
@@ -1080,6 +1112,7 @@ export interface DashboardMissionAgentBrief {
   current_work?: string | null
   related_session_id?: string | null
   related_attention_count: number
+  last_activity_at?: string | null
   recent_output_preview?: string | null
   recent_input_preview?: string | null
   recent_event?: string | null
@@ -1126,10 +1159,30 @@ export interface DashboardMissionResponse {
   command_focus: DashboardMissionCommandFocus
   operator_targets: DashboardMissionTargets
   attention_queue: DashboardMissionAttentionQueueItem[]
+  sessions: DashboardMissionSessionCard[]
   session_briefs: DashboardMissionSessionBrief[]
   agent_briefs: DashboardMissionAgentBrief[]
   keeper_briefs: DashboardMissionKeeperBrief[]
   internal_signals: DashboardMissionInternalSignal[]
+}
+
+export interface DashboardMissionTimelineItem {
+  id: string
+  timestamp?: string | null
+  event_type?: string
+  actor?: string | null
+  summary: string
+}
+
+export interface DashboardMissionSessionDetailResponse {
+  generated_at?: string
+  session_id: string
+  session?: DashboardMissionSessionCard | null
+  timeline: DashboardMissionTimelineItem[]
+  participants: DashboardMissionParticipantPreview[]
+  operations: DashboardMissionOperationBadge[]
+  keepers: DashboardMissionKeeperRef[]
+  error?: string | null
 }
 
 export interface DashboardMissionBriefingSection {
@@ -1278,6 +1331,9 @@ export interface OperatorSessionSnapshot {
 
 export interface OperatorKeeperSnapshot {
   name: string
+  runtime_class?: 'resident_keeper' | 'persistent_agent'
+  desired?: boolean
+  resident_registered?: boolean
   agent_name?: string
   status?: string
   autonomy_level?: string
@@ -1455,6 +1511,7 @@ export interface OperatorSnapshot {
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
   resident_judge_runtime?: OperatorResidentJudgeRuntime | null
+  persistent_agents?: OperatorKeeperSnapshot[]
   command_plane?: CommandPlaneSnapshot
   swarm_status?: CommandPlaneSwarmStatus
   recent_messages: Message[]

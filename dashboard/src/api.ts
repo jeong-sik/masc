@@ -3,12 +3,12 @@
 
 import { isRecord } from './components/common/normalize'
 import type {
-  DashboardData,
   DashboardExecutionResponse,
   DashboardGovernanceResponse,
   DashboardMemoryResponse,
   DashboardMissionBriefingResponse,
   DashboardMissionResponse,
+  DashboardMissionSessionDetailResponse,
   DashboardProofResponse,
   DashboardPlanningResponse,
   DashboardShellResponse,
@@ -291,13 +291,7 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   return extractMcpText(parsed)
 }
 
-// --- Dashboard (batch) ---
-
-export type DashboardMode = 'compact' | 'full'
-
-export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<DashboardData> {
-  return get(`/api/v1/dashboard?mode=${mode}`)
-}
+// --- Dashboard projections ---
 
 export function fetchDashboardShell(): Promise<DashboardShellResponse> {
   return get('/api/v1/dashboard/shell')
@@ -396,6 +390,11 @@ export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
   return get('/api/v1/dashboard/mission')
+}
+
+export function fetchDashboardMissionSession(sessionId: string): Promise<DashboardMissionSessionDetailResponse> {
+  const query = `?session_id=${encodeURIComponent(sessionId)}`
+  return get(`/api/v1/dashboard/session${query}`)
 }
 
 export function fetchDashboardMissionBriefing(force = false): Promise<DashboardMissionBriefingResponse> {

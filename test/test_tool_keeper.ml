@@ -92,18 +92,18 @@ let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
   with_env "ZAI_API_KEY" "zai-test" (fun () ->
       let labels =
         Masc_mcp.Tool_keeper.maybe_append_keeper_fallback_models
-          ["ollama:glm-4.7-flash"]
+          ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
       in
-      let ollama_listening =
-        match Masc_mcp.Tool_keeper.model_specs_of_strings ["ollama:glm-4.7-flash"] with
+      let llama_listening =
+        match Masc_mcp.Tool_keeper.model_specs_of_strings ["llama:qwen3.5-35b-a3b-ud-q8-xl"] with
         | Ok [spec] -> Masc_mcp.Tool_keeper.model_spec_is_available spec
         | _ -> false
       in
       let expected =
-        if ollama_listening then
-          ["ollama:glm-4.7-flash"]
+        if llama_listening then
+          ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
         else
-          ["ollama:glm-4.7-flash"; "glm:glm-4.7"]
+          ["llama:qwen3.5-35b-a3b-ud-q8-xl"; "glm:glm-4.7"]
       in
       check (list string) "append glm fallback only when local runtime unavailable"
         expected labels)
@@ -200,8 +200,8 @@ let test_keeper_model_set_persists_active_model () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Maintain Sangsu persona");
-              ("models", `List [ `String "ollama:glm-4.7-flash" ]);
-              ("active_model", `String "ollama:glm-4.7-flash");
+              ("models", `List [ `String "custom:initial-model" ]);
+              ("active_model", `String "custom:initial-model");
               ("room_scope", `String "all");
               ("trigger_mode", `String "explicit_only");
               ("mention_targets", `List [ `String "sangsu" ]);
@@ -215,12 +215,12 @@ let test_keeper_model_set_persists_active_model () =
           (`Assoc
             [
               ("name", `String "sangsu");
-              ("model", `String "ollama:qwen3.5:35b-a3b");
+              ("model", `String "custom:updated-model");
             ])
       in
       check bool "model set ok" true ok;
       let json = Yojson.Safe.from_string body in
-      check string "active model updated" "ollama:qwen3.5:35b-a3b"
+      check string "active model updated" "custom:updated-model"
         Yojson.Safe.Util.(json |> member "active_model" |> to_string);
       let ok, status_body =
         dispatch "masc_keeper_status"
@@ -237,7 +237,7 @@ let test_keeper_model_set_persists_active_model () =
       in
       check bool "status ok" true ok;
       let status_json = Yojson.Safe.from_string status_body in
-      check string "status active model" "ollama:qwen3.5:35b-a3b"
+      check string "status active model" "custom:updated-model"
         Yojson.Safe.Util.(status_json |> member "active_model" |> to_string))
 
 let write_persona_profile ~me_root ~persona_name ~content =
@@ -336,8 +336,8 @@ let test_persona_list_and_create_from_persona () =
         in
         check bool "dry run ok" true ok;
         let dry_json = Yojson.Safe.from_string dry_body in
-        check bool "dry run ready" true
-          Yojson.Safe.Util.(dry_json |> member "ready" |> to_bool);
+        check bool "dry run resident" true
+          Yojson.Safe.Util.(dry_json |> member "resident" |> to_bool);
         check string "dry run trigger mode" "explicit_only"
           Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "trigger_mode" |> to_string);
         let ok, create_body =
@@ -368,6 +368,70 @@ let test_persona_list_and_create_from_persona () =
         let status_json = Yojson.Safe.from_string status_body in
         check string "status room scope" "all"
           Yojson.Safe.Util.(status_json |> member "meta" |> member "room_scope" |> to_string)))
+
+let test_resident_keeper_and_persistent_agent_lists_split () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "resident-demo");
+              ("goal", `String "Stay resident");
+              ("models", `List [ `String "custom:test-model" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "resident keeper up" true ok;
+      let ok, _ =
+        dispatch "masc_persistent_agent_up"
+          (`Assoc
+            [
+              ("name", `String "persistent-demo");
+              ("goal", `String "Stay on demand");
+              ("models", `List [ `String "custom:test-model" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "persistent agent up" true ok;
+      let ok, resident_body =
+        dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool false) ])
+      in
+      check bool "resident list ok" true ok;
+      let resident_json = Yojson.Safe.from_string resident_body in
+      check bool "resident listed" true
+        Yojson.Safe.Util.(
+          resident_json |> member "keepers" |> to_list
+          |> List.exists (( = ) (`String "resident-demo")));
+      check bool "persistent hidden" false
+        Yojson.Safe.Util.(
+          resident_json |> member "keepers" |> to_list
+          |> List.exists (( = ) (`String "persistent-demo")));
+      let ok, persistent_body =
+        dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool false) ])
+      in
+      check bool "persistent list ok" true ok;
+      let persistent_json = Yojson.Safe.from_string persistent_body in
+      check bool "persistent listed" true
+        Yojson.Safe.Util.(
+          persistent_json |> member "persistent_agents" |> to_list
+          |> List.exists (( = ) (`String "persistent-demo"))))
 
 let test_keeper_policy_tools_roundtrip () =
   Eio_main.run @@ fun env ->
@@ -570,6 +634,8 @@ let () =
            test_keeper_model_set_persists_active_model;
          test_case "persona list and create from persona" `Quick
            test_persona_list_and_create_from_persona;
+         test_case "resident and persistent lists split" `Quick
+           test_resident_keeper_and_persistent_agent_lists_split;
          test_case "policy tools roundtrip" `Quick
            test_keeper_policy_tools_roundtrip;
          test_case "policy set rejects invalid mode" `Quick

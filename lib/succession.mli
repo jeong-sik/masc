@@ -3,7 +3,7 @@
     Handles context transfer between agents, potentially running
     different LLM models.  Extends the mitosis/relay pattern with:
     - Structured DNA (goal, progress, decisions, metrics)
-    - Cross-model normalization (Claude ↔ Ollama ↔ GLM)
+    - Cross-model normalization (Claude ↔ local runtimes such as llama:<model>/ollama:<model> ↔ GLM)
     - Generation tracking across the succession chain
 
     @since 2.61.0 *)

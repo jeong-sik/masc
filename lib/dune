@@ -43,6 +43,7 @@
    dashboard_governance_judge
    dashboard_operator_judge
    dashboard_semantics
+   dashboard_utils
    dashboard_execution
    dashboard_mission
    dashboard_proof
@@ -76,6 +77,7 @@
    level2_config
    level4_config
    local_runtime_pool
+   agent_swarm_contract
    local_agent_eio
    agent_swarm_client
    agent_swarm_dev_tools
@@ -273,6 +275,7 @@
    circuit_breaker
    audit_log
    build_identity
+  voice_config
   voice_bridge_eio
   voice_bridge
   voice_session_manager

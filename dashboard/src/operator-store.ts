@@ -289,6 +289,10 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   const contextRaw = isRecord(raw.context) ? raw.context : undefined
   return {
     name,
+    runtime_class:
+      raw.runtime_class === 'persistent_agent' ? 'persistent_agent' : 'resident_keeper',
+    desired: asBoolean(raw.desired),
+    resident_registered: asBoolean(raw.resident_registered),
     agent_name: asString(raw.agent_name),
     status: asString(raw.status),
     autonomy_level: asString(raw.autonomy_level),
@@ -328,6 +332,9 @@ function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
     resident_judge_runtime: normalizeResidentJudgeRuntime(root.resident_judge_runtime),
+    persistent_agents: extractArray(root.persistent_agents, ['items', 'persistent_agents'])
+      .map(normalizeKeeper)
+      .filter((item): item is OperatorKeeperSnapshot => item !== null),
     recent_messages: extractArray(root.recent_messages, ['messages'])
       .map(normalizeMessage)
       .filter((item): item is Message => item !== null),

@@ -12,7 +12,7 @@ val mode_to_string : mode -> string
 
 val agent_type_of_mention : string -> string
 (** Extract base agent type from mention/nickname
-    e.g., "ollama-gentle-gecko" → "ollama" *)
+    e.g., "llama-gentle-gecko" → "llama" *)
 
 val is_nickname : string -> bool
 (** Check if mention follows nickname pattern (agent-adj-animal) *)

@@ -402,10 +402,11 @@ let orchestrate
         | "claude" | "claude-cli" | "opus" | "sonnet" | "haiku" | "haiku-4.5" ->
             exec_with_retry "claude" (("model", `String model) :: args)
         | "ollama" ->
-            exec_with_retry "ollama" args
-        | m when starts_with ~prefix:"ollama:" m ->
-            let ollama_model = String.sub model 7 (String.length model - 7) in
-            exec_with_retry "ollama" (("model", `String ollama_model) :: args)
+            Error (Provider_adapter.bare_ollama_migration_message ())
+        | "llama" ->
+            exec_with_retry "llama" args
+        | m when starts_with ~prefix:"llama:" m ->
+            exec_with_retry "llama" (("model", `String model) :: args)
         | m when is_gemini_model m ->
             exec_with_retry "gemini" (("model", `String model) :: args)
         | _ ->

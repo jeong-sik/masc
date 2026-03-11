@@ -1248,7 +1248,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           ("name", `String keeper_name);
           ("message", `String message);
           ("timeout_sec", `Float timeout_sec);
-          ("ollama_timeout_sec", `Float timeout_sec);
         ]
     in
     (* Eio outer timeout includes LLM time + protocol overhead (serialization,

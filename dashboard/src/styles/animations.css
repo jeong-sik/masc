@@ -248,6 +248,62 @@ button.monitor-row.bad.state-quiet {
   line-height: 1.45;
 }
 
+.proof-summary-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.proof-summary-block {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+}
+
+.proof-summary-block.warn {
+  border-color: rgba(251,191,36,0.24);
+  background: rgba(251,191,36,0.08);
+}
+
+.proof-summary-block.bad {
+  border-color: rgba(248,113,113,0.28);
+  background: rgba(248,113,113,0.08);
+}
+
+.proof-summary-block strong {
+  color: var(--text-strong);
+}
+
+.proof-summary-block span {
+  color: rgba(255,255,255,0.8);
+  line-height: 1.5;
+}
+
+.proof-kv-block {
+  display: grid;
+  gap: 10px;
+}
+
+.proof-kv-grid {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 8px 12px;
+}
+
+.proof-kv-grid > span {
+  color: rgba(255,255,255,0.56);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.proof-kv-grid > strong {
+  color: var(--text-strong);
+  line-height: 1.45;
+}
+
 .mission-card-actions {
   display: flex;
   gap: 8px;
@@ -546,6 +602,10 @@ button.monitor-row.bad.state-quiet {
   line-height: 1.45;
 }
 
+.mission-link-row.static {
+  cursor: default;
+}
+
 .mission-pill-row {
   margin-top: 10px;
   display: flex;
@@ -652,6 +712,34 @@ button.monitor-row.bad.state-quiet {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.mission-member-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mission-member-preview {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.03);
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  color: inherit;
+}
+
+.mission-member-preview strong {
+  color: var(--text-strong);
+}
+
+.mission-member-preview span,
+.mission-member-preview small {
+  color: rgba(255,255,255,0.72);
+  line-height: 1.45;
 }
 
 .mission-member-row {
@@ -785,19 +873,70 @@ button.monitor-row.bad.state-quiet {
   gap: 4px;
 }
 
+.proof-io-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.proof-timeline-row .semantic-tag-row {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+.proof-artifact-row .command-meta-line span {
+  overflow-wrap: anywhere;
+}
+
+.mission-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.mission-detail-column {
+  display: grid;
+  gap: 10px;
+}
+
+.mission-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mission-timeline-row {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.03);
+  display: grid;
+  gap: 4px;
+}
+
+.mission-timeline-row small {
+  color: rgba(255,255,255,0.68);
+  line-height: 1.45;
+}
+
 @media (max-width: 1100px) {
   .mission-primary-grid,
   .mission-content-grid,
   .mission-human-grid,
   .mission-target-grid,
   .mission-focus-grid,
+  .mission-detail-grid,
   .agents-workbench {
     grid-template-columns: 1fr;
   }
 
   .mission-briefing-grid,
   .mission-fact-grid,
-  .mission-io-stack {
+  .mission-io-stack,
+  .proof-io-grid,
+  .proof-kv-grid,
+  .mission-member-preview-grid {
     grid-template-columns: 1fr;
   }
 }

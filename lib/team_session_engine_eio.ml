@@ -1288,24 +1288,17 @@ let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : strin
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
   | Some session ->
       if session.status = Team_session_types.Running then begin
-        let accepted =
-          with_runtimes_lock (fun () ->
-              match Hashtbl.find_opt runtimes session_id with
-              | Some runtime ->
-                  if runtime.finalizing then
-                    false
-                  else (
-                    runtime.stop_requested <- true;
-                    runtime.stop_reason <- Some reason;
-                    runtime.generate_report_on_finalize <- generate_report;
-                    true)
-              | None -> false)
-        in
+        with_runtimes_lock (fun () ->
+            match Hashtbl.find_opt runtimes session_id with
+            | Some runtime when not runtime.finalizing ->
+                runtime.stop_requested <- true;
+                runtime.stop_reason <- Some reason;
+                runtime.generate_report_on_finalize <- generate_report
+            | _ -> ());
         (* Directly finalize rather than deferring to the runtime loop.
            The runtime loop sleeps up to 15s between ticks, so setting a flag
            alone would leave callers waiting. finalize_session is idempotent
            under with_finalize_lock, safe even if the runtime loop also fires. *)
-        ignore accepted;
         let reloaded = Team_session_store.load_session config session_id in
         let updated =
           match reloaded with

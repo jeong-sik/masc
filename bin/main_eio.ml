@@ -1520,12 +1520,16 @@ let has_nonempty_env name =
 let trpg_default_fast_keeper_models () : string list =
   let glm_available = has_nonempty_env "ZAI_API_KEY" in
   let gemini_available = has_nonempty_env "GEMINI_API_KEY" in
+  let llama_models =
+    match Masc_mcp.Provider_adapter.explicit_llama_model_label_result () with
+    | Ok label -> [ label ]
+    | Error _ -> []
+  in
   match (glm_available, gemini_available) with
-  | true, true ->
-      [ "glm:glm-4.7"; "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
-  | true, false -> [ "glm:glm-4.7"; "ollama:glm-4.7-flash" ]
-  | false, true -> [ "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
-  | false, false -> [ "ollama:glm-4.7-flash" ]
+  | true, true -> [ "glm:glm-4.7"; "gemini:gemini-2.5-flash" ] @ llama_models
+  | true, false -> [ "glm:glm-4.7" ] @ llama_models
+  | false, true -> [ "gemini:gemini-2.5-flash" ] @ llama_models
+  | false, false -> llama_models
 
 let trpg_keeper_models_override_csv () : string option =
   match Sys.getenv_opt "MASC_TRPG_KEEPER_MODELS" with
@@ -1763,25 +1767,23 @@ let trpg_discover_openai_compatible_models (base_url : string) :
              (fun model_id -> Printf.sprintf "custom:%s@%s" model_id base_url)
              names)
 
-let trpg_discover_ollama_models () : (string list, string) result =
-  let base_url = trim_trailing_slashes Llm_client.ollama_glm.api_url in
-  let url = base_url ^ "/api/tags" in
-  match trpg_http_get_json_via_curl url with
+let trpg_discover_local_llama_models () : (string list, string) result =
+  match trpg_discover_openai_compatible_models Masc_mcp.Env_config.Llama.server_url with
+  | Ok specs ->
+      Ok
+        (specs
+        |> List.map (fun spec ->
+               match String.index_opt spec ':' with
+               | Some idx when idx + 1 < String.length spec ->
+                   let tail =
+                     String.sub spec (idx + 1) (String.length spec - idx - 1)
+                   in
+                   (match String.index_opt tail '@' with
+                   | Some at_idx when at_idx > 0 ->
+                       "llama:" ^ String.sub tail 0 at_idx
+                   | _ -> spec)
+               | _ -> spec))
   | Error err -> Error err
-  | Ok json -> (
-      match trpg_json_assoc_find "models" json with
-      | Some (`List entries) ->
-          let names =
-            entries
-            |> List.filter_map (fun entry ->
-                   trpg_json_string_fields ["name"; "model"] entry)
-            |> List.map (fun model_id -> Printf.sprintf "ollama:%s" model_id)
-            |> String.concat ","
-            |> split_csv_nonempty
-          in
-          if names = [] then Error "no ollama models found"
-          else Ok names
-      | _ -> Error "ollama tag list missing models array")
 
 let trpg_available_models_json_collect
     ?(warnings : string list = [])
@@ -1845,16 +1847,16 @@ let trpg_available_models_json_collect
             add_warning
               (Printf.sprintf "openai-compatible %s 조회 실패: %s" base_url err))
       (trpg_openai_compatible_urls ());
-    match trpg_discover_ollama_models () with
+    match trpg_discover_local_llama_models () with
     | Ok specs ->
         List.iter
           (fun spec ->
-            add_model ~spec ~source:"ollama" ~status:"live"
-              ~detail:Llm_client.ollama_glm.api_url ())
+            add_model ~spec ~source:"llama" ~status:"live"
+              ~detail:Masc_mcp.Env_config.Llama.server_url ())
           specs
     | Error err ->
         add_warning
-          (Printf.sprintf "ollama %s 조회 실패: %s" Llm_client.ollama_glm.api_url err));
+          (Printf.sprintf "llama %s 조회 실패: %s" Masc_mcp.Env_config.Llama.server_url err));
   `Assoc
     [
       ("ok", `Bool true);
@@ -2592,7 +2594,6 @@ let trpg_keeper_call_with_runtime
           ("goal", `String inline_goal);
           ("require_existing", `Bool true);
           ("timeout_sec", `Float timeout_sec);
-          ("ollama_timeout_sec", `Float timeout_sec);
           ("turn_instructions", `String turn_instructions);
         ])
   in
@@ -2810,77 +2811,20 @@ let auth_token_from_request request =
 let trpg_tts_proxy ~body_str : (string, [> `Bad_request | `Internal_server_error] * string) result =
   try
     let json = Yojson.Safe.from_string body_str in
-    let open Yojson.Safe.Util in
-    let text =
-      match json |> member "text" |> to_string_option with
-      | Some t when String.length (String.trim t) > 0 -> String.trim t
-      | _ -> raise (Yojson.Json_error "missing or empty 'text' field")
-    in
-    let voice_id =
-      match json |> member "voice_id" |> to_string_option with
-      | Some v when String.length v > 0 -> v
-      | _ -> "21m00Tcm4TlvDq8ikWAM"  (* Rachel *)
-    in
-    let model_id =
-      match json |> member "voice_model" |> to_string_option with
-      | Some m when String.length m > 0 -> m
-      | _ -> "eleven_multilingual_v2"
-    in
-    match Sys.getenv_opt "ELEVENLABS_API_KEY" with
-    | None | Some "" ->
-        Error (`Internal_server_error, "ELEVENLABS_API_KEY not configured")
-    | Some api_key ->
-        let url = Printf.sprintf
-          "https://api.elevenlabs.io/v1/text-to-speech/%s" voice_id in
-        let req_body = Yojson.Safe.to_string (`Assoc [
-          ("text", `String text);
-          ("model_id", `String model_id);
-          ("voice_settings", `Assoc [
-            ("stability", `Float 0.5);
-            ("similarity_boost", `Float 0.75);
-            ("style", `Float 0.0);
-          ]);
-        ]) in
-        let headers = [
-          ("xi-api-key", api_key);
-          ("Content-Type", "application/json");
-          ("Accept", "audio/mpeg");
-        ] in
-        let header_args = List.concat_map (fun (k, v) ->
-          ["-H"; Printf.sprintf "%s: %s" k v]
-        ) headers in
-        let argv = ["curl"; "-s"; "--max-time"; "30";
-                    "-X"; "POST"; url] @ header_args @ ["-d"; "@-"] in
-        let (status, raw) = Process_eio.run_argv_with_stdin_and_status
-          ~timeout_sec:35.0
-          ~stdin_content:req_body
-          argv in
-        (match status with
-         | Unix.WEXITED 0 ->
-             if String.length raw < 100 then
-               (* ElevenLabs returns JSON error bodies which are short *)
-               (try
-                 let err_json = Yojson.Safe.from_string raw in
-                 let detail = err_json |> member "detail" |> member "message"
-                   |> to_string_option |> Option.value ~default:raw in
-                 Error (`Internal_server_error,
-                   Printf.sprintf "ElevenLabs error: %s" detail)
-               with _ -> Ok raw)
-             else
-               Ok raw
-         | Unix.WEXITED 28 ->
-             Error (`Internal_server_error, "ElevenLabs request timed out")
-         | Unix.WEXITED code ->
-             Error (`Internal_server_error,
-               Printf.sprintf "curl exit %d calling ElevenLabs" code)
-         | _ ->
-             Error (`Internal_server_error, "ElevenLabs request failed"))
+    (match Masc_mcp.Voice_bridge.tts_preview_bytes_from_request_json json with
+    | Ok bytes -> Ok bytes
+    | Error message -> Error (`Internal_server_error, message))
   with
   | Yojson.Json_error e ->
       Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
   | exn ->
       Error (`Internal_server_error,
         Printf.sprintf "TTS proxy error: %s" (Printexc.to_string exn))
+
+let voice_config_payload () =
+  match Masc_mcp.Voice_bridge.public_config_json () with
+  | Ok json -> (`OK, json)
+  | Error json -> (`Error, json)
 
 let agent_from_request request =
   match Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent" with
@@ -3944,7 +3888,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
       | None -> s
       | Some i ->
           let prefix = String.sub s 0 i |> String.lowercase_ascii in
-          if List.mem prefix ["ollama"; "glm"; "claude"; "gemini"; "openrouter"] then
+          if List.mem prefix ["llama"; "glm"; "claude"; "gemini"; "openrouter"] then
             String.sub s (i + 1) (String.length s - i - 1)
           else
             s
@@ -3955,15 +3899,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
       s
   in
   let names =
-    let dir = Tool_keeper.keeper_dir config in
-    if not (Sys.file_exists dir) then []
-    else
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter Tool_keeper.validate_name
-      |> List.sort String.compare
+    Tool_keeper.resident_keeper_names config
   in
   let now_ts = Masc_mcp.Time_compat.now () in
   let summaries =
@@ -4905,7 +4841,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                  | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
                  | Ok specs ->
                      let primary =
-                       match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm
+                       match specs with m0 :: _ -> m0 | [] -> Llm_client.llama_default
                      in
                      let base_dir = Tool_keeper.session_base_dir config in
                      let (_session, ctx_opt) =
@@ -4973,6 +4909,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               in
 	            `Assoc ([
               ("name", `String m.name);
+              ("runtime_class", `String "resident_keeper");
+              ("desired", `Bool true);
+              ("resident_registered", `Bool true);
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));
@@ -5513,6 +5452,26 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
     ~config:state.Mcp_server.room_config ~sw ~clock
     ~proc_mgr:state.Mcp_server.proc_mgr ()
 
+let dashboard_session_http_json ~state ~sw ~clock request =
+  match query_param request "session_id" with
+  | Some session_id when String.trim session_id <> "" ->
+      Dashboard_mission.session_json ?actor:(operator_actor_hint request)
+        ~session_id:(String.trim session_id)
+        ~config:state.Mcp_server.room_config ~sw ~clock
+        ~proc_mgr:state.Mcp_server.proc_mgr ()
+  | _ ->
+      `Assoc
+        [
+          ("generated_at", `String (Types.now_iso ()));
+          ("session_id", `Null);
+          ("session", `Null);
+          ("timeline", `List []);
+          ("participants", `List []);
+          ("operations", `List []);
+          ("keepers", `List []);
+          ("error", `String "session_id is required");
+        ]
+
 let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
   Dashboard_mission_briefing.json ?actor:(operator_actor_hint request)
     ~force:(bool_query_param request "force" ~default:false)
@@ -5993,6 +5952,8 @@ let mcp_transport_json_headers session_id protocol_version origin =
         cors_headers = cors_headers;
         auth_token_from_request = auth_token_from_request;
         get_server_state_opt = (fun () -> !server_state);
+        get_sw = Masc_mcp.Eio_context.get_switch_opt;
+        get_clock = Masc_mcp.Eio_context.get_clock_opt;
         verify_mcp_auth =
           (fun ~base_path request ->
             Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
@@ -6538,6 +6499,8 @@ let mcp_transport_http_deps : Server_mcp_transport_http.deps =
     cors_headers;
     auth_token_from_request;
     get_server_state_opt = (fun () -> !server_state);
+    get_sw = Masc_mcp.Eio_context.get_switch_opt;
+    get_clock = Masc_mcp.Eio_context.get_clock_opt;
     verify_mcp_auth =
       (fun ~base_path request ->
         Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
@@ -6788,6 +6751,20 @@ let make_routes ~port ~host ~sw ~clock =
   |> Http.Router.get "/api/v1/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          Http.Response.json (Masc_mcp.Credits_dashboard.json_api ()) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/openapi.json" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let host_header = Httpun.Headers.get req.Httpun.Request.headers "host" in
+         let (resolved_host, resolved_port) = match host_header with
+           | Some header -> parse_host_port (Some header) host port
+           | None -> ("", 0)
+         in
+         let json =
+           Masc_mcp.Transport.Rest.generate_openapi_document
+             ~host:resolved_host ~port:resolved_port ()
+           |> Yojson.Safe.to_string
+         in
+         Http.Response.json json reqd
        ) request reqd)
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
   |> Http.Router.get "/static/css/middleware.css"
@@ -7306,6 +7283,12 @@ let make_routes ~port ~host ~sw ~clock =
          | Error (_, msg) ->
              respond_json_with_cors ~status:`Internal_server_error request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))))
+  |> Http.Router.get "/api/v1/voice/config" (fun request reqd ->
+       let status, json = voice_config_payload () in
+       let status =
+         match status with `OK -> `OK | `Error -> `Internal_server_error
+       in
+       respond_json_with_cors ~status request reqd (Yojson.Safe.to_string json))
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
        with_read_auth (fun state _req reqd ->
@@ -7388,6 +7371,11 @@ let make_routes ~port ~host ~sw ~clock =
   |> Http.Router.get "/api/v1/dashboard/mission" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_mission_http_json ~state ~sw ~clock req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/session" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = dashboard_session_http_json ~state ~sw ~clock req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission/briefing" (fun request reqd ->
@@ -8852,6 +8840,11 @@ let run_server ~sw ~env ~host ~port ~base_path =
           let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/session" ->
+          let state = get_server_state () in
+          let json = dashboard_session_http_json ~state ~sw ~clock httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/dashboard/mission/briefing" ->
           let state = get_server_state () in
           let json =
@@ -9029,6 +9022,19 @@ let run_server ~sw ~env ~host ~port ~base_path =
 
       | `GET, "/api/v1/credits" ->
           h2_respond_json h2_reqd (Masc_mcp.Credits_dashboard.json_api ()) ~extra_headers:cors
+
+      | `GET, "/api/v1/openapi.json" ->
+          let host_header = get_header_any_case httpun_request.headers "host" in
+          let (resolved_host, resolved_port) = match host_header with
+            | Some header -> parse_host_port (Some header) "127.0.0.1" 8935
+            | None -> ("", 0)
+          in
+          let json =
+            Masc_mcp.Transport.Rest.generate_openapi_document
+              ~host:resolved_host ~port:resolved_port ()
+            |> Yojson.Safe.to_string
+          in
+          h2_respond_json h2_reqd json ~extra_headers:cors
 
       | `GET, "/api/v1/trpg/events" ->
           let state = get_server_state () in
@@ -10124,6 +10130,14 @@ let run_server ~sw ~env ~host ~port ~base_path =
                 h2_respond_json h2_reqd
                   (Yojson.Safe.to_string (trpg_error_json msg))
                   ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `GET, "/api/v1/voice/config" ->
+          let status, json = voice_config_payload () in
+          let status =
+            match status with `OK -> `OK | `Error -> `Internal_server_error
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~status
+            ~extra_headers:cors
 
       | `GET, "/api/v1/council/debates" ->
           let state = get_server_state () in

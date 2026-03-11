@@ -79,11 +79,7 @@ let trace_id prefix =
   let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
   prefix ^ "_" ^ String.sub digest 0 16
 
-let iso_of_unix unix_ts =
-  let tm = Unix.gmtime unix_ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+let iso_of_unix = Dashboard_utils.iso_of_unix
 
 let remote_client_type_of_context (ctx : 'a context) =
   match ctx.mcp_session_id with
@@ -490,18 +486,7 @@ let recent_messages_json config =
   |> fun rows -> `List rows
 
 let keepers_json config =
-  let dir = Tool_keeper.keeper_dir config in
-  let names =
-    if not (Sys.file_exists dir) then
-      []
-    else
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (fun file -> Filename.check_suffix file ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter Tool_keeper.validate_name
-      |> List.sort String.compare
-  in
+  let names = Tool_keeper.resident_keeper_names config in
   let rows =
     List.filter_map
       (fun name ->
@@ -519,6 +504,9 @@ let keepers_json config =
             Some
               (`Assoc
                 [
+                  ("runtime_class", `String "resident_keeper");
+                  ("desired", `Bool true);
+                  ("resident_registered", `Bool true);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
                   ("trace_id", `String meta.trace_id);
@@ -543,6 +531,55 @@ let keepers_json config =
                   ( "last_autonomous_action_at",
                     if String.trim meta.last_autonomous_action_at = "" then `Null
                     else `String meta.last_autonomous_action_at );
+                  ("autonomous_action_count", `Int meta.autonomous_action_count);
+                  ("updated_at", `String meta.updated_at);
+                  ("created_at", `String meta.created_at);
+                ]))
+      names
+  in
+  `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
+
+let persistent_agents_json config =
+  let names = Tool_keeper.persistent_agent_names config in
+  let rows =
+    List.filter_map
+      (fun name ->
+        match Tool_keeper.read_meta config name with
+        | Error _ | Ok None -> None
+        | Ok (Some meta) ->
+            let agent_json =
+              Tool_keeper.parse_agent_status config ~agent_name:meta.agent_name
+            in
+            let agent_status =
+              match agent_json |> U.member "status" with
+              | `String status -> status
+              | _ -> "unknown"
+            in
+            Some
+              (`Assoc
+                [
+                  ("runtime_class", `String "persistent_agent");
+                  ("desired", `Bool false);
+                  ("resident_registered", `Bool false);
+                  ("name", `String meta.name);
+                  ("agent_name", `String meta.agent_name);
+                  ("trace_id", `String meta.trace_id);
+                  ("goal", `String meta.goal);
+                  ("short_goal", `String meta.short_goal);
+                  ("mid_goal", `String meta.mid_goal);
+                  ("long_goal", `String meta.long_goal);
+                  ("status", `String agent_status);
+                  ("generation", `Int meta.generation);
+                  ("turn_count", `Int meta.total_turns);
+                  ("context_ratio", `Null);
+                  ("context_tokens", `Int meta.last_total_tokens);
+                  ("last_model_used", `String meta.last_model_used);
+                  ("active_model", `String (Tool_keeper.active_model_of_meta meta));
+                  ("next_model_hint", string_option_to_json (Tool_keeper.next_model_hint_of_meta meta));
+                  ("autonomy_level", `String meta.autonomy_level);
+                  ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+                  ("last_autonomous_action_at",
+                    if String.trim meta.last_autonomous_action_at = "" then `Null else `String meta.last_autonomous_action_at);
                   ("autonomous_action_count", `Int meta.autonomous_action_count);
                   ("updated_at", `String meta.updated_at);
                   ("created_at", `String meta.created_at);
@@ -2185,6 +2222,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
        ( "keepers",
          if initialized && include_keepers then keepers_json config
+         else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+       ( "persistent_agents",
+         if initialized && include_keepers then persistent_agents_json config
          else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
        ("command_plane", command_plane_json);
        ("swarm_status", swarm_status_json);

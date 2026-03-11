@@ -1411,7 +1411,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
               [
                 ("name", `String keeper_name);
                 ("goal", `String "Probe keeper runtime");
-                ("models", `List [ `String "ollama:glm-4.7-flash" ]);
+                ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
                 ("presence_keepalive", `Bool false);
                 ("proactive_enabled", `Bool false);
               ])
@@ -1422,8 +1422,18 @@ let test_keeper_status_exposes_summary_and_recoverable () =
           ~args:(`Assoc [ ("name", `String keeper_name) ])
       in
       Alcotest.(check bool) "keeper down ok" true ok;
+      (match
+         Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_status"
+           ~args:(`Assoc [ ("name", `String keeper_name) ])
+       with
+      | Some (false, err) ->
+          Alcotest.(check string) "resident status missing after down"
+            (Printf.sprintf "resident keeper not found: %s" keeper_name)
+            err
+      | Some (true, _) -> Alcotest.fail "resident keeper should not remain registered after down"
+      | None -> Alcotest.fail "missing resident keeper status dispatch");
       let ok, body =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+        dispatch_keeper_exn keeper_ctx ~name:"masc_persistent_agent_status"
           ~args:
             (`Assoc
               [
@@ -1436,7 +1446,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
                 ("include_compaction_history", `Bool false);
               ])
       in
-      Alcotest.(check bool) "keeper status ok" true ok;
+      Alcotest.(check bool) "persistent status ok" true ok;
       let diagnostic = parse_json_exn body |> Yojson.Safe.Util.member "diagnostic" in
       Alcotest.(check string) "health_state" "offline"
         Yojson.Safe.Util.(diagnostic |> member "health_state" |> to_string);

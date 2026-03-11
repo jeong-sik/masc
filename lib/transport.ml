@@ -145,46 +145,397 @@ module Rest = struct
     | DELETE -> "DELETE"
     | PATCH -> "PATCH"
 
-  (** Map MASC tools to REST endpoints *)
+  let method_json_key method_ =
+    String.lowercase_ascii (method_to_string method_)
+
+  let list_json values =
+    `List (List.map (fun value -> `String value) values)
+
+  let actual_rest_bindings_for_operation = function
+    | "masc_status" -> [ (GET, "/api/v1/status") ]
+    | "masc_tasks" -> [ (GET, "/api/v1/tasks") ]
+    | "masc_who" -> [ (GET, "/api/v1/agents") ]
+    | "masc_messages" -> [ (GET, "/api/v1/messages") ]
+    | "masc_broadcast" -> [ (POST, "/api/v1/broadcast") ]
+    | "masc_agent_card" -> [ (GET, "/.well-known/agent.json") ]
+    | "masc_operator_snapshot" -> [ (GET, "/api/v1/operator") ]
+    | "masc_operator_digest" -> [ (GET, "/api/v1/operator/digest") ]
+    | "masc_operator_action" -> [ (POST, "/api/v1/operator/action") ]
+    | "masc_operator_confirm" -> [ (POST, "/api/v1/operator/confirm") ]
+    | "masc_operation_start" -> [ (POST, "/api/v1/command-plane/operations") ]
+    | "masc_operation_status" -> [ (GET, "/api/v1/command-plane/operations") ]
+    | "masc_operation_pause" -> [ (POST, "/api/v1/command-plane/operations/pause") ]
+    | "masc_operation_resume" -> [ (POST, "/api/v1/command-plane/operations/resume") ]
+    | "masc_operation_stop" -> [ (POST, "/api/v1/command-plane/operations/stop") ]
+    | "masc_operation_finalize" -> [ (POST, "/api/v1/command-plane/operations/finalize") ]
+    | "masc_operation_checkpoint" -> [ (POST, "/api/v1/command-plane/operations/checkpoint") ]
+    | "masc_dispatch_plan" -> [ (POST, "/api/v1/command-plane/dispatch/plan") ]
+    | "masc_dispatch_assign" -> [ (POST, "/api/v1/command-plane/dispatch/assign") ]
+    | "masc_dispatch_rebalance" -> [ (POST, "/api/v1/command-plane/dispatch/rebalance") ]
+    | "masc_dispatch_escalate" -> [ (POST, "/api/v1/command-plane/dispatch/escalate") ]
+    | "masc_dispatch_recall" -> [ (POST, "/api/v1/command-plane/dispatch/recall") ]
+    | "masc_dispatch_tick" -> [ (POST, "/api/v1/command-plane/dispatch/tick") ]
+    | "masc_unit_define" -> [ (POST, "/api/v1/command-plane/units") ]
+    | "masc_unit_list" -> [ (GET, "/api/v1/command-plane/units") ]
+    | "masc_unit_reassign" -> [ (POST, "/api/v1/command-plane/units/reassign") ]
+    | "masc_unit_reparent" -> [ (POST, "/api/v1/command-plane/units/reparent") ]
+    | "masc_policy_status" -> [ (GET, "/api/v1/command-plane/policy") ]
+    | "masc_policy_approve" -> [ (POST, "/api/v1/command-plane/policy/approve") ]
+    | "masc_policy_deny" -> [ (POST, "/api/v1/command-plane/policy/deny") ]
+    | "masc_policy_update" -> [ (POST, "/api/v1/command-plane/policy/update") ]
+    | "masc_policy_freeze_unit" -> [ (POST, "/api/v1/command-plane/policy/freeze") ]
+    | "masc_policy_kill_switch" -> [ (POST, "/api/v1/command-plane/policy/kill-switch") ]
+    | "masc_observe_topology" -> [ (GET, "/api/v1/command-plane/topology") ]
+    | "masc_observe_operations" -> [ (GET, "/api/v1/command-plane/operations") ]
+    | "masc_observe_capacity" -> [ (GET, "/api/v1/command-plane/capacity") ]
+    | "masc_observe_alerts" -> [ (GET, "/api/v1/command-plane/alerts") ]
+    | "masc_observe_traces" -> [ (GET, "/api/v1/command-plane/traces") ]
+    | _ -> []
+
+  let find_schema name =
+    List.find_opt
+      (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+      Config.raw_all_tool_schemas
+
+  let help_entry name =
+    match Tool_help_registry.find_entry Config.raw_all_tool_schemas name with
+    | Some entry -> entry
+    | None -> (
+        match find_schema name with
+        | Some schema -> Tool_help_registry.entry_of_schema schema
+        | None ->
+            {
+              Tool_help_registry.name = name;
+              short_description = name;
+              when_to_use = "Use when you need this operation.";
+              key_constraints = [];
+              details_markdown = name;
+              doc_refs = [];
+              prompt_hints = [];
+            })
+
+  let tags_for_operation name =
+    if String.starts_with ~prefix:"masc_operator_" name then
+      [ "operator" ]
+    else if
+      String.starts_with ~prefix:"masc_operation_" name
+      || String.starts_with ~prefix:"masc_dispatch_" name
+      || String.starts_with ~prefix:"masc_unit_" name
+      || String.starts_with ~prefix:"masc_policy_" name
+      || String.starts_with ~prefix:"masc_observe_" name
+    then
+      [ "command-plane" ]
+    else if String.starts_with ~prefix:"masc_team_session_" name then
+      [ "team-session" ]
+    else if
+      String.equal name "masc_status"
+      || String.equal name "masc_tasks"
+      || String.equal name "masc_add_task"
+      || String.equal name "masc_batch_add_tasks"
+      || String.equal name "masc_transition"
+      || String.equal name "masc_claim_next"
+    then
+      [ "tasks" ]
+    else if
+      String.equal name "masc_plan_init"
+      || String.equal name "masc_plan_get"
+      || String.equal name "masc_plan_update"
+      || String.equal name "masc_note_add"
+      || String.equal name "masc_deliver"
+    then
+      [ "planning" ]
+    else if
+      String.equal name "masc_broadcast"
+      || String.equal name "masc_messages"
+      || String.equal name "masc_a2a_delegate"
+      || String.equal name "masc_a2a_subscribe"
+      || String.equal name "masc_poll_events"
+    then
+      [ "messaging" ]
+    else if
+      String.equal name "decision_create"
+      || String.equal name "decision_finalize"
+      || String.equal name "decision_status"
+      || String.equal name "masc_consensus_start"
+      || String.equal name "masc_consensus_vote"
+      || String.equal name "masc_consensus_result"
+      || String.equal name "masc_consensus_close"
+    then
+      [ "decision" ]
+    else
+      [ "masc" ]
+
+  let parameters_from_schema (schema : Yojson.Safe.t) =
+    let required = Agent_swarm_contract.required_names schema in
+    Agent_swarm_contract.property_map schema
+    |> List.map (fun (name, property_schema) ->
+           let description =
+             Agent_swarm_contract.string_member "description" property_schema
+             |> Option.value
+                  ~default:(Printf.sprintf "%s parameter" name)
+           in
+           `Assoc
+             [
+               ("name", `String name);
+               ("in", `String "query");
+               ("required", `Bool (List.mem name required));
+               ("description", `String description);
+               ("schema", property_schema);
+             ])
+
+  let operation_catalog_entry name (schema : Types.tool_schema) =
+    let entry = help_entry name in
+    let aliases =
+      Agent_swarm_contract.sdk_aliases_for_operation name
+      |> List.map Agent_swarm_contract.sdk_alias_json
+    in
+    let rest_bindings =
+      actual_rest_bindings_for_operation name
+      |> List.map (fun (method_, path) ->
+             `Assoc
+               [
+                 ("method", `String (method_to_string method_));
+                 ("path", `String path);
+               ])
+    in
+    `Assoc
+      [
+        ("name", `String name);
+        ("operationId", `String name);
+        ("summary", `String entry.short_description);
+        ("description", `String entry.details_markdown);
+        ("inputSchema", schema.input_schema);
+        ("tags", list_json (tags_for_operation name));
+        ("x-mcp-tool", `Assoc (Tool_catalog.metadata_to_fields name));
+        ("x-agent-sdk", `Assoc [ ("aliases", `List aliases) ]);
+        ("x-rest-bindings", `List rest_bindings);
+      ]
+
+  let mcp_request_schema () =
+    `Assoc
+      [
+        ("type", `String "object");
+        ( "properties",
+          `Assoc
+            [
+              ( "jsonrpc",
+                `Assoc
+                  [
+                    ("type", `String "string");
+                    ("const", `String "2.0");
+                  ] );
+              ( "method",
+                `Assoc
+                  [
+                    ("type", `String "string");
+                    ("const", `String "tools/call");
+                  ] );
+              ( "params",
+                `Assoc
+                  [
+                    ("type", `String "object");
+                    ( "properties",
+                      `Assoc
+                        [
+                          ("name", `Assoc [ ("type", `String "string") ]);
+                          ("arguments", `Assoc [ ("type", `String "object") ]);
+                        ] );
+                    ("required", `List [ `String "name"; `String "arguments" ]);
+                  ] );
+              ( "id",
+                `Assoc
+                  [
+                    ( "oneOf",
+                      `List
+                        [
+                          `Assoc [ ("type", `String "integer") ];
+                          `Assoc [ ("type", `String "string") ];
+                          `Assoc [ ("type", `String "null") ];
+                        ] );
+                  ] );
+            ] );
+        ( "required",
+          `List
+            [ `String "jsonrpc"; `String "method"; `String "params"; `String "id" ] );
+      ]
+
+  let success_response_schema =
+    `Assoc
+      [
+        ("type", `String "object");
+        ("description", `String "JSON-RPC success or error envelope.");
+      ]
+
+  let rest_operation_json name method_ (schema : Types.tool_schema) =
+    let entry = help_entry name in
+    let base_fields =
+      [
+        ("summary", `String entry.short_description);
+        ("description", `String entry.when_to_use);
+        ("tags", list_json (tags_for_operation name));
+        ("x-canonical-operation", `String name);
+      ]
+    in
+    let request_fields =
+      match method_ with
+      | GET | DELETE ->
+          let params = parameters_from_schema schema.input_schema in
+          if params = [] then
+            base_fields
+          else
+            ("parameters", `List params) :: base_fields
+      | POST | PUT | PATCH ->
+          ( "requestBody",
+            `Assoc
+              [
+                ("required", `Bool true);
+                ( "content",
+                  `Assoc
+                    [
+                      ( "application/json",
+                        `Assoc [ ("schema", schema.input_schema) ] );
+                    ] );
+              ] )
+          :: base_fields
+    in
+    `Assoc
+      (List.rev
+         ( ( "responses",
+             `Assoc
+               [
+                 ( "200",
+                   `Assoc
+                     [
+                       ("description", `String "Success");
+                       ( "content",
+                         `Assoc
+                           [
+                             ( "application/json",
+                               `Assoc
+                                 [ ("schema", success_response_schema) ] );
+                           ] );
+                     ] );
+               ] )
+         :: request_fields ))
+
+  let generate_openapi_document ?(host = "127.0.0.1") ?(port = 8935) () :
+      Yojson.Safe.t =
+    let operation_entries =
+      Agent_swarm_contract.core_remote_operation_names
+      |> List.filter_map (fun name ->
+             match find_schema name with
+             | Some schema -> Some (name, schema)
+             | None -> None)
+    in
+    let operation_catalog =
+      List.map
+        (fun (name, schema) -> operation_catalog_entry name schema)
+        operation_entries
+    in
+    let sdk_tools =
+      List.map Agent_swarm_contract.sdk_alias_json
+        Agent_swarm_contract.sdk_bindings
+    in
+    let components_schemas =
+      operation_entries
+      |> List.map (fun (name, (schema : Types.tool_schema)) ->
+             (name ^ "Input", schema.input_schema))
+    in
+    let path_table : (string, (string * Yojson.Safe.t) list) Hashtbl.t =
+      Hashtbl.create 32
+    in
+    let add_path_method path method_key operation_json =
+      let existing =
+        Hashtbl.find_opt path_table path |> Option.value ~default:[]
+      in
+      Hashtbl.replace path_table path ((method_key, operation_json) :: existing)
+    in
+    List.iter
+      (fun (name, schema) ->
+        actual_rest_bindings_for_operation name
+        |> List.iter (fun (method_, path) ->
+               add_path_method path (method_json_key method_)
+                 (rest_operation_json name method_ schema)))
+      operation_entries;
+    add_path_method "/mcp" "post"
+      (`Assoc
+        [
+          ("operationId", `String "mcp_tools_call");
+          ("summary", `String "Call MASC MCP tools over JSON-RPC 2.0.");
+          ( "description",
+            `String
+              "Primary control transport for internal agents. The canonical operation catalog is exposed through x-mcp-operations." );
+          ( "requestBody",
+            `Assoc
+              [
+                ("required", `Bool true);
+                ( "content",
+                  `Assoc
+                    [
+                      ( "application/json",
+                        `Assoc [ ("schema", mcp_request_schema ()) ] );
+                    ] );
+              ] );
+          ( "responses",
+            `Assoc
+              [
+                ( "200",
+                  `Assoc
+                    [
+                      ("description", `String "JSON-RPC response envelope");
+                      ( "content",
+                        `Assoc
+                          [
+                            ( "application/json",
+                              `Assoc
+                                [ ("schema", success_response_schema) ] );
+                          ] );
+                    ] );
+              ] );
+          ("x-mcp-operations", `List operation_catalog);
+          ("x-agent-sdk-tools", `List sdk_tools);
+        ]);
+    let path_entries =
+      Hashtbl.to_seq path_table
+      |> List.of_seq
+      |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+      |> List.map (fun (path, methods) -> (path, `Assoc (List.rev methods)))
+    in
+    let server_url =
+      if String.trim host = "" || port <= 0 then "/"
+      else Printf.sprintf "http://%s:%d" host port
+    in
+    `Assoc
+      [
+        ("openapi", `String "3.1.0");
+        ( "info",
+          `Assoc
+            [
+              ("title", `String "MASC Agent Control Contract");
+              ("version", `String Version.version);
+              ( "description",
+                `String
+                  "Internal OAS export for MASC MCP agent control. Use x-mcp-operations for canonical MCP operation metadata and x-agent-sdk-tools for the current SDK-facing aliases." );
+            ] );
+        ( "servers",
+          `List
+            [
+              `Assoc
+                [
+                  ("url", `String server_url);
+                ];
+            ] );
+        ("paths", `Assoc path_entries);
+        ("components", `Assoc [ ("schemas", `Assoc components_schemas) ]);
+      ]
+
+  (** Compatibility helper. Returns a concrete REST route when one exists;
+      otherwise fall back to the truthful MCP transport entrypoint. *)
   let tool_to_endpoint = function
-    (* Task operations *)
-    | "masc_status" -> (GET, "/api/v1/status")
-    | "masc_tasks" -> (GET, "/api/v1/tasks")
-    | "masc_add_task" -> (POST, "/api/v1/tasks")
-    | "masc_claim" -> (POST, "/api/v1/tasks/{task_id}/claim")
-    | "masc_transition" -> (POST, "/api/v1/tasks/{task_id}/transition")
-    | "masc_done" -> (POST, "/api/v1/tasks/{task_id}/done")
-    | "masc_release" -> (POST, "/api/v1/tasks/{task_id}/release")
-    | "masc_cancel_task" -> (POST, "/api/v1/tasks/{task_id}/cancel")
-    | "masc_task_history" -> (GET, "/api/v1/tasks/{task_id}/history")
-    (* Agent operations *)
-    | "masc_join" -> (POST, "/api/v1/agents")
-    | "masc_leave" -> (DELETE, "/api/v1/agents/{agent_name}")
-    | "masc_who" -> (GET, "/api/v1/agents")
-    | "masc_agents" -> (GET, "/api/v1/agents/detailed")
-    | "masc_agent_update" -> (PATCH, "/api/v1/agents/{agent_name}")
-    (* Messaging *)
-    | "masc_broadcast" -> (POST, "/api/v1/messages")
-    | "masc_messages" -> (GET, "/api/v1/messages")
-    (* Voting *)
-    | "masc_vote_create" -> (POST, "/api/v1/votes")
-    | "masc_vote_cast" -> (POST, "/api/v1/votes/{vote_id}/cast")
-    | "masc_vote_status" -> (GET, "/api/v1/votes/{vote_id}")
-    | "masc_votes" -> (GET, "/api/v1/votes")
-    (* Planning *)
-    | "masc_plan_init" -> (POST, "/api/v1/planning/{task_id}")
-    | "masc_plan_update" -> (PUT, "/api/v1/planning/{task_id}/plan")
-    | "masc_note_add" -> (POST, "/api/v1/planning/{task_id}/notes")
-    | "masc_deliver" -> (PUT, "/api/v1/planning/{task_id}/deliverable")
-    | "masc_plan_get" -> (GET, "/api/v1/planning/{task_id}")
-    (* Agent Card *)
-    | "masc_agent_card" -> (GET, "/.well-known/agent.json")
-    (* Worktree *)
-    | "masc_worktree_create" -> (POST, "/api/v1/worktrees")
-    | "masc_worktree_remove" -> (DELETE, "/api/v1/worktrees/{task_id}")
-    | "masc_worktree_list" -> (GET, "/api/v1/worktrees")
-    (* Default *)
-    | tool -> (POST, Printf.sprintf "/api/v1/tools/%s" tool)
+    | operation_id -> (
+        match actual_rest_bindings_for_operation operation_id with
+        | (method_, path) :: _ -> (method_, path)
+        | [] -> (POST, "/mcp"))
 
   (** Parse REST request to internal request *)
   let parse_request ~http_method ~path ~query_params ~body : request =
@@ -194,6 +545,7 @@ module Rest = struct
       | "GET", "/" | "GET", "/api/v1/status" -> "masc_status"
       | "GET", "/api/v1/tasks" -> "masc_tasks"
       | "GET", "/api/v1/agents" -> "masc_who"
+      | "POST", "/api/v1/broadcast" | "POST", "/broadcast" -> "masc_broadcast"
       | "GET", "/.well-known/agent.json"
       | "GET", "/.well-known/agent-card.json" -> "masc_agent_card"
       | _, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/tools/" ->
@@ -209,27 +561,12 @@ module Rest = struct
 
   (** Generate OpenAPI-style endpoint documentation *)
   let generate_openapi_paths () : Yojson.Safe.t =
-    let tools = [
-      "masc_status"; "masc_tasks"; "masc_add_task"; "masc_claim"; "masc_done";
-      "masc_transition"; "masc_release"; "masc_task_history"; "masc_cancel_task";
-      "masc_join"; "masc_leave"; "masc_who"; "masc_agents"; "masc_agent_update";
-      "masc_broadcast"; "masc_messages";
-      "masc_vote_create"; "masc_vote_cast"; "masc_vote_status"; "masc_votes";
-      "masc_plan_init"; "masc_plan_update"; "masc_note_add"; "masc_deliver"; "masc_plan_get";
-      "masc_agent_card"; "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    ] in
-    let paths = List.map (fun tool ->
-      let (http_method, path) = tool_to_endpoint tool in
-      let method_str = String.lowercase_ascii (method_to_string http_method) in
-      (path, `Assoc [
-        (method_str, `Assoc [
-          ("operationId", `String tool);
-          ("summary", `String (Printf.sprintf "MASC %s operation" tool));
-          ("tags", `List [`String "MASC"]);
-        ])
-      ])
-    ) tools in
-    `Assoc paths
+    match generate_openapi_document () with
+    | `Assoc fields -> (
+        match List.assoc_opt "paths" fields with
+        | Some paths -> paths
+        | None -> `Assoc [])
+    | _ -> `Assoc []
 end
 
 (** Get available bindings for current MASC instance *)

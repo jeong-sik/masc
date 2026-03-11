@@ -68,9 +68,9 @@ let default_model_strings ~cascade_name =
       Printf.sprintf "glm:%s" Env_config.Llm.default_model;
     ]
   in
-  let ollama_glm =
+  let local_llama_glm =
     [
-      Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
+      Printf.sprintf "llama:%s" Env_config.Llama.default_model;
       Printf.sprintf "glm:%s" Env_config.Llm.default_model;
     ]
   in
@@ -85,21 +85,21 @@ let default_model_strings ~cascade_name =
       llama_glm
   (* gardener — llama first, glm fallback *)
   | "gardener_spawn" -> llama_glm
-  (* classification — ollama (fast local), glm fallback *)
-  | "classification" | "context_router" | "capability_match" -> ollama_glm
-  (* theory of mind — ollama, glm fallback *)
-  | "tom" -> ollama_glm
-  (* verifier — ollama, glm fallback *)
-  | "verifier" -> ollama_glm
-  (* trpg — ollama, glm fallback *)
-  | "trpg_intent" -> ollama_glm
-  (* briefing — llama first, flash-tier cloud chain, ollama final fallback *)
+  (* classification — local llama, glm fallback *)
+  | "classification" | "context_router" | "capability_match" -> local_llama_glm
+  (* theory of mind — local llama, glm fallback *)
+  | "tom" -> local_llama_glm
+  (* verifier — local llama, glm fallback *)
+  | "verifier" -> local_llama_glm
+  (* trpg — local llama, glm fallback *)
+  | "trpg_intent" -> local_llama_glm
+  (* briefing — llama first, flash-tier cloud chain, local llama final fallback *)
   | "briefing" ->
       [
         "llama:qwen3.5-35b-a3b";
         "glm:glm-4.7-flash";
         "gemini:gemini-2.5-flash";
-        "ollama:glm-4.7-flash";
+        Printf.sprintf "llama:%s" Env_config.Llama.default_model;
       ]
   | "governance_judge" | "operator_judge" -> llama_glm
   (* walph — default execution models *)

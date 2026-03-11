@@ -17,116 +17,34 @@
 *)
 
 (** ============================================
-    Configuration (Externalized)
+    Configuration (JSON SSOT)
     ============================================ *)
 
-(** Voice Bridge configuration type *)
-type voice_bridge_config = {
-  host: string;
-  port: int;
-  base_url: string option;
-  mcp_url: string option;
-  health_url: string option;
-  timeout_seconds: float;
-  max_retries: int;
-  initial_backoff_seconds: float;
-  backoff_multiplier: float;
-  agent_voices: (string * string) list;
-}
+let default_timeout_seconds = 5.0
+let default_max_retries = 3
+let default_initial_backoff_seconds = 1.0
+let default_backoff_multiplier = 2.0
+let ( let* ) = Result.bind
 
-(** Default configuration values *)
-let default_config = {
-  host = "127.0.0.1";
-  port = 8936;
-  base_url = None;
-  mcp_url = None;
-  health_url = None;
-  timeout_seconds = 5.0;
-  max_retries = 3;
-  initial_backoff_seconds = 1.0;
-  backoff_multiplier = 2.0;
-  agent_voices = [
-    ("claude", "Sarah");      (* BALTHASAR - 차분한 여성 *)
-    ("gemini", "Roger");      (* CASPER - 깊은 남성 *)
-    ("codex", "George");      (* MELCHIOR - 명확한 남성 *)
-    ("ollama", "Laura");      (* ARTABAN - 따뜻한 여성 *)
-  ];
-}
+let default_agent_voices =
+  [
+    ("claude", "Sarah");
+    ("gemini", "Roger");
+    ("codex", "George");
+    ("llama", "Laura");
+  ]
 
-(** Load configuration from $ME_ROOT/.masc/voice_config.json *)
-let load_config () =
-  let config_path =
-    match Sys.getenv_opt "ME_ROOT" with
-    | Some root -> Filename.concat root ".masc/voice_config.json"
-    | None -> ".masc/voice_config.json"
-  in
-  if Sys.file_exists config_path then
-    try
-      let json = Yojson.Safe.from_file config_path in
-      let open Yojson.Safe.Util in
-      let get_float key default =
-        try json |> member "server" |> member key |> to_float
-        with Type_error _ -> try json |> member "retry" |> member key |> to_float
-        with Type_error _ -> default
-      in
-      let get_int key default =
-        try json |> member "server" |> member key |> to_int
-        with Type_error _ -> try json |> member "retry" |> member key |> to_int
-        with Type_error _ -> default
-      in
-      let to_nonempty_string = function
-        | `String s ->
-            let trimmed = String.trim s in
-            if trimmed = "" then None else Some trimmed
-        | _ -> None
-      in
-      let get_server_opt key =
-        json |> member "server" |> member key |> to_nonempty_string
-      in
-      let get_top_opt key =
-        json |> member key |> to_nonempty_string
-      in
-      let pick_opt key =
-        match get_server_opt key with
-        | Some _ as v -> v
-        | None -> get_top_opt key
-      in
-      let voices =
-        try json |> member "agent_voices" |> to_assoc
-            |> List.map (fun (agent, voice) -> (agent, to_string voice))
-        with Type_error _ -> default_config.agent_voices
-      in
-      {
-        host = (try json |> member "server" |> member "host" |> to_string
-                with Type_error _ -> default_config.host);
-        port = get_int "port" default_config.port;
-        base_url = pick_opt "base_url";
-        mcp_url = pick_opt "mcp_url";
-        health_url = pick_opt "health_url";
-        timeout_seconds = get_float "timeout_seconds" default_config.timeout_seconds;
-        max_retries = get_int "max_retries" default_config.max_retries;
-        initial_backoff_seconds = get_float "initial_backoff_seconds" default_config.initial_backoff_seconds;
-        backoff_multiplier = get_float "backoff_multiplier" default_config.backoff_multiplier;
-        agent_voices = voices;
-      }
-    with e ->
-      Printf.eprintf "[VoiceBridge] Config parse failed: %s, using defaults\n%!"
-        (Printexc.to_string e);
-      default_config
-  else
-    default_config
+let load_voice_config () = Voice_config.load ()
 
-(** Cached configuration (lazy-loaded once) *)
-let config = lazy (load_config ())
+let request_timeout_seconds () = default_timeout_seconds
+let max_retries () = default_max_retries
+let initial_backoff_seconds () = default_initial_backoff_seconds
+let backoff_multiplier () = default_backoff_multiplier
 
-(** Configuration accessors *)
-let voice_mcp_host () = (Lazy.force config).host
-let voice_mcp_port () = (Lazy.force config).port
-let request_timeout_seconds () = (Lazy.force config).timeout_seconds
-let max_retries () = (Lazy.force config).max_retries
-let initial_backoff_seconds () = (Lazy.force config).initial_backoff_seconds
-let backoff_multiplier () = (Lazy.force config).backoff_multiplier
-let agent_voices () = (Lazy.force config).agent_voices
+let agent_voices () =
+  match load_voice_config () with
+  | Ok config -> config.tts.agent_voices
+  | Error _ -> default_agent_voices
 
 let ends_with ~suffix s =
   let slen = String.length s in
@@ -158,25 +76,44 @@ let compose_endpoint_from_base ~base_url ~path =
   in
   Uri.with_path base_uri final_path
 
-let voice_mcp_uri () =
-  let cfg = Lazy.force config in
-  match cfg.mcp_url with
-  | Some url -> Uri.of_string url
-  | None -> (
-      match cfg.base_url with
-      | Some base_url -> compose_endpoint_from_base ~base_url ~path:"/mcp"
-      | None ->
-          Uri.make ~scheme:"http" ~host:cfg.host ~port:cfg.port ~path:"/mcp" ())
+let active_session_endpoint () =
+  match load_voice_config () with
+  | Ok config -> Voice_config.select_endpoint config.session.endpoints
+  | Error _ -> None
 
-let voice_health_uri () =
-  let cfg = Lazy.force config in
-  match cfg.health_url with
+let session_mcp_uri endpoint =
+  match endpoint.Voice_config.mcp_url with
   | Some url -> Uri.of_string url
   | None -> (
-      match cfg.base_url with
+      match endpoint.base_url with
+      | Some base_url -> compose_endpoint_from_base ~base_url ~path:"/mcp"
+      | None -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ())
+
+let session_health_uri endpoint =
+  match endpoint.Voice_config.health_url with
+  | Some url -> Uri.of_string url
+  | None -> (
+      match endpoint.base_url with
       | Some base_url -> compose_endpoint_from_base ~base_url ~path:"/health"
       | None ->
-          Uri.make ~scheme:"http" ~host:cfg.host ~port:cfg.port ~path:"/health" ())
+          Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ())
+
+let voice_mcp_uri () =
+  match active_session_endpoint () with
+  | Some endpoint -> session_mcp_uri endpoint
+  | None -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ()
+
+let voice_health_uri () =
+  match active_session_endpoint () with
+  | Some endpoint -> session_health_uri endpoint
+  | None ->
+      Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ()
+
+let voice_mcp_host () =
+  match Uri.host (voice_mcp_uri ()) with Some host -> host | None -> "127.0.0.1"
+
+let voice_mcp_port () =
+  match Uri.port (voice_mcp_uri ()) with Some port -> port | None -> 8936
 
 let client_for_uri ~net uri =
   if Uri.scheme uri = Some "https" then
@@ -199,20 +136,17 @@ let log_error msg =
 let log_debug msg =
   Log.debug "%s %s" log_prefix msg
 
-(** Get voice for agent, defaults to "Sarah" *)
+(** Get voice for agent, defaults to "Sarah" if config is unavailable *)
 let get_voice_for_agent agent_id =
-  let voices = (Lazy.force config).agent_voices in
+  let voices = agent_voices () in
   match List.assoc_opt agent_id voices with
   | Some voice -> voice
   | None -> "Sarah"
 
 (** ============================================
-    ElevenLabs Direct TTS
+    TTS Adapters
     ============================================ *)
 
-(** ElevenLabs voice name → voice_id mapping.
-    Used when calling api.elevenlabs.io directly (requires voice_id).
-    Railway proxy accepts voice names, so this is only needed for direct API. *)
 let elevenlabs_voice_ids = [
   ("Sarah",  "EXAVITQu4vr4xnSDxMaL");
   ("Roger",  "CwhRBWXzGAHq8TQ4Fs17");
@@ -220,12 +154,12 @@ let elevenlabs_voice_ids = [
   ("Laura",  "FGY2WhTYpPnrIDTdsKH5");
 ]
 
-(** Resolve voice name to ElevenLabs voice_id.
-    Falls back to Rachel (default) if name is unknown. *)
 let voice_name_to_id name =
   match List.assoc_opt name elevenlabs_voice_ids with
   | Some id -> id
-  | None -> "21m00Tcm4TlvDq8ikWAM" (* Rachel — default *)
+  | None ->
+      let trimmed = String.trim name in
+      if trimmed = "" then "21m00Tcm4TlvDq8ikWAM" else trimmed
 
 (** Ensure .masc/audio/ directory exists *)
 let ensure_audio_dir () =
@@ -235,141 +169,306 @@ let ensure_audio_dir () =
   else if not (Sys.is_directory dir) then
     log_error ".masc/audio exists but is not a directory"
 
-(** Direct ElevenLabs TTS call — no MCP intermediary.
-    Uses ELEVENLABS_API_KEY for api.elevenlabs.io,
-    or falls back to Railway proxy if ELEVENLABS_PROXY_URL is set.
-    Saves audio to .masc/audio/{timestamp}_{agent_id}.mp3 *)
-let elevenlabs_direct_tts ~agent_id ~message ~voice =
-  let voice_id = voice_name_to_id voice in
-  match Sys.getenv_opt "ELEVENLABS_API_KEY" with
-  | Some api_key when String.length api_key > 0 ->
-    let url = Printf.sprintf
-      "https://api.elevenlabs.io/v1/text-to-speech/%s" voice_id in
-    let req_body = Yojson.Safe.to_string (`Assoc [
-      ("text", `String message);
-      ("model_id", `String "eleven_multilingual_v2");
-      ("voice_settings", `Assoc [
-        ("stability", `Float 0.5);
-        ("similarity_boost", `Float 0.75);
-        ("style", `Float 0.0);
-      ]);
-    ]) in
-    let timestamp = int_of_float (Time_compat.now ()) in
-    let safe_agent = String.map (fun c ->
-      if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-         || (c >= '0' && c <= '9') || c = '-' || c = '_'
-      then c else '_') agent_id in
-    let audio_file = Printf.sprintf ".masc/audio/%d_%s.mp3" timestamp safe_agent in
-    ensure_audio_dir ();
-    let argv = [
-      "curl"; "-s"; "--max-time"; "30";
-      "-X"; "POST"; url;
-      "-H"; Printf.sprintf "xi-api-key: %s" api_key;
-      "-H"; "Content-Type: application/json";
-      "-H"; "Accept: audio/mpeg";
-      "-d"; "@-";
-      "-o"; audio_file;
-      "-w"; "%{http_code}";
-    ] in
-    let (status, http_code_str) = Process_eio.run_argv_with_stdin_and_status
-      ~timeout_sec:35.0
-      ~stdin_content:req_body
-      argv in
-    (match status with
-     | Unix.WEXITED 0 ->
-       let http_code = try int_of_string (String.trim http_code_str) with Failure _ -> 0 in
-       if http_code >= 200 && http_code < 300 then begin
-         let file_size = try (Unix.stat audio_file).st_size with Unix.Unix_error _ -> 0 in
-         if file_size > 100 then begin
-           log_info (Printf.sprintf "ElevenLabs TTS OK: %s (%d bytes)" audio_file file_size);
-           Ok (`Assoc [
-             ("status", `String "spoken");
-             ("agent_id", `String agent_id);
-             ("voice", `String voice);
-             ("audio_file", `String audio_file);
-             ("audio_size", `Int file_size);
-             ("message_preview", `String (String.sub message 0 (min 50 (String.length message))));
-           ])
-         end else begin
-           (* Small file likely means JSON error body *)
-           (try Sys.remove audio_file with Sys_error _ -> ());
-           Error (Printf.sprintf "ElevenLabs returned small response (%d bytes), likely error" file_size)
-         end
-       end else begin
-         (try Sys.remove audio_file with Sys_error _ -> ());
-         Error (Printf.sprintf "ElevenLabs HTTP %d" http_code)
-       end
-     | Unix.WEXITED 28 ->
-       (try Sys.remove audio_file with Sys_error _ -> ());
-       Error "ElevenLabs request timed out"
-     | Unix.WEXITED code ->
-       (try Sys.remove audio_file with Sys_error _ -> ());
-       Error (Printf.sprintf "curl exit %d" code)
-     | _ ->
-       (try Sys.remove audio_file with Sys_error _ -> ());
-       Error "ElevenLabs curl process failed")
-  | _ ->
-    (* No ELEVENLABS_API_KEY, try Railway proxy *)
-    match Sys.getenv_opt "ELEVENLABS_PROXY_URL" with
-    | Some proxy_url when String.length proxy_url > 0 ->
-      let url = Printf.sprintf "%s/v1/audio/speech" proxy_url in
-      let req_body = Yojson.Safe.to_string (`Assoc [
+let normalize_base_url value =
+  let trimmed = String.trim value in
+  if ends_with ~suffix:"/" trimmed && String.length trimmed > 1 then
+    String.sub trimmed 0 (String.length trimmed - 1)
+  else
+    trimmed
+
+let endpoint_url endpoint =
+  match endpoint.Voice_config.kind with
+  | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
+      endpoint.base_url
+  | Voice_config.Voice_mcp -> (
+      match endpoint.mcp_url with
+      | Some _ as url -> url
+      | None -> endpoint.base_url)
+
+let endpoint_url_json endpoint =
+  match endpoint_url endpoint with
+  | Some value -> `String value
+  | None -> `Null
+
+let append_provider_metadata json endpoint =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        @ [
+            ( "provider_kind",
+              `String
+                (Voice_config.string_of_endpoint_kind endpoint.Voice_config.kind) );
+            ("endpoint_id", `String endpoint.id);
+            ("endpoint_url", endpoint_url_json endpoint);
+          ])
+  | other -> other
+
+let safe_agent_id value =
+  String.map
+    (fun c ->
+      if
+        (c >= 'a' && c <= 'z')
+        || (c >= 'A' && c <= 'Z')
+        || (c >= '0' && c <= '9')
+        || c = '-'
+        || c = '_'
+      then c
+      else '_')
+    value
+
+let make_audio_file ~agent_id =
+  ensure_audio_dir ();
+  let timestamp = int_of_float (Time_compat.now ()) in
+  Printf.sprintf ".masc/audio/%d_%s.mp3" timestamp (safe_agent_id agent_id)
+
+let write_text path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      let len = in_channel_length ic in
+      really_input_string ic len)
+
+let resolve_api_key endpoint =
+  match endpoint.Voice_config.api_key_env with
+  | Some env_name -> (
+      match Sys.getenv_opt env_name with
+      | Some value when String.trim value <> "" -> Ok (String.trim value)
+      | _ ->
+          Error
+            (Printf.sprintf
+               "voice config endpoint %s expects %s to be set"
+               endpoint.id env_name) )
+  | None -> Ok ""
+
+let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
+  let body_file = Filename.temp_file "masc_voice_request" ".json" in
+  Fun.protect
+    ~finally:(fun () -> (try Sys.remove body_file with Sys_error _ -> ()))
+    (fun () ->
+      write_text body_file (Yojson.Safe.to_string body_json);
+      let header_args =
+        List.concat_map
+          (fun (key, value) -> [ "-H"; Printf.sprintf "%s: %s" key value ])
+          headers
+      in
+      let argv =
+        [
+          "curl";
+          "-sS";
+          "--max-time";
+          "30";
+          "-X";
+          "POST";
+          url;
+        ]
+        @ header_args
+        @ [ "--data-binary"; "@" ^ body_file; "-o"; output_file; "-w"; "%{http_code}" ]
+      in
+      let status, http_code_str =
+        Process_eio.run_argv_with_stdin_and_status ~timeout_sec:35.0
+          ~stdin_content:"" argv
+      in
+      match status with
+      | Unix.WEXITED 0 ->
+          let http_code =
+            try int_of_string (String.trim http_code_str) with Failure _ -> 0
+          in
+          if http_code >= 200 && http_code < 300 then
+            let file_size =
+              try (Unix.stat output_file).st_size with Unix.Unix_error _ -> 0
+            in
+            if file_size > 100 then Ok file_size
+            else
+              let detail =
+                try read_file output_file with Sys_error _ -> "response too small"
+              in
+              Error
+                (Printf.sprintf "HTTP %d returned small audio payload (%d bytes): %s"
+                   http_code file_size detail)
+          else
+            let detail =
+              try read_file output_file with Sys_error _ -> "request failed"
+            in
+            Error (Printf.sprintf "HTTP %d: %s" http_code detail)
+      | Unix.WEXITED 28 -> Error "request timed out"
+      | Unix.WEXITED code -> Error (Printf.sprintf "curl exit %d" code)
+      | _ -> Error "curl process failed")
+
+let speak_via_openai_compat_to_file endpoint ~message ~voice ~model ~output_file =
+  let open Result in
+  let* api_key = resolve_api_key endpoint in
+  let base_url =
+    match endpoint.base_url with
+    | Some value -> Ok (normalize_base_url value)
+    | None ->
+        Error
+          (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
+  in
+  let* base_url = base_url in
+  let headers =
+    [ ("Content-Type", "application/json"); ("Accept", "audio/mpeg") ]
+    @
+    if api_key = "" then [] else [ ("Authorization", "Bearer " ^ api_key) ]
+  in
+  let body_json =
+    `Assoc
+      [
         ("input", `String message);
         ("voice", `String voice);
-        ("model", `String "eleven_multilingual_v2");
+        ("model", `String model);
         ("response_format", `String "mp3");
-      ]) in
-      let timestamp = int_of_float (Time_compat.now ()) in
-      let safe_agent = String.map (fun c ->
-        if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-           || (c >= '0' && c <= '9') || c = '-' || c = '_'
-        then c else '_') agent_id in
-      let audio_file = Printf.sprintf ".masc/audio/%d_%s.mp3" timestamp safe_agent in
-      ensure_audio_dir ();
-      let argv = [
-        "curl"; "-s"; "--max-time"; "30";
-        "-X"; "POST"; url;
-        "-H"; "Content-Type: application/json";
-        "-H"; "Accept: audio/mpeg";
-        "-d"; "@-";
-        "-o"; audio_file;
-        "-w"; "%{http_code}";
-      ] in
-      let (status, http_code_str) = Process_eio.run_argv_with_stdin_and_status
-        ~timeout_sec:35.0
-        ~stdin_content:req_body
-        argv in
-      (match status with
-       | Unix.WEXITED 0 ->
-         let http_code = try int_of_string (String.trim http_code_str) with Failure _ -> 0 in
-         if http_code >= 200 && http_code < 300 then begin
-           let file_size = try (Unix.stat audio_file).st_size with Unix.Unix_error _ -> 0 in
-           if file_size > 100 then begin
-             log_info (Printf.sprintf "Railway proxy TTS OK: %s (%d bytes)" audio_file file_size);
-             Ok (`Assoc [
-               ("status", `String "spoken");
-               ("agent_id", `String agent_id);
-               ("voice", `String voice);
-               ("audio_file", `String audio_file);
-               ("audio_size", `Int file_size);
-               ("message_preview", `String (String.sub message 0 (min 50 (String.length message))));
-             ])
-           end else begin
-             (try Sys.remove audio_file with Sys_error _ -> ());
-             Error (Printf.sprintf "Proxy returned small response (%d bytes)" file_size)
-           end
-         end else begin
-           (try Sys.remove audio_file with Sys_error _ -> ());
-           Error (Printf.sprintf "Proxy HTTP %d" http_code)
-         end
-       | Unix.WEXITED 28 ->
-         (try Sys.remove audio_file with Sys_error _ -> ());
-         Error "Proxy request timed out"
-       | _ ->
-         (try Sys.remove audio_file with Sys_error _ -> ());
-         Error "Proxy curl failed")
-    | _ ->
-      Error "No ELEVENLABS_API_KEY or ELEVENLABS_PROXY_URL configured"
+      ]
+  in
+  run_audio_http_request_to_file
+    ~url:(base_url ^ "/audio/speech")
+    ~headers ~body_json ~output_file
+
+let speak_via_elevenlabs_to_file endpoint ~message ~voice ~model ~output_file =
+  let open Result in
+  let* api_key = resolve_api_key endpoint in
+  let base_url =
+    match endpoint.base_url with
+    | Some value -> Ok (normalize_base_url value)
+    | None ->
+        Error
+          (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
+  in
+  let* base_url = base_url in
+  let voice_id = voice_name_to_id voice in
+  let headers =
+    [
+      ("xi-api-key", api_key);
+      ("Content-Type", "application/json");
+      ("Accept", "audio/mpeg");
+    ]
+  in
+  let body_json =
+    `Assoc
+      [
+        ("text", `String message);
+        ("model_id", `String model);
+        ( "voice_settings",
+          `Assoc
+            [
+              ("stability", `Float 0.5);
+              ("similarity_boost", `Float 0.75);
+              ("style", `Float 0.0);
+            ] );
+      ]
+  in
+  run_audio_http_request_to_file
+    ~url:(Printf.sprintf "%s/text-to-speech/%s" base_url voice_id)
+    ~headers ~body_json ~output_file
+
+let available_tts_endpoints ?provider () =
+  match load_voice_config () with
+  | Error _ -> []
+  | Ok config -> (
+      match Voice_config.select_endpoint ?endpoint_id:provider config.tts.endpoints with
+      | Some endpoint when Option.is_some provider -> [ endpoint ]
+      | _ -> Voice_config.enabled_endpoints config.tts.endpoints)
+
+let provider_error_json endpoint message =
+  `Assoc
+    [ ("status", `String "error");
+      ("message", `String message);
+      ( "provider_kind",
+        `String (Voice_config.string_of_endpoint_kind endpoint.Voice_config.kind) );
+      ("endpoint_id", `String endpoint.id);
+      ("endpoint_url", endpoint_url_json endpoint) ]
+
+let public_config_json () =
+  match load_voice_config () with
+  | Ok config -> Ok (Voice_config.public_json config)
+  | Error message ->
+      Error
+        (`Assoc
+          [ ("status", `String "error");
+            ("message", `String message);
+            ("config_path", `String (Voice_config.config_path ())) ])
+
+let tts_preview_bytes_from_request_json json =
+  let open Yojson.Safe.Util in
+  let text =
+    match json |> member "text" |> to_string_option with
+    | Some value when String.trim value <> "" -> String.trim value
+    | _ -> (
+        match json |> member "input" |> to_string_option with
+        | Some value when String.trim value <> "" -> String.trim value
+        | _ -> raise (Yojson.Json_error "missing or empty text/input field"))
+  in
+  let voice =
+    match json |> member "voice" |> to_string_option with
+    | Some value when String.trim value <> "" -> String.trim value
+    | _ -> (
+        match json |> member "voice_id" |> to_string_option with
+        | Some value when String.trim value <> "" -> String.trim value
+        | _ -> (
+            match load_voice_config () with
+            | Ok config -> config.tts.default_voice
+            | Error _ -> "Sarah"))
+  in
+  let model =
+    match json |> member "model" |> to_string_option with
+    | Some value when String.trim value <> "" -> String.trim value
+    | _ -> (
+        match json |> member "voice_model" |> to_string_option with
+        | Some value when String.trim value <> "" -> String.trim value
+        | _ -> (
+            match load_voice_config () with
+            | Ok config -> config.tts.default_model
+            | Error _ -> "eleven_multilingual_v2"))
+  in
+  let provider =
+    json |> member "provider" |> to_string_option
+    |> Option.map String.trim
+    |> (function Some value when value <> "" -> Some value | _ -> None)
+  in
+  let endpoints = available_tts_endpoints ?provider () in
+  let rec try_endpoints attempted = function
+    | [] ->
+        let detail =
+          if attempted = [] then "no configured TTS endpoint"
+          else String.concat "; " (List.rev attempted)
+        in
+        Error detail
+    | endpoint :: rest -> (
+        match endpoint.Voice_config.kind with
+        | Voice_config.Voice_mcp ->
+            let note =
+              Printf.sprintf "%s: preview unsupported for voice_mcp" endpoint.id
+            in
+            try_endpoints (note :: attempted) rest
+        | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
+            let output_file = Filename.temp_file "masc_voice_preview" ".mp3" in
+            let result =
+              match endpoint.Voice_config.kind with
+              | Voice_config.Openai_compat ->
+                  speak_via_openai_compat_to_file endpoint ~message:text ~voice ~model
+                    ~output_file
+              | Voice_config.Elevenlabs_direct ->
+                  speak_via_elevenlabs_to_file endpoint ~message:text ~voice ~model
+                    ~output_file
+              | Voice_config.Voice_mcp -> assert false
+            in
+            Fun.protect
+              ~finally:(fun () -> (try Sys.remove output_file with Sys_error _ -> ()))
+              (fun () ->
+                match result with
+                | Ok _ -> Ok (read_file output_file)
+                | Error error ->
+                    let note = Printf.sprintf "%s: %s" endpoint.id error in
+                    try_endpoints (note :: attempted) rest))
+  in
+  try_endpoints [] endpoints
 
 (** Clean up old audio files (>1 hour). Call from heartbeat. *)
 let cleanup_old_audio_files () =
@@ -550,6 +649,105 @@ let extract_mcp_result json =
   with e ->
     Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))
 
+let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
+  let uri = session_mcp_uri endpoint in
+  let request_body =
+    `Assoc
+      [
+        ("jsonrpc", `String "2.0");
+        ("method", `String "tools/call");
+        ("id", `Int 1);
+        ("params", `Assoc [ ("name", `String tool_name); ("arguments", arguments) ]);
+      ]
+  in
+  let body_str = Yojson.Safe.to_string request_body in
+  let headers =
+    Cohttp.Header.of_list
+      [ ("Content-Type", "application/json"); ("Accept", "application/json") ]
+  in
+  let client = client_for_uri ~net uri in
+  let operation () =
+    let timeout =
+      Option.value endpoint.timeout_seconds ~default:(request_timeout_seconds ())
+    in
+    with_timeout ~clock ~timeout (fun () ->
+        single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str)
+  in
+  retry_with_backoff ~clock ~attempt:1
+    ~max_attempts:(Option.value endpoint.max_retries ~default:(max_retries ()))
+    ~backoff_sec:(initial_backoff_seconds ()) operation
+
+let attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
+    ~priority endpoint =
+  match endpoint.Voice_config.kind with
+  | Voice_config.Openai_compat ->
+      let audio_file = make_audio_file ~agent_id in
+      (match
+         speak_via_openai_compat_to_file endpoint ~message ~voice ~model
+           ~output_file:audio_file
+       with
+      | Ok file_size ->
+          Ok
+            (append_provider_metadata
+               (`Assoc
+                 [
+                   ("status", `String "spoken");
+                   ("agent_id", `String agent_id);
+                   ("voice", `String voice);
+                   ("audio_file", `String audio_file);
+                   ("audio_size", `Int file_size);
+                   ( "message_preview",
+                     `String
+                       (String.sub message 0 (min 50 (String.length message))) );
+                 ])
+               endpoint)
+      | Error error ->
+          (try Sys.remove audio_file with Sys_error _ -> ());
+          Error error)
+  | Voice_config.Elevenlabs_direct ->
+      let audio_file = make_audio_file ~agent_id in
+      (match
+         speak_via_elevenlabs_to_file endpoint ~message ~voice ~model
+           ~output_file:audio_file
+       with
+      | Ok file_size ->
+          Ok
+            (append_provider_metadata
+               (`Assoc
+                 [
+                   ("status", `String "spoken");
+                   ("agent_id", `String agent_id);
+                   ("voice", `String voice);
+                   ("audio_file", `String audio_file);
+                   ("audio_size", `Int file_size);
+                   ( "message_preview",
+                     `String
+                       (String.sub message 0 (min 50 (String.length message))) );
+                 ])
+               endpoint)
+      | Error error ->
+          (try Sys.remove audio_file with Sys_error _ -> ());
+          Error error)
+  | Voice_config.Voice_mcp ->
+      let args =
+        `Assoc
+          [
+            ("agent_id", `String agent_id);
+            ("message", `String message);
+            ("voice", `String voice);
+            ("priority", `Int priority);
+          ]
+      in
+      (match
+         call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name:"agent_speak"
+           ~arguments:args
+       with
+      | Ok json -> (
+          match extract_mcp_result json with
+          | Ok data -> Ok (append_provider_metadata data endpoint)
+          | Error error -> Error error)
+      | Error error -> Error error)
+
 (** ============================================
     Fallback Strategies
     ============================================ *)
@@ -558,6 +756,7 @@ let extract_mcp_result json =
     Circuit Breaker pattern - shorter cache on failure for faster recovery *)
 let voice_server_available = ref None
 let voice_server_check_time = ref 0.0
+let voice_server_health_target = ref None
 
 (** Cache duration: 30s on success, 5s on failure (Circuit Breaker) *)
 let cache_duration () =
@@ -566,45 +765,98 @@ let cache_duration () =
   | Some false -> 5.0   (* Failure: retry sooner *)
   | None -> 0.0         (* No cache: check immediately *)
 
+let session_endpoint_result () =
+  match load_voice_config () with
+  | Error message -> Error message
+  | Ok config -> (
+      match Voice_config.select_endpoint config.session.endpoints with
+      | Some endpoint -> (
+          match endpoint.Voice_config.kind with
+          | Voice_config.Voice_mcp -> Ok endpoint
+          | _ ->
+              Error
+                (Printf.sprintf
+                   "session endpoint %s must use kind=voice_mcp" endpoint.id) )
+      | None -> Error "no configured session endpoint")
+
 let is_voice_server_available ~sw ~clock ~net =
-  let now = Time_compat.now () in
-  if now -. !voice_server_check_time < cache_duration () then
-    Option.value !voice_server_available ~default:false
-  else begin
-    voice_server_check_time := now;
-    let check () =
-      try
-        let uri = voice_health_uri () in
-        let client = client_for_uri ~net uri in
-        let resp, _ = Cohttp_eio.Client.get ~sw client uri in
-        let status = Cohttp.Response.status resp in
-        let available = Cohttp.Code.is_success (Cohttp.Code.code_of_status status) in
-        voice_server_available := Some available;
-        Ok available
-      with exn ->
-        Eio.traceln "[WARN] voice server check failed: %s" (Printexc.to_string exn);
-        voice_server_available := Some false;
-        Ok false
-    in
-    with_timeout ~clock ~timeout:2.0 check |> function
-      | Ok available -> available
-      | Error _ ->
-        voice_server_available := Some false;
-        false
-  end
+  match session_endpoint_result () with
+  | Error _ ->
+      voice_server_available := Some false;
+      false
+  | Ok endpoint ->
+      let health_target = Uri.to_string (session_health_uri endpoint) in
+      if !voice_server_health_target <> Some health_target then (
+        voice_server_health_target := Some health_target;
+        voice_server_available := None;
+        voice_server_check_time := 0.0);
+      let now = Time_compat.now () in
+      if now -. !voice_server_check_time < cache_duration () then
+        Option.value !voice_server_available ~default:false
+      else begin
+        voice_server_check_time := now;
+        let check () =
+          try
+            let uri = session_health_uri endpoint in
+            let client = client_for_uri ~net uri in
+            let resp, _ = Cohttp_eio.Client.get ~sw client uri in
+            let status = Cohttp.Response.status resp in
+            let available =
+              Cohttp.Code.is_success (Cohttp.Code.code_of_status status)
+            in
+            voice_server_available := Some available;
+            Ok available
+          with exn ->
+            Eio.traceln "[WARN] voice server check failed: %s"
+              (Printexc.to_string exn);
+            voice_server_available := Some false;
+            Ok false
+        in
+        with_timeout ~clock ~timeout:2.0 check |> function
+        | Ok available -> available
+        | Error _ ->
+            voice_server_available := Some false;
+            false
+      end
 
 (** Text-only fallback for when voice is unavailable *)
-let text_fallback ~agent_id ~message =
+let text_fallback ?reason ?(attempted_endpoints = []) ~agent_id ~message () =
   let voice = get_voice_for_agent agent_id in
   log_info (Printf.sprintf "[Text fallback] %s (%s): %s"
     agent_id voice
     (String.sub message 0 (min 50 (String.length message))));
-  Ok (`Assoc [
-    ("status", `String "text_fallback");
-    ("agent_id", `String agent_id);
-    ("voice", `String voice);
-    ("message_preview", `String (String.sub message 0 (min 50 (String.length message))));
-  ])
+  let fields =
+    [
+      ("status", `String "text_fallback");
+      ("agent_id", `String agent_id);
+      ("voice", `String voice);
+      ( "message_preview",
+        `String (String.sub message 0 (min 50 (String.length message))) );
+    ]
+    @
+    (match reason with Some value -> [ ("reason", `String value) ] | None -> [])
+    @
+    if attempted_endpoints = [] then []
+    else
+      [
+        ( "attempted_endpoints",
+          `List (List.map (fun value -> `String value) attempted_endpoints) );
+      ]
+  in
+  Ok (`Assoc fields)
+
+let call_session_tool ~sw ~clock ~net ~tool_name ~arguments =
+  match session_endpoint_result () with
+  | Error message -> Error message
+  | Ok endpoint -> (
+      match
+        call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments
+      with
+      | Ok json -> (
+          match extract_mcp_result json with
+          | Ok data -> Ok (append_provider_metadata data endpoint)
+          | Error error -> Error error)
+      | Error error -> Error error)
 
 (** ============================================
     Voice Session Management (Eio-native)
@@ -612,149 +864,117 @@ let text_fallback ~agent_id ~message =
 
 (** Start a voice session for an agent *)
 let start_voice_session ~sw ~clock ~net ~agent_id ?session_name () =
-  if not (is_voice_server_available ~sw ~clock ~net) then
-    Error "Voice MCP server unavailable"
-  else
-    let voice = get_voice_for_agent agent_id in
-    let args = `Assoc [
-      ("agent_id", `String agent_id);
-      ("voice", `String voice);
-      ("session_name", match session_name with Some n -> `String n | None -> `Null);
-    ] in
-    match call_voice_mcp ~sw ~clock ~net ~tool_name:"voice_session_start" ~arguments:args with
-    | Ok json ->
-      (match extract_mcp_result json with
-      | Ok data ->
-        let open Yojson.Safe.Util in
-        let session_id = data |> member "session_id" |> to_string_option |> Option.value ~default:"unknown" in
-        Ok (`Assoc [
-          ("session_id", `String session_id);
-          ("agent_id", `String agent_id);
-          ("voice", `String voice);
-          ("is_active", `Bool true);
-          ("turn_count", `Int 0);
-          ("duration_seconds", `Null);
-        ])
-      | Error e -> Error e)
-    | Error e -> Error e
+  let voice = get_voice_for_agent agent_id in
+  let args =
+    `Assoc
+      [
+        ("agent_id", `String agent_id);
+        ("voice", `String voice);
+        ("session_name", match session_name with Some n -> `String n | None -> `Null);
+      ]
+  in
+  match call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_start" ~arguments:args with
+  | Ok (`Assoc fields as data) ->
+      let open Yojson.Safe.Util in
+      let session_id =
+        data |> member "session_id" |> to_string_option
+        |> Option.value ~default:"unknown"
+      in
+      Ok
+        (`Assoc
+          ([
+             ("session_id", `String session_id);
+             ("agent_id", `String agent_id);
+             ("voice", `String voice);
+             ("is_active", `Bool true);
+             ("turn_count", `Int 0);
+             ("duration_seconds", `Null);
+           ]
+          @ List.filter
+              (fun (key, _) ->
+                key = "provider_kind" || key = "endpoint_id" || key = "endpoint_url")
+              fields))
+  | Ok data -> Ok data
+  | Error error -> Error error
 
 (** End a voice session *)
 let end_voice_session ~sw ~clock ~net ~agent_id =
   if not (is_voice_server_available ~sw ~clock ~net) then
-    Ok (`Assoc [("status", `String "skipped"); ("reason", `String "Voice server unavailable")])
+    Ok
+      (`Assoc
+        [ ("status", `String "skipped"); ("reason", `String "Voice server unavailable") ])
   else
-    let args = `Assoc [("agent_id", `String agent_id)] in
-    match call_voice_mcp ~sw ~clock ~net ~tool_name:"voice_session_end" ~arguments:args with
-    | Ok json ->
-      (match extract_mcp_result json with
-      | Ok data -> Ok data
-      | Error e -> Error e)
-    | Error e -> Error e
+    let args = `Assoc [ ("agent_id", `String agent_id) ] in
+    call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_end" ~arguments:args
 
 (** Request speaking turn.
-    Fallback chain: ElevenLabs direct → Voice MCP (legacy) → text_fallback *)
+    Ordered endpoint chain from voice_config.json → text_fallback *)
 let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority=1) () =
   let voice = get_voice_for_agent agent_id in
-  let has_elevenlabs =
-    Sys.getenv_opt "ELEVENLABS_API_KEY" <> None
-    || Sys.getenv_opt "ELEVENLABS_PROXY_URL" <> None
+  let provider =
+    provider |> Option.map String.trim
+    |> (function Some value when value <> "" -> Some value | _ -> None)
   in
-  if has_elevenlabs then begin
-    log_info (Printf.sprintf "ElevenLabs direct TTS for agent=%s voice=%s" agent_id voice);
-    cleanup_old_audio_files ();
-    match elevenlabs_direct_tts ~agent_id ~message ~voice with
-    | Ok result -> Ok result
-    | Error e ->
-      log_info (Printf.sprintf "ElevenLabs direct failed (%s), trying MCP fallback" e);
-      if is_voice_server_available ~sw ~clock ~net then begin
-        let args_fields =
-          [
-            ("agent_id", `String agent_id);
-            ("message", `String message);
-            ("voice", `String voice);
-            ("priority", `Int priority);
-          ]
-          @
-          (match provider with
-          | Some p when String.trim p <> "" -> [ ("provider", `String (String.trim p)) ]
-          | _ -> [])
-        in
-        let args = `Assoc args_fields in
-        match call_voice_mcp ~sw ~clock ~net ~tool_name:"agent_speak" ~arguments:args with
-        | Ok json ->
-          (match extract_mcp_result json with
-          | Ok data ->
-            let open Yojson.Safe.Util in
-            let status = data |> member "status" |> to_string_option |> Option.value ~default:"queued" in
-            let queue_pos = data |> member "queue_position" |> to_int_option |> Option.value ~default:0 in
-            Ok (`Assoc [
-              ("status", `String status);
-              ("agent_id", `String agent_id);
-              ("message_preview", `String (String.sub message 0 (min 50 (String.length message))));
-              ("voice", `String voice);
-              ("queue_position", `Int queue_pos);
-            ])
-          | Error _ -> text_fallback ~agent_id ~message)
-        | Error _ -> text_fallback ~agent_id ~message
-      end else
+  cleanup_old_audio_files ();
+  let endpoints = available_tts_endpoints ?provider () in
+  let model =
+    match load_voice_config () with
+    | Ok config -> config.tts.default_model
+    | Error _ -> "eleven_multilingual_v2"
+  in
+  let rec try_endpoints attempted = function
+    | [] ->
         text_fallback ~agent_id ~message
-  end else if is_voice_server_available ~sw ~clock ~net then begin
-    log_info "No ElevenLabs keys, using Voice MCP";
-    let args_fields =
-      [
-        ("agent_id", `String agent_id);
-        ("message", `String message);
-        ("voice", `String voice);
-        ("priority", `Int priority);
-      ]
-      @
-      (match provider with
-      | Some p when String.trim p <> "" -> [ ("provider", `String (String.trim p)) ]
-      | _ -> [])
-    in
-    let args = `Assoc args_fields in
-    match call_voice_mcp ~sw ~clock ~net ~tool_name:"agent_speak" ~arguments:args with
-    | Ok json ->
-      (match extract_mcp_result json with
-      | Ok data ->
-        let open Yojson.Safe.Util in
-        let status = data |> member "status" |> to_string_option |> Option.value ~default:"queued" in
-        let queue_pos = data |> member "queue_position" |> to_int_option |> Option.value ~default:0 in
-        Ok (`Assoc [
-          ("status", `String status);
-          ("agent_id", `String agent_id);
-          ("message_preview", `String (String.sub message 0 (min 50 (String.length message))));
-          ("voice", `String voice);
-          ("queue_position", `Int queue_pos);
-        ])
-      | Error _ -> text_fallback ~agent_id ~message)
-    | Error _ -> text_fallback ~agent_id ~message
-  end else begin
-    log_info "No TTS provider available, using text fallback";
-    text_fallback ~agent_id ~message
-  end
+          ~reason:"all configured TTS endpoints failed"
+          ~attempted_endpoints:(List.rev attempted) ()
+    | endpoint :: rest -> (
+        match
+          attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
+            ~priority endpoint
+        with
+        | Ok result -> Ok result
+        | Error error ->
+            let attempt = Printf.sprintf "%s: %s" endpoint.id error in
+            try_endpoints (attempt :: attempted) rest)
+  in
+  if endpoints = [] then
+    text_fallback ~agent_id ~message ~reason:"no configured TTS endpoint" ()
+  else
+    try_endpoints [] endpoints
 
 (** List active voice sessions *)
 let list_voice_sessions ~sw ~clock ~net =
   if not (is_voice_server_available ~sw ~clock ~net) then
-    Ok (`Assoc [("sessions", `List []); ("status", `String "voice_server_unavailable")])
+    Ok (`Assoc [ ("sessions", `List []); ("status", `String "voice_server_unavailable") ])
   else
     let args = `Assoc [] in
-    match call_voice_mcp ~sw ~clock ~net ~tool_name:"voice_session_list" ~arguments:args with
-    | Ok json ->
-      (match extract_mcp_result json with
-      | Ok data -> Ok data
-      | Error e -> Error e)
-    | Error e -> Error e
+    call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_list" ~arguments:args
 
 (** Get voice configuration for an agent *)
 let get_agent_voice ~agent_id =
-  let voice = get_voice_for_agent agent_id in
-  Ok (`Assoc [
-    ("agent_id", `String agent_id);
-    ("voice", `String voice);
-    ("available_voices", `List (List.map (fun (_, v) -> `String v) (agent_voices ())));
-  ])
+  match load_voice_config () with
+  | Ok config ->
+      let voice = Voice_config.voice_for_agent config agent_id in
+      Ok
+        (`Assoc
+          [
+            ("agent_id", `String agent_id);
+            ("voice", `String voice);
+            ( "available_voices",
+              `List
+                (List.map
+                   (fun value -> `String value)
+                (Voice_config.available_voices config)) );
+          ])
+  | Error _ ->
+      let voice = get_voice_for_agent agent_id in
+      Ok
+        (`Assoc
+          [
+            ("agent_id", `String agent_id);
+            ("voice", `String voice);
+            ("available_voices", `List (List.map (fun (_, v) -> `String v) (agent_voices ())));
+          ])
 
 (** ============================================
     Conference Management (Eio-native)
@@ -762,36 +982,43 @@ let get_agent_voice ~agent_id =
 
 (** Start a multi-agent voice conference *)
 let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
-  if not (is_voice_server_available ~sw ~clock ~net) then
-    Error "Voice MCP server unavailable - cannot start conference"
-  else
-    let agent_voices_list = List.map (fun id ->
-      `Assoc [
-        ("agent_id", `String id);
-        ("voice", `String (get_voice_for_agent id));
+  let agent_voices_list =
+    List.map
+      (fun id ->
+        `Assoc [ ("agent_id", `String id); ("voice", `String (get_voice_for_agent id)) ])
+      agent_ids
+  in
+  let args =
+    `Assoc
+      [
+        ("agent_ids", `List (List.map (fun id -> `String id) agent_ids));
+        ("agent_voices", `List agent_voices_list);
+        ("conference_name", match conference_name with Some n -> `String n | None -> `Null);
       ]
-    ) agent_ids in
-    let args = `Assoc [
-      ("agent_ids", `List (List.map (fun id -> `String id) agent_ids));
-      ("agent_voices", `List agent_voices_list);
-      ("conference_name", match conference_name with Some n -> `String n | None -> `Null);
-    ] in
-    match call_voice_mcp ~sw ~clock ~net ~tool_name:"conference_start" ~arguments:args with
-    | Ok json ->
-      (match extract_mcp_result json with
-      | Ok data ->
-        let open Yojson.Safe.Util in
-        let conference_id = data |> member "conference_id" |> to_string_option |> Option.value ~default:"unknown" in
-        Ok (`Assoc [
-          ("conference_id", `String conference_id);
-          ("state", `String "active");
-          ("participants", `List (List.map (fun id -> `String id) agent_ids));
-          ("current_speaker", `Null);
-          ("queue_size", `Int 0);
-          ("turn_count", `Int 0);
-        ])
-      | Error e -> Error e)
-    | Error e -> Error e
+  in
+  match call_session_tool ~sw ~clock ~net ~tool_name:"conference_start" ~arguments:args with
+  | Ok (`Assoc fields as data) ->
+      let open Yojson.Safe.Util in
+      let conference_id =
+        data |> member "conference_id" |> to_string_option
+        |> Option.value ~default:"unknown"
+      in
+      Ok
+        (`Assoc
+          ([
+             ("conference_id", `String conference_id);
+             ("state", `String "active");
+             ("participants", `List (List.map (fun id -> `String id) agent_ids));
+             ("current_speaker", `Null);
+             ("queue_size", `Int 0);
+             ("turn_count", `Int 0);
+           ]
+          @ List.filter
+              (fun (key, _) ->
+                key = "provider_kind" || key = "endpoint_id" || key = "endpoint_url")
+              fields))
+  | Ok data -> Ok data
+  | Error error -> Error error
 
 (** End a multi-agent voice conference *)
 let end_conference ~sw ~clock ~net ~agent_ids () =
@@ -824,15 +1051,15 @@ let end_conference ~sw ~clock ~net ~agent_ids () =
 (** Get transcript of voice conversation *)
 let get_transcript ~sw ~clock ~net () =
   if not (is_voice_server_available ~sw ~clock ~net) then
-    Ok (`Assoc [("transcript", `List []); ("turn_count", `Int 0)])
+    Ok (`Assoc [ ("transcript", `List []); ("turn_count", `Int 0) ])
   else
     let args = `Assoc [] in
-    match call_voice_mcp ~sw ~clock ~net ~tool_name:"get_transcript" ~arguments:args with
-    | Ok json ->
-      (match extract_mcp_result json with
-      | Ok data -> Ok data
-      | Error _ -> Ok (`Assoc [("transcript", `List []); ("turn_count", `Int 0)]))
-    | Error _ -> Ok (`Assoc [("transcript", `List []); ("turn_count", `Int 0)])
+    match
+      call_session_tool ~sw ~clock ~net ~tool_name:"get_transcript"
+        ~arguments:args
+    with
+    | Ok data -> Ok data
+    | Error _ -> Ok (`Assoc [ ("transcript", `List []); ("turn_count", `Int 0) ])
 
 (** ============================================
     Health Check (Eio-native)
@@ -840,19 +1067,30 @@ let get_transcript ~sw ~clock ~net () =
 
 (** Health check for Voice MCP server *)
 let health_check ~sw ~clock:_ ~net () =
-  let uri = voice_health_uri () in
-  try
-    let client = client_for_uri ~net uri in
-    let resp, body = Cohttp_eio.Client.get ~sw client uri in
-    let status = Cohttp.Response.status resp in
-    let body_str = Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int in
-    if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then
-      Ok (`Assoc [
-        ("status", `String "healthy");
-        ("server", `String (Uri.to_string uri));
-        ("response", (try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `String body_str));
-      ])
-    else
-      Error (Printf.sprintf "Unhealthy: HTTP %d" (Cohttp.Code.code_of_status status))
-  with exn ->
-    Error (Printf.sprintf "Not reachable: %s" (Printexc.to_string exn))
+  match session_endpoint_result () with
+  | Error error -> Error error
+  | Ok endpoint ->
+      let uri = session_health_uri endpoint in
+      try
+        let client = client_for_uri ~net uri in
+        let resp, body = Cohttp_eio.Client.get ~sw client uri in
+        let status = Cohttp.Response.status resp in
+        let body_str = Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int in
+        if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then
+          Ok
+            (append_provider_metadata
+               (`Assoc
+                 [
+                   ("status", `String "healthy");
+                   ("server", `String (Uri.to_string uri));
+                   ( "response",
+                     try Yojson.Safe.from_string body_str
+                     with Yojson.Json_error _ -> `String body_str );
+                 ])
+               endpoint)
+        else
+          Error
+            (Printf.sprintf "Unhealthy: HTTP %d"
+               (Cohttp.Code.code_of_status status))
+      with exn ->
+        Error (Printf.sprintf "Not reachable: %s" (Printexc.to_string exn))

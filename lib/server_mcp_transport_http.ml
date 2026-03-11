@@ -7,6 +7,8 @@ type deps = {
   cors_headers : string -> (string * string) list;
   auth_token_from_request : Httpun.Request.t -> string option;
   get_server_state_opt : unit -> Mcp_server.server_state option;
+  get_sw : unit -> Eio.Switch.t option;
+  get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t option;
   verify_mcp_auth : base_path:string -> Httpun.Request.t -> (unit, string) result;
   verify_operator_mcp_auth :
     base_path:string -> Httpun.Request.t -> (unit, string) result;
@@ -527,8 +529,16 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
               Http.Request.read_body_async reqd (fun body_str ->
                   try
                     let state = get_server_state deps in
-                    let sw = Eio_context.get_switch () in
-                    let clock = Eio_context.get_clock () in
+                    let sw =
+                      match deps.get_sw () with
+                      | Some sw -> sw
+                      | None -> failwith "Eio switch not available"
+                    in
+                    let clock =
+                      match deps.get_clock () with
+                      | Some c -> c
+                      | None -> failwith "Eio clock not available"
+                    in
                     let response_json =
                       Mcp_eio.handle_request ~clock ~sw ~profile
                         ~mcp_session_id:session_id ?auth_token state body_str
@@ -724,7 +734,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
               List.iter (fun ev -> ignore (send_raw info ev)) missed
           | None -> ());
           (match
-             (Eio_context.get_switch_opt (), Eio_context.get_clock_opt ())
+             (deps.get_sw (), deps.get_clock ())
            with
           | Some sw, Some clock ->
               Eio.Fiber.fork ~sw (fun () ->
@@ -833,8 +843,16 @@ let handle_post_messages ~deps request reqd =
       | Ok () ->
           Http.Request.read_body_async reqd (fun body_str ->
               let state = get_server_state deps in
-              let sw = Eio_context.get_switch () in
-              let clock = Eio_context.get_clock () in
+              let sw =
+                match deps.get_sw () with
+                | Some sw -> sw
+                | None -> failwith "Eio switch not available"
+              in
+              let clock =
+                match deps.get_clock () with
+                | Some c -> c
+                | None -> failwith "Eio clock not available"
+              in
               let response_json =
                 Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id
                   ?auth_token state body_str
@@ -973,7 +991,7 @@ let handle_ag_ui_events ~deps request reqd =
           List.iter (fun ev -> ignore (send_raw info ev)) missed
       | None -> ());
       (match
-         (Eio_context.get_switch_opt (), Eio_context.get_clock_opt ())
+         (deps.get_sw (), deps.get_clock ())
        with
       | Some sw, Some clock ->
           Eio.Fiber.fork ~sw (fun () ->

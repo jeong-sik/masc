@@ -551,8 +551,8 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
       in
       let lower_model = String.lowercase_ascii effective_model in
       let supports_tools =
-        (lower_model = "ollama" ||
-         (String.length lower_model > 7 && String.sub lower_model 0 7 = "ollama:"))
+        (lower_model = "llama" ||
+         (String.length lower_model > 6 && String.sub lower_model 0 6 = "llama:"))
       in
       let tools_enabled = tools_count > 0 && (not tools_invalid) && supports_tools in
       let tool_choice_reason =

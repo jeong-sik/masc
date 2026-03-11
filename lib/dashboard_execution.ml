@@ -86,9 +86,7 @@ let list_field key json =
   | `List items -> items
   | _ -> []
 
-let trim_to_option text =
-  let trimmed = String.trim text in
-  if trimmed = "" then None else Some trimmed
+let trim_to_option = Dashboard_utils.trim_to_option
 
 let compact_text ?(max_len = 160) raw =
   let normalized =
@@ -103,19 +101,8 @@ let compact_text ?(max_len = 160) raw =
   else if String.length normalized <= max_len then normalized
   else String.sub normalized 0 (max_len - 1) ^ "…"
 
-let parse_iso_opt value =
-  match value with
-  | Some text when String.trim text <> "" -> Some (Types.parse_iso8601 text)
-  | _ -> None
-
-let string_list_of_json json =
-  match json with
-  | `List items ->
-      items
-      |> List.filter_map (function
-             | `String value -> trim_to_option value
-             | _ -> None)
-  | _ -> []
+let parse_iso_opt = Dashboard_utils.parse_iso_opt
+let string_list_of_json = Dashboard_utils.string_list_of_json
 
 let dedup_strings items =
   List.sort_uniq String.compare

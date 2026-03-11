@@ -27,7 +27,7 @@ let with_env name value f =
 
 let test_load_models_from_config () =
   with_temp_json
-    {|{"heartbeat_action_models":["llama:qwen-local","ollama:glm-4.7-flash"]}|}
+    {|{"heartbeat_action_models":["llama:qwen-local","llama:qwen-local-fallback"]}|}
     (fun path ->
       let specs = Lodge_cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
       check int "spec count" 2 (List.length specs);
@@ -35,8 +35,8 @@ let test_load_models_from_config () =
       | [ first; second ] ->
           check bool "first is llama" true (first.provider = Llm_client.Llama);
           check string "first model" "qwen-local" first.model_id;
-          check bool "second is ollama" true (second.provider = Llm_client.Ollama);
-          check string "second model" "glm-4.7-flash" second.model_id
+          check bool "second is llama" true (second.provider = Llm_client.Llama);
+          check string "second model" "qwen-local-fallback" second.model_id
       | _ -> fail "expected two specs")
 
 let test_skips_invalid_and_missing_api_key () =
@@ -124,13 +124,13 @@ let test_briefing_has_four_models () =
   let models = Lodge_cascade.default_model_strings ~cascade_name:"briefing" in
   check int "briefing has 4 models" 4 (List.length models)
 
-let test_classification_uses_ollama_first () =
+let test_classification_uses_llama_first () =
   let models =
     Lodge_cascade.default_model_strings ~cascade_name:"classification"
   in
   let first = List.hd models in
-  check bool "classification starts with ollama:" true
-    (String.length first > 7 && String.sub first 0 7 = "ollama:")
+  check bool "classification starts with llama:" true
+    (String.length first > 6 && String.sub first 0 6 = "llama:")
 
 let test_model_key_format () =
   let key = Lodge_cascade.model_key_of_cascade "heartbeat_action" in
@@ -161,8 +161,8 @@ let () =
             test_unknown_name_returns_llama_fallback;
           test_case "briefing has four models" `Quick
             test_briefing_has_four_models;
-          test_case "classification uses ollama first" `Quick
-            test_classification_uses_ollama_first;
+          test_case "classification uses llama first" `Quick
+            test_classification_uses_llama_first;
           test_case "model_key appends _models" `Quick
             test_model_key_format;
         ] );

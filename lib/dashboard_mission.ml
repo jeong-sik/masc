@@ -9,6 +9,8 @@ type session_context = {
   member_names : string list;
   started_at : string option;
   elapsed_sec : int option;
+  operation_id : string option;
+  blocker_summary : string option;
   last_event_at : string option;
   last_event_ts : float;
   last_event_summary : string;
@@ -39,6 +41,16 @@ type keeper_context = {
   pressure_rank : int;
   last_seen_ts : float;
   json : Yojson.Safe.t;
+}
+
+type operation_context = {
+  operation_id : string;
+  linked_session_id : string option;
+  status : string;
+  stage : string option;
+  detachment_status : string option;
+  objective : string option;
+  updated_at : string option;
 }
 
 let json_string_option value =
@@ -103,9 +115,7 @@ let rec take n items =
     | [] -> []
     | x :: xs -> x :: take (n - 1) xs
 
-let trim_to_option text =
-  let trimmed = String.trim text in
-  if trimmed = "" then None else Some trimmed
+let trim_to_option = Dashboard_utils.trim_to_option
 
 let compact_text ?(max_len = 160) raw =
   let normalized =
@@ -172,19 +182,8 @@ let recent_tool_names_for_agent agent_name =
   | Some snapshot -> snapshot.tool_names
   | None -> []
 
-let parse_iso_opt value =
-  match value with
-  | Some text when String.trim text <> "" -> Some (Types.parse_iso8601 text)
-  | _ -> None
-
-let string_list_of_json json =
-  match json with
-  | `List items ->
-      items
-      |> List.filter_map (function
-             | `String value -> trim_to_option value
-             | _ -> None)
-  | _ -> []
+let parse_iso_opt = Dashboard_utils.parse_iso_opt
+let string_list_of_json = Dashboard_utils.string_list_of_json
 
 let dedup_strings items =
   List.sort_uniq String.compare
@@ -328,6 +327,7 @@ let build_session_context session_json session_cards =
           | value -> Some value)
       | None -> None
     in
+    let operation_id = trim_to_option (string_field "operation_id" meta) in
     let mode =
       trim_to_option (string_field "mode" communication)
       |> Option.value ~default:"mode n/a"
@@ -339,6 +339,21 @@ let build_session_context session_json session_cards =
         (string_list_of_json (member_assoc "agent_names" meta)
         @ string_list_of_json (member_assoc "active_agents" summary)
         @ string_list_of_json (member_assoc "planned_participants" summary))
+    in
+    let blocker_summary =
+      match top_attention with
+      | Some attention ->
+          trim_to_option (string_field "summary" attention)
+      | None ->
+          if int_field "active_agents_count" team_health < int_field ~default:1 "required_agents" team_health
+          then
+            Some
+              (Printf.sprintf "active %d / required %d"
+                 (int_field "active_agents_count" team_health)
+                 (int_field ~default:1 "required_agents" team_health))
+          else
+            Option.bind top_recommendation (fun action ->
+                trim_to_option (string_field "reason" action))
     in
     Some
       {
@@ -363,6 +378,8 @@ let build_session_context session_json session_cards =
           | `Int value -> Some value
           | `Float value -> Some (int_of_float value)
           | _ -> None);
+        operation_id;
+        blocker_summary;
         last_event_at =
           Option.bind last_event (fun json -> trim_to_option (string_field "ts_iso" json));
         last_event_ts =
@@ -643,6 +660,8 @@ let build_session_briefs sessions attention_queue actions =
                ("member_names", `List (List.map (fun value -> `String value) session.member_names));
                ("started_at", json_string_option session.started_at);
                ("elapsed_sec", option_to_json (fun value -> `Int value) session.elapsed_sec);
+               ("operation_id", json_string_option session.operation_id);
+               ("blocker_summary", json_string_option session.blocker_summary);
                ("last_event_at", json_string_option session.last_event_at);
                ("last_event_summary", `String session.last_event_summary);
                ("communication_summary", `String session.communication_summary);
@@ -792,6 +811,14 @@ let build_agent_briefs config sessions attention_queue room_json =
            | None ->
                if Option.is_some related_session then "active" else "unknown"
          in
+         let last_activity_at =
+           match agent with
+           | Some value -> trim_to_option value.last_seen
+           | None ->
+               (match related_session with
+               | Some session -> session.last_event_at
+               | None -> None)
+         in
          let last_seen_ts =
            match agent with
            | Some value ->
@@ -815,6 +842,7 @@ let build_agent_briefs config sessions attention_queue room_json =
                   ("current_work", json_string_option current_work);
                   ("related_session_id", json_string_option (Option.map (fun s -> s.session_id) related_session));
                   ("related_attention_count", `Int related_attention_count);
+                  ("last_activity_at", json_string_option last_activity_at);
                   ("recent_output_preview", json_string_option recent_output_preview);
                   ("recent_input_preview", json_string_option recent_input_preview);
                   ("recent_event", json_string_option recent_event);
@@ -948,6 +976,234 @@ let build_internal_signals incidents actions =
   |> List.sort (fun left right -> Int.compare right.pressure_rank left.pressure_rank)
   |> List.map (fun (row : keeper_context) -> row.json)
 
+let detachment_index command_plane_json =
+  let table = Hashtbl.create 16 in
+  let detachments =
+    member_assoc "detachments" command_plane_json
+    |> member_assoc "detachments"
+    |> function
+    | `List items -> items
+    | _ -> []
+  in
+  List.iter
+    (fun detachment_card ->
+      let detachment = member_assoc "detachment" detachment_card in
+      let operation_id = string_field "operation_id" detachment in
+      if operation_id <> "" then
+        Hashtbl.replace table operation_id
+          ( trim_to_option (string_field "session_id" detachment),
+            trim_to_option (string_field "status" detachment) ))
+    detachments;
+  table
+
+let build_operation_contexts command_plane_json =
+  let operations =
+    member_assoc "operations" command_plane_json
+    |> member_assoc "operations"
+    |> function
+    | `List items -> items
+    | _ -> []
+  in
+  let detachments = detachment_index command_plane_json in
+  operations
+  |> List.filter_map (fun operation_card ->
+         let operation = member_assoc "operation" operation_card in
+         let operation_id = string_field "operation_id" operation in
+         if operation_id = "" then None
+         else
+           let linked_session_id, detachment_status =
+             match Hashtbl.find_opt detachments operation_id with
+             | Some (session_id, status) -> (session_id, status)
+             | None ->
+                 (trim_to_option (string_field "detachment_session_id" operation), None)
+           in
+           Some
+             {
+               operation_id;
+               linked_session_id;
+               status = string_field ~default:"unknown" "status" operation;
+               stage = trim_to_option (string_field "stage" operation);
+               detachment_status;
+               objective = trim_to_option (string_field "objective" operation);
+               updated_at = trim_to_option (string_field "updated_at" operation);
+             })
+
+let operation_badge_json (operation : operation_context) =
+  `Assoc
+    [
+      ("operation_id", `String operation.operation_id);
+      ("status", `String operation.status);
+      ("stage", json_string_option operation.stage);
+      ("detachment_status", json_string_option operation.detachment_status);
+      ("objective", json_string_option operation.objective);
+      ("updated_at", json_string_option operation.updated_at);
+    ]
+
+let operation_badges_for_session session operation_contexts =
+  let linked_operation_ids =
+    operation_contexts
+    |> List.filter_map (fun (operation : operation_context) ->
+           match operation.linked_session_id with
+           | Some session_id when String.equal session_id session.session_id -> Some operation.operation_id
+           | _ -> None)
+  in
+  let session_operation_ids =
+    dedup_strings (Option.to_list session.operation_id @ linked_operation_ids)
+  in
+  let from_contexts =
+    operation_contexts
+    |> List.filter (fun (operation : operation_context) ->
+           List.mem operation.operation_id session_operation_ids)
+    |> List.map operation_badge_json
+  in
+  match from_contexts, session.operation_id with
+  | [], Some operation_id ->
+      [
+        `Assoc
+          [
+            ("operation_id", `String operation_id);
+            ("status", `String "unknown");
+            ("stage", `Null);
+            ("detachment_status", `Null);
+            ("objective", `Null);
+            ("updated_at", `Null);
+          ];
+      ]
+  | _ -> from_contexts
+
+let participant_preview_json session_id member_names agent_briefs =
+  let member_set = List.sort_uniq String.compare member_names in
+  agent_briefs
+  |> List.filter_map (fun row ->
+         let related_session_id = trim_to_option (string_field "related_session_id" row) in
+         let agent_name = string_field "agent_name" row in
+         let belongs =
+           String.equal (Option.value ~default:"" related_session_id) session_id
+           || List.mem agent_name member_set
+         in
+         if not belongs || agent_name = "" then None
+         else
+           Some
+             (`Assoc
+               [
+                 ("agent_name", `String agent_name);
+                 ("status", member_assoc "status" row);
+                 ("current_work", member_assoc "current_work" row);
+                 ("recent_input_preview", member_assoc "recent_input_preview" row);
+                 ("recent_output_preview", member_assoc "recent_output_preview" row);
+                 ("recent_tool_names", member_assoc "recent_tool_names" row);
+                 ("last_activity_at", member_assoc "last_activity_at" row);
+               ]))
+
+let keeper_refs_for_session member_names keeper_briefs =
+  let member_set = List.sort_uniq String.compare member_names in
+  keeper_briefs
+  |> List.filter_map (fun row ->
+         let agent_name = trim_to_option (string_field "agent_name" row) in
+         let name = string_field "name" row in
+         let matches =
+           (match agent_name with
+           | Some value -> List.mem value member_set
+           | None -> false)
+           || List.mem name member_set
+         in
+         if not matches || name = "" then None
+         else
+           Some
+             (`Assoc
+               [
+                 ("name", `String name);
+                 ("agent_name", json_string_option agent_name);
+                 ("status", member_assoc "status" row);
+                 ("generation", member_assoc "generation" row);
+                 ("context_ratio", member_assoc "context_ratio" row);
+                 ("last_turn_ago_s", member_assoc "last_turn_ago_s" row);
+                 ("current_work", member_assoc "current_work" row);
+               ]))
+
+let build_sessions sessions attention_queue agent_briefs keeper_briefs command_plane_json =
+  let related_attention_count session_id =
+    attention_queue
+    |> List.fold_left
+         (fun acc (attention : attention_context) ->
+           if List.mem session_id attention.related_session_ids then acc + 1 else acc)
+         0
+  in
+  let operation_contexts = build_operation_contexts command_plane_json in
+  sessions
+  |> List.map (fun (session : session_context) ->
+         let attention_count = related_attention_count session.session_id in
+         let top_attention = option_to_json (fun value -> value) session.top_attention in
+         let top_recommendation =
+           option_to_json (fun value -> value) session.top_recommendation
+         in
+         ( attention_count,
+           severity_rank
+             (match session.top_attention with
+             | Some attention -> string_field ~default:session.health "severity" attention
+             | None -> session.health),
+           session.last_event_ts,
+           `Assoc
+             [
+               ("session_id", `String session.session_id);
+               ("goal", `String session.goal);
+               ("room", json_string_option session.room);
+               ("status", `String session.status);
+               ("health", `String session.health);
+               ("member_names", string_list_json session.member_names);
+               ("started_at", json_string_option session.started_at);
+               ("elapsed_sec", option_to_json (fun value -> `Int value) session.elapsed_sec);
+               ("operation_id", json_string_option session.operation_id);
+               ("blocker_summary", json_string_option session.blocker_summary);
+               ("last_event_at", json_string_option session.last_event_at);
+               ("last_event_summary", `String session.last_event_summary);
+               ("communication_summary", `String session.communication_summary);
+               ("active_count", `Int session.active_count);
+               ("required_count", `Int session.required_count);
+               ("related_attention_count", `Int attention_count);
+               ("top_attention", top_attention);
+               ("top_recommendation", top_recommendation);
+               ( "member_previews",
+                 `List
+                   (participant_preview_json session.session_id session.member_names agent_briefs)
+               );
+               ( "operation_badges",
+                 `List (operation_badges_for_session session operation_contexts) );
+               ( "keeper_refs",
+                 `List (keeper_refs_for_session session.member_names keeper_briefs) );
+             ] ))
+  |> List.sort (fun (left_count, left_sev, left_ts, _) (right_count, right_sev, right_ts, _) ->
+         let by_count = Int.compare right_count left_count in
+         if by_count <> 0 then by_count
+         else
+           let by_severity = Int.compare right_sev left_sev in
+           if by_severity <> 0 then by_severity else Float.compare right_ts left_ts)
+  |> List.map (fun (_, _, _, json) -> json)
+
+let session_timeline_json session_json =
+  session_recent_events session_json
+  |> List.sort (fun left right ->
+         let right_ts =
+           parse_iso_opt (trim_to_option (string_field "ts_iso" right))
+           |> Option.value ~default:0.0
+         in
+         let left_ts =
+           parse_iso_opt (trim_to_option (string_field "ts_iso" left))
+           |> Option.value ~default:0.0
+         in
+         Float.compare right_ts left_ts)
+  |> take 10
+  |> List.mapi (fun idx event_json ->
+         let detail = event_detail_json event_json in
+         `Assoc
+           [
+             ("id", `String (Printf.sprintf "event-%d" idx));
+             ("timestamp", member_assoc "ts_iso" event_json);
+             ("event_type", member_assoc "event_type" event_json);
+             ("actor", json_string_option (trim_to_option (string_field "actor" detail)));
+             ("summary", `String (event_summary event_json));
+           ])
+
 let summarize_queue_counts attention_queue =
   let session_count =
     attention_queue
@@ -968,7 +1224,23 @@ let summarize_queue_counts attention_queue =
       ("agent_count", `Int agent_count);
     ]
 
-let json ?actor ~config ~sw ~clock ~proc_mgr () =
+type mission_projection = {
+  generated_at : string;
+  snapshot_json : Yojson.Safe.t;
+  digest_json : Yojson.Safe.t;
+  room_json : Yojson.Safe.t;
+  command_json : Yojson.Safe.t;
+  incidents : Yojson.Safe.t list;
+  recommended_actions : Yojson.Safe.t list;
+  attention_queue : attention_context list;
+  sessions : session_context list;
+  session_briefs : Yojson.Safe.t list;
+  agent_briefs : Yojson.Safe.t list;
+  keeper_briefs : Yojson.Safe.t list;
+  internal_signals : Yojson.Safe.t list;
+}
+
+let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
   let actor_name =
     match actor with
     | Some value when String.trim value <> "" -> String.trim value
@@ -1009,9 +1281,7 @@ let json ?actor ~config ~sw ~clock ~proc_mgr () =
           ]
   in
   let room_json = member_assoc "room" snapshot_json in
-  let command_json = member_assoc "command_plane" digest_json in
-  let operations_summary = member_assoc "operations" command_json |> member_assoc "summary" in
-  let decisions_summary = member_assoc "decisions" command_json |> member_assoc "summary" in
+  let command_json = member_assoc "command_plane" snapshot_json in
   let incidents =
     list_field "attention_items" digest_json
     |> List.sort (fun left right ->
@@ -1032,58 +1302,149 @@ let json ?actor ~config ~sw ~clock ~proc_mgr () =
   let agent_briefs = build_agent_briefs config sessions attention_queue room_json in
   let keeper_briefs = build_keeper_briefs snapshot_json in
   let internal_signals = build_internal_signals incidents recommended_actions in
+  {
+    generated_at = Types.now_iso ();
+    snapshot_json;
+    digest_json;
+    room_json;
+    command_json;
+    incidents;
+    recommended_actions;
+    attention_queue;
+    sessions;
+    session_briefs;
+    agent_briefs;
+    keeper_briefs;
+    internal_signals;
+  }
+
+let json ?actor ~config ~sw ~clock ~proc_mgr () =
+  let projection = build_projection ?actor ~config ~sw ~clock ~proc_mgr () in
+  let operations_summary =
+    member_assoc "operations" projection.command_json |> member_assoc "summary"
+  in
+  let decisions_summary =
+    member_assoc "decisions" projection.command_json |> member_assoc "summary"
+  in
+  let session_cards = list_field "session_cards" projection.digest_json in
   let summary_json =
     `Assoc
       [
-        ("room_health", `String (string_field ~default:"ok" "health" digest_json));
-        ("cluster", json_string_option (Some (string_field "cluster" room_json)));
-        ("project", json_string_option (Some (string_field "project" room_json)));
-        ("current_room", member_assoc "current_room" room_json);
-        ("paused", `Bool (bool_field "paused" room_json));
-        ("tempo_interval_s", member_assoc "tempo_interval_s" room_json);
+        ("room_health", `String (string_field ~default:"ok" "health" projection.digest_json));
+        ("cluster", json_string_option (Some (string_field "cluster" projection.room_json)));
+        ("project", json_string_option (Some (string_field "project" projection.room_json)));
+        ("current_room", member_assoc "current_room" projection.room_json);
+        ("paused", `Bool (bool_field "paused" projection.room_json));
+        ("tempo_interval_s", member_assoc "tempo_interval_s" projection.room_json);
         ("active_agents", `Int (active_agent_count config));
-        ("keeper_pressure", `Int (keeper_pressure_count snapshot_json));
+        ("keeper_pressure", `Int (keeper_pressure_count projection.snapshot_json));
         ("active_operations", `Int (int_field "active" operations_summary));
         ("pending_approvals", `Int (int_field "pending" decisions_summary));
-        ("incident_count", `Int (List.length incidents));
-        ("recommended_action_count", `Int (List.length recommended_actions));
-        ("top_attention", top_item incidents);
-        ("top_action", top_item recommended_actions);
-        ("attention_queue", summarize_queue_counts attention_queue);
+        ("incident_count", `Int (List.length projection.incidents));
+        ("recommended_action_count", `Int (List.length projection.recommended_actions));
+        ("top_attention", top_item projection.incidents);
+        ("top_action", top_item projection.recommended_actions);
+        ("attention_queue", summarize_queue_counts projection.attention_queue);
       ]
   in
   let command_focus_json =
     `Assoc
       [
-        ("health", `String (string_field ~default:"ok" "health" digest_json));
+        ("health", `String (string_field ~default:"ok" "health" projection.digest_json));
         ("active_operations", `Int (int_field "active" operations_summary));
         ("pending_approvals", `Int (int_field "pending" decisions_summary));
-        ("swarm_overview", member_assoc "swarm_status" digest_json |> member_assoc "overview");
-        ("top_attention", top_item incidents);
-        ("top_action", top_item recommended_actions);
+        ("swarm_overview", member_assoc "swarm_status" projection.digest_json |> member_assoc "overview");
+        ("top_attention", top_item projection.incidents);
+        ("top_action", top_item projection.recommended_actions);
         ("session_cards", `List (take 3 session_cards));
       ]
   in
   let operator_targets_json =
     `Assoc
       [
-        ("sessions", member_assoc "sessions" snapshot_json |> member_assoc "items");
-        ("keepers", member_assoc "keepers" snapshot_json |> member_assoc "items");
-        ("pending_confirms", member_assoc "pending_confirms" snapshot_json);
-        ("available_actions", member_assoc "available_actions" snapshot_json);
+        ("sessions", member_assoc "sessions" projection.snapshot_json |> member_assoc "items");
+        ("keepers", member_assoc "keepers" projection.snapshot_json |> member_assoc "items");
+        ("pending_confirms", member_assoc "pending_confirms" projection.snapshot_json);
+        ("available_actions", member_assoc "available_actions" projection.snapshot_json);
       ]
+  in
+  let sessions_json =
+    build_sessions projection.sessions projection.attention_queue projection.agent_briefs
+      projection.keeper_briefs projection.command_json
   in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String projection.generated_at);
       ("summary", summary_json);
-      ("incidents", `List incidents);
-      ("recommended_actions", `List recommended_actions);
+      ("incidents", `List projection.incidents);
+      ("recommended_actions", `List projection.recommended_actions);
       ("command_focus", command_focus_json);
       ("operator_targets", operator_targets_json);
-      ("attention_queue", `List (List.map (fun (item : attention_context) -> item.json) attention_queue));
-      ("session_briefs", `List session_briefs);
-      ("agent_briefs", `List agent_briefs);
-      ("keeper_briefs", `List keeper_briefs);
-      ("internal_signals", `List internal_signals);
+      ( "attention_queue",
+        `List (List.map (fun (item : attention_context) -> item.json) projection.attention_queue)
+      );
+      ("sessions", `List sessions_json);
+      ("session_briefs", `List projection.session_briefs);
+      ("agent_briefs", `List projection.agent_briefs);
+      ("keeper_briefs", `List projection.keeper_briefs);
+      ("internal_signals", `List projection.internal_signals);
+    ]
+
+let session_json ?actor ~session_id ~config ~sw ~clock ~proc_mgr () =
+  let projection = build_projection ?actor ~config ~sw ~clock ~proc_mgr () in
+  let session_row_json =
+    build_sessions projection.sessions projection.attention_queue projection.agent_briefs
+      projection.keeper_briefs projection.command_json
+    |> List.find_opt (fun json ->
+           String.equal (string_field "session_id" json) session_id)
+  in
+  let session_source_json =
+    member_assoc "sessions" projection.snapshot_json |> member_assoc "items"
+    |> function
+    | `List items ->
+        List.find_opt
+          (fun json -> String.equal (string_field "session_id" json) session_id)
+          items
+    | _ -> None
+  in
+  let session_context =
+    List.find_opt
+      (fun (session : session_context) -> String.equal session.session_id session_id)
+      projection.sessions
+  in
+  let operation_contexts = build_operation_contexts projection.command_json in
+  let operations_json =
+    match session_context with
+    | None -> []
+    | Some session -> operation_badges_for_session session operation_contexts
+  in
+  let keepers_json =
+    match session_context with
+    | None -> []
+    | Some session ->
+        keeper_refs_for_session session.member_names projection.keeper_briefs
+  in
+  let participants_json =
+    match session_context with
+    | None -> []
+    | Some session ->
+        participant_preview_json session.session_id session.member_names projection.agent_briefs
+  in
+  `Assoc
+    [
+      ("generated_at", `String projection.generated_at);
+      ("session_id", `String session_id);
+      ("session", option_to_json (fun value -> value) session_row_json);
+      ( "timeline",
+        `List
+          (match session_source_json with
+          | Some json -> session_timeline_json json
+          | None -> []) );
+      ("participants", `List participants_json);
+      ("operations", `List operations_json);
+      ("keepers", `List keepers_json);
+      ( "error",
+        match session_row_json with
+        | Some _ -> `Null
+        | None -> `String "session not found" );
     ]

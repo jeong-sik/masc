@@ -71,7 +71,10 @@ let help_doc_refs name =
       "docs/COMMAND-PLANE-RUNBOOK.md";
       "docs/BENCHMARK-RUNBOOK.md";
     ]
-  else if String.starts_with ~prefix:"masc_keeper_" name then
+  else if
+    String.starts_with ~prefix:"masc_keeper_" name
+    || String.starts_with ~prefix:"masc_persistent_agent_" name
+  then
     [ "docs/SUPERVISOR-MODE.md" ]
   else
     []
@@ -371,4 +374,3 @@ let validate_short_description (entry : help_entry) =
   not (String.contains entry.short_description '\n')
   && String.length (String.trim entry.short_description) > 0
   && String.length entry.short_description <= 140
-

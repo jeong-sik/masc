@@ -109,6 +109,22 @@ struct ActiveDmVoiceAudio {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, serde::Deserialize)]
+struct RuntimeVoiceConfigResponse {
+    tts: Option<RuntimeVoiceTtsConfig>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, serde::Deserialize)]
+struct RuntimeVoiceTtsConfig {
+    preview_url: Option<String>,
+    default_model: Option<String>,
+    default_voice: Option<String>,
+    available_models: Option<Vec<String>>,
+    available_voices: Option<Vec<String>>,
+}
+
+#[cfg(target_arch = "wasm32")]
 thread_local! {
     static ACTIVE_DM_VOICE_AUDIO: std::cell::RefCell<Vec<ActiveDmVoiceAudio>> =
         std::cell::RefCell::new(Vec::new());
@@ -253,7 +269,7 @@ pub fn sync_dm_voice_controls(room_state: Res<RoomState>, progress: Res<TurnProg
                     &doc,
                     "status-ok",
                     &format!(
-                        "진행 중: ElevenLabs proxy 사용 (model: {}, voice_id: {}, tone: {})",
+                        "진행 중: voice proxy 사용 (model: {}, voice: {}, tone: {})",
                         model,
                         voice_id,
                         dm_voice_tone_label(tone)
@@ -677,7 +693,6 @@ fn hydrate_preset_select(
     custom_wrap_id: &str,
     custom_input_id: &str,
     current_value: Option<String>,
-    is_known_preset: fn(&str) -> bool,
 ) {
     match current_value.and_then(|v| normalize_optional(&v)) {
         None => {
@@ -685,7 +700,7 @@ fn hydrate_preset_select(
             set_hidden(doc, custom_wrap_id, true);
             set_input_value(doc, custom_input_id, "");
         }
-        Some(value) if is_known_preset(&value) => {
+        Some(value) if select_has_option_value(doc, select_id, &value) => {
             set_select_value(doc, select_id, &value);
             set_hidden(doc, custom_wrap_id, true);
             set_input_value(doc, custom_input_id, "");
@@ -745,31 +760,106 @@ fn select_storage_value(
     }
     set_hidden(doc, custom_wrap_id, true);
     if selected == DM_VOICE_RANDOM_PRESET_VALUE && select_id == DM_VOICE_ID_SELECT_ID {
-        return pick_random_voice_id();
+        return pick_random_voice_id(doc);
     }
     Some(selected)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn is_model_preset(value: &str) -> bool {
-    DM_VOICE_MODEL_PRESETS.iter().any(|preset| *preset == value)
+fn select_has_option_value(doc: &web_sys::Document, select_id: &str, value: &str) -> bool {
+    use wasm_bindgen::JsCast;
+
+    let Some(select) = doc
+        .get_element_by_id(select_id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+    else {
+        return false;
+    };
+
+    let options = select.options();
+    for index in 0..options.length() {
+        let Some(option) = options
+            .item(index)
+            .and_then(|node| node.dyn_into::<web_sys::HtmlOptionElement>().ok())
+        else {
+            continue;
+        };
+        if option.value() == value {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(target_arch = "wasm32")]
-fn is_voice_id_preset(value: &str) -> bool {
-    DM_VOICE_ID_PRESETS
-        .iter()
-        .any(|(preset, _name)| *preset == value)
-}
+fn pick_random_voice_id(doc: &web_sys::Document) -> Option<String> {
+    use wasm_bindgen::JsCast;
 
-#[cfg(target_arch = "wasm32")]
-fn pick_random_voice_id() -> Option<String> {
-    if DM_VOICE_ID_PRESETS.is_empty() {
+    let select = doc
+        .get_element_by_id(DM_VOICE_ID_SELECT_ID)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())?;
+    let options = select.options();
+    let mut values = Vec::new();
+    for index in 0..options.length() {
+        let Some(option) = options
+            .item(index)
+            .and_then(|node| node.dyn_into::<web_sys::HtmlOptionElement>().ok())
+        else {
+            continue;
+        };
+        let value = option.value();
+        if value.is_empty() || value == DM_VOICE_RANDOM_PRESET_VALUE || value == DM_VOICE_CUSTOM_VALUE
+        {
+            continue;
+        }
+        values.push(value);
+    }
+    if values.is_empty() {
         return None;
     }
-    let index = (js_sys::Math::random() * DM_VOICE_ID_PRESETS.len() as f64).floor() as usize;
-    let bounded = index.min(DM_VOICE_ID_PRESETS.len().saturating_sub(1));
-    Some(DM_VOICE_ID_PRESETS[bounded].0.to_string())
+    let index = (js_sys::Math::random() * values.len() as f64).floor() as usize;
+    let bounded = index.min(values.len().saturating_sub(1));
+    values.get(bounded).cloned()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rebuild_select_options(
+    doc: &web_sys::Document,
+    select_id: &str,
+    options: &[(String, String)],
+    include_random: bool,
+) {
+    use wasm_bindgen::JsCast;
+
+    let Some(select) = doc
+        .get_element_by_id(select_id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+    else {
+        return;
+    };
+
+    select.set_inner_html("");
+
+    let mut append_option = |value: &str, label: &str| {
+        let Ok(option) = doc.create_element("option") else {
+            return;
+        };
+        let Ok(option) = option.dyn_into::<web_sys::HtmlOptionElement>() else {
+            return;
+        };
+        option.set_value(value);
+        option.set_text(label);
+        let _ = select.append_child(&option);
+    };
+
+    append_option("", "자동 (프록시 기본값)");
+    if include_random {
+        append_option(DM_VOICE_RANDOM_PRESET_VALUE, DM_VOICE_RANDOM_PRESET_LABEL);
+    }
+    for (value, label) in options {
+        append_option(value, label);
+    }
+    append_option(DM_VOICE_CUSTOM_VALUE, "직접 입력");
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -788,6 +878,100 @@ fn persist_storage_value(key: &str, value: Option<String>) {
             let _ = storage.remove_item(key);
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn storage_value(key: &str) -> Option<String> {
+    let win = web_sys::window()?;
+    let storage = win.local_storage().ok()??;
+    storage.get_item(key).ok()?
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_runtime_voice_config(doc: &web_sys::Document, config: RuntimeVoiceConfigResponse) {
+    let Some(tts) = config.tts else {
+        return;
+    };
+
+    if let Some(models) = tts.available_models.as_ref() {
+        let model_options: Vec<(String, String)> = models
+            .iter()
+            .filter_map(|value| normalize_optional(value).map(|v| (v.clone(), v)))
+            .collect();
+        if !model_options.is_empty() {
+            rebuild_select_options(doc, DM_VOICE_MODEL_SELECT_ID, &model_options, false);
+        }
+    }
+
+    if let Some(voices) = tts.available_voices.as_ref() {
+        let voice_options: Vec<(String, String)> = voices
+            .iter()
+            .filter_map(|value| normalize_optional(value).map(|v| (v.clone(), v)))
+            .collect();
+        if !voice_options.is_empty() {
+            rebuild_select_options(doc, DM_VOICE_ID_SELECT_ID, &voice_options, true);
+        }
+    }
+
+    if storage_value(STORAGE_DM_VOICE_PROXY_URL).is_none() {
+        persist_storage_value(STORAGE_DM_VOICE_PROXY_URL, tts.preview_url);
+    }
+    if storage_value(STORAGE_DM_VOICE_MODEL).is_none() {
+        persist_storage_value(STORAGE_DM_VOICE_MODEL, tts.default_model);
+    }
+    if storage_value(STORAGE_DM_VOICE_ID).is_none() {
+        persist_storage_value(STORAGE_DM_VOICE_ID, tts.default_voice);
+    }
+
+    hydrate_dm_voice_controls(doc);
+    sync_custom_field_visibility(
+        doc,
+        DM_VOICE_MODEL_SELECT_ID,
+        DM_VOICE_MODEL_CUSTOM_WRAP_ID,
+        DM_VOICE_MODEL_CUSTOM_INPUT_ID,
+    );
+    sync_custom_field_visibility(
+        doc,
+        DM_VOICE_ID_SELECT_ID,
+        DM_VOICE_ID_CUSTOM_WRAP_ID,
+        DM_VOICE_ID_CUSTOM_INPUT_ID,
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn fetch_runtime_voice_config(doc: web_sys::Document) {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    wasm_bindgen_futures::spawn_local(async move {
+        let Some(win) = web_sys::window() else {
+            return;
+        };
+        let Ok(resp_value) =
+            JsFuture::from(win.fetch_with_str("/api/v1/voice/config")).await
+        else {
+            return;
+        };
+        let Ok(response) = resp_value.dyn_into::<web_sys::Response>() else {
+            return;
+        };
+        if !response.ok() {
+            return;
+        }
+        let Ok(text_promise) = response.text() else {
+            return;
+        };
+        let Ok(text_value) = JsFuture::from(text_promise).await else {
+            return;
+        };
+        let Some(text) = text_value.as_string() else {
+            return;
+        };
+        let Ok(config) = serde_json::from_str::<RuntimeVoiceConfigResponse>(&text) else {
+            return;
+        };
+        apply_runtime_voice_config(&doc, config);
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -817,7 +1001,6 @@ fn hydrate_dm_voice_controls(doc: &web_sys::Document) {
         DM_VOICE_MODEL_CUSTOM_WRAP_ID,
         DM_VOICE_MODEL_CUSTOM_INPUT_ID,
         resolve_dm_voice_model(),
-        is_model_preset,
     );
     hydrate_preset_select(
         doc,
@@ -825,7 +1008,6 @@ fn hydrate_dm_voice_controls(doc: &web_sys::Document) {
         DM_VOICE_ID_CUSTOM_WRAP_ID,
         DM_VOICE_ID_CUSTOM_INPUT_ID,
         resolve_dm_voice_id(),
-        is_voice_id_preset,
     );
 }
 
@@ -1038,7 +1220,7 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
                     &doc,
                     "status-info",
                     &format!(
-                        "ElevenLabs 미리듣기 요청 전송 (model: {}, voice_id: {}, tone: {})",
+                        "Voice 미리듣기 요청 전송 (model: {}, voice: {}, tone: {})",
                         model_label,
                         voice_label,
                         dm_voice_tone_label(tone)
@@ -1111,6 +1293,7 @@ fn bind_dm_voice_controls_impl() {
         "status-info",
         "DM 음성은 세션 진행 중일 때만 재생됩니다.",
     );
+    fetch_runtime_voice_config(doc);
 }
 
 #[cfg(target_arch = "wasm32")]

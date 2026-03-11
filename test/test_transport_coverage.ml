@@ -426,31 +426,27 @@ let test_rest_tool_to_endpoint_tasks () =
 let test_rest_tool_to_endpoint_add_task () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_add_task" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
-  check string "path" "/api/v1/tasks" path
+  check string "path" "/mcp" path
 
 let test_rest_tool_to_endpoint_claim () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_claim" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
-  check bool "has task_id" true
-    (try let _ = Str.search_forward (Str.regexp "task_id") path 0 in true
-     with Not_found -> false)
+  check string "path" "/mcp" path
 
 let test_rest_tool_to_endpoint_join () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_join" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
-  check string "path" "/api/v1/agents" path
+  check string "path" "/mcp" path
 
 let test_rest_tool_to_endpoint_leave () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_leave" in
-  check string "method" "DELETE" (Transport.Rest.method_to_string m);
-  check bool "has agent_name" true
-    (try let _ = Str.search_forward (Str.regexp "agent_name") path 0 in true
-     with Not_found -> false)
+  check string "method" "POST" (Transport.Rest.method_to_string m);
+  check string "path" "/mcp" path
 
 let test_rest_tool_to_endpoint_broadcast () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_broadcast" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
-  check string "path" "/api/v1/messages" path
+  check string "path" "/api/v1/broadcast" path
 
 let test_rest_tool_to_endpoint_agent_card () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_agent_card" in
@@ -460,9 +456,7 @@ let test_rest_tool_to_endpoint_agent_card () =
 let test_rest_tool_to_endpoint_unknown () =
   let (m, path) = Transport.Rest.tool_to_endpoint "unknown_tool" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
-  check bool "has unknown" true
-    (try let _ = Str.search_forward (Str.regexp "unknown_tool") path 0 in true
-     with Not_found -> false)
+  check string "path" "/mcp" path
 
 let test_rest_parse_request_status () =
   let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/api/v1/status" ~query_params:[] ~body:"" in
@@ -502,13 +496,13 @@ let test_rest_parse_request_with_body () =
 let test_rest_parse_request_broadcast () =
   (* Test /broadcast endpoint for autocov compatibility *)
   let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/broadcast" ~query_params:[] ~body:"{\"agent_name\":\"test\",\"message\":\"hello\"}" in
-  check bool "parsed" true (req.method_name <> "");
+  check string "method_name" "masc_broadcast" req.method_name;
   check bool "has params" true (req.params <> `Null)
 
 let test_rest_parse_request_api_broadcast () =
   (* Test /api/v1/broadcast RESTful endpoint *)
   let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/api/v1/broadcast" ~query_params:[] ~body:"{\"agent_name\":\"test\",\"message\":\"hello\"}" in
-  check bool "parsed" true (req.method_name <> "");
+  check string "method_name" "masc_broadcast" req.method_name;
   check bool "has params" true (req.params <> `Null)
 
 let test_rest_parse_request_root () =
@@ -524,6 +518,55 @@ let test_rest_generate_openapi_paths () =
   check bool "has join" true
     (try let _ = Str.search_forward (Str.regexp "masc_join") json_str 0 in true
      with Not_found -> false)
+
+let test_rest_generate_openapi_document () =
+  let open Yojson.Safe.Util in
+  let doc = Transport.Rest.generate_openapi_document () in
+  check string "openapi version" "3.1.0" (doc |> member "openapi" |> to_string);
+  check string "info.version matches repo version" Masc_mcp.Version.version
+    (doc |> member "info" |> member "version" |> to_string);
+  let mcp_post = doc |> member "paths" |> member "/mcp" |> member "post" in
+  check string "mcp operation id" "mcp_tools_call"
+    (mcp_post |> member "operationId" |> to_string);
+  let operations = mcp_post |> member "x-mcp-operations" |> to_list in
+  let status_entry =
+    operations
+    |> List.find (fun row ->
+           row |> member "operationId" |> to_string = "masc_status")
+  in
+  check bool "status summary non-empty" true
+    (String.length (status_entry |> member "summary" |> to_string) > 0);
+  let sdk_aliases =
+    status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list
+  in
+  check bool "has sdk alias masc_room_status" true
+    (List.exists
+       (fun row -> row |> member "name" |> to_string = "masc_room_status")
+       sdk_aliases);
+  let add_task_entry =
+    operations
+    |> List.find (fun row ->
+           row |> member "operationId" |> to_string = "masc_add_task")
+  in
+  check int "add_task has no fake rest binding"
+    0
+    (add_task_entry |> member "x-rest-bindings" |> to_list |> List.length);
+  let broadcast_entry =
+    operations
+    |> List.find (fun row ->
+           row |> member "operationId" |> to_string = "masc_broadcast")
+  in
+  check bool "broadcast rest binding is real" true
+    (List.exists
+       (fun row ->
+         row |> member "path" |> to_string = "/api/v1/broadcast")
+       (broadcast_entry |> member "x-rest-bindings" |> to_list))
+
+let test_rest_generate_openapi_document_relative_server_fallback () =
+  let open Yojson.Safe.Util in
+  let doc = Transport.Rest.generate_openapi_document ~host:"" ~port:0 () in
+  check string "relative server url when host unknown" "/"
+    (doc |> member "servers" |> index 0 |> member "url" |> to_string)
 
 (* ============================================================
    get_bindings Tests
@@ -807,6 +850,9 @@ let () =
     ];
     "rest.generate_openapi_paths", [
       test_case "paths" `Quick test_rest_generate_openapi_paths;
+      test_case "document" `Quick test_rest_generate_openapi_document;
+      test_case "relative server fallback" `Quick
+        test_rest_generate_openapi_document_relative_server_fallback;
     ];
     "get_bindings", [
       test_case "nonempty" `Quick test_get_bindings_nonempty;

@@ -1,5 +1,9 @@
 (** Llm_direct — Direct LLM API calls without llm-mcp dependency.
 
+    @deprecated Use {!Llm_client.run_prompt_cascade} with
+    {!Lodge_cascade.get_cascade} instead. This module will be removed
+    in a future release.
+
     Provides call_glm, call_claude_cli, call_ollama, call_llama,
     and a unified dispatch.
     Removes the SPOF on llm-mcp (port 8932) for Lodge heartbeat. *)
@@ -16,7 +20,6 @@ let env_set (env : string array) (k : string) (v : string) : string array =
     |> List.filter (fun kv -> not (String.starts_with ~prefix kv))
   in
   Array.of_list ((prefix ^ v) :: rest)
-
 (** Strip [Extra] metadata and hook outputs from LLM responses. *)
 let strip_extra s =
   let s = match String.index_opt s '[' with
@@ -41,7 +44,6 @@ let strip_extra s =
   in
   let filtered = List.filter (fun l -> not (is_hook_line l)) lines in
   String.trim (String.concat "\n" filtered)
-
 (* ---------- GLM (Z.ai) ---------- *)
 
 (** Call GLM API directly via curl.
@@ -83,7 +85,6 @@ let call_glm ?(api_key="") ~model ~prompt ~timeout_sec ~max_chars () =
       then String.sub result 0 max_chars else result in
     strip_extra truncated
   end
-
 (* ---------- Claude CLI ---------- *)
 
 (** Call Claude CLI as subprocess.
@@ -105,7 +106,6 @@ let call_claude_cli ?(api_key="") ~model ~prompt ~timeout_sec ~max_chars () =
     if String.length raw > max_chars then String.sub raw 0 max_chars else raw
   in
   strip_extra truncated
-
 (* ---------- Ollama ---------- *)
 
 (** Call Ollama API directly.
@@ -133,7 +133,6 @@ let call_ollama ~model ~prompt ~timeout_sec ~max_chars () =
   let truncated = if String.length result > max_chars
     then String.sub result 0 max_chars else result in
   strip_extra truncated
-
 (* ---------- Llama (llama.cpp / llama-server) ---------- *)
 
 (** Call llama-server via OpenAI-compatible API.
@@ -166,7 +165,6 @@ let call_llama ~model ~prompt ~timeout_sec ~max_chars () =
   let truncated = if String.length result > max_chars
     then String.sub result 0 max_chars else result in
   strip_extra truncated
-
 (* ---------- Dispatch ---------- *)
 
 (** Unified dispatcher: routes by tool_name to the appropriate backend.

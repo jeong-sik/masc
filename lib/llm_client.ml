@@ -202,7 +202,7 @@ let ollama_glm = {
   provider = Ollama;
   model_id = "glm-4.7-flash";
   max_context = 202000;
-  api_url = "http://127.0.0.1:11434";
+  api_url = Env_config.Ollama.server_url;
   api_key_env = None;
   cost_per_1k_input = 0.0;
   cost_per_1k_output = 0.0;
@@ -212,7 +212,7 @@ let ollama_lfm = {
   provider = Ollama;
   model_id = "LFM2.5-1.2B-Instruct";
   max_context = 128000;
-  api_url = "http://127.0.0.1:11434";
+  api_url = Env_config.Ollama.server_url;
   api_key_env = None;
   cost_per_1k_input = 0.0;
   cost_per_1k_output = 0.0;
@@ -1368,13 +1368,18 @@ let default_local_model_spec () =
       | Error _ -> glm_cloud)
 
 let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec ?ollama_timeout_sec
-    ?(accept = fun _ -> true) ~model_specs ~max_tokens ~prompt () =
+    ?(accept = fun _ -> true) ?system ~model_specs ~max_tokens ~prompt () =
+  let msgs =
+    match system with
+    | Some s -> [ system_msg s; user_msg prompt ]
+    | None -> [ user_msg prompt ]
+  in
   let requests =
     List.map
       (fun (model : model_spec) ->
         ({
            model;
-           messages = [ user_msg prompt ];
+           messages = msgs;
            temperature;
            max_tokens;
            tools = [];

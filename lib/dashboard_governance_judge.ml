@@ -42,16 +42,8 @@ let rec ensure_dir path =
     if parent <> path && not (Sys.file_exists parent) then ensure_dir parent;
     try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 
-let iso_of_unix unix_ts =
-  let tm = Unix.gmtime unix_ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour
-    tm.Unix.tm_min tm.Unix.tm_sec
-
-let parse_iso_opt = function
-  | None -> None
-  | Some raw -> (
-      try Some (Types.parse_iso8601 raw) with _ -> None)
+let iso_of_unix = Dashboard_utils.iso_of_unix
+let parse_iso_opt = Dashboard_utils.parse_iso_opt
 
 let now_iso () = Types.now_iso ()
 let option_to_yojson f = function Some value -> f value | None -> `Null

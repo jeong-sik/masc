@@ -42,6 +42,7 @@
    dashboard_governance
    dashboard_governance_judge
    dashboard_semantics
+   dashboard_utils
    dashboard_execution
    dashboard_mission
    dashboard_proof

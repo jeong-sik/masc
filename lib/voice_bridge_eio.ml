@@ -49,7 +49,7 @@ let default_config = {
     ("claude", "Sarah");      (* BALTHASAR - 차분한 여성 *)
     ("gemini", "Roger");      (* CASPER - 깊은 남성 *)
     ("codex", "George");      (* MELCHIOR - 명확한 남성 *)
-    ("ollama", "Laura");      (* ARTABAN - 따뜻한 여성 *)
+    ("llama", "Laura");       (* ARTABAN - 따뜻한 여성 *)
   ];
 }
 

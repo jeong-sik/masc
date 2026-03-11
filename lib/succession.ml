@@ -268,8 +268,8 @@ let extract_dna ~(working_ctx : Context_manager.working_context)
 let normalize_for_model (msgs : Llm_client.message list)
     (target : Llm_client.model_spec) : Llm_client.message list =
   let msgs = match target.provider with
-    | Llm_client.Ollama ->
-      (* Ollama: merge consecutive system messages, simplify tool messages *)
+    | Llm_client.Llama ->
+      (* Local llama runtimes: merge consecutive system messages, simplify tool messages *)
       List.map (fun (m : Llm_client.message) ->
         match m.role with
         | Llm_client.Tool ->

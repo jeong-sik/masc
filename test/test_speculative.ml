@@ -33,10 +33,10 @@ let run_test name f =
 
 (** Dummy model_spec for testing (no real LLM calls). *)
 let dummy_model : Llm_client.model_spec = {
-  provider = Ollama;
+  provider = Llm_client.Llama;
   model_id = "test-fast-model";
   max_context = 4096;
-  api_url = "http://localhost:11434";
+  api_url = "http://localhost:8085";
   api_key_env = None;
   cost_per_1k_input = 0.001;
   cost_per_1k_output = 0.002;

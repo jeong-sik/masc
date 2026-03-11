@@ -7,7 +7,7 @@ let test_model_type_construction () =
   let _ = Llm_client_eio.Gemini in
   let _ = Llm_client_eio.Claude in
   let _ = Llm_client_eio.Codex in
-  let _ = Llm_client_eio.Ollama "qwen3" in
+  let _ = Llm_client_eio.Llama "qwen3" in
   Alcotest.(check pass) "model variants" () ()
 
 let test_response_type () =
@@ -36,7 +36,7 @@ let test_model_to_string () =
   Alcotest.(check string) "gemini" "gemini" (Llm_client_eio.model_to_string Llm_client_eio.Gemini);
   Alcotest.(check string) "claude" "claude-cli" (Llm_client_eio.model_to_string Llm_client_eio.Claude);
   Alcotest.(check string) "codex" "codex" (Llm_client_eio.model_to_string Llm_client_eio.Codex);
-  Alcotest.(check string) "ollama" "ollama:qwen3" (Llm_client_eio.model_to_string (Llm_client_eio.Ollama "qwen3"))
+  Alcotest.(check string) "llama" "llama:qwen3" (Llm_client_eio.model_to_string (Llm_client_eio.Llama "qwen3"))
 
 let contains s sub =
   try

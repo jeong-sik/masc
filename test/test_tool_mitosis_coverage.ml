@@ -117,6 +117,32 @@ let test_dispatch_mitosis_prepare () =
   | Some (success, _) -> check bool "succeeds" true success
   | None -> fail "expected Some"
 
+let test_dispatch_mitosis_handoff_rejects_bare_ollama_target () =
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [
+        ("context_ratio", `Float 0.9);
+        ("full_context", `String "test context");
+        ("target_agent", `String "ollama");
+        ("async", `Bool false);
+        ("verify", `Bool false);
+      ]
+  in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (false, result) ->
+      check bool "migration message" true
+        (try
+           let _ =
+             Str.search_forward
+               (Str.regexp_string "ollama:<model>")
+               result 0
+           in
+           true
+         with Not_found -> false)
+  | Some (true, _) -> fail "expected bare ollama target to be rejected"
+  | None -> fail "expected Some"
+
 (* Note: mitosis_divide is not tested here as it involves spawning
    which requires external processes *)
 
@@ -995,6 +1021,8 @@ let () =
       test_case "mitosis_check" `Quick test_dispatch_mitosis_check;
       test_case "mitosis_record" `Quick test_dispatch_mitosis_record;
       test_case "mitosis_prepare" `Quick test_dispatch_mitosis_prepare;
+      test_case "mitosis_handoff rejects bare ollama target" `Quick
+        test_dispatch_mitosis_handoff_rejects_bare_ollama_target;
       test_case "unknown" `Quick test_dispatch_unknown_tool;
     ];
     "context_ratio_validation", [

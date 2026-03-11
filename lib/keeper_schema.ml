@@ -359,10 +359,6 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
           ("type", `String "number");
           ("description", `String "Optional: overall cascade timeout (sec) for this keeper message call");
         ]);
-        ("ollama_timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Optional: override Ollama timeout (sec) for this keeper message call");
-        ]);
         ("no_skill_route", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Optional: do not emit SKILL/SKILL_REASON headers in reply");

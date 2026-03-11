@@ -1,6 +1,7 @@
 // MASC Dashboard — Typed API client
 // All fetch calls go through this module for consistent auth and typing
 
+import { isRecord } from './components/common/normalize'
 import type {
   DashboardData,
   DashboardExecutionResponse,
@@ -813,10 +814,8 @@ function parseSessionOutcomeFromEvents(
   return parseSessionOutcomePayload(isRecord(latest.payload) ? latest.payload : {})
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
+// Local helpers below return fallback values (not undefined) — intentionally
+// separate from common/normalize.ts which returns T | undefined.
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }

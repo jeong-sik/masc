@@ -326,6 +326,12 @@ function KeeperWatchRow({ row }: { row: KeeperMonitorRow }) {
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
+<<<<<<< HEAD
+||||||| 9a5c0b1d
+      ${keeper.skill_reason ? html`<div class="monitor-footnote">Skill route: ${keeper.skill_reason}</div>` : null}
+=======
+      ${keeper.skill_reason ? html`<div class="monitor-footnote">스킬 라우팅: ${keeper.skill_reason}</div>` : null}
+>>>>>>> origin/main
     </button>
   `
 }

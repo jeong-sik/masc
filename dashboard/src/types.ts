@@ -11,12 +11,12 @@ export interface Agent {
   context_ratio?: number
   joined_at?: string
   last_seen?: string
-  capabilities?: string[]
+  capabilities: string[]
   emoji?: string
   koreanName?: string
   model?: string
-  traits?: string[]
-  interests?: string[]
+  traits: string[]
+  interests: string[]
   activityLevel?: number
   preferredHours?: number[]
   peakHour?: number

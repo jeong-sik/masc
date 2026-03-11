@@ -4,6 +4,7 @@
 module Time_compat = Time_compat
 
 module Version = Version
+module Build_identity = Build_identity
 module Common = Common
 module Json_util = Json_util
 module Log = Log

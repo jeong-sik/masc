@@ -829,3 +829,8 @@
  (name test_mode_tool_count)
  (modules test_mode_tool_count)
  (libraries masc_mcp alcotest yojson))
+
+(test
+ (name test_build_identity)
+ (modules test_build_identity)
+ (libraries masc_mcp alcotest unix))

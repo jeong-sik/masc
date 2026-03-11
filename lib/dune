@@ -270,6 +270,7 @@
    validation
    circuit_breaker
    audit_log
+   build_identity
   voice_bridge_eio
   voice_bridge
   voice_session_manager

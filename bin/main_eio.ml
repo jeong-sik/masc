@@ -25,6 +25,7 @@ module Dashboard_execution = Masc_mcp.Dashboard_execution
 module Dashboard_mission = Masc_mcp.Dashboard_mission
 module Dashboard_proof = Masc_mcp.Dashboard_proof
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
+module Build_identity = Masc_mcp.Build_identity
 module Tool_audit = Masc_mcp.Tool_audit
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
@@ -5435,6 +5436,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let build = Build_identity.current () in
   `Assoc
     [
       ("room", `String room_state.project);
@@ -5446,7 +5448,8 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
       ("lodge", lodge_json);
-      ("version", `String Masc_mcp.Version.version);
+      ("version", `String build.release_version);
+      ("build", Build_identity.to_yojson build);
     ]
 
 let dashboard_task_assignee (task : Types.task) =
@@ -6237,14 +6240,16 @@ let health_handler _request reqd =
     else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
     else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
   in
+  let build = Build_identity.current () in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let guardian_json = Masc_mcp.Guardian.status_json () in
   let sentinel_json = Masc_mcp.Sentinel.status_json () in
   let health_json = `Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
-    ("version", `String Masc_mcp.Version.version);
-    ("release_version", `String Masc_mcp.Version.version);
+    ("version", `String build.release_version);
+    ("release_version", `String build.release_version);
+    ("build", Build_identity.to_yojson build);
     ( "protocol",
       `Assoc
         [
@@ -8469,13 +8474,16 @@ let run_server ~sw ~env ~port ~base_path =
             else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
             else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
           in
+          let build = Build_identity.current () in
           let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
           let guardian_json = Masc_mcp.Guardian.status_json () in
           let sentinel_json = Masc_mcp.Sentinel.status_json () in
           let health_json = `Assoc [
             ("status", `String "ok");
             ("server", `String "masc-mcp");
-            ("version", `String Masc_mcp.Version.version);
+            ("version", `String build.release_version);
+            ("release_version", `String build.release_version);
+            ("build", Build_identity.to_yojson build);
             ("protocol", `String "h2");
             ("uptime", `String uptime_str);
             ("sse_clients", `Int (Sse.client_count ()));

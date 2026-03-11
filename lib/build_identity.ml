@@ -1,0 +1,93 @@
+(** Build identity for the running server process. *)
+
+type t = {
+  release_version : string;
+  commit : string option;
+  started_at : string;
+  uptime_seconds : int;
+}
+
+let iso8601_of_unix ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let trim_to_option raw =
+  let trimmed = String.trim raw in
+  if trimmed = "" then None else Some trimmed
+
+let rec find_git_root dir =
+  let git_marker = Filename.concat dir ".git" in
+  if Sys.file_exists git_marker then
+    Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_git_root parent
+
+let executable_dir () =
+  let argv0 =
+    if Array.length Sys.argv > 0 then Sys.argv.(0) else Sys.getcwd ()
+  in
+  let path =
+    if Filename.is_relative argv0 then
+      Filename.concat (Sys.getcwd ()) argv0
+    else
+      argv0
+  in
+  Filename.dirname path
+
+let git_probe_from_root repo_root =
+  let cmd =
+    Printf.sprintf "git -C %s rev-parse --short HEAD 2>/dev/null"
+      (Filename.quote repo_root)
+  in
+  let ic = Unix.open_process_in cmd in
+  let output =
+    try In_channel.input_all ic with _ -> ""
+  in
+  match Unix.close_process_in ic with
+  | Unix.WEXITED 0 -> trim_to_option output
+  | _ -> None
+
+let probe_git_commit () =
+  [ Sys.getcwd (); executable_dir () ]
+  |> List.sort_uniq String.compare
+  |> List.find_map (fun dir ->
+         match find_git_root dir with
+         | Some root -> git_probe_from_root root
+         | None -> None)
+
+let resolve_commit ~env_value ~probe =
+  match env_value with
+  | Some raw -> (
+      match trim_to_option raw with
+      | Some commit -> Some commit
+      | None -> probe ())
+  | None -> probe ()
+
+let started_at_unix = Unix.gettimeofday ()
+let started_at_iso = iso8601_of_unix started_at_unix
+
+let commit =
+  lazy
+    (resolve_commit
+       ~env_value:(Sys.getenv_opt "MASC_BUILD_GIT_COMMIT")
+       ~probe:probe_git_commit)
+
+let current () =
+  {
+    release_version = Version.version;
+    commit = Lazy.force commit;
+    started_at = started_at_iso;
+    uptime_seconds = max 0 (int_of_float (Unix.gettimeofday () -. started_at_unix));
+  }
+
+let to_yojson snapshot =
+  `Assoc
+    [
+      ("release_version", `String snapshot.release_version);
+      ("commit", Option.fold ~none:`Null ~some:(fun value -> `String value) snapshot.commit);
+      ("started_at", `String snapshot.started_at);
+      ("uptime_seconds", `Int snapshot.uptime_seconds);
+    ]

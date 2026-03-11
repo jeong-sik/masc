@@ -89,12 +89,11 @@ let mission_briefing_models () =
     | None ->
         let glm = has_nonempty_env "ZAI_API_KEY" in
         let gemini = has_nonempty_env "GEMINI_API_KEY" in
-        match (glm, gemini) with
-        | true, true ->
-            [ "ollama:glm-4.7-flash"; "glm:glm-4.7-flash"; "gemini:gemini-2.5-flash" ]
-        | true, false -> [ "ollama:glm-4.7-flash"; "glm:glm-4.7-flash" ]
-        | false, true -> [ "ollama:glm-4.7-flash"; "gemini:gemini-2.5-flash" ]
-        | false, false -> [ "ollama:glm-4.7-flash" ]
+        let cloud =
+          (if glm then [ "glm:glm-4.7-flash" ] else [])
+          @ (if gemini then [ "gemini:gemini-2.5-flash" ] else [])
+        in
+        [ "llama:qwen3.5-35b-a3b" ] @ cloud @ [ "ollama:glm-4.7-flash" ]
   in
   Llm_client.available_model_specs_of_strings defaults
 

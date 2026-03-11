@@ -432,7 +432,7 @@ export function Planning() {
       <${TaskBacklog} />
 
       <!-- Step 3: Goals in collapsible details -->
-      <details class="overview-section-collapsible" ...${hasGoals ? { open: true } : {}}>
+      <details class="overview-section-collapsible" open=${hasGoals}>
         <summary>
           Goal Pipeline
           <span class="monitor-pill">${goals.value.length}</span>
@@ -459,7 +459,7 @@ export function Planning() {
       </details>
 
       <!-- MDAL Loops in collapsible details -->
-      <details class="overview-section-collapsible" ...${hasLoops ? { open: true } : {}}>
+      <details class="overview-section-collapsible" open=${hasLoops}>
         <summary>
           MDAL Loops
           <span class="monitor-pill">${loops.length}</span>

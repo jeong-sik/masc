@@ -37,6 +37,8 @@ let resolve_provider name =
   | "sonnet" -> Some (Provider.anthropic_sonnet ())
   | "haiku" -> Some (Provider.anthropic_haiku ())
   | "opus" -> Some (Provider.anthropic_opus ())
+  | "ollama" -> Some (Provider.ollama ())
+  | "openrouter" -> Some (Provider.openrouter ())
   | _ -> None
 
 let parse_args argv =

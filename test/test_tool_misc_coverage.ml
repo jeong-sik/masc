@@ -296,7 +296,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           assert success;
           let json = parse_json result in
           assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "keeper_policy");
-          (match Tool_keeper.read_meta ctx.config "admin-keeper" with
+          (match Keeper_types.read_meta ctx.config "admin-keeper" with
           | Ok (Some meta) ->
               assert (meta.autonomy_level = "l4_autonomous" || meta.autonomy_level = "L4_Autonomous");
               assert (meta.policy_action_budget = "board")

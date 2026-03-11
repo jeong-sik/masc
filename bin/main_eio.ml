@@ -6703,6 +6703,20 @@ let make_routes ~port ~host ~sw ~clock =
        with_public_read (fun _state _req reqd ->
          Http.Response.json (Masc_mcp.Credits_dashboard.json_api ()) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/openapi.json" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let host_header = Httpun.Headers.get req.Httpun.Request.headers "host" in
+         let (resolved_host, resolved_port) = match host_header with
+           | Some header -> parse_host_port (Some header) host port
+           | None -> ("", 0)
+         in
+         let json =
+           Masc_mcp.Transport.Rest.generate_openapi_document
+             ~host:resolved_host ~port:resolved_port ()
+           |> Yojson.Safe.to_string
+         in
+         Http.Response.json json reqd
+       ) request reqd)
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
   |> Http.Router.get "/static/css/middleware.css"
        (serve_playground_asset "static/css/middleware.css")
@@ -8921,6 +8935,19 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `GET, "/api/v1/credits" ->
           h2_respond_json h2_reqd (Masc_mcp.Credits_dashboard.json_api ()) ~extra_headers:cors
+
+      | `GET, "/api/v1/openapi.json" ->
+          let host_header = get_header_any_case httpun_request.headers "host" in
+          let (resolved_host, resolved_port) = match host_header with
+            | Some header -> parse_host_port (Some header) "127.0.0.1" 8935
+            | None -> ("", 0)
+          in
+          let json =
+            Masc_mcp.Transport.Rest.generate_openapi_document
+              ~host:resolved_host ~port:resolved_port ()
+            |> Yojson.Safe.to_string
+          in
+          h2_respond_json h2_reqd json ~extra_headers:cors
 
       | `GET, "/api/v1/trpg/events" ->
           let state = get_server_state () in

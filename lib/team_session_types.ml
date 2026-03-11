@@ -963,6 +963,36 @@ let event_entry_to_yojson (e : event_entry) =
       ("detail", e.detail);
     ]
 
+let checkpoint_of_yojson (json : Yojson.Safe.t) : (checkpoint, string) result =
+  try
+    Ok
+      {
+        ts = json |> member "ts" |> to_float;
+        ts_iso = json |> member "ts_iso" |> to_string;
+        status =
+          json |> member "status" |> to_string |> status_of_string;
+        elapsed_sec = json |> member "elapsed_sec" |> to_int;
+        remaining_sec = json |> member "remaining_sec" |> to_int;
+        progress_pct = json |> member "progress_pct" |> to_float;
+        done_delta_total = json |> member "done_delta_total" |> to_int;
+        done_delta_by_agent =
+          assoc_int_of_json (json |> member "done_delta_by_agent");
+        active_agents =
+          json |> member "active_agents" |> to_list |> List.map to_string;
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let event_entry_of_yojson (json : Yojson.Safe.t) : (event_entry, string) result =
+  try
+    Ok
+      {
+        ts = json |> member "ts" |> to_float;
+        ts_iso = json |> member "ts_iso" |> to_string;
+        event_type = json |> member "event_type" |> to_string;
+        detail = json |> member "detail";
+      }
+  with exn -> Error (Printexc.to_string exn)
+
 let checkpoint_to_yojson (c : checkpoint) =
   `Assoc
     [

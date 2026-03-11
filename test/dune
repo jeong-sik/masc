@@ -306,6 +306,11 @@
  (libraries masc_mcp alcotest str yojson unix))
 
 (test
+ (name test_swarm_persistence)
+ (modules test_swarm_persistence)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_tool_team_session)
  (modules test_tool_team_session)
  (libraries masc_mcp alcotest yojson unix eio eio_main))

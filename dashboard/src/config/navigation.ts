@@ -48,6 +48,13 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     description: '지금 문제, 다음 액션, 운영 포커스를 먼저 보는 기본 랜딩',
   },
   {
+    id: 'proof',
+    label: 'Proof',
+    icon: '\uD83D\uDD0D',
+    group: 'observe',
+    description: '협업, 대화, 도구, backing evidence를 증명 중심으로 읽는 표면',
+  },
+  {
     id: 'execution',
     label: 'Execution',
     icon: '\uD83E\uDD16',

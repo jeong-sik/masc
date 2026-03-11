@@ -211,6 +211,39 @@ let with_test_env f =
     Unix.rmdir tmp_dir;
     raise e
 
+let with_memory_test_env f =
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc_mem_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  Unix.mkdir tmp_dir 0o755;
+  let backend_config : Backend.config = {
+    backend_type = Backend.Memory;
+    base_path = Filename.concat tmp_dir ".masc";
+    postgres_url = None;
+    node_id = "test-node";
+    cluster_name = "default";
+    pubsub_max_messages = 1000;
+  } in
+  let memory_backend =
+    match Backend.MemoryBackend.create backend_config with
+    | Ok backend -> backend
+    | Error e -> failwith (Backend.show_error e)
+  in
+  let config : Room_utils.config = {
+    base_path = tmp_dir;
+    lock_expiry_minutes = 30;
+    backend_config;
+    backend = Room_utils.Memory memory_backend;
+  } in
+  let _ = Room.init config ~agent_name:(Some "claude") in
+  try
+    f config;
+    let _ = Room.reset config in
+    Unix.rmdir tmp_dir
+  with e ->
+    let _ = Room.reset config in
+    Unix.rmdir tmp_dir;
+    raise e
+
 (* --- Task Edge Cases --- *)
 
 let test_complete_without_claim () =
@@ -506,6 +539,47 @@ let test_heartbeat_updates_lastseen () =
     (* Send heartbeat *)
     let result = Room.heartbeat config ~agent_name:"gemini" in
     Alcotest.(check bool) "heartbeat success" true (contains_heartbeat result)
+  )
+
+let test_is_agent_joined_after_default_join () =
+  with_test_env (fun config ->
+    let _ = Room.join config ~agent_name:"gemini" ~capabilities:[] () in
+    let agents : Types.agent list = Room.get_agents_raw config in
+    let gemini_name =
+      match List.find_opt (fun (agent : Types.agent) ->
+        String.length agent.name >= 6 && String.sub agent.name 0 6 = "gemini"
+      ) agents with
+      | Some agent -> agent.name
+      | None -> failwith "expected gemini agent"
+    in
+    Alcotest.(check bool) "joined agent detected" true
+      (Room.is_agent_joined config ~agent_name:gemini_name)
+  )
+
+let test_room_bootstrap_preserves_backend_state () =
+  with_memory_test_env (fun config ->
+    let room_id = "side-room" in
+    Room.ensure_room_bootstrap config room_id;
+    let _ =
+      Room.update_state_in_room config room_id (fun state ->
+        { state with message_seq = 41 })
+    in
+    let backlog =
+      {
+        Types.tasks = [];
+        last_updated = Types.now_iso ();
+        version = 7;
+      }
+    in
+    Room_utils.write_json config (Room.backlog_path_in_room config room_id)
+      (Types.backlog_to_yojson backlog);
+
+    Room.ensure_room_bootstrap config room_id;
+
+    let state = Room.read_state_in_room config room_id in
+    let saved_backlog = Room.read_backlog_in_room config room_id in
+    Alcotest.(check int) "state preserved" 41 state.message_seq;
+    Alcotest.(check int) "backlog preserved" 7 saved_backlog.version
   )
 
 let test_heartbeat_nonexistent_agent () =
@@ -1218,8 +1292,10 @@ let () =
     (* === Heartbeat & Zombie Detection Tests === *)
     "heartbeat", [
       Alcotest.test_case "updates last_seen" `Quick test_heartbeat_updates_lastseen;
+      Alcotest.test_case "default join keeps joined status" `Quick test_is_agent_joined_after_default_join;
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
+      Alcotest.test_case "backend bootstrap preserves room state" `Quick test_room_bootstrap_preserves_backend_state;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;

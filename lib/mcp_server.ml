@@ -292,6 +292,12 @@ let resources : mcp_resource list = [
     description = "List of curated library documents as JSON with full metadata";
     mime_type = "application/json";
   };
+  {
+    uri = "masc://tool-help-index";
+    name = "Tool Help Index";
+    description = "Canonical help index for MCP-exposed MASC tools";
+    mime_type = "text/markdown";
+  };
 ]
 
 let resource_templates : mcp_resource_template list = [
@@ -330,6 +336,12 @@ let resource_templates : mcp_resource_template list = [
     name = "Library Document (JSON)";
     description = "Read a specific library document as JSON with metadata";
     mime_type = "application/json";
+  };
+  {
+    uri_template = "masc://tool-help/{tool_name}";
+    name = "Tool Help";
+    description = "Read canonical help for a specific MCP tool";
+    mime_type = "text/markdown";
   };
 ]
 

@@ -157,6 +157,7 @@ module Rest = struct
     | "masc_who" -> [ (GET, "/api/v1/agents") ]
     | "masc_messages" -> [ (GET, "/api/v1/messages") ]
     | "masc_broadcast" -> [ (POST, "/api/v1/broadcast") ]
+    | "masc_agent_card" -> [ (GET, "/.well-known/agent-card.json") ]
     | "masc_operator_snapshot" -> [ (GET, "/api/v1/operator") ]
     | "masc_operator_digest" -> [ (GET, "/api/v1/operator/digest") ]
     | "masc_operator_action" -> [ (POST, "/api/v1/operator/action") ]
@@ -525,46 +526,13 @@ module Rest = struct
         ("components", `Assoc [ ("schemas", `Assoc components_schemas) ]);
       ]
 
-  (** Map MASC tools to REST endpoints *)
+  (** Compatibility helper. Returns a concrete REST route when one exists;
+      otherwise fall back to the truthful MCP transport entrypoint. *)
   let tool_to_endpoint = function
-    (* Task operations *)
-    | "masc_status" -> (GET, "/api/v1/status")
-    | "masc_tasks" -> (GET, "/api/v1/tasks")
-    | "masc_add_task" -> (POST, "/api/v1/tasks")
-    | "masc_claim" -> (POST, "/api/v1/tasks/{task_id}/claim")
-    | "masc_transition" -> (POST, "/api/v1/tasks/{task_id}/transition")
-    | "masc_done" -> (POST, "/api/v1/tasks/{task_id}/done")
-    | "masc_release" -> (POST, "/api/v1/tasks/{task_id}/release")
-    | "masc_cancel_task" -> (POST, "/api/v1/tasks/{task_id}/cancel")
-    | "masc_task_history" -> (GET, "/api/v1/tasks/{task_id}/history")
-    (* Agent operations *)
-    | "masc_join" -> (POST, "/api/v1/agents")
-    | "masc_leave" -> (DELETE, "/api/v1/agents/{agent_name}")
-    | "masc_who" -> (GET, "/api/v1/agents")
-    | "masc_agents" -> (GET, "/api/v1/agents/detailed")
-    | "masc_agent_update" -> (PATCH, "/api/v1/agents/{agent_name}")
-    (* Messaging *)
-    | "masc_broadcast" -> (POST, "/api/v1/messages")
-    | "masc_messages" -> (GET, "/api/v1/messages")
-    (* Voting *)
-    | "masc_vote_create" -> (POST, "/api/v1/votes")
-    | "masc_vote_cast" -> (POST, "/api/v1/votes/{vote_id}/cast")
-    | "masc_vote_status" -> (GET, "/api/v1/votes/{vote_id}")
-    | "masc_votes" -> (GET, "/api/v1/votes")
-    (* Planning *)
-    | "masc_plan_init" -> (POST, "/api/v1/planning/{task_id}")
-    | "masc_plan_update" -> (PUT, "/api/v1/planning/{task_id}/plan")
-    | "masc_note_add" -> (POST, "/api/v1/planning/{task_id}/notes")
-    | "masc_deliver" -> (PUT, "/api/v1/planning/{task_id}/deliverable")
-    | "masc_plan_get" -> (GET, "/api/v1/planning/{task_id}")
-    (* Agent Card *)
-    | "masc_agent_card" -> (GET, "/.well-known/agent-card.json")
-    (* Worktree *)
-    | "masc_worktree_create" -> (POST, "/api/v1/worktrees")
-    | "masc_worktree_remove" -> (DELETE, "/api/v1/worktrees/{task_id}")
-    | "masc_worktree_list" -> (GET, "/api/v1/worktrees")
-    (* Default *)
-    | tool -> (POST, Printf.sprintf "/api/v1/tools/%s" tool)
+    | operation_id -> (
+        match actual_rest_bindings_for_operation operation_id with
+        | (method_, path) :: _ -> (method_, path)
+        | [] -> (POST, "/mcp"))
 
   (** Parse REST request to internal request *)
   let parse_request ~http_method ~path ~query_params ~body : request =
@@ -574,6 +542,7 @@ module Rest = struct
       | "GET", "/" | "GET", "/api/v1/status" -> "masc_status"
       | "GET", "/api/v1/tasks" -> "masc_tasks"
       | "GET", "/api/v1/agents" -> "masc_who"
+      | "POST", "/api/v1/broadcast" | "POST", "/broadcast" -> "masc_broadcast"
       | "GET", "/.well-known/agent-card.json" -> "masc_agent_card"
       | _, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/tools/" ->
           String.sub p 14 (String.length p - 14)

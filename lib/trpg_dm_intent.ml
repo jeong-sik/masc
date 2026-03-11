@@ -201,12 +201,6 @@ let extract_keyword (text : string) : dm_intent =
 
 (* ── LLM Classification ────────────────────────────────────────────── *)
 
-(** Model specs for DM intent LLM classification.
-    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
-    Override via config/llm_cascade.json key "trpg_intent_models". *)
-let intent_model_specs () =
-  Lodge_cascade.get_cascade ~cascade_name:"trpg_intent" ()
-
 let category_of_string (s : string) : intent_category =
   match String.lowercase_ascii (String.trim s) with
   | "combat_setup" | "combat" -> Combat_setup
@@ -308,15 +302,11 @@ let llm_response_is_valid (resp : Llm_client.completion_response) : bool =
 let extract_with_llm (text : string) : (dm_intent, string) result =
   let prompt = build_classification_prompt text in
   match
-    Llm_client.run_prompt_cascade
-      ~temperature:0.1
-      ~timeout_sec:15
-      ~accept:llm_response_is_valid
-      ~model_specs:(intent_model_specs ())
-      ~max_tokens:200
-      ~prompt ()
+    Lodge_cascade.call ~cascade_name:"trpg_intent" ~prompt
+      ~temperature:0.1 ~timeout_sec:15 ~max_tokens:200
+      ~accept:llm_response_is_valid ()
   with
-  | Ok resp -> parse_llm_intent resp.content
+  | Ok r -> parse_llm_intent r.response
   | Error err -> Error err
 
 (* ── Public API ─────────────────────────────────────────────────────── *)

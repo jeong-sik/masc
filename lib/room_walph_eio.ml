@@ -264,12 +264,6 @@ let get_chain_id_for_preset = function
   | "figma" -> Some "walph-figma"
   | _ -> None
 
-(** Model specs for Walph loop LLM dispatch.
-    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
-    Override via config/llm_cascade.json key "walph_models". *)
-let walph_available_model_specs () =
-  Lodge_cascade.get_cascade ~cascade_name:"walph" ()
-
 let walph_response_is_valid (resp : Llm_client.completion_response) =
   let content = String.trim resp.content in
   let lower = String.lowercase_ascii content in
@@ -281,12 +275,10 @@ let walph_response_is_valid (resp : Llm_client.completion_response) =
 
 let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec ~max_chars () =
   match
-    Llm_client.run_prompt_cascade ~timeout_sec
-      ~accept:walph_response_is_valid
-      ~model_specs:(walph_available_model_specs ()) ~max_tokens:max_chars
-      ~prompt ()
+    Lodge_cascade.call ~cascade_name:"walph" ~prompt ~timeout_sec
+      ~max_tokens:max_chars ~accept:walph_response_is_valid ()
   with
-  | Ok resp -> resp.content
+  | Ok r -> r.response
   | Error err -> failwith err
 
 (** {1 Main Loop} *)

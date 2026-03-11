@@ -8,6 +8,13 @@
 
 type position = Support | Oppose | Neutral
 
+type context_ref = {
+  board_post_id: string option;
+  task_id: string option;
+  operation_id: string option;
+  team_session_id: string option;
+}
+
 type argument = {
   agent: string;
   position: position;
@@ -16,6 +23,7 @@ type argument = {
   reply_to: int option;  (** Index of argument this is replying to *)
   mentions: string list; (** Agents mentioned/addressed *)
   archetype: string option; (** MAGI archetype: melchior/balthasar/casper/athena *)
+  created_at: float option;
 }
 
 type debate_status = Open | Closed | Pending
@@ -25,7 +33,9 @@ type debate = {
   topic: string;
   status: debate_status;
   arguments: argument list;
+  context: context_ref;
   created_at: float;
+  closed_at: float option;
 }
 
 (** {1 Helper Functions} *)
@@ -81,6 +91,45 @@ let status_of_string = function
   | "pending" -> Ok Pending
   | s -> Error (Printf.sprintf "Unknown status: %s" s)
 
+let empty_context_ref =
+  {
+    board_post_id = None;
+    task_id = None;
+    operation_id = None;
+    team_session_id = None;
+  }
+
+let context_ref_to_yojson (ctx : context_ref) =
+  let fields =
+    [
+      ("board_post_id", ctx.board_post_id);
+      ("task_id", ctx.task_id);
+      ("operation_id", ctx.operation_id);
+      ("team_session_id", ctx.team_session_id);
+    ]
+    |> List.filter_map (fun (key, value) ->
+           match value with
+           | Some text when String.trim text <> "" -> Some (key, `String (String.trim text))
+           | _ -> None)
+  in
+  `Assoc fields
+
+let context_ref_of_yojson json =
+  let open Yojson.Safe.Util in
+  let get_opt key =
+    match json |> member key with
+    | `String value ->
+        let trimmed = String.trim value in
+        if trimmed = "" then None else Some trimmed
+    | _ -> None
+  in
+  {
+    board_post_id = get_opt "board_post_id";
+    task_id = get_opt "task_id";
+    operation_id = get_opt "operation_id";
+    team_session_id = get_opt "team_session_id";
+  }
+
 let argument_to_yojson (a : argument) : Yojson.Safe.t =
   let base = [
     ("agent", `String a.agent);
@@ -97,7 +146,11 @@ let argument_to_yojson (a : argument) : Yojson.Safe.t =
     | None -> with_reply
     | Some arch -> ("archetype", `String arch) :: with_reply
   in
-  `Assoc with_archetype
+  let with_timestamp = match a.created_at with
+    | Some ts -> ("created_at", `Float ts) :: with_archetype
+    | None -> with_archetype
+  in
+  `Assoc with_timestamp
 
 let argument_of_yojson (json : Yojson.Safe.t) : (argument, string) result =
   let open Yojson.Safe.Util in
@@ -121,18 +174,36 @@ let argument_of_yojson (json : Yojson.Safe.t) : (argument, string) result =
           | `String s -> Some s
           | _ -> None
         in
-        Ok { agent; position; content; evidence; reply_to; mentions; archetype }
+        let created_at = match json |> member "created_at" with
+          | `Float ts -> Some ts
+          | `Int ts -> Some (float_of_int ts)
+          | _ -> None
+        in
+        Ok { agent; position; content; evidence; reply_to; mentions; archetype; created_at }
   with e ->
     Error (Printf.sprintf "Failed to parse argument: %s" (Printexc.to_string e))
 
 let debate_to_yojson (d : debate) : Yojson.Safe.t =
-  `Assoc [
-    ("id", `String d.id);
-    ("topic", `String d.topic);
-    ("status", `String (status_to_string d.status));
-    ("arguments", `List (List.map argument_to_yojson d.arguments));
-    ("created_at", `Float d.created_at);
-  ]
+  let base =
+    [
+      ("id", `String d.id);
+      ("topic", `String d.topic);
+      ("status", `String (status_to_string d.status));
+      ("arguments", `List (List.map argument_to_yojson d.arguments));
+      ("created_at", `Float d.created_at);
+    ]
+  in
+  let with_context =
+    match context_ref_to_yojson d.context with
+    | `Assoc [] -> base
+    | json -> ("context", json) :: base
+  in
+  let with_closed_at =
+    match d.closed_at with
+    | Some ts -> ("closed_at", `Float ts) :: with_context
+    | None -> with_context
+  in
+  `Assoc with_closed_at
 
 let debate_of_yojson (json : Yojson.Safe.t) : (debate, string) result =
   let open Yojson.Safe.Util in
@@ -154,7 +225,17 @@ let debate_of_yojson (json : Yojson.Safe.t) : (debate, string) result =
          | Error e -> Error e
          | Ok arguments ->
              let created_at = json |> member "created_at" |> to_float in
-             Ok { id; topic; status; arguments; created_at })
+             let context =
+               match json |> member "context" with
+               | `Assoc _ as ctx -> context_ref_of_yojson ctx
+               | _ -> empty_context_ref
+             in
+             let closed_at = match json |> member "closed_at" with
+               | `Float ts -> Some ts
+               | `Int ts -> Some (float_of_int ts)
+               | _ -> None
+             in
+             Ok { id; topic; status; arguments; context; created_at; closed_at })
   with e ->
     Error (Printf.sprintf "Failed to parse debate: %s" (Printexc.to_string e))
 
@@ -214,7 +295,8 @@ let read_json path =
 
 (** Start a new debate on a topic.
     Notifies relevant agents via the notify callback. *)
-let start_debate config ~topic ?(notify_agents=[]) ~notify_fn () : (debate, string) result =
+let start_debate config ~topic ?(context = empty_context_ref) ?(notify_agents=[]) ~notify_fn ()
+    : (debate, string) result =
   ensure_dirs config;
   let id = generate_debate_id () in
   let debate : debate = {
@@ -222,7 +304,9 @@ let start_debate config ~topic ?(notify_agents=[]) ~notify_fn () : (debate, stri
     topic;
     status = Open;
     arguments = [];
+    context;
     created_at = Time_compat.now ();
+    closed_at = None;
   } in
   let path = debate_path config id in
   try
@@ -258,7 +342,18 @@ let add_argument config ~debate_id ~agent ~position ~content
       if debate.status <> Open then
         Error (Printf.sprintf "Cannot add argument: debate %s is not open" debate_id)
       else begin
-        let arg : argument = { agent; position; content; evidence; reply_to; mentions; archetype } in
+        let arg : argument =
+          {
+            agent;
+            position;
+            content;
+            evidence;
+            reply_to;
+            mentions;
+            archetype;
+            created_at = Some (Time_compat.now ());
+          }
+        in
         let arg_idx = List.length debate.arguments in
         let updated = { debate with arguments = debate.arguments @ [arg] } in
         try
@@ -321,7 +416,7 @@ let close_debate config ~debate_id : (debate, string) result =
       if debate.status = Closed then
         Error (Printf.sprintf "Debate %s is already closed" debate_id)
       else begin
-        let updated = { debate with status = Closed } in
+        let updated = { debate with status = Closed; closed_at = Some (Time_compat.now ()) } in
         try
           save_debate config updated;
           Ok updated

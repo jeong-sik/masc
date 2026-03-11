@@ -38,6 +38,13 @@ type voting_state =
   | Cancelled
 [@@deriving show, eq]
 
+type context_ref = {
+  board_post_id: string option;
+  task_id: string option;
+  operation_id: string option;
+  team_session_id: string option;
+}
+
 let voting_state_to_yojson = function
   | Open -> `String "open"
   | Closed -> `String "closed"
@@ -54,6 +61,7 @@ type session = {
   state: voting_state;
   created_at: float;
   closed_at: float option;
+  context: context_ref;
 }
 
 (** Voting error types *)
@@ -136,6 +144,45 @@ let voting_state_of_yojson = function
   | `String "cancelled" -> Ok Cancelled
   | j -> Error (Printf.sprintf "Unknown voting_state: %s" (Yojson.Safe.to_string j))
 
+let empty_context_ref =
+  {
+    board_post_id = None;
+    task_id = None;
+    operation_id = None;
+    team_session_id = None;
+  }
+
+let context_ref_to_yojson (ctx : context_ref) =
+  let fields =
+    [
+      ("board_post_id", ctx.board_post_id);
+      ("task_id", ctx.task_id);
+      ("operation_id", ctx.operation_id);
+      ("team_session_id", ctx.team_session_id);
+    ]
+    |> List.filter_map (fun (key, value) ->
+           match value with
+           | Some text when String.trim text <> "" -> Some (key, `String (String.trim text))
+           | _ -> None)
+  in
+  `Assoc fields
+
+let context_ref_of_yojson json =
+  let open Yojson.Safe.Util in
+  let get_opt key =
+    match json |> member key with
+    | `String value ->
+        let trimmed = String.trim value in
+        if trimmed = "" then None else Some trimmed
+    | _ -> None
+  in
+  {
+    board_post_id = get_opt "board_post_id";
+    task_id = get_opt "task_id";
+    operation_id = get_opt "operation_id";
+    team_session_id = get_opt "team_session_id";
+  }
+
 let vote_to_yojson (v : vote) : Yojson.Safe.t =
   let base = [
     ("agent", `String v.agent);
@@ -170,17 +217,25 @@ let vote_of_yojson (json : Yojson.Safe.t) : (vote, string) result =
     Error (Printf.sprintf "Failed to parse vote: %s" (Printexc.to_string e))
 
 let full_session_to_yojson (s : session) : Yojson.Safe.t =
-  `Assoc [
-    ("id", `String s.id);
-    ("topic", `String s.topic);
-    ("initiator", `String s.initiator);
-    ("votes", `List (List.map vote_to_yojson s.votes));
-    ("quorum", `Int s.quorum);
-    ("threshold", `Float s.threshold);
-    ("state", voting_state_to_yojson s.state);
-    ("created_at", `Float s.created_at);
-    ("closed_at", match s.closed_at with Some t -> `Float t | None -> `Null);
-  ]
+  let base =
+    [
+      ("id", `String s.id);
+      ("topic", `String s.topic);
+      ("initiator", `String s.initiator);
+      ("votes", `List (List.map vote_to_yojson s.votes));
+      ("quorum", `Int s.quorum);
+      ("threshold", `Float s.threshold);
+      ("state", voting_state_to_yojson s.state);
+      ("created_at", `Float s.created_at);
+      ("closed_at", match s.closed_at with Some t -> `Float t | None -> `Null);
+    ]
+  in
+  let with_context =
+    match context_ref_to_yojson s.context with
+    | `Assoc [] -> base
+    | json -> ("context", json) :: base
+  in
+  `Assoc with_context
 
 let full_session_of_yojson (json : Yojson.Safe.t) : (session, string) result =
   let open Yojson.Safe.Util in
@@ -210,7 +265,12 @@ let full_session_of_yojson (json : Yojson.Safe.t) : (session, string) result =
         (match collect_votes [] votes_json with
          | Error e -> Error e
          | Ok votes ->
-             Ok { id; topic; initiator; votes; quorum; threshold; state; created_at; closed_at })
+             let context =
+               match json |> member "context" with
+               | `Assoc _ as ctx -> context_ref_of_yojson ctx
+               | _ -> empty_context_ref
+             in
+             Ok { id; topic; initiator; votes; quorum; threshold; state; created_at; closed_at; context })
   with e ->
     Error (Printf.sprintf "Failed to parse session: %s" (Printexc.to_string e))
 
@@ -257,7 +317,8 @@ let generate_id () =
   Uuidm.to_string uuid
 
 (** Start a new voting session *)
-let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5) () : (session, error) Result.t =
+let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5)
+    ?(context = empty_context_ref) () : (session, error) Result.t =
   if threshold < 0.0 || threshold > 1.0 then
     Error (Invalid_threshold threshold)
   else
@@ -271,6 +332,7 @@ let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5) () : (sessio
       state = Open;
       created_at = Time_compat.now ();
       closed_at = None;
+      context;
     } in
     Hashtbl.replace sessions session.id session;
     save_session session;
@@ -402,6 +464,9 @@ let list_active_sessions () : session list =
   |> Seq.filter (fun s -> s.state = Open)
   |> List.of_seq
 
+let list_all_sessions () : session list =
+  Hashtbl.to_seq_values sessions |> List.of_seq
+
 (** Clear all sessions (for testing) *)
 let clear_sessions () =
   Hashtbl.clear sessions
@@ -409,23 +474,31 @@ let clear_sessions () =
 (** Session to JSON *)
 let session_to_json session : Yojson.Safe.t =
   let approves, rejects, abstains = tally_votes session in
-  `Assoc [
-    ("id", `String session.id);
-    ("topic", `String session.topic);
-    ("initiator", `String session.initiator);
-    ("quorum", `Int session.quorum);
-    ("threshold", `Float session.threshold);
-    ("state", voting_state_to_yojson session.state);
-    ("vote_count", `Int (List.length session.votes));
-    ("approves", `Int approves);
-    ("rejects", `Int rejects);
-    ("abstains", `Int abstains);
-    ("quorum_met", `Bool (quorum_met session));
-    ("created_at", `Float session.created_at);
-    ("closed_at", match session.closed_at with
-      | Some t -> `Float t
-      | None -> `Null);
-  ]
+  let base =
+    [
+      ("id", `String session.id);
+      ("topic", `String session.topic);
+      ("initiator", `String session.initiator);
+      ("quorum", `Int session.quorum);
+      ("threshold", `Float session.threshold);
+      ("state", voting_state_to_yojson session.state);
+      ("vote_count", `Int (List.length session.votes));
+      ("approves", `Int approves);
+      ("rejects", `Int rejects);
+      ("abstains", `Int abstains);
+      ("quorum_met", `Bool (quorum_met session));
+      ("created_at", `Float session.created_at);
+      ("closed_at", match session.closed_at with
+        | Some t -> `Float t
+        | None -> `Null);
+    ]
+  in
+  let with_context =
+    match context_ref_to_yojson session.context with
+    | `Assoc [] -> base
+    | json -> ("context", json) :: base
+  in
+  `Assoc with_context
 
 (** Result to JSON *)
 let voting_result_to_json = function

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.82.0] - 2026-03-11
+
+### Changed
+- **Server State Record Threading** — `net` threaded through `server_state` record, removing global references (P3a) (#768)
+- **Lodge Cascade Unification** — 8 call sites migrated to `Lodge_cascade.call` for consistent LLM dispatch (#766)
+- **Mission Briefing Determinism** — briefing generation no longer depends on non-deterministic inputs (#764)
+- **Execution Surface** — session-first diagnostics with actor parameter passthrough (#757)
+
+### Fixed
+- Gardener provenance derived from actual decision path instead of config flag (#765)
+- Execution uses passed `actor` parameter instead of hardcoded `"dashboard"` (#770)
+
 ## [2.81.1] - 2026-03-11
 
 ### Fixed

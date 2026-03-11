@@ -795,11 +795,29 @@ let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
 
 (** End a multi-agent voice conference *)
 let end_conference ~sw ~clock ~net ~agent_ids () =
-  let results = List.map (fun agent_id ->
-    end_voice_session ~sw ~clock ~net ~agent_id
-  ) agent_ids in
+  let classify_result = function
+    | Ok (`Assoc fields) -> (
+        match List.assoc_opt "status" fields with
+        | Some (`String "ended") -> `Ended
+        | Some (`String "skipped") -> `Skipped
+        | Some (`String _) | Some _ -> `Failed
+        | None -> `Failed)
+    | Ok _ -> `Failed
+    | Error _ -> `Failed
+  in
+  let ended, skipped, failed =
+    List.fold_left
+      (fun (ended, skipped, failed) agent_id ->
+        match classify_result (end_voice_session ~sw ~clock ~net ~agent_id) with
+        | `Ended -> (ended + 1, skipped, failed)
+        | `Skipped -> (ended, skipped + 1, failed)
+        | `Failed -> (ended, skipped, failed + 1))
+      (0, 0, 0) agent_ids
+  in
   Ok (`Assoc [
-    ("ended", `Int (List.length (List.filter Result.is_ok results)));
+    ("ended", `Int ended);
+    ("skipped", `Int skipped);
+    ("failed", `Int failed);
     ("total", `Int (List.length agent_ids));
   ])
 

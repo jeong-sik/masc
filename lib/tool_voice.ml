@@ -290,6 +290,8 @@ let handle_voice_conference_end (ctx : 'a context) args : result =
             (`Assoc
               [
                 ("ended", `Int 0);
+                ("skipped", `Int (List.length agent_ids));
+                ("failed", `Int 0);
                 ("total", `Int (List.length agent_ids));
               ]) )
 

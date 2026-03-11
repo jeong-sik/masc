@@ -100,7 +100,7 @@ let mode_snapshot_json ctx =
 let keeper_tool_policy_json autonomy_level =
   match Keeper_autonomy.autonomy_level_of_string autonomy_level with
   | Some level ->
-      let gate = Tool_keeper.autonomous_gate_config ~autonomy_level:level in
+      let gate = Keeper_execution.autonomous_gate_config ~autonomy_level:level in
       `Assoc
         [
           ("configured_tool_policy", `String (if gate.allowlist_enabled then "allowlist" else "all"));
@@ -123,8 +123,10 @@ let keeper_tool_policy_json autonomy_level =
           ("destructive_check_enabled", `Null);
         ]
 
-let keeper_policy_row ctx ~runtime_class (meta : Tool_keeper.keeper_meta) =
-  let status_json = Tool_keeper.parse_agent_status ctx.config ~agent_name:meta.agent_name in
+let keeper_policy_row ctx ~runtime_class (meta : Keeper_execution.keeper_meta) =
+  let status_json =
+    Keeper_execution.parse_agent_status ctx.config ~agent_name:meta.agent_name
+  in
   let status =
     match U.member "status" status_json with
     | `String value -> value
@@ -147,7 +149,7 @@ let keeper_policy_row ctx ~runtime_class (meta : Tool_keeper.keeper_meta) =
        ("reward_model_path",
         if String.trim meta.policy_reward_model_path = "" then `Null
         else `String meta.policy_reward_model_path);
-       ("active_model", `String (Tool_keeper.active_model_of_meta meta));
+       ("active_model", `String (Keeper_execution.active_model_of_meta meta));
        ("allowed_models", `List (List.map (fun model -> `String model) meta.allowed_models));
        ("updated_at", `String meta.updated_at);
      ]

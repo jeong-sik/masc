@@ -470,11 +470,10 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
     gap.maturity_hours
   in
 
-  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"gardener_spawn" () in
   let response =
-    match Llm_client.run_prompt_cascade ~temperature:0.3 ~timeout_sec:15
-        ~model_specs ~max_tokens:200 ~prompt () with
-    | Ok resp -> resp.content
+    match Lodge_cascade.call ~cascade_name:"gardener_spawn"
+        ~prompt ~temperature:0.3 ~timeout_sec:15 ~max_tokens:200 () with
+    | Ok r -> r.response
     | Error _ -> ""
   in
 

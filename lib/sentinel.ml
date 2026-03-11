@@ -48,30 +48,19 @@ let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
         log (sprintf "prompt %s render failed: %s" prompt_id msg);
         None
     | Ok prompt ->
-        let specs = Lodge_cascade.get_cascade ~cascade_name () in
-        if specs = [] then (
-          log (sprintf "no models available for cascade %s" cascade_name);
-          None)
-        else
-          let timeout = Env_config.Sentinel.llm_timeout_sec in
-          let max_tokens = 800 in
-          match Llm_client.run_prompt_cascade
-                  ~temperature:0.3
-                  ~timeout_sec:timeout
-                  ~model_specs:specs
-                  ~max_tokens
-                  ~prompt () with
-          | Ok resp ->
-              if String.length resp.content > 5 then (
-                log (sprintf "LLM response from %s (%d chars)" resp.model_used
-                       (String.length resp.content));
-                parse_llm_json_safe resp.content)
-              else (
-                log (sprintf "LLM response too short from %s" resp.model_used);
-                None)
-          | Error err ->
-              log (sprintf "LLM cascade %s failed: %s" cascade_name err);
-              None
+        let timeout = Env_config.Sentinel.llm_timeout_sec in
+        (match Lodge_cascade.call ~cascade_name ~prompt
+            ~temperature:0.3 ~timeout_sec:timeout ~max_tokens:800 () with
+        | Ok r when String.length r.response > 5 ->
+            log (sprintf "LLM response from %s (%d chars)" r.llm_used
+                   (String.length r.response));
+            parse_llm_json_safe r.response
+        | Ok r ->
+            log (sprintf "LLM response too short from %s" r.llm_used);
+            None
+        | Error err ->
+            log (sprintf "LLM cascade %s failed: %s" cascade_name err);
+            None)
 
 (* ── Sentinel-specific Pulse Consumers ─────────────────────── *)
 

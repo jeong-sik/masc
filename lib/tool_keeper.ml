@@ -9734,6 +9734,12 @@ let handle_keeper_list ctx args : tool_result =
 	            in
 	            let skill_route_json =
 	              let open Yojson.Safe.Util in
+                  let selection_mode = keeper_skill_selection_mode () in
+                  let selection_mode_string, selection_provenance =
+                    match selection_mode with
+                    | SkillSelectAgent -> ("agent", "judgment")
+                    | SkillSelectHeuristic -> ("heuristic", "fallback")
+                  in
 	              match last_skill_metrics with
 	              | None -> `Null
 	              | Some metrics ->
@@ -9751,6 +9757,9 @@ let handle_keeper_list ctx args : tool_result =
 	                    ("primary", match primary with Some s -> `String s | None -> `Null);
 	                    ("secondary", `List (List.map (fun s -> `String s) secondary));
 	                    ("reason", match reason with Some s -> `String s | None -> `Null);
+                        ("selection_mode", `String selection_mode_string);
+                        ("provenance", `String selection_provenance);
+                        ("authoritative", `Bool false);
 	                  ]
 	            in
 	            Some (`Assoc [

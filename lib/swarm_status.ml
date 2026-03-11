@@ -148,6 +148,16 @@ let source_of_truth = function
   | Projected -> "projected_swarm_json"
   | Supervised -> "team_session_operator"
 
+let swarm_surface_contract_json =
+  `Assoc
+    [
+      ("overview", `String "derived");
+      ("lanes", `String "derived");
+      ("timeline", `String "truth");
+      ("gaps", `String "derived");
+      ("recommended_next_action", `String "fallback");
+    ]
+
 let option_map_to_json f = function
   | Some value -> f value
   | None -> `Null
@@ -160,6 +170,7 @@ let flag_to_json (flag : flag) =
       ("code", `String flag.code);
       ("severity", `String flag.severity);
       ("summary", `String flag.summary);
+      ("provenance", `String "derived");
     ]
 
 let timeline_event_to_json (event : timeline_event) =
@@ -173,6 +184,7 @@ let timeline_event_to_json (event : timeline_event) =
       ("detail", `String event.detail);
       ("tone", `String event.tone);
       ("source", `String event.source);
+      ("provenance", `String "truth");
     ]
 
 let lane_to_json (lane : lane) =
@@ -199,6 +211,8 @@ let lane_to_json (lane : lane) =
             ("alerts", `Int lane.alerts);
           ] );
       ("hard_flags", `List (List.map flag_to_json lane.hard_flags));
+      ("provenance", `String "derived");
+      ("authoritative", `Bool false);
     ]
 
 let recommendation_to_json (item : recommendation) =
@@ -208,6 +222,9 @@ let recommendation_to_json (item : recommendation) =
       ("label", `String item.label);
       ("reason", `String item.reason);
       ("lane_id", string_option_to_json item.lane_id);
+      ("provenance", `String "fallback");
+      ("decision_engine", `String "deterministic_lane_rules");
+      ("authoritative", `Bool false);
     ]
 
 let get_string_opt json key =
@@ -1144,6 +1161,7 @@ let build_json_from_inputs ~timeline_limit_override ~now
                ("summary", `String flag.summary);
                ("lane_ids", `List (List.map (fun lane_id -> `String lane_id) lane_ids));
                ("count", `Int (List.length lane_ids));
+               ("provenance", `String "derived");
              ])
     |> List.sort (fun left right ->
            let left_severity = left |> U.member "severity" |> U.to_string in
@@ -1181,6 +1199,9 @@ let build_json_from_inputs ~timeline_limit_override ~now
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
+      ("judgment_owner", `String "fallback_read_model");
+      ("authoritative_judgment_available", `Bool false);
+      ("provenance_summary", swarm_surface_contract_json);
       ( "overview",
         `Assoc
           [
@@ -1189,6 +1210,7 @@ let build_json_from_inputs ~timeline_limit_override ~now
             ("stalled_lanes", `Int stalled_lanes);
             ("projected_lanes", `Int projected_lanes);
             ("last_movement_at", string_option_to_json last_movement_at);
+            ("provenance", `String "derived");
           ] );
       ("lanes", `List (List.map lane_to_json lanes));
       ("timeline", `List (List.map timeline_event_to_json timeline));
@@ -1251,6 +1273,9 @@ let empty_json =
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
+      ("judgment_owner", `String "fallback_read_model");
+      ("authoritative_judgment_available", `Bool false);
+      ("provenance_summary", swarm_surface_contract_json);
       ( "overview",
         `Assoc
           [
@@ -1259,6 +1284,7 @@ let empty_json =
             ("stalled_lanes", `Int 0);
             ("projected_lanes", `Int 0);
             ("last_movement_at", `Null);
+            ("provenance", `String "derived");
           ] );
       ("lanes", `List (List.map lane_to_json [ lane Managed; lane Supervised; lane Projected ]));
       ("timeline", `List []);

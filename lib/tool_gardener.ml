@@ -12,6 +12,15 @@ open Tool_args
 
 type result = bool * string
 
+let spawn_decision_provenance ~(use_llm_decision : bool)
+    (decision : spawn_decision) =
+  match decision with
+  | SpawnApproved _ when use_llm_decision -> "judgment"
+  | SpawnApproved _ | SpawnDeferred _ | SpawnRejected _ -> "fallback"
+
+let retirement_decision_provenance (_decision : retirement_decision) =
+  "fallback"
+
 (** {1 Tool Handlers} *)
 
 (** Handle masc_gardener_health tool call.
@@ -28,6 +37,8 @@ let handle_health _ctx _args : result =
 
     let json = `Assoc [
       ("status", `String "ok");
+      ("provenance", `String "derived");
+      ("authoritative", `Bool false);
       ("health", ecosystem_health_to_yojson health);
       ("config_summary", `Assoc [
         ("enabled", `Bool config.enabled);
@@ -67,9 +78,16 @@ let handle_propose_spawn _ctx args : result =
       let urgency = urgency_of_string urgency_str in
 
       let decision = Gardener.propose_spawn ~topic ~reason ~urgency in
+      let decision_provenance =
+        spawn_decision_provenance
+          ~use_llm_decision:(Gardener.get_config ()).use_llm_decision
+          decision
+      in
 
       let json = `Assoc [
         ("status", `String "ok");
+        ("provenance", `String decision_provenance);
+        ("authoritative", `Bool false);
         ("decision", spawn_decision_to_yojson decision);
         ("topic", `String topic);
         ("can_execute", `Bool (match decision with SpawnApproved _ -> true | _ -> false));
@@ -93,9 +111,12 @@ let handle_retire_agent _ctx args : result =
       (false, "Missing required parameter: agent_name")
     else begin
       let decision = Gardener.propose_retire ~agent_name in
+      let decision_provenance = retirement_decision_provenance decision in
 
       let json = `Assoc [
         ("status", `String "ok");
+        ("provenance", `String decision_provenance);
+        ("authoritative", `Bool false);
         ("decision", retirement_decision_to_yojson decision);
         ("agent_name", `String agent_name);
         ("can_execute", `Bool (match decision with RetireApproved _ -> true | _ -> false));
@@ -113,6 +134,8 @@ let handle_config _ctx _args : result =
     let config = Gardener.get_config () in
     let json = `Assoc [
       ("status", `String "ok");
+      ("provenance", `String "truth");
+      ("authoritative", `Bool true);
       ("config", gardener_config_to_yojson config);
       ("circuit_breaker", `Assoc [
         ("is_open", `Bool (Gardener.is_circuit_open ()));

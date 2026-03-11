@@ -3,6 +3,14 @@ let cache_ttl_sec = 300.0
 let no_model_reason =
   "No dashboard briefing model is available in the current environment."
 
+let mission_briefing_surface_contract_json =
+  `Assoc
+    [
+      ("summary", `String "narrative");
+      ("sections", `String "narrative");
+      ("basis", `String "truth");
+    ]
+
 let briefing_timeout_sec () =
   match Sys.getenv_opt "MASC_DASHBOARD_BRIEFING_TIMEOUT_SEC" with
   | Some raw -> (
@@ -471,6 +479,8 @@ let annotate_section ~section_id ~status ~summary ~evidence ~metadata_gaps
       ("evidence", `List (List.map (fun item -> `String item) evidence));
       ("signal_class", `String signal_class);
       ("evidence_quality", `String evidence_quality);
+      ("provenance", `String "narrative");
+      ("authoritative", `Bool false);
     ]
 
 module For_test = struct
@@ -490,6 +500,9 @@ let unavailable_json ~now ~reason =
       ("refreshing", `Bool false);
       ("status", `String "unavailable");
       ("summary", `String reason);
+      ("provenance", `String "narrative");
+      ("authoritative", `Bool false);
+      ("provenance_summary", mission_briefing_surface_contract_json);
       ("model", `Null);
       ("ttl_sec", `Int (int_of_float cache_ttl_sec));
       ("criteria", criteria_json ());
@@ -507,6 +520,9 @@ let error_json ~now ~reason =
       ("refreshing", `Bool false);
       ("status", `String "error");
       ("summary", `String "Mission briefing refresh failed. Retry to request a fresh judgment.");
+      ("provenance", `String "narrative");
+      ("authoritative", `Bool false);
+      ("provenance_summary", mission_briefing_surface_contract_json);
       ("model", `Null);
       ("ttl_sec", `Int (int_of_float cache_ttl_sec));
       ("criteria", criteria_json ());
@@ -524,6 +540,9 @@ let pending_json ~now ~last_error =
       ("refreshing", `Bool true);
       ("status", `String "pending");
       ("summary", `String "Generating mission briefing from the latest snapshot.");
+      ("provenance", `String "narrative");
+      ("authoritative", `Bool false);
+      ("provenance_summary", mission_briefing_surface_contract_json);
       ("model", `Null);
       ("ttl_sec", `Int (int_of_float cache_ttl_sec));
       ("criteria", criteria_json ());
@@ -719,6 +738,9 @@ let compute_briefing_json ~actor_name ~models ~config ~sw ~clock ~proc_mgr () =
                 ("refreshing", `Bool false);
                 ("status", `String "ok");
                 ("summary", `String watch_summary);
+                ("provenance", `String "narrative");
+                ("authoritative", `Bool false);
+                ("provenance_summary", mission_briefing_surface_contract_json);
                 ("model", `String response.model_used);
                 ("ttl_sec", `Int (int_of_float cache_ttl_sec));
                 ("criteria", criteria_json ());

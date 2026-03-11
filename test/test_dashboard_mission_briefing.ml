@@ -87,6 +87,10 @@ let test_disabled_override_returns_unavailable () =
           (json |> member "status" |> to_string);
         check bool "refreshing false" false
           (json |> member "refreshing" |> to_bool);
+        check string "provenance" "narrative"
+          (json |> member "provenance" |> to_string);
+        check bool "not authoritative" false
+          (json |> member "authoritative" |> to_bool);
         check string "error reason"
           "No dashboard briefing model is available in the current environment."
           (json |> member "error" |> to_string)))

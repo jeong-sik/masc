@@ -1,82 +1,111 @@
 open Masc_mcp
 
+let with_env key value f =
+  let old = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some prev -> Unix.putenv key prev
+      | None -> Unix.putenv key "")
+    f
+
+let with_keyword_mode f =
+  with_env "MASC_TRPG_DM_INTENT_MODE" "keyword" f
+
 (* ==== Keyword extraction tests (default mode) ============================ *)
 
 let test_combat () =
-  let intent =
-    Trpg_dm_intent.extract
-      "The goblins draw their swords and charge! A battle begins as the monsters attack."
-  in
-  let cat = Trpg_dm_intent.string_of_category intent.primary in
-  Alcotest.(check string) "combat detected" "combat_setup" cat;
-  Alcotest.(check bool) "confidence > 0" true (intent.confidence > 0.0);
-  Alcotest.(check bool) "keywords non-empty" true
-    (List.length intent.keywords_matched > 0)
+  with_keyword_mode (fun () ->
+      let intent =
+        Trpg_dm_intent.extract
+          "The goblins draw their swords and charge! A battle begins as the monsters attack."
+      in
+      let cat = Trpg_dm_intent.string_of_category intent.primary in
+      Alcotest.(check string) "combat detected" "combat_setup" cat;
+      Alcotest.(check bool) "confidence > 0" true (intent.confidence > 0.0);
+      Alcotest.(check bool) "keywords non-empty" true
+        (List.length intent.keywords_matched > 0);
+      Alcotest.(check bool) "mode set" true (String.length intent.mode > 0);
+      Alcotest.(check bool) "provenance set" true
+        (String.length intent.provenance > 0))
 
 let test_social () =
-  let intent =
-    Trpg_dm_intent.extract
-      "The merchant greets you at the tavern and says: I have an offer for a trade."
-  in
-  let cat = Trpg_dm_intent.string_of_category intent.primary in
-  Alcotest.(check string) "social detected" "social_encounter" cat
+  with_keyword_mode (fun () ->
+      let intent =
+        Trpg_dm_intent.extract
+          "The merchant greets you at the tavern and says: I have an offer for a trade."
+      in
+      let cat = Trpg_dm_intent.string_of_category intent.primary in
+      Alcotest.(check string) "social detected" "social_encounter" cat)
 
 let test_puzzle () =
-  let intent =
-    Trpg_dm_intent.extract
-      "You find a locked chest with strange runes. A riddle is inscribed."
-  in
-  let cat = Trpg_dm_intent.string_of_category intent.primary in
-  Alcotest.(check string) "puzzle detected" "puzzle_challenge" cat
+  with_keyword_mode (fun () ->
+      let intent =
+        Trpg_dm_intent.extract
+          "You find a locked chest with strange runes. A riddle is inscribed."
+      in
+      let cat = Trpg_dm_intent.string_of_category intent.primary in
+      Alcotest.(check string) "puzzle detected" "puzzle_challenge" cat)
 
 let test_exploration () =
-  let intent =
-    Trpg_dm_intent.extract
-      "You travel through the dense forest, discovering ancient ruins ahead."
-  in
-  let cat = Trpg_dm_intent.string_of_category intent.primary in
-  Alcotest.(check string) "exploration detected" "exploration" cat
+  with_keyword_mode (fun () ->
+      let intent =
+        Trpg_dm_intent.extract
+          "You travel through the dense forest, discovering ancient ruins ahead."
+      in
+      let cat = Trpg_dm_intent.string_of_category intent.primary in
+      Alcotest.(check string) "exploration detected" "exploration" cat)
 
 let test_rest () =
-  let intent =
-    Trpg_dm_intent.extract "The party sets up camp for the night to rest and heal."
-  in
-  let cat = Trpg_dm_intent.string_of_category intent.primary in
-  Alcotest.(check string) "rest detected" "rest_downtime" cat
+  with_keyword_mode (fun () ->
+      let intent =
+        Trpg_dm_intent.extract "The party sets up camp for the night to rest and heal."
+      in
+      let cat = Trpg_dm_intent.string_of_category intent.primary in
+      Alcotest.(check string) "rest detected" "rest_downtime" cat)
 
 let test_tension () =
-  let intent =
-    Trpg_dm_intent.extract
-      "An ominous shadow looms overhead. Something watches from the darkness."
-  in
-  let cat = Trpg_dm_intent.string_of_category intent.primary in
-  Alcotest.(check string) "tension detected" "tension_building" cat
+  with_keyword_mode (fun () ->
+      let intent =
+        Trpg_dm_intent.extract
+          "An ominous shadow looms overhead. Something watches from the darkness."
+      in
+      let cat = Trpg_dm_intent.string_of_category intent.primary in
+      Alcotest.(check string) "tension detected" "tension_building" cat)
 
 let test_unknown () =
-  let intent = Trpg_dm_intent.extract "Hello world, nothing specific here." in
-  let cat = Trpg_dm_intent.string_of_category intent.primary in
-  (* Could be unknown or low-confidence match *)
-  Alcotest.(check bool) "some category returned" true (String.length cat > 0)
+  with_keyword_mode (fun () ->
+      let intent = Trpg_dm_intent.extract "Hello world, nothing specific here." in
+      let cat = Trpg_dm_intent.string_of_category intent.primary in
+      (* Could be unknown or low-confidence match *)
+      Alcotest.(check bool) "some category returned" true (String.length cat > 0))
 
 (* ==== Serialization tests ================================================ *)
 
 let test_to_hint () =
-  let intent = Trpg_dm_intent.extract "Monsters appear! Roll initiative!" in
-  let hint = Trpg_dm_intent.to_hint intent in
-  Alcotest.(check bool) "hint non-empty" true (String.length hint > 0)
+  with_keyword_mode (fun () ->
+      let intent = Trpg_dm_intent.extract "Monsters appear! Roll initiative!" in
+      let hint = Trpg_dm_intent.to_hint intent in
+      Alcotest.(check bool) "hint non-empty" true (String.length hint > 0))
 
 let test_to_yojson () =
-  let intent = Trpg_dm_intent.extract "The king reveals the secret prophecy." in
-  let json = Trpg_dm_intent.to_yojson intent in
-  match json with
-  | `Assoc fields ->
-    Alcotest.(check bool) "has primary field" true
-      (List.mem_assoc "primary" fields);
-    Alcotest.(check bool) "has confidence field" true
-      (List.mem_assoc "confidence" fields);
-    Alcotest.(check bool) "has keywords_matched field" true
-      (List.mem_assoc "keywords_matched" fields)
-  | _ -> Alcotest.fail "to_yojson should return Assoc"
+  with_keyword_mode (fun () ->
+      let intent = Trpg_dm_intent.extract "The king reveals the secret prophecy." in
+      let json = Trpg_dm_intent.to_yojson intent in
+      match json with
+      | `Assoc fields ->
+        Alcotest.(check bool) "has primary field" true
+          (List.mem_assoc "primary" fields);
+        Alcotest.(check bool) "has confidence field" true
+          (List.mem_assoc "confidence" fields);
+        Alcotest.(check bool) "has keywords_matched field" true
+          (List.mem_assoc "keywords_matched" fields);
+        Alcotest.(check bool) "has mode field" true
+          (List.mem_assoc "mode" fields);
+        Alcotest.(check bool) "has provenance field" true
+          (List.mem_assoc "provenance" fields)
+      | _ -> Alcotest.fail "to_yojson should return Assoc")
 
 (* ==== category_of_string tests =========================================== *)
 

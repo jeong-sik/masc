@@ -100,6 +100,17 @@ let operator_server_profile_json =
       ("curated_tool_count", `Int 4);
     ]
 
+let operator_surface_contract_json =
+  `Assoc
+    [
+      ("command_plane", `String "truth");
+      ("swarm_status", `String "derived");
+      ("attention_items", `String "derived");
+      ("recommended_actions", `String "fallback");
+      ("session_cards", `String "derived");
+      ("worker_cards", `String "truth");
+    ]
+
 type attention_item = {
   kind : string;
   severity : string;
@@ -620,6 +631,9 @@ let attention_item_to_yojson (item : attention_item) =
       ("target_id", string_option_to_json item.target_id);
       ("actor", string_option_to_json item.actor);
       ("evidence", item.evidence);
+      ("provenance", `String "derived");
+      ("decision_engine", `String "deterministic_translation");
+      ("authoritative", `Bool false);
     ]
 
 let recommended_confirm_required = function
@@ -649,6 +663,9 @@ let recommended_action_to_yojson ~actor (item : recommended_action) =
       ("confirm_required", `Bool (recommended_confirm_required item.action_type));
       ("suggested_payload", item.suggested_payload);
       ("preview", preview);
+      ("provenance", `String "fallback");
+      ("decision_engine", `String "deterministic_rules");
+      ("authoritative", `Bool false);
     ]
 
 let worker_card_to_yojson (card : worker_card) =
@@ -677,6 +694,8 @@ let worker_card_to_yojson (card : worker_card) =
       ("empty_note_turn_count", `Int card.empty_note_turn_count);
       ("has_turn", `Bool card.has_turn);
       ("last_turn_ts_iso", string_option_to_json card.last_turn_ts_iso);
+      ("provenance", `String "truth");
+      ("authoritative", `Bool true);
     ]
 
 let spawn_batch_stub_of_cards (cards : worker_card list) =
@@ -875,6 +894,8 @@ let session_card_to_yojson ~actor (digest : session_digest) =
       ("recommended_action_count", `Int (List.length digest.recommended_actions));
       ( "top_recommendation",
         option_to_json (recommended_action_to_yojson ~actor) top_recommendation );
+      ("provenance", `String "derived");
+      ("authoritative", `Bool false);
     ]
 
 let summary_of_attention_items (items : attention_item list) =
@@ -900,6 +921,8 @@ let summary_of_attention_items (items : attention_item list) =
       ("bad_count", `Int bad_count);
       ("warn_count", `Int warn_count);
       ("top_item", option_to_json attention_item_to_yojson top_item);
+      ("provenance", `String "derived");
+      ("authoritative", `Bool false);
     ]
 
 let dedup_recommendations (items : recommended_action list) =
@@ -930,6 +953,8 @@ let summary_of_recommendations ~actor (items : recommended_action list) =
       ("count", `Int (List.length sorted));
       ( "top_action",
         option_to_json (recommended_action_to_yojson ~actor) top_item );
+      ("provenance", `String "fallback");
+      ("authoritative", `Bool false);
     ]
 
 let event_ts_iso json =
@@ -1967,6 +1992,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     ([
        ("trace_id", `String trace_id);
        ("server_profile", operator_server_profile_json);
+       ("judgment_owner", `String "fallback_read_model");
+       ("authoritative_judgment_available", `Bool false);
+       ("provenance_summary", operator_surface_contract_json);
        ("room", room_json config);
        ( "sessions",
          if initialized && include_sessions then sessions_json config
@@ -2003,6 +2031,9 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
           ("target_type", `String "room");
           ("target_id", `Null);
           ("health", `String "ok");
+          ("judgment_owner", `String "fallback_read_model");
+          ("authoritative_judgment_available", `Bool false);
+          ("provenance_summary", operator_surface_contract_json);
           ("command_plane", `Assoc []);
           ("swarm_status", Swarm_status.empty_json);
           ("attention_items", `List []);
@@ -2050,6 +2081,9 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
               ("target_type", `String "room");
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
+              ("judgment_owner", `String "fallback_read_model");
+              ("authoritative_judgment_available", `Bool false);
+              ("provenance_summary", operator_surface_contract_json);
               ("command_plane", command_plane_digest_json);
               ("swarm_status", swarm_status_json);
               ("role_census", aggregate_worker_class_counts tracked_sessions);
@@ -2099,6 +2133,9 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
                       ("target_type", `String "team_session");
                       ("target_id", `String session_id);
                       ("health", `String digest.health);
+                      ("judgment_owner", `String "fallback_read_model");
+                      ("authoritative_judgment_available", `Bool false);
+                      ("provenance_summary", operator_surface_contract_json);
                       ("command_plane", command_plane_digest_json);
                       ("swarm_status", swarm_status_json);
                       ( "attention_items",

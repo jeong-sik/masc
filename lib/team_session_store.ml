@@ -145,6 +145,27 @@ let list_checkpoint_paths config session_id =
     |> List.sort String.compare
     |> List.map (Filename.concat dir)
 
+let load_latest_checkpoint config session_id : Team_session_types.checkpoint option =
+  match List.rev (list_checkpoint_paths config session_id) with
+  | [] -> None
+  | latest :: _ -> (
+      try
+        let json = read_json config latest in
+        match Team_session_types.checkpoint_of_yojson json with
+        | Ok cp -> Some cp
+        | Error _ -> None
+      with _ -> None)
+
+let read_recent_events config session_id ~max_count :
+    Team_session_types.event_entry list =
+  let raw = read_events ~max_events:max_count config session_id in
+  List.filter_map
+    (fun json ->
+      match Team_session_types.event_entry_of_yojson json with
+      | Ok e -> Some e
+      | Error _ -> None)
+    raw
+
 let list_sessions config : Team_session_types.session list =
   let root = sessions_root config in
   if not (path_exists config root) then

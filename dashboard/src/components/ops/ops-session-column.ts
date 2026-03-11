@@ -8,7 +8,9 @@ import {
   operatorSnapshot,
 } from '../../operator-store'
 import {
+  actionTypeLabel,
   displayStatus,
+  deliveryModeLabel,
   prettyJson,
   selectedSessionId,
   sessionActionLabel,
@@ -16,6 +18,7 @@ import {
   submitTeamTurn,
   targetTypeLabel,
   teamMessage,
+  teamSpawnBatchJson,
   teamStopReason,
   teamTaskDescription,
   teamTaskPriority,
@@ -27,6 +30,7 @@ export function OpsSessionColumn() {
   const snapshot = operatorSnapshot.value
   const sessionDigest = operatorSessionDigest.value
   const sessions = snapshot?.sessions ?? []
+  const availableSessionActions = (snapshot?.available_actions ?? []).filter(action => action.target_type === 'team_session')
   const selectedSession = sessions.find(session => session.session_id === selectedSessionId.value) ?? sessions[0] ?? null
 
   return html`
@@ -100,6 +104,19 @@ export function OpsSessionColumn() {
           <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
         </div>
         <p class="ops-context-note">선택한 세션에만 메모, 작업, 체크포인트, 중지 요청을 보냅니다.</p>
+        ${availableSessionActions.length > 0 ? html`
+          <div class="ops-log-list">
+            ${availableSessionActions.map(action => html`
+              <article key=${action.action_type} class="ops-log-entry">
+                <div class="ops-log-head">
+                  <strong>${actionTypeLabel(action.action_type)}</strong>
+                  <span>${deliveryModeLabel(action.confirm_required)}</span>
+                </div>
+                <div class="ops-log-body">${action.description ?? '설명 확인 필요'}</div>
+              </article>
+            `)}
+          </div>
+        ` : null}
 
         ${selectedSession ? html`
           <div class="ops-detail-card">
@@ -127,6 +144,7 @@ export function OpsSessionColumn() {
             <option value="note">노트</option>
             <option value="broadcast">방송</option>
             <option value="task">작업</option>
+            <option value="worker_spawn_batch">worker 교체</option>
           </select>
           <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${operatorActionBusy.value || !selectedSession}>
             적용
@@ -172,6 +190,15 @@ export function OpsSessionColumn() {
             <option value="4">P4</option>
             <option value="5">P5</option>
           </select>
+        ` : teamTurnKind.value === 'worker_spawn_batch' ? html`
+          <textarea
+            class="control-textarea"
+            rows=${6}
+            placeholder='spawn_batch JSON, 예: [{"spawn_agent":"llama","spawn_prompt":"...", "spawn_role":"replacement"}]'
+            value=${teamSpawnBatchJson.value}
+            onInput=${(event: Event) => { teamSpawnBatchJson.value = (event.target as HTMLTextAreaElement).value }}
+            disabled=${operatorActionBusy.value || !selectedSession}
+          ></textarea>
         ` : null}
 
         <div class="control-row ops-split-row">

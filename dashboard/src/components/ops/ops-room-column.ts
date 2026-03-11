@@ -13,6 +13,7 @@ import {
   broadcastMessage,
   confirmPending,
   deliveryModeLabel,
+  hydrateRecommendedAction,
   pauseReason,
   prettyJson,
   submitBroadcast,
@@ -159,6 +160,13 @@ export function OpsRoomColumn() {
                   <span>${deliveryModeLabel(item.confirm_required)}</span>
                 </div>
                 <div class="ops-log-body">${item.reason}</div>
+                ${item.suggested_payload ? html`
+                  <div class="ops-confirmation-actions">
+                    <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item) }} disabled=${operatorActionBusy.value}>
+                      폼에 채우기
+                    </button>
+                  </div>
+                ` : null}
               </article>
             `)}
           </div>

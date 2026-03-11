@@ -1388,11 +1388,19 @@ let handle_step ctx args : result =
               match turn_kind_result with
               | Error e -> (false, json_error e)
               | Ok turn_kind_opt ->
-              let actor =
+              let actor_result =
                 match get_string_opt args "actor" with
-                | Some a -> a
-                | None -> ctx.agent_name
+                | None -> Ok ctx.agent_name
+                | Some actor_name
+                  when String.equal (String.trim actor_name) ctx.agent_name ->
+                    Ok ctx.agent_name
+                | Some _ ->
+                    Error
+                      "actor must match the authenticated caller; omit actor to use the current agent"
               in
+              match actor_result with
+              | Error e -> (false, json_error e)
+              | Ok actor ->
               let base_message = get_string_opt args "message" in
               let target_agent = get_string_opt args "target_agent" in
               let task_title = get_string_opt args "task_title" in
@@ -2492,7 +2500,14 @@ let schemas : tool_schema list =
                               `String "checkpoint";
                             ] );
                       ] );
-                  ("actor", `Assoc [ ("type", `String "string") ]);
+                  ( "actor",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "description",
+                          `String
+                            "Optional explicit actor. If provided, it must match the authenticated caller." );
+                      ] );
                   ("message", `Assoc [ ("type", `String "string") ]);
                   ("target_agent", `Assoc [ ("type", `String "string") ]);
                   ("task_title", `Assoc [ ("type", `String "string") ]);

@@ -199,6 +199,68 @@ let test_goal_dispatch_runtime_validation () =
     (json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
   cleanup_dir base_dir
 
+let test_goal_dispatch_task_runtime_requires_manual_current_task_binding () =
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let ctx : Tool_goals.context =
+    { config; agent_name = "tester"; call_keeper_msg = None }
+  in
+  ignore
+    (upsert_goal_exn ctx
+       (`Assoc
+         [ ("horizon", `String "short"); ("title", `String "Dispatch task hygiene") ]));
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_goal_dispatch"
+      ~args:
+        (`Assoc
+          [
+            ("runtime", `String "task");
+            ("execute", `Bool true);
+            ("approved", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "task runtime dispatch ok" true ok;
+  let json = parse_json_exn body in
+  Alcotest.(check bool) "current task not bound" false
+    (json |> Yojson.Safe.Util.member "current_task_bound"
+   |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check string) "task hygiene message"
+    "dispatch created backlog tasks only; claim one and call masc_plan_set_task to bind current_task"
+    (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check (option string)) "planning current_task still unset" None
+    (Planning_eio.get_current_task config);
+  cleanup_dir base_dir
+
+let test_goal_dispatch_unknown_goal_ids_fail () =
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let ctx : Tool_goals.context =
+    { config; agent_name = "tester"; call_keeper_msg = None }
+  in
+  ignore
+    (upsert_goal_exn ctx
+       (`Assoc [ ("horizon", `String "short"); ("title", `String "Known goal") ]));
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_goal_dispatch"
+      ~args:
+        (`Assoc
+          [
+            ("goal_ids", `List [ `String "goal-missing" ]);
+            ("execute", `Bool true);
+            ("approved", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "unknown goal ids fail" false ok;
+  let json = parse_json_exn body in
+  Alcotest.(check string) "status error" "error"
+    (json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string) "unknown goal ids message"
+    "unknown goal_ids: goal-missing"
+    (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
+  cleanup_dir base_dir
+
 let () =
   Alcotest.run "Tool_goals"
     [
@@ -213,5 +275,10 @@ let () =
             test_goal_review_done_and_promote;
           Alcotest.test_case "dispatch runtime validation" `Quick
             test_goal_dispatch_runtime_validation;
+          Alcotest.test_case
+            "dispatch task runtime requires manual current_task binding" `Quick
+            test_goal_dispatch_task_runtime_requires_manual_current_task_binding;
+          Alcotest.test_case "dispatch unknown goal_ids fail" `Quick
+            test_goal_dispatch_unknown_goal_ids_fail;
         ] );
     ]

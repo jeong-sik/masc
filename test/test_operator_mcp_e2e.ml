@@ -82,7 +82,7 @@ let parse_headers raw =
       (status, headers)
   | Some [] -> (None, [])
 
-let run_curl_json ?token ~port ~path ~session_id ~payload () =
+let run_curl_json ?token ?(max_time_sec = 5) ~port ~path ~session_id ~payload () =
   let header_file = Filename.temp_file "operator-mcp-header-" ".txt" in
   let body_file = Filename.temp_file "operator-mcp-body-" ".txt" in
   let data_file = Filename.temp_file "operator-mcp-request-" ".json" in
@@ -97,7 +97,7 @@ let run_curl_json ?token ~port ~path ~session_id ~payload () =
       "-sS";
       "--http1.1";
       "--max-time";
-      "5";
+      string_of_int max_time_sec;
       "-X";
       "POST";
       "-H";
@@ -474,9 +474,9 @@ let test_operator_mcp_supervises_team_session () =
                          ~implementer_b_token ~supervisor_nickname
                          ~planner_nickname ~implementer_a_nickname
                          ~implementer_b_nickname ->
-  let call_tool ?token ~path ~session_id ~id ~name arguments =
+  let call_tool ?token ?max_time_sec ~path ~session_id ~id ~name arguments =
     let res =
-      run_curl_json ?token ~port ~path ~session_id
+      run_curl_json ?token ?max_time_sec ~port ~path ~session_id
         ~payload:(tool_payload ~id ~name ~arguments) ()
     in
     let json = parse_json_body name res in
@@ -545,10 +545,22 @@ let test_operator_mcp_supervises_team_session () =
     |> U.member "session_id" |> U.to_string
   in
 
-  let worker_turn token session_id_header id message =
+  ignore
+    (call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"supervisor-root"
+       ~id:6 ~name:"masc_team_session_step"
+       (`Assoc
+         [
+           ("session_id", `String session_id);
+           ("turn_kind", `String "note");
+           ( "message",
+             `String
+               "[supervisor] explicit model selection is recorded before worker execution" );
+         ]));
+
+  let worker_step token session_id_header id message =
     ignore
       (call_tool ~token ~path:"/mcp" ~session_id:session_id_header ~id
-         ~name:"masc_team_session_turn"
+         ~name:"masc_team_session_step"
          (`Assoc
            [
              ("session_id", `String session_id);
@@ -556,16 +568,16 @@ let test_operator_mcp_supervises_team_session () =
              ("message", `String message);
            ]))
   in
-  worker_turn planner_token "planner" 6
+  worker_step planner_token "planner" 7
     "[planner] decomposition is docs + harness + endpoint proof";
-  worker_turn implementer_a_token "implementer-a" 7
+  worker_step implementer_a_token "implementer-a" 8
     "[implementer-a] backend path uses /mcp plus /mcp/operator";
-  worker_turn implementer_b_token "implementer-b" 8
+  worker_step implementer_b_token "implementer-b" 9
     "[implementer-b] docs will explain preview-confirm supervision";
 
   let tools_list_res =
     run_curl_json ~token:supervisor_token ~port ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~payload:(tools_list_payload ~id:9) ()
+      ~session_id:"operator-supervisor" ~payload:(tools_list_payload ~id:10) ()
   in
   let tools_list_json = parse_json_body "operator tools/list" tools_list_res in
   require_jsonrpc_ok "operator tools/list" tools_list_json;
@@ -585,7 +597,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let snapshot_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~id:10 ~name:"masc_operator_snapshot"
+      ~session_id:"operator-supervisor" ~id:11 ~name:"masc_operator_snapshot"
       (`Assoc [ ("actor", `String supervisor_nickname); ("view", `String "full") ])
   in
   let snapshot_result = extract_tool_payload_json "operator_snapshot" snapshot_json in
@@ -621,7 +633,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let note_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~id:11 ~name:"masc_operator_action"
+      ~session_id:"operator-supervisor" ~id:12 ~name:"masc_operator_action"
       (`Assoc
         [
           ("actor", `String supervisor_nickname);
@@ -640,7 +652,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let preview_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~id:12 ~name:"masc_operator_action"
+      ~session_id:"operator-supervisor" ~id:13 ~name:"masc_operator_action"
       (`Assoc
         [
           ("actor", `String supervisor_nickname);
@@ -662,7 +674,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let confirm_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~id:13 ~name:"masc_operator_confirm"
+      ~session_id:"operator-supervisor" ~id:14 ~name:"masc_operator_confirm"
       (`Assoc
         [
           ("actor", `String supervisor_nickname);
@@ -674,7 +686,7 @@ let test_operator_mcp_supervises_team_session () =
     (confirm_result |> U.member "delegated_tool_result" <> `Null);
 
   let events_json =
-    call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"supervisor-root" ~id:14
+    call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"supervisor-root" ~id:15
       ~name:"masc_team_session_events"
       (`Assoc
         [
@@ -691,10 +703,67 @@ let test_operator_mcp_supervises_team_session () =
     (contains_substr "implementer-a" events_text);
   check bool "implementer-b event present" true
     (contains_substr "implementer-b" events_text);
+  check bool "selection note present" true
+    (contains_substr
+       "[supervisor] explicit model selection is recorded before worker execution"
+       events_text);
   check bool "supervisor note present" true
     (contains_substr "[supervisor] keep the session focused on MCP proof" events_text);
   check bool "injected task present" true
-    (contains_substr "Capture supervisor evidence" events_text)
+    (contains_substr "Capture supervisor evidence" events_text);
+
+  let finalize_json =
+    call_tool ~token:supervisor_token ~max_time_sec:35 ~path:"/mcp"
+      ~session_id:"supervisor-root"
+      ~id:16 ~name:"masc_team_session_finalize"
+      (`Assoc
+        [
+          ("session_id", `String session_id);
+          ("reason", `String "operator_e2e_finalize");
+          ("generate_report", `Bool true);
+          ("generate_proof", `Bool true);
+          ("wait_timeout_sec", `Int 25);
+        ])
+  in
+  let finalize_result =
+    extract_tool_result_json "team_session_finalize" finalize_json
+  in
+  check string "finalize terminal status" "interrupted"
+    (finalize_result |> U.member "terminal_status" |> U.to_string);
+  check bool "finalize report present" true
+    (finalize_result |> U.member "report" <> `Null);
+  check bool "finalize proof present" true
+    (finalize_result |> U.member "proof" <> `Null);
+
+  let report_json =
+    call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"supervisor-root"
+      ~id:17 ~name:"masc_team_session_report"
+      (`Assoc
+        [
+          ("session_id", `String session_id);
+          ("force_regenerate", `Bool false);
+        ])
+  in
+  let report_result = extract_tool_result_json "team_session_report" report_json in
+  check bool "report json path present" true
+    (report_result |> U.member "json_path" <> `Null);
+  check bool "report markdown path present" true
+    (report_result |> U.member "markdown_path" <> `Null);
+
+  let prove_json =
+    call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"supervisor-root"
+      ~id:18 ~name:"masc_team_session_prove"
+      (`Assoc
+        [
+          ("session_id", `String session_id);
+          ("generate_report_if_missing", `Bool false);
+        ])
+  in
+  let prove_result = extract_tool_result_json "team_session_prove" prove_json in
+  check bool "prove json path present" true
+    (prove_result |> U.member "proof_json_path" <> `Null);
+  check bool "prove markdown path present" true
+    (prove_result |> U.member "proof_md_path" <> `Null)
 
 let () =
   run "operator_mcp_e2e"

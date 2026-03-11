@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.80.0] - 2026-03-11
+
+### Added
+- **Karpathy Autoresearch Phase 2.5** — real autonomous experiment loop with expanded runtime control (#736)
+
+### Changed
+- LLM runtime calls consolidated behind `Llm_client` abstraction (#741)
+- Contract truth and shared runtime context restored across dashboard/server flows (#743)
+
+### Fixed
+- Orphan sessions now transition to `Interrupted` on restart instead of lingering in stale state (#739)
+- Mission briefing runtime hardened against failure and drift during live refresh (#742)
+
+### Removed
+- Legacy public `masc_swarm_*` MCP tools removed; canonical swarm path remains CPv2, `team_session`, `operator`, and `masc_swarm_live_run` (#748)
+
 ## [2.79.0] - 2026-03-11
 
 ### Added

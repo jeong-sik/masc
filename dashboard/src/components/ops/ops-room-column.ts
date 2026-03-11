@@ -1,0 +1,212 @@
+// Ops — Room column: broadcast, pause/resume, task inject, recommended actions, pending confirmations, room feed
+
+import { html } from 'htm/preact'
+import { PanelSemanticDetails } from '../common/semantic-layer'
+import {
+  operatorActionBusy,
+  operatorDigestLoading,
+  operatorRoomDigest,
+  operatorSnapshot,
+} from '../../operator-store'
+import {
+  actionTypeLabel,
+  broadcastMessage,
+  confirmPending,
+  deliveryModeLabel,
+  pauseReason,
+  prettyJson,
+  submitBroadcast,
+  submitPause,
+  submitResume,
+  submitTaskInject,
+  targetTypeLabel,
+  taskDescription,
+  taskPriority,
+  taskTitle,
+} from './helpers'
+
+export function OpsRoomColumn() {
+  const snapshot = operatorSnapshot.value
+  const roomDigest = operatorRoomDigest.value
+  const room = snapshot?.room ?? {}
+  const pendingConfirms = snapshot?.pending_confirms ?? []
+  const recentMessages = snapshot?.recent_messages ?? []
+  const recommendedActions = roomDigest?.recommended_actions ?? []
+  const roomFeed = recentMessages.slice(0, 5)
+
+  return html`
+    <div class="ops-column">
+      <section class="card ops-panel ops-lane-panel">
+        <div class="card-title-row">
+          <div class="card-title">Room 개입</div>
+          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+        </div>
+        <p class="ops-context-note">전체 room에 영향 주는 액션입니다. 방송, 정지/재개, 작업 주입을 여기서 처리합니다.</p>
+
+        <div class="ops-stat-grid">
+          <div class="ops-stat">
+            <span>Room</span>
+            <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
+          </div>
+          <div class="ops-stat">
+            <span>프로젝트</span>
+            <strong>${room.project ?? '확인 없음'}</strong>
+          </div>
+          <div class="ops-stat">
+            <span>클러스터</span>
+            <strong>${room.cluster ?? '확인 없음'}</strong>
+          </div>
+          <div class="ops-stat ${room.paused ? 'warn' : 'ok'}">
+            <span>상태</span>
+            <strong>${room.paused ? '일시정지' : '진행 중'}</strong>
+          </div>
+        </div>
+
+        <label class="control-label" for="ops-broadcast">Room 방송</label>
+        <div class="control-row">
+          <input
+            id="ops-broadcast"
+            class="control-input"
+            type="text"
+            placeholder="@agent 또는 room 전체 공지"
+            value=${broadcastMessage.value}
+            onInput=${(event: Event) => { broadcastMessage.value = (event.target as HTMLInputElement).value }}
+            onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
+            disabled=${operatorActionBusy.value}
+          />
+          <button class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
+            보내기
+          </button>
+        </div>
+
+        <label class="control-label" for="ops-pause-reason">일시정지 / 재개</label>
+        <div class="control-row ops-split-row">
+          <input
+            id="ops-pause-reason"
+            class="control-input"
+            type="text"
+            value=${pauseReason.value}
+            onInput=${(event: Event) => { pauseReason.value = (event.target as HTMLInputElement).value }}
+            disabled=${operatorActionBusy.value}
+          />
+          <button class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
+            일시정지
+          </button>
+          <button class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
+            재개
+          </button>
+        </div>
+
+        <div class="ops-section-head">작업 주입</div>
+        <input
+          class="control-input"
+          type="text"
+          placeholder="작업 제목"
+          value=${taskTitle.value}
+          onInput=${(event: Event) => { taskTitle.value = (event.target as HTMLInputElement).value }}
+          disabled=${operatorActionBusy.value}
+        />
+        <textarea
+          class="control-textarea"
+          rows=${3}
+          placeholder="작업 설명"
+          value=${taskDescription.value}
+          onInput=${(event: Event) => { taskDescription.value = (event.target as HTMLTextAreaElement).value }}
+          disabled=${operatorActionBusy.value}
+        ></textarea>
+        <div class="control-row ops-split-row">
+          <select
+            class="control-input ops-select"
+            value=${taskPriority.value}
+            onChange=${(event: Event) => { taskPriority.value = (event.target as HTMLSelectElement).value }}
+            disabled=${operatorActionBusy.value}
+          >
+            <option value="1">P1</option>
+            <option value="2">P2</option>
+            <option value="3">P3</option>
+            <option value="4">P4</option>
+            <option value="5">P5</option>
+          </select>
+          <button class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
+            주입
+          </button>
+        </div>
+      </section>
+
+      <section class="card ops-panel">
+        <div class="card-title-row">
+          <div class="card-title">추천 개입</div>
+          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} />
+        </div>
+        <p class="ops-context-note">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
+        ${operatorDigestLoading.value && !roomDigest ? html`
+          <div class="ops-empty">개입 추천을 불러오는 중입니다...</div>
+        ` : recommendedActions.length > 0 ? html`
+          <div class="ops-log-list">
+            ${recommendedActions.map(item => html`
+              <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="ops-log-entry ${item.severity}">
+                <div class="ops-log-head">
+                  <strong>${actionTypeLabel(item.action_type)}</strong>
+                  <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
+                  <span>${deliveryModeLabel(item.confirm_required)}</span>
+                </div>
+                <div class="ops-log-body">${item.reason}</div>
+              </article>
+            `)}
+          </div>
+        ` : html`
+          <div class="ops-empty">지금 떠 있는 추천 개입은 없습니다.</div>
+        `}
+      </section>
+
+      <section class="card ops-panel ops-pending-section">
+        <div class="card-title-row">
+          <div class="card-title">승인 대기</div>
+          <${PanelSemanticDetails} panelId="intervene.pending_confirmations" compact=${true} />
+        </div>
+        <p class="ops-context-note">미리보기만 끝났고 아직 사람이 눌러줘야 하는 액션만 남깁니다.</p>
+        ${pendingConfirms.length > 0 ? html`
+          <div class="ops-confirmation-list">
+            ${pendingConfirms.map(item => html`
+              <article key=${item.confirm_token} class="ops-confirmation-card">
+                <div class="ops-confirmation-meta">
+                  <strong>${actionTypeLabel(item.action_type)}</strong>
+                  <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
+                  <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
+                </div>
+                ${item.preview ? html`<pre class="ops-code-block compact">${prettyJson(item.preview)}</pre>` : null}
+                <div class="ops-confirmation-actions">
+                  <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
+                    실행
+                  </button>
+                  <span class="ops-token">${item.confirm_token}</span>
+                </div>
+              </article>
+            `)}
+          </div>
+        ` : html`<div class="ops-empty">지금 승인 대기는 없습니다.</div>`}
+      </section>
+
+      <section class="card ops-panel">
+        <div class="card-title-row">
+          <div class="card-title">최근 Room 메시지</div>
+          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} />
+        </div>
+        <p class="ops-context-note">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
+        ${roomFeed.length > 0 ? html`
+          <div class="ops-feed-list">
+            ${roomFeed.map(message => html`
+              <article key=${message.seq ?? message.id ?? message.timestamp} class="ops-feed-item">
+                <div class="ops-feed-meta">
+                  <strong>${message.from}</strong>
+                  <span>${message.timestamp}</span>
+                </div>
+                <div class="ops-feed-content">${message.content}</div>
+              </article>
+            `)}
+          </div>
+        ` : html`<div class="ops-empty">최근 room 메시지가 없습니다.</div>`}
+      </section>
+    </div>
+  `
+}

@@ -103,6 +103,9 @@ let default_model_strings ~cascade_name =
       ]
   (* walph — default execution models *)
   | "walph" -> llama_glm
+  (* spawn glm — cloud cascade for spawn_eio direct client path *)
+  | "spawn_glm" ->
+      [ "glm:glm-4.7"; "glm:glm-4.7-flash"; "glm:glm-5"; "glm:glm-5-code" ]
   (* unregistered cascade: llama + glm as safety net *)
   | _ -> llama_glm
 

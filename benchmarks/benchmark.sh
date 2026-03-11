@@ -44,6 +44,37 @@ call_masc() {
     local end=$(date +%s%N)
     local duration=$(( (end - start) / 1000000 ))  # ms
 
+    python3 - "$tool" "$response" <<'PY'
+import json
+import sys
+
+tool = sys.argv[1]
+raw = sys.argv[2]
+
+try:
+    payload = json.loads(raw)
+except Exception as exc:
+    print(f"invalid JSON response from {tool}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+if not isinstance(payload, dict):
+    print(f"unexpected response shape from {tool}", file=sys.stderr)
+    sys.exit(1)
+
+if payload.get("error") is not None:
+    print(f"{tool} returned JSON-RPC error: {payload['error']}", file=sys.stderr)
+    sys.exit(1)
+
+result = payload.get("result")
+if not isinstance(result, dict):
+    print(f"{tool} missing result field", file=sys.stderr)
+    sys.exit(1)
+
+if result.get("isError"):
+    print(f"{tool} returned tool error: {result.get('content')}", file=sys.stderr)
+    sys.exit(1)
+PY
+
     echo "$duration"
 }
 
@@ -152,25 +183,21 @@ bench_a2a() {
     log "  discover=${discover_time}ms, query_skill=${query_time}ms"
 }
 
-# Benchmark 5: Swarm Operations
+# Benchmark 5: Swarm Live / CPv2 Operations
 bench_swarm() {
-    log "Running: Swarm Operations Benchmark"
-    local topic="bench_swarm_$TIMESTAMP"
+    log "Running: Swarm Live Benchmark"
+    local run_id="bench_swarm_$TIMESTAMP"
 
-    # Init swarm
-    local init_time=$(call_masc "masc_swarm_init" "{\"agent_name\":\"$MASC_AGENT\",\"topic\":\"$topic\"}")
+    # Execute deterministic swarm-live harness
+    local run_time=$(call_masc "masc_swarm_live_run" "{\"run_id\":\"$run_id\",\"worker_count\":12}")
 
-    # Propose
-    local propose_time=$(call_masc "masc_swarm_propose" "{\"agent_name\":\"$MASC_AGENT\",\"topic\":\"$topic\",\"proposal\":\"test\"}")
+    # Observe command-plane and trace read models after the run
+    local operations_time=$(call_masc "masc_observe_operations" "{}")
+    local alerts_time=$(call_masc "masc_observe_alerts" "{}")
+    local traces_time=$(call_masc "masc_observe_traces" "{\"limit\":25}")
 
-    # Vote
-    local vote_time=$(call_masc "masc_swarm_vote" "{\"agent_name\":\"$MASC_AGENT\",\"topic\":\"$topic\",\"choice\":\"test\",\"voter\":\"benchmark\"}")
-
-    # Status
-    local status_time=$(call_masc "masc_swarm_status" "{\"agent_name\":\"$MASC_AGENT\",\"topic\":\"$topic\"}")
-
-    echo "swarm,$init_time,$propose_time,$vote_time,$status_time" >> "$RESULTS_DIR/results_$TIMESTAMP.csv"
-    log "  init=${init_time}ms, propose=${propose_time}ms, vote=${vote_time}ms, status=${status_time}ms"
+    echo "swarm_live,$run_time,$operations_time,$alerts_time,$traces_time" >> "$RESULTS_DIR/results_$TIMESTAMP.csv"
+    log "  run=${run_time}ms, operations=${operations_time}ms, alerts=${alerts_time}ms, traces=${traces_time}ms"
 }
 
 # Main

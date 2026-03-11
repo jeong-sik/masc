@@ -3441,160 +3441,6 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
     ];
   };
 
-  (* ===== Level 4: Swarm Intelligence Tools ===== *)
-
-  {
-    name = "masc_swarm_init";
-    description = "Initialize a new swarm for emergent collective intelligence. Creates swarm with configurable behavior mode: flocking (cluster around success), foraging (distributed search), stigmergy (pheromone trails), or quorum_sensing (collective decisions).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("behavior", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "flocking"; `String "foraging"; `String "stigmergy"; `String "quorum_sensing"]);
-          ("description", `String "Swarm behavior mode (default: flocking)");
-          ("default", `String "flocking");
-        ]);
-        ("selection_pressure", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Evolution selection pressure 0.0-1.0 (default: 0.3)");
-          ("default", `Float 0.3);
-        ]);
-        ("mutation_rate", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Agent mutation rate 0.0-1.0 (default: 0.1)");
-          ("default", `Float 0.1);
-        ]);
-      ]);
-    ];
-  };
-
-  {
-    name = "masc_swarm_join";
-    description = "Join an agent to the swarm. Agents in swarm participate in collective behaviors like flocking, foraging, and quorum voting.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent name to add to swarm");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
-
-  {
-    name = "masc_swarm_leave";
-    description = "Remove yourself from the swarm collective. \
-Differs from masc_leave: swarm is a coordination layer on top of room. \
-Agent stays in room but exits swarm consensus/voting. \
-Use when: switching to solo mode, swarm task complete, reducing overhead. \
-Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent name to remove from swarm");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
-
-  {
-    name = "masc_swarm_status";
-    description = "Get current swarm status including active agents, behavior mode, pheromone trails, and pending proposals.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-
-  {
-    name = "masc_swarm_evolve";
-    description = "Run one evolution cycle on the swarm. Applies selection pressure, fitness-based ranking, and optional mutation. High-fitness agents are preserved while low-fitness may be replaced.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-
-  {
-    name = "masc_swarm_propose";
-    description = "Create a quorum proposal for collective decision making. Proposals require threshold (default 60%) of agents to vote in favor.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("description", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Description of the proposal");
-        ]);
-        ("threshold", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Vote threshold 0.0-1.0 (default: 0.6)");
-          ("default", `Float 0.6);
-        ]);
-      ]);
-      ("required", `List [`String "description"]);
-    ];
-  };
-
-  {
-    name = "masc_swarm_vote";
-    description = "Vote on a swarm proposal. When threshold is reached, proposal status updates to approved/rejected.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("proposal_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "ID of the proposal to vote on");
-        ]);
-        ("vote_for", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "true to vote for, false to vote against");
-        ]);
-      ]);
-      ("required", `List [`String "proposal_id"; `String "vote_for"]);
-    ];
-  };
-
-  {
-    name = "masc_swarm_deposit";
-    description = "Deposit pheromone on a path to signal success. Other agents following stigmergy behavior will be attracted to strong pheromone trails.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("path_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Identifier for the path/solution");
-        ]);
-        ("strength", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Pheromone strength to deposit (default: 0.2)");
-          ("default", `Float 0.2);
-        ]);
-      ]);
-      ("required", `List [`String "path_id"]);
-    ];
-  };
-
-  {
-    name = "masc_swarm_trails";
-    description = "Get the strongest pheromone trails in the swarm. Useful for finding successful paths/solutions discovered by other agents.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Maximum trails to return (default: 5)");
-          ("default", `Int 5);
-        ]);
-      ]);
-    ];
-  };
-
   (* ============================================ *)
   (* Multi-Room Management Tools                  *)
   (* ============================================ *)
@@ -3894,28 +3740,6 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
         ("agent_name", `Assoc [
           ("type", `String "string");
           ("description", `String "Agent requesting the status");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
-
-  (* Swarm Walph: Coordinate multiple Walph instances *)
-  {
-    name = "masc_swarm_walph";
-    description = "Swarm-level control for all Walph instances in the room. View aggregate status, stop/pause/resume all running loops at once. Commands: STATUS (show all Walph states), STOP (signal all to stop), PAUSE (pause all running), RESUME (resume all paused). Useful for coordinating multi-agent workloads.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("command", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Swarm control command");
-          ("enum", `List [`String "STATUS"; `String "STOP"; `String "PAUSE"; `String "RESUME"]);
-          ("default", `String "STATUS");
-        ]);
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent issuing the swarm command (for audit trail)");
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
@@ -4548,25 +4372,7 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
   };
 ]
 
-let deprecated_public_tools =
-  [
-    "masc_swarm_init";
-    "masc_swarm_join";
-    "masc_swarm_leave";
-    "masc_swarm_status";
-    "masc_swarm_evolve";
-    "masc_swarm_propose";
-    "masc_swarm_vote";
-    "masc_swarm_deposit";
-    "masc_swarm_trails";
-    "masc_swarm_walph";
-  ]
-
-let all_schemas : tool_schema list =
-  List.filter
-    (fun (schema : tool_schema) ->
-      not (List.mem schema.name deprecated_public_tools))
-    raw_schemas
+let all_schemas : tool_schema list = raw_schemas
 
 (** All schemas including Perpetual Agent Runtime tools *)
 let all_schemas_with_perpetual =

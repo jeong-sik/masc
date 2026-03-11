@@ -148,9 +148,6 @@ let metadata name =
   | None -> (
       match name with
       | "masc_swarm_live_run" -> default_metadata
-      | _ when String.starts_with ~prefix:"masc_swarm_" name ->
-          deprecated
-            "Swarm public tools are deprecated. Use Command Plane V2 dispatch, detachment, and policy tools instead."
       | _ -> (
           match Tool_protocol_game_view.legacy_alias_to_canonical name with
           | Some canonical_name ->

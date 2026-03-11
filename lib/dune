@@ -208,7 +208,6 @@
    tempo
    tools
    tool_args
-   tool_swarm
    tool_plan
    tool_run
    tool_cache

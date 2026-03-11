@@ -76,5 +76,11 @@
   "classification_models": [
     "ollama:glm-4.7-flash",
     "glm:glm-4.7"
+  ],
+  "spawn_glm_models": [
+    "glm:glm-4.7",
+    "glm:glm-4.7-flash",
+    "glm:glm-5",
+    "glm:glm-5-code"
   ]
 }

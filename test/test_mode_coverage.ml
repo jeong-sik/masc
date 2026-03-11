@@ -248,6 +248,12 @@ let test_tool_category_code () =
   check bool "code_symbols" true (Mode.tool_category "masc_code_symbols" = Mode.Code);
   check bool "code_read" true (Mode.tool_category "masc_code_read" = Mode.Code)
 
+let test_tool_category_ecosystem_voice () =
+  check bool "voice_speak" true (Mode.tool_category "masc_voice_speak" = Mode.Ecosystem);
+  check bool "voice_sessions" true (Mode.tool_category "masc_voice_sessions" = Mode.Ecosystem);
+  check bool "voice_conference_start" true
+    (Mode.tool_category "masc_voice_conference_start" = Mode.Ecosystem)
+
 let test_tool_category_namespace_mapping () =
   check bool "lodge namespace" true (Mode.tool_category "lodge_heartbeat" = Mode.Comm);
   check bool "trpg namespace" true (Mode.tool_category "trpg.dice.roll" = Mode.TRPG);
@@ -402,6 +408,7 @@ let () =
       test_case "ratelimit tools" `Quick test_tool_category_ratelimit;
       test_case "encryption tools" `Quick test_tool_category_encryption;
       test_case "code tools" `Quick test_tool_category_code;
+      test_case "ecosystem voice tools" `Quick test_tool_category_ecosystem_voice;
       test_case "namespace mappings" `Quick test_tool_category_namespace_mapping;
       test_case "unknown category" `Quick test_tool_category_unknown;
     ];

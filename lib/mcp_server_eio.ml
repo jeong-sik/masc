@@ -1211,6 +1211,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_control : Tool_control.context = { config; agent_name } in
   let simple_ctx_misc : Tool_misc.context = { config; agent_name } in
   let simple_ctx_llama : Tool_llama.context = { config; agent_name } in
+  let simple_ctx_voice : _ Tool_voice.context =
+    { agent_name; sw; clock; net = state.Mcp_server.net }
+  in
   let simple_ctx_suspend : Tool_suspend.context = { config; caller_agent = Some agent_name } in
   let simple_ctx_library : Tool_library.context = { agent_name } in
   let simple_ctx_mdal : Tool_mdal.context = {
@@ -1334,6 +1337,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_team_session.dispatch simple_ctx_team_session ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_voice.dispatch simple_ctx_voice ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_cache.dispatch simple_ctx_cache ~name ~args:arguments with

@@ -168,6 +168,17 @@ function latestMessageFrom(agentName: string, rows: Message[]): Message | null {
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] ?? null
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function containsDirectMention(content: string, agentName: string): boolean {
+  if (!agentName) return false
+  const escaped = escapeRegex(agentName)
+  const pattern = new RegExp(`(?:^|[^a-z0-9_])@${escaped}(?![a-z0-9_-])`, 'i')
+  return pattern.test(content)
+}
+
 function latestMessageTo(agentName: string, rows: Message[]): Message | null {
   const key = agentName.trim().toLowerCase()
   return [...rows]
@@ -175,7 +186,7 @@ function latestMessageTo(agentName: string, rows: Message[]): Message | null {
       const from = (item.from ?? '').trim().toLowerCase()
       if (from === key) return false
       const content = (item.content ?? '').trim().toLowerCase()
-      return content.includes(`@${key}`) || content.includes(key)
+      return containsDirectMention(content, key)
     })
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] ?? null
 }

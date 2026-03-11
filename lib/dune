@@ -115,7 +115,6 @@
    chain_run_store
    chain_native_eio
    llm_client_eio
-   llm_direct
    log
    lodge_cascade
    lodge_atmosphere

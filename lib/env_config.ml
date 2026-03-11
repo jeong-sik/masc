@@ -464,8 +464,8 @@ end
 
 module Endpoints = struct
   (** @deprecated LLM-MCP server URL - no longer used.
-      Use {!Llm_direct.dispatch} for direct API calls instead.
-      Kept for backward compatibility; will be removed in v3.0. *)
+      Use {!Llm_client.run_prompt_cascade} with {!Lodge_cascade.get_cascade}
+      instead. Kept for backward compatibility; will be removed in v3.0. *)
   let llm_mcp_url =
     get_string ~default:"" "LLM_MCP_URL"  (* Default empty - not used *)
 

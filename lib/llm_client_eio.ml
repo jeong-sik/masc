@@ -1,19 +1,11 @@
 (** LLM Client for Eio - HTTP client for llm-mcp server
 
     @deprecated This module is deprecated since v2.59.0.
-    Use {!Llm_direct} for direct LLM API calls instead.
-
-    The llm-mcp proxy dependency has been removed from MASC.
-    All LLM calls now go directly to provider APIs:
-    - Z.ai (GLM): via {!Llm_direct.dispatch} with tool_name="glm"
-    - Ollama: via {!Llm_direct.dispatch} with tool_name="ollama"
-    - Claude: via {!Llm_direct.dispatch} with tool_name="claude-cli"
+    Use {!Llm_client.run_prompt_cascade} with {!Lodge_cascade.get_cascade}
+    instead.
 
     This module is kept for backward compatibility with tests.
-    It will be removed in a future version.
-
-    @see https://github.com/jeong-sik/llm-mcp for original server (no longer required)
-*)
+    It will be removed in a future version. *)
 
 (* Eio modules are referenced with full paths for clarity *)
 

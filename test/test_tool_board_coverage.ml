@@ -2,31 +2,45 @@ open Masc_mcp
 
 (** {1 Test helpers} *)
 
+(** Temp directory for test isolation — set before any Board.global call *)
+let _test_base_path =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc-test-tool-board" in
+  Unix.putenv "MASC_BASE_PATH" dir;
+  dir
+
 (** Clear all Board global state for test isolation.
     Must call inside Eio_main.run since Board.store contains Eio.Mutex. *)
 let rng_initialized = ref false
+
+let rec remove_path path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun entry -> remove_path (Filename.concat path entry));
+      Unix.rmdir path
+    end else
+      Sys.remove path
 
 let cleanup () =
   if not !rng_initialized then begin
     Mirage_crypto_rng_unix.use_default ();
     rng_initialized := true
   end;
+  Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  let store = Board.global () in
-  Hashtbl.reset store.Board.posts;
-  Hashtbl.reset store.Board.comments;
-  Hashtbl.reset store.Board.vote_log;
-  Hashtbl.reset store.Board.comments_by_post;
-  store.Board.post_count := 0;
-  store.Board.karma_cache <- None;
-  store.Board.sorted_posts_cache <- None;
-  store.Board.dirty_posts <- false;
-  store.Board.dirty_comments <- false
+  remove_path (Filename.concat _test_base_path ".masc");
+  Board_dispatch.init_jsonl ()
 
 let dispatch name args =
   Tool_board.handle_tool name args
 
 let make_args pairs = `Assoc pairs
+
+let contains_substring haystack needle =
+  try
+    ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
+    true
+  with Not_found -> false
 
 (** {2 Group 1: Helper / Formatting Functions} *)
 
@@ -170,6 +184,20 @@ let test_post_list_empty () =
   Alcotest.(check bool) "list ok" true ok;
   Alcotest.(check bool) "no posts msg" true
     (String.length body > 0)
+
+let test_cleanup_clears_persisted_jsonl () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok1, _ =
+    dispatch "masc_board_post"
+      (make_args [ ("content", `String "persist me"); ("author", `String "tester") ])
+  in
+  Alcotest.(check bool) "create ok" true ok1;
+  cleanup ();
+  let ok2, body = dispatch "masc_board_list" (make_args []) in
+  Alcotest.(check bool) "list ok after cleanup" true ok2;
+  Alcotest.(check bool) "persisted content removed" false
+    (contains_substring body "persist me")
 
 let test_post_list_with_posts () =
   Eio_main.run @@ fun _env ->
@@ -392,6 +420,8 @@ let () =
           Alcotest.test_case "create success" `Quick test_post_create_success;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
           Alcotest.test_case "list empty" `Quick test_post_list_empty;
+          Alcotest.test_case "cleanup clears persisted jsonl" `Quick
+            test_cleanup_clears_persisted_jsonl;
           Alcotest.test_case "list with posts" `Quick test_post_list_with_posts;
           Alcotest.test_case "list limit clamping" `Quick test_post_list_limit_clamping;
           Alcotest.test_case "list sort orders" `Quick test_post_list_sort_orders;

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.81.1] - 2026-03-11
+
+### Fixed
+- Board test isolation: `ref(lazy)` singleton pattern prevents test JSONL data from polluting production board path (#759)
+- Thread-safe resettable singleton via `Lazy.force` atomic CAS + `ref` wrapping for test reset
+- `MASC_BASE_PATH` temp directory isolation in `test_board_dispatch` and `test_tool_board_coverage`
+
 ## [2.81.0] - 2026-03-11
 
 ### Added
@@ -17,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Keeper room presence no longer depends on mutating repo-global `current_room`
-
 ## [2.80.0] - 2026-03-11
 
 ### Added

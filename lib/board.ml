@@ -1016,7 +1016,7 @@ let set_thread_id store ~post_id ~thread_id : (unit, board_error) result =
 
 (** {1 Global Store} *)
 
-let global_store = lazy (
+let make_global_lazy () = lazy (
   let store = create_store () in
   load_persisted_posts store;
   load_persisted_comments store;
@@ -1025,7 +1025,14 @@ let global_store = lazy (
   store
 )
 
-let global () = Lazy.force global_store
+let global_lazy = ref (make_global_lazy ())
+
+let global () = Lazy.force !global_lazy
+
+(** Reset global store for test isolation. Next [global ()] call creates fresh store.
+    Safe: only called from test setup before concurrent fibers exist. *)
+let reset_global_for_test () =
+  global_lazy := make_global_lazy ()
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss. *)
 let flush_dirty store =

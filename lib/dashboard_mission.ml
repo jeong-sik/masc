@@ -528,6 +528,26 @@ let latest_message_from agent_name messages =
             if message.seq >= current.seq then Some message else best)
     None messages
 
+let is_agent_name_char = function
+  | 'a' .. 'z' | '0' .. '9' | '-' | '_' | '.' -> true
+  | _ -> false
+
+let content_mentions_agent ~agent_name content =
+  let mention = "@" ^ agent_name in
+  let mention_len = String.length mention in
+  let content_len = String.length content in
+  let rec search start_idx =
+    if start_idx + mention_len > content_len then false
+    else
+      match Str.search_forward (Str.regexp_string mention) content start_idx with
+      | idx ->
+          let after_idx = idx + mention_len in
+          if after_idx >= content_len || not (is_agent_name_char content.[after_idx]) then true
+          else search (idx + 1)
+      | exception Not_found -> false
+  in
+  if agent_name = "" then false else search 0
+
 let latest_message_to agent_name messages =
   let lowered = String.lowercase_ascii (String.trim agent_name) in
   List.fold_left
@@ -535,9 +555,9 @@ let latest_message_to agent_name messages =
       let content = String.lowercase_ascii message.content in
       let from_self = String.equal (String.lowercase_ascii (String.trim message.from_agent)) lowered in
       let mentioned =
-        String.contains content '@'
-        && (String.contains content (String.get lowered 0)
-            || String.contains content (String.get lowered (String.length lowered - 1)))
+        match message.mention with
+        | Some mention -> String.equal (String.lowercase_ascii (String.trim mention)) lowered
+        | None -> content_mentions_agent ~agent_name:lowered content
       in
       if from_self || not mentioned
       then best

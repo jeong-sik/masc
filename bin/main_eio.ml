@@ -6706,8 +6706,9 @@ let make_routes ~port ~host ~sw ~clock =
   |> Http.Router.get "/api/v1/openapi.json" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let host_header = Httpun.Headers.get req.Httpun.Request.headers "host" in
-         let (resolved_host, resolved_port) =
-           parse_host_port host_header host port
+         let (resolved_host, resolved_port) = match host_header with
+           | Some header -> parse_host_port (Some header) host port
+           | None -> ("", 0)
          in
          let json =
            Masc_mcp.Transport.Rest.generate_openapi_document
@@ -8937,8 +8938,9 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `GET, "/api/v1/openapi.json" ->
           let host_header = get_header_any_case httpun_request.headers "host" in
-          let (resolved_host, resolved_port) =
-            parse_host_port host_header "127.0.0.1" 8935
+          let (resolved_host, resolved_port) = match host_header with
+            | Some header -> parse_host_port (Some header) "127.0.0.1" 8935
+            | None -> ("", 0)
           in
           let json =
             Masc_mcp.Transport.Rest.generate_openapi_document

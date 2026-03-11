@@ -555,6 +555,12 @@ let test_rest_generate_openapi_document () =
          row |> member "path" |> to_string = "/api/v1/broadcast")
        (broadcast_entry |> member "x-rest-bindings" |> to_list))
 
+let test_rest_generate_openapi_document_relative_server_fallback () =
+  let open Yojson.Safe.Util in
+  let doc = Transport.Rest.generate_openapi_document ~host:"" ~port:0 () in
+  check string "relative server url when host unknown" "/"
+    (doc |> member "servers" |> index 0 |> member "url" |> to_string)
+
 (* ============================================================
    get_bindings Tests
    ============================================================ *)
@@ -836,6 +842,8 @@ let () =
     "rest.generate_openapi_paths", [
       test_case "paths" `Quick test_rest_generate_openapi_paths;
       test_case "document" `Quick test_rest_generate_openapi_document;
+      test_case "relative server fallback" `Quick
+        test_rest_generate_openapi_document_relative_server_fallback;
     ];
     "get_bindings", [
       test_case "nonempty" `Quick test_get_bindings_nonempty;

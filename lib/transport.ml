@@ -501,6 +501,10 @@ module Rest = struct
       |> List.sort (fun (a, _) (b, _) -> String.compare a b)
       |> List.map (fun (path, methods) -> (path, `Assoc (List.rev methods)))
     in
+    let server_url =
+      if String.trim host = "" || port <= 0 then "/"
+      else Printf.sprintf "http://%s:%d" host port
+    in
     `Assoc
       [
         ("openapi", `String "3.1.0");
@@ -518,8 +522,7 @@ module Rest = struct
             [
               `Assoc
                 [
-                  ( "url",
-                    `String (Printf.sprintf "http://%s:%d" host port) );
+                  ("url", `String server_url);
                 ];
             ] );
         ("paths", `Assoc path_entries);

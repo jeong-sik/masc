@@ -1190,6 +1190,80 @@ function normalizeSwarmProvider(raw: unknown): CommandPlaneSwarmProvider | undef
   }
 }
 
+function normalizeRunResolution(raw: unknown): CommandPlaneSwarmResponse['run_resolution'] {
+  if (!isRecord(raw)) return null
+  const runId = asString(raw.run_id)
+  const status = asString(raw.status) as 'continued' | 'rerun' | 'abandoned' | null
+  const decidedBy = asString(raw.decided_by)
+  const decidedAt = asString(raw.decided_at)
+  const reason = asString(raw.reason)
+  if (!runId || !status || !decidedBy || !decidedAt || !reason) return null
+  const history: NonNullable<CommandPlaneSwarmResponse['run_resolution']>['history'] = []
+  if (Array.isArray(raw.history)) {
+    raw.history.forEach(entry => {
+      if (!isRecord(entry)) return
+      const itemStatus = asString(entry.status) as 'continued' | 'rerun' | 'abandoned' | null
+      const itemActor = asString(entry.decided_by)
+      const itemAt = asString(entry.decided_at)
+      const itemReason = asString(entry.reason)
+      if (!itemStatus || !itemActor || !itemAt || !itemReason) return
+      history.push({
+        status: itemStatus,
+        decided_by: itemActor,
+        decided_at: itemAt,
+        reason: itemReason,
+        operation_id: asString(entry.operation_id) ?? null,
+        detachment_id: asString(entry.detachment_id) ?? null,
+        note: asString(entry.note) ?? null,
+      })
+    })
+  }
+  return {
+    run_id: runId,
+    status,
+    decided_by: decidedBy,
+    decided_at: decidedAt,
+    reason,
+    operation_id: asString(raw.operation_id) ?? null,
+    detachment_id: asString(raw.detachment_id) ?? null,
+    note: asString(raw.note) ?? null,
+    history,
+  }
+}
+
+function normalizeRunResolutionRecommendation(
+  raw: unknown,
+): CommandPlaneSwarmResponse['resolution_recommendation'] {
+  if (!isRecord(raw)) return null
+  const runId = asString(raw.run_id)
+  const recommendedKind = asString(raw.recommended_kind) as 'continue' | 'rerun' | 'abandon' | null
+  const reason = asString(raw.reason)
+  if (!runId || !recommendedKind || !reason) return null
+  return {
+    run_id: runId,
+    recommended_kind: recommendedKind,
+    continue_available: asBoolean(raw.continue_available) ?? false,
+    rerun_available: asBoolean(raw.rerun_available) ?? false,
+    abandon_available: asBoolean(raw.abandon_available) ?? false,
+    reason,
+    evidence: isRecord(raw.evidence)
+      ? {
+          operation_id: asString(raw.evidence.operation_id) ?? null,
+          detachment_id: asString(raw.evidence.detachment_id) ?? null,
+          joined_workers: asNumber(raw.evidence.joined_workers),
+          current_task_bound: asNumber(raw.evidence.current_task_bound),
+          fresh_heartbeats: asNumber(raw.evidence.fresh_heartbeats),
+          trace_events: asNumber(raw.evidence.trace_events),
+          message_events: asNumber(raw.evidence.message_events),
+          runtime_blocker: asString(raw.evidence.runtime_blocker) ?? null,
+        }
+      : undefined,
+    provenance: asString(raw.provenance),
+    decision_engine: asString(raw.decision_engine),
+    authoritative: asBoolean(raw.authoritative),
+  }
+}
+
 function normalizeSwarm(raw: unknown): CommandPlaneSwarmResponse {
   const root = isRecord(raw) ? raw : {}
   const summary = isRecord(root.summary) ? root.summary : undefined
@@ -1199,6 +1273,8 @@ function normalizeSwarm(raw: unknown): CommandPlaneSwarmResponse {
     run_id: asString(root.run_id),
     room_id: asString(root.room_id),
     operation_id: asString(root.operation_id) ?? null,
+    run_resolution: normalizeRunResolution(root.run_resolution),
+    resolution_recommendation: normalizeRunResolutionRecommendation(root.resolution_recommendation),
     recommended_next_tool: asString(root.recommended_next_tool),
     summary: summary
       ? {

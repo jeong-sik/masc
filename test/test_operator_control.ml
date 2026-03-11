@@ -69,6 +69,60 @@ let start_session_exn ctx =
   json |> result_field |> Yojson.Safe.Util.member "session_id"
   |> Yojson.Safe.Util.to_string
 
+let unit_update_exn config ~actor args =
+  match Command_plane_v2.unit_update_json config ~actor args with
+  | Ok _ -> ()
+  | Error message -> failwith message
+
+let start_operation_exn config ~actor args =
+  match Command_plane_v2.start_operation config ~actor args with
+  | Ok operation -> operation
+  | Error message -> failwith message
+
+let setup_swarm_run_env config ~owner ~worker_one ~worker_two ~run_id =
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
+  ignore (Room.join config ~agent_name:worker_one ~capabilities:[] ());
+  ignore (Room.join config ~agent_name:worker_two ~capabilities:[] ());
+  unit_update_exn config ~actor:owner
+    (`Assoc
+      [
+        ("unit_id", `String "company-main");
+        ("kind", `String "company");
+        ("label", `String "Main Company");
+        ("leader_id", `String owner);
+        ("roster", `List [ `String owner; `String worker_one; `String worker_two ]);
+      ]);
+  unit_update_exn config ~actor:owner
+    (`Assoc
+      [
+        ("unit_id", `String "platoon-alpha");
+        ("kind", `String "platoon");
+        ("label", `String "Alpha Platoon");
+        ("parent_unit_id", `String "company-main");
+        ("leader_id", `String worker_one);
+        ("roster", `List [ `String worker_one; `String worker_two ]);
+      ]);
+  let operation =
+    start_operation_exn config ~actor:owner
+      (`Assoc
+        [
+          ("assigned_unit_id", `String "company-main");
+          ("objective", `String "Operator swarm resolution test");
+          ("note", `String (Printf.sprintf "run_id=%s" run_id));
+          ("policy_class", `String "guarded");
+          ("budget_class", `String "standard");
+        ])
+  in
+  ignore
+    (match
+       Command_plane_v2.dispatch_tick_json config ~actor:owner
+         (`Assoc [ ("operation_id", `String operation.operation_id) ])
+     with
+    | Ok _ -> ()
+    | Error message -> failwith message);
+  operation
+
 let test_snapshot_has_expected_sections () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -911,6 +965,136 @@ let test_confirm_rejects_expired_token () =
           Alcotest.(check string) "expired error"
             "pending confirmation expired" err)
 
+let test_swarm_run_continue_requires_confirm_then_executes () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      let run_id = "operator-swarm-continue" in
+      let operation =
+        setup_swarm_run_env config ~owner:"owner-root-node"
+          ~worker_one:"alpha-lead-node" ~worker_two:"alpha-two-node" ~run_id
+      in
+      ignore
+        (match
+           Command_plane_v2.pause_operation_json config ~actor:"owner"
+             (`Assoc [ ("operation_id", `String operation.operation_id) ])
+         with
+        | Ok _ -> ()
+        | Error message -> failwith message);
+      let ctx = operator_ctx env sw config "dashboard" in
+      let action_json =
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "dashboard");
+              ("action_type", `String "swarm_run_continue");
+              ("target_type", `String "swarm_run");
+              ("target_id", `String run_id);
+              ("payload", `Assoc [ ("operation_id", `String operation.operation_id) ]);
+            ])
+      in
+      let action_json =
+        match action_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check bool) "confirm required" true
+        Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
+      Alcotest.(check string) "delegated tool" "swarm_run_continue_chain"
+        Yojson.Safe.Util.(action_json |> member "delegated_tool" |> to_string);
+      Alcotest.(check string) "preview kind" "continue"
+        Yojson.Safe.Util.(action_json |> member "preview" |> member "resolution_kind" |> to_string);
+      Alcotest.(check int) "preview step count" 2
+        Yojson.Safe.Util.(action_json |> member "preview" |> member "tool_chain_preview" |> to_list |> List.length);
+      let confirm_token =
+        Yojson.Safe.Util.(action_json |> member "confirm_token" |> to_string)
+      in
+      let confirm_json =
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [
+              ("actor", `String "dashboard");
+              ("confirm_token", `String confirm_token);
+            ])
+      in
+      let confirm_json =
+        match confirm_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let delegated_result = Yojson.Safe.Util.member "delegated_tool_result" confirm_json in
+      Alcotest.(check int) "executed steps" 2
+        Yojson.Safe.Util.(delegated_result |> member "result" |> to_list |> List.length);
+      Alcotest.(check string) "resolution persisted" "continued"
+        Yojson.Safe.Util.(delegated_result |> member "resolution" |> member "status" |> to_string))
+
+let test_swarm_run_abandon_records_soft_resolution () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      let run_id = "operator-swarm-abandon" in
+      let operation =
+        setup_swarm_run_env config ~owner:"owner-root-node"
+          ~worker_one:"alpha-lead-node" ~worker_two:"alpha-two-node" ~run_id
+      in
+      let ctx = operator_ctx env sw config "dashboard" in
+      let action_json =
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "dashboard");
+              ("action_type", `String "swarm_run_abandon");
+              ("target_type", `String "swarm_run");
+              ("target_id", `String run_id);
+              ("payload", `Assoc [ ("reason", `String "operator chose to move on") ]);
+            ])
+      in
+      let action_json =
+        match action_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check bool) "confirm required" true
+        Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
+      let confirm_token =
+        Yojson.Safe.Util.(action_json |> member "confirm_token" |> to_string)
+      in
+      let confirm_json =
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [
+              ("actor", `String "dashboard");
+              ("confirm_token", `String confirm_token);
+            ])
+      in
+      let confirm_json =
+        match confirm_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let delegated_result = Yojson.Safe.Util.member "delegated_tool_result" confirm_json in
+      Alcotest.(check string) "delegated tool" "swarm_run_resolution"
+        Yojson.Safe.Util.(delegated_result |> member "delegated_tool" |> to_string);
+      Alcotest.(check string) "resolution persisted" "abandoned"
+        Yojson.Safe.Util.(delegated_result |> member "resolution" |> member "status" |> to_string);
+      let operation_status =
+        Command_plane_v2.operation_status_json config ~operation_id:operation.operation_id ()
+        |> Yojson.Safe.Util.member "operations"
+        |> Yojson.Safe.Util.index 0
+        |> Yojson.Safe.Util.member "operation"
+        |> Yojson.Safe.Util.member "status"
+        |> Yojson.Safe.Util.to_string
+      in
+      Alcotest.(check string) "operation not stopped" "active" operation_status)
+
 let test_snapshot_exposes_keeper_and_lodge_actions () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -956,7 +1140,16 @@ let test_snapshot_exposes_keeper_and_lodge_actions () =
           Alcotest.(check string) "keeper_recover target_type" "keeper"
             Yojson.Safe.Util.(keeper_recover |> member "target_type" |> to_string);
           Alcotest.(check bool) "keeper_recover confirm false" false
-            Yojson.Safe.Util.(keeper_recover |> member "confirm_required" |> to_bool))
+            Yojson.Safe.Util.(keeper_recover |> member "confirm_required" |> to_bool);
+          let swarm_continue =
+            match find_action "swarm_run_continue" with
+            | Some row -> row
+            | None -> Alcotest.fail "expected swarm_run_continue in available_actions"
+          in
+          Alcotest.(check string) "swarm continue target_type" "swarm_run"
+            Yojson.Safe.Util.(swarm_continue |> member "target_type" |> to_string);
+          Alcotest.(check bool) "swarm continue confirm true" true
+            Yojson.Safe.Util.(swarm_continue |> member "confirm_required" |> to_bool))
 
 let test_select_checkin_agents_manual_override_quiet_hours () =
   let current_hour = Lodge_heartbeat.current_hour_kst () in
@@ -1126,5 +1319,9 @@ let () =
             test_manual_lodge_tick_updates_observable_state;
           Alcotest.test_case "expired confirmation rejected" `Quick
             test_confirm_rejects_expired_token;
+          Alcotest.test_case "swarm run continue confirm flow" `Quick
+            test_swarm_run_continue_requires_confirm_then_executes;
+          Alcotest.test_case "swarm run abandon soft resolution" `Quick
+            test_swarm_run_abandon_records_soft_resolution;
         ] );
     ]

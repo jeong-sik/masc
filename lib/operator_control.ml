@@ -445,6 +445,27 @@ let available_actions_json =
           ("description", `String "Use this when a keeper is stale, degraded, or offline and you need a safe down/up recovery with before-and-after diagnostics.");
           ("confirm_required", `Bool false);
         ];
+      `Assoc
+        [
+          ("action_type", `String "swarm_run_continue");
+          ("target_type", `String "swarm_run");
+          ("description", `String "Use this when a stalled swarm-live run still has resumable managed state and you want a preview-confirm command-plane recovery chain.");
+          ("confirm_required", `Bool true);
+        ];
+      `Assoc
+        [
+          ("action_type", `String "swarm_run_rerun");
+          ("target_type", `String "swarm_run");
+          ("description", `String "Use this when a swarm-live run has no trustworthy resumable state and you want to rerun the harness for the same run_id.");
+          ("confirm_required", `Bool true);
+        ];
+      `Assoc
+        [
+          ("action_type", `String "swarm_run_abandon");
+          ("target_type", `String "swarm_run");
+          ("description", `String "Use this when you want to soft-abandon a swarm-live run without stopping any matched operation.");
+          ("confirm_required", `Bool true);
+        ];
     ]
 
 let recent_messages_json config =
@@ -638,7 +659,8 @@ let attention_item_to_yojson (item : attention_item) =
 
 let recommended_confirm_required = function
   | "room_pause" | "team_stop" | "task_inject" | "team_task_inject"
-  | "team_worker_spawn_batch" ->
+  | "team_worker_spawn_batch" | "swarm_run_continue"
+  | "swarm_run_rerun" | "swarm_run_abandon" ->
       true
   | _ -> false
 
@@ -1906,7 +1928,75 @@ let room_recommendations config =
                  }
            | _ -> None)
   in
-  dedup_recommendations signal_recommendations
+  let swarm_resolution_recommendation =
+    let swarm = Command_plane_v2.swarm_live_json config () in
+    match U.member "resolution_recommendation" swarm with
+    | `Assoc _ as recommendation -> (
+        match
+          recommendation |> U.member "recommended_kind" |> U.to_string_option,
+          swarm |> U.member "run_id" |> U.to_string_option
+        with
+        | Some recommended_kind, Some run_id -> (
+            let reason =
+              recommendation |> U.member "reason" |> U.to_string_option
+              |> Option.value ~default:"swarm-live run needs operator resolution"
+            in
+            let operation_id =
+              match U.member "operation" swarm with
+              | `Assoc _ as operation ->
+                  operation |> U.member "operation_id" |> U.to_string_option
+              | _ -> None
+            in
+            let payload =
+              `Assoc
+                [
+                  ("run_id", `String run_id);
+                  ("reason", `String reason);
+                  ( "evidence",
+                    match recommendation |> U.member "evidence" with
+                    | `Assoc _ as evidence -> evidence
+                    | _ -> `Assoc [] );
+                ]
+            in
+            let payload =
+              match operation_id with
+              | Some value -> (
+                  match payload with
+                  | `Assoc fields ->
+                      `Assoc (("operation_id", `String value) :: fields)
+                  | other -> other)
+              | None -> payload
+            in
+            let action_type =
+              match recommended_kind with
+              | "continue" -> "swarm_run_continue"
+              | "rerun" -> "swarm_run_rerun"
+              | "abandon" -> "swarm_run_abandon"
+              | _ -> ""
+            in
+            if action_type = "" then None
+            else
+              Some
+                {
+                  action_type;
+                  target_type = "swarm_run";
+                  target_id = Some run_id;
+                  severity =
+                    (match recommendation |> U.member "recommended_kind" |> U.to_string_option with
+                    | Some "continue" -> "warn"
+                    | _ -> "bad");
+                  reason;
+                  suggested_payload = payload;
+                })
+        | _ -> None)
+    | _ -> None
+  in
+  dedup_recommendations
+    (signal_recommendations
+    @
+    match swarm_resolution_recommendation with
+    | Some item -> [ item ]
+    | None -> [])
 
 type snapshot_view =
   | Summary
@@ -2176,6 +2266,9 @@ let canonical_action_type action_type =
   | "keeper_message" -> "keeper_message"
   | "keeper_probe" -> "keeper_probe"
   | "keeper_recover" -> "keeper_recover"
+  | "swarm_run_continue" -> "swarm_run_continue"
+  | "swarm_run_rerun" -> "swarm_run_rerun"
+  | "swarm_run_abandon" -> "swarm_run_abandon"
   | other -> other
 
 let default_target_type_for action_type =
@@ -2185,9 +2278,11 @@ let default_target_type_for action_type =
   | "team_worker_spawn_batch" | "team_stop" ->
       "team_session"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
+  | "swarm_run_continue" | "swarm_run_rerun" | "swarm_run_abandon" ->
+      "swarm_run"
   | _ -> ""
 
-let generate_confirm_token ~clock config =
+let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
   let max_attempts = 10 in
   let rec loop attempts =
     if attempts >= max_attempts then
@@ -2248,12 +2343,16 @@ let delegated_tool_for action_type =
   | "keeper_message" -> "masc_keeper_msg"
   | "keeper_probe" -> "masc_keeper_status"
   | "keeper_recover" -> "masc_keeper_recover"
+  | "swarm_run_continue" -> "swarm_run_continue_chain"
+  | "swarm_run_rerun" -> "masc_swarm_live_run"
+  | "swarm_run_abandon" -> "swarm_run_resolution"
   | "task_inject" -> "masc_add_task"
   | _ -> "unknown"
 
 let confirm_required = function
   | "room_pause" | "team_stop" | "task_inject" | "team_task_inject"
-  | "team_worker_spawn_batch" ->
+  | "team_worker_spawn_batch" | "swarm_run_continue"
+  | "swarm_run_rerun" | "swarm_run_abandon" ->
       true
   | _ -> false
 
@@ -2300,6 +2399,127 @@ let parse_turn_kind payload =
   | None ->
       Error
         "payload.turn_kind must be one of: note, broadcast, portal, task, checkpoint"
+
+let swarm_run_json_for_request (ctx : 'a context) (request : action_request) =
+  let* run_id = require_target_id request in
+  let operation_id = get_string_opt request.payload "operation_id" in
+  Ok (Command_plane_v2.swarm_live_json ctx.config ~run_id ?operation_id ())
+
+let swarm_run_recommendation_json swarm_json =
+  match U.member "resolution_recommendation" swarm_json with
+  | `Assoc _ as json -> Some json
+  | _ -> None
+
+let swarm_run_operation_id swarm_json =
+  match U.member "operation" swarm_json with
+  | `Assoc _ as operation ->
+      operation |> U.member "operation_id" |> U.to_string_option
+  | _ -> None
+
+let swarm_run_detachment_id swarm_json =
+  match U.member "detachment" swarm_json with
+  | `Assoc _ as detachment ->
+      detachment |> U.member "detachment_id" |> U.to_string_option
+  | _ -> None
+
+let swarm_run_reason swarm_json fallback =
+  match swarm_run_recommendation_json swarm_json with
+  | Some json -> (
+      match U.member "reason" json with
+      | `String reason when String.trim reason <> "" -> reason
+      | _ -> fallback)
+  | None -> fallback
+
+let swarm_run_chain_preview (request : action_request) swarm_json =
+  let run_id =
+    swarm_json |> U.member "run_id" |> U.to_string_option
+    |> Option.value ~default:(Option.value ~default:"swarm-live" request.target_id)
+  in
+  let reason =
+    swarm_run_reason swarm_json "swarm-live run needs operator resolution"
+  in
+  let operation_id = swarm_run_operation_id swarm_json in
+  let detachment_id = swarm_run_detachment_id swarm_json in
+  let base_fields =
+    [
+      ("run_id", `String run_id);
+      ("reason", `String reason);
+      ("provenance", `String "derived");
+      ("decision_engine", `String "deterministic_truth_map");
+      ("authoritative", `Bool false);
+    ]
+  in
+  let evidence =
+    match swarm_run_recommendation_json swarm_json with
+    | Some json -> (
+        match U.member "evidence" json with
+        | `Assoc _ as evidence -> evidence
+        | _ -> `Assoc [])
+    | None -> `Assoc []
+  in
+  match request.action_type with
+  | "swarm_run_continue" ->
+      let steps =
+        (match
+           swarm_json |> U.member "operation" |> U.member "status"
+           |> U.to_string_option
+         with
+        | Some "paused" -> [ `Assoc [ ("tool", `String "masc_operation_resume"); ("args", `Assoc [ ("operation_id", option_to_json (fun value -> `String value) operation_id) ]) ] ]
+        | _ -> [])
+        @
+        (match operation_id, detachment_id with
+        | Some value, _ ->
+            [ `Assoc [ ("tool", `String "masc_dispatch_tick"); ("args", `Assoc [ ("operation_id", `String value) ]) ] ]
+        | None, Some value ->
+            [ `Assoc [ ("tool", `String "masc_dispatch_tick"); ("args", `Assoc [ ("detachment_id", `String value) ]) ] ]
+        | None, None -> [])
+      in
+      `Assoc
+        (base_fields
+        @ [
+            ("resolution_kind", `String "continue");
+            ("delegated_tools", `List (List.map (fun step -> U.member "tool" step) steps));
+            ("tool_chain_preview", `List steps);
+            ("evidence", evidence);
+          ])
+  | "swarm_run_rerun" ->
+      let steps =
+        [
+          `Assoc
+            [
+              ("tool", `String "masc_swarm_live_run");
+              ("args", `Assoc [ ("run_id", `String run_id) ]);
+            ];
+        ]
+      in
+      `Assoc
+        (base_fields
+        @ [
+            ("resolution_kind", `String "rerun");
+            ("delegated_tools", `List (List.map (fun step -> U.member "tool" step) steps));
+            ("tool_chain_preview", `List steps);
+            ("evidence", evidence);
+          ])
+  | "swarm_run_abandon" ->
+      `Assoc
+        (base_fields
+        @ [
+            ("resolution_kind", `String "abandon");
+            ("delegated_tools", `List []);
+            ("tool_chain_preview", `List []);
+            ("operation_id", option_to_json (fun value -> `String value) operation_id);
+            ("detachment_id", option_to_json (fun value -> `String value) detachment_id);
+            ("evidence", evidence);
+          ])
+  | _ ->
+      `Assoc
+        [
+          ("actor", `String request.actor);
+          ("action_type", `String request.action_type);
+          ("target_type", `String request.target_type);
+          ("target_id", string_option_to_json request.target_id);
+          ("payload", request.payload);
+        ]
 
 let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
@@ -2384,8 +2604,26 @@ let lodge_tick_ack_json ~mode ~status ~manual_tick_running =
 let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
   { config = ctx.config; sw = ctx.sw; clock = ctx.clock }
 
+let tool_command_plane_ctx (ctx : 'a context) : _ Tool_command_plane.context =
+  {
+    config = ctx.config;
+    agent_name = ctx.agent_name;
+    sw = Some ctx.sw;
+    clock = Some ctx.clock;
+    net = None;
+    mcp_state = None;
+    mcp_session_id = ctx.mcp_session_id;
+    auth_token = None;
+  }
+
 let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
   match Tool_keeper.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
+  | Some (true, body) -> Ok (json_of_dispatch_output body)
+  | Some (false, err) -> Error err
+  | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
+
+let dispatch_command_plane_json (ctx : 'a context) ~tool_name ~args =
+  match Tool_command_plane.dispatch (tool_command_plane_ctx ctx) ~name:tool_name ~args with
   | Some (true, body) -> Ok (json_of_dispatch_output body)
   | Some (false, err) -> Error err
   | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
@@ -2860,6 +3098,127 @@ let execute_action (ctx : 'a context) (request : action_request) :
             ("delegated_tool", `String "masc_keeper_msg");
             ("result", json_of_dispatch_output body);
           ])
+  | "swarm_run_continue" ->
+      let* () = validate_target_type "swarm_run" request in
+      let swarm_json = swarm_run_json_for_request ctx request in
+      let* swarm_json = swarm_json in
+      let operation_id = swarm_run_operation_id swarm_json in
+      let detachment_id = swarm_run_detachment_id swarm_json in
+      let pending_decisions =
+        swarm_json |> U.member "summary" |> U.member "pending_decisions"
+        |> U.to_int_option |> Option.value ~default:0
+      in
+      if pending_decisions > 0 then
+        Error "swarm run has pending approvals; resolve approvals before continue"
+      else
+        let steps =
+          (match
+             swarm_json |> U.member "operation" |> U.member "status"
+             |> U.to_string_option
+           with
+          | Some "paused" -> [ ("masc_operation_resume", `Assoc [ ("operation_id", option_to_json (fun value -> `String value) operation_id) ]) ]
+          | _ -> [])
+          @
+          (match operation_id, detachment_id with
+          | Some value, _ ->
+              [ ("masc_dispatch_tick", `Assoc [ ("operation_id", `String value) ]) ]
+          | None, Some value ->
+              [ ("masc_dispatch_tick", `Assoc [ ("detachment_id", `String value) ]) ]
+          | None, None -> [])
+        in
+        if steps = [] then
+          Error "swarm run has no resumable managed operation or detachment"
+        else
+          let* results =
+            steps
+            |> List.fold_left
+                 (fun acc (tool_name, args) ->
+                   let* collected = acc in
+                   let* result_json =
+                     dispatch_command_plane_json ctx ~tool_name ~args
+                   in
+                   Ok
+                     (collected
+                     @ [
+                         `Assoc
+                           [
+                             ("tool", `String tool_name);
+                             ("args", args);
+                             ("result", result_json);
+                           ];
+                       ]))
+                 (Ok [])
+          in
+          let run_id = Option.value ~default:"swarm-live" request.target_id in
+          let reason =
+            swarm_run_reason swarm_json
+              "command-plane recovery chain executed for swarm-live run"
+          in
+          let resolution =
+            Command_plane_v2.record_swarm_run_resolution_json ctx.config ~run_id
+              ~status:"continued" ~actor:request.actor ~reason ?operation_id
+              ?detachment_id
+              ?note:(Some "operator continue chain executed") ()
+          in
+          Ok
+            (`Assoc
+              [
+                ("delegated_tool", `String "swarm_run_continue_chain");
+                ("delegated_tools", `List (List.map (fun (tool_name, _) -> `String tool_name) steps));
+                ("result", `List results);
+                ("resolution", resolution);
+              ])
+  | "swarm_run_rerun" ->
+      let* () = validate_target_type "swarm_run" request in
+      let swarm_json = swarm_run_json_for_request ctx request in
+      let* swarm_json = swarm_json in
+      let run_id = Option.value ~default:"swarm-live" request.target_id in
+      let args = `Assoc [ ("run_id", `String run_id) ] in
+      let* rerun_result =
+        dispatch_command_plane_json ctx ~tool_name:"masc_swarm_live_run" ~args
+      in
+      let resolution =
+        Command_plane_v2.record_swarm_run_resolution_json ctx.config ~run_id
+          ~status:"rerun" ~actor:request.actor
+          ~reason:
+            (swarm_run_reason swarm_json
+               "swarm-live harness rerun requested through operator control")
+          ?operation_id:(swarm_run_operation_id swarm_json)
+          ?detachment_id:(swarm_run_detachment_id swarm_json)
+          ?note:(Some "operator rerun executed") ()
+      in
+      Ok
+        (`Assoc
+          [
+            ("delegated_tool", `String "masc_swarm_live_run");
+            ("delegated_tools", `List [ `String "masc_swarm_live_run" ]);
+            ("result", rerun_result);
+            ("resolution", resolution);
+          ])
+  | "swarm_run_abandon" ->
+      let* () = validate_target_type "swarm_run" request in
+      let swarm_json = swarm_run_json_for_request ctx request in
+      let* swarm_json = swarm_json in
+      let run_id = Option.value ~default:"swarm-live" request.target_id in
+      let resolution =
+        Command_plane_v2.record_swarm_run_resolution_json ctx.config ~run_id
+          ~status:"abandoned" ~actor:request.actor
+          ~reason:
+            (get_string request.payload "reason"
+               (swarm_run_reason swarm_json
+                  "swarm-live run was soft-abandoned by operator"))
+          ?operation_id:(swarm_run_operation_id swarm_json)
+          ?detachment_id:(swarm_run_detachment_id swarm_json)
+          ?note:(Some "soft abandon; no operation stop issued") ()
+      in
+      Ok
+        (`Assoc
+          [
+            ("delegated_tool", `String "swarm_run_resolution");
+            ("delegated_tools", `List []);
+            ("result", `Assoc [ ("recorded", `Bool true) ]);
+            ("resolution", resolution);
+          ])
   | "task_inject" ->
       let* () = validate_target_type "room" request in
       let title =
@@ -2888,12 +3247,15 @@ let validate_request request =
   | "team_turn" | "team_note"
   | "team_broadcast" | "team_task_inject" | "team_worker_spawn_batch"
   | "team_stop"
-  | "keeper_message" | "keeper_probe" | "keeper_recover" | "task_inject" ->
+  | "keeper_message" | "keeper_probe" | "keeper_recover"
+  | "swarm_run_continue" | "swarm_run_rerun" | "swarm_run_abandon"
+  | "task_inject" ->
       Ok ()
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
-let action_json ?actor_hint (ctx : 'a context) args =
+let action_json ?actor_hint (ctx : _ context) args :
+    (Yojson.Safe.t, string) result =
   let request = action_request_of_args ?actor_hint ctx args in
   let* () = validate_request request in
   let delegated_tool = delegated_tool_for request.action_type in
@@ -2902,6 +3264,14 @@ let action_json ?actor_hint (ctx : 'a context) args =
   if confirm_required request.action_type then (
     let expires_at = iso_of_unix (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
     let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
+    let preview =
+      match request.action_type with
+      | "swarm_run_continue" | "swarm_run_rerun" | "swarm_run_abandon" -> (
+          match swarm_run_json_for_request ctx request with
+          | Ok swarm_json -> swarm_run_chain_preview request swarm_json
+          | Error _ -> preview_of_action request)
+      | _ -> preview_of_action request
+    in
     let entry =
       {
         token;
@@ -2938,7 +3308,7 @@ let action_json ?actor_hint (ctx : 'a context) args =
            ("trace_id", `String trace_id);
            ("confirm_required", `Bool true);
            ("confirm_token", `String entry.token);
-           ("preview", preview_of_action request);
+           ("preview", preview);
            ("delegated_tool", `String delegated_tool);
            ("expires_at", `String expires_at);
          ]))
@@ -2969,7 +3339,8 @@ let action_json ?actor_hint (ctx : 'a context) args =
            ("result", executed);
          ])
 
-let confirm_json ?actor_hint (ctx : 'a context) args =
+let confirm_json ?actor_hint (ctx : _ context) args :
+    (Yojson.Safe.t, string) result =
   let actor =
     normalized_actor ~context_actor:ctx.agent_name
       (match get_string_opt args "actor" with

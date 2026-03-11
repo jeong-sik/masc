@@ -391,14 +391,18 @@ export async function dispatchOperatorAction(request: OperatorActionRequest): Pr
   }
 }
 
-export async function confirmOperatorPendingAction(actor: string, confirmToken: string): Promise<OperatorActionResult> {
+export async function confirmOperatorPendingAction(
+  actor: string,
+  confirmToken: string,
+  decision: 'confirm' | 'deny' = 'confirm',
+): Promise<OperatorActionResult> {
   operatorActionBusy.value = true
   operatorError.value = null
   try {
-    const result = await confirmOperatorAction(actor, confirmToken)
+    const result = await confirmOperatorAction(actor, confirmToken, decision)
     appendLog({
       actor,
-      action_type: 'confirm',
+      action_type: decision,
       target_label: confirmToken,
       outcome: 'confirmed',
       message: logMessageFromResult(result),

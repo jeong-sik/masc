@@ -1420,8 +1420,11 @@ export type OperatorActionType =
   | 'keeper_message'
   | 'keeper_probe'
   | 'keeper_recover'
+  | 'swarm_run_continue'
+  | 'swarm_run_rerun'
+  | 'swarm_run_abandon'
 
-export type OperatorTargetType = 'room' | 'team_session' | 'keeper'
+export type OperatorTargetType = 'room' | 'team_session' | 'keeper' | 'swarm_run'
 
 export interface OperatorActionRequest {
   actor: string
@@ -2134,12 +2137,58 @@ export interface CommandPlaneSwarmProvider {
   timeline: CommandPlaneSwarmProviderSample[]
 }
 
+export interface CommandPlaneRunResolutionHistoryEntry {
+  status: 'continued' | 'rerun' | 'abandoned'
+  decided_by: string
+  decided_at: string
+  reason: string
+  operation_id?: string | null
+  detachment_id?: string | null
+  note?: string | null
+}
+
+export interface CommandPlaneRunResolutionState {
+  run_id: string
+  status: 'continued' | 'rerun' | 'abandoned'
+  decided_by: string
+  decided_at: string
+  reason: string
+  operation_id?: string | null
+  detachment_id?: string | null
+  note?: string | null
+  history: CommandPlaneRunResolutionHistoryEntry[]
+}
+
+export interface CommandPlaneRunResolutionRecommendation {
+  run_id: string
+  recommended_kind: 'continue' | 'rerun' | 'abandon'
+  continue_available: boolean
+  rerun_available: boolean
+  abandon_available: boolean
+  reason: string
+  evidence?: {
+    operation_id?: string | null
+    detachment_id?: string | null
+    joined_workers?: number
+    current_task_bound?: number
+    fresh_heartbeats?: number
+    trace_events?: number
+    message_events?: number
+    runtime_blocker?: string | null
+  }
+  provenance?: string
+  decision_engine?: string
+  authoritative?: boolean
+}
+
 export interface CommandPlaneSwarmResponse {
   version?: string
   generated_at?: string
   run_id?: string
   room_id?: string
   operation_id?: string | null
+  run_resolution?: CommandPlaneRunResolutionState | null
+  resolution_recommendation?: CommandPlaneRunResolutionRecommendation | null
   recommended_next_tool?: string
   summary?: {
     expected_workers?: number

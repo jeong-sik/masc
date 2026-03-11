@@ -1523,7 +1523,7 @@ let build_continuity_briefs ~(now_ts : float) keepers session_contexts :
          else Float.compare right.last_signal_ts left.last_signal_ts)
 
 let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
-  ignore actor;
+  let effective_actor = Option.value ~default:"dashboard" actor in
   match dashboard_fixture_name ?fixture () with
   | Some "execution_smoke" -> execution_smoke_fixture_json ()
   | _ ->
@@ -1533,7 +1533,7 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
       let ctx : _ Operator_control.context =
         {
           config;
-          agent_name = "dashboard";
+          agent_name = effective_actor;
           sw;
           clock;
           proc_mgr;
@@ -1542,7 +1542,7 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
       in
       let snapshot_json =
         Operator_control.snapshot_json
-          ~actor:"dashboard"
+          ~actor:effective_actor
           ~view:"summary"
           ~include_messages:false
           ~include_sessions:true
@@ -1550,7 +1550,7 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
           ctx
       in
       let digest_json =
-        match Operator_control.digest_json ~actor:"dashboard" ctx with
+        match Operator_control.digest_json ~actor:effective_actor ctx with
         | Ok json -> json
         | Error message ->
             `Assoc

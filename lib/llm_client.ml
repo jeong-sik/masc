@@ -988,14 +988,37 @@ let cascade ?(accept = fun _ -> true) ?timeout_sec
 (* Model Spec Parser                                                *)
 (* ================================================================ *)
 
-let model_spec_of_string s =
+let rec model_spec_of_string s =
   let s = String.trim s in
+  if String.equal (String.lowercase_ascii s) "default" then
+    match Provider_adapter.default_model_label_result () with
+    | Ok label -> model_spec_of_string label
+    | Error _ as e -> e
+  else if
+    String.length s > 8
+    && String.equal
+         (String.lowercase_ascii (String.sub s 0 8))
+         "default:"
+  then
+    let override_model =
+      String.sub s 8 (String.length s - 8) |> String.trim
+    in
+    (match Provider_adapter.default_model_override_label_result override_model with
+    | Ok label -> model_spec_of_string label
+    | Error _ as e -> e)
+  else
   match String.index_opt s ':' with
   | None ->
-    Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)
+    Error
+      (sprintf
+         "Cannot parse model spec: %s (expected provider:model or default[:model])"
+         s)
   | Some idx ->
     if idx = 0 || idx >= String.length s - 1 then
-      Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)
+      Error
+        (sprintf
+           "Cannot parse model spec: %s (expected provider:model or default[:model])"
+           s)
     else
       let provider = String.sub s 0 idx |> String.lowercase_ascii in
       let model_id =
@@ -1003,7 +1026,10 @@ let model_spec_of_string s =
         |> String.trim
       in
       if model_id = "" then
-        Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)
+        Error
+          (sprintf
+             "Cannot parse model spec: %s (expected provider:model or default[:model])"
+             s)
       else
         match Provider_adapter.resolve_direct_adapter provider with
         | Some adapter when adapter.canonical_name = "llama" ->
@@ -1106,9 +1132,9 @@ let first_available_model_spec labels =
   | spec :: _ -> Ok spec
   | [] ->
       Error
-        "No default model available. Set MASC_DEFAULT_MODEL / MASC_DEFAULT_VERIFIER_MODEL, \
-         configure a supported provider credential (ZAI_API_KEY, GEMINI_API_KEY, \
-         GOOGLE_CLOUD_PROJECT, ANTHROPIC_API_KEY, OPENAI_API_KEY), or pass a model explicitly."
+        "No default model available. Set MASC_DEFAULT_CASCADE, \
+         MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL, or provider credentials for the \
+         preferred fallback chain, or pass an explicit model."
 
 let default_execution_model_spec () =
   first_available_model_spec (default_execution_model_labels ())

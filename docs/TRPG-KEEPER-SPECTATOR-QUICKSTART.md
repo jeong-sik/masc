@@ -11,7 +11,7 @@ Updated: 2026-03-02
 
 - `masc-mcp` 서버가 HTTP 모드로 실행 중이어야 한다. (`/mcp`, `/health` 접근 가능)
 - Viewer 실행에 `trunk`가 필요하다.
-- 최소 1개 이상의 실행 가능한 모델이 준비되어야 한다. (`new-game-models` 또는 `KEEPER_MODELS`)
+- 최소 1개 이상의 실행 가능한 모델이 준비되어야 한다. (`new-game-models` 또는 `KEEPER_MODELS`, 권장: `default`)
 
 ## 3. 관전 루트 A (Viewer UI 권장)
 
@@ -40,7 +40,7 @@ make viewer-serve
 1. 상단 `새 게임` 클릭
 2. `DM` 1명 선택
 3. 플레이어 keeper 선택 (권장 4명)
-4. `new-game-models` 확인 (예: `glm:glm-4.7`)
+4. `new-game-models` 확인 (권장: `default`)
 5. `세션 시작` 클릭
 
 ### 3.4 관전 시작
@@ -54,7 +54,7 @@ make viewer-serve
 Viewer에서 직접 세션을 만들지 않고, 터미널에서 TRPG 세션 + keeper 배치를 먼저 만든다.
 
 ```bash
-KEEPER_MODELS="glm:glm-4.7" \
+KEEPER_MODELS="default" \
 RUN_ROUND=1 \
 ROUNDS=3 \
 scripts/run_trpg_grimland_smoke.sh

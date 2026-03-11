@@ -194,7 +194,7 @@ val run_prompt_cascade :
 val cache_key_of_request : completion_request -> string
 
 (** Parse model spec from string like "glm:glm-4.7",
-    "claude:opus", or "gemini:gemini-3-flash-preview".
+    "claude:opus", "default", or "default:gemini-2.5-flash".
     Splits at the first ':' only, so model IDs may contain additional ':'. *)
 val model_spec_of_string : string -> (model_spec, string) result
 

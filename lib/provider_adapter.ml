@@ -233,7 +233,7 @@ let dedupe_keep_order items =
     items
 
 let bare_ollama_migration_message () =
-  "Bare `ollama` is no longer supported. Use `ollama:<model>` for provider selection, or use `llama`/`glm` for local execution."
+  "Bare `ollama` is no longer supported. Use `default` for normal selection, or `llama:<model>` / another explicit provider:model label as an override."
 
 let is_bare_ollama_label label =
   String.equal (normalize_label label) "ollama"
@@ -346,6 +346,32 @@ let default_model_label_result () =
   | Ok (first :: _) -> Ok first
   | Ok [] -> Error "No default model configured"
   | Error _ as e -> e
+
+let provider_prefix_of_label_result label =
+  let normalized = String.trim label in
+  match String.index_opt normalized ':' with
+  | Some idx when idx > 0 ->
+      Ok
+        (String.sub normalized 0 idx |> String.trim |> String.lowercase_ascii)
+  | _ ->
+      Error
+        (Printf.sprintf
+           "Default model label must be provider:model, got: %s"
+           normalized)
+
+let default_model_provider_prefix_result () =
+  match default_model_label_result () with
+  | Ok label -> provider_prefix_of_label_result label
+  | Error _ as e -> e
+
+let default_model_override_label_result model_id =
+  let model_id = String.trim model_id in
+  if model_id = "" then
+    Error "default:<model> requires a non-empty model id"
+  else
+    match default_model_provider_prefix_result () with
+    | Ok provider -> Ok (provider ^ ":" ^ model_id)
+    | Error _ as e -> e
 
 let default_local_model_label () =
   match default_model_label_result () with

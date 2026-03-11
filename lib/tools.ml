@@ -2251,7 +2251,7 @@ Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
         ]);
         ("target_agent", `Assoc [
           ("type", `String "string");
-          ("description", `String "Agent to spawn: 'claude'|'gemini'|'codex'|'llama' (default: claude). Bare 'ollama' is unsupported; use ollama:<model> only in model fields.");
+          ("description", `String "Agent to spawn: 'claude'|'gemini'|'codex'|'llama' (default: claude). Prefer 'default' in model fields for adapter-managed selection; explicit provider:model labels remain available as overrides.");
         ]);
         ("async", `Assoc [
           ("type", `String "boolean");
@@ -2266,7 +2266,7 @@ Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
         ("verifier_models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Verifier model list (provider:model). Default: provider-aware auto selection from explicit env or available remote credentials.");
+          ("description", `String "Verifier model list. Prefer 'default' or 'default:<model>' for normal use; explicit provider:model labels remain valid as overrides.");
         ]);
         ("verifier_perspectives", `Assoc [
           ("type", `String "array");
@@ -3013,7 +3013,7 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
         ]);
         ("agent_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Agent to spawn (claude, gemini, codex, llama). Bare 'ollama' is unsupported; use ollama:<model> only in model fields.");
+          ("description", `String "Agent to spawn (claude, gemini, codex, llama). Bare 'ollama' is unsupported; use 'default' in model fields for adapter-managed selection.");
         ]);
         ("additional_instructions", `Assoc [
           ("type", `String "string");

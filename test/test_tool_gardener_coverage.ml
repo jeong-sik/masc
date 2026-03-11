@@ -71,6 +71,8 @@ let test_config_returns_json () =
   let json = Yojson.Safe.from_string msg in
   let status = json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string in
   Alcotest.(check string) "status ok" "ok" status;
+  let provenance = json |> Yojson.Safe.Util.member "provenance" |> Yojson.Safe.Util.to_string in
+  Alcotest.(check string) "config provenance truth" "truth" provenance;
   let cb = json |> Yojson.Safe.Util.member "circuit_breaker" in
   let is_open = cb |> Yojson.Safe.Util.member "is_open" |> Yojson.Safe.Util.to_bool in
   Alcotest.(check bool) "circuit_breaker.is_open is bool" true (is_open || not is_open);
@@ -78,6 +80,54 @@ let test_config_returns_json () =
   Alcotest.(check bool) "can_spawn is bool" true (can_spawn || not can_spawn);
   let can_retire = json |> Yojson.Safe.Util.member "can_retire" |> Yojson.Safe.Util.to_bool in
   Alcotest.(check bool) "can_retire is bool" true (can_retire || not can_retire)
+
+let test_spawn_decision_provenance_uses_decision_path () =
+  let approved =
+    Masc_mcp.Gardener_types.SpawnApproved
+      {
+        topic = "security";
+        urgency = Masc_mcp.Gardener_types.Medium;
+        proposed_traits = [];
+        proposed_hours = [];
+        reason = "approved";
+      }
+  in
+  let deferred =
+    Masc_mcp.Gardener_types.SpawnDeferred
+      { topic = "security"; retry_after_sec = 60.0; reason = "cooldown"; }
+  in
+  let rejected =
+    Masc_mcp.Gardener_types.SpawnRejected
+      { topic = "security"; reason = "population cap"; }
+  in
+  Alcotest.(check string) "approved with llm uses judgment" "judgment"
+    (Tool_gardener.spawn_decision_provenance ~use_llm_decision:true approved);
+  Alcotest.(check string) "approved without llm uses fallback" "fallback"
+    (Tool_gardener.spawn_decision_provenance ~use_llm_decision:false approved);
+  Alcotest.(check string) "deferred stays fallback" "fallback"
+    (Tool_gardener.spawn_decision_provenance ~use_llm_decision:true deferred);
+  Alcotest.(check string) "rejected stays fallback" "fallback"
+    (Tool_gardener.spawn_decision_provenance ~use_llm_decision:true rejected)
+
+let test_retirement_decision_provenance_always_fallback () =
+  let approved =
+    Masc_mcp.Gardener_types.RetireApproved
+      { agent_name = "agent-x"; reason = "idle"; grace_period_sec = 30.0; }
+  in
+  let deferred =
+    Masc_mcp.Gardener_types.RetireDeferred
+      { agent_name = "agent-x"; retry_after_sec = 60.0; reason = "cooldown"; }
+  in
+  let rejected =
+    Masc_mcp.Gardener_types.RetireRejected
+      { agent_name = "agent-x"; reason = "active"; }
+  in
+  Alcotest.(check string) "approved retirement fallback" "fallback"
+    (Tool_gardener.retirement_decision_provenance approved);
+  Alcotest.(check string) "deferred retirement fallback" "fallback"
+    (Tool_gardener.retirement_decision_provenance deferred);
+  Alcotest.(check string) "rejected retirement fallback" "fallback"
+    (Tool_gardener.retirement_decision_provenance rejected)
 
 (* ============================================================
    Input validation tests (early return, no network)
@@ -137,6 +187,8 @@ let () =
     ]);
     ("config", [
       Alcotest.test_case "returns json" `Quick test_config_returns_json;
+      Alcotest.test_case "spawn provenance path" `Quick test_spawn_decision_provenance_uses_decision_path;
+      Alcotest.test_case "retirement provenance path" `Quick test_retirement_decision_provenance_always_fallback;
     ]);
     ("validation", [
       Alcotest.test_case "propose_spawn missing topic" `Quick test_propose_spawn_missing_topic;

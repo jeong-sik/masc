@@ -12,6 +12,15 @@ open Tool_args
 
 type result = bool * string
 
+let spawn_decision_provenance ~(use_llm_decision : bool)
+    (decision : spawn_decision) =
+  match decision with
+  | SpawnApproved _ when use_llm_decision -> "judgment"
+  | SpawnApproved _ | SpawnDeferred _ | SpawnRejected _ -> "fallback"
+
+let retirement_decision_provenance (_decision : retirement_decision) =
+  "fallback"
+
 (** {1 Tool Handlers} *)
 
 (** Handle masc_gardener_health tool call.
@@ -70,7 +79,9 @@ let handle_propose_spawn _ctx args : result =
 
       let decision = Gardener.propose_spawn ~topic ~reason ~urgency in
       let decision_provenance =
-        if (Gardener.get_config ()).use_llm_decision then "judgment" else "fallback"
+        spawn_decision_provenance
+          ~use_llm_decision:(Gardener.get_config ()).use_llm_decision
+          decision
       in
 
       let json = `Assoc [
@@ -100,9 +111,7 @@ let handle_retire_agent _ctx args : result =
       (false, "Missing required parameter: agent_name")
     else begin
       let decision = Gardener.propose_retire ~agent_name in
-      let decision_provenance =
-        if (Gardener.get_config ()).use_llm_decision then "judgment" else "fallback"
-      in
+      let decision_provenance = retirement_decision_provenance decision in
 
       let json = `Assoc [
         ("status", `String "ok");

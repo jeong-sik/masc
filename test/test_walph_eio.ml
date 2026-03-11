@@ -319,7 +319,7 @@ let test_eio_default_dispatch_uses_shared_cascade () =
     (file_contains_pattern "lib/room_walph_eio.ml" "Llm_direct.dispatch");
   check bool "shared pool uses centralized defaults" true
     (file_contains_pattern "lib/room_walph_eio.ml"
-       {|Llm_client.default_execution_model_labels ()|})
+       {|Lodge_cascade.get_cascade ~cascade_name:"walph" ()|})
 
 (* ============================================
    Test Registration

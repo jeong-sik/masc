@@ -1,35 +1,46 @@
 {
   "heartbeat_action_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
     "glm:glm-4.7"
   ],
   "heartbeat_wake_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
     "glm:glm-4.7"
   ],
   "sentinel_board_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
     "glm:glm-4.7"
   ],
   "sentinel_task_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
     "glm:glm-4.7"
   ],
   "sentinel_keeper_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
     "glm:glm-4.7"
   ],
   "gardener_spawn_models": [
-    "glm:glm-4.7"
-  ],
-  "lodge_context_rewrite_models": [
-    "glm:glm-4.7"
-  ],
-  "lodge_trait_gen_models": [
-    "glm:glm-4.7"
-  ],
-  "lodge_comment_models": [
-    "glm:glm-4.7"
-  ],
-  "lodge_agent_match_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
     "glm:glm-4.7"
   ],
   "lodge_direct_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
+    "glm:glm-4.7"
+  ],
+  "lodge_context_rewrite_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
+    "glm:glm-4.7"
+  ],
+  "lodge_trait_gen_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
+    "glm:glm-4.7"
+  ],
+  "lodge_comment_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
+    "glm:glm-4.7"
+  ],
+  "lodge_agent_match_models": [
+    "llama:qwen3.5-35b-a3b-ud-q8-xl",
     "glm:glm-4.7"
   ]
 }

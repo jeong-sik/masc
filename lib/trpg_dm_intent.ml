@@ -179,18 +179,10 @@ let extract_keyword (text : string) : dm_intent =
 (* ── LLM Classification ────────────────────────────────────────────── *)
 
 (** Model specs for DM intent LLM classification.
-    Override with MASC_TRPG_DM_INTENT_MODELS. *)
-let intent_model_strings () =
-  match Sys.getenv_opt "MASC_TRPG_DM_INTENT_MODELS" with
-  | Some s -> String.split_on_char ',' s |> List.map String.trim
-  | None ->
-      [
-        Printf.sprintf "ollama:%s" Env_config.Ollama.default_model;
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-      ]
-
+    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
+    Override via config/llm_cascade.json key "trpg_intent_models". *)
 let intent_model_specs () =
-  Llm_client.available_model_specs_of_strings (intent_model_strings ())
+  Lodge_cascade.get_cascade ~cascade_name:"trpg_intent" ()
 
 let category_of_string (s : string) : intent_category =
   match String.lowercase_ascii (String.trim s) with

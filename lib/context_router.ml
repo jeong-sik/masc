@@ -57,18 +57,10 @@ let get_router_mode () : router_mode =
   | _ -> Heuristic
 
 (** Model specs for context router LLM classification.
-    Uses fast local models by default; override with MASC_CONTEXT_ROUTER_MODELS. *)
-let router_model_strings () =
-  match Sys.getenv_opt "MASC_CONTEXT_ROUTER_MODELS" with
-  | Some s -> String.split_on_char ',' s |> List.map String.trim
-  | None ->
-      [
-        Printf.sprintf "ollama:%s" (Env_config.Ollama.default_model);
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-      ]
-
+    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
+    Override via config/llm_cascade.json key "context_router_models". *)
 let router_model_specs () =
-  Llm_client.available_model_specs_of_strings (router_model_strings ())
+  Lodge_cascade.get_cascade ~cascade_name:"context_router" ()
 
 (* ---------- Intent Classification (Heuristic) ---------- *)
 

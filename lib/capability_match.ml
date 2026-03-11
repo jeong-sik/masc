@@ -155,14 +155,10 @@ let agent_profile_of_identity (id : Agent_identity.t) : agent_profile =
 (* ---------- LLM Scoring ---------- *)
 
 (** Model specs for capability match LLM scoring.
-    Uses fast local models by default; override with MASC_CAPABILITY_MATCH_MODELS. *)
-let match_model_strings () =
-  match Sys.getenv_opt "MASC_CAPABILITY_MATCH_MODELS" with
-  | Some s -> String.split_on_char ',' s |> List.map String.trim
-  | None -> Llm_client.default_execution_model_labels ()
-
+    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
+    Override via config/llm_cascade.json key "capability_match_models". *)
 let match_model_specs () =
-  Llm_client.available_model_specs_of_strings (match_model_strings ())
+  Lodge_cascade.get_cascade ~cascade_name:"capability_match" ()
 
 (** Build the LLM prompt for agent-task compatibility scoring. *)
 let build_scoring_prompt (agent : agent_profile) (task : task_profile) : string =

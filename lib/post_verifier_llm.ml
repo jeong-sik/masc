@@ -21,19 +21,11 @@ let get_verifier_mode () =
   | Some "hybrid" -> Hybrid
   | _ -> Heuristic
 
-(** Model strings for the verifier LLM cascade.
-    Override with MASC_VERIFIER_MODELS env var (comma-separated). *)
-let verifier_model_strings () =
-  match Sys.getenv_opt "MASC_VERIFIER_MODELS" with
-  | Some s -> String.split_on_char ',' s |> List.map String.trim
-  | None ->
-      [
-        Printf.sprintf "ollama:%s" (Env_config.Ollama.default_model);
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-      ]
-
+(** Model specs for the verifier LLM cascade.
+    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
+    Override via config/llm_cascade.json key "verifier_models". *)
 let verifier_model_specs () =
-  Llm_client.available_model_specs_of_strings (verifier_model_strings ())
+  Lodge_cascade.get_cascade ~cascade_name:"verifier" ()
 
 (** G-Eval rubric prompt for post quality assessment. *)
 let build_geval_prompt ~content : string =

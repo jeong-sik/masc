@@ -270,6 +270,16 @@ let test_permission_for_tool_persona_list () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
+let test_permission_for_tool_voice_sessions () =
+  match Auth.permission_for_tool "masc_voice_sessions" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_voice_speak () =
+  match Auth.permission_for_tool "masc_voice_speak" with
+  | Some Types.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
+
 let test_permission_for_tool_keeper_create_from_persona () =
   match Auth.permission_for_tool "masc_keeper_create_from_persona" with
   | Some Types.CanBroadcast -> ()
@@ -350,6 +360,8 @@ let () =
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
       test_case "persona_list" `Quick test_permission_for_tool_persona_list;
+      test_case "voice_sessions" `Quick test_permission_for_tool_voice_sessions;
+      test_case "voice_speak" `Quick test_permission_for_tool_voice_speak;
       test_case "keeper_create_from_persona" `Quick
         test_permission_for_tool_keeper_create_from_persona;
       test_case "unknown" `Quick test_permission_for_tool_unknown;

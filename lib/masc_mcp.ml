@@ -254,6 +254,7 @@ module Tool_command_plane = Tool_command_plane
 module Tool_lodge = Tool_lodge
 module Tool_mdal = Tool_mdal
 module Tool_notifications = Tool_notifications
+module Tool_voice = Tool_voice
 
 (* Lodge subsystem *)
 module Lodge_heartbeat = Lodge_heartbeat

@@ -4393,7 +4393,7 @@ let all_schemas : tool_schema list = raw_schemas
 let all_schemas_with_perpetual =
   all_schemas @ Tool_perpetual.schemas @ Tool_keeper.schemas
   @ Tool_operator.schemas @ Tool_llama.schemas @ Tool_command_plane.schemas @ Tool_goals.schemas
-  @ Tool_team_session.schemas @ Tool_shard.schemas
+  @ Tool_team_session.schemas @ Tool_voice.schemas @ Tool_shard.schemas
   @ Tool_notifications.schemas
 
 (** Get tool by name *)

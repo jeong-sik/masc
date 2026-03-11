@@ -912,6 +912,7 @@ let dedup_recommendations (items : recommended_action list) =
               item.action_type;
               item.target_type;
               Option.value ~default:"" item.target_id;
+              String.trim item.reason |> String.lowercase_ascii;
             ]
         in
         if List.mem key seen then loop seen acc rest

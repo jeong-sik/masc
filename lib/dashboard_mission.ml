@@ -138,6 +138,9 @@ let dedup_strings items =
   List.sort_uniq String.compare
     (List.filter_map trim_to_option items)
 
+let normalized_text_key text =
+  compact_text ~max_len:512 text |> String.trim |> String.lowercase_ascii
+
 let top_item items =
   match items with
   | item :: _ -> item
@@ -279,6 +282,12 @@ let build_session_context session_json session_cards =
     in
     let broadcast_count = int_field "broadcast_count" communication in
     let portal_count = int_field "portal_count" communication in
+    let member_names =
+      dedup_strings
+        (string_list_of_json (member_assoc "agent_names" meta)
+        @ string_list_of_json (member_assoc "active_agents" summary)
+        @ string_list_of_json (member_assoc "planned_participants" summary))
+    in
     Some
       {
         session_id;
@@ -295,7 +304,7 @@ let build_session_context session_json session_cards =
           | None ->
               trim_to_option (string_field "status" team_health)
               |> Option.value ~default:"ok");
-        member_names = string_list_of_json (member_assoc "agent_names" meta);
+        member_names;
         started_at = trim_to_option (string_field "created_at_iso" meta);
         elapsed_sec =
           (match member_assoc "elapsed_sec" summary with
@@ -330,6 +339,96 @@ let matching_action target_type target_id actions =
       | None, None -> true
       | _ -> false)
     actions
+
+let action_identity action =
+  String.concat "|"
+    [
+      string_field "action_type" action;
+      string_field "target_type" action;
+      Option.value ~default:"none" (trim_to_option (string_field "target_id" action));
+      normalized_text_key (string_field "reason" action);
+    ]
+
+let incident_identity incident =
+  String.concat "|"
+    [
+      string_field "kind" incident;
+      string_field "target_type" incident;
+      Option.value ~default:"none" (trim_to_option (string_field "target_id" incident));
+      normalized_text_key (string_field "summary" incident);
+    ]
+
+let identity_digest prefix identity =
+  Printf.sprintf "%s:%s" prefix (Digest.to_hex (Digest.string identity))
+
+let incident_action_types kind =
+  match kind with
+  | "spawn_failure_present" -> [ "team_task_inject" ]
+  | "detached_actor_present"
+  | "empty_note_turn_present"
+  | "low_confidence_routing"
+  | "routing_escalation_present" ->
+      [ "team_note" ]
+  | "planned_worker_without_turn" -> [ "team_worker_spawn_batch"; "team_note" ]
+  | "local64_role_gap" -> [ "team_worker_spawn_batch" ]
+  | "stalled_session" -> [ "team_stop" ]
+  | "command_issue_pressure"
+  | "command_routing_confidence"
+  | "command_quality_per_token"
+  | "command_verification_gate_failures"
+  | "command_rework_rate"
+  | "command_artifact_scope_drift"
+  | "command_cache_contention"
+  | "command_speculative_posture"
+  | "intent_blocked"
+  | "intent_handoff_ready" ->
+      [ "broadcast" ]
+  | _ -> []
+
+let action_matches_incident incident action =
+  let target_type = string_field "target_type" incident in
+  let target_id = trim_to_option (string_field "target_id" incident) in
+  let action_target_type = string_field "target_type" action in
+  let action_target_id = trim_to_option (string_field "target_id" action) in
+  let same_target =
+    String.equal action_target_type target_type
+    &&
+    match target_id, action_target_id with
+    | Some left, Some right -> String.equal left right
+    | None, None -> true
+    | _ -> false
+  in
+  if not same_target then false
+  else
+    let incident_summary = normalized_text_key (string_field "summary" incident) in
+    let action_reason = normalized_text_key (string_field "reason" action) in
+    let reason_matches =
+      incident_summary <> "" && action_reason <> ""
+      && String.equal incident_summary action_reason
+    in
+    if reason_matches then true
+    else
+      let action_type = string_field "action_type" action in
+      List.mem action_type (incident_action_types (string_field "kind" incident))
+
+let matching_action_for_incident incident actions =
+  let target_type = string_field "target_type" incident in
+  let target_id = trim_to_option (string_field "target_id" incident) in
+  let candidates =
+    actions
+    |> List.filter (fun action ->
+           let action_target_type = string_field "target_type" action in
+           let action_target_id = trim_to_option (string_field "target_id" action) in
+           String.equal action_target_type target_type
+           &&
+           match target_id, action_target_id with
+           | Some left, Some right -> String.equal left right
+           | None, None -> true
+           | _ -> false)
+  in
+  match List.find_opt (action_matches_incident incident) candidates with
+  | Some action -> Some action
+  | None -> (match candidates with action :: _ -> Some action | [] -> None)
 
 let rec evidence_preview_strings json =
   match json with
@@ -399,7 +498,7 @@ let build_attention_queue incidents actions sessions =
                | Some actor -> [ actor ]
                | None -> [])
            in
-           let top_action = matching_action target_type target_id actions in
+           let top_action = matching_action_for_incident incident actions in
            let last_seen_at =
              related_session_ids
              |> List.filter_map (fun session_id ->
@@ -466,8 +565,11 @@ let build_session_briefs sessions attention_queue actions =
          let top_recommendation_json =
            match session.top_recommendation with
            | Some value -> Some value
-           | None ->
-               matching_action "team_session" (Some session.session_id) actions
+           | None -> (
+               match top_attention_json with
+               | Some attention -> matching_action_for_incident attention actions
+               | None ->
+                   matching_action "team_session" (Some session.session_id) actions)
          in
          let health_tone =
            match top_attention_json with
@@ -737,21 +839,14 @@ let build_internal_signals incidents actions =
     incidents
     |> List.filter is_internal_attention
     |> List.map (fun incident ->
-           let target_type = string_field "target_type" incident in
-           let target_id = trim_to_option (string_field "target_id" incident) in
-           let action = matching_action target_type target_id actions in
-           let kind = string_field "kind" incident in
-           let id =
-             Printf.sprintf "attention:%s:%s:%s" kind target_type
-               (match target_id with Some value -> value | None -> "none")
-           in
+           let action = List.find_opt (action_matches_incident incident) actions in
            {
              pressure_rank = severity_rank (string_field ~default:"warn" "severity" incident);
              last_seen_ts = 0.0;
              json =
                `Assoc
                  [
-                   ("id", `String id);
+                   ("id", `String (identity_digest "attention" (incident_identity incident)));
                    ("signal_type", `String "attention");
                    ("severity", member_assoc "severity" incident);
                    ("summary", member_assoc "summary" incident);
@@ -762,38 +857,26 @@ let build_internal_signals incidents actions =
                  ];
            })
   in
-  let internal_incident_targets =
+  let matched_internal_action_keys =
     internal_incidents
-    |> List.map (fun row ->
-           let attention = member_assoc "attention" row.json in
-           ( string_field "target_type" attention,
-             trim_to_option (string_field "target_id" attention) ))
+    |> List.filter_map (fun row ->
+           match member_assoc "action" row.json with
+           | `Assoc _ as action -> Some (action_identity action)
+           | _ -> None)
   in
   let internal_actions =
     actions
     |> List.filter is_internal_action
     |> List.filter (fun action ->
-           let target_id = trim_to_option (string_field "target_id" action) in
-           not
-             (List.exists
-                (fun (incident_target_type, incident_target_id) ->
-                  String.equal incident_target_type (string_field "target_type" action)
-                  &&
-                  match target_id, incident_target_id with
-                  | Some left, Some right -> String.equal left right
-                  | None, None -> true
-                  | _ -> false)
-                internal_incident_targets))
+           not (List.mem (action_identity action) matched_internal_action_keys))
     |> List.map (fun action ->
-           let action_type = string_field "action_type" action in
-           let target_id = trim_to_option (string_field "target_id" action) in
            {
              pressure_rank = severity_rank (string_field ~default:"warn" "severity" action);
              last_seen_ts = 0.0;
              json =
                `Assoc
                  [
-                   ("id", `String (Printf.sprintf "action:%s:%s" action_type (Option.value ~default:"none" target_id)));
+                   ("id", `String (identity_digest "action" (action_identity action)));
                    ("signal_type", `String "action");
                    ("severity", member_assoc "severity" action);
                    ("summary", member_assoc "reason" action);

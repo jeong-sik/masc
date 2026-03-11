@@ -1,36 +1,213 @@
-(** Keeper_memory — memory-bank paths, JSONL operations, state snapshots,
-    scoring, recall evaluation, and cost utilities for keeper agents. *)
+(** Keeper_memory — memory-bank paths, reward-model evaluation,
+    state snapshots, recall scoring, and metrics summaries. *)
 
 include Keeper_types
 
-let keeper_metrics_path config name =
-  Filename.concat (keeper_dir config) (name ^ ".metrics.jsonl")
+type keeper_reward_candidate = {
+  bias: float;
+  weights: (string * float) list;
+}
 
-let keeper_memory_bank_path config name =
-  Filename.concat (keeper_dir config) (name ^ ".memory.jsonl")
+type keeper_reward_model = {
+  version: string;
+  path: string;
+  candidates: (string * keeper_reward_candidate) list;
+}
 
-let keeper_session_dir config trace_id =
-  Filename.concat (session_base_dir config) trace_id
+type keeper_policy_observation = {
+  source_kind: string;
+  room_id: string option;
+  from_agent: string;
+  message: string;
+  direct_mention: bool;
+  has_question: bool;
+  message_chars: int;
+  total_turns: int;
+  active_goal_count: int;
+  joined_room_count: int;
+  room_scope: string;
+  trigger_mode: string;
+  last_turn_ago_s: float;
+}
 
-let keeper_history_path config trace_id =
-  Filename.concat (keeper_session_dir config trace_id) "history.jsonl"
+type keeper_policy_candidate_score = {
+  action: string;
+  bias: float;
+  feature_scores: (string * float) list;
+  score: float;
+  allowed: bool;
+}
 
-let keeper_alerts_path config =
-  Filename.concat (keeper_dir config) "_alerts.jsonl"
+let empty_keeper_reward_candidate = { bias = 0.0; weights = [] }
 
-let keeper_alert_retry_path config =
-  Filename.concat (keeper_dir config) "_alerts.retry.jsonl"
+let policy_action_order action =
+  match action with
+  | "noop" -> 0
+  | "reply_in_room" -> 1
+  | "board_post" -> 2
+  | _ -> 9
 
-let keeper_alert_deadletter_path config =
-  Filename.concat (keeper_dir config) "_alerts.deadletter.jsonl"
+let keeper_policy_mode_is_learned (meta : keeper_meta) =
+  canonical_policy_mode meta.policy_mode = "learned_offline_v1"
 
-let append_jsonl_line path (json : Yojson.Safe.t) =
-  let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
-  let fd = Unix.openfile path
-    [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-    let _ = Unix.write_substring fd line 0 (String.length line) in
-    ())
+let keeper_policy_feature_vector (obs : keeper_policy_observation) : (string * float) list =
+  let clamp01 value = max 0.0 (min 1.0 value) in
+  [
+    ("direct_mention", if obs.direct_mention then 1.0 else 0.0);
+    ("question_mark", if obs.has_question then 1.0 else 0.0);
+    ("message_chars", clamp01 (float_of_int obs.message_chars /. 400.0));
+    ("active_goal_count", clamp01 (float_of_int obs.active_goal_count /. 5.0));
+    ("joined_room_count", clamp01 (float_of_int obs.joined_room_count /. 5.0));
+    ("room_scope_all", if obs.room_scope = "all" then 1.0 else 0.0);
+    ("idle_seconds", clamp01 (obs.last_turn_ago_s /. 3600.0));
+  ]
+
+let float_assoc_to_json (items : (string * float) list) : Yojson.Safe.t =
+  `Assoc (List.map (fun (key, value) -> (key, `Float value)) items)
+
+let keeper_policy_observation_to_json (obs : keeper_policy_observation) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("source_kind", `String obs.source_kind);
+      ("room_id",
+        match obs.room_id with
+        | Some room_id -> `String room_id
+        | None -> `Null);
+      ("from_agent", `String obs.from_agent);
+      ("message", `String obs.message);
+      ("direct_mention", `Bool obs.direct_mention);
+      ("has_question", `Bool obs.has_question);
+      ("message_chars", `Int obs.message_chars);
+      ("total_turns", `Int obs.total_turns);
+      ("active_goal_count", `Int obs.active_goal_count);
+      ("joined_room_count", `Int obs.joined_room_count);
+      ("room_scope", `String obs.room_scope);
+      ("trigger_mode", `String obs.trigger_mode);
+      ("last_turn_ago_s", `Float obs.last_turn_ago_s);
+    ]
+
+let keeper_policy_candidate_score_to_json
+    (candidate : keeper_policy_candidate_score) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("action", `String candidate.action);
+      ("bias", `Float candidate.bias);
+      ("feature_scores", float_assoc_to_json candidate.feature_scores);
+      ("score", `Float candidate.score);
+      ("allowed", `Bool candidate.allowed);
+    ]
+
+let reward_candidate_of_json (json : Yojson.Safe.t) : keeper_reward_candidate =
+  let bias = Safe_ops.json_float ~default:0.0 "bias" json in
+  let weights =
+    match Yojson.Safe.Util.member "weights" json with
+    | `Assoc fields ->
+        fields
+        |> List.filter_map (fun (feature, value) ->
+               match value with
+               | `Float weight -> Some (feature, weight)
+               | `Int n -> Some (feature, float_of_int n)
+               | `Intlit raw ->
+                   Some (feature, Safe_ops.float_of_string_with_default ~default:0.0 raw)
+               | _ -> None)
+    | _ -> []
+  in
+  { bias; weights }
+
+let load_keeper_reward_model (path : string) : (keeper_reward_model, string) result =
+  let path = String.trim path in
+  if path = "" then
+    Error "reward_model_path is required for learned_offline_v1"
+  else
+    match Safe_ops.read_json_file_safe path with
+    | Error e -> Error e
+    | Ok json ->
+        let version = Safe_ops.json_string ~default:"reward-model-v1" "version" json in
+        let candidates =
+          match Yojson.Safe.Util.member "candidates" json with
+          | `Assoc fields ->
+              fields |> List.map (fun (name, value) -> (name, reward_candidate_of_json value))
+          | _ -> []
+        in
+        if candidates = [] then
+          Error "reward model must define candidates"
+        else
+          Ok { version; path; candidates }
+
+let score_keeper_policy_candidate
+    ~(model : keeper_reward_model)
+    ~(features : (string * float) list)
+    ~(action : string)
+    ~(allowed : bool) : keeper_policy_candidate_score =
+  let candidate_model =
+    model.candidates
+    |> List.find_map (fun (candidate_action, candidate_model) ->
+           if candidate_action = action then Some candidate_model else None)
+    |> Option.value ~default:empty_keeper_reward_candidate
+  in
+  let feature_scores =
+    candidate_model.weights
+    |> List.map (fun (feature_name, weight) ->
+           let feature_value =
+             features
+             |> List.find_map (fun (name, value) ->
+                    if name = feature_name then Some value else None)
+             |> Option.value ~default:0.0
+           in
+           (feature_name, weight *. feature_value))
+  in
+  let score =
+    List.fold_left (fun acc (_, value) -> acc +. value) candidate_model.bias feature_scores
+  in
+  {
+    action;
+    bias = candidate_model.bias;
+    feature_scores;
+    score;
+    allowed;
+  }
+
+let observation_has_question (message : string) =
+  String.contains message '?'
+
+let keeper_policy_observation_of_room_message
+    ~(meta : keeper_meta)
+    ~(room_id : string)
+    (msg : Types.message) : keeper_policy_observation =
+  let now_ts = Time_compat.now () in
+  let last_turn_ago_s =
+    if meta.last_turn_ts <= 0.0 then 0.0 else max 0.0 (now_ts -. meta.last_turn_ts)
+  in
+  {
+    source_kind = "room_message";
+    room_id = Some room_id;
+    from_agent = msg.from_agent;
+    message = msg.content;
+    direct_mention = true;
+    has_question = observation_has_question msg.content;
+    message_chars = String.length msg.content;
+    total_turns = meta.total_turns;
+    active_goal_count = List.length meta.active_goal_ids;
+    joined_room_count = List.length meta.joined_room_ids;
+    room_scope = meta.room_scope;
+    trigger_mode = meta.trigger_mode;
+    last_turn_ago_s;
+  }
+
+let deterministic_policy_baseline_action (obs : keeper_policy_observation) : string =
+  if obs.direct_mention then "reply_in_room" else "noop"
+
+let choose_policy_action (candidates : keeper_policy_candidate_score list) :
+    keeper_policy_candidate_score option =
+  candidates
+  |> List.filter (fun candidate -> candidate.allowed)
+  |> List.sort (fun a b ->
+         let score_cmp = Float.compare b.score a.score in
+         if score_cmp <> 0 then score_cmp
+         else compare (policy_action_order a.action) (policy_action_order b.action))
+  |> function
+  | candidate :: _ -> Some candidate
+  | [] -> None
 
 type alert_channel_result = {
   channel: string;
@@ -1396,6 +1573,47 @@ let evaluate_keeper_auto_rules
     reasons = List.rev reasons;
   }
 
+let learned_policy_auto_rules
+    ~(meta : keeper_meta)
+    ~(context_ratio : float)
+    ~(message_count : int)
+    ~(token_count : int)
+    ~(repetition_risk : float)
+    ~(goal_alignment : float)
+    ~(response_alignment : float) : keeper_auto_rule_eval =
+  let ratio_gate = meta.compaction_ratio_gate in
+  let message_gate = meta.compaction_message_gate in
+  let token_gate = meta.compaction_token_gate in
+  let goal_drift =
+    1.0 -. max 0.0 (min 1.0 (max goal_alignment response_alignment))
+    |> max 0.0
+    |> min 1.0
+  in
+  let compact =
+    context_ratio >= ratio_gate
+    || (message_gate > 0 && message_count >= message_gate)
+    || (token_gate > 0 && token_count >= token_gate)
+  in
+  let handoff = meta.auto_handoff && context_ratio >= meta.handoff_threshold in
+  {
+    repetition_risk;
+    goal_alignment;
+    response_alignment;
+    goal_drift;
+    reflect = false;
+    plan = false;
+    compact;
+    handoff;
+    guardrail_stop = false;
+    guardrail_reason = None;
+    reasons =
+      [
+        "policy_mode=learned_offline_v1";
+        (if compact then "compact_safety_gate=true" else "compact_safety_gate=false");
+        (if handoff then "handoff_safety_gate=true" else "handoff_safety_gate=false");
+      ];
+  }
+
 let recent_user_messages (msgs : Llm_client.message list) ~(max_n : int) : string list =
   msgs
   |> List.rev
@@ -1552,3 +1770,5 @@ let work_kind_of_eval (e : memory_recall_eval) : string =
     | Some topic when topic <> "" -> topic
     | _ -> "general_chat"
 
+(* Tool definitions moved to Tool_shard for dynamic composition.
+   This alias maintains backward compatibility. *)

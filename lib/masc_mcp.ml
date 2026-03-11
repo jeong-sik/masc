@@ -293,6 +293,11 @@ module Anti_fake = Anti_fake
 (* Keeper Autonomy Engine (Phase 2: autonomy slider + verifier) *)
 module Keeper_autonomy = Keeper_autonomy
 module Keeper_verifier = Keeper_verifier
+module Keeper_types = Keeper_types
+module Keeper_memory = Keeper_memory
+module Keeper_alerting = Keeper_alerting
+module Keeper_execution = Keeper_execution
+module Keeper_runtime = Keeper_runtime
 
 (* Autonomy Adjuster — Feedback Closure (Phase 4) *)
 module Autonomy_adjuster = Autonomy_adjuster

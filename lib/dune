@@ -294,6 +294,7 @@
    keeper_memory
    keeper_alerting
    keeper_execution
+   keeper_runtime
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)

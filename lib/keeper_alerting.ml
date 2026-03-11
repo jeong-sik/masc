@@ -1,12 +1,8 @@
-(** Keeper_alerting — alert dispatch (Slack, MCP broadcast, board),
-    retry/deadletter queues, skill routing, and path-resolution helpers
-    for keeper tool execution. *)
+(** Keeper_alerting — alert fanout, skill routing, path safety checks,
+    and tool-call preparation helpers for keeper execution. *)
 
 include Keeper_memory
 
-
-(* Tool definitions moved to Tool_shard for dynamic composition.
-   This alias maintains backward compatibility. *)
 let keeper_llm_tools = Tool_shard.keeper_llm_tools
 
 let merge_usage
@@ -575,6 +571,12 @@ type keeper_skill_selection_mode =
   | SkillSelectHeuristic
   | SkillSelectAgent
 
+type keeper_skill_route_resolution = {
+  route: keeper_skill_route;
+  selection_mode: string;
+  provenance: string;
+}
+
 let keeper_skill_selection_mode () : keeper_skill_selection_mode =
   match Sys.getenv_opt "MASC_KEEPER_SKILL_SELECTION" with
   | None -> SkillSelectAgent
@@ -814,6 +816,20 @@ let agent_selected_skill_route_from_reply (raw : string) : keeper_skill_route op
              |> Option.value ~default:"agent-selected"
            in
            Some { primary_skill = primary; secondary_skills = secondary; reason })
+
+let resolved_keeper_skill_route
+    ~(selection_mode : keeper_skill_selection_mode)
+    ~(fallback_route : keeper_skill_route)
+    ~(reply_raw : string) : keeper_skill_route_resolution =
+  match selection_mode with
+  | SkillSelectHeuristic ->
+      { route = fallback_route; selection_mode = "heuristic"; provenance = "fallback" }
+  | SkillSelectAgent ->
+      (match agent_selected_skill_route_from_reply reply_raw with
+       | Some route ->
+           { route; selection_mode = "agent"; provenance = "judgment" }
+       | None ->
+           { route = fallback_route; selection_mode = "heuristic"; provenance = "fallback" })
 
 let skill_route_system_prompt_heuristic
     ~(base_system_prompt : string)

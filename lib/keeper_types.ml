@@ -1,7 +1,5 @@
-(** Keeper_types — shared types, meta record, serialization, path helpers,
-    and model-resolution utilities used by all keeper-related modules.
-
-    Includes [Keeper_config] so consumers get config defaults and parsing. *)
+(** Keeper_types — shared keeper contract, registry/store helpers,
+    path resolution, and model-selection utilities. *)
 
 let keeper_debug =
   try Sys.getenv "MASC_KEEPER_DEBUG" = "1" with Not_found -> false
@@ -46,9 +44,10 @@ let similarity_tokens (s : string) : string list =
 
 let jaccard_similarity (a : string list) (b : string list) : float =
   let to_set xs =
-    List.fold_left (fun acc x ->
-      if List.mem x acc then acc else x :: acc
-    ) [] xs
+    List.fold_left
+      (fun acc x -> if List.mem x acc then acc else x :: acc)
+      []
+      xs
   in
   let sa = to_set a in
   let sb = to_set b in
@@ -125,9 +124,205 @@ let mkdir_p path =
   in
   go path
 
+let dedupe_keep_order items =
+  let seen = Hashtbl.create (List.length items) in
+  List.filter
+    (fun item ->
+      if Hashtbl.mem seen item then
+        false
+      else (
+        Hashtbl.add seen item ();
+        true))
+    items
+
+let first_some a b =
+  match a with
+  | Some _ -> a
+  | None -> b
+
+let canonical_room_scope = function
+  | "all" -> "all"
+  | _ -> "current"
+
+let canonical_scope_kind = function
+  | "global" -> "global"
+  | _ -> "local"
+
+let canonical_trigger_mode = function
+  | "explicit_only" -> "explicit_only"
+  | _ -> "legacy"
+
+let canonical_policy_mode = function
+  | "learned_offline_v1" -> "learned_offline_v1"
+  | _ -> "heuristic"
+
+let canonical_policy_action_budget = function
+  | "board" -> "board"
+  | _ -> "conversation"
+
+let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
+  `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)
+
+let room_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
+  match json with
+  | `Assoc fields ->
+      fields
+      |> List.filter_map (fun (room_id, value) ->
+             if not (validate_name room_id) then
+               None
+             else
+               match value with
+               | `Int seq -> Some (room_id, seq)
+               | `Intlit raw ->
+                   Some (room_id, Safe_ops.int_of_string_with_default ~default:0 raw)
+               | _ -> None)
+  | _ -> []
+
+type keeper_profile_defaults = {
+  manifest_path : string option;
+  goal : string option;
+  short_goal : string option;
+  mid_goal : string option;
+  long_goal : string option;
+  soul_profile : string option;
+  will : string option;
+  needs : string option;
+  desires : string option;
+  instructions : string option;
+  models : string list;
+  allowed_models : string list;
+  active_model : string option;
+  room_scope : string option;
+  scope_kind : string option;
+  trigger_mode : string option;
+  mention_targets : string list;
+  presence_keepalive : bool option;
+  presence_keepalive_sec : int option;
+  proactive_enabled : bool option;
+}
+
+type persona_summary = {
+  persona_name : string;
+  display_name : string;
+  role : string option;
+  trait : string option;
+  profile_path : string;
+  has_keeper_defaults : bool;
+}
+
+let empty_keeper_profile_defaults = {
+  manifest_path = None;
+  goal = None;
+  short_goal = None;
+  mid_goal = None;
+  long_goal = None;
+  soul_profile = None;
+  will = None;
+  needs = None;
+  desires = None;
+  instructions = None;
+  models = [];
+  allowed_models = [];
+  active_model = None;
+  room_scope = None;
+  scope_kind = None;
+  trigger_mode = None;
+  mention_targets = [];
+  presence_keepalive = None;
+  presence_keepalive_sec = None;
+  proactive_enabled = None;
+}
+
+let personas_root_opt () =
+  try
+    let me_root = Env_config.me_root () in
+    let path = Filename.concat me_root "personas" in
+    if Sys.file_exists path && Sys.is_directory path then Some path else None
+  with _ -> None
+
+let persona_profile_path_opt name =
+  match personas_root_opt () with
+  | None -> None
+  | Some root ->
+      let path = Filename.concat (Filename.concat root name) "profile.json" in
+      if Sys.file_exists path then Some path else None
+
+let load_keeper_profile_defaults name : keeper_profile_defaults =
+  match persona_profile_path_opt name with
+  | None -> empty_keeper_profile_defaults
+  | Some path -> (
+      match Safe_ops.read_json_file_safe path with
+      | Error _ -> empty_keeper_profile_defaults
+      | Ok json ->
+          let keeper_json = Yojson.Safe.Util.member "keeper" json in
+          match keeper_json with
+          | `Assoc _ ->
+              {
+                manifest_path = Some path;
+                goal = Safe_ops.json_string_opt "goal" keeper_json;
+                short_goal =
+                  normalize_goal_horizon_opt (Safe_ops.json_string_opt "short_goal" keeper_json);
+                mid_goal =
+                  normalize_goal_horizon_opt (Safe_ops.json_string_opt "mid_goal" keeper_json);
+                long_goal =
+                  normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" keeper_json);
+                soul_profile = Safe_ops.json_string_opt "soul_profile" keeper_json;
+                will = Safe_ops.json_string_opt "will" keeper_json;
+                needs = Safe_ops.json_string_opt "needs" keeper_json;
+                desires = Safe_ops.json_string_opt "desires" keeper_json;
+                instructions = Safe_ops.json_string_opt "instructions" keeper_json;
+                models = Safe_ops.json_string_list "models" keeper_json;
+                allowed_models = Safe_ops.json_string_list "allowed_models" keeper_json;
+                active_model = Safe_ops.json_string_opt "active_model" keeper_json;
+                room_scope = Safe_ops.json_string_opt "room_scope" keeper_json;
+                scope_kind = Safe_ops.json_string_opt "scope_kind" keeper_json;
+                trigger_mode = Safe_ops.json_string_opt "trigger_mode" keeper_json;
+                mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
+                presence_keepalive = Safe_ops.json_bool_opt "presence_keepalive" keeper_json;
+                presence_keepalive_sec = Safe_ops.json_int_opt "presence_keepalive_sec" keeper_json;
+                proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
+              }
+          | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
+
+let load_persona_summary name : persona_summary option =
+  match persona_profile_path_opt name with
+  | None -> None
+  | Some path -> (
+      match Safe_ops.read_json_file_safe path with
+      | Error _ -> None
+      | Ok json ->
+          let display_name =
+            Safe_ops.json_string_opt "name" json |> Option.value ~default:name
+          in
+          let role = Safe_ops.json_string_opt "role" json in
+          let trait = Safe_ops.json_string_opt "trait" json in
+          let has_keeper_defaults =
+            match Yojson.Safe.Util.member "keeper" json with
+            | `Assoc _ -> true
+            | _ -> false
+          in
+          Some
+            {
+              persona_name = name;
+              display_name;
+              role;
+              trait;
+              profile_path = path;
+              has_keeper_defaults;
+            })
+
+let list_persona_summaries () : persona_summary list =
+  match personas_root_opt () with
+  | None -> []
+  | Some root ->
+      root
+      |> Sys.readdir
+      |> Array.to_list
+      |> List.filter validate_name
+      |> List.filter_map load_persona_summary
+      |> List.sort (fun a b -> String.compare a.persona_name b.persona_name)
+
 let keeper_dir (config : Room.config) =
-  (* Keepers are global — never scoped to cluster/room.
-     Use base_path directly, consistent with perpetual_loop.ml. *)
   let d = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in
   mkdir_p d;
   d
@@ -136,16 +331,15 @@ let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
 let session_base_dir (config : Room.config) =
-  (* Cluster-independent, consistent with Perpetual_loop.default_config. *)
   Filename.concat (Filename.concat config.base_path ".masc") "perpetual"
 
 let keeper_agent_name name =
-  (* Make it look like a generated nickname so Room.join uses it as-is. *)
   Printf.sprintf "keeper-%s-agent" name
 
 type keeper_meta = {
   name: string;
   agent_name: string;
+  persona_profile_path: string;
   trace_id: string;
   trace_history: string list;
   goal: string;
@@ -158,6 +352,17 @@ type keeper_meta = {
   desires: string;
   instructions: string;
   models: string list;
+  allowed_models: string list;
+  active_model: string;
+  policy_mode: string;
+  policy_action_budget: string;
+  policy_reward_model_path: string;
+  scope_kind: string;
+  room_scope: string;
+  trigger_mode: string;
+  mention_targets: string list;
+  joined_room_ids: string list;
+  last_seen_seq_by_room: (string * int) list;
   generation: int;
   verify: bool;
   presence_keepalive: bool;
@@ -205,95 +410,107 @@ type keeper_meta = {
   last_compaction_decision: string;
   last_continuity_update_ts: float;
   continuity_summary: string;
-  (* Autonomy fields (Phase 2: Keeper Autonomy Engine) *)
-  autonomy_level: string;  (** L1_Reactive..L5_Independent, stored as string for JSON compat *)
-  active_goal_ids: string list;  (** goal_store goal IDs this keeper pursues *)
-  last_autonomous_action_at: string;  (** ISO timestamp of last autonomous action *)
-  autonomous_action_count: int;  (** total autonomous actions taken *)
+  autonomy_level: string;
+  active_goal_ids: string list;
+  last_autonomous_action_at: string;
+  autonomous_action_count: int;
 }
 
 let now_iso () = Types.now_iso ()
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
-  `Assoc [
-    ("name", `String m.name);
-    ("agent_name", `String m.agent_name);
-    ("trace_id", `String m.trace_id);
-    ("trace_history", `List (List.map (fun s -> `String s) m.trace_history));
-    ("goal", `String m.goal);
-    ("short_goal", `String m.short_goal);
-    ("mid_goal", `String m.mid_goal);
-    ("long_goal", `String m.long_goal);
-    ("soul_profile", `String m.soul_profile);
-    ("will", `String m.will);
-    ("needs", `String m.needs);
-    ("desires", `String m.desires);
-    ("instructions", `String m.instructions);
-    ("models", `List (List.map (fun s -> `String s) m.models));
-    ("generation", `Int m.generation);
-    ("verify", `Bool m.verify);
-    ("presence_keepalive", `Bool m.presence_keepalive);
-    ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
-    ("proactive_enabled", `Bool m.proactive_enabled);
-    ("proactive_idle_sec", `Int m.proactive_idle_sec);
-    ("proactive_cooldown_sec", `Int m.proactive_cooldown_sec);
-    ("drift_enabled", `Bool m.drift_enabled);
-    ("drift_min_turn_gap", `Int m.drift_min_turn_gap);
-    ("drift_count_total", `Int m.drift_count_total);
-    ("last_drift_turn", `Int m.last_drift_turn);
-    ("last_drift_reason", `String m.last_drift_reason);
-    ("compaction_profile", `String m.compaction_profile);
-    ("compaction_ratio_gate", `Float m.compaction_ratio_gate);
-    ("compaction_message_gate", `Int m.compaction_message_gate);
-    ("compaction_token_gate", `Int m.compaction_token_gate);
-    ("continuity_compaction_cooldown_sec", `Int m.continuity_compaction_cooldown_sec);
-    ("auto_handoff", `Bool m.auto_handoff);
-    ("handoff_threshold", `Float m.handoff_threshold);
-    ("handoff_cooldown_sec", `Int m.handoff_cooldown_sec);
-    ("context_budget", `Float m.context_budget);
-    ("last_handoff_ts", `Float m.last_handoff_ts);
-    ("created_at", `String m.created_at);
-    ("updated_at", `String m.updated_at);
-    ("total_turns", `Int m.total_turns);
-    ("total_input_tokens", `Int m.total_input_tokens);
-    ("total_output_tokens", `Int m.total_output_tokens);
-    ("total_tokens", `Int m.total_tokens);
-    ("total_cost_usd", `Float m.total_cost_usd);
-    ("last_turn_ts", `Float m.last_turn_ts);
-    ("last_model_used", `String m.last_model_used);
-    ("last_input_tokens", `Int m.last_input_tokens);
-    ("last_output_tokens", `Int m.last_output_tokens);
-    ("last_total_tokens", `Int m.last_total_tokens);
-    ("last_latency_ms", `Int m.last_latency_ms);
-    ("compaction_count", `Int m.compaction_count);
-    ("last_compaction_ts", `Float m.last_compaction_ts);
-    ("last_compaction_before_tokens", `Int m.last_compaction_before_tokens);
-    ("last_compaction_after_tokens", `Int m.last_compaction_after_tokens);
-    ("proactive_count_total", `Int m.proactive_count_total);
-    ("last_proactive_ts", `Float m.last_proactive_ts);
-    ("last_proactive_reason", `String m.last_proactive_reason);
-    ("last_proactive_preview", `String m.last_proactive_preview);
-    ("last_compaction_check_ts", `Float m.last_compaction_check_ts);
-    ("last_compaction_decision", `String m.last_compaction_decision);
-    ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
-    ("continuity_summary", `String m.continuity_summary);
-    ("autonomy_level", `String m.autonomy_level);
-    ("active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids));
-    ("last_autonomous_action_at", `String m.last_autonomous_action_at);
-    ("autonomous_action_count", `Int m.autonomous_action_count);
-  ]
+  `Assoc
+    [
+      ("name", `String m.name);
+      ("agent_name", `String m.agent_name);
+      ("persona_profile_path", `String m.persona_profile_path);
+      ("trace_id", `String m.trace_id);
+      ("trace_history", `List (List.map (fun s -> `String s) m.trace_history));
+      ("goal", `String m.goal);
+      ("short_goal", `String m.short_goal);
+      ("mid_goal", `String m.mid_goal);
+      ("long_goal", `String m.long_goal);
+      ("soul_profile", `String m.soul_profile);
+      ("will", `String m.will);
+      ("needs", `String m.needs);
+      ("desires", `String m.desires);
+      ("instructions", `String m.instructions);
+      ("models", `List (List.map (fun s -> `String s) m.models));
+      ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
+      ("active_model", `String m.active_model);
+      ("policy_mode", `String m.policy_mode);
+      ("policy_action_budget", `String m.policy_action_budget);
+      ("policy_reward_model_path", `String m.policy_reward_model_path);
+      ("scope_kind", `String m.scope_kind);
+      ("room_scope", `String m.room_scope);
+      ("trigger_mode", `String m.trigger_mode);
+      ("mention_targets", `List (List.map (fun s -> `String s) m.mention_targets));
+      ("joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids));
+      ("last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room);
+      ("generation", `Int m.generation);
+      ("verify", `Bool m.verify);
+      ("presence_keepalive", `Bool m.presence_keepalive);
+      ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
+      ("proactive_enabled", `Bool m.proactive_enabled);
+      ("proactive_idle_sec", `Int m.proactive_idle_sec);
+      ("proactive_cooldown_sec", `Int m.proactive_cooldown_sec);
+      ("drift_enabled", `Bool m.drift_enabled);
+      ("drift_min_turn_gap", `Int m.drift_min_turn_gap);
+      ("drift_count_total", `Int m.drift_count_total);
+      ("last_drift_turn", `Int m.last_drift_turn);
+      ("last_drift_reason", `String m.last_drift_reason);
+      ("compaction_profile", `String m.compaction_profile);
+      ("compaction_ratio_gate", `Float m.compaction_ratio_gate);
+      ("compaction_message_gate", `Int m.compaction_message_gate);
+      ("compaction_token_gate", `Int m.compaction_token_gate);
+      ("continuity_compaction_cooldown_sec", `Int m.continuity_compaction_cooldown_sec);
+      ("auto_handoff", `Bool m.auto_handoff);
+      ("handoff_threshold", `Float m.handoff_threshold);
+      ("handoff_cooldown_sec", `Int m.handoff_cooldown_sec);
+      ("context_budget", `Float m.context_budget);
+      ("last_handoff_ts", `Float m.last_handoff_ts);
+      ("created_at", `String m.created_at);
+      ("updated_at", `String m.updated_at);
+      ("total_turns", `Int m.total_turns);
+      ("total_input_tokens", `Int m.total_input_tokens);
+      ("total_output_tokens", `Int m.total_output_tokens);
+      ("total_tokens", `Int m.total_tokens);
+      ("total_cost_usd", `Float m.total_cost_usd);
+      ("last_turn_ts", `Float m.last_turn_ts);
+      ("last_model_used", `String m.last_model_used);
+      ("last_input_tokens", `Int m.last_input_tokens);
+      ("last_output_tokens", `Int m.last_output_tokens);
+      ("last_total_tokens", `Int m.last_total_tokens);
+      ("last_latency_ms", `Int m.last_latency_ms);
+      ("compaction_count", `Int m.compaction_count);
+      ("last_compaction_ts", `Float m.last_compaction_ts);
+      ("last_compaction_before_tokens", `Int m.last_compaction_before_tokens);
+      ("last_compaction_after_tokens", `Int m.last_compaction_after_tokens);
+      ("proactive_count_total", `Int m.proactive_count_total);
+      ("last_proactive_ts", `Float m.last_proactive_ts);
+      ("last_proactive_reason", `String m.last_proactive_reason);
+      ("last_proactive_preview", `String m.last_proactive_preview);
+      ("last_compaction_check_ts", `Float m.last_compaction_check_ts);
+      ("last_compaction_decision", `String m.last_compaction_decision);
+      ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
+      ("continuity_summary", `String m.continuity_summary);
+      ("autonomy_level", `String m.autonomy_level);
+      ("active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids));
+      ("last_autonomous_action_at", `String m.last_autonomous_action_at);
+      ("autonomous_action_count", `Int m.autonomous_action_count);
+    ]
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   try
     let name = Safe_ops.json_string ~default:"" "name" json in
     let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
+    let persona_profile_path = Safe_ops.json_string ~default:"" "persona_profile_path" json in
     let trace_id = Safe_ops.json_string ~default:"" "trace_id" json in
     let trace_history =
       Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
     in
     let goal =
-      Safe_ops.json_string ~default:"" "goal" json
-      |> normalize_goal_horizon_text
+      Safe_ops.json_string ~default:"" "goal" json |> normalize_goal_horizon_text
     in
     let (short_goal, mid_goal, long_goal) =
       resolve_goal_horizons
@@ -321,10 +538,49 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     in
     let instructions = Safe_ops.json_string ~default:"" "instructions" json in
     let models = Safe_ops.json_string_list "models" json in
+    let allowed_models_raw = Safe_ops.json_string_list "allowed_models" json in
+    let allowed_models =
+      let base = if allowed_models_raw <> [] then allowed_models_raw else models in
+      dedupe_keep_order base
+    in
+    let active_model = Safe_ops.json_string ~default:"" "active_model" json in
+    let policy_mode =
+      Safe_ops.json_string ~default:"heuristic" "policy_mode" json
+      |> canonical_policy_mode
+    in
+    let policy_action_budget =
+      Safe_ops.json_string ~default:"conversation" "policy_action_budget" json
+      |> canonical_policy_action_budget
+    in
+    let policy_reward_model_path =
+      Safe_ops.json_string ~default:"" "policy_reward_model_path" json
+    in
+    let scope_kind =
+      Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
+    in
+    let room_scope =
+      Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
+    in
+    let trigger_mode =
+      Safe_ops.json_string ~default:"legacy" "trigger_mode" json |> canonical_trigger_mode
+    in
+    let mention_targets =
+      Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
+    in
+    let joined_room_ids =
+      Safe_ops.json_string_list "joined_room_ids" json
+      |> List.filter validate_name
+      |> dedupe_keep_order
+    in
+    let last_seen_seq_by_room =
+      Yojson.Safe.Util.member "last_seen_seq_by_room" json |> room_seq_map_of_json
+    in
     let generation = Safe_ops.json_int ~default:0 "generation" json in
     let verify = Safe_ops.json_bool ~default:false "verify" json in
     let presence_keepalive = Safe_ops.json_bool ~default:true "presence_keepalive" json in
-    let presence_keepalive_sec = Safe_ops.json_int ~default:30 "presence_keepalive_sec" json in
+    let presence_keepalive_sec =
+      Safe_ops.json_int ~default:30 "presence_keepalive_sec" json
+    in
     let proactive_enabled =
       Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
     in
@@ -369,7 +625,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let continuity_compaction_cooldown_sec =
       Safe_ops.json_int
         ~default:(keeper_continuity_compaction_cooldown_sec ())
-        "continuity_compaction_cooldown_sec" json
+        "continuity_compaction_cooldown_sec"
+        json
       |> normalize_continuity_compaction_cooldown_sec
     in
     let auto_handoff = Safe_ops.json_bool ~default:true "auto_handoff" json in
@@ -392,13 +649,21 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let last_latency_ms = Safe_ops.json_int ~default:0 "last_latency_ms" json in
     let compaction_count = Safe_ops.json_int ~default:0 "compaction_count" json in
     let last_compaction_ts = Safe_ops.json_float ~default:0.0 "last_compaction_ts" json in
-    let last_compaction_before_tokens = Safe_ops.json_int ~default:0 "last_compaction_before_tokens" json in
-    let last_compaction_after_tokens = Safe_ops.json_int ~default:0 "last_compaction_after_tokens" json in
+    let last_compaction_before_tokens =
+      Safe_ops.json_int ~default:0 "last_compaction_before_tokens" json
+    in
+    let last_compaction_after_tokens =
+      Safe_ops.json_int ~default:0 "last_compaction_after_tokens" json
+    in
     let proactive_count_total = Safe_ops.json_int ~default:0 "proactive_count_total" json in
     let last_proactive_ts = Safe_ops.json_float ~default:0.0 "last_proactive_ts" json in
     let last_proactive_reason = Safe_ops.json_string ~default:"" "last_proactive_reason" json in
-    let last_proactive_preview = Safe_ops.json_string ~default:"" "last_proactive_preview" json in
-    let last_compaction_check_ts = Safe_ops.json_float ~default:0.0 "last_compaction_check_ts" json in
+    let last_proactive_preview =
+      Safe_ops.json_string ~default:"" "last_proactive_preview" json
+    in
+    let last_compaction_check_ts =
+      Safe_ops.json_float ~default:0.0 "last_compaction_check_ts" json
+    in
     let last_compaction_decision =
       Safe_ops.json_string ~default:"uninitialized" "last_compaction_decision" json
     in
@@ -410,84 +675,254 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       else
         parsed_ts
     in
-    let autonomy_level = Safe_ops.json_string ~default:"l1_reactive" "autonomy_level" json in
+    let autonomy_level =
+      Safe_ops.json_string ~default:"l1_reactive" "autonomy_level" json
+    in
     let active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
-    let last_autonomous_action_at = Safe_ops.json_string ~default:"" "last_autonomous_action_at" json in
-    let autonomous_action_count = Safe_ops.json_int ~default:0 "autonomous_action_count" json in
+    let last_autonomous_action_at =
+      Safe_ops.json_string ~default:"" "last_autonomous_action_at" json
+    in
+    let autonomous_action_count =
+      Safe_ops.json_int ~default:0 "autonomous_action_count" json
+    in
     if not (validate_name name) then
       Error "invalid keeper meta (bad name)"
     else if not (validate_name trace_id) then
       Error "invalid keeper meta (bad trace_id)"
     else
-      Ok {
-        name;
-        agent_name = if agent_name = "" then keeper_agent_name name else agent_name;
-        trace_id;
-        trace_history;
-        goal;
-        short_goal;
-        mid_goal;
-        long_goal;
-        soul_profile;
-        will;
-        needs;
-        desires;
-        instructions;
-        models;
-        generation;
-        verify;
-        presence_keepalive;
-        presence_keepalive_sec;
-        proactive_enabled;
-        proactive_idle_sec;
-        proactive_cooldown_sec;
-        drift_enabled;
-        drift_min_turn_gap;
-        drift_count_total;
-        last_drift_turn;
-        last_drift_reason;
-        compaction_profile;
-        compaction_ratio_gate;
-        compaction_message_gate;
-        compaction_token_gate;
-        continuity_compaction_cooldown_sec;
-        auto_handoff;
-        handoff_threshold;
-        handoff_cooldown_sec;
-        context_budget;
-        last_handoff_ts;
-        created_at = if created_at = "" then now_iso () else created_at;
-        updated_at = if updated_at = "" then now_iso () else updated_at;
-        total_turns;
-        total_input_tokens;
-        total_output_tokens;
-        total_tokens;
-        total_cost_usd;
-        last_turn_ts;
-        last_model_used;
-        last_input_tokens;
-        last_output_tokens;
-        last_total_tokens;
-        last_latency_ms;
-        compaction_count;
-        last_compaction_ts;
-        last_compaction_before_tokens;
-        last_compaction_after_tokens;
-        proactive_count_total;
-        last_proactive_ts;
-        last_proactive_reason;
-        last_proactive_preview;
-        last_compaction_check_ts;
-        last_compaction_decision;
-        last_continuity_update_ts;
-        continuity_summary;
-        autonomy_level;
-        active_goal_ids;
-        last_autonomous_action_at;
-        autonomous_action_count;
-      }
+      Ok
+        {
+          name;
+          agent_name = if agent_name = "" then keeper_agent_name name else agent_name;
+          persona_profile_path;
+          trace_id;
+          trace_history;
+          goal;
+          short_goal;
+          mid_goal;
+          long_goal;
+          soul_profile;
+          will;
+          needs;
+          desires;
+          instructions;
+          models;
+          allowed_models;
+          active_model;
+          policy_mode;
+          policy_action_budget;
+          policy_reward_model_path;
+          scope_kind;
+          room_scope;
+          trigger_mode;
+          mention_targets;
+          joined_room_ids;
+          last_seen_seq_by_room;
+          generation;
+          verify;
+          presence_keepalive;
+          presence_keepalive_sec;
+          proactive_enabled;
+          proactive_idle_sec;
+          proactive_cooldown_sec;
+          drift_enabled;
+          drift_min_turn_gap;
+          drift_count_total;
+          last_drift_turn;
+          last_drift_reason;
+          compaction_profile;
+          compaction_ratio_gate;
+          compaction_message_gate;
+          compaction_token_gate;
+          continuity_compaction_cooldown_sec;
+          auto_handoff;
+          handoff_threshold;
+          handoff_cooldown_sec;
+          context_budget;
+          last_handoff_ts;
+          created_at = if created_at = "" then now_iso () else created_at;
+          updated_at = if updated_at = "" then now_iso () else updated_at;
+          total_turns;
+          total_input_tokens;
+          total_output_tokens;
+          total_tokens;
+          total_cost_usd;
+          last_turn_ts;
+          last_model_used;
+          last_input_tokens;
+          last_output_tokens;
+          last_total_tokens;
+          last_latency_ms;
+          compaction_count;
+          last_compaction_ts;
+          last_compaction_before_tokens;
+          last_compaction_after_tokens;
+          proactive_count_total;
+          last_proactive_ts;
+          last_proactive_reason;
+          last_proactive_preview;
+          last_compaction_check_ts;
+          last_compaction_decision;
+          last_continuity_update_ts;
+          continuity_summary;
+          autonomy_level;
+          active_goal_ids;
+          last_autonomous_action_at;
+          autonomous_action_count;
+        }
   with exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
+
+type resident_keeper_spec = {
+  name : string;
+  persistent_name : string;
+  desired : bool;
+  seed_meta : Yojson.Safe.t;
+  created_at : string;
+  updated_at : string;
+}
+
+let resident_keeper_dir (config : Room.config) =
+  let d = Filename.concat (Filename.concat config.base_path ".masc") "resident-keepers" in
+  mkdir_p d;
+  d
+
+let resident_keeper_path config name =
+  Filename.concat (resident_keeper_dir config) (name ^ ".json")
+
+let resident_keeper_to_json (spec : resident_keeper_spec) =
+  `Assoc
+    [
+      ("name", `String spec.name);
+      ("persistent_name", `String spec.persistent_name);
+      ("desired", `Bool spec.desired);
+      ("seed_meta", spec.seed_meta);
+      ("created_at", `String spec.created_at);
+      ("updated_at", `String spec.updated_at);
+    ]
+
+let resident_keeper_of_json (json : Yojson.Safe.t) :
+    (resident_keeper_spec, string) result =
+  try
+    let open Yojson.Safe.Util in
+    let name = json |> member "name" |> to_string in
+    let persistent_name =
+      match json |> member "persistent_name" |> to_string_option with
+      | Some value -> value
+      | None -> name
+    in
+    let desired =
+      match json |> member "desired" with
+      | `Bool value -> value
+      | _ -> true
+    in
+    let seed_meta =
+      match json |> member "seed_meta" with
+      | `Assoc _ as value -> value
+      | _ -> `Assoc []
+    in
+    let created_at =
+      match json |> member "created_at" |> to_string_option with
+      | Some value -> value
+      | None -> now_iso ()
+    in
+    let updated_at =
+      match json |> member "updated_at" |> to_string_option with
+      | Some value -> value
+      | None -> created_at
+    in
+    Ok { name; persistent_name; desired; seed_meta; created_at; updated_at }
+  with Yojson.Safe.Util.Type_error (msg, _) | Failure msg ->
+    Error ("resident keeper parse error: " ^ msg)
+
+let write_resident_keeper config (spec : resident_keeper_spec) :
+    (unit, string) result =
+  let path = resident_keeper_path config spec.name in
+  let content = Yojson.Safe.pretty_to_string (resident_keeper_to_json spec) in
+  try
+    let oc = open_out path in
+    Common.protect ~module_name:"tool_keeper" ~finally_label:"close_out"
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc content);
+    Ok ()
+  with exn ->
+    Error
+      (Printf.sprintf "failed to write resident keeper %s: %s" path
+         (Printexc.to_string exn))
+
+let read_resident_keeper config name : (resident_keeper_spec option, string) result =
+  let path = resident_keeper_path config name in
+  if not (Sys.file_exists path) then Ok None
+  else
+    try
+      let json = Room_utils.read_json_local path in
+      match resident_keeper_of_json json with
+      | Ok spec -> Ok (Some spec)
+      | Error msg -> Error msg
+    with exn ->
+      Error
+        (Printf.sprintf "failed to read resident keeper %s: %s" path
+           (Printexc.to_string exn))
+
+let remove_resident_keeper config name =
+  Safe_ops.remove_file_logged ~context:"resident_keeper_remove"
+    (resident_keeper_path config name)
+
+let list_resident_keepers config : resident_keeper_spec list =
+  let dir = resident_keeper_dir config in
+  match Safe_ops.list_dir_safe dir with
+  | Error _ -> []
+  | Ok files ->
+      files
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.map Filename.remove_extension
+      |> List.filter validate_name
+      |> List.filter_map (fun name ->
+             match read_resident_keeper config name with
+             | Ok (Some spec) -> Some spec
+             | _ -> None)
+      |> List.sort (fun a b -> String.compare a.name b.name)
+
+let resident_keeper_names config =
+  list_resident_keepers config |> List.map (fun spec -> spec.name)
+
+let is_resident_keeper config name =
+  List.mem name (resident_keeper_names config)
+
+let register_resident_keeper_from_meta config (meta : keeper_meta) :
+    (unit, string) result =
+  let existing =
+    match read_resident_keeper config meta.name with
+    | Ok (Some spec) -> Some spec
+    | _ -> None
+  in
+  let created_at =
+    match existing with
+    | Some spec -> spec.created_at
+    | None -> now_iso ()
+  in
+  write_resident_keeper config
+    {
+      name = meta.name;
+      persistent_name = meta.name;
+      desired = true;
+      seed_meta = meta_to_json meta;
+      created_at;
+      updated_at = now_iso ();
+    }
+
+let persistent_agent_names config =
+  let dir = keeper_dir config in
+  let resident = resident_keeper_names config in
+  match Safe_ops.list_dir_safe dir with
+  | Error _ -> []
+  | Ok files ->
+      files
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.map Filename.remove_extension
+      |> List.filter validate_name
+      |> List.filter (fun name -> not (List.mem name resident))
+      |> List.sort String.compare
 
 let write_meta config (m : keeper_meta) : (unit, string) result =
   let path = keeper_meta_path config m.name in
@@ -504,23 +939,26 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
 let read_meta config name : (keeper_meta option, string) result =
   let path = keeper_meta_path config name in
   if keeper_debug then
-    Printf.eprintf "[KEEPER-DEBUG] read_meta name=%s path=%s exists=%b\n%!" name path (Sys.file_exists path);
+    Printf.eprintf
+      "[KEEPER-DEBUG] read_meta name=%s path=%s exists=%b\n%!"
+      name path (Sys.file_exists path);
   if not (Sys.file_exists path) then Ok None
   else
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
-    | Ok json ->
-      (match meta_of_json json with
-       | Ok m -> Ok (Some m)
-       | Error e -> Error e)
+    | Ok json -> (
+        match meta_of_json json with
+        | Ok m -> Ok (Some m)
+        | Error e -> Error e)
 
-let model_specs_of_strings (model_strs : string list) : (Llm_client.model_spec list, string) result =
+let model_specs_of_strings (model_strs : string list) :
+    (Llm_client.model_spec list, string) result =
   let rec go acc = function
     | [] -> Ok (List.rev acc)
-    | s :: rest ->
-      (match Llm_client.model_spec_of_string s with
-       | Ok spec -> go (spec :: acc) rest
-       | Error e -> Error (Printf.sprintf "Bad model spec %s: %s" s e))
+    | s :: rest -> (
+        match Llm_client.model_spec_of_string s with
+        | Ok spec -> go (spec :: acc) rest
+        | Error e -> Error (Printf.sprintf "Bad model spec %s: %s" s e))
   in
   go [] model_strs
 
@@ -528,6 +966,17 @@ let env_present name =
   match Sys.getenv_opt name with
   | Some value -> String.trim value <> ""
   | None -> false
+
+let ollama_port_listening () =
+  try
+    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Fun.protect
+      ~finally:(fun () -> try Unix.close sock with Unix.Unix_error _ -> ())
+      (fun () ->
+        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 11434));
+        true)
+  with Unix.Unix_error _ ->
+    false
 
 let model_spec_is_local_runtime (model : Llm_client.model_spec) =
   match model.provider with
@@ -577,10 +1026,50 @@ let ensure_api_keys (models : Llm_client.model_spec list) : (unit, string) resul
       match m.api_key_env with
       | None -> None
       | Some env ->
-        let v = Sys.getenv_opt env |> Option.value ~default:"" in
-        if v = "" then Some env else None
-    ) models
+          let v = Sys.getenv_opt env |> Option.value ~default:"" in
+          if v = "" then Some env else None)
+      models
   in
   match missing with
   | [] -> Ok ()
-  | xs -> Error (Printf.sprintf "Missing API key env vars: %s" (String.concat ", " xs))
+  | xs ->
+      Error (Printf.sprintf "Missing API key env vars: %s" (String.concat ", " xs))
+
+let keeper_metrics_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".metrics.jsonl")
+
+let keeper_memory_bank_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".memory.jsonl")
+
+let keeper_session_dir config trace_id =
+  Filename.concat (session_base_dir config) trace_id
+
+let keeper_history_path config trace_id =
+  Filename.concat (keeper_session_dir config trace_id) "history.jsonl"
+
+let keeper_policy_log_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".policy.jsonl")
+
+let keeper_feedback_log_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".feedback.jsonl")
+
+let keeper_dataset_export_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".dataset.json")
+
+let keeper_alerts_path config =
+  Filename.concat (keeper_dir config) "_alerts.jsonl"
+
+let keeper_alert_retry_path config =
+  Filename.concat (keeper_dir config) "_alerts.retry.jsonl"
+
+let keeper_alert_deadletter_path config =
+  Filename.concat (keeper_dir config) "_alerts.deadletter.jsonl"
+
+let append_jsonl_line path (json : Yojson.Safe.t) =
+  let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
+  let fd =
+    Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644
+  in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      let _ = Unix.write_substring fd line 0 (String.length line) in
+      ())

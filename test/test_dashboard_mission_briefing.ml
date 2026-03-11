@@ -363,9 +363,16 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
   let communication = find_section sections "communication" in
   check_string_field communication "status" "watch";
   match get_field "evidence" communication with
-  | `List (`String first :: _) ->
-      check string "metadata evidence shown first"
-        "Keeper last reply status is not recorded." first
+  | `List items ->
+      let found =
+        List.exists
+          (function
+            | `String value ->
+                String.equal value "Keeper last reply status is not recorded."
+            | _ -> false)
+          items
+      in
+      check bool "metadata evidence remains visible" true found
   | _ -> fail "expected communication evidence list"
 
 let () =

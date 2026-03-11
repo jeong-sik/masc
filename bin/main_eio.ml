@@ -18,6 +18,10 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Room = Masc_mcp.Room
 module Room_utils = Masc_mcp.Room_utils
 module Tool_keeper = Masc_mcp.Tool_keeper
+module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_memory = Masc_mcp.Keeper_memory
+module Keeper_execution = Masc_mcp.Keeper_execution
+module Keeper_runtime = Masc_mcp.Keeper_runtime
 module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
 module Command_plane_v2 = Masc_mcp.Command_plane_v2
@@ -1479,7 +1483,7 @@ let trpg_keeper_models_for_round () : string list =
     | Some models -> models
     | None -> trpg_default_fast_keeper_models ()
   in
-  match Tool_keeper.model_specs_of_strings chosen with
+  match Keeper_types.model_specs_of_strings chosen with
   | Ok _ -> chosen
   | Error e ->
       if chosen <> [] then
@@ -1954,28 +1958,28 @@ let trpg_actor_control_rows (state : Yojson.Safe.t) =
          if String.equal role "dm" || claimed then Some row else None)
 
 let trpg_keeper_summary_rows (config : Room.config) =
-  let dir = Tool_keeper.keeper_dir config in
+  let dir = Keeper_types.keeper_dir config in
   if not (Sys.file_exists dir) then []
   else
     Sys.readdir dir
     |> Array.to_list
     |> List.filter (fun f -> Filename.check_suffix f ".json")
     |> List.map Filename.remove_extension
-    |> List.filter Tool_keeper.validate_name
+    |> List.filter Keeper_types.validate_name
     |> List.sort String.compare
     |> List.filter_map (fun name ->
-           match Tool_keeper.read_meta config name with
+           match Keeper_types.read_meta config name with
            | Error _ -> None
            | Ok None -> None
-           | Ok (Some (m : Tool_keeper.keeper_meta)) ->
-               let agent = Tool_keeper.parse_agent_status config ~agent_name:m.agent_name in
+           | Ok (Some (m : Keeper_types.keeper_meta)) ->
+               let agent = Keeper_execution.parse_agent_status config ~agent_name:m.agent_name in
                let agent_exists = trpg_json_bool_field agent "exists" ~default:false in
                let agent_status =
                  trpg_json_string_opt_field agent "status"
                  |> Option.value ~default:"unknown"
                in
                let is_zombie = trpg_json_bool_field agent "is_zombie" ~default:false in
-               let keepalive_running = Hashtbl.mem Tool_keeper.keepalives m.name in
+               let keepalive_running = Keeper_execution.keeper_keepalive_running m.name in
                Some
                  (`Assoc
                    [
@@ -3536,7 +3540,7 @@ let keeper_metrics_24h_json
   let window_sec = 24.0 *. 3600.0 in
   let start_ts = now_ts -. window_sec in
   let lines =
-    Tool_keeper.read_file_tail_lines
+    Keeper_memory.read_file_tail_lines
       metrics_path
       ~max_bytes
       ~max_lines
@@ -3646,7 +3650,7 @@ let keeper_history_summary_json
     ~(filter_fragments : bool)
   : Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int * int =
   let history_lines =
-    Tool_keeper.read_file_tail_lines
+    Keeper_memory.read_file_tail_lines
       history_path
       ~max_bytes:120000
       ~max_lines:80
@@ -3668,7 +3672,7 @@ let keeper_history_summary_json
         else
           let is_fragment =
             role_lc = "assistant"
-            && Tool_keeper.looks_fragmentary_history_text content
+            && Keeper_execution.looks_fragmentary_history_text content
           in
           let should_filter = filter_fragments && is_fragment in
           let mentions =
@@ -3726,7 +3730,7 @@ let keeper_history_summary_json
     |> List.sort (fun (ka, va) (kb, vb) ->
          let c = compare vb va in
          if c <> 0 then c else String.compare ka kb)
-    |> Tool_keeper.take 5
+    |> Keeper_types.take 5
     |> List.map (fun (k, v) ->
          `Assoc [("keeper", `String k); ("count", `Int v)])
     |> fun xs -> `List xs
@@ -3743,7 +3747,7 @@ let top_counts_json
   |> List.sort (fun (ka, va) (kb, vb) ->
        let c = compare vb va in
        if c <> 0 then c else String.compare ka kb)
-  |> Tool_keeper.take limit
+  |> Keeper_types.take limit
   |> List.map (fun (k, v) ->
        `Assoc [ (name_key, `String k); ("count", `Int v) ])
 
@@ -3806,16 +3810,16 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
       s
   in
   let names =
-    Tool_keeper.resident_keeper_names config
+    Keeper_types.resident_keeper_names config
   in
   let now_ts = Masc_mcp.Time_compat.now () in
   let summaries =
     List.filter_map (fun name ->
-      match Tool_keeper.read_meta config name with
+      match Keeper_types.read_meta config name with
       | Error _ -> None
       | Ok None -> None
-      | Ok (Some (m : Tool_keeper.keeper_meta)) ->
-          let agent = Tool_keeper.parse_agent_status config ~agent_name:m.agent_name in
+      | Ok (Some (m : Keeper_types.keeper_meta)) ->
+          let agent = Keeper_execution.parse_agent_status config ~agent_name:m.agent_name in
 
           let created_ts =
             Masc_mcp.Resilience.Time.parse_iso8601_opt m.created_at
@@ -3833,8 +3837,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             if m.last_proactive_ts <= 0.0 then 0.0 else now_ts -. m.last_proactive_ts
           in
           let trace_history_count = List.length m.trace_history in
-          let active_model = Tool_keeper.active_model_of_meta m in
-          let next_model_hint = Tool_keeper.next_model_hint_of_meta m in
+          let active_model = Keeper_execution.active_model_of_meta m in
+          let next_model_hint = Keeper_execution.next_model_hint_of_meta m in
           let primary_model =
             match m.models with
             | model :: _ -> model
@@ -3845,14 +3849,14 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             max 0 (m.last_compaction_before_tokens - m.last_compaction_after_tokens)
           in
 
-          let metrics_path = Tool_keeper.keeper_metrics_path config m.name in
+          let metrics_path = Keeper_types.keeper_metrics_path config m.name in
           let (metrics_24h, metrics_24h_summary) =
             if compact then (`Null, `Null)
             else keeper_metrics_24h_json ~metrics_path ~now_ts
           in
             let metrics_window_max_bytes = 200000 in
             let metrics_lines =
-              Tool_keeper.read_file_tail_lines
+              Keeper_memory.read_file_tail_lines
               metrics_path ~max_bytes:metrics_window_max_bytes ~max_lines:series_points
           in
           let parsed_metrics =
@@ -4650,7 +4654,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           in
 
           let models_resolved =
-            match Tool_keeper.model_specs_of_strings m.models with
+            match Keeper_types.model_specs_of_strings m.models with
             | Error _ -> `List []
             | Ok specs ->
                 `List (List.map (fun (s : Llm_client.model_spec) ->
@@ -4663,7 +4667,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           in
 
           let memory_bank_summary =
-            Tool_keeper.read_keeper_memory_summary
+            Keeper_memory.read_keeper_memory_summary
               config
               ~name:m.name
               ~max_bytes:120000
@@ -4671,16 +4675,16 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ~recent_limit:4
           in
           let memory_bank_json =
-            Tool_keeper.memory_summary_to_json memory_bank_summary
+            Keeper_memory.memory_summary_to_json memory_bank_summary
           in
           let memory_recent_note =
-            match memory_bank_summary.Tool_keeper.recent_notes with
-            | row :: _ -> Some row.Tool_keeper.text
+            match memory_bank_summary.Keeper_memory.recent_notes with
+            | row :: _ -> Some row.Keeper_memory.text
             | [] -> None
           in
           let history_path =
             Filename.concat
-              (Filename.concat (Tool_keeper.session_base_dir config) m.trace_id)
+              (Filename.concat (Keeper_types.session_base_dir config) m.trace_id)
               "history.jsonl"
           in
           let ( conversation_tail,
@@ -4730,7 +4734,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | _ -> 0
           in
           let keepalive_running =
-            Tool_keeper.keeper_keepalive_running m.name
+            Keeper_execution.keeper_keepalive_running m.name
           in
 
           let context =
@@ -4744,15 +4748,15 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
-                (match Tool_keeper.model_specs_of_strings m.models with
+                (match Keeper_types.model_specs_of_strings m.models with
                  | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
                  | Ok specs ->
                      let primary =
                        match specs with m0 :: _ -> m0 | [] -> Llm_client.llama_default
                      in
-                     let base_dir = Tool_keeper.session_base_dir config in
+                     let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =
-                       Tool_keeper.load_context_from_checkpoint
+                       Keeper_execution.load_context_from_checkpoint
                          ~trace_id:m.trace_id
                          ~primary_model_max_tokens:primary.max_context
                          ~base_dir
@@ -4796,7 +4800,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 | _ -> []
               in
               let diagnostic =
-                Tool_keeper.keeper_diagnostic_json
+                Keeper_execution.keeper_diagnostic_json
                   ~meta:m
                   ~agent_status:agent
                   ~keepalive_running
@@ -4919,9 +4923,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 	                | None -> `Null);
               ("metrics_window", metrics_window_summary);
               ("metrics_24h_summary", metrics_24h_summary);
-              ("memory_note_count", `Int memory_bank_summary.Tool_keeper.total_notes);
+              ("memory_note_count", `Int memory_bank_summary.Keeper_memory.total_notes);
               ("memory_top_kind",
-                match memory_bank_summary.Tool_keeper.top_kind with
+                match memory_bank_summary.Keeper_memory.top_kind with
                 | Some kind -> `String kind
                 | None -> `Null);
               ("memory_recent_note",
@@ -8203,7 +8207,7 @@ let run_server ~sw ~env ~port ~base_path =
      so liveness/last_seen stays up-to-date even if no tool calls happen. *)
   (try
      let keeper_ctx : _ Tool_keeper.context = { config = state.room_config; sw; clock } in
-     let stats = Tool_keeper.bootstrap_existing_keepers keeper_ctx in
+     let stats = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
      if stats.enabled then
        Printf.eprintf
          "[keeper-bootstrap] scanned=%d started=%d stale=%d\n%!"

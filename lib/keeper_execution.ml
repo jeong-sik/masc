@@ -1,7 +1,7 @@
-(** Keeper_execution — tool-call execution loop, LLM system prompts,
-    metrics summarization, agent diagnostics, constitution, context
-    checkpoint management, proactive reply generation, and autonomous
-    goal turns. *)
+(** Keeper_execution — keeper tool execution loop, prompting,
+    compaction, proactive/explicit room behavior, and keepalive runtime. *)
+
+open Tool_args
 
 include Keeper_alerting
 
@@ -1007,17 +1007,341 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) : 
   ) empty_metrics_summary lines
 
 let active_model_of_meta (m : keeper_meta) : string =
-  if m.last_model_used <> "" then m.last_model_used
+  if String.trim m.active_model <> "" then m.active_model
+  else if m.last_model_used <> "" then m.last_model_used
   else
-    match m.models with
+    match m.allowed_models @ m.models with
     | model :: _ -> model
     | [] -> ""
 
 let next_model_hint_of_meta (m : keeper_meta) : string option =
-  match m.models with
-  | _current :: next_model :: _ -> Some next_model
-  | current :: [] -> Some current
-  | [] -> None
+  let active = active_model_of_meta m in
+  let pool = dedupe_keep_order (m.allowed_models @ m.models) in
+  match List.filter (fun model -> model <> active) pool with
+  | next_model :: _ -> Some next_model
+  | [] ->
+      (match pool with
+       | current :: _ -> Some current
+       | [] -> None)
+
+let effective_model_labels_for_turn (m : keeper_meta) ~(inline_models : string list) : string list =
+  if inline_models <> [] then
+    inline_models
+  else
+    match active_model_of_meta m with
+    | "" ->
+        let pool = dedupe_keep_order (m.allowed_models @ m.models) in
+        if pool = [] then m.models else pool
+    | model -> [ model ]
+
+let room_cursor_for meta room_id =
+  meta.last_seen_seq_by_room
+  |> List.find_map (fun (rid, seq) -> if rid = room_id then Some seq else None)
+  |> Option.value ~default:0
+
+let set_room_cursor meta room_id seq =
+  let kept =
+    meta.last_seen_seq_by_room
+    |> List.filter (fun (rid, _) -> rid <> room_id)
+  in
+  { meta with last_seen_seq_by_room = dedupe_keep_order ((room_id, seq) :: kept) }
+
+let room_ids_for_meta config (meta : keeper_meta) : string list =
+  match meta.room_scope with
+  | "all" ->
+      let open Yojson.Safe.Util in
+      let listed =
+        match Room.rooms_list config |> member "rooms" with
+        | `List rooms ->
+            rooms
+            |> List.filter_map (fun room ->
+                   match room |> member "id" with
+                   | `String room_id when validate_name room_id -> Some room_id
+                   | _ -> None)
+        | _ -> []
+      in
+      let current = Room.current_room_id config in
+      dedupe_keep_order (current :: listed)
+  | _ -> [ Room.current_room_id config ]
+
+let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
+  let room_ids = room_ids_for_meta config meta in
+  let successful_rooms =
+    List.fold_left
+      (fun acc room_id ->
+        try
+          if not (Room.is_agent_joined_in_room config ~room_id ~agent_name:meta.agent_name) then
+            ignore
+              (Room.join_in_room config ~room_id ~agent_name:meta.agent_name
+                 ~capabilities:["keeper"] ());
+          ignore (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name);
+          room_id :: acc
+        with exn ->
+          Printf.eprintf "[keeper] room presence sync failed for %s in %s: %s\n%!"
+            meta.name room_id (Printexc.to_string exn);
+          acc)
+      []
+      room_ids
+  in
+  { meta with joined_room_ids = List.rev successful_rooms }
+
+let exact_direct_mention_present ~(targets : string list) (content : string) : bool =
+  let escaped_targets = targets |> List.map Str.quote |> List.filter (fun s -> String.trim s <> "") in
+  List.exists
+    (fun target ->
+      let pattern =
+        Printf.sprintf "\\(^\\|[^@A-Za-z0-9_-]\\)@%s\\([^A-Za-z0-9_-]\\|$\\)" target
+      in
+      try
+        ignore (Str.search_forward (Str.regexp_case_fold pattern) content 0);
+        true
+      with Not_found -> false)
+    escaped_targets
+
+let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("persona_name", `String persona.persona_name);
+      ("display_name", `String persona.display_name);
+      ("role", match persona.role with Some value -> `String value | None -> `Null);
+      ("trait", match persona.trait with Some value -> `String value | None -> `Null);
+      ("profile_path", `String persona.profile_path);
+      ("has_keeper_defaults", `Bool persona.has_keeper_defaults);
+    ]
+
+let string_list_to_json values = `List (List.map (fun value -> `String value) values)
+
+let read_jsonl_rows path ~max_bytes ~max_lines : Yojson.Safe.t list =
+  if not (Sys.file_exists path) then
+    []
+  else
+    read_file_tail_lines path ~max_bytes ~max_lines
+    |> List.filter_map (fun line ->
+           try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
+
+let find_jsonl_row_by_action_id rows action_id =
+  rows
+  |> List.find_map (fun json ->
+         match Safe_ops.json_string_opt "action_id" json with
+         | Some candidate when candidate = action_id -> Some json
+         | _ -> None)
+
+let upsert_assoc key value fields =
+  (key, value) :: List.remove_assoc key fields
+
+let resolved_keeper_args_to_json
+    ~name ~persona_name ~persona_profile_path ~goal ~short_goal ~mid_goal ~long_goal
+    ~instructions ~soul_profile ~will ~needs ~desires ~models ~allowed_models
+    ~active_model ~room_scope ~scope_kind ~trigger_mode ~mention_targets
+    ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled ~verify
+    ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec ~context_budget =
+  `Assoc
+    [
+      ("name", `String name);
+      ("persona_name", `String persona_name);
+      ("persona_profile_path", `String persona_profile_path);
+      ("goal", `String goal);
+      ("short_goal", `String short_goal);
+      ("mid_goal", `String mid_goal);
+      ("long_goal", `String long_goal);
+      ("instructions", `String instructions);
+      ("soul_profile", `String soul_profile);
+      ("will", `String will);
+      ("needs", `String needs);
+      ("desires", `String desires);
+      ("models", string_list_to_json models);
+      ("allowed_models", string_list_to_json allowed_models);
+      ("active_model", `String active_model);
+      ("room_scope", `String room_scope);
+      ("scope_kind", `String scope_kind);
+      ("trigger_mode", `String trigger_mode);
+      ("mention_targets", string_list_to_json mention_targets);
+      ("presence_keepalive", `Bool presence_keepalive);
+      ("presence_keepalive_sec", `Int presence_keepalive_sec);
+      ("proactive_enabled", `Bool proactive_enabled);
+      ("verify", `Bool verify);
+      ("auto_handoff", `Bool auto_handoff);
+      ("handoff_threshold", `Float handoff_threshold);
+      ("handoff_cooldown_sec", `Int handoff_cooldown_sec);
+      ("context_budget", `Float context_budget);
+    ]
+
+let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
+  let errors = ref [] in
+  let name = Safe_ops.json_string ~default:"" "name" json in
+  let goal = Safe_ops.json_string ~default:"" "goal" json |> String.trim in
+  let models = Safe_ops.json_string_list "models" json in
+  let allowed_models = Safe_ops.json_string_list "allowed_models" json in
+  let active_model = Safe_ops.json_string ~default:"" "active_model" json |> String.trim in
+  let mention_targets = Safe_ops.json_string_list "mention_targets" json in
+  if not (validate_name name) then errors := "invalid keeper name" :: !errors;
+  if goal = "" then errors := "goal is required" :: !errors;
+  if models = [] then errors := "models is required" :: !errors;
+  if active_model <> "" && not (List.mem active_model (allowed_models @ models)) then
+    errors := "active_model must be included in models or allowed_models" :: !errors;
+  if Safe_ops.json_string ~default:"legacy" "trigger_mode" json = "explicit_only"
+     && mention_targets = []
+  then errors := "mention_targets is required for explicit_only trigger_mode" :: !errors;
+  List.rev !errors
+
+let resolved_keeper_args_from_persona args :
+    ((persona_summary * Yojson.Safe.t), string) result =
+  let persona_name = get_string args "persona_name" "" |> String.trim in
+  let soul_profile_opt_res = parse_soul_profile_opt args "soul_profile" in
+  match soul_profile_opt_res with
+  | Error err -> Error err
+  | Ok soul_profile_opt ->
+      if not (validate_name persona_name) then
+        Error "persona_name is required"
+      else
+        match load_persona_summary persona_name with
+        | None -> Error (Printf.sprintf "persona not found or missing profile.json: %s" persona_name)
+        | Some persona ->
+        let defaults = load_keeper_profile_defaults persona_name in
+        let name =
+          get_string_opt args "name" |> Option.value ~default:persona_name
+        in
+        let goal =
+          get_string_opt args "goal"
+          |> first_some defaults.goal
+          |> Option.value ~default:""
+          |> normalize_goal_horizon_text
+        in
+        let short_goal =
+          parse_goal_horizon_opt args "short_goal"
+          |> first_some defaults.short_goal
+          |> Option.value ~default:goal
+          |> normalize_goal_horizon_text
+        in
+        let mid_goal =
+          parse_goal_horizon_opt args "mid_goal"
+          |> first_some defaults.mid_goal
+          |> Option.value ~default:goal
+          |> normalize_goal_horizon_text
+        in
+        let long_goal =
+          parse_goal_horizon_opt args "long_goal"
+          |> first_some defaults.long_goal
+          |> Option.value ~default:goal
+          |> normalize_goal_horizon_text
+        in
+        let instructions =
+          get_string_opt args "instructions"
+          |> first_some defaults.instructions
+          |> Option.value ~default:""
+        in
+        let soul_profile =
+          soul_profile_opt
+          |> first_some defaults.soul_profile
+          |> Option.value ~default:default_soul_profile
+        in
+        let will =
+          parse_self_model_opt args "will"
+          |> first_some defaults.will
+          |> Option.value ~default:default_keeper_will
+        in
+        let needs =
+          parse_self_model_opt args "needs"
+          |> first_some defaults.needs
+          |> Option.value ~default:default_keeper_needs
+        in
+        let desires =
+          parse_self_model_opt args "desires"
+          |> first_some defaults.desires
+          |> Option.value ~default:default_keeper_desires
+        in
+        let explicit_models = get_string_list args "models" in
+        let explicit_allowed_models = get_string_list args "allowed_models" in
+        let active_model_opt = get_string_opt args "active_model" in
+        let base_models =
+          if explicit_models <> [] then explicit_models
+          else if defaults.models <> [] then defaults.models
+          else (
+            match active_model_opt |> first_some defaults.active_model with
+            | Some model -> [ model ]
+            | None -> [])
+        in
+        let allowed_models =
+          dedupe_keep_order
+            (explicit_allowed_models @ defaults.allowed_models @ base_models)
+        in
+        let active_model =
+          active_model_opt
+          |> first_some defaults.active_model
+          |> Option.value
+               ~default:
+                 (match base_models with
+                  | model :: _ -> model
+                  | [] -> "")
+        in
+        let room_scope =
+          get_string_opt args "room_scope"
+          |> first_some defaults.room_scope
+          |> Option.value ~default:"current"
+          |> canonical_room_scope
+        in
+        let scope_kind =
+          get_string_opt args "scope_kind"
+          |> first_some defaults.scope_kind
+          |> Option.value ~default:(if room_scope = "all" then "global" else "local")
+          |> canonical_scope_kind
+        in
+        let trigger_mode =
+          get_string_opt args "trigger_mode"
+          |> first_some defaults.trigger_mode
+          |> Option.value ~default:"legacy"
+          |> canonical_trigger_mode
+        in
+        let mention_targets =
+          let explicit = get_string_list args "mention_targets" in
+          let raw =
+            if explicit <> [] then explicit
+            else if defaults.mention_targets <> [] then defaults.mention_targets
+            else [ persona_name ]
+          in
+          raw |> List.filter (fun value -> String.trim value <> "") |> dedupe_keep_order
+        in
+        let presence_keepalive =
+          get_bool_opt args "presence_keepalive"
+          |> first_some defaults.presence_keepalive
+          |> Option.value ~default:true
+        in
+        let presence_keepalive_sec =
+          Safe_ops.json_int_opt "presence_keepalive_sec" args
+          |> first_some defaults.presence_keepalive_sec
+          |> Option.value ~default:30
+        in
+        let proactive_enabled =
+          get_bool_opt args "proactive_enabled"
+          |> first_some defaults.proactive_enabled
+          |> Option.value
+               ~default:(if trigger_mode = "explicit_only" then false else default_proactive_enabled)
+        in
+        let verify = get_bool args "verify" false in
+        let auto_handoff = get_bool args "auto_handoff" true in
+        let handoff_threshold =
+          Safe_ops.json_float_opt "handoff_threshold" args |> Option.value ~default:0.85
+        in
+        let handoff_cooldown_sec =
+          Safe_ops.json_int_opt "handoff_cooldown_sec" args |> Option.value ~default:300
+        in
+        let context_budget =
+          Safe_ops.json_float_opt "context_budget" args |> Option.value ~default:0.6
+        in
+        let resolved =
+          resolved_keeper_args_to_json
+            ~name
+            ~persona_name
+            ~persona_profile_path:persona.profile_path
+            ~goal ~short_goal ~mid_goal ~long_goal
+            ~instructions ~soul_profile ~will ~needs ~desires
+            ~models:base_models ~allowed_models ~active_model
+            ~room_scope ~scope_kind ~trigger_mode ~mention_targets
+            ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
+            ~verify ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec
+            ~context_budget
+        in
+        Ok (persona, resolved)
 
 let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Safe.t =
   let agent_file =
@@ -2860,6 +3184,8 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
 	                                       (fun s -> `String s)
 	                                       proactive_skill_route.secondary_skills));
 	                                ("skill_reason", `String proactive_skill_route.reason);
+                                ("skill_selection_mode", `String "heuristic");
+                                ("skill_provenance", `String "fallback");
 	                                ("memory_check", memory_check_default_json ());
 	                                ("proactive", `Assoc [
                                   ("performed", `Bool true);
@@ -2876,7 +3202,581 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                               ]
                           in
                           append_jsonl_line metrics_path metrics_json
-                        with exn ->
-                          Printf.eprintf "[keeper] metrics JSONL write failed: %s\n%!" (Printexc.to_string exn));
+                       with exn ->
+                         Printf.eprintf "[keeper] metrics JSONL write failed: %s\n%!" (Printexc.to_string exn));
                        updated))
 
+let explicit_room_prompt ~(meta : keeper_meta) ~(room_id : string) (msg : Types.message) : string =
+  Printf.sprintf
+    "You were explicitly mentioned in room '%s' by %s.\n\
+     Mention targets: %s\n\
+     Reply in-character as %s with exactly one room-ready message.\n\
+     Do not include SKILL headers, STATE blocks, markdown headings, or code fences unless the user explicitly asked for them.\n\n\
+     Original room message:\n%s"
+    room_id
+    msg.from_agent
+    (String.concat ", " meta.mention_targets)
+    meta.name
+    msg.content
+
+let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_id : string)
+    (msg : Types.message) : (keeper_meta * string, string) result =
+  let model_labels = effective_model_labels_for_turn meta ~inline_models:[] in
+  match model_specs_of_strings model_labels with
+  | Error e -> Error e
+  | Ok specs -> (
+      match ensure_api_keys specs with
+      | Error e -> Error e
+      | Ok () ->
+          let primary =
+            match specs with
+            | model :: _ -> model
+            | [] -> Llm_client.default_local_model_spec ()
+          in
+          let base_dir = session_base_dir ctx.config in
+          mkdir_p base_dir;
+          let (session, ctx_opt) =
+            load_context_from_checkpoint
+              ~trace_id:meta.trace_id
+              ~primary_model_max_tokens:primary.max_context
+              ~base_dir
+          in
+          let base_ctx =
+            match ctx_opt with
+            | Some current -> current
+            | None ->
+                Context_manager.create
+                  ~system_prompt:
+                    (build_keeper_system_prompt
+                       ~goal:meta.goal
+                       ~short_goal:meta.short_goal
+                       ~mid_goal:meta.mid_goal
+                       ~long_goal:meta.long_goal
+                       ~soul_profile:meta.soul_profile
+                       ~will:meta.will
+                       ~needs:meta.needs
+                       ~desires:meta.desires
+                       ~instructions:meta.instructions)
+                  ~max_tokens:primary.max_context
+          in
+          let ctx_work =
+            Context_manager.set_system_prompt base_ctx
+              ~system_prompt:
+                (build_keeper_system_prompt
+                   ~goal:meta.goal
+                   ~short_goal:meta.short_goal
+                   ~mid_goal:meta.mid_goal
+                   ~long_goal:meta.long_goal
+                   ~soul_profile:meta.soul_profile
+                   ~will:meta.will
+                   ~needs:meta.needs
+                   ~desires:meta.desires
+                   ~instructions:meta.instructions)
+          in
+          let prompt = explicit_room_prompt ~meta ~room_id msg in
+          let user_message = Llm_client.user_msg prompt in
+          let ctx_work = Context_manager.append ctx_work user_message in
+          Context_manager.persist_message session user_message;
+          let requests =
+            List.map
+              (fun (model : Llm_client.model_spec) ->
+                ({
+                  Llm_client.model;
+                  messages = (Llm_client.system_msg ctx_work.system_prompt) :: ctx_work.messages;
+                  temperature = 0.6;
+                  max_tokens = 256;
+                  tools = [];
+                  response_format = `Text;
+                } : Llm_client.completion_request))
+              specs
+          in
+          match Llm_client.cascade requests with
+          | Error e -> Error e
+          | Ok resp ->
+              let used_model =
+                model_spec_for_used specs resp.model_used |> Option.value ~default:primary
+              in
+              let reply_raw = String.trim resp.content in
+              let reply =
+                if reply_raw = "" then
+                  Printf.sprintf "@%s 야, 다시 한 번만 말해봐." msg.from_agent
+                else
+                  reply_raw
+              in
+              let assistant_message = Llm_client.assistant_msg reply in
+              let ctx_work = Context_manager.append ctx_work assistant_message in
+              Context_manager.persist_message session assistant_message;
+              (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
+               with exn ->
+                 Printf.eprintf "[keeper] save_checkpoint (explicit room reply) failed: %s\n%!"
+                   (Printexc.to_string exn));
+              let usage = resp.usage in
+              let now_ts = Time_compat.now () in
+              let updated =
+                {
+                  meta with
+                  updated_at = now_iso ();
+                  total_turns = meta.total_turns + 1;
+                  total_input_tokens = meta.total_input_tokens + usage.input_tokens;
+                  total_output_tokens = meta.total_output_tokens + usage.output_tokens;
+                  total_tokens = meta.total_tokens + usage.total_tokens;
+                  total_cost_usd =
+                    meta.total_cost_usd +. cost_usd_of_usage usage used_model;
+                  last_turn_ts = now_ts;
+                  last_model_used = resp.model_used;
+                  last_input_tokens = usage.input_tokens;
+                  last_output_tokens = usage.output_tokens;
+                  last_total_tokens = usage.total_tokens;
+                  last_latency_ms = resp.latency_ms;
+                }
+              in
+              Ok (updated, reply))
+
+let run_learned_policy_room_event
+    (ctx : _ context)
+    ~(meta : keeper_meta)
+    ~(room_id : string)
+    (msg : Types.message) : (keeper_meta, string) result =
+  let reward_model_path = String.trim meta.policy_reward_model_path in
+  match load_keeper_reward_model reward_model_path with
+  | Error e -> Error e
+  | Ok reward_model ->
+      let action_budget = canonical_policy_action_budget meta.policy_action_budget in
+      let observation = keeper_policy_observation_of_room_message ~meta ~room_id msg in
+      let feature_vector = keeper_policy_feature_vector observation in
+      let candidate_actions =
+        [ ("noop", true); ("reply_in_room", true) ]
+        @
+        if action_budget = "board" then [ ("board_post", true) ] else []
+      in
+      let candidate_scores =
+        List.map
+          (fun (action, allowed) ->
+            score_keeper_policy_candidate
+              ~model:reward_model
+              ~features:feature_vector
+              ~action
+              ~allowed)
+          candidate_actions
+      in
+      let chosen_candidate =
+        choose_policy_action candidate_scores
+        |> Option.value
+             ~default:
+               {
+                 action = "noop";
+                 bias = 0.0;
+                 feature_scores = [];
+                 score = 0.0;
+                 allowed = true;
+               }
+      in
+      let action_id = generate_trace_id () in
+      let now_ts = Time_compat.now () in
+      let execution_result, updated_meta =
+        match chosen_candidate.action with
+        | "reply_in_room" -> (
+            match generate_explicit_room_reply ctx ~meta ~room_id msg with
+            | Error e ->
+                ( `Assoc
+                    [
+                      ("executed", `Bool false);
+                      ("error", `String e);
+                    ],
+                  meta )
+            | Ok (updated_meta, reply) ->
+                (try
+                   ignore
+                     (Room.broadcast_in_room ctx.config ~room_id
+                        ~from_agent:updated_meta.agent_name ~content:reply)
+                 with exn ->
+                   Printf.eprintf
+                     "[keeper] learned policy room broadcast failed for %s in %s: %s\n%!"
+                     updated_meta.name room_id (Printexc.to_string exn));
+                ( `Assoc
+                    [
+                      ("executed", `Bool true);
+                      ("reply", `String reply);
+                      ("reply_preview", `String (short_preview reply));
+                    ],
+                  updated_meta ))
+        | "board_post" ->
+            let title =
+              Printf.sprintf "[keeper:%s] %s mentioned in %s"
+                meta.name msg.from_agent room_id
+            in
+            let content =
+              Printf.sprintf
+                "Learned-policy board escalation.\n\n- Keeper: %s\n- Room: %s\n- Mentioned by: %s\n- Message: %s"
+                meta.name
+                room_id
+                msg.from_agent
+                (short_preview ~max_len:400 msg.content)
+            in
+            let board_args =
+              `Assoc
+                [
+                  ("author", `String meta.name);
+                  ("title", `String title);
+                  ("content", `String content);
+                  ("tags",
+                    `List
+                      [
+                        `String "keeper-policy";
+                        `String "learned-offline-v1";
+                        `String meta.name;
+                      ]);
+                ]
+            in
+            let ok, result = Tool_board.handle_tool "masc_board_post" board_args in
+            if ok then
+              let updated_meta =
+                {
+                  meta with
+                  updated_at = now_iso ();
+                  last_autonomous_action_at = now_iso ();
+                  autonomous_action_count = meta.autonomous_action_count + 1;
+                }
+              in
+              ( `Assoc
+                  [
+                    ("executed", `Bool true);
+                    ("title", `String title);
+                    ("board_result",
+                      try Yojson.Safe.from_string result with Yojson.Json_error _ -> `String result);
+                  ],
+                updated_meta )
+            else
+              ( `Assoc
+                  [
+                    ("executed", `Bool false);
+                    ("error", `String result);
+                  ],
+                meta )
+        | _ ->
+            (`Assoc [("executed", `Bool false); ("result", `String "noop")], meta)
+      in
+      let log_json =
+        `Assoc
+          [
+            ("ts", `String (now_iso ()));
+            ("ts_unix", `Float now_ts);
+            ("action_id", `String action_id);
+            ("keeper", `String meta.name);
+            ("trace_id", `String meta.trace_id);
+            ("policy_mode", `String meta.policy_mode);
+            ("policy_action_budget", `String action_budget);
+            ("reward_model", `String reward_model.version);
+            ("reward_model_path", `String reward_model.path);
+            ("observation", keeper_policy_observation_to_json observation);
+            ("feature_vector", float_assoc_to_json feature_vector);
+            ("candidates", `List (List.map keeper_policy_candidate_score_to_json candidate_scores));
+            ("chosen_action", `String chosen_candidate.action);
+            ("chosen_score", `Float chosen_candidate.score);
+            ("heuristic_baseline_action",
+              `String (deterministic_policy_baseline_action observation));
+            ("safety_gate",
+              `Assoc
+                [
+                  ("allowed", `Bool chosen_candidate.allowed);
+                  ("reason", `String "conversation_and_board_only");
+                ]);
+            ("result", execution_result);
+          ]
+      in
+      append_jsonl_line (keeper_policy_log_path ctx.config meta.name) log_json;
+      Ok updated_meta
+
+let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : keeper_meta =
+  if meta.trigger_mode <> "explicit_only" then meta
+  else
+    let meta = ensure_keeper_room_presence ctx.config meta in
+    let targets =
+      if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
+    in
+    let batch_limit = 200 in
+    let next_meta =
+      List.fold_left
+        (fun meta_acc room_id ->
+          let since_seq = room_cursor_for meta_acc room_id in
+          let messages =
+            Room.get_messages_raw_in_room ctx.config ~room_id ~since_seq ~limit:batch_limit
+          in
+          let max_seq =
+            List.fold_left (fun best (msg : Types.message) -> max best msg.seq) since_seq messages
+          in
+          let meta_after_messages =
+            List.fold_left
+              (fun current_meta (msg : Types.message) ->
+                if msg.from_agent = current_meta.agent_name then
+                  current_meta
+                else if not (exact_direct_mention_present ~targets msg.content) then
+                  current_meta
+                else
+                  if keeper_policy_mode_is_learned current_meta then
+                    (match run_learned_policy_room_event ctx ~meta:current_meta ~room_id msg with
+                     | Error err ->
+                         Printf.eprintf
+                           "[keeper] learned policy room action failed for %s in %s: %s\n%!"
+                           current_meta.name room_id err;
+                         current_meta
+                     | Ok updated_meta ->
+                         (match write_meta ctx.config updated_meta with
+                          | Ok () -> ()
+                          | Error err ->
+                              Printf.eprintf
+                                "[keeper] write_meta after learned policy room action failed: %s\n%!"
+                                err);
+                         updated_meta)
+                  else
+                    match generate_explicit_room_reply ctx ~meta:current_meta ~room_id msg with
+                    | Error err ->
+                        Printf.eprintf "[keeper] explicit room reply failed for %s in %s: %s\n%!"
+                          current_meta.name room_id err;
+                        current_meta
+                    | Ok (updated_meta, reply) ->
+                        (try
+                           ignore
+                             (Room.broadcast_in_room ctx.config ~room_id
+                                ~from_agent:updated_meta.agent_name ~content:reply)
+                         with exn ->
+                           Printf.eprintf
+                             "[keeper] explicit room broadcast failed for %s in %s: %s\n%!"
+                             updated_meta.name room_id (Printexc.to_string exn));
+                        (match write_meta ctx.config updated_meta with
+                         | Ok () -> ()
+                         | Error err ->
+                             Printf.eprintf "[keeper] write_meta after explicit room reply failed: %s\n%!"
+                               err);
+                        updated_meta)
+              meta_acc
+              messages
+          in
+          let updated_meta = set_room_cursor meta_after_messages room_id max_seq in
+          let updated_meta =
+            { updated_meta with joined_room_ids = dedupe_keep_order (room_id :: updated_meta.joined_room_ids) }
+          in
+          (match write_meta ctx.config updated_meta with
+           | Ok () -> ()
+           | Error err ->
+               Printf.eprintf "[keeper] write_meta after room cursor update failed: %s\n%!" err);
+          updated_meta)
+        meta
+        meta.joined_room_ids
+    in
+    next_meta
+
+(* Presence keepalive fibers keyed by keeper name. *)
+let keepalives : (string, bool ref) Hashtbl.t = Hashtbl.create 8
+let running_keepers () = Hashtbl.length keepalives
+let keeper_keepalive_running name = Hashtbl.mem keepalives name
+let keeper_spawn_slots_available () =
+  let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+  max_keepers <= 0 || running_keepers () < max_keepers
+
+let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit =
+  if not m.presence_keepalive then ()
+  else if Hashtbl.mem keepalives m.name then ()
+  else if not (keeper_spawn_slots_available ()) then ()
+  else begin
+    let stop = ref false in
+    Hashtbl.replace keepalives m.name stop;
+    (* Keepers should be usable even if the user hasn't called masc_init yet. *)
+    (try
+       if not (Room_utils.is_initialized ctx.config) then
+         ignore (Room.init ctx.config ~agent_name:None)
+     with exn ->
+       Printf.eprintf "[keeper] room init failed: %s\n%!" (Printexc.to_string exn));
+    (try
+       let synced = ensure_keeper_room_presence ctx.config m in
+       ignore (write_meta ctx.config synced)
+     with exn ->
+       Printf.eprintf "[keeper] room presence bootstrap failed: %s\n%!"
+         (Printexc.to_string exn));
+    Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+      let keepalive_started_ts = Time_compat.now () in
+      let snapshot_interval_sec =
+        match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_SEC" with
+        | Some s ->
+            (try max 15 (min 3600 (int_of_string (String.trim s))) with Failure _ -> 60)
+        | None -> 60
+      in
+      let last_snapshot_ts = ref 0.0 in
+      let rec loop () =
+        if !stop then ()
+        else begin
+          let meta_current =
+            match read_meta ctx.config m.name with
+            | Ok (Some latest) -> latest
+            | _ -> m
+          in
+          (try
+             let synced = ensure_keeper_room_presence ctx.config meta_current in
+             ignore (write_meta ctx.config synced)
+           with exn ->
+             Printf.eprintf "[keeper] room heartbeat failed: %s\n%!" (Printexc.to_string exn));
+          let meta_current =
+            match read_meta ctx.config m.name with
+            | Ok (Some latest) -> latest
+            | _ -> meta_current
+          in
+          let now_ts = Time_compat.now () in
+          if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec then begin
+            (try
+               let metrics_path = keeper_metrics_path ctx.config meta_current.name in
+               let primary_model =
+                 match model_specs_of_strings meta_current.models with
+                 | Ok (primary :: _) -> primary
+                 | _ -> Llm_client.default_local_model_spec ()
+               in
+               let base_dir = session_base_dir ctx.config in
+               let (_session, ctx_opt) =
+                 load_context_from_checkpoint
+                   ~trace_id:meta_current.trace_id
+                   ~primary_model_max_tokens:primary_model.max_context
+                   ~base_dir
+               in
+	               (match ctx_opt with
+	                | None -> ()
+	                | Some c ->
+                    let latest_user_message =
+                      latest_message_content_by_role
+                        ~role:Llm_client.User
+                        c.messages
+                    in
+                    let latest_assistant_message =
+                      latest_message_content_by_role
+                        ~role:Llm_client.Assistant
+                        c.messages
+                    in
+	                    let continuity_snapshot = latest_state_snapshot_from_messages c.messages in
+	                    let continuity_summary =
+	                      match continuity_snapshot with
+	                      | Some s -> keeper_state_snapshot_to_summary_text s
+	                      | None ->
+	                          let trimmed = String.trim meta_current.continuity_summary in
+	                          if trimmed = "" then "No continuity snapshot available." else trimmed
+	                    in
+	                    let repetition_risk =
+	                      repetition_risk_score ~messages:c.messages ~candidate_reply:None
+	                    in
+	                    let goal_alignment =
+	                      goal_alignment_score
+	                        ~meta:meta_current
+	                        ~user_message:latest_user_message
+	                        ~assistant_reply:latest_assistant_message
+	                    in
+                    let response_alignment =
+                      match latest_user_message, latest_assistant_message with
+                      | Some user_message, Some assistant_message ->
+                        jaccard_similarity user_message assistant_message
+                      | _ -> 0.0
+                    in
+                    let auto_rules =
+                      evaluate_keeper_auto_rules
+                        ~meta:meta_current
+                        ~context_ratio:(Context_manager.context_ratio c)
+                        ~message_count:(List.length c.messages)
+                        ~token_count:c.token_count
+                        ~repetition_risk
+                        ~goal_alignment
+                        ~response_alignment
+                    in
+	                    let snapshot = `Assoc [
+                      ("ts", `String (now_iso ()));
+                      ("ts_unix", `Float now_ts);
+                      ("channel", `String "heartbeat");
+                      ("name", `String meta_current.name);
+                      ("agent_name", `String meta_current.agent_name);
+                      ("trace_id", `String meta_current.trace_id);
+                      ("generation", `Int meta_current.generation);
+                      ("model_used", `String meta_current.last_model_used);
+                      ("usage", `Assoc [
+                        ("input_tokens", `Int 0);
+                        ("output_tokens", `Int 0);
+                        ("total_tokens", `Int 0);
+                      ]);
+                      ("latency_ms", `Int 0);
+                      ("cost_usd", `Float 0.0);
+                      ("context_ratio", `Float (Context_manager.context_ratio c));
+                      ("context_tokens", `Int c.token_count);
+                      ("context_max", `Int c.max_tokens);
+                      ("message_count", `Int (List.length c.messages));
+                      ("continuity_state",
+                        match continuity_snapshot with
+                        | None -> `Null
+                        | Some s -> keeper_state_snapshot_to_json s);
+                      ("continuity_summary",
+                        `String continuity_summary);
+                      ("compacted", `Bool false);
+                      ("compaction_before_tokens", `Int c.token_count);
+                      ("compaction_after_tokens", `Int c.token_count);
+                      ("work_kind", `String "status_tick");
+                      ("tool_call_count", `Int 0);
+                      ("tools_used", `List []);
+                      ("snapshot_source", `String "keeper_context_status");
+                      ("memory_check", memory_check_default_json ());
+                      ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                      ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
+                      ("auto_reflect", `Bool auto_rules.reflect);
+                      ("auto_plan", `Bool auto_rules.plan);
+                      ("auto_compact", `Bool auto_rules.compact);
+                      ("auto_handoff", `Bool auto_rules.handoff);
+	                      ("repetition_risk", `Float repetition_risk);
+	                      ("goal_alignment", `Float goal_alignment);
+                      ("response_alignment", `Float response_alignment);
+                      ("goal_drift", `Float auto_rules.goal_drift);
+                      ("guardrail_stop", `Bool auto_rules.guardrail_stop);
+                      ("guardrail_stop_reason",
+                        match auto_rules.guardrail_reason with
+                        | Some reason -> `String reason
+                        | None -> `Null);
+	                      ("handoff", `Assoc [("performed", `Bool false)]);
+	                    ] in
+                    append_jsonl_line metrics_path snapshot;
+                    (* SSE: keeper_heartbeat — dashboard real-time monitoring *)
+                    (try Sse.broadcast (`Assoc [
+                      ("type", `String "keeper_heartbeat");
+                      ("name", `String meta_current.name);
+                      ("generation", `Int meta_current.generation);
+                      ("context_ratio", `Float (Context_manager.context_ratio c));
+                      ("ts_unix", `Float now_ts);
+                    ]) with exn ->
+                      Printf.eprintf "[keeper] heartbeat SSE broadcast failed: %s\n%!" (Printexc.to_string exn)))
+             with exn ->
+               Printf.eprintf "[keeper] heartbeat snapshot write failed: %s\n%!" (Printexc.to_string exn));
+            last_snapshot_ts := now_ts
+          end;
+          let proactive_warmup_elapsed =
+            proactive_warmup_sec <= 0
+            || now_ts -. keepalive_started_ts >= float_of_int proactive_warmup_sec
+          in
+          let meta_after_proactive =
+            if proactive_warmup_elapsed
+            then
+              (try
+                 if meta_current.trigger_mode = "explicit_only" then
+                   maybe_emit_explicit_room_replies ctx meta_current
+                 else
+                   maybe_emit_proactive ctx meta_current
+               with exn ->
+                 Printf.eprintf "[keeper] proactive emission failed: %s\n%!"
+                   (Printexc.to_string exn);
+                 meta_current)
+            else meta_current
+          in
+          let base = float_of_int (max 30 (min 300 meta_after_proactive.presence_keepalive_sec)) in
+          let jitter = base *. 0.2 *. Random.float 1.0 in
+          Eio.Time.sleep ctx.clock (base +. jitter);
+          loop ()
+        end
+      in
+      loop ())
+  end
+
+let stop_keepalive name =
+  match Hashtbl.find_opt keepalives name with
+  | None -> ()
+  | Some stop ->
+    stop := true;
+    Hashtbl.remove keepalives name

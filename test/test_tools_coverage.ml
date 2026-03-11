@@ -707,36 +707,7 @@ let test_masc_handover_claim_schema () =
       | None -> Alcotest.fail "masc_handover_claim missing properties"
 
 (* ============================================================ *)
-(* 15. Swarm Cutover Tests                                       *)
-(* ============================================================ *)
-
-let test_masc_swarm_init_hidden () =
-  match find_tool "masc_swarm_init" with
-  | None -> ()
-  | Some _ -> Alcotest.fail "masc_swarm_init should be hidden from public schemas"
-
-let test_masc_swarm_join_hidden () =
-  match find_tool "masc_swarm_join" with
-  | None -> ()
-  | Some _ -> Alcotest.fail "masc_swarm_join should be hidden from public schemas"
-
-let test_masc_swarm_leave_hidden () =
-  match find_tool "masc_swarm_leave" with
-  | None -> ()
-  | Some _ -> Alcotest.fail "masc_swarm_leave should be hidden from public schemas"
-
-let test_masc_swarm_status_hidden () =
-  match find_tool "masc_swarm_status" with
-  | None -> ()
-  | Some _ -> Alcotest.fail "masc_swarm_status should be hidden from public schemas"
-
-let test_masc_swarm_propose_hidden () =
-  match find_tool "masc_swarm_propose" with
-  | None -> ()
-  | Some _ -> Alcotest.fail "masc_swarm_propose should be hidden from public schemas"
-
-(* ============================================================ *)
-(* 16. Command Plane V2 Tool Tests                               *)
+(* 15. Command Plane V2 Tool Tests                               *)
 (* ============================================================ *)
 
 let test_masc_dispatch_tick_schema () =
@@ -1010,13 +981,6 @@ let () =
       Alcotest.test_case "handover_create" `Quick test_masc_handover_create_schema;
       Alcotest.test_case "handover_list" `Quick test_masc_handover_list_schema;
       Alcotest.test_case "handover_claim" `Quick test_masc_handover_claim_schema;
-    ];
-    "swarm_cutover", [
-      Alcotest.test_case "swarm_init_hidden" `Quick test_masc_swarm_init_hidden;
-      Alcotest.test_case "swarm_join_hidden" `Quick test_masc_swarm_join_hidden;
-      Alcotest.test_case "swarm_leave_hidden" `Quick test_masc_swarm_leave_hidden;
-      Alcotest.test_case "swarm_status_hidden" `Quick test_masc_swarm_status_hidden;
-      Alcotest.test_case "swarm_propose_hidden" `Quick test_masc_swarm_propose_hidden;
     ];
     "command_plane_tools", [
       Alcotest.test_case "dispatch_tick" `Quick test_masc_dispatch_tick_schema;

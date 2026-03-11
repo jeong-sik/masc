@@ -1104,11 +1104,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   (* Delegate to extracted tool modules first *)
-  let swarm_ctx : Tool_swarm.context = {
-    config;
-    fs = state.Mcp_server.fs;
-    agent_name;
-  } in
   let simple_ctx_config = { Tool_plan.config } in
   let simple_ctx_run = { Tool_run.config } in
   let simple_ctx_team_session =
@@ -1299,9 +1294,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   (* Chain through all extracted tool modules *)
-  match Tool_swarm.dispatch swarm_ctx ~name ~args:arguments with
-  | Some result -> result
-  | None ->
   match Tool_plan.dispatch simple_ctx_config ~name ~args:arguments with
   | Some result -> result
   | None ->
@@ -2416,9 +2408,6 @@ Time: %s
                (List.length result.items) query));
            ] in
            (true, Yojson.Safe.pretty_to_string response))
-
-  (* Swarm tools delegated to Tool_swarm module *)
-
   (* Board tools delegated to Tool_board module *)
   | "masc_board_post" ->
       let (success, message) as result = Tool_board.handle_tool name arguments in

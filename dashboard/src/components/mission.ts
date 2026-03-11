@@ -65,6 +65,10 @@ type EnrichedKeeperRow = {
 const selectedAttentionId = signal<string | null>(null)
 const selectedSessionId = signal<string | null>(null)
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function trimText(value: string | null | undefined, max = 120): string | null {
   const text = (value ?? '').replace(/\s+/g, ' ').trim()
   if (!text) return null
@@ -185,6 +189,8 @@ function latestMessageTo(agentName: string, rows: Message[]): Message | null {
     .filter(item => {
       const from = (item.from ?? '').trim().toLowerCase()
       if (from === key) return false
+      const mention = (item.mention ?? '').trim().toLowerCase()
+      if (mention === key) return true
       const content = (item.content ?? '').trim().toLowerCase()
       return containsDirectMention(content, key)
     })

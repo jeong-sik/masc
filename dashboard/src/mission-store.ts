@@ -29,6 +29,7 @@ export const missionBriefingLoading = signal(false)
 export const missionBriefingError = signal<string | null>(null)
 
 let missionBriefingPollTimer: number | null = null
+let missionBriefingRequestSeq = 0
 
 function clearMissionBriefingPoll(): void {
   if (missionBriefingPollTimer !== null) {
@@ -43,6 +44,14 @@ function scheduleMissionBriefingPoll(delayMs = 1500): void {
     missionBriefingPollTimer = null
     void refreshMissionBriefing(false)
   }, delayMs)
+}
+
+function missionRoomKey(snapshot: DashboardMissionResponse | null): string | null {
+  return snapshot?.summary.current_room ?? null
+}
+
+function briefingRoomKey(briefing: DashboardMissionBriefingResponse | null): string | null {
+  return briefing?.basis?.current_room ?? null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -506,8 +515,20 @@ export async function refreshMissionSnapshot(): Promise<void> {
   missionLoading.value = true
   missionError.value = null
   try {
+    const previousRoom = missionRoomKey(missionSnapshot.value)
     const raw = await fetchDashboardMission()
-    missionSnapshot.value = normalizeMission(raw)
+    const normalized = normalizeMission(raw)
+    const nextRoom = missionRoomKey(normalized)
+    missionSnapshot.value = normalized
+    if (previousRoom !== nextRoom) {
+      missionBriefingRequestSeq += 1
+      missionBriefing.value = null
+      missionBriefingError.value = null
+      clearMissionBriefingPoll()
+      if (previousRoom !== null) {
+        void refreshMissionBriefing(false)
+      }
+    }
   } catch (err) {
     missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'
   } finally {
@@ -516,11 +537,27 @@ export async function refreshMissionSnapshot(): Promise<void> {
 }
 
 export async function refreshMissionBriefing(force = false): Promise<void> {
+  const requestSeq = ++missionBriefingRequestSeq
+  const requestedRoom = missionRoomKey(missionSnapshot.value)
+  if (briefingRoomKey(missionBriefing.value) !== requestedRoom) {
+    missionBriefing.value = null
+  }
   missionBriefingLoading.value = true
   missionBriefingError.value = null
   try {
     const raw = await fetchDashboardMissionBriefing(force)
     const normalized = normalizeMissionBriefing(raw)
+    if (requestSeq !== missionBriefingRequestSeq) return
+    const currentRoom = missionRoomKey(missionSnapshot.value)
+    const responseRoom = briefingRoomKey(normalized)
+    const roomChangedDuringFetch =
+      requestedRoom !== null && currentRoom !== null && requestedRoom !== currentRoom
+    const responseRoomMismatch =
+      requestedRoom !== null && responseRoom !== null && requestedRoom !== responseRoom
+    if (roomChangedDuringFetch || responseRoomMismatch) {
+      clearMissionBriefingPoll()
+      return
+    }
     missionBriefing.value = normalized
     if (normalized.refreshing || normalized.status === 'pending') {
       scheduleMissionBriefingPoll()
@@ -528,9 +565,12 @@ export async function refreshMissionBriefing(force = false): Promise<void> {
       clearMissionBriefingPoll()
     }
   } catch (err) {
+    if (requestSeq !== missionBriefingRequestSeq) return
     missionBriefingError.value = err instanceof Error ? err.message : 'Failed to load mission briefing'
     clearMissionBriefingPoll()
   } finally {
-    missionBriefingLoading.value = false
+    if (requestSeq === missionBriefingRequestSeq) {
+      missionBriefingLoading.value = false
+    }
   }
 }

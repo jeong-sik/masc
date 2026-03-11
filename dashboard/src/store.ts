@@ -299,6 +299,7 @@ function normalizeMessage(raw: unknown): Message | null {
     content,
     timestamp,
     type: asString(raw.type),
+    mention: asString(raw.mention) ?? null,
   }
 }
 

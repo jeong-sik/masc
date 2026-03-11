@@ -66,8 +66,17 @@ let seed_room config session_id =
     (Lib.Room.broadcast config ~from_agent:"fixture-root"
        ~content:"@llama-local-beta isolate metacog lane");
   ignore
+    (Lib.Room.broadcast config ~from_agent:"team-session-local64-smoke"
+       ~content:"@llama-local-alpha inspect alpha continuity signal");
+  ignore
+    (Lib.Room.broadcast config ~from_agent:"fixture-root"
+       ~content:"@llama-local-beta isolate metacog lane");
+  ignore
     (Lib.Room.broadcast config ~from_agent:"llama-local-alpha"
        ~content:"Spawned worker recovered partial role coverage and runtime visibility.");
+  ignore
+    (Lib.Room.broadcast config ~from_agent:"team-session-local64-smoke"
+       ~content:"@llama-local-beta inspect beta continuity signal");
 
   let now = Unix.gettimeofday () in
   let open Lib.Team_session_types in
@@ -251,14 +260,9 @@ let test_dashboard_mission_projection () =
         let agent_briefs = json |> member "agent_briefs" |> to_list in
         let internal_signals = json |> member "internal_signals" |> to_list in
         let alpha_brief =
-          match
-            List.find_opt
-              (fun row ->
+          agent_briefs
+          |> List.find (fun row ->
                  row |> member "agent_name" |> to_string = "llama-local-alpha")
-              agent_briefs
-          with
-          | Some row -> row
-          | None -> fail "expected alpha brief"
         in
         check bool "attention_queue present" true (attention_queue <> []);
         check string "top attention kind" "spawn_failure_present"
@@ -272,14 +276,11 @@ let test_dashboard_mission_projection () =
            |> List.exists (fun row ->
                 row |> member "agent_name" |> to_string = "llama-local-alpha"
                 && row |> member "related_session_id" |> to_string = session_id));
-        check bool "recent input uses full mention target" true
-          (contains
-             (alpha_brief |> member "recent_input_preview" |> to_string)
-             "@llama-local-alpha");
-        check bool "recent input excludes unrelated mention" false
-          (contains
-             (alpha_brief |> member "recent_input_preview" |> to_string)
-             "@llama-local-beta");
+        let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
+        check bool "recent input preserves exact alpha target" true
+          (contains alpha_input "alpha continuity signal");
+        check bool "recent input excludes unrelated beta target" false
+          (contains alpha_input "beta continuity signal");
         check bool "internal signal includes pending confirm" true
           (internal_signals
            |> List.exists (fun row ->

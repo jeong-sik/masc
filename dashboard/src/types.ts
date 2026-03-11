@@ -42,6 +42,7 @@ export interface Message {
   content: string
   timestamp: string
   type?: string
+  mention?: string | null
 }
 
 // --- Board ---

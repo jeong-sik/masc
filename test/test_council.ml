@@ -821,9 +821,20 @@ let test_persist_cypher_escape () =
   let escaped2 = Thread_persist.cypher_escape "back\\slash" in
   check bool "backslash escaped" (String.length escaped2 > String.length "back\\slash") true
 
+let test_persist_clear_context_disables_neo4j () =
+  Thread_persist.clear_eio_context ();
+  match Thread_persist.execute_cypher_http ~cypher:"RETURN 1" with
+  | Error msg ->
+      check bool "reports disabled neo4j path" true
+        (String.length msg > 0
+         && (String.contains msg 'n' || String.contains msg 'N'))
+  | Ok () ->
+      fail "expected neo4j path to be disabled without eio context"
+
 let persist_tests = [
   "dual-stream save + load", `Quick, test_persist_save_load;
   "cypher escape safety", `Quick, test_persist_cypher_escape;
+  "clear context disables neo4j", `Quick, test_persist_clear_context_disables_neo4j;
 ]
 
 let () =

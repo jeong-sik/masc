@@ -1298,6 +1298,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     worker_runner = None;
     clock = Some clock;
   } in
+  let simple_ctx_autoresearch : Tool_autoresearch.context = {
+    base_path = config.base_path;
+  } in
   let simple_ctx_perpetual : Tool_perpetual.context = {
     agent_name;
     start_loop = Some (fun loop_state loop_config ->
@@ -1508,6 +1511,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_mdal.dispatch simple_ctx_mdal ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_autoresearch.dispatch simple_ctx_autoresearch ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_trpg.dispatch simple_ctx_trpg ~name ~args:arguments with

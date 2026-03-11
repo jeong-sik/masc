@@ -324,6 +324,9 @@
    json_util
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
+   ;; Autoresearch — Karpathy-inspired autonomous experiment loop
+   autoresearch
+   tool_autoresearch
    ;; SWARM-RISC Agent ISA (Phase 1: types + pipeline + tools)
    risc_types
    risc_pipeline

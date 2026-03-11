@@ -100,7 +100,8 @@ let all_tool_schemas : Types.tool_schema list =
     @ Tool_protocol_game_view.schemas
     @ Tool_experiment.schemas
     @ Tool_trpg.schemas
-    @ Tool_risc.schemas)
+    @ Tool_risc.schemas
+    @ Tool_autoresearch.schemas)
 
 let is_tool_visible tool_name =
   Tool_catalog.is_visible tool_name

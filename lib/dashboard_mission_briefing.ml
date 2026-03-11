@@ -446,7 +446,7 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
   let positive_signal =
     recent_message_count > 0 || broadcast_total > 0 || portal_total > 0
   in
-  let evidence =
+  let positive_evidence =
     []
     |> evidence_add_if (recent_message_count > 0)
          (Printf.sprintf "Recent room messages recorded: %d" recent_message_count)
@@ -454,11 +454,21 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
          (Printf.sprintf "Session broadcasts recorded: %d" broadcast_total)
     |> evidence_add_if (portal_total > 0)
          (Printf.sprintf "Portal messages recorded: %d" portal_total)
+  in
+  let inactivity_evidence =
+    []
     |> evidence_add_if
          (not positive_signal && live_session_count = 0)
          "Active sessions count is zero"
-    |> fun items -> items @ metadata_evidence
-    |> take 2
+    |> evidence_add_if
+         (not positive_signal && live_session_count > 0)
+         "No communication activity is recorded for the live sessions"
+  in
+  let evidence =
+    if metadata_evidence <> [] then
+      take 2 (metadata_evidence @ positive_evidence @ inactivity_evidence)
+    else
+      take 2 (positive_evidence @ inactivity_evidence)
   in
   if positive_signal && metadata_evidence = [] then
     ("healthy", "Communication activity is recorded across recent messages and session metrics.", evidence)

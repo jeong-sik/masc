@@ -4395,17 +4395,24 @@ let room_ids_for_meta config (meta : keeper_meta) : string list =
 
 let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
   let room_ids = room_ids_for_meta config meta in
-  List.iter
-    (fun room_id ->
-      try
-        if not (Room.is_agent_joined_in_room config ~room_id ~agent_name:meta.agent_name) then
-          ignore (Room.join_in_room config ~room_id ~agent_name:meta.agent_name ~capabilities:["keeper"] ());
-        ignore (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name)
-      with exn ->
-        Printf.eprintf "[keeper] room presence sync failed for %s in %s: %s\n%!"
-          meta.name room_id (Printexc.to_string exn))
-    room_ids;
-  { meta with joined_room_ids = room_ids }
+  let successful_rooms =
+    List.fold_left
+      (fun acc room_id ->
+        try
+          if not (Room.is_agent_joined_in_room config ~room_id ~agent_name:meta.agent_name) then
+            ignore
+              (Room.join_in_room config ~room_id ~agent_name:meta.agent_name
+                 ~capabilities:["keeper"] ());
+          ignore (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name);
+          room_id :: acc
+        with exn ->
+          Printf.eprintf "[keeper] room presence sync failed for %s in %s: %s\n%!"
+            meta.name room_id (Printexc.to_string exn);
+          acc)
+      []
+      room_ids
+  in
+  { meta with joined_room_ids = List.rev successful_rooms }
 
 let exact_direct_mention_present ~(targets : string list) (content : string) : bool =
   let escaped_targets = targets |> List.map Str.quote |> List.filter (fun s -> String.trim s <> "") in

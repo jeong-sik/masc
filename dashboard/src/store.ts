@@ -648,6 +648,13 @@ function normalizeKeepers(raw: unknown, serverStatusValue?: ServerStatus | null)
 
       const keeper: Keeper = {
         name,
+        runtime_class:
+          row.runtime_class === 'persistent_agent' ? 'persistent_agent' : 'resident_keeper',
+        desired:
+          typeof row.desired === 'boolean' ? row.desired : undefined,
+        resident_registered:
+          typeof row.resident_registered === 'boolean' ? row.resident_registered : undefined,
+        reconcile_status: asString(row.reconcile_status) ?? null,
         emoji: asString(row.emoji),
         koreanName: asString(row.koreanName) ?? asString(row.korean_name),
         agent_name: asString(row.agent_name),

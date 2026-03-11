@@ -23,7 +23,8 @@
         test_multi_room test_worktree_detection test_bounded test_mention test_hat
         test_swarm test_heartbeat_qw test_sse_qw test_agent_health
         test_post_verifier test_post_verifier_llm test_mdal
-        test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm)
+        test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
+        test_tool_tier)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -33,7 +34,8 @@
           test_multi_room test_worktree_detection test_bounded test_mention test_hat
           test_swarm test_heartbeat_qw test_sse_qw test_agent_health
           test_post_verifier test_post_verifier_llm test_mdal
-          test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm)
+          test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
+          test_tool_tier)
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
 

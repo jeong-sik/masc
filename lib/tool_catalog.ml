@@ -12,6 +12,11 @@ type implementation_status =
   | Simulation
   | Placeholder
 
+type tier =
+  | Essential
+  | Standard
+  | Full
+
 type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
@@ -182,6 +187,74 @@ let lifecycle_to_string = function
   | Active -> "active"
   | Deprecated -> "deprecated"
 
+(** {1 Tool Tier System}
+
+    3-tier tool filtering to reduce the number of tools presented to LLMs.
+    Essential (~20) < Standard (~50) < Full (all).
+    Tier is an additive overlay on the existing mode/category system. *)
+
+let essential_tools =
+  [
+    "masc_join"; "masc_leave"; "masc_status"; "masc_set_room";
+    "masc_add_task"; "masc_claim_next"; "masc_transition"; "masc_tasks";
+    "masc_broadcast"; "masc_heartbeat"; "masc_messages";
+    "masc_worktree_create"; "masc_worktree_list"; "masc_worktree_remove";
+    "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
+    "masc_who"; "masc_dashboard";
+  ]
+
+let standard_tools =
+  essential_tools
+  @ [
+    (* Board *)
+    "masc_board_post"; "masc_board_get"; "masc_board_list";
+    "masc_board_vote"; "masc_board_comment"; "masc_board_comment_vote";
+    "masc_board_search"; "masc_board_stats"; "masc_board_profile";
+    "masc_board_hearths";
+    (* Team Session *)
+    "masc_team_session_start"; "masc_team_session_step";
+    "masc_team_session_status"; "masc_team_session_stop";
+    "masc_team_session_list"; "masc_team_session_events";
+    (* Consensus *)
+    "masc_consensus_start"; "masc_consensus_vote";
+    "masc_consensus_result"; "masc_consensus_close";
+    (* Decision *)
+    "decision_create"; "decision_finalize"; "decision_status";
+    (* Handover *)
+    "masc_handover_create"; "masc_handover_claim";
+    "masc_handover_get"; "masc_handover_list";
+    (* Misc *)
+    "masc_spawn"; "masc_agents"; "masc_progress";
+    "masc_note_add"; "masc_batch_add_tasks"; "masc_stats";
+  ]
+
+let tier_to_string = function
+  | Essential -> "essential"
+  | Standard -> "standard"
+  | Full -> "full"
+
+let tier_of_string = function
+  | "essential" -> Some Essential
+  | "standard" -> Some Standard
+  | "full" -> Some Full
+  | _ -> None
+
+let tool_tier name =
+  if List.mem name essential_tools then Essential
+  else if List.mem name standard_tools then Standard
+  else Full
+
+let is_in_tier tier name =
+  match tier with
+  | Full -> true
+  | Standard -> List.mem name standard_tools
+  | Essential -> List.mem name essential_tools
+
+let tier_tool_count = function
+  | Essential -> List.length essential_tools
+  | Standard -> List.length standard_tools
+  | Full -> -1  (* unknown until schemas are enumerated *)
+
 let metadata_to_fields name =
   let meta = metadata name in
   let base =
@@ -189,6 +262,7 @@ let metadata_to_fields name =
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
       ("implementationStatus", `String (implementation_status_to_string meta.implementation_status));
+      ("tier", `String (tier_to_string (tool_tier name)));
     ]
   in
   let with_canonical =

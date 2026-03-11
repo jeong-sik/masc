@@ -2,7 +2,6 @@
 
     Tests compression functionality across MASC-MCP modules:
     - Backend_eio.Compression (storage layer)
-    - Datachannel.Compression (WebRTC layer)
     - Http_server_eio.Compression (HTTP layer - tested separately)
 
     Expected Results:
@@ -82,63 +81,7 @@ let backend_tests = [
   "JSON compression ratio", `Quick, test_backend_json_compression;
 ]
 
-(* ===== DataChannel Compression Tests ===== *)
-
-module DataChannelCompression = Masc_mcp.Datachannel.Compression
-
-let test_dc_compress_skip_small () =
-  let small = Bytes.of_string "tiny" in
-  let (result, compressed) = DataChannelCompression.compress small in
-  Alcotest.(check bool) "small data not compressed" false compressed;
-  Alcotest.(check bytes) "data unchanged" small result
-
-let test_dc_compress_large () =
-  let large = Bytes.make 500 'x' in  (* Highly compressible *)
-  let (result, compressed) = DataChannelCompression.compress large in
-  Alcotest.(check bool) "large data compressed" true compressed;
-  Alcotest.(check bool) "smaller than original" true (Bytes.length result < 500)
-
-let test_dc_roundtrip () =
-  let original = Bytes.init 300 (fun i -> Char.chr (65 + (i mod 26))) in
-  let compressed = DataChannelCompression.compress_with_header original in
-  let decompressed = DataChannelCompression.decompress_auto compressed in
-  Alcotest.(check bytes) "roundtrip preserves data" original decompressed
-
-let test_dc_header_format () =
-  let data = Bytes.make 256 'Z' in
-  let compressed = DataChannelCompression.compress_with_header data in
-  (* Check ZSTD magic header *)
-  let magic = Bytes.sub_string compressed 0 4 in
-  Alcotest.(check string) "ZSTD magic" "ZSTD" magic;
-  (* Check original size stored in bytes 4-7 (big endian) *)
-  let orig_size =
-    (Char.code (Bytes.get compressed 4) lsl 24) lor
-    (Char.code (Bytes.get compressed 5) lsl 16) lor
-    (Char.code (Bytes.get compressed 6) lsl 8) lor
-    Char.code (Bytes.get compressed 7)
-  in
-  Alcotest.(check int) "original size in header" 256 orig_size
-
-let test_dc_non_compressed_passthrough () =
-  let plain = Bytes.of_string "Plain bytes without ZSTD header" in
-  let result = DataChannelCompression.decompress_auto plain in
-  Alcotest.(check bytes) "non-compressed unchanged" plain result
-
-let test_dc_binary_roundtrip () =
-  (* Test with binary data including null bytes *)
-  let binary = Bytes.init 200 (fun i -> Char.chr (i mod 256)) in
-  let compressed = DataChannelCompression.compress_with_header binary in
-  let decompressed = DataChannelCompression.decompress_auto compressed in
-  Alcotest.(check bytes) "binary roundtrip" binary decompressed
-
-let datachannel_tests = [
-  "skip small data", `Quick, test_dc_compress_skip_small;
-  "compress large data", `Quick, test_dc_compress_large;
-  "roundtrip", `Quick, test_dc_roundtrip;
-  "ZSTD header format", `Quick, test_dc_header_format;
-  "non-compressed passthrough", `Quick, test_dc_non_compressed_passthrough;
-  "binary roundtrip", `Quick, test_dc_binary_roundtrip;
-]
+(* DataChannel Compression tests removed — use ocaml-webrtc library *)
 
 (* ===== Compression Threshold Tests ===== *)
 
@@ -146,16 +89,11 @@ let test_threshold_backend () =
   (* Now uses dictionary compression with lower threshold *)
   Alcotest.(check int) "backend min_size" 32 BackendCompression.min_size
 
-let test_threshold_datachannel () =
-  Alcotest.(check int) "datachannel min_size" 128 DataChannelCompression.min_size
-
 let test_default_level () =
-  Alcotest.(check int) "backend level" 3 BackendCompression.default_level;
-  Alcotest.(check int) "datachannel level" 3 DataChannelCompression.default_level
+  Alcotest.(check int) "backend level" 3 BackendCompression.default_level
 
 let threshold_tests = [
   "backend min_size", `Quick, test_threshold_backend;
-  "datachannel min_size", `Quick, test_threshold_datachannel;
   "default compression level", `Quick, test_default_level;
 ]
 
@@ -207,7 +145,6 @@ let ratio_tests = [
 let () =
   Alcotest.run "Compression" [
     "Backend_eio", backend_tests;
-    "DataChannel", datachannel_tests;
     "Thresholds", threshold_tests;
     "Compression Ratios", ratio_tests;
   ]

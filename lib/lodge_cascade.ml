@@ -73,6 +73,8 @@ let default_model_strings ~cascade_name =
   | "gardener_spawn" | "lodge_context_rewrite" | "lodge_trait_gen"
   | "lodge_comment" | "lodge_agent_match" | "lodge_direct" ->
       [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+  | "spawn_glm" ->
+      [ "glm:glm-4.7"; "glm:glm-4.7-flash"; "glm:glm-5"; "glm:glm-5-code" ]
   | _ -> []
 
 let model_key_of_cascade cascade_name = cascade_name ^ "_models"

@@ -37,6 +37,12 @@
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
 
+; Dashboard mission test (requires Eio)
+(test
+ (name test_dashboard_mission)
+ (modules test_dashboard_mission)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
 ; Streamable HTTP test (requires Eio for Eio.Mutex)
 (test
  (name test_streamable_http)
@@ -746,6 +752,12 @@
  (modules test_proof_criteria)
  (libraries masc_mcp alcotest yojson))
 
+; Mode preset end-to-end tool count validation
+(test
+ (name test_mode_tool_count)
+ (modules test_mode_tool_count)
+ (libraries masc_mcp alcotest))
+
 ; LLM Scoring Demo — compare keyword vs LLM capability matching
 ; Run with: MASC_CAPABILITY_MATCH_MODE=llm dune exec test/test_llm_scoring_demo.exe
 (executable
@@ -764,10 +776,4 @@
 (test
  (name test_tool_registry)
  (modules test_tool_registry)
- (libraries masc_mcp alcotest yojson))
-
-; Mode Tool Count — end-to-end Config.enabled_tool_schemas per mode
-(test
- (name test_mode_tool_count)
- (modules test_mode_tool_count)
  (libraries masc_mcp alcotest yojson))

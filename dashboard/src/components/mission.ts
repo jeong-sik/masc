@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { extractAgentInfo, isKeeperAgent } from './common/agent-info'
@@ -13,53 +13,37 @@ import {
   missionSnapshot,
   refreshMissionBriefing,
 } from '../mission-store'
-import { agentMotionMap, agents, keepers, messages, tasks } from '../store'
+import { agents, keepers, messages, tasks } from '../store'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import type {
   Agent,
+  DashboardMissionAgentBrief,
+  DashboardMissionAttentionQueueItem,
+  DashboardMissionInternalSignal,
+  DashboardMissionKeeperBrief,
+  DashboardMissionSessionBrief,
   Keeper,
   Message,
   OperatorAttentionItem,
   OperatorRecommendedAction,
-  OperatorSessionSnapshot,
   Task,
 } from '../types'
 import {
   createMissionWorkflowContext,
-  extractActionPayload,
   missionCommandParams,
   missionInterveneParams,
   persistWorkflowContext,
-  summarizePayloadPreview,
   workflowActionLabel,
   workflowTargetLabel,
 } from '../workflow-context'
 
-type CrewRow = {
-  session: OperatorSessionSnapshot
-  goal: string
-  room: string | null
-  status: string
-  memberNames: string[]
-  startedAt: string | null
-  stoppedAt: string | null
-  elapsedSec: number | null
-  lastEventAt: string | null
-  lastEventSummary: string
-  communicationMode: string | null
-  broadcastCount: number
-  portalCount: number
-  activeCount: number
-  requiredCount: number
-  attentionSummary: string | null
-}
-
-type AgentActivityRow = {
-  agent: Agent
+type EnrichedAgentRow = {
+  brief: DashboardMissionAgentBrief
+  agent: Agent | null
+  keeper: Keeper | null
   where: string
   withWhom: string[]
-  activeSince: string | null
   currentWork: string
   how: string | null
   recentInput: string | null
@@ -68,9 +52,9 @@ type AgentActivityRow = {
   recentTools: string[]
 }
 
-type KeeperActivityRow = {
-  keeper: Keeper
-  activeSince: string | null
+type EnrichedKeeperRow = {
+  brief: DashboardMissionKeeperBrief
+  keeper: Keeper | null
   currentWork: string
   recentInput: string | null
   recentOutput: string | null
@@ -78,24 +62,8 @@ type KeeperActivityRow = {
   recentTools: string[]
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function stringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map(item => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
-}
+const selectedAttentionId = signal<string | null>(null)
+const selectedSessionId = signal<string | null>(null)
 
 function trimText(value: string | null | undefined, max = 120): string | null {
   const text = (value ?? '').replace(/\s+/g, ' ').trim()
@@ -104,8 +72,8 @@ function trimText(value: string | null | undefined, max = 120): string | null {
 }
 
 function toneClass(tone?: string | null): string {
-  if (tone === 'bad' || tone === 'offline' || tone === 'critical') return 'bad'
-  if (tone === 'warn' || tone === 'pending' || tone === 'degraded' || tone === 'interrupted') return 'warn'
+  if (tone === 'bad' || tone === 'offline' || tone === 'critical' || tone === 'risk') return 'bad'
+  if (tone === 'warn' || tone === 'pending' || tone === 'degraded' || tone === 'interrupted' || tone === 'watch') return 'warn'
   return 'ok'
 }
 
@@ -128,32 +96,13 @@ function formatDuration(seconds?: number | null): string {
   return `${Math.round(seconds / 86400)}d`
 }
 
-function eventTimestamp(row: Record<string, unknown>): number {
-  const unix = asNumber(row.ts)
-  if (unix != null) return unix
-  const iso = asString(row.ts_iso)
-  if (!iso) return 0
-  const parsed = Date.parse(iso)
-  return Number.isNaN(parsed) ? 0 : parsed
-}
-
-function dedupe(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))]
-}
-
 function actionModeLabel(action?: OperatorRecommendedAction | null): string {
   return action?.confirm_required ? '확인 후 실행' : '즉시 실행'
 }
 
-function actionPayloadPreview(action?: OperatorRecommendedAction | null): string | null {
-  return summarizePayloadPreview(extractActionPayload(action))
-}
-
 function actionTargetLabel(action?: OperatorRecommendedAction | null): string {
   return workflowTargetLabel(
-    action
-      ? createMissionWorkflowContext(action, null, '상황판 추천 액션')
-      : null,
+    action ? createMissionWorkflowContext(action, null, '상황판 추천 액션') : null,
   )
 }
 
@@ -200,11 +149,34 @@ function openSession(tab: 'intervene' | 'command', sessionId: string): void {
   navigate(tab, params)
 }
 
+function attentionAsIncident(item: DashboardMissionAttentionQueueItem): OperatorAttentionItem {
+  return {
+    kind: item.kind,
+    severity: item.severity,
+    summary: item.summary,
+    target_type: item.target_type,
+    target_id: item.target_id ?? null,
+    actor: null,
+    evidence: item.evidence_preview,
+  }
+}
+
 function latestMessageFrom(agentName: string, rows: Message[]): Message | null {
   const key = agentName.trim().toLowerCase()
   return [...rows]
     .filter(item => (item.from ?? '').trim().toLowerCase() === key)
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] ?? null
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function containsDirectMention(content: string, agentName: string): boolean {
+  if (!agentName) return false
+  const escaped = escapeRegex(agentName)
+  const pattern = new RegExp(`(?:^|[^a-z0-9_])@${escaped}(?![a-z0-9_-])`, 'i')
+  return pattern.test(content)
 }
 
 function latestMessageTo(agentName: string, rows: Message[]): Message | null {
@@ -214,139 +186,9 @@ function latestMessageTo(agentName: string, rows: Message[]): Message | null {
       const from = (item.from ?? '').trim().toLowerCase()
       if (from === key) return false
       const content = (item.content ?? '').trim().toLowerCase()
-      return content.includes(`@${key}`) || content.includes(key)
+      return containsDirectMention(content, key)
     })
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] ?? null
-}
-
-function memberNamesForSession(session: OperatorSessionSnapshot): string[] {
-  const rawSession = isRecord(session.session) ? session.session : {}
-  const summary = isRecord(session.summary) ? session.summary : {}
-  return dedupe([
-    ...stringArray(rawSession.agent_names),
-    ...stringArray(summary.active_agents),
-    ...stringArray(summary.planned_participants),
-  ]).filter(name => !isKeeperAgent(name))
-}
-
-function sessionGoal(session: OperatorSessionSnapshot): string {
-  const rawSession = isRecord(session.session) ? session.session : {}
-  return (
-    asString(rawSession.goal)
-    ?? asString(rawSession.session_id)
-    ?? session.session_id
-  )
-}
-
-function sessionRoom(session: OperatorSessionSnapshot): string | null {
-  const rawSession = isRecord(session.session) ? session.session : {}
-  return asString(rawSession.room_id)
-}
-
-function sessionStartedAt(session: OperatorSessionSnapshot): string | null {
-  const rawSession = isRecord(session.session) ? session.session : {}
-  return asString(rawSession.created_at_iso)
-}
-
-function sessionStoppedAt(session: OperatorSessionSnapshot): string | null {
-  const rawSession = isRecord(session.session) ? session.session : {}
-  return asString(rawSession.updated_at_iso)
-}
-
-function sessionCommunicationMode(session: OperatorSessionSnapshot): string | null {
-  const metrics = isRecord(session.communication_metrics) ? session.communication_metrics : {}
-  return asString(metrics.mode)
-}
-
-function sessionBroadcastCount(session: OperatorSessionSnapshot): number {
-  const metrics = isRecord(session.communication_metrics) ? session.communication_metrics : {}
-  return asNumber(metrics.broadcast_count) ?? 0
-}
-
-function sessionPortalCount(session: OperatorSessionSnapshot): number {
-  const metrics = isRecord(session.communication_metrics) ? session.communication_metrics : {}
-  return asNumber(metrics.portal_count) ?? 0
-}
-
-function sessionCoverage(session: OperatorSessionSnapshot): { active: number; required: number } {
-  const health = isRecord(session.team_health) ? session.team_health : {}
-  return {
-    active: asNumber(health.active_agents_count) ?? 0,
-    required: asNumber(health.required_agents) ?? 0,
-  }
-}
-
-function sessionLastEvent(session: OperatorSessionSnapshot): { at: string | null; summary: string } {
-  const recent = [...(session.recent_events ?? [])]
-  const latest = recent
-    .sort((a, b) => {
-      return eventTimestamp(b) - eventTimestamp(a)
-    })[0]
-  if (!latest) {
-    return {
-      at: null,
-      summary: '최근 session event가 없습니다.',
-    }
-  }
-  const detail = isRecord(latest.detail) ? latest.detail : {}
-  const eventType = asString(latest.event_type) ?? 'event'
-  const actor = asString(detail.actor)
-  const taskTitle = asString(detail.task_title) ?? asString(detail.title)
-  const result = trimText(asString(detail.result), 120)
-  const reason = trimText(asString(detail.reason), 120)
-  const summary =
-    taskTitle
-      ? `${actor ? `${actor} · ` : ''}${taskTitle}`
-      : result
-        ?? reason
-        ?? eventType.replace(/_/g, ' ')
-  return {
-    at: asString(latest.ts_iso),
-    summary,
-  }
-}
-
-function crewRowsFromMission(): CrewRow[] {
-  const mission = missionSnapshot.value
-  if (!mission) return []
-  return mission.operator_targets.sessions
-    .map(session => {
-      const coverage = sessionCoverage(session)
-      const lastEvent = sessionLastEvent(session)
-      const topCard = mission.command_focus.session_cards.find(card => card.session_id === session.session_id)
-      return {
-        session,
-        goal: sessionGoal(session),
-        room: sessionRoom(session),
-        status: session.status ?? 'unknown',
-        memberNames: memberNamesForSession(session),
-        startedAt: sessionStartedAt(session),
-        stoppedAt: sessionStoppedAt(session),
-        elapsedSec: session.elapsed_sec ?? null,
-        lastEventAt: lastEvent.at,
-        lastEventSummary: lastEvent.summary,
-        communicationMode: sessionCommunicationMode(session),
-        broadcastCount: sessionBroadcastCount(session),
-        portalCount: sessionPortalCount(session),
-        activeCount: coverage.active,
-        requiredCount: coverage.required,
-        attentionSummary: topCard?.top_attention?.summary ?? topCard?.top_recommendation?.reason ?? null,
-      }
-    })
-    .sort((a, b) => {
-      const aTs = Date.parse(a.lastEventAt ?? a.startedAt ?? '') || 0
-      const bTs = Date.parse(b.lastEventAt ?? b.startedAt ?? '') || 0
-      return bTs - aTs
-    })
-}
-
-function keeperToolNames(keeper: Keeper): string[] {
-  if (keeper.recent_tool_names && keeper.recent_tool_names.length > 0) return keeper.recent_tool_names
-  const metrics = isRecord(keeper.metrics_window) ? keeper.metrics_window : {}
-  const topTools = Array.isArray(metrics.top_tools) ? metrics.top_tools : []
-  return topTools
-    .map(item => (isRecord(item) ? asString(item.tool) : null))
-    .filter((item): item is string => item !== null)
 }
 
 function keeperForAgent(agentName: string): Keeper | null {
@@ -355,9 +197,13 @@ function keeperForAgent(agentName: string): Keeper | null {
   ) ?? null
 }
 
-function taskLabel(agent: Agent, taskList: Task[]): string {
-  const current = trimText(agent.current_task, 100)
-  if (!current) return '명시된 current task 없음'
+function agentByName(name: string): Agent | null {
+  return agents.value.find(agent => agent.name === name) ?? null
+}
+
+function taskLabel(taskId: string | null | undefined, taskList: Task[]): string | null {
+  const current = trimText(taskId, 100)
+  if (!current) return null
   const byId = taskList.find(task => task.id === current)
   if (byId) return `${byId.id} · ${trimText(byId.title, 92)}`
   const byTitle = taskList.find(task => task.title === current)
@@ -365,95 +211,109 @@ function taskLabel(agent: Agent, taskList: Task[]): string {
   return current
 }
 
-function agentRowsFromMission(crews: CrewRow[]): AgentActivityRow[] {
-  const crewByMember = new Map<string, CrewRow>()
-  for (const crew of crews) {
-    for (const member of crew.memberNames) {
-      if (!crewByMember.has(member)) crewByMember.set(member, crew)
-    }
-  }
+function enrichedAgentRow(brief: DashboardMissionAgentBrief): EnrichedAgentRow {
+  const agent = agentByName(brief.agent_name)
+  const keeper = keeperForAgent(brief.agent_name)
+  const latestOut = latestMessageFrom(brief.agent_name, messages.value)
+  const latestIn = latestMessageTo(brief.agent_name, messages.value)
+  const info = extractAgentInfo(brief.agent_name)
+  const how =
+    keeper?.skill_primary
+    ?? (agent?.capabilities && agent.capabilities.length > 0 ? agent.capabilities.slice(0, 3).join(', ') : null)
+    ?? info.model
+    ?? agent?.agent_type
+    ?? null
 
-  return [...agents.value]
-    .map(agent => {
-      const crew = crewByMember.get(agent.name)
-      const keeper = keeperForAgent(agent.name)
-      const latestOut = latestMessageFrom(agent.name, messages.value)
-      const latestIn = latestMessageTo(agent.name, messages.value)
-      const motion = agentMotionMap.value.get(agent.name.trim().toLowerCase())
-      const peers = crew ? crew.memberNames.filter(name => name !== agent.name) : []
-      const where = crew
-        ? `${crew.goal}${crew.room ? ` · ${crew.room}` : ''}`
-        : (missionSnapshot.value?.summary.current_room ?? 'room')
-      const how =
-        keeper?.skill_primary
-        ?? (agent.capabilities && agent.capabilities.length > 0 ? agent.capabilities.slice(0, 3).join(', ') : null)
-        ?? agent.agent_type
-        ?? null
-      const currentWork =
-        taskLabel(agent, tasks.value)
-      return {
-        agent,
-        where,
-        withWhom: peers,
-        activeSince: crew?.startedAt ?? agent.joined_at ?? agent.last_seen ?? null,
-        currentWork,
-        how,
-        recentInput:
-          trimText(latestIn?.content, 120)
-          ?? trimText(keeper?.recent_input_preview, 120)
-          ?? null,
-        recentOutput:
-          trimText(latestOut?.content, 120)
-          ?? trimText(keeper?.recent_output_preview, 120)
-          ?? trimText(keeper?.diagnostic?.last_reply_preview, 120)
-          ?? null,
-        recentEvent:
-          trimText(motion?.lastActivityText, 120)
-          ?? crew?.lastEventSummary
-          ?? null,
-        recentTools: keeper ? keeperToolNames(keeper) : [],
-      }
-    })
-    .sort((a, b) => {
-      const statusRank = (value: Agent['status']) =>
-        value === 'busy' ? 4 : value === 'active' ? 3 : value === 'listening' ? 2 : value === 'idle' ? 1 : 0
-      const statusDiff = statusRank(b.agent.status) - statusRank(a.agent.status)
-      if (statusDiff !== 0) return statusDiff
-      const aTs = Date.parse(a.agent.last_seen ?? a.activeSince ?? '') || 0
-      const bTs = Date.parse(b.agent.last_seen ?? b.activeSince ?? '') || 0
-      return bTs - aTs
-    })
+  return {
+    brief,
+    agent,
+    keeper,
+    where: brief.where ?? 'room',
+    withWhom: brief.with_whom,
+    currentWork:
+      brief.current_work
+      ?? taskLabel(agent?.current_task ?? null, tasks.value)
+      ?? '명시된 current task 없음',
+    how,
+    recentInput:
+      trimText(brief.recent_input_preview, 120)
+      ?? trimText(latestIn?.content, 120)
+      ?? trimText(keeper?.recent_input_preview, 120)
+      ?? null,
+    recentOutput:
+      trimText(brief.recent_output_preview, 120)
+      ?? trimText(latestOut?.content, 120)
+      ?? trimText(keeper?.recent_output_preview, 120)
+      ?? trimText(keeper?.diagnostic?.last_reply_preview, 120)
+      ?? null,
+    recentEvent:
+      trimText(brief.recent_event, 120)
+      ?? trimText(keeper?.diagnostic?.summary, 120)
+      ?? null,
+    recentTools:
+      brief.recent_tool_names.length > 0
+        ? brief.recent_tool_names
+        : keeper?.recent_tool_names ?? [],
+  }
 }
 
-function keeperRowsFromMission(): KeeperActivityRow[] {
-  return [...keepers.value]
-    .map(keeper => ({
-      keeper,
-      activeSince: keeper.agent?.joined_at ?? keeper.created_at ?? keeper.last_heartbeat ?? null,
-      currentWork:
-        trimText(keeper.agent?.current_task, 110)
-        ?? trimText(keeper.skill_primary, 110)
-        ?? trimText(keeper.last_proactive_reason, 110)
-        ?? '명시된 keeper focus 없음',
-      recentInput:
-        trimText(keeper.recent_input_preview, 120)
-        ?? null,
-      recentOutput:
-        trimText(keeper.recent_output_preview, 120)
-        ?? trimText(keeper.diagnostic?.last_reply_preview, 120)
-        ?? trimText(keeper.last_proactive_preview, 120)
-        ?? null,
-      recentEvent:
-        trimText(keeper.last_proactive_reason, 120)
-        ?? trimText(keeper.diagnostic?.summary, 120)
-        ?? null,
-      recentTools: keeperToolNames(keeper),
-    }))
-    .sort((a, b) => {
-      const aTs = Date.parse(a.keeper.last_heartbeat ?? a.activeSince ?? '') || 0
-      const bTs = Date.parse(b.keeper.last_heartbeat ?? b.activeSince ?? '') || 0
-      return bTs - aTs
-    })
+function enrichedKeeperRow(brief: DashboardMissionKeeperBrief): EnrichedKeeperRow {
+  const keeper =
+    keepers.value.find(item => item.name === brief.name || item.agent_name === brief.agent_name) ?? null
+  return {
+    brief,
+    keeper,
+    currentWork:
+      trimText(brief.current_work, 110)
+      ?? trimText(keeper?.skill_primary, 110)
+      ?? trimText(keeper?.last_proactive_reason, 110)
+      ?? '명시된 keeper focus 없음',
+    recentInput:
+      trimText(keeper?.recent_input_preview, 120) ?? null,
+    recentOutput:
+      trimText(keeper?.recent_output_preview, 120)
+      ?? trimText(keeper?.diagnostic?.last_reply_preview, 120)
+      ?? trimText(keeper?.last_proactive_preview, 120)
+      ?? null,
+    recentEvent:
+      trimText(keeper?.last_proactive_reason, 120)
+      ?? trimText(keeper?.diagnostic?.summary, 120)
+      ?? null,
+    recentTools: keeper?.recent_tool_names ?? [],
+  }
+}
+
+function sessionLookupById() {
+  const mission = missionSnapshot.value
+  if (!mission) return new Map<string, DashboardMissionSessionBrief>()
+  return new Map(mission.session_briefs.map(item => [item.session_id, item]))
+}
+
+function memberPreview(name: string) {
+  const agent = agentByName(name)
+  const latestOut = latestMessageFrom(name, messages.value)
+  const info = extractAgentInfo(name)
+  return {
+    name,
+    model: info.model,
+    nickname: info.nickname,
+    currentTask: taskLabel(agent?.current_task ?? null, tasks.value) ?? 'agent snapshot 없음',
+    output: trimText(latestOut?.content, 96),
+  }
+}
+
+function toggleAttention(id: string): void {
+  selectedAttentionId.value = selectedAttentionId.value === id ? null : id
+  selectedSessionId.value = null
+}
+
+function toggleSession(id: string): void {
+  selectedSessionId.value = selectedSessionId.value === id ? null : id
+}
+
+function clearMissionSelection(): void {
+  selectedAttentionId.value = null
+  selectedSessionId.value = null
 }
 
 function MissionContextBar({
@@ -512,15 +372,15 @@ function SummaryStat({
 function MissionBriefingCard() {
   const briefing = missionBriefing.value
   const briefingTone = toneClass(briefing?.status ?? (missionBriefingError.value ? 'bad' : 'warn'))
-  const showEmpty = !briefing || briefing.sections.length === 0
   const retryNeedsForce =
     briefing?.status === 'error'
     || (briefing?.status === 'unavailable' && !briefing?.cached)
+
   return html`
     <${Card} title="LLM 판단 레이어" class="mission-briefing-card" semanticId="mission.llm_briefing">
       <div class="mission-section-head">
         <h3>heuristic 대신 별도 판단 계층</h3>
-        <p>아래 해석은 LLM이 사실 스냅샷만 읽고 만든 요약입니다. raw thinking은 숨기고, 기준과 근거만 남깁니다.</p>
+        <p>핵심 해석 3줄만 먼저 보여주고, 근거는 접어서 둡니다.</p>
       </div>
 
       <div class="mission-briefing-meta">
@@ -531,20 +391,16 @@ function MissionBriefingCard() {
         ${briefing?.generated_at ? html`<span class="command-chip">${relativeTime(briefing.generated_at)}</span>` : null}
         ${briefing?.cached ? html`<span class="command-chip">cached</span>` : null}
         ${briefing?.stale ? html`<span class="command-chip warn">stale</span>` : null}
-        ${briefing?.refreshing ? html`<span class="command-chip warn">refreshing</span>` : null}
       </div>
 
       ${missionBriefingError.value ? html`<div class="empty-state error">${missionBriefingError.value}</div>` : null}
       ${briefing?.error ? html`<div class="empty-state error">${briefing.error}</div>` : null}
       ${briefing?.summary ? html`<div class="mission-inline-note">${briefing.summary}</div>` : null}
-      ${briefing?.last_error && !briefing.error
-        ? html`<div class="mission-inline-note">최근 refresh 실패: ${briefing.last_error}</div>`
-        : null}
 
       ${briefing && briefing.sections.length > 0
         ? html`
             <div class="mission-briefing-grid">
-              ${briefing.sections.map(section => html`
+              ${briefing.sections.slice(0, 3).map(section => html`
                 <article class="mission-briefing-section ${toneClass(section.status)}">
                   <div class="mission-card-head">
                     <strong>${section.label}</strong>
@@ -553,35 +409,21 @@ function MissionBriefingCard() {
                   <p>${section.summary}</p>
                   ${section.evidence.length > 0
                     ? html`
-                        <div class="mission-briefing-evidence">
-                          ${section.evidence.map(item => html`<span>${item}</span>`)}
-                        </div>
+                        <details class="mission-card-disclosure compact">
+                          <summary>근거 보기</summary>
+                          <div class="mission-pill-row">
+                            ${section.evidence.map(item => html`<span class="mission-pill">${item}</span>`)}
+                          </div>
+                        </details>
                       `
                     : null}
                 </article>
               `)}
             </div>
           `
-        : (!missionBriefingLoading.value && !missionBriefingError.value && showEmpty
-            ? html`
-                <div class="empty-state">
-                  ${briefing?.status === 'pending'
-                    ? '최신 스냅샷으로 브리핑을 생성 중입니다. 마지막 성공 결과가 생기면 자동으로 다시 읽습니다.'
-                    : '아직 판단 레이어를 불러오지 못했습니다.'}
-                </div>
-              `
+        : (!missionBriefingLoading.value && !missionBriefingError.value
+            ? html`<div class="empty-state">판단 레이어 결과가 아직 없습니다.</div>`
             : null)}
-
-      ${briefing?.criteria && briefing.criteria.length > 0
-        ? html`
-            <details class="mission-briefing-criteria">
-              <summary>판단 기준 보기</summary>
-              <div class="mission-briefing-evidence">
-                ${briefing.criteria.map(item => html`<span>${item}</span>`)}
-              </div>
-            </details>
-          `
-        : null}
 
       <div class="mission-card-actions">
         <button class="control-btn ghost" onClick=${() => { void refreshMissionBriefing(retryNeedsForce) }} disabled=${missionBriefingLoading.value}>
@@ -595,238 +437,358 @@ function MissionBriefingCard() {
   `
 }
 
-function StaleCrewSection({ rows }: { rows: CrewRow[] }) {
-  const [open, setOpen] = useState(false)
+function AttentionCard({
+  item,
+  selected,
+  sessionLookup,
+}: {
+  item: DashboardMissionAttentionQueueItem
+  selected: boolean
+  sessionLookup: Map<string, DashboardMissionSessionBrief>
+}) {
+  const incident = attentionAsIncident(item)
+  const linkedSessions = item.related_session_ids
+    .map(id => sessionLookup.get(id))
+    .filter((row): row is DashboardMissionSessionBrief => row != null)
+  const action = item.top_action ?? null
+
   return html`
-    <div class="mission-stale-section">
-      <button class="mission-stale-toggle" onClick=${() => setOpen(!open)}>
-        ${open ? '▾' : '▸'} 종료/중단된 세션 (${rows.length})
+    <article class="mission-attention-card ${toneClass(action?.severity ?? item.severity)} ${selected ? 'is-selected' : ''}">
+      <button class="mission-card-select" onClick=${() => toggleAttention(item.id)}>
+        <div class="mission-card-head">
+          <div>
+            <strong>${item.summary}</strong>
+            <div class="mission-card-target">${item.kind}${item.target_id ? ` · ${item.target_id}` : ''}</div>
+          </div>
+          <span class="command-chip ${toneClass(action?.severity ?? item.severity)}">${action ? actionModeLabel(action) : item.severity}</span>
+        </div>
+
+        <div class="mission-fact-grid">
+          <div class="mission-fact-tile">
+            <span>영향 session</span>
+            <strong>${item.related_session_ids.length}</strong>
+            <small>${item.related_session_ids.slice(0, 2).join(', ') || '없음'}</small>
+          </div>
+          <div class="mission-fact-tile">
+            <span>영향 agent</span>
+            <strong>${item.related_agent_names.length}</strong>
+            <small>${item.related_agent_names.slice(0, 3).join(', ') || '없음'}</small>
+          </div>
+          <div class="mission-fact-tile">
+            <span>최근 신호</span>
+            <strong>${item.last_seen_at ? relativeTime(item.last_seen_at) : 'n/a'}</strong>
+            <small>${item.target_type}</small>
+          </div>
+          <div class="mission-fact-tile">
+            <span>다음 액션</span>
+            <strong>${action ? workflowActionLabel(action.action_type) : '판단 필요'}</strong>
+            <small>${action ? actionTargetLabel(action) : '추천 액션 없음'}</small>
+          </div>
+        </div>
       </button>
-      ${open ? rows.map(row => html`<${CrewCard} key=${row.session.session_id} row=${row} />`) : null}
-    </div>
-  `
-}
 
-function CrewCard({ row }: { row: CrewRow }) {
-  const memberRows = row.memberNames.slice(0, 4).map(name => {
-    const agent = agents.value.find(item => item.name === name)
-    const output = latestMessageFrom(name, messages.value)
-    const info = extractAgentInfo(name)
-    return {
-      name,
-      model: info.model,
-      nickname: info.nickname,
-      currentTask: agent ? taskLabel(agent, tasks.value) : '서버 재시작 후 상태 소실',
-      output: trimText(output?.content, 96),
-    }
-  })
+      ${action ? html`<div class="mission-inline-note">${action.reason}</div>` : null}
 
-  return html`
-    <article class="mission-crew-card ${toneClass(row.status)}">
-      <div class="mission-card-head">
-        <div>
-          <strong>${row.goal}</strong>
-          <div class="mission-card-target">${row.session.session_id}${row.room ? ` · ${row.room}` : ''}</div>
-        </div>
-        <span class="command-chip ${toneClass(row.status)}">${row.status}</span>
-        ${row.status === 'interrupted' ? html`<small class="mission-stale-reason">서버 재시작으로 중단됨</small>` : null}
-        ${row.status === 'completed' ? html`<small class="mission-stale-reason">정상 완료</small>` : null}
-      </div>
+      <details class="mission-card-disclosure">
+        <summary>연결된 흐름 보기</summary>
+        ${linkedSessions.length > 0
+          ? html`
+              <div class="mission-link-list">
+                ${linkedSessions.slice(0, 4).map(session => html`
+                  <button class="mission-link-row" onClick=${() => toggleSession(session.session_id)}>
+                    <strong>${session.goal}</strong>
+                    <span>${session.status ?? 'unknown'} · ${session.last_event_summary ?? '최근 사건 없음'}</span>
+                  </button>
+                `)}
+              </div>
+            `
+          : html`<div class="empty-state">직접 연결된 session이 아직 없습니다.</div>`}
 
-      <div class="mission-fact-grid">
-        <div class="mission-fact-tile">
-          <span>멤버</span>
-          <strong>${row.memberNames.length}</strong>
-          <small>${row.memberNames.slice(0, 3).join(', ') || 'n/a'}</small>
-        </div>
-        <div class="mission-fact-tile">
-          <span>가동 시간</span>
-          <strong>${formatDuration(row.elapsedSec)}</strong>
-          <small>${row.startedAt ? `${relativeTime(row.startedAt)} 시작` : '시작 시각 없음'}</small>
-        </div>
-        <div class="mission-fact-tile">
-          <span>커뮤니케이션</span>
-          <strong>${row.broadcastCount + row.portalCount}</strong>
-          <small>${row.communicationMode ?? 'mode n/a'} · broadcast ${row.broadcastCount} · portal ${row.portalCount}</small>
-        </div>
-        <div class="mission-fact-tile">
-          <span>커버리지</span>
-          <strong>${row.activeCount}/${row.requiredCount || row.activeCount || 1}</strong>
-          <small>active / required</small>
-        </div>
-      </div>
+        ${item.related_agent_names.length > 0
+          ? html`
+              <div class="mission-pill-row">
+                ${item.related_agent_names.slice(0, 8).map(name => html`
+                  <button class="mission-pill action" onClick=${() => openAgentDetail(name)}>${name}</button>
+                `)}
+              </div>
+            `
+          : null}
 
-      <div class="mission-crew-event">
-        <span>최근 사건</span>
-        <strong>${row.lastEventSummary}</strong>
-        <small>${row.lastEventAt ? relativeTime(row.lastEventAt) : '시각 없음'}</small>
-      </div>
-
-      ${memberRows.length > 0
-        ? html`
-            <div class="mission-member-stack">
-              ${memberRows.map(member => html`
-                <button class="mission-member-row" onClick=${() => openAgentDetail(member.name)}>
-                  <strong>${member.model !== member.nickname ? html`<span class="model-badge">${member.model}</span> ` : ''}${member.nickname}</strong>
-                  <span>${member.currentTask}</span>
-                  <small>${member.output ?? '최근 출력 없음'}</small>
-                </button>
-              `)}
-            </div>
-          `
-        : null}
-
-      ${row.attentionSummary ? html`<div class="mission-inline-note">attention: ${row.attentionSummary}</div>` : null}
+        ${item.evidence_preview.length > 0
+          ? html`
+              <details class="mission-card-disclosure compact">
+                <summary>evidence preview</summary>
+                <div class="mission-evidence-list">
+                  ${item.evidence_preview.map(text => html`<span>${text}</span>`)}
+                </div>
+              </details>
+            `
+          : null}
+      </details>
 
       <div class="mission-card-actions">
-        <button class="control-btn ghost" onClick=${() => openSession('intervene', row.session.session_id)}>세션 개입 열기</button>
-        <button class="control-btn ghost" onClick=${() => openSession('command', row.session.session_id)}>세션 원인 보기</button>
+        ${action
+          ? html`
+              <button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, 'Mission attention')}>
+                이 액션으로 개입 열기
+              </button>
+              <button class="control-btn ghost" onClick=${() => openActionCommand(action, incident, 'Mission attention')}>
+                원인 보기
+              </button>
+            `
+          : html`
+              <button class="control-btn ghost" onClick=${() => openIncidentIntervene(incident)}>이 이슈로 개입 열기</button>
+              <button class="control-btn ghost" onClick=${() => openIncidentCommand(incident)}>이 이슈의 원인 보기</button>
+            `}
       </div>
     </article>
   `
 }
 
-function AgentCard({ row }: { row: AgentActivityRow }) {
-  const toolPreview = row.recentTools.length > 0 ? row.recentTools.join(', ') : '도구 텔레메트리 없음'
-  const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 room-level'
+function SessionBriefCard({
+  brief,
+  selected,
+}: {
+  brief: DashboardMissionSessionBrief
+  selected: boolean
+}) {
+  const members = brief.member_names.slice(0, 6).map(memberPreview)
+  const action = brief.top_recommendation ?? null
+  const incident = brief.top_attention ?? null
 
   return html`
-    <button class="mission-activity-card ${toneClass(row.agent.status)}" onClick=${() => openAgentDetail(row.agent.name)}>
-      <div class="mission-activity-head">
-        <div class="mission-activity-title">
-          <span class="agent-emoji">${row.agent.emoji ?? ''}</span>
+    <article class="mission-crew-card ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)} ${selected ? 'is-selected' : ''}">
+      <button class="mission-card-select" onClick=${() => toggleSession(brief.session_id)}>
+        <div class="mission-card-head">
           <div>
-            <strong>${row.agent.name}</strong>
-            ${row.agent.koreanName ? html`<span>${row.agent.koreanName}</span>` : null}
+            <strong>${brief.goal}</strong>
+            <div class="mission-card-target">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
+          </div>
+          <span class="command-chip ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${brief.status ?? 'unknown'}</span>
+        </div>
+
+        <div class="mission-fact-grid">
+          <div class="mission-fact-tile">
+            <span>멤버</span>
+            <strong>${brief.member_names.length}</strong>
+            <small>${brief.member_names.slice(0, 3).join(', ') || 'n/a'}</small>
+          </div>
+          <div class="mission-fact-tile">
+            <span>가동 시간</span>
+            <strong>${formatDuration(brief.elapsed_sec)}</strong>
+            <small>${brief.started_at ? `${relativeTime(brief.started_at)} 시작` : '시작 시각 없음'}</small>
+          </div>
+          <div class="mission-fact-tile">
+            <span>커뮤니케이션</span>
+            <strong>${brief.communication_summary ? '요약됨' : 'n/a'}</strong>
+            <small>${brief.communication_summary ?? '요약 없음'}</small>
+          </div>
+          <div class="mission-fact-tile">
+            <span>커버리지</span>
+            <strong>${brief.active_count ?? 0}/${brief.required_count || 1}</strong>
+            <small>active / required</small>
           </div>
         </div>
-        <span class="command-chip ${toneClass(row.agent.status)}">${row.agent.status}</span>
+      </button>
+
+      <div class="mission-crew-event">
+        <span>최근 사건</span>
+        <strong>${brief.last_event_summary ?? '최근 session event가 없습니다.'}</strong>
+        <small>${brief.last_event_at ? relativeTime(brief.last_event_at) : '시각 없음'}</small>
       </div>
 
-      <div class="mission-activity-meta">
-        <span>어디서 · ${row.where}</span>
-        <span>누구와 · ${who}</span>
-        <span>언제부터 · ${row.activeSince ? relativeTime(row.activeSince) : 'n/a'}</span>
-      </div>
+      ${brief.top_attention ? html`<div class="mission-inline-note">attention: ${brief.top_attention.summary}</div>` : null}
 
-      <div class="mission-activity-focus">
-        <span>무엇을</span>
-        <strong>${row.currentWork}</strong>
-        ${row.how ? html`<small>어떻게 · ${row.how}</small>` : null}
-      </div>
+      <details class="mission-card-disclosure">
+        <summary>session detail</summary>
+        ${members.length > 0
+          ? html`
+              <div class="mission-pill-row">
+                ${members.map(member => html`
+                  <button class="mission-pill action" onClick=${() => openAgentDetail(member.name)}>
+                    ${member.model !== member.nickname ? `${member.model} · ` : ''}${member.nickname}
+                  </button>
+                `)}
+              </div>
+            `
+          : null}
 
-      <div class="mission-io-stack">
-        <div class="mission-io-item">
-          <span>최근 input</span>
-          <strong>${row.recentInput ?? '명시된 recent input 없음'}</strong>
-        </div>
-        <div class="mission-io-item">
-          <span>최근 output</span>
-          <strong>${row.recentOutput ?? '명시된 recent output 없음'}</strong>
-        </div>
-      </div>
+        ${members.length > 0
+          ? html`
+              <details class="mission-card-disclosure compact">
+                <summary>member output preview</summary>
+                <div class="mission-link-list">
+                  ${members.map(member => html`
+                    <button class="mission-link-row" onClick=${() => openAgentDetail(member.name)}>
+                      <strong>${member.nickname}</strong>
+                      <span>${member.currentTask}</span>
+                      <small>${member.output ?? '최근 출력 없음'}</small>
+                    </button>
+                  `)}
+                </div>
+              </details>
+            `
+          : null}
+      </details>
 
-      <div class="mission-activity-foot">
-        <span>최근 도구 · ${toolPreview}</span>
-        ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : null}
+      <div class="mission-card-actions">
+        <button class="control-btn ghost" onClick=${() => openSession('intervene', brief.session_id)}>세션 개입 열기</button>
+        <button class="control-btn ghost" onClick=${() => openSession('command', brief.session_id)}>세션 원인 보기</button>
+        ${action
+          ? html`<button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, 'Mission session brief')}>추천 액션 열기</button>`
+          : null}
       </div>
-    </button>
+    </article>
   `
 }
 
-function KeeperCard({ row }: { row: KeeperActivityRow }) {
+function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
+  const info = extractAgentInfo(row.brief.agent_name)
+  const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 room-level'
+  return html`
+    <article class="mission-activity-card ${toneClass(row.brief.status ?? row.agent?.status)}">
+      <button class="mission-card-select" onClick=${() => openAgentDetail(row.brief.agent_name)}>
+        <div class="mission-activity-head">
+          <div class="mission-activity-title">
+            <span class="agent-emoji">${row.agent?.emoji ?? row.keeper?.emoji ?? ''}</span>
+            <div>
+              <strong>${row.brief.agent_name}</strong>
+              <span>${info.model !== info.nickname ? `${info.model} · ` : ''}${info.nickname}</span>
+            </div>
+          </div>
+          <span class="command-chip ${toneClass(row.brief.status ?? row.agent?.status)}">${row.brief.status ?? row.agent?.status ?? 'unknown'}</span>
+        </div>
+
+        <div class="mission-activity-meta">
+          <span>어디서 · ${row.where}</span>
+          <span>누구와 · ${who}</span>
+          <span>attention · ${row.brief.related_attention_count}</span>
+        </div>
+
+        <div class="mission-activity-focus">
+          <span>무엇을</span>
+          <strong>${row.currentWork}</strong>
+          ${row.how ? html`<small>어떻게 · ${row.how}</small>` : null}
+        </div>
+      </button>
+
+      <details class="mission-card-disclosure">
+        <summary>recent trace</summary>
+        <div class="mission-activity-foot">
+          ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : html`<span>최근 사건 요약 없음</span>`}
+          <span>관련 session · ${row.brief.related_session_id ?? '없음'}</span>
+        </div>
+
+        <details class="mission-card-disclosure compact">
+          <summary>input / output / tools</summary>
+          <div class="mission-io-stack">
+            <div class="mission-io-item">
+              <span>최근 input</span>
+              <strong>${row.recentInput ?? '표시 가능한 recent input 없음'}</strong>
+            </div>
+            <div class="mission-io-item">
+              <span>최근 output</span>
+              <strong>${row.recentOutput ?? '표시 가능한 recent output 없음'}</strong>
+            </div>
+          </div>
+          <div class="mission-activity-foot">
+            <span>최근 도구 · ${row.recentTools.length > 0 ? row.recentTools.join(', ') : '도구 텔레메트리 없음'}</span>
+          </div>
+        </details>
+      </details>
+    </article>
+  `
+}
+
+function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
   const continuity = [
-    `gen ${row.keeper.generation ?? 0}`,
-    `handoff ${row.keeper.handoff_count_total ?? 0}`,
-    `compact ${row.keeper.compaction_count ?? 0}`,
-    row.keeper.context_ratio != null ? `ctx ${Math.round(row.keeper.context_ratio * 100)}%` : null,
+    `gen ${row.brief.generation ?? row.keeper?.generation ?? 0}`,
+    row.brief.context_ratio != null
+      ? `ctx ${Math.round(row.brief.context_ratio * 100)}%`
+      : (row.keeper?.context_ratio != null ? `ctx ${Math.round(row.keeper.context_ratio * 100)}%` : null),
+    row.brief.last_turn_ago_s != null ? `last turn ${Math.round(row.brief.last_turn_ago_s)}s` : null,
   ]
     .filter((value): value is string => value !== null)
     .join(' · ')
 
   return html`
-    <button class="mission-activity-card ${toneClass(row.keeper.status)}" onClick=${() => openKeeperDetail(row.keeper)}>
-      <div class="mission-activity-head">
-        <div class="mission-activity-title">
-          <span class="agent-emoji">${row.keeper.emoji ?? ''}</span>
-          <div>
-            <strong>${row.keeper.name}</strong>
-            ${row.keeper.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
+    <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)}">
+      <button class="mission-card-select" onClick=${() => { if (row.keeper) openKeeperDetail(row.keeper) }}>
+        <div class="mission-activity-head">
+          <div class="mission-activity-title">
+            <span class="agent-emoji">${row.keeper?.emoji ?? ''}</span>
+            <div>
+              <strong>${row.brief.name}</strong>
+              ${row.keeper?.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
+            </div>
           </div>
+          <span class="command-chip ${toneClass(row.brief.status ?? row.keeper?.status)}">${row.brief.status ?? row.keeper?.status ?? 'unknown'}</span>
         </div>
-        <span class="command-chip ${toneClass(row.keeper.status)}">${row.keeper.status}</span>
-      </div>
 
-      <div class="mission-activity-meta">
-        <span>언제부터 · ${row.activeSince ? relativeTime(row.activeSince) : 'n/a'}</span>
-        <span>최근 heartbeat · ${row.keeper.last_heartbeat ? relativeTime(row.keeper.last_heartbeat) : 'n/a'}</span>
-        <span>${continuity}</span>
-      </div>
-
-      <div class="mission-activity-focus">
-        <span>무엇을</span>
-        <strong>${row.currentWork}</strong>
-        ${row.keeper.skill_reason ? html`<small>판단 요약 · ${trimText(row.keeper.skill_reason, 120)}</small>` : null}
-      </div>
-
-      <div class="mission-io-stack">
-        <div class="mission-io-item">
-          <span>최근 input</span>
-          <strong>${row.recentInput ?? '명시된 recent input 없음'}</strong>
+        <div class="mission-activity-meta">
+          <span>최근 heartbeat · ${row.keeper?.last_heartbeat ? relativeTime(row.keeper.last_heartbeat) : 'n/a'}</span>
+          <span>${continuity || 'continuity 정보 없음'}</span>
         </div>
-        <div class="mission-io-item">
-          <span>최근 output</span>
-          <strong>${row.recentOutput ?? '명시된 recent output 없음'}</strong>
+
+        <div class="mission-activity-focus">
+          <span>무엇을</span>
+          <strong>${row.currentWork}</strong>
+          ${row.keeper?.skill_reason ? html`<small>판단 요약 · ${trimText(row.keeper.skill_reason, 120)}</small>` : null}
         </div>
-      </div>
+      </button>
 
-      <div class="mission-activity-foot">
-        <span>최근 도구 · ${row.recentTools.length > 0 ? row.recentTools.join(', ') : '도구 사용 없음'}</span>
-        ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : null}
-      </div>
-    </button>
-  `
-}
-
-function InternalIncidentCard({ item }: { item: OperatorAttentionItem }) {
-  return html`
-    <article class="mission-action-card ${toneClass(item.severity)}">
-      <div class="mission-card-head">
-        <span class="command-chip ${toneClass(item.severity)}">${item.kind}</span>
-        <span class="mission-card-target">${item.target_type}${item.target_id ? ` · ${item.target_id}` : ''}</span>
-      </div>
-      <p>${item.summary}</p>
-      <div class="mission-card-actions">
-        <button class="control-btn ghost" onClick=${() => openIncidentIntervene(item)}>이 이슈로 개입 열기</button>
-        <button class="control-btn ghost" onClick=${() => openIncidentCommand(item)}>이 이슈의 원인 보기</button>
-      </div>
+      <details class="mission-card-disclosure">
+        <summary>continuity detail</summary>
+        <div class="mission-activity-foot">
+          <span>agent · ${row.brief.agent_name ?? row.keeper?.agent_name ?? 'n/a'}</span>
+          ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : null}
+        </div>
+        <details class="mission-card-disclosure compact">
+          <summary>input / output / tools</summary>
+          <div class="mission-io-stack">
+            <div class="mission-io-item">
+              <span>최근 input</span>
+              <strong>${row.recentInput ?? '표시 가능한 recent input 없음'}</strong>
+            </div>
+            <div class="mission-io-item">
+              <span>최근 output</span>
+              <strong>${row.recentOutput ?? '표시 가능한 recent output 없음'}</strong>
+            </div>
+          </div>
+          <div class="mission-activity-foot">
+            <span>최근 도구 · ${row.recentTools.length > 0 ? row.recentTools.join(', ') : '도구 사용 없음'}</span>
+          </div>
+        </details>
+      </details>
     </article>
   `
 }
 
-function InternalActionCard({
-  action,
-  incident,
-}: {
-  action: OperatorRecommendedAction
-  incident?: OperatorAttentionItem | null
-}) {
-  const payloadPreview = actionPayloadPreview(action)
+function InternalSignalCard({ item }: { item: DashboardMissionInternalSignal }) {
+  const action = item.action ?? null
+  const attention = item.attention ?? null
   return html`
-    <article class="mission-action-card ${toneClass(action.severity)}">
+    <article class="mission-action-card ${toneClass(item.severity)}">
       <div class="mission-card-head">
-        <span class="command-chip ${toneClass(action.severity)}">${workflowActionLabel(action.action_type)}</span>
-        <span class="mission-card-target">${action.target_type}${action.target_id ? ` · ${action.target_id}` : ''}</span>
+        <span class="command-chip ${toneClass(item.severity)}">
+          ${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? 'signal'}
+        </span>
+        <span class="mission-card-target">${item.target_type}${item.target_id ? ` · ${item.target_id}` : ''}</span>
       </div>
-      <p>${action.reason}</p>
-      <div class="mission-action-detail">
-        <span>${actionModeLabel(action)}</span>
-        <span>${actionTargetLabel(action)}</span>
-      </div>
-      ${payloadPreview ? html`<div class="mission-action-preview">${payloadPreview}</div>` : null}
+      <p>${item.summary}</p>
+      ${action ? html`<div class="mission-action-preview">${action.reason}</div>` : null}
       <div class="mission-card-actions">
-        <button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, '상황판 추천 액션')}>이 액션으로 개입 열기</button>
-        <button class="control-btn ghost" onClick=${() => openActionCommand(action, incident, '상황판 추천 액션')}>이 이슈의 원인 보기</button>
+        ${action
+          ? html`
+              <button class="control-btn ghost" onClick=${() => openActionIntervene(action, attention, 'Mission internal signal')}>이 액션으로 개입 열기</button>
+              <button class="control-btn ghost" onClick=${() => openActionCommand(action, attention, 'Mission internal signal')}>이 이슈의 원인 보기</button>
+            `
+          : attention
+            ? html`
+                <button class="control-btn ghost" onClick=${() => openIncidentIntervene(attention)}>이 이슈로 개입 열기</button>
+                <button class="control-btn ghost" onClick=${() => openIncidentCommand(attention)}>이 이슈의 원인 보기</button>
+              `
+            : null}
       </div>
     </article>
   `
@@ -844,13 +806,42 @@ export function Mission() {
     return html`<div class="empty-state">상황판 스냅샷이 아직 없습니다.</div>`
   }
 
-  const crews = crewRowsFromMission()
-  const agentRows = agentRowsFromMission(crews)
-  const keeperRows = keeperRowsFromMission()
-  const activeAgentsCount = agentRows.filter(row => ['active', 'busy', 'listening', 'idle'].includes(row.agent.status)).length
-  const liveOutputs = agentRows.filter(row => row.recentOutput).length + keeperRows.filter(row => row.recentOutput).length
-  const topIncident = mission.incidents[0] ?? null
-  const topAction = mission.recommended_actions[0] ?? null
+  if (selectedAttentionId.value && !mission.attention_queue.some(item => item.id === selectedAttentionId.value)) {
+    selectedAttentionId.value = null
+  }
+  if (selectedSessionId.value && !mission.session_briefs.some(item => item.session_id === selectedSessionId.value)) {
+    selectedSessionId.value = null
+  }
+
+  const activeAttention =
+    mission.attention_queue.find(item => item.id === selectedAttentionId.value) ?? null
+  const activeSessionId = selectedSessionId.value
+  const sessionLookup = sessionLookupById()
+  const activeSessionSet = activeAttention ? new Set(activeAttention.related_session_ids) : null
+  const activeAgentSet = activeAttention ? new Set(activeAttention.related_agent_names) : null
+
+  const sessionRows = (activeSessionSet
+    ? mission.session_briefs.filter(item => activeSessionSet.has(item.session_id))
+    : mission.session_briefs
+  ).slice(0, activeAttention ? 8 : 6)
+
+  const agentRows = mission.agent_briefs
+    .filter(item => !isKeeperAgent(item.agent_name))
+    .filter(item => {
+      if (activeSessionId) return item.related_session_id === activeSessionId
+      if (activeAgentSet && activeSessionSet) {
+        return activeAgentSet.has(item.agent_name) || (item.related_session_id ? activeSessionSet.has(item.related_session_id) : false)
+      }
+      return true
+    })
+    .slice(0, activeSessionId || activeAttention ? 10 : 8)
+    .map(enrichedAgentRow)
+
+  const keeperRows = mission.keeper_briefs.slice(0, 6).map(enrichedKeeperRow)
+  const attentionQueue = mission.attention_queue.slice(0, 6)
+  const internalSignals = mission.internal_signals.slice(0, 3)
+  const liveOutputs =
+    agentRows.filter(row => row.recentOutput).length + keeperRows.filter(row => row.recentOutput).length
 
   return html`
     <section class="dashboard-panel mission-view">
@@ -858,7 +849,7 @@ export function Mission() {
       <div class="panel-header">
         <div>
           <h2>상황판</h2>
-          <p>사람 운영자가 누가 어디서 누구와 무엇을 하고 있는지 바로 보는 관찰면입니다. 내부 메트릭은 아래가 아니라 Command로 내렸습니다.</p>
+          <p>원인 분석과 개입 판단을 먼저 보는 landing 입니다. 문제 → 영향 session → 관련 actor 순서로 좁혀서 읽습니다.</p>
         </div>
         <div class="mission-header-meta">
           <span class="command-chip ${toneClass(mission.summary.room_health)}">${mission.summary.room_health ?? 'ok'}</span>
@@ -877,72 +868,83 @@ export function Mission() {
       <${MissionBriefingCard} />
 
       <div class="mission-stat-grid">
-        <${SummaryStat} label="활성 흐름" value=${crews.length} detail="지금 보이는 crew / session" tone=${crews.length > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="응답 가능 에이전트" value=${activeAgentsCount} detail="지금 응답 가능한 actor 수" tone=${activeAgentsCount > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="Keeper 수" value=${keeperRows.length} detail="연속성 runtime / generation 관찰 대상" tone=${keeperRows.length > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="최근 output" value=${liveOutputs} detail="main 화면에서 바로 볼 수 있는 최근 출력 수" tone=${liveOutputs > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="내부 incident" value=${mission.incidents.length} detail="시스템 진단 신호는 아래 보조 카드로만 유지" tone=${topIncident?.severity ?? 'ok'} />
-        <${SummaryStat} label="추천 액션" value=${mission.recommended_actions.length} detail="개입이 필요하면 Intervene로 바로 이동" tone=${topAction?.severity ?? 'ok'} />
+        <${SummaryStat} label="주의 큐" value=${attentionQueue.length} detail="개입 판단이 필요한 issue" tone=${attentionQueue[0]?.severity ?? 'ok'} />
+        <${SummaryStat} label="영향 session" value=${sessionRows.length} detail="현재 선택 기준으로 좁힌 흐름" tone=${sessionRows[0]?.top_attention?.severity ?? sessionRows[0]?.health ?? 'ok'} />
+        <${SummaryStat} label="영향 agent" value=${agentRows.length} detail="선택된 흐름에 연결된 actor" tone=${agentRows[0]?.brief.status ?? 'ok'} />
+        <${SummaryStat} label="Keeper watch" value=${keeperRows.length} detail="continuity lane 관찰 대상" tone=${keeperRows[0]?.brief.status ?? 'ok'} />
+        <${SummaryStat} label="최근 output" value=${liveOutputs} detail="선택된 영역에서 바로 읽을 수 있는 출력 수" tone=${liveOutputs > 0 ? 'ok' : 'warn'} />
+        <${SummaryStat} label="내부 신호" value=${internalSignals.length} detail="room/system 진단은 하단 보조 lane" tone=${internalSignals[0]?.severity ?? 'ok'} />
       </div>
 
+      ${(activeAttention || activeSessionId)
+        ? html`
+            <div class="mission-selection-bar">
+              <span>현재 drill-down · ${activeAttention ? activeAttention.summary : 'session 선택'}${activeSessionId ? ` · ${activeSessionId}` : ''}</span>
+              <button class="control-btn ghost" onClick=${clearMissionSelection}>선택 해제</button>
+            </div>
+          `
+        : null}
+
+      <${Card} title="Attention Queue" class="mission-list-card" semanticId="mission.attention_queue">
+        <div class="mission-section-head">
+          <h3>이슈에서 시작</h3>
+          <p>문제와 경고를 먼저 보고, 여기서 session과 agent로 좁혀갑니다.</p>
+        </div>
+        <div class="mission-lane-stack">
+          ${attentionQueue.length > 0
+            ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${selectedAttentionId.value === item.id} sessionLookup=${sessionLookup} />`)
+            : html`<div class="empty-state">지금 Mission attention queue가 비어 있습니다.</div>`}
+        </div>
+      <//>
+
       <div class="mission-human-grid">
-        <${Card} title="같이 움직이는 흐름" class="mission-list-card" semanticId="mission.crews">
+        <${Card} title="Affected Sessions" class="mission-list-card" semanticId="mission.session_briefs">
           <div class="mission-section-head">
-            <h3>누가 누구와 같은 목표를 향하는지</h3>
-            <p>team session 단위로 목표, 멤버, 최근 사건, 커뮤니케이션 흔적을 바로 보여줍니다.</p>
+            <h3>영향받는 session</h3>
+            <p>attention과 직접 연결된 흐름만 먼저 보여주고, member preview는 한 단계 더 열었을 때만 보여줍니다.</p>
           </div>
           <div class="mission-list-stack">
-            ${(() => {
-              const active = crews.filter(r => r.status !== 'interrupted' && r.status !== 'completed')
-              const stale = crews.filter(r => r.status === 'interrupted' || r.status === 'completed')
-              if (active.length === 0 && stale.length === 0) {
-                return html`<div class="empty-state">지금 열려 있는 crew / session 이 없습니다.</div>`
-              }
-              return html`
-                ${active.map(row => html`<${CrewCard} key=${row.session.session_id} row=${row} />`)}
-                ${stale.length > 0 ? html`<${StaleCrewSection} rows=${stale} />` : null}
-              `
-            })()}
+            ${sessionRows.length > 0
+              ? sessionRows.map(row => html`<${SessionBriefCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)
+              : html`<div class="empty-state">현재 선택과 연결된 session이 없습니다.</div>`}
           </div>
         <//>
 
-        <${Card} title="에이전트 활동" class="mission-list-card" semanticId="mission.agent_activity">
+        <${Card} title="Impacted Agents" class="mission-list-card" semanticId="mission.agent_activity">
           <div class="mission-section-head">
-            <h3>각 에이전트가 지금 뭘 하는가</h3>
-            <p>where / with whom / current task / recent input-output / recent tools 를 preview-first로 보여줍니다.</p>
+            <h3>관련 agent</h3>
+            <p>선택된 incident 또는 session과 연결된 actor만 보여주고, input-output은 접어서 둡니다.</p>
           </div>
           <div class="mission-activity-list">
             ${agentRows.length > 0
-              ? agentRows.slice(0, 10).map(row => html`<${AgentCard} key=${row.agent.name} row=${row} />`)
-              : html`<div class="empty-state">지금 보이는 에이전트 활동이 없습니다.</div>`}
+              ? agentRows.map(row => html`<${AgentBriefCard} key=${row.brief.agent_name} row=${row} />`)
+              : html`<div class="empty-state">현재 선택과 연결된 agent가 없습니다.</div>`}
           </div>
         <//>
       </div>
 
       <div class="mission-human-grid">
-        <${Card} title="Keeper 연속성" class="mission-list-card" semanticId="mission.keeper_activity">
+        <${Card} title="Keeper Continuity" class="mission-list-card" semanticId="mission.keeper_activity">
           <div class="mission-section-head">
-            <h3>generation / compaction / handoff 를 거치는 장기 실행체</h3>
-            <p>keeper 는 별도 continuity lane 으로 보고, raw thinking 대신 최근 입출력과 판단 요약만 노출합니다.</p>
+            <h3>continuity lane</h3>
+            <p>keeper는 별도 lane으로 보고, continuity 판단에 필요한 정보만 먼저 보여줍니다.</p>
           </div>
           <div class="mission-activity-list">
             ${keeperRows.length > 0
-              ? keeperRows.slice(0, 8).map(row => html`<${KeeperCard} key=${row.keeper.name} row=${row} />`)
-              : html`<div class="empty-state">지금 보이는 keeper 가 없습니다.</div>`}
+              ? keeperRows.map(row => html`<${KeeperBriefCard} key=${row.brief.name} row=${row} />`)
+              : html`<div class="empty-state">지금 보이는 keeper가 없습니다.</div>`}
           </div>
         <//>
 
-        <${Card} title="내부 진단은 여기서만" class="mission-list-card" semanticId="mission.internal_signals">
+        <${Card} title="Internal Signals" class="mission-list-card" semanticId="mission.internal_signals">
           <div class="mission-section-head">
-            <h3>internal signal / recommendation</h3>
-            <p>artifact_scope_drift 같은 시스템 진단은 메인 판단 근거가 아니라 보조 신호로만 유지합니다.</p>
+            <h3>room / system 보조 신호</h3>
+            <p>artifact scope drift 같은 시스템 진단은 메인 판단 근거가 아니라 보조 lane으로만 유지합니다.</p>
           </div>
           <div class="mission-list-stack">
-            ${mission.incidents.slice(0, 2).map(item => html`<${InternalIncidentCard} key=${`${item.kind}:${item.target_id ?? 'room'}`} item=${item} />`)}
-            ${mission.recommended_actions.slice(0, 2).map(action => html`<${InternalActionCard} key=${`${action.action_type}:${action.target_id ?? 'room'}`} action=${action} />`)}
-            ${mission.incidents.length === 0 && mission.recommended_actions.length === 0
-              ? html`<div class="empty-state">지금은 내부 진단 경고가 없습니다.</div>`
-              : null}
+            ${internalSignals.length > 0
+              ? internalSignals.map(item => html`<${InternalSignalCard} key=${item.id} item=${item} />`)
+              : html`<div class="empty-state">지금은 내부 진단 경고가 없습니다.</div>`}
           </div>
           <div class="mission-card-actions">
             <button class="control-btn ghost" onClick=${() => navigate('execution')}>실행 관찰면 보기</button>

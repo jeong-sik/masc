@@ -82,18 +82,18 @@ function toneRank(tone: MonitorTone): number {
 
 function agentStateLabel(state: AgentMonitorState): string {
   switch (state) {
-    case 'working': return 'Working'
-    case 'watching': return 'Watching'
-    case 'quiet': return 'Quiet'
-    case 'offline': return 'Offline'
+    case 'working': return '작업 중'
+    case 'watching': return '대기 중'
+    case 'quiet': return '조용함'
+    case 'offline': return '오프라인'
   }
 }
 
 function keeperStateLabel(state: KeeperMonitorState): string {
   switch (state) {
-    case 'critical': return 'Critical'
-    case 'warning': return 'Watch'
-    default: return 'Healthy'
+    case 'critical': return '위험'
+    case 'warning': return '주의'
+    default: return '정상'
   }
 }
 
@@ -103,11 +103,10 @@ function formatContext(value?: number | null): string {
 }
 
 function keeperFocus(keeper: Keeper): string {
-  return keeper.agent?.current_task
-    ?? keeper.skill_primary
-    ?? keeper.last_proactive_reason
-    ?? keeper.memory_recent_note
-    ?? 'No active focus'
+  return keeper.agent?.current_task?.trim()
+    || keeper.skill_primary?.trim()
+    || keeper.last_proactive_reason?.trim()
+    || '현재 포커스 없음'
 }
 
 function keeperContinuity(keeper: Keeper): string {
@@ -179,16 +178,16 @@ function buildKeeperRow(keeper: Keeper): KeeperMonitorRow {
 
   let state: KeeperMonitorState = 'healthy'
   let tone: MonitorTone = 'ok'
-  let note = 'Heartbeat and context look healthy'
+  let note = '하트비트와 컨텍스트 상태가 안정적입니다'
 
   if (keeper.status === 'offline' || isStale || lifecycle === 'handoff-imminent') {
     state = 'critical'
     tone = 'bad'
     note = isStale
-      ? 'Heartbeat stale'
+      ? '하트비트 지연'
       : lifecycle === 'handoff-imminent'
-        ? 'Handoff imminent'
-        : 'Keeper offline'
+        ? '핸드오프 임박'
+        : 'keeper 오프라인'
   } else if (
     lifecycle === 'preparing'
     || lifecycle === 'compacting'
@@ -197,10 +196,10 @@ function buildKeeperRow(keeper: Keeper): KeeperMonitorRow {
     state = 'warning'
     tone = 'warn'
     note = ratio >= HOT_KEEPER_RATIO
-      ? 'High context pressure'
+      ? '컨텍스트 압력이 높습니다'
       : lifecycle === 'compacting'
-        ? 'Compaction in progress'
-        : 'Preparing for handoff'
+        ? '컴팩팅 진행 중'
+        : '핸드오프 준비 중'
   }
 
   return {
@@ -247,9 +246,9 @@ function AttentionRow({ item }: { item: AttentionItem }) {
       </div>
       <div class="monitor-alert-meta">
         <span class="monitor-pill ${item.tone}">
-          ${item.kind === 'agent' ? 'Agent' : 'Keeper'}
+          ${item.kind === 'agent' ? '에이전트' : 'keeper'}
         </span>
-        ${item.timestamp ? html`<span><${TimeAgo} timestamp=${item.timestamp} /></span>` : html`<span>No signal</span>`}
+        ${item.timestamp ? html`<span><${TimeAgo} timestamp=${item.timestamp} /></span>` : html`<span>신호 없음</span>`}
       </div>
     </button>
   `
@@ -275,15 +274,15 @@ function AgentWatchRow({ row }: { row: AgentMonitorRow }) {
       </div>
 
       <div class="monitor-meta">
-        ${row.lastSignalAt ? html`<span>Signal <${TimeAgo} timestamp=${row.lastSignalAt} /></span>` : html`<span>No recent signal</span>`}
-        <span>${row.activeTaskCount > 0 ? `${row.activeTaskCount} active tasks` : 'No active tasks'}</span>
+        ${row.lastSignalAt ? html`<span>신호 <${TimeAgo} timestamp=${row.lastSignalAt} /></span>` : html`<span>최근 신호 없음</span>`}
+        <span>${row.activeTaskCount > 0 ? `활성 작업 ${row.activeTaskCount}개` : '활성 작업 없음'}</span>
         ${agent.model ? html`<span>${agent.model}</span>` : null}
-        ${agent.last_seen ? html`<span>Seen <${TimeAgo} timestamp=${agent.last_seen} /></span>` : null}
+        ${agent.last_seen ? html`<span>마지막 감지 <${TimeAgo} timestamp=${agent.last_seen} /></span>` : null}
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
       ${motion.lastActivityText && motion.lastActivityText !== row.focus
-        ? html`<div class="monitor-footnote">Latest detail: ${motion.lastActivityText}</div>`
+        ? html`<div class="monitor-footnote">최근 상세: ${motion.lastActivityText}</div>`
         : null}
     </button>
   `
@@ -309,15 +308,15 @@ function KeeperWatchRow({ row }: { row: KeeperMonitorRow }) {
       </div>
 
       <div class="monitor-meta">
-        ${keeper.last_heartbeat ? html`<span>Heartbeat <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>` : html`<span>No heartbeat</span>`}
+        ${keeper.last_heartbeat ? html`<span>하트비트 <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>` : html`<span>하트비트 없음</span>`}
         <span>${keeperContinuity(keeper)}</span>
-        <span>Lifecycle ${row.lifecycle}</span>
-        <span>Context ${formatContext(keeper.context_ratio)}</span>
+        <span>라이프사이클 ${row.lifecycle}</span>
+        <span>컨텍스트 ${formatContext(keeper.context_ratio)}</span>
         ${keeper.model ? html`<span>${keeper.model}</span>` : null}
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
-      ${keeper.skill_reason ? html`<div class="monitor-footnote">Skill route: ${keeper.skill_reason}</div>` : null}
+      ${keeper.skill_reason ? html`<div class="monitor-footnote">스킬 라우팅: ${keeper.skill_reason}</div>` : null}
     </button>
   `
 }
@@ -383,21 +382,21 @@ export function Execution() {
     <div class="agents-monitor">
       <${SurfaceSemanticIntro} surfaceId="execution" />
       <div class="stats-grid">
-        <${MonitorStat} label="Workers online" value=${onlineAgents} color="#4ade80" caption="활성 + 대기 실행 actor" />
-        <${MonitorStat} label="Working now" value=${workingAgents} color="#fbbf24" caption="작업 또는 할당된 부하" />
-        <${MonitorStat} label="Fresh signals" value=${freshSignals} color="#22d3ee" caption="최근 2분 이내 신호" />
-        <${MonitorStat} label="Worker alerts" value=${agentAlerts.length} color=${agentAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="실행 actor 경고" />
-        <${MonitorStat} label="Continuity alerts" value=${keeperAlerts.length} color=${keeperAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="keeper 연속성 경고" />
+        <${MonitorStat} label="온라인 worker" value=${onlineAgents} color="#4ade80" caption="활성 + 대기 실행 주체" />
+        <${MonitorStat} label="지금 작업 중" value=${workingAgents} color="#fbbf24" caption="작업 또는 할당된 부하" />
+        <${MonitorStat} label="신선한 신호" value=${freshSignals} color="#22d3ee" caption="최근 2분 이내 신호" />
+        <${MonitorStat} label="worker 경고" value=${agentAlerts.length} color=${agentAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="실행 주체 경고" />
+        <${MonitorStat} label="연속성 경고" value=${keeperAlerts.length} color=${keeperAlerts.length > 0 ? '#fb7185' : '#4ade80'} caption="keeper 연속성 경고" />
       </div>
 
       <${Card} title="Execution Priorities" class="section" semanticId="execution.priority_queue">
         <div class="monitor-section-head">
-          <h2 class="monitor-headline">What needs execution attention right now</h2>
-          <p class="monitor-subheadline">Worker drift and keeper continuity risk are ranked together here, but diagnosed in separate sections below.</p>
+          <h2 class="monitor-headline">지금 실행 관점에서 먼저 봐야 할 대상</h2>
+          <p class="monitor-subheadline">worker 드리프트와 keeper 연속성 위험은 여기서 함께 우선순위를 매기고, 아래 섹션에서 각각 따로 진단합니다.</p>
         </div>
         <div class="monitor-alert-list">
           ${attentionItems.length === 0
-            ? html`<div class="empty-state">No execution alerts right now</div>`
+            ? html`<div class="empty-state">지금은 실행 경고가 없습니다</div>`
             : attentionItems.map(item => html`<${AttentionRow} key=${item.key} item=${item} />`)}
         </div>
       <//>
@@ -405,36 +404,36 @@ export function Execution() {
       <div class="agents-workbench">
         <${Card} title="Workers" class="section" semanticId="execution.workers">
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">Short-horizon execution monitor</h2>
-            <p class="monitor-subheadline">Live workers stay grouped here so owner drift is visible before you scan offline history.</p>
+            <h2 class="monitor-headline">단기 실행 모니터</h2>
+            <p class="monitor-subheadline">현재 살아 있는 worker를 먼저 묶어서, 누가 일을 잃었는지 오프라인 이력보다 먼저 보이게 합니다.</p>
           </div>
           <div class="monitor-list">
             ${aliveRows.length === 0
-              ? html`<div class="empty-state">No active workers visible</div>`
+              ? html`<div class="empty-state">보이는 활성 worker가 없습니다</div>`
               : aliveRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
           </div>
         <//>
 
         <${Card} title="Continuity" class="section" semanticId="execution.continuity">
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">Long-running keeper continuity</h2>
-            <p class="monitor-subheadline">Heartbeat, context pressure, and handoff state are isolated from worker execution drift.</p>
+            <h2 class="monitor-headline">장기 keeper 연속성</h2>
+            <p class="monitor-subheadline">하트비트, 컨텍스트 압력, 핸드오프 상태를 worker 실행 드리프트와 분리해서 봅니다.</p>
           </div>
           <div class="monitor-list">
             ${keeperRows.length === 0
-              ? html`<div class="empty-state">No keepers active</div>`
+              ? html`<div class="empty-state">활성 keeper가 없습니다</div>`
               : keeperRows.map(row => html`<${KeeperWatchRow} key=${row.keeper.name} row=${row} />`)}
           </div>
         <//>
 
         <${Card} title="Offline Workers" class="section" semanticId="execution.offline">
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">Who dropped out of the live loop</h2>
-            <p class="monitor-subheadline">Offline rows stay separate so they do not drown the active execution monitor.</p>
+            <h2 class="monitor-headline">라이브 루프에서 빠진 worker</h2>
+            <p class="monitor-subheadline">오프라인 row를 분리해서, 활성 실행 모니터가 묻히지 않게 합니다.</p>
           </div>
           <div class="monitor-list">
             ${offlineRows.length === 0
-              ? html`<div class="empty-state">No offline workers right now</div>`
+              ? html`<div class="empty-state">지금은 오프라인 worker가 없습니다</div>`
               : offlineRows.map(row => html`<${AgentWatchRow} key=${row.agent.name} row=${row} />`)}
           </div>
         <//>

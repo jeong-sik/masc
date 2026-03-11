@@ -17,6 +17,7 @@ import type {
   OperatorWorkerCard,
 } from './types'
 import { registerOperatorRefresh } from './store'
+import { isRecord, asString, asNumber, asBoolean, asStringArray, extractArray } from './components/common/normalize'
 
 export const operatorSnapshot = signal<OperatorSnapshot | null>(null)
 export const operatorRoomDigest = signal<OperatorDigest | null>(null)
@@ -29,39 +30,6 @@ export const operatorActionBusy = signal(false)
 export const operatorActionLog = signal<OperatorActionLogEntry[]>([])
 
 let nextLogId = 1
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value : undefined
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map(item => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
-}
-
-function extractArray(value: unknown, keys: string[] = []): unknown[] {
-  if (Array.isArray(value)) return value
-  if (!isRecord(value)) return []
-  for (const key of keys) {
-    const candidate = value[key]
-    if (Array.isArray(candidate)) return candidate
-  }
-  return []
-}
 
 function normalizeMessage(raw: unknown): Message | null {
   if (!isRecord(raw)) return null

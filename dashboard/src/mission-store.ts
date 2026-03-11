@@ -1,9 +1,14 @@
 import { signal } from '@preact/signals'
 import { fetchDashboardMission, fetchDashboardMissionBriefing } from './api'
 import type {
+  DashboardMissionAgentBrief,
+  DashboardMissionAttentionQueueItem,
   DashboardMissionBriefingResponse,
   DashboardMissionBriefingSection,
+  DashboardMissionInternalSignal,
+  DashboardMissionKeeperBrief,
   DashboardMissionResponse,
+  DashboardMissionSessionBrief,
   DashboardMissionSummary,
   DashboardMissionCommandFocus,
   DashboardMissionTargets,
@@ -288,6 +293,120 @@ function normalizeTargets(raw: unknown): DashboardMissionTargets {
   }
 }
 
+function normalizeAttentionQueueItem(raw: unknown): DashboardMissionAttentionQueueItem | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const kind = asString(raw.kind)
+  const summary = asString(raw.summary)
+  const targetType = asString(raw.target_type)
+  if (!id || !kind || !summary || !targetType) return null
+  return {
+    id,
+    kind,
+    severity: asString(raw.severity) ?? 'warn',
+    summary,
+    target_type: targetType,
+    target_id: asString(raw.target_id) ?? null,
+    top_action: normalizeRecommendedAction(raw.top_action),
+    related_session_ids: extractArray(raw.related_session_ids)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    related_agent_names: extractArray(raw.related_agent_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    evidence_preview: extractArray(raw.evidence_preview)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    last_seen_at: asString(raw.last_seen_at) ?? null,
+  }
+}
+
+function normalizeSessionBrief(raw: unknown): DashboardMissionSessionBrief | null {
+  if (!isRecord(raw)) return null
+  const sessionId = asString(raw.session_id)
+  const goal = asString(raw.goal)
+  if (!sessionId || !goal) return null
+  return {
+    session_id: sessionId,
+    goal,
+    room: asString(raw.room) ?? null,
+    status: asString(raw.status),
+    health: asString(raw.health),
+    member_names: extractArray(raw.member_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    started_at: asString(raw.started_at) ?? null,
+    elapsed_sec: asNumber(raw.elapsed_sec) ?? null,
+    last_event_at: asString(raw.last_event_at) ?? null,
+    last_event_summary: asString(raw.last_event_summary) ?? null,
+    communication_summary: asString(raw.communication_summary) ?? null,
+    active_count: asNumber(raw.active_count),
+    required_count: asNumber(raw.required_count),
+    related_attention_count: asNumber(raw.related_attention_count) ?? 0,
+    top_attention: normalizeAttentionItem(raw.top_attention),
+    top_recommendation: normalizeRecommendedAction(raw.top_recommendation),
+  }
+}
+
+function normalizeAgentBrief(raw: unknown): DashboardMissionAgentBrief | null {
+  if (!isRecord(raw)) return null
+  const agentName = asString(raw.agent_name)
+  if (!agentName) return null
+  return {
+    agent_name: agentName,
+    status: asString(raw.status),
+    where: asString(raw.where) ?? null,
+    with_whom: extractArray(raw.with_whom)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    current_work: asString(raw.current_work) ?? null,
+    related_session_id: asString(raw.related_session_id) ?? null,
+    related_attention_count: asNumber(raw.related_attention_count) ?? 0,
+    recent_output_preview: asString(raw.recent_output_preview) ?? null,
+    recent_input_preview: asString(raw.recent_input_preview) ?? null,
+    recent_event: asString(raw.recent_event) ?? null,
+    recent_tool_names: extractArray(raw.recent_tool_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+  }
+}
+
+function normalizeKeeperBrief(raw: unknown): DashboardMissionKeeperBrief | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  if (!name) return null
+  return {
+    name,
+    agent_name: asString(raw.agent_name) ?? null,
+    status: asString(raw.status),
+    generation: asNumber(raw.generation),
+    context_ratio: asNumber(raw.context_ratio) ?? null,
+    last_turn_ago_s: asNumber(raw.last_turn_ago_s) ?? null,
+    current_work: asString(raw.current_work) ?? null,
+    last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
+  }
+}
+
+function normalizeInternalSignal(raw: unknown): DashboardMissionInternalSignal | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const signalType = asString(raw.signal_type)
+  const summary = asString(raw.summary)
+  const targetType = asString(raw.target_type)
+  if (!id || !signalType || !summary || !targetType) return null
+  const normalizedType = signalType === 'action' ? 'action' : 'attention'
+  return {
+    id,
+    signal_type: normalizedType,
+    severity: asString(raw.severity) ?? 'warn',
+    summary,
+    target_type: targetType,
+    target_id: asString(raw.target_id) ?? null,
+    attention: normalizeAttentionItem(raw.attention),
+    action: normalizeRecommendedAction(raw.action),
+  }
+}
+
 function normalizeMission(raw: unknown): DashboardMissionResponse {
   const root = isRecord(raw) ? raw : {}
   return {
@@ -301,6 +420,21 @@ function normalizeMission(raw: unknown): DashboardMissionResponse {
       .filter((item): item is OperatorRecommendedAction => item !== null),
     command_focus: normalizeCommandFocus(root.command_focus),
     operator_targets: normalizeTargets(root.operator_targets),
+    attention_queue: extractArray(root.attention_queue)
+      .map(normalizeAttentionQueueItem)
+      .filter((item): item is DashboardMissionAttentionQueueItem => item !== null),
+    session_briefs: extractArray(root.session_briefs)
+      .map(normalizeSessionBrief)
+      .filter((item): item is DashboardMissionSessionBrief => item !== null),
+    agent_briefs: extractArray(root.agent_briefs)
+      .map(normalizeAgentBrief)
+      .filter((item): item is DashboardMissionAgentBrief => item !== null),
+    keeper_briefs: extractArray(root.keeper_briefs)
+      .map(normalizeKeeperBrief)
+      .filter((item): item is DashboardMissionKeeperBrief => item !== null),
+    internal_signals: extractArray(root.internal_signals)
+      .map(normalizeInternalSignal)
+      .filter((item): item is DashboardMissionInternalSignal => item !== null),
   }
 }
 

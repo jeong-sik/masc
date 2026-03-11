@@ -8,6 +8,7 @@ import {
   fetchCommandPlaneSwarm,
   runCommandPlaneAction,
 } from './api'
+import { isRecord, asString, asNumber, asBoolean, asStringArray } from './components/common/normalize'
 import type {
   ChainHistoryEventSummary,
   ChainRuntimeStatus,
@@ -94,29 +95,6 @@ let activeChainRunRequestId: string | null = null
 
 function surfaceNeedsDetail(surface: CommandPlaneSurface): boolean {
   return surface !== 'summary' && surface !== 'swarm' && surface !== 'warroom'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value : undefined
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map(item => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
 }
 
 function currentLocationParams(): URLSearchParams {

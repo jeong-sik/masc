@@ -35,6 +35,7 @@ import {
   workflowActionLabel,
   workflowTargetLabel,
 } from '../workflow-context'
+import { isRecord, asStringArray as stringArray } from './common/normalize'
 
 type CrewRow = {
   session: OperatorSessionSnapshot
@@ -78,23 +79,12 @@ type KeeperActivityRow = {
   recentTools: string[]
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
 }
 
 function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function stringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map(item => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
 }
 
 function trimText(value: string | null | undefined, max = 120): string | null {

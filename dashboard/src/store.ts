@@ -36,6 +36,7 @@ import {
 import { lastEvent, connected, journal } from './sse'
 import { deriveKeeperDiagnostic, normalizeLodgeRuntimeStatus } from './keeper-runtime'
 import { buildAgentMotion, type AgentMotionSnapshot } from './components/common/agent-motion'
+import { isRecord, asString, asNumber, asStringArray, toIsoTimestamp } from './components/common/normalize'
 
 // --- Core state signals ---
 
@@ -220,30 +221,6 @@ export function invalidateDashboardCache(): void {
 }
 
 // --- Data fetchers ---
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value : undefined
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function asStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const rows = value.filter((v): v is string => typeof v === 'string' && v.trim() !== '')
-  return rows.length > 0 ? rows : undefined
-}
-
-function toIsoTimestamp(value: unknown): string | undefined {
-  if (typeof value === 'string' && value.trim() !== '') return value
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
-  return new Date(value * 1000).toISOString()
-}
 
 function normalizeAgentStatus(value: unknown): Agent['status'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''

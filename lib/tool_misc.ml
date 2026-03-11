@@ -5,12 +5,553 @@
 
 open Tool_args
 
+module U = Yojson.Safe.Util
+
 type result = bool * string
 
 type context = {
   config: Room.config;
   agent_name: string;
 }
+
+let json_string_option = function
+  | Some value when String.trim value <> "" -> `String (String.trim value)
+  | _ -> `Null
+
+let bool_arg_opt args key =
+  match U.member key args with
+  | `Bool value -> Some value
+  | _ -> None
+
+let int_arg_opt args key =
+  match U.member key args with
+  | `Int value -> Some value
+  | `Intlit raw -> Some (Safe_ops.int_of_string_with_default ~default:0 raw)
+  | _ -> None
+
+let category_list_arg_opt args key =
+  match U.member key args with
+  | `Null -> None
+  | `List items ->
+      let categories =
+        items
+        |> List.filter_map (function
+             | `String raw ->
+                 Mode.category_of_string (String.lowercase_ascii (String.trim raw))
+             | _ -> None)
+      in
+      Some categories
+  | _ -> None
+
+let permission_to_json tool_name =
+  match Auth.permission_for_tool tool_name with
+  | Some permission -> `String (Types.show_permission permission)
+  | None -> `Null
+
+let auth_snapshot_json ctx =
+  let cfg = Auth.load_auth_config ctx.config.base_path in
+  let credentials =
+    Auth.list_credentials ctx.config.base_path
+    |> List.sort (fun (left : Types.agent_credential) right ->
+           String.compare left.agent_name right.agent_name)
+    |> List.map (fun (cred : Types.agent_credential) ->
+           `Assoc
+             [
+               ("agent_name", `String cred.agent_name);
+               ("role", `String (Types.agent_role_to_string cred.role));
+               ("created_at", `String cred.created_at);
+               ("expires_at", json_string_option cred.expires_at);
+             ])
+  in
+  `Assoc
+    [
+      ("enabled", `Bool cfg.enabled);
+      ("require_token", `Bool cfg.require_token);
+      ("default_role", `String (Types.agent_role_to_string cfg.default_role));
+      ("token_expiry_hours", `Int cfg.token_expiry_hours);
+      ("tool_auth_strict", `Bool (Auth.is_tool_auth_strict_enabled ()));
+      ("credential_count", `Int (List.length credentials));
+      ("credentials", `List credentials);
+    ]
+
+let mode_snapshot_json ctx =
+  let room_path = Room.masc_dir ctx.config in
+  let cfg = Config.load room_path in
+  let categories =
+    Mode.all_categories
+    |> List.map (fun category ->
+           let enabled = List.mem category cfg.enabled_categories in
+           `Assoc
+             [
+               ("name", `String (Mode.category_to_string category));
+               ("description", `String (Mode.category_description category));
+               ("enabled", `Bool enabled);
+             ])
+  in
+  `Assoc
+    [
+      ("mode", `String (Mode.mode_to_string cfg.mode));
+      ("mode_description", `String (Mode.mode_description cfg.mode));
+      ("enabled_tool_count", `Int (List.length (Config.enabled_tool_schemas cfg.enabled_categories)));
+      ("categories", `List categories);
+      ("config_summary", Config.get_config_summary room_path);
+    ]
+
+let keeper_tool_policy_json autonomy_level =
+  match Keeper_autonomy.autonomy_level_of_string autonomy_level with
+  | Some level ->
+      let gate = Tool_keeper.autonomous_gate_config ~autonomy_level:level in
+      `Assoc
+        [
+          ("configured_tool_policy", `String (if gate.allowlist_enabled then "allowlist" else "all"));
+          ( "configured_tool_names",
+            `List
+              (if gate.allowlist_enabled
+               then List.map (fun name -> `String name) gate.allowed_tools
+               else []) );
+          ("denied_tool_names", `List (List.map (fun name -> `String name) gate.denied_tools));
+          ("max_tool_calls_per_turn", `Int gate.max_tool_calls_per_turn);
+          ("destructive_check_enabled", `Bool gate.destructive_check_enabled);
+        ]
+  | None ->
+      `Assoc
+        [
+          ("configured_tool_policy", `String "unknown");
+          ("configured_tool_names", `List []);
+          ("denied_tool_names", `List []);
+          ("max_tool_calls_per_turn", `Null);
+          ("destructive_check_enabled", `Null);
+        ]
+
+let keeper_policy_row ctx ~runtime_class (meta : Tool_keeper.keeper_meta) =
+  let status_json = Tool_keeper.parse_agent_status ctx.config ~agent_name:meta.agent_name in
+  let status =
+    match U.member "status" status_json with
+    | `String value -> value
+    | _ -> "unknown"
+  in
+  let policy_json =
+    match keeper_tool_policy_json meta.autonomy_level with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
+  `Assoc
+    ([
+       ("name", `String meta.name);
+       ("runtime_class", `String runtime_class);
+       ("agent_name", `String meta.agent_name);
+       ("status", `String status);
+       ("autonomy_level", `String meta.autonomy_level);
+       ("policy_mode", `String meta.policy_mode);
+       ("action_budget", `String meta.policy_action_budget);
+       ("reward_model_path",
+        if String.trim meta.policy_reward_model_path = "" then `Null
+        else `String meta.policy_reward_model_path);
+       ("active_model", `String (Tool_keeper.active_model_of_meta meta));
+       ("allowed_models", `List (List.map (fun model -> `String model) meta.allowed_models));
+       ("updated_at", `String meta.updated_at);
+     ]
+    @ policy_json)
+
+let keeper_policies_json ctx =
+  let resident_rows =
+    Tool_keeper.resident_keeper_names ctx.config
+    |> List.filter_map (fun name ->
+           match Tool_keeper.read_meta ctx.config name with
+           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"resident_keeper" meta)
+           | Ok None | Error _ -> None)
+  in
+  let persistent_rows =
+    Tool_keeper.persistent_agent_names ctx.config
+    |> List.filter_map (fun name ->
+           match Tool_keeper.read_meta ctx.config name with
+           | Ok (Some meta) -> Some (keeper_policy_row ctx ~runtime_class:"persistent_agent" meta)
+           | Ok None | Error _ -> None)
+  in
+  `Assoc
+    [
+      ("resident_keepers", `List resident_rows);
+      ("persistent_agents", `List persistent_rows);
+    ]
+
+let tool_inventory_json ctx ~include_hidden ~include_deprecated =
+  let room_path = Room.masc_dir ctx.config in
+  let cfg = Config.load room_path in
+  let schemas =
+    Config.raw_all_tool_schemas
+    |> List.filter (fun (schema : Types.tool_schema) ->
+           Tool_catalog.is_visible ~include_hidden ~include_deprecated schema.name)
+    |> List.sort (fun (left : Types.tool_schema) right -> String.compare left.name right.name)
+  in
+  let rows =
+    schemas
+    |> List.map (fun (schema : Types.tool_schema) ->
+           let help_entry = Tool_help_registry.entry_of_schema schema in
+           let category = Mode.tool_category schema.name in
+           `Assoc
+             ([
+                ("name", `String schema.name);
+                ("description", `String help_entry.short_description);
+                ("category", `String (Mode.category_to_string category));
+                ("category_description", `String (Mode.category_description category));
+                ("enabled_in_current_mode", `Bool (Mode.is_tool_enabled cfg.enabled_categories schema.name));
+                ("direct_call_allowed", `Bool (Tool_catalog.allow_direct_call schema.name));
+                ("required_permission", permission_to_json schema.name);
+                ("doc_refs", `List (List.map (fun value -> `String value) help_entry.doc_refs));
+                ("prompt_hints", `List (List.map (fun value -> `String value) help_entry.prompt_hints));
+              ]
+             @ Tool_catalog.metadata_to_fields schema.name))
+  in
+  `Assoc
+    [
+      ("count", `Int (List.length rows));
+      ("tools", `List rows);
+    ]
+
+let enforcement_summary_json () =
+  `List
+    [
+      `Assoc
+        [
+          ("surface", `String "room.mode_categories");
+          ("status", `String "enforced");
+          ("reason",
+           `String
+             "Tool dispatch blocks tools whose category is disabled in the current room mode.");
+        ];
+      `Assoc
+        [
+          ("surface", `String "room.auth.permission_map");
+          ("status", `String "conditional");
+          ("reason",
+           `String
+             "Auth permission checks are enforced only when room auth is enabled.");
+        ];
+      `Assoc
+        [
+          ("surface", `String "tool_catalog.visibility");
+          ("status", `String "enforced");
+          ("reason",
+           `String
+             "Hidden tools are removed from default discovery and may be direct-call blocked.");
+        ];
+      `Assoc
+        [
+          ("surface", `String "keeper.eval_gate.allowed_tools");
+          ("status", `String "enforced");
+          ("reason",
+           `String
+             "Keeper autonomy uses Eval_gate allow/deny lists at tool-call time.");
+        ];
+      `Assoc
+        [
+          ("surface", `String "unit.policy.kill_switch");
+          ("status", `String "enforced");
+          ("reason",
+           `String
+             "Command-plane assignment blocks operations targeting units with kill-switch enabled.");
+        ];
+      `Assoc
+        [
+          ("surface", `String "unit.policy.frozen");
+          ("status", `String "enforced");
+          ("reason",
+           `String
+             "Command-plane assignment blocks operations targeting frozen units.");
+        ];
+      `Assoc
+        [
+          ("surface", `String "unit.policy.tool_allowlist");
+          ("status", `String "advisory_only");
+          ("reason",
+           `String
+             "Stored in CPv2 topology/policy JSON but not wired into runtime tool dispatch on main.");
+        ];
+      `Assoc
+        [
+          ("surface", `String "unit.policy.model_allowlist");
+          ("status", `String "advisory_only");
+          ("reason",
+           `String
+             "Stored in CPv2 topology/policy JSON but not wired into runtime model selection on main.");
+        ];
+    ]
+
+let handle_tool_admin_snapshot ctx args =
+  let include_hidden = get_bool args "include_hidden" true in
+  let include_deprecated = get_bool args "include_deprecated" true in
+  let payload =
+    `Assoc
+      [
+        ("status", `String "ok");
+        ("generated_at", `String (Types.now_iso ()));
+        ("mode", mode_snapshot_json ctx);
+        ("auth", auth_snapshot_json ctx);
+        ( "command_plane",
+          `Assoc
+            [
+              ("policy_status", Command_plane_v2.policy_status_json ctx.config);
+              ("enforcement_summary", enforcement_summary_json ());
+            ] );
+        ("keeper_policies", keeper_policies_json ctx);
+        ( "tool_inventory",
+          tool_inventory_json ctx ~include_hidden ~include_deprecated );
+      ]
+  in
+  (true, Yojson.Safe.pretty_to_string payload)
+
+let apply_keeper_policy_update config ~runtime_class args =
+  let name = get_string args "name" "" |> String.trim in
+  let policy_mode_opt = get_string_opt args "policy_mode" |> Option.map String.trim in
+  let action_budget_opt = get_string_opt args "action_budget" |> Option.map String.trim in
+  let autonomy_level_opt = get_string_opt args "autonomy_level" |> Option.map String.trim in
+  let reward_model_path_opt = get_string_opt args "reward_model_path" |> Option.map String.trim in
+  let membership_ok =
+    match runtime_class with
+    | "resident_keeper" -> List.mem name (Tool_keeper.resident_keeper_names config)
+    | "persistent_agent" -> List.mem name (Tool_keeper.persistent_agent_names config)
+    | _ -> false
+  in
+  if not (Tool_keeper.validate_name name) then
+    Error "invalid keeper name"
+  else if not membership_ok then
+    Error
+      (Printf.sprintf "%s not found in %s set" name runtime_class)
+  else
+    match Tool_keeper.read_meta config name with
+    | Error err -> Error err
+    | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
+    | Ok (Some meta) ->
+        let policy_mode =
+          match policy_mode_opt with
+          | None -> Ok meta.policy_mode
+          | Some "heuristic" -> Ok "heuristic"
+          | Some "learned_offline_v1" -> Ok "learned_offline_v1"
+          | Some other -> Error (Printf.sprintf "invalid policy_mode: %s" other)
+        in
+        let action_budget =
+          match action_budget_opt with
+          | None -> Ok meta.policy_action_budget
+          | Some "conversation" -> Ok "conversation"
+          | Some "board" -> Ok "board"
+          | Some other -> Error (Printf.sprintf "invalid action_budget: %s" other)
+        in
+        let autonomy_level =
+          match autonomy_level_opt with
+          | None -> Ok meta.autonomy_level
+          | Some raw -> (
+              match Keeper_autonomy.autonomy_level_of_string raw with
+              | Some level ->
+                  Ok
+                    (String.lowercase_ascii
+                       (Keeper_autonomy.autonomy_level_to_string level))
+              | None -> Error (Printf.sprintf "invalid autonomy_level: %s" raw))
+        in
+        (match policy_mode, action_budget, autonomy_level with
+        | Error err, _, _ | _, Error err, _ | _, _, Error err -> Error err
+        | Ok policy_mode, Ok action_budget, Ok autonomy_level ->
+            let reward_model_path_raw =
+              match reward_model_path_opt with
+              | Some value -> value
+              | None -> meta.policy_reward_model_path
+            in
+            let reward_model_path =
+              if reward_model_path_raw <> ""
+                 && Filename.is_relative reward_model_path_raw
+              then
+                Filename.concat config.base_path reward_model_path_raw
+              else
+                reward_model_path_raw
+            in
+            let effective_reward_result =
+              if String.equal policy_mode "learned_offline_v1" then
+                Tool_keeper.load_keeper_reward_model reward_model_path
+                |> Result.map (fun _ -> (reward_model_path, None))
+              else
+                Ok (reward_model_path, None)
+            in
+            match effective_reward_result with
+            | Error err -> Error err
+            | Ok (effective_reward_path, reward_model_version) ->
+                let updated =
+                  {
+                    meta with
+                    policy_mode;
+                    policy_action_budget = action_budget;
+                    policy_reward_model_path = effective_reward_path;
+                    autonomy_level;
+                    updated_at = Types.now_iso ();
+                  }
+                in
+                (match Tool_keeper.write_meta config updated with
+                | Error err -> Error err
+                | Ok () ->
+                    let policy_json =
+                      match keeper_tool_policy_json updated.autonomy_level with
+                      | `Assoc fields -> fields
+                      | _ -> []
+                    in
+                    Ok
+                      (`Assoc
+                        ([
+                           ("status", `String "ok");
+                           ("runtime_class", `String runtime_class);
+                           ("name", `String updated.name);
+                           ("policy_mode", `String updated.policy_mode);
+                           ("action_budget", `String updated.policy_action_budget);
+                           ("autonomy_level", `String updated.autonomy_level);
+                           ("reward_model_path", json_string_option (Some updated.policy_reward_model_path));
+                           ("reward_model_version", json_string_option reward_model_version);
+                         ]
+                        @ policy_json)))
+        )
+
+let handle_tool_admin_update ctx args =
+  let section =
+    get_string args "section" "" |> String.trim |> String.lowercase_ascii
+  in
+  let room_path = Room.masc_dir ctx.config in
+  match section with
+  | "mode" ->
+      let categories_opt = category_list_arg_opt args "enabled_categories" in
+      let mode_opt =
+        get_string_opt args "mode"
+        |> Option.map (fun raw -> String.lowercase_ascii (String.trim raw))
+      in
+      let result =
+        match categories_opt, mode_opt with
+        | Some categories, _ ->
+            let config = Config.set_categories room_path categories in
+            Ok config
+        | None, Some "custom" ->
+            Error "mode=custom requires enabled_categories"
+        | None, Some raw -> (
+            match Mode.mode_of_string raw with
+            | Some mode -> Ok (Config.switch_mode room_path mode)
+            | None -> Error (Printf.sprintf "unknown mode: %s" raw))
+        | None, None -> Error "mode or enabled_categories is required"
+      in
+      (match result with
+      | Error err -> (false, "❌ " ^ err)
+      | Ok _ ->
+          let payload =
+            `Assoc
+              [
+                ("status", `String "ok");
+                ("section", `String "mode");
+                ("result", mode_snapshot_json ctx);
+              ]
+          in
+          (true, Yojson.Safe.pretty_to_string payload))
+  | "auth" ->
+      let current = Auth.load_auth_config ctx.config.base_path in
+      let require_token =
+        match bool_arg_opt args "require_token" with
+        | Some value -> value
+        | None -> current.require_token
+      in
+      let enabled_opt = bool_arg_opt args "enabled" in
+      let room_secret =
+        match enabled_opt with
+        | Some true when not current.enabled ->
+            Some (Auth.enable_auth ctx.config.base_path ~require_token)
+        | Some false when current.enabled ->
+            Auth.disable_auth ctx.config.base_path;
+            None
+        | _ -> None
+      in
+      let refreshed = Auth.load_auth_config ctx.config.base_path in
+      let default_role_result =
+        match get_string_opt args "default_role" with
+        | None -> Ok refreshed.default_role
+        | Some raw -> (
+            match Types.agent_role_of_string (String.lowercase_ascii (String.trim raw)) with
+            | Ok role -> Ok role
+            | Error err -> Error err)
+      in
+      let expiry_hours =
+        match int_arg_opt args "token_expiry_hours" with
+        | Some value when value > 0 -> Ok value
+        | Some _ -> Error "token_expiry_hours must be > 0"
+        | None -> Ok refreshed.token_expiry_hours
+      in
+      (match default_role_result, expiry_hours with
+      | Error err, _ | _, Error err -> (false, "❌ " ^ err)
+      | Ok default_role, Ok token_expiry_hours ->
+          let updated =
+            {
+              refreshed with
+              require_token;
+              default_role;
+              token_expiry_hours;
+              enabled =
+                (match enabled_opt with Some value -> value | None -> refreshed.enabled);
+            }
+          in
+          Auth.save_auth_config ctx.config.base_path updated;
+          let payload =
+            `Assoc
+              [
+                ("status", `String "ok");
+                ("section", `String "auth");
+                ("room_secret", json_string_option room_secret);
+                ("result", auth_snapshot_json ctx);
+              ]
+          in
+          (true, Yojson.Safe.pretty_to_string payload))
+  | "unit_policy" ->
+      (match Command_plane_v2.policy_update_json ctx.config ~actor:ctx.agent_name args with
+      | Error err -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String err) ]))
+      | Ok json ->
+          let warnings =
+            let policy_json = U.member "policy" args in
+            let items = ref [] in
+            if U.member "tool_allowlist" policy_json <> `Null then
+              items :=
+                `Assoc
+                  [
+                    ("field", `String "tool_allowlist");
+                    ("status", `String "advisory_only");
+                    ("reason",
+                     `String
+                       "Stored in CPv2 policy but not yet enforced by runtime tool dispatch.");
+                  ]
+                :: !items;
+            if U.member "model_allowlist" policy_json <> `Null then
+              items :=
+                `Assoc
+                  [
+                    ("field", `String "model_allowlist");
+                    ("status", `String "advisory_only");
+                    ("reason",
+                     `String
+                       "Stored in CPv2 policy but not yet enforced by runtime model selection.");
+                  ]
+                :: !items;
+            `List (List.rev !items)
+          in
+          let payload =
+            `Assoc
+              [
+                ("status", `String "ok");
+                ("section", `String "unit_policy");
+                ("warnings", warnings);
+                ("result", json);
+              ]
+          in
+          (true, Yojson.Safe.pretty_to_string payload))
+  | "keeper_policy" ->
+      (match apply_keeper_policy_update ctx.config ~runtime_class:"resident_keeper" args with
+      | Ok json ->
+          (true, Yojson.Safe.pretty_to_string (`Assoc [ ("status", `String "ok"); ("section", `String "keeper_policy"); ("result", json) ]))
+      | Error err -> (false, "❌ " ^ err))
+  | "persistent_agent_policy" ->
+      (match apply_keeper_policy_update ctx.config ~runtime_class:"persistent_agent" args with
+      | Ok json ->
+          (true, Yojson.Safe.pretty_to_string (`Assoc [ ("status", `String "ok"); ("section", `String "persistent_agent_policy"); ("result", json) ]))
+      | Error err -> (false, "❌ " ^ err))
+  | _ ->
+      (false, "❌ section must be one of: mode | auth | unit_policy | keeper_policy | persistent_agent_policy")
 
 (* Handlers *)
 
@@ -83,4 +624,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ctx args)
   | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
   | "masc_tool_help" -> Some (handle_tool_help ctx args)
+  | "masc_tool_admin_snapshot" -> Some (handle_tool_admin_snapshot ctx args)
+  | "masc_tool_admin_update" -> Some (handle_tool_admin_update ctx args)
   | _ -> None

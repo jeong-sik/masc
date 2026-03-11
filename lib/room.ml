@@ -278,9 +278,11 @@ let resolve_agent_name_in_room config ~room_id agent_name =
         String.sub f 0 (String.length prefix) = prefix
       ) files with
       | Some file -> String.sub file 0 (String.length file - 5)
-      | None -> agent_name
+      | None ->
+          (* Default joins still persist under the root agents dir. *)
+          resolve_agent_name config agent_name
     else
-      agent_name
+      resolve_agent_name config agent_name
   end
 
 let ensure_room_bootstrap config room_id =
@@ -343,7 +345,7 @@ let ensure_room_bootstrap config room_id =
     let state_path = state_path_in_room config room_id in
     let backlog_path = backlog_path_in_room config room_id in
     List.iter mkdir_p [ room_path; agents_path; tasks_path; messages_path ];
-    if not (Sys.file_exists state_path) then begin
+    if not (path_exists config state_path) then begin
       let state = {
         protocol_version = "0.1.0";
         project = Filename.basename config.base_path;
@@ -360,7 +362,7 @@ let ensure_room_bootstrap config room_id =
       } in
       write_state_in_room config room_id state
     end;
-    if not (Sys.file_exists backlog_path) then begin
+    if not (path_exists config backlog_path) then begin
       let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
       write_json config backlog_path (backlog_to_yojson backlog)
     end
@@ -1987,7 +1989,8 @@ let audit_orphan_tasks config : (Types.task * string) list =
 let is_agent_joined_in_room config ~room_id ~agent_name =
   if not (root_is_initialized config) then false
   else
-    let filename = safe_filename agent_name ^ ".json" in
+    let actual_name = resolve_agent_name_in_room config ~room_id agent_name in
+    let filename = safe_filename actual_name ^ ".json" in
     (* Check room-scoped path first *)
     let room_agents = agents_dir_in_room config room_id in
     let room_path = Filename.concat room_agents filename in

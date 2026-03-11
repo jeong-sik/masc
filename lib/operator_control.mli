@@ -30,12 +30,12 @@ val digest_json :
 
 val action_json :
   ?actor_hint:string ->
-  'a context ->
+  float Eio.Time.clock_ty context ->
   Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 
 val confirm_json :
   ?actor_hint:string ->
-  'a context ->
+  float Eio.Time.clock_ty context ->
   Yojson.Safe.t ->
   (Yojson.Safe.t, string) result

@@ -1,11 +1,14 @@
 import { html } from 'htm/preact'
 import type {
+  CommandPlaneRunResolutionRecommendation,
+  CommandPlaneRunResolutionState,
   CommandPlaneSwarmBlocker,
   CommandPlaneSwarmChecklistItem,
   CommandPlaneSwarmFlag,
   CommandPlaneSwarmGap,
   CommandPlaneSwarmLane,
   CommandPlaneSwarmProof,
+  CommandPlaneSwarmResponse,
   CommandPlaneSwarmTimelineEvent,
   CommandPlaneSwarmWorker,
 } from '../../types'
@@ -14,11 +17,18 @@ import {
   commandPlaneSwarmError,
   commandPlaneSwarmLoading,
 } from '../../command-store'
+import {
+  confirmOperatorPendingAction,
+  dispatchOperatorAction,
+  operatorActionBusy,
+  operatorSnapshot,
+} from '../../operator-store'
 import { route } from '../../router'
 import { PanelSemanticDetails } from '../common/semantic-layer'
 import { workflowContextForRoute } from '../../workflow-context'
 import {
   currentCommandPlaneSummary,
+  dashboardActorName,
   dashboardSwarmOperationId,
   dashboardSwarmRunId,
   relativeTime,
@@ -26,6 +36,139 @@ import {
   toneClass,
 } from './helpers'
 import { TraceRow } from './topology'
+
+function previewText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value == null) return ''
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function runResolutionTone(
+  recommendation: CommandPlaneRunResolutionRecommendation | null | undefined,
+  resolution: CommandPlaneRunResolutionState | null | undefined,
+): string {
+  if (resolution?.status === 'abandoned') return 'warn'
+  if (recommendation?.recommended_kind === 'continue') return 'warn'
+  if (recommendation?.recommended_kind === 'rerun') return 'bad'
+  return 'ok'
+}
+
+function runResolutionLabel(kind?: string | null): string {
+  switch (kind) {
+    case 'continue':
+    case 'continued':
+      return '계속'
+    case 'rerun':
+      return '재실행'
+    case 'abandon':
+    case 'abandoned':
+      return '포기'
+    default:
+      return kind?.trim() || '결정'
+  }
+}
+
+export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResponse }) {
+  const runId = swarm.run_id
+  const recommendation = swarm.resolution_recommendation
+  const resolution = swarm.run_resolution
+  if (!runId || (!recommendation && !resolution)) return null
+
+  const actor = dashboardActorName() ?? 'dashboard'
+  const pendingConfirm =
+    operatorSnapshot.value?.pending_confirms.find(item =>
+      item.target_type === 'swarm_run' && item.target_id === runId,
+    ) ?? null
+  const tone = runResolutionTone(recommendation, resolution)
+  const operationId = swarm.operation?.operation_id ?? swarm.operation_id ?? undefined
+  const basePayload: Record<string, unknown> = {
+    run_id: runId,
+  }
+  if (operationId) basePayload.operation_id = operationId
+  if (recommendation?.reason) basePayload.reason = recommendation.reason
+
+  const previewAction = async (actionType: 'swarm_run_continue' | 'swarm_run_rerun' | 'swarm_run_abandon') => {
+    await dispatchOperatorAction({
+      actor,
+      action_type: actionType,
+      target_type: 'swarm_run',
+      target_id: runId,
+      payload: basePayload,
+    })
+  }
+
+  const confirmPending = async (decision: 'confirm' | 'deny') => {
+    if (!pendingConfirm) return
+    await confirmOperatorPendingAction(actor, pendingConfirm.confirm_token, decision)
+  }
+
+  return html`
+    <article class="command-guide-card ${toneClass(tone)}">
+      <div class="command-guide-head">
+        <strong>Run Resolution</strong>
+        <span class="command-chip ${toneClass(tone)}">
+          ${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)}
+        </span>
+      </div>
+      <p>
+        ${resolution?.status === 'abandoned'
+          ? `이 run은 ${resolution.decided_by}가 ${relativeTime(resolution.decided_at)}에 soft abandon 처리했습니다. ${resolution.reason}`
+          : recommendation?.reason ?? '이 run에 대한 별도 resolution recommendation은 아직 없습니다.'}
+      </p>
+      <div class="command-card-grid">
+        <span>Run</span><span>${runId}</span>
+        <span>Provenance</span><span>${recommendation?.provenance ?? 'recorded'}</span>
+        <span>Engine</span><span>${recommendation?.decision_engine ?? 'operator_record'}</span>
+        <span>Authoritative</span><span>${recommendation?.authoritative ? 'yes' : 'no'}</span>
+      </div>
+      ${recommendation?.evidence
+        ? html`
+            <div class="command-tag-row">
+              <span class="command-tag">joined ${recommendation.evidence.joined_workers ?? 0}</span>
+              <span class="command-tag">trace ${recommendation.evidence.trace_events ?? 0}</span>
+              <span class="command-tag">message ${recommendation.evidence.message_events ?? 0}</span>
+              ${recommendation.evidence.runtime_blocker
+                ? html`<span class="command-tag ${toneClass('bad')}">${recommendation.evidence.runtime_blocker}</span>`
+                : null}
+            </div>
+          `
+        : null}
+      ${pendingConfirm
+        ? html`
+            <div class="command-guide-card warn">
+              <div class="command-guide-head">
+                <strong>확인 대기</strong>
+                <span class="command-chip warn">${pendingConfirm.confirm_token}</span>
+              </div>
+              ${pendingConfirm.preview ? html`<pre class="command-trace-detail">${previewText(pendingConfirm.preview)}</pre>` : null}
+              <div class="command-action-row">
+                <button class="control-btn" onClick=${() => { void confirmPending('confirm') }} disabled=${operatorActionBusy.value}>확인 실행</button>
+                <button class="control-btn ghost" onClick=${() => { void confirmPending('deny') }} disabled=${operatorActionBusy.value}>취소</button>
+              </div>
+            </div>
+          `
+        : recommendation
+          ? html`
+              <div class="command-action-row">
+                ${recommendation.continue_available
+                  ? html`<button class="control-btn ghost" onClick=${() => { void previewAction('swarm_run_continue') }} disabled=${operatorActionBusy.value}>Continue</button>`
+                  : null}
+                ${recommendation.rerun_available
+                  ? html`<button class="control-btn" onClick=${() => { void previewAction('swarm_run_rerun') }} disabled=${operatorActionBusy.value}>Rerun</button>`
+                  : null}
+                ${recommendation.abandon_available
+                  ? html`<button class="control-btn ghost" onClick=${() => { void previewAction('swarm_run_abandon') }} disabled=${operatorActionBusy.value}>Abandon</button>`
+                  : null}
+              </div>
+            `
+          : null}
+    </article>
+  `
+}
 
 function swarmLaneTone(lane: CommandPlaneSwarmLane): string {
   if (lane.motion_state === 'stalled') return 'bad'
@@ -449,6 +592,7 @@ export function SwarmSurface() {
                           ${swarm.truth_notes.map(note => html`<span class="command-tag">${note}</span>`)}
                         </div>`
                       : null}
+                    <${SwarmRunResolutionCard} swarm=${swarm} />
                   `
                 : html`<div class="empty-state">스웜 read-model이 아직 없습니다.</div>`}
         </section>

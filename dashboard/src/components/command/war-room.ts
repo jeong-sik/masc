@@ -37,7 +37,7 @@ import {
   surfaceRouteParams,
   toneClass,
 } from './helpers'
-import { SwarmBlockerCard, SwarmHealthBar, SwarmStoryboard } from './swarm'
+import { SwarmBlockerCard, SwarmHealthBar, SwarmRunResolutionCard, SwarmStoryboard } from './swarm'
 import { TraceRow } from './topology'
 
 type WarRoomWorkerView = {
@@ -425,6 +425,7 @@ export function WarRoomSurface() {
               <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
             </div>
             <div class="command-card-stack">
+              ${swarm ? html`<${SwarmRunResolutionCard} swarm=${swarm} />` : null}
               ${blockers.length > 0
                 ? blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)
                 : html`<div class="command-guide-card ok"><p>지금 보이는 blocker는 없습니다.</p></div>`}

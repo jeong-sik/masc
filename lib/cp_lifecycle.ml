@@ -1,5 +1,66 @@
 include Cp_snapshot
 
+let option_to_json f = function
+  | Some value -> f value
+  | None -> `Null
+
+let swarm_run_resolution_status_of_json json =
+  match U.member "status" json with
+  | `String ("continued" | "rerun" | "abandoned" as status) -> Some status
+  | _ -> None
+
+let read_swarm_run_resolution_json config run_id =
+  find_swarm_live_artifact_json config run_id "resolution.json"
+
+let swarm_run_resolution_entry_json ~status ~actor ~reason ?operation_id
+    ?detachment_id ?note () =
+  `Assoc
+    [
+      ("status", `String status);
+      ("decided_by", `String actor);
+      ("decided_at", `String (Types.now_iso ()));
+      ("reason", `String reason);
+      ("operation_id", option_to_json (fun value -> `String value) operation_id);
+      ("detachment_id", option_to_json (fun value -> `String value) detachment_id);
+      ("note", option_to_json (fun value -> `String value) note);
+    ]
+
+let record_swarm_run_resolution_json config ~run_id ~status ~actor ~reason
+    ?operation_id ?detachment_id ?note () =
+  let existing =
+    match read_swarm_run_resolution_json config run_id with
+    | Some (`Assoc _ as json) -> json
+    | _ -> `Assoc []
+  in
+  let entry =
+    swarm_run_resolution_entry_json ~status ~actor ~reason ?operation_id
+      ?detachment_id ?note ()
+  in
+  let history =
+    match U.member "history" existing with
+    | `List rows -> rows @ [ entry ]
+    | _ -> [ entry ]
+  in
+  let payload =
+    `Assoc
+      [
+        ("run_id", `String run_id);
+        ("status", `String status);
+        ("decided_by", `String actor);
+        ("decided_at", `String (Types.now_iso ()));
+        ("reason", `String reason);
+        ("operation_id", option_to_json (fun value -> `String value) operation_id);
+        ("detachment_id", option_to_json (fun value -> `String value) detachment_id);
+        ("note", option_to_json (fun value -> `String value) note);
+        ("history", `List history);
+      ]
+  in
+  let run_dir = Cp_paths.primary_swarm_live_run_dir config run_id in
+  Room_utils.mkdir_p run_dir;
+  Room_utils.write_json_local (Cp_paths.swarm_live_resolution_path config run_id)
+    payload;
+  payload
+
 let swarm_live_json config ?run_id ?operation_id () =
   let room_id = Room.current_room_id config in
   let agents = Room.get_agents_raw config in
@@ -864,6 +925,82 @@ let swarm_live_json config ?run_id ?operation_id () =
         |> (function Some value -> String.equal value "bad" | None -> false))
       !blockers
   in
+  let existing_resolution = read_swarm_run_resolution_json config effective_run_id in
+  let existing_resolution_status =
+    Option.bind existing_resolution swarm_run_resolution_status_of_json
+  in
+  let partial_run_evidence =
+    joined_workers > 0
+    || current_task_bound > 0
+    || fresh_heartbeats > 0
+    || recent_messages <> []
+    || relevant_traces <> []
+  in
+  let operation_paused =
+    match selected_operation with
+    | Some operation -> operation.status = Paused
+    | None -> false
+  in
+  let continue_available =
+    pending_decisions = []
+    && (Option.is_some selected_operation || detachment_exists)
+  in
+  let rerun_available = pending_decisions = [] in
+  let abandon_available = true in
+  let resolution_recommendation =
+    if pending_decisions <> [] then
+      None
+    else if existing_resolution_status = Some "abandoned" then
+      None
+    else
+      let recommended_kind, reason =
+        if
+          continue_available
+          && (operation_paused || partial_run_evidence || detachment_exists)
+          && not (Option.is_some runtime_blocker)
+        then
+          ( "continue",
+            if operation_paused then
+              "Matched operation is paused and run-scoped evidence exists. Resume and dispatch before rerunning the harness."
+            else if partial_run_evidence then
+              "Matched operation or detachment still has worker or trace evidence. Try command-plane recovery before a full rerun."
+            else
+              "A matching detachment exists for this run. Dispatch recovery is cheaper than a full rerun." )
+        else
+          ( "rerun",
+            if Option.is_some runtime_blocker then
+              "Runtime verification failed for this run. Clear the runtime blocker, then rerun the harness for the same run_id."
+            else if Option.is_some selected_operation || detachment_exists then
+              "The run still maps to managed state, but resumable evidence is too weak. Rerun the harness and rebuild fresh proof."
+            else
+              "No resumable managed operation or worker evidence remains for this run. Rerun the harness to materialize fresh state." )
+      in
+      Some
+        (`Assoc
+          [
+            ("run_id", `String effective_run_id);
+            ("recommended_kind", `String recommended_kind);
+            ("continue_available", `Bool continue_available);
+            ("rerun_available", `Bool rerun_available);
+            ("abandon_available", `Bool abandon_available);
+            ("reason", `String reason);
+            ( "evidence",
+              `Assoc
+                [
+                  ("operation_id", option_to_json (fun value -> `String value) (Option.map (fun (operation : operation_record) -> operation.operation_id) selected_operation));
+                  ("detachment_id", option_to_json (fun value -> `String value) (Option.map (fun (detachment : detachment_record) -> detachment.detachment_id) matched_detachment));
+                  ("joined_workers", `Int joined_workers);
+                  ("current_task_bound", `Int current_task_bound);
+                  ("fresh_heartbeats", `Int fresh_heartbeats);
+                  ("trace_events", `Int (List.length relevant_traces));
+                  ("message_events", `Int (List.length recent_messages));
+                  ("runtime_blocker", option_to_json (fun value -> `String value) runtime_blocker);
+                ] );
+            ("provenance", `String "derived");
+            ("decision_engine", `String "deterministic_truth_map");
+            ("authoritative", `Bool false);
+          ])
+  in
   `Assoc
     [
       ("version", `String "cp-v2");
@@ -871,6 +1008,8 @@ let swarm_live_json config ?run_id ?operation_id () =
       ("run_id", `String effective_run_id);
       ("room_id", `String room_id);
       ("operation_id", match selected_operation with Some operation -> `String operation.operation_id | None -> `Null);
+      ("run_resolution", option_to_json Fun.id existing_resolution);
+      ("resolution_recommendation", option_to_json Fun.id resolution_recommendation);
       ("recommended_next_tool", `String recommended_next_tool);
       ( "summary",
         `Assoc

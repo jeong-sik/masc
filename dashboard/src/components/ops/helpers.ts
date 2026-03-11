@@ -135,6 +135,12 @@ export function actionTypeLabel(value?: string | null): string {
       return 'keeper 메시지'
     case 'keeper_msg':
       return 'keeper 메시지'
+    case 'swarm_run_continue':
+      return 'swarm run 계속'
+    case 'swarm_run_rerun':
+      return 'swarm run 재실행'
+    case 'swarm_run_abandon':
+      return 'swarm run 포기'
     default:
       return value?.trim() || '액션'
   }
@@ -148,6 +154,8 @@ export function targetTypeLabel(value?: string | null): string {
       return 'session'
     case 'keeper':
       return 'keeper'
+    case 'swarm_run':
+      return 'swarm run'
     default:
       return value?.trim() || 'target'
   }

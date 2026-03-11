@@ -73,11 +73,19 @@ let swarm_live_run_dirs config run_id =
          [ Filename.concat dir normalized; Filename.concat dir run_id ])
   |> List.sort_uniq String.compare
 
+let primary_swarm_live_run_dir config run_id =
+  Filename.concat
+    (Filename.concat (control_plane_root_dir config) "swarm-live")
+    (Room_utils.safe_filename run_id)
+
 let find_swarm_live_artifact_path config run_id filename =
   swarm_live_run_dirs config run_id
   |> List.find_map (fun dir ->
          let path = Filename.concat dir filename in
          if Sys.file_exists path || Room_utils.path_exists config path then Some path else None)
+
+let swarm_live_resolution_path config run_id =
+  Filename.concat (primary_swarm_live_run_dir config run_id) "resolution.json"
 
 let find_swarm_live_artifact_json config run_id filename =
   match find_swarm_live_artifact_path config run_id filename with

@@ -1590,6 +1590,81 @@ let test_swarm_live_json_reads_runtime_doctor_and_blockers () =
                 (row |> member "code" |> to_string)
                 "provider_unreachable")))
 
+let test_swarm_live_json_recommends_rerun_without_resumable_state () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      let swarm = Command_plane_v2.swarm_live_json config ~run_id:"empty-swarm-run" () in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "rerun recommendation" "rerun"
+        (swarm |> member "resolution_recommendation" |> member "recommended_kind"
+       |> to_string);
+      Alcotest.(check bool) "continue unavailable" false
+        (swarm |> member "resolution_recommendation" |> member "continue_available"
+       |> to_bool);
+      Alcotest.(check bool) "rerun available" true
+        (swarm |> member "resolution_recommendation" |> member "rerun_available"
+       |> to_bool))
+
+let test_swarm_live_json_recommends_continue_for_paused_run_and_hides_after_abandon () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let run_id = "paused-swarm-run" in
+      let config = Room.default_config base_dir in
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "platoon-alpha");
+              ("objective", `String "Paused swarm live harness");
+              ("note", `String (Printf.sprintf "run_id=%s" run_id));
+              ("policy_class", `String "guarded");
+              ("budget_class", `String "standard");
+            ])
+      in
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.dispatch_tick_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String operation.operation_id) ])));
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.pause_operation_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String operation.operation_id) ])));
+      let before =
+        Command_plane_v2.swarm_live_json config ~run_id
+          ~operation_id:operation.operation_id ()
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "continue recommendation" "continue"
+        (before |> member "resolution_recommendation" |> member "recommended_kind"
+       |> to_string);
+      let resolution =
+        Command_plane_v2.record_swarm_run_resolution_json config ~run_id
+          ~status:"abandoned" ~actor:"owner"
+          ~reason:"operator chose soft abandon"
+          ~operation_id:operation.operation_id
+          ?note:(Some "test abandon") ()
+      in
+      Alcotest.(check string) "resolution written" "abandoned"
+        (resolution |> member "status" |> to_string);
+      let after =
+        Command_plane_v2.swarm_live_json config ~run_id
+          ~operation_id:operation.operation_id ()
+      in
+      Alcotest.(check string) "persisted run resolution" "abandoned"
+        (after |> member "run_resolution" |> member "status" |> to_string);
+      Alcotest.(check bool) "recommendation suppressed" true
+        (after |> member "resolution_recommendation" = `Null))
+
 let test_best_first_search_blocks_and_routes_research_pipeline () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1967,6 +2042,10 @@ let () =
             test_swarm_live_json_reads_custom_worker_count_from_operation_note;
           Alcotest.test_case "swarm live reads runtime doctor and blockers" `Quick
             test_swarm_live_json_reads_runtime_doctor_and_blockers;
+          Alcotest.test_case "swarm live recommends rerun without resumable state" `Quick
+            test_swarm_live_json_recommends_rerun_without_resumable_state;
+          Alcotest.test_case "swarm live recommends continue and hides after abandon" `Quick
+            test_swarm_live_json_recommends_continue_for_paused_run_and_hides_after_abandon;
           Alcotest.test_case "swarm live wrapper persists summary" `Quick
             test_swarm_live_run_with_runner_persists_summary;
           Alcotest.test_case "swarm live wrapper reports runner exceptions" `Quick

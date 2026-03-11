@@ -321,7 +321,9 @@ let tool_category tool_name =
   | "masc_persona_list" | "masc_keeper_create_from_persona"
   | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_status"
   | "masc_keeper_list" | "masc_keeper_msg" | "masc_keeper_eval"
-  | "masc_keeper_model_set"
+  | "masc_keeper_model_set" | "masc_keeper_policy_set"
+  | "masc_keeper_feedback_record" | "masc_keeper_dataset_export"
+  | "masc_keeper_action_explain" | "masc_keeper_eval_replay"
   | "masc_keeper_goals" | "masc_keeper_trajectory"
   | "masc_keeper_autonomy"
   (* Perpetual *)

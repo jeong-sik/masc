@@ -449,6 +449,127 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
   };
 
   {
+    name = "masc_keeper_policy_set";
+    description = "Switch a keeper between heuristic and learned policy modes with an explicit action budget and reward model path.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("policy_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "heuristic"; `String "learned_offline_v1"]);
+          ("description", `String "Behavior selection mode. learned_offline_v1 disables keeper heuristics and uses the reward model scorer.");
+        ]);
+        ("action_budget", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "conversation"; `String "board"]);
+          ("description", `String "Maximum autonomous action surface for learned policy mode.");
+        ]);
+        ("reward_model_path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Absolute or relative JSON file path for the offline reward model.");
+        ]);
+      ]);
+      ("required", `List [`String "name"; `String "policy_mode"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_feedback_record";
+    description = "Record structured feedback for a learned-policy keeper action. Use this to build offline reward datasets from accepted or rejected behavior.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("action_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Policy action id returned by action_explain or stored in the policy log.");
+        ]);
+        ("verdict", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Structured feedback label, for example good_action, unnecessary_action, missed_action, wrong_room, wrong_timing, wrong_tone.");
+        ]);
+        ("score", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Optional scalar feedback score.");
+        ]);
+        ("note", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional human note explaining the verdict.");
+        ]);
+      ]);
+      ("required", `List [`String "name"; `String "action_id"; `String "verdict"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_dataset_export";
+    description = "Export learned-policy traces and feedback into a deterministic JSON dataset artifact for offline reward-model training.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("output_path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional JSON output path. Defaults to .masc/perpetual-keepers/<name>.dataset.json.");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum number of policy actions to export (default: 200).");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_action_explain";
+    description = "Explain the latest or specified learned-policy action, including observation features, candidate scores, chosen action, and safety-gate result.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("action_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional specific policy action id. Defaults to the latest logged action.");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_eval_replay";
+    description = "Replay recent learned-policy actions offline and compare the stored choice against the current reward model and a simple deterministic baseline.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum number of policy actions to replay (default: 50).");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
+  {
     name = "masc_keeper_down";
     description = "Stop keeper presence keepalive and optionally remove keeper files.";
     input_schema = `Assoc [

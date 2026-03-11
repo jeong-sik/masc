@@ -249,6 +249,37 @@ let write_persona_profile ~me_root ~persona_name ~content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let write_reward_model path =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc
+        {|{
+  "version": "reward-model-v1",
+  "candidates": {
+    "noop": {
+      "bias": 0.0,
+      "weights": {
+        "direct_mention": -0.5
+      }
+    },
+    "reply_in_room": {
+      "bias": 0.1,
+      "weights": {
+        "direct_mention": 1.5,
+        "question_mark": 0.2
+      }
+    },
+    "board_post": {
+      "bias": -0.3,
+      "weights": {
+        "active_goal_count": 0.8
+      }
+    }
+  }
+}|})
+
 let test_persona_list_and_create_from_persona () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -338,6 +369,142 @@ let test_persona_list_and_create_from_persona () =
         check string "status room scope" "all"
           Yojson.Safe.Util.(status_json |> member "meta" |> member "room_scope" |> to_string)))
 
+let test_keeper_policy_tools_roundtrip () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let reward_model_path = Filename.concat base_dir "reward-model.json" in
+      write_reward_model reward_model_path;
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Maintain Sangsu persona");
+              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("active_model", `String "llama:qwen3.5-35b-a3b-ud-q8-xl");
+              ("room_scope", `String "all");
+              ("trigger_mode", `String "explicit_only");
+              ("mention_targets", `List [ `String "sangsu" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let ok, policy_body =
+        dispatch "masc_keeper_policy_set"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("policy_mode", `String "learned_offline_v1");
+              ("action_budget", `String "board");
+              ("reward_model_path", `String reward_model_path);
+            ])
+      in
+      check bool "policy set ok" true ok;
+      let policy_json = Yojson.Safe.from_string policy_body in
+      check string "policy mode updated" "learned_offline_v1"
+        Yojson.Safe.Util.(policy_json |> member "policy_mode" |> to_string);
+      Masc_mcp.Tool_keeper.append_jsonl_line
+        (Masc_mcp.Tool_keeper.keeper_policy_log_path config "sangsu")
+        (`Assoc
+          [
+            ("action_id", `String "act-1");
+            ("chosen_action", `String "reply_in_room");
+            ("feature_vector",
+              `Assoc
+                [
+                  ("direct_mention", `Float 1.0);
+                  ("question_mark", `Float 1.0);
+                  ("active_goal_count", `Float 0.0);
+                ]);
+            ("candidates",
+              `List
+                [
+                  `Assoc [("action", `String "noop")];
+                  `Assoc [("action", `String "reply_in_room")];
+                ]);
+            ("observation",
+              `Assoc
+                [
+                  ("source_kind", `String "room_message");
+                  ("room_id", `String "default");
+                  ("from_agent", `String "tester");
+                  ("message", `String "@sangsu?");
+                  ("direct_mention", `Bool true);
+                  ("has_question", `Bool true);
+                  ("message_chars", `Int 8);
+                  ("total_turns", `Int 0);
+                  ("active_goal_count", `Int 0);
+                  ("joined_room_count", `Int 1);
+                  ("room_scope", `String "all");
+                  ("trigger_mode", `String "explicit_only");
+                  ("last_turn_ago_s", `Float 0.0);
+                ]);
+          ]);
+      let ok, explain_body =
+        dispatch "masc_keeper_action_explain"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("action_id", `String "act-1");
+            ])
+      in
+      check bool "action explain ok" true ok;
+      let explain_json = Yojson.Safe.from_string explain_body in
+      check string "action explain chosen action" "reply_in_room"
+        Yojson.Safe.Util.(explain_json |> member "chosen_action" |> to_string);
+      let ok, _ =
+        dispatch "masc_keeper_feedback_record"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("action_id", `String "act-1");
+              ("verdict", `String "good_action");
+              ("score", `Float 1.0);
+            ])
+      in
+      check bool "feedback record ok" true ok;
+      let export_path = Filename.concat base_dir "dataset.json" in
+      let ok, export_body =
+        dispatch "masc_keeper_dataset_export"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("output_path", `String export_path);
+            ])
+      in
+      check bool "dataset export ok" true ok;
+      let export_json = Yojson.Safe.from_string export_body in
+      check string "dataset export path" export_path
+        Yojson.Safe.Util.(export_json |> member "output_path" |> to_string);
+      check bool "dataset file exists" true (Sys.file_exists export_path);
+      let ok, replay_body =
+        dispatch "masc_keeper_eval_replay"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("limit", `Int 10);
+            ])
+      in
+      check bool "eval replay ok" true ok;
+      let replay_json = Yojson.Safe.from_string replay_body in
+      check int "replayed count" 1
+        Yojson.Safe.Util.(replay_json |> member "replayed_count" |> to_int))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -359,5 +526,7 @@ let () =
            test_keeper_model_set_persists_active_model;
          test_case "persona list and create from persona" `Quick
            test_persona_list_and_create_from_persona;
+         test_case "policy tools roundtrip" `Quick
+           test_keeper_policy_tools_roundtrip;
        ]);
   ]

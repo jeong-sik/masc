@@ -460,13 +460,15 @@ let handle_cycle ctx args =
                        (* Karpathy ratchet: git reset --hard HEAD~1 reverts commit + files *)
                        Autoresearch.git_reset_last ~workdir
                      | Autoresearch.Keep ->
-                       (* Update baseline to new score *)
-                       state.baseline <- score_after;
                        if score_after >= state.best_score then
                          Autoresearch.git_tag_best ~workdir
                            ~cycle:state.current_cycle ~score:score_after);
-                    (* 9. Persist *)
+                    (* 9. Persist cycle record first, then update in-memory state.
+                       Baseline mutation after append_cycle ensures disk has the
+                       decision record even if save_state fails. *)
                     Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
+                    (if record.decision = Autoresearch.Keep then
+                       state.baseline <- score_after);
                     state.current_cycle <- state.current_cycle + 1;
                     Autoresearch.save_state ~base_path:ctx.base_path state;
                     (* 10. SSE broadcast *)

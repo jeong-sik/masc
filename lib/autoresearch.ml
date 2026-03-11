@@ -310,19 +310,37 @@ let git_tag_best ~workdir ~cycle ~score =
 (* Target File Validation & I/O                                     *)
 (* ================================================================ *)
 
-(** Validate target_file: must be relative, no path traversal, must exist.
+(** Check if path contains traversal components (../ or /.. or bare ..). *)
+let has_path_traversal path =
+  path = ".."
+  || contains_substring path "../"
+  || (let len = String.length path in
+      len >= 3 && String.sub path (len - 3) 3 = "/..")
+
+(** Validate target_file: must be relative, no path traversal, must exist,
+    must not escape workdir via symlink.
     Returns Ok absolute_path or Error reason. *)
 let validate_target_file ~workdir target_file =
   if String.length target_file = 0 then
     Result.error "target_file is empty"
-  else if contains_substring target_file ".." then
-    Result.error (Printf.sprintf "target_file contains '..': %s" target_file)
   else if String.get target_file 0 = '/' then
     Result.error (Printf.sprintf "target_file must be relative: %s" target_file)
+  else if has_path_traversal target_file then
+    Result.error (Printf.sprintf "target_file contains '..': %s" target_file)
   else
     let abs = Filename.concat workdir target_file in
-    if Sys.file_exists abs then Result.ok abs
-    else Result.error (Printf.sprintf "target_file not found: %s" abs)
+    if not (Sys.file_exists abs) then
+      Result.error (Printf.sprintf "target_file not found: %s" abs)
+    else
+      let real_path = Unix.realpath abs in
+      let real_workdir = Unix.realpath workdir in
+      let prefix_len = String.length real_workdir in
+      if String.length real_path >= prefix_len
+         && String.sub real_path 0 prefix_len = real_workdir then
+        Result.ok real_path
+      else
+        Result.error (Printf.sprintf
+          "target_file escapes workdir via symlink: %s" target_file)
 
 (** Read entire file contents. *)
 let read_file path =
@@ -334,18 +352,28 @@ let read_file path =
     Bytes.to_string buf
   )
 
-(** Apply code change: write new_content to target_file.
+(** Apply code change: write new_content to target_file atomically.
+    Writes to a temp file in the same directory, then renames.
     Returns Ok original_content (for rollback reference) or Error reason. *)
 let apply_code_change ~workdir ~target_file ~new_content =
   match validate_target_file ~workdir target_file with
   | (Result.Error _) as e -> e
   | Result.Ok abs_path ->
     let original = read_file abs_path in
-    let oc = open_out abs_path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc new_content
-    );
-    Result.ok original
+    let dir = Filename.dirname abs_path in
+    let tmp_path = Filename.concat dir
+      (Printf.sprintf ".autoresearch_tmp_%d" (Unix.getpid ())) in
+    (try
+      let oc = open_out tmp_path in
+      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+        output_string oc new_content
+      );
+      Unix.rename tmp_path abs_path;
+      Result.ok original
+    with exn ->
+      (try Sys.remove tmp_path with _ -> ());
+      Result.error (Printf.sprintf "Failed to write %s: %s"
+        target_file (Printexc.to_string exn)))
 
 (* ================================================================ *)
 (* LLM Code Change Generation                                       *)
@@ -425,14 +453,18 @@ let parse_llm_code_response response =
         | Some code ->
           if String.trim code = "" then Result.error "Empty <modified_code> tag"
           else
-            (* Trim leading/trailing newline from code block *)
+            (* Strip all leading/trailing whitespace-only lines *)
             let trimmed =
-              let s = code in
-              let s = if String.length s > 0 && String.get s 0 = '\n'
-                then String.sub s 1 (String.length s - 1) else s in
-              let len = String.length s in
-              if len > 0 && String.get s (len - 1) = '\n'
-              then String.sub s 0 (len - 1) else s
+              let lines = String.split_on_char '\n' code in
+              let rec drop_blank = function
+                | [] -> []
+                | l :: rest ->
+                  if String.trim l = "" then drop_blank rest
+                  else l :: rest
+              in
+              let stripped = drop_blank lines in
+              let stripped = List.rev (drop_blank (List.rev stripped)) in
+              String.concat "\n" stripped
             in
             Result.ok (hypothesis, trimmed)
 

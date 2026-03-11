@@ -2179,10 +2179,80 @@ let gc config ?(days=7) () =
    | Error e ->
        results := Printf.sprintf "⚠️ Backend pubsub cleanup failed: %s" (Backend.show_error e) :: !results);
 
+  (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json) *)
+  let keeper_orphan_count = ref 0 in
+  let pk_dir = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in
+  if Sys.file_exists pk_dir then begin
+    let entries = Sys.readdir pk_dir |> Array.to_list in
+    (* Active keepers = those with a .json config file *)
+    let active_keepers = List.filter_map (fun name ->
+      if Filename.check_suffix name ".json" && String.length name > 0 && name.[0] <> '_' then
+        Some (Filename.chop_suffix name ".json")
+      else None
+    ) entries in
+    (* Find and remove orphan sidecar files *)
+    List.iter (fun name ->
+      (* Skip global files starting with _ (e.g. _alerts.jsonl) *)
+      if String.length name > 0 && name.[0] <> '_' then begin
+        let is_metrics = Filename.check_suffix name ".metrics.jsonl" in
+        let is_memory = Filename.check_suffix name ".memory.jsonl" in
+        if is_metrics || is_memory then begin
+          let suffix = if is_metrics then ".metrics.jsonl" else ".memory.jsonl" in
+          let base = String.sub name 0 (String.length name - String.length suffix) in
+          if not (List.mem base active_keepers) then begin
+            (try Sys.remove (Filename.concat pk_dir name)
+             with Sys_error _ -> ());
+            incr keeper_orphan_count
+          end
+        end
+      end
+    ) entries
+  end;
+  if !keeper_orphan_count > 0 then
+    results := Printf.sprintf "🧹 Removed %d orphan keeper sidecar file(s)" !keeper_orphan_count :: !results
+  else
+    results := "✅ No orphan keeper files" :: !results;
+
+  (* 6. Archive completed/interrupted team sessions older than N days *)
+  let session_archive_count = ref 0 in
+  let ts_root = Filename.concat (Filename.concat config.base_path ".masc") "team-sessions" in
+  if Sys.file_exists ts_root && Sys.is_directory ts_root then begin
+    let archive_ts_dir = Filename.concat
+      (Filename.concat (Filename.concat config.base_path ".masc") "archive") "team-sessions" in
+    Sys.readdir ts_root |> Array.iter (fun session_id ->
+      let sdir = Filename.concat ts_root session_id in
+      if Sys.is_directory sdir then begin
+        let sjson = Filename.concat sdir "session.json" in
+        if Sys.file_exists sjson then
+          try
+            let json = read_json config sjson in
+            let status =
+              Yojson.Safe.Util.(member "status" json |> to_string_option)
+              |> Option.value ~default:"" in
+            let updated =
+              Yojson.Safe.Util.(member "updated_at_iso" json |> to_string_option)
+              |> Option.value ~default:"" in
+            if (status = "completed" || status = "interrupted") && updated <> "" && updated < cutoff_iso then begin
+              mkdir_p archive_ts_dir;
+              let dest = Filename.concat archive_ts_dir session_id in
+              (try Unix.rename sdir dest
+               with Unix.Unix_error _ ->
+                 Printf.eprintf "[gc] failed to archive session %s\n%!" session_id);
+              incr session_archive_count
+            end
+          with _ -> ()
+      end
+    )
+  end;
+  if !session_archive_count > 0 then
+    results := Printf.sprintf "📦 Archived %d completed/interrupted team session(s)" !session_archive_count :: !results
+  else
+    results := "✅ No team sessions to archive" :: !results;
+
   (* Log event *)
   log_event config (Printf.sprintf
-    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"days\":%d,\"ts\":\"%s\"}"
-    !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count days (now_iso ()));
+    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"days\":%d,\"ts\":\"%s\"}"
+    !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count !keeper_orphan_count !session_archive_count days (now_iso ()));
 
   String.concat "\n" (List.rev !results)
 

@@ -765,3 +765,9 @@
  (name test_tool_registry)
  (modules test_tool_registry)
  (libraries masc_mcp alcotest yojson))
+
+; Mode Tool Count — end-to-end Config.enabled_tool_schemas per mode
+(test
+ (name test_mode_tool_count)
+ (modules test_mode_tool_count)
+ (libraries masc_mcp alcotest yojson))

@@ -1301,28 +1301,24 @@ let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : strin
                     true)
               | None -> false)
         in
-        if accepted then
-          Ok
-            (`Assoc
-              [
-                ("session_id", `String session_id);
-                ("status", `String "stop_requested");
-                ("reason", `String reason);
-              ])
-        else
-          let reloaded = Team_session_store.load_session config session_id in
-          let updated =
-            match reloaded with
-            | Some s when s.status <> Team_session_types.Running -> Some s
-            | _ ->
-                finalize_session ~config ~session_id
-                  ~final_status:Team_session_types.Interrupted ~reason
-                  ~generate_report
-          in
-          (match updated with
-          | Some s -> Ok (session_status_json config s)
-          | None ->
-              Error (Printf.sprintf "team session not found: %s" session_id))
+        (* Directly finalize rather than deferring to the runtime loop.
+           The runtime loop sleeps up to 15s between ticks, so setting a flag
+           alone would leave callers waiting. finalize_session is idempotent
+           under with_finalize_lock, safe even if the runtime loop also fires. *)
+        ignore accepted;
+        let reloaded = Team_session_store.load_session config session_id in
+        let updated =
+          match reloaded with
+          | Some s when s.status <> Team_session_types.Running -> Some s
+          | _ ->
+              finalize_session ~config ~session_id
+                ~final_status:Team_session_types.Interrupted ~reason
+                ~generate_report
+        in
+        (match updated with
+        | Some s -> Ok (session_status_json config s)
+        | None ->
+            Error (Printf.sprintf "team session not found: %s" session_id))
       end else
         let response =
           if generate_report then (

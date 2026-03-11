@@ -451,19 +451,9 @@ let handle_tool_admin_update ctx args =
         | None -> current.require_token
       in
       let enabled_opt = bool_arg_opt args "enabled" in
-      let room_secret =
-        match enabled_opt with
-        | Some true when not current.enabled ->
-            Some (Auth.enable_auth ctx.config.base_path ~require_token)
-        | Some false when current.enabled ->
-            Auth.disable_auth ctx.config.base_path;
-            None
-        | _ -> None
-      in
-      let refreshed = Auth.load_auth_config ctx.config.base_path in
       let default_role_result =
         match get_string_opt args "default_role" with
-        | None -> Ok refreshed.default_role
+        | None -> Ok current.default_role
         | Some raw -> (
             match Types.agent_role_of_string (String.lowercase_ascii (String.trim raw)) with
             | Ok role -> Ok role
@@ -473,11 +463,21 @@ let handle_tool_admin_update ctx args =
         match int_arg_opt args "token_expiry_hours" with
         | Some value when value > 0 -> Ok value
         | Some _ -> Error "token_expiry_hours must be > 0"
-        | None -> Ok refreshed.token_expiry_hours
+        | None -> Ok current.token_expiry_hours
       in
       (match default_role_result, expiry_hours with
       | Error err, _ | _, Error err -> (false, "❌ " ^ err)
       | Ok default_role, Ok token_expiry_hours ->
+          let room_secret =
+            match enabled_opt with
+            | Some true when not current.enabled ->
+                Some (Auth.enable_auth ctx.config.base_path ~require_token)
+            | Some false when current.enabled ->
+                Auth.disable_auth ctx.config.base_path;
+                None
+            | _ -> None
+          in
+          let refreshed = Auth.load_auth_config ctx.config.base_path in
           let updated =
             {
               refreshed with

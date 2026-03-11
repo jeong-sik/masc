@@ -175,6 +175,7 @@ let tool_category tool_name =
   (* Operator *)
   | "masc_operator_snapshot" | "masc_operator_digest"
   | "masc_operator_action" | "masc_operator_confirm"
+  | "masc_operator_judgment_write" | "masc_operator_judgment_latest"
   (* Detachment *)
   | "masc_detachment_list" | "masc_detachment_status"
   (* Execute *)

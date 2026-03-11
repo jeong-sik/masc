@@ -487,12 +487,30 @@ export function displayStatus(status?: string | null): string {
 export function hasSwarmActivity(): boolean {
   const swarm = commandPlaneSwarm.value
   if (!swarm) return false
+  const hasWorkerEvidence = swarm.workers.some(worker =>
+    worker.joined
+    || worker.live_presence
+    || worker.completed
+    || worker.current_task_matches_run
+    || worker.heartbeat_fresh
+    || worker.claim_marker_seen
+    || worker.done_marker_seen
+    || worker.final_marker_seen
+    || !!worker.current_task
+    || !!worker.bound_task_id
+    || !!worker.last_message,
+  )
   return Boolean(
-    swarm.run_id
-    || swarm.operation?.operation_id
+    swarm.operation?.operation_id
     || swarm.detachment?.detachment_id
-    || (swarm.summary?.expected_workers ?? 0) > 0
-    || swarm.workers.length > 0
+    || (swarm.summary?.joined_workers ?? 0) > 0
+    || (swarm.summary?.live_workers ?? 0) > 0
+    || (swarm.summary?.current_task_bound ?? 0) > 0
+    || (swarm.summary?.fresh_heartbeats ?? 0) > 0
+    || (swarm.summary?.claim_markers_seen ?? 0) > 0
+    || (swarm.summary?.done_markers_seen ?? 0) > 0
+    || (swarm.summary?.final_markers_seen ?? 0) > 0
+    || hasWorkerEvidence
     || swarm.recent_messages.length > 0
     || swarm.recent_trace_events.length > 0,
   )

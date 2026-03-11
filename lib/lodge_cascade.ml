@@ -101,7 +101,7 @@ let default_model_strings ~cascade_name =
         "gemini:gemini-2.5-flash";
         "ollama:glm-4.7-flash";
       ]
-  | "governance_judge" -> llama_glm
+  | "governance_judge" | "operator_judge" -> llama_glm
   (* walph — default execution models *)
   | "walph" -> llama_glm
   (* auto_responder — agent_type-specific cascades *)

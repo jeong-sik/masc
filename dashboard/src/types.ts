@@ -1369,11 +1369,66 @@ export interface OperatorSessionCard {
   top_recommendation?: OperatorRecommendedAction | null
 }
 
+export interface OperatorResidentJudgeRuntime {
+  enabled?: boolean
+  judge_online?: boolean
+  refreshing?: boolean
+  generated_at?: string | null
+  expires_at?: string | null
+  model_used?: string | null
+  keeper_name?: string | null
+  last_error?: string | null
+}
+
+export interface OperatorGuidanceSummary {
+  summary?: string | null
+  confidence?: number | null
+  provenance?: string | null
+  authoritative?: boolean
+  surface?: string | null
+  fresh_until?: string | null
+  keeper_name?: string | null
+  fallback_used?: boolean
+  disagreement_with_truth?: boolean
+}
+
+export interface OperatorJudgment {
+  judgment_id?: string
+  surface?: string | null
+  target_type?: string | null
+  target_id?: string | null
+  status?: string | null
+  summary?: string | null
+  confidence?: number | null
+  generated_at?: string | null
+  fresh_until?: string | null
+  keeper_name?: string | null
+  model_name?: string | null
+  runtime_name?: string | null
+  evidence_refs: string[]
+  recommended_action?: OperatorRecommendedAction | null
+  supersedes: string[]
+  fallback_used?: boolean
+  disagreement_with_truth?: boolean
+  provenance?: string | null
+}
+
 export interface OperatorDigest {
   trace_id?: string
   target_type: 'room' | 'team_session' | string
   target_id?: string | null
   health?: string
+  judgment_owner?: string | null
+  authoritative_judgment_available?: boolean
+  resident_judge_runtime?: OperatorResidentJudgeRuntime | null
+  judgment?: OperatorJudgment | null
+  active_guidance_layer?: string | null
+  active_summary?: OperatorGuidanceSummary | null
+  active_recommended_actions?: OperatorRecommendedAction[]
+  active_recommendation_source?: string | null
+  active_recommendation_summary?: OperatorGuidanceSummary | null
+  fallback_recommended_actions?: OperatorRecommendedAction[]
+  recommendation_summary?: OperatorGuidanceSummary | null
   swarm_status?: CommandPlaneSwarmStatus
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
@@ -1399,6 +1454,7 @@ export interface OperatorSnapshot {
   room: OperatorRoomSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
+  resident_judge_runtime?: OperatorResidentJudgeRuntime | null
   command_plane?: CommandPlaneSnapshot
   swarm_status?: CommandPlaneSwarmStatus
   recent_messages: Message[]

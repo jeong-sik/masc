@@ -34,6 +34,12 @@ val action_json :
   Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 
+val judgment_write_json :
+  'a context -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
+val judgment_latest_json :
+  'a context -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
 val confirm_json :
   ?actor_hint:string ->
   float Eio.Time.clock_ty context ->

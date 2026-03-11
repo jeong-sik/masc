@@ -79,6 +79,23 @@ let start_operation_exn config ~actor args =
   | Ok operation -> operation
   | Error message -> failwith message
 
+let iso_of_unix unix_ts =
+  let tm = Unix.gmtime unix_ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let record_operator_judgment config ~surface ~target_type ~target_id ~summary
+    ?recommended_action ~fresh_for_sec () =
+  let now_unix = Unix.gettimeofday () in
+  ignore
+    (Operator_judgment.record config ~surface ~target_type ~target_id ~summary
+       ~confidence:0.91 ?recommended_action ~generated_at:(Types.now_iso ())
+       ~generated_at_unix:now_unix
+       ~fresh_until:(iso_of_unix (now_unix +. fresh_for_sec))
+       ~fresh_until_unix:(now_unix +. fresh_for_sec)
+       ~keeper_name:"operator-judge" ())
+
 let setup_swarm_run_env config ~owner ~worker_one ~worker_two ~run_id =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
@@ -153,6 +170,12 @@ let test_snapshot_has_expected_sections () =
         (Yojson.Safe.Util.member "attention_summary" json <> `Null);
       Alcotest.(check bool) "recommendation summary present" true
         (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
+      Alcotest.(check bool) "resident judge runtime present" true
+        (Yojson.Safe.Util.member "resident_judge_runtime" json <> `Null);
+      Alcotest.(check bool) "resident judge disabled by default" false
+        Yojson.Safe.Util.
+          (json |> member "resident_judge_runtime" |> member "enabled"
+          |> to_bool);
       Alcotest.(check string) "judgment owner" "fallback_read_model"
         Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "no authoritative judgment" false
@@ -204,6 +227,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
       Alcotest.(check bool) "command_plane present" true
         (Yojson.Safe.Util.member "command_plane" digest <> `Null);
+      Alcotest.(check bool) "resident judge runtime present" true
+        (Yojson.Safe.Util.member "resident_judge_runtime" digest <> `Null);
       Alcotest.(check bool) "command_plane microarch present" true
         (Yojson.Safe.Util.(digest |> member "command_plane" |> member "operations"
          |> member "microarch")
@@ -785,6 +810,184 @@ let test_team_worker_spawn_batch_requires_confirm_then_executes () =
           spawn_event |> member "detail" |> member "actor" |> to_string)
     )
 
+let test_digest_room_prefers_fresh_resident_judgment () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      ignore (Room.join config ~agent_name:"operator" ~capabilities:[] ());
+      record_operator_judgment config ~surface:"command.warroom"
+        ~target_type:Operator_judgment.Room ~target_id:None
+        ~summary:"Pause the room before taking any destructive action."
+        ~recommended_action:
+          (`Assoc
+            [
+              ("action_kind", `String "pause_room");
+              ("resolved_tool", `String "masc_operator_confirm");
+              ("target_type", `String "room");
+              ("target_id", `Null);
+              ("reason", `String "resident judge requires manual gate");
+              ("payload_preview", `Assoc [ ("reason", `String "manual review") ]);
+            ])
+        ~fresh_for_sec:90.0 ();
+      Alcotest.(check int) "stored judgments" 1
+        (List.length (Operator_judgment.load_all config));
+      (match
+         Operator_judgment.latest_active config ~surface:"command.warroom"
+           ~target_type:Operator_judgment.Room ~target_id:None
+       with
+      | Some _ -> ()
+      | None ->
+          Alcotest.failf "expected room judgment in %s"
+            (Operator_judgment.judgments_path config));
+      let ctx = operator_ctx env sw config "operator" in
+      let digest =
+        match Operator_control.digest_json ~actor:"operator" ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "judgment owner" "resident_operator_keeper"
+        Yojson.Safe.Util.(digest |> member "judgment_owner" |> to_string);
+      Alcotest.(check bool) "authoritative judgment available" true
+        Yojson.Safe.Util.
+          (digest |> member "authoritative_judgment_available" |> to_bool);
+      Alcotest.(check string) "active guidance layer" "judgment"
+        Yojson.Safe.Util.(digest |> member "active_guidance_layer" |> to_string);
+      Alcotest.(check string) "active summary from judgment"
+        "Pause the room before taking any destructive action."
+        Yojson.Safe.Util.
+          (digest |> member "active_summary" |> member "summary" |> to_string);
+      Alcotest.(check string) "active recommendation source" "judgment"
+        Yojson.Safe.Util.
+          (digest |> member "active_recommendation_source" |> to_string);
+      Alcotest.(check bool) "judgment present" true
+        (Yojson.Safe.Util.member "judgment" digest <> `Null))
+
+let test_digest_room_ignores_stale_resident_judgment () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      ignore (Room.join config ~agent_name:"operator" ~capabilities:[] ());
+      record_operator_judgment config ~surface:"command.warroom"
+        ~target_type:Operator_judgment.Room ~target_id:None
+        ~summary:"This judgment is stale."
+        ~fresh_for_sec:(-5.0) ();
+      let ctx = operator_ctx env sw config "operator" in
+      let digest =
+        match Operator_control.digest_json ~actor:"operator" ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "judgment owner fallback" "fallback_read_model"
+        Yojson.Safe.Util.(digest |> member "judgment_owner" |> to_string);
+      Alcotest.(check bool) "authoritative judgment unavailable" false
+        Yojson.Safe.Util.
+          (digest |> member "authoritative_judgment_available" |> to_bool);
+      Alcotest.(check string) "active guidance layer fallback" "fallback"
+        Yojson.Safe.Util.(digest |> member "active_guidance_layer" |> to_string);
+      Alcotest.(check bool) "judgment missing" true
+        (Yojson.Safe.Util.member "judgment" digest = `Null))
+
+let test_digest_team_session_prefers_fresh_resident_judgment () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let ctx = team_ctx env sw config "operator" in
+      let session_id = start_session_exn ctx in
+      record_operator_judgment config ~surface:"command.swarm"
+        ~target_type:Operator_judgment.Team_session
+        ~target_id:(Some session_id)
+        ~summary:"Spawn one more worker before continuing the session."
+        ~fresh_for_sec:120.0 ();
+      (match
+         Operator_judgment.latest_active config ~surface:"command.swarm"
+           ~target_type:Operator_judgment.Team_session
+           ~target_id:(Some session_id)
+       with
+      | Some _ -> ()
+      | None ->
+          Alcotest.failf "expected team session judgment in %s"
+            (Operator_judgment.judgments_path config));
+      let digest =
+        match
+          Operator_control.digest_json ~actor:"operator"
+            ~target_type:"team_session" ~target_id:session_id
+            (operator_ctx env sw config "operator")
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "team_session judgment owner"
+        "resident_operator_keeper"
+        Yojson.Safe.Util.(digest |> member "judgment_owner" |> to_string);
+      Alcotest.(check string) "team_session active guidance layer" "judgment"
+        Yojson.Safe.Util.(digest |> member "active_guidance_layer" |> to_string);
+      Alcotest.(check string) "team_session active summary"
+        "Spawn one more worker before continuing the session."
+        Yojson.Safe.Util.
+          (digest |> member "active_summary" |> member "summary" |> to_string))
+
+let test_operator_judgment_write_and_latest_roundtrip () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator-judge"));
+      let ctx = operator_ctx env sw config "operator-judge" in
+      let written =
+        match
+          Operator_control.judgment_write_json ctx
+            (`Assoc
+              [
+                ("surface", `String "command.warroom");
+                ("target_type", `String "room");
+                ("summary", `String "Resident judge requests a human checkpoint.");
+                ("confidence", `Float 0.88);
+                ("fresh_ttl_sec", `Int 90);
+                ("evidence_refs", `List [ `String "trace:opsd-1" ]);
+              ])
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "write ok" "ok"
+        Yojson.Safe.Util.(written |> member "status" |> to_string);
+      let latest =
+        match
+          Operator_control.judgment_latest_json ctx
+            (`Assoc
+              [
+                ("surface", `String "command.warroom");
+                ("target_type", `String "room");
+              ])
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "latest ok" "ok"
+        Yojson.Safe.Util.(latest |> member "status" |> to_string);
+      Alcotest.(check string) "latest summary"
+        "Resident judge requests a human checkpoint."
+        Yojson.Safe.Util.
+          (latest |> member "judgment" |> member "summary" |> to_string))
+
 let test_confirm_keeps_pending_token_when_delegated_action_fails () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1287,10 +1490,18 @@ let () =
             test_snapshot_has_expected_sections;
           Alcotest.test_case "digest room pending confirm attention" `Quick
             test_digest_room_exposes_pending_confirm_attention;
+          Alcotest.test_case "digest room prefers fresh resident judgment"
+            `Quick test_digest_room_prefers_fresh_resident_judgment;
+          Alcotest.test_case "digest room ignores stale resident judgment"
+            `Quick test_digest_room_ignores_stale_resident_judgment;
           Alcotest.test_case "digest team session shape" `Quick
             test_digest_team_session_shape;
+          Alcotest.test_case "digest team session prefers fresh resident judgment"
+            `Quick test_digest_team_session_prefers_fresh_resident_judgment;
           Alcotest.test_case "digest team session can skip workers" `Quick
             test_digest_team_session_can_skip_workers;
+          Alcotest.test_case "operator judgment write and latest roundtrip"
+            `Quick test_operator_judgment_write_and_latest_roundtrip;
           Alcotest.test_case "snapshot and digest expose role runtime census" `Quick
             test_snapshot_and_digest_expose_role_runtime_census;
           Alcotest.test_case "task inject confirm flow" `Quick

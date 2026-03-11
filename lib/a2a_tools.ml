@@ -307,6 +307,61 @@ let latest_heartbeat_task agent =
 let latest_heartbeat_result agent =
   Hashtbl.find_opt latest_heartbeat_results agent
 
+let remote_agent_card_paths =
+  [ "/.well-known/agent.json"; "/.well-known/agent-card.json" ]
+
+let fetch_remote_agent_card url :
+    (Yojson.Safe.t * string, string) result =
+  let rec loop = function
+    | [] ->
+        Stdlib.Error
+          (Printf.sprintf "No agent discovery endpoint succeeded for %s" url)
+    | path :: rest ->
+        let well_known = url ^ path in
+        let argv =
+          [
+            "curl";
+            "-s";
+            "--max-time";
+            "10";
+            "--proto";
+            "=https,http";
+            "-H";
+            "Accept: application/json";
+            well_known;
+          ]
+        in
+        try
+          let (status, body) =
+            Process_eio.run_argv_with_status ~timeout_sec:15.0 argv
+          in
+          match status with
+          | Unix.WEXITED 0 when String.length body > 0 -> (
+              try
+                let card_json = Yojson.Safe.from_string body in
+                Stdlib.Ok (card_json, well_known)
+              with Yojson.Json_error msg ->
+                Stdlib.Error
+                  (Printf.sprintf "Invalid JSON from %s: %s" well_known msg))
+          | Unix.WEXITED 0 ->
+              loop rest
+          | Unix.WEXITED 7 | Unix.WEXITED 22 | Unix.WEXITED 28 ->
+              loop rest
+          | Unix.WEXITED code ->
+              Stdlib.Error
+                (Printf.sprintf "HTTP fetch failed (exit %d): %s" code well_known)
+          | Unix.WSIGNALED sig_num ->
+              Stdlib.Error
+                (Printf.sprintf "Fetch killed by signal %d: %s" sig_num well_known)
+          | Unix.WSTOPPED _ ->
+              Stdlib.Error (Printf.sprintf "Fetch stopped: %s" well_known)
+        with exn ->
+          Stdlib.Error
+            (Printf.sprintf "Remote discovery error (%s): %s" well_known
+               (Printexc.to_string exn))
+  in
+  loop remote_agent_card_paths
+
 (** Discover available agents
 
     Combines local room agents with remote agent card fetching.
@@ -319,37 +374,17 @@ let discover config ?(endpoint : string option) ?(capability : string option) ()
     : (Yojson.Safe.t, string) result =
   match endpoint with
   | Some url ->
-    (* Remote discovery - fetch agent card from well-known URL via curl *)
-    let well_known = url ^ "/.well-known/agent-card.json" in
-    let argv = ["curl"; "-s"; "--max-time"; "10"; "--proto"; "=https,http";
-                "-H"; "Accept: application/json"; well_known] in
-    (try
-      let (status, body) = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
-      match status with
-      | Unix.WEXITED 0 when String.length body > 0 ->
-        (try
-          let card_json = Yojson.Safe.from_string body in
-          Ok (`Assoc [
-            ("type", `String "remote_discovery");
-            ("endpoint", `String url);
-            ("agent_card", card_json);
-          ])
-        with Yojson.Json_error msg ->
-          Error (Printf.sprintf "Invalid JSON from %s: %s" well_known msg))
-      | Unix.WEXITED 0 ->
-        Error (Printf.sprintf "Empty response from %s" well_known)
-      | Unix.WEXITED 7 ->
-        Error (Printf.sprintf "Connection refused: %s" well_known)
-      | Unix.WEXITED 28 ->
-        Error (Printf.sprintf "Request timed out: %s" well_known)
-      | Unix.WEXITED code ->
-        Error (Printf.sprintf "HTTP fetch failed (exit %d): %s" code well_known)
-      | Unix.WSIGNALED sig_num ->
-        Error (Printf.sprintf "Fetch killed by signal %d: %s" sig_num well_known)
-      | Unix.WSTOPPED _ ->
-        Error (Printf.sprintf "Fetch stopped: %s" well_known)
-    with exn ->
-      Error (Printf.sprintf "Remote discovery error: %s" (Printexc.to_string exn)))
+      (match fetch_remote_agent_card url with
+      | Stdlib.Ok (card_json, discovered_url) ->
+          Stdlib.Ok
+            (`Assoc
+              [
+                ("type", `String "remote_discovery");
+                ("endpoint", `String url);
+                ("discovered_url", `String discovered_url);
+                ("agent_card", card_json);
+              ])
+      | Stdlib.Error err -> Stdlib.Error err)
   | None ->
     (* Local discovery - list agents in room *)
     let agents = Room.get_agents_raw config in

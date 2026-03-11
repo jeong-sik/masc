@@ -7,7 +7,10 @@ import type {
   OperatorActionResult,
   OperatorAttentionItem,
   OperatorDigest,
+  OperatorGuidanceSummary,
+  OperatorJudgment,
   OperatorKeeperSnapshot,
+  OperatorResidentJudgeRuntime,
   OperatorRecommendedAction,
   OperatorSessionSnapshot,
   OperatorSessionCard,
@@ -103,6 +106,59 @@ function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAction | n
   }
 }
 
+function normalizeResidentJudgeRuntime(raw: unknown): OperatorResidentJudgeRuntime | null {
+  if (!isRecord(raw)) return null
+  return {
+    enabled: asBoolean(raw.enabled),
+    judge_online: asBoolean(raw.judge_online),
+    refreshing: asBoolean(raw.refreshing),
+    generated_at: asString(raw.generated_at) ?? null,
+    expires_at: asString(raw.expires_at) ?? null,
+    model_used: asString(raw.model_used) ?? null,
+    keeper_name: asString(raw.keeper_name) ?? null,
+    last_error: asString(raw.last_error) ?? null,
+  }
+}
+
+function normalizeGuidanceSummary(raw: unknown): OperatorGuidanceSummary | null {
+  if (!isRecord(raw)) return null
+  return {
+    summary: asString(raw.summary) ?? null,
+    confidence: asNumber(raw.confidence) ?? null,
+    provenance: asString(raw.provenance) ?? null,
+    authoritative: asBoolean(raw.authoritative),
+    surface: asString(raw.surface) ?? null,
+    fresh_until: asString(raw.fresh_until) ?? null,
+    keeper_name: asString(raw.keeper_name) ?? null,
+    fallback_used: asBoolean(raw.fallback_used),
+    disagreement_with_truth: asBoolean(raw.disagreement_with_truth),
+  }
+}
+
+function normalizeOperatorJudgment(raw: unknown): OperatorJudgment | null {
+  if (!isRecord(raw)) return null
+  return {
+    judgment_id: asString(raw.judgment_id) ?? undefined,
+    surface: asString(raw.surface) ?? null,
+    target_type: asString(raw.target_type) ?? null,
+    target_id: asString(raw.target_id) ?? null,
+    status: asString(raw.status) ?? null,
+    summary: asString(raw.summary) ?? null,
+    confidence: asNumber(raw.confidence) ?? null,
+    generated_at: asString(raw.generated_at) ?? null,
+    fresh_until: asString(raw.fresh_until) ?? null,
+    keeper_name: asString(raw.keeper_name) ?? null,
+    model_name: asString(raw.model_name) ?? null,
+    runtime_name: asString(raw.runtime_name) ?? null,
+    evidence_refs: asStringArray(raw.evidence_refs),
+    recommended_action: normalizeRecommendedAction(raw.recommended_action),
+    supersedes: asStringArray(raw.supersedes),
+    fallback_used: asBoolean(raw.fallback_used),
+    disagreement_with_truth: asBoolean(raw.disagreement_with_truth),
+    provenance: asString(raw.provenance) ?? null,
+  }
+}
+
 function normalizeWorkerCard(raw: unknown): OperatorWorkerCard | null {
   if (!isRecord(raw)) return null
   return {
@@ -159,6 +215,21 @@ function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     target_type: asString(root.target_type) ?? 'room',
     target_id: asString(root.target_id) ?? null,
     health: asString(root.health),
+    judgment_owner: asString(root.judgment_owner) ?? null,
+    authoritative_judgment_available: asBoolean(root.authoritative_judgment_available),
+    resident_judge_runtime: normalizeResidentJudgeRuntime(root.resident_judge_runtime),
+    judgment: normalizeOperatorJudgment(root.judgment),
+    active_guidance_layer: asString(root.active_guidance_layer) ?? null,
+    active_summary: normalizeGuidanceSummary(root.active_summary),
+    active_recommended_actions: extractArray(root.active_recommended_actions)
+      .map(normalizeRecommendedAction)
+      .filter((item): item is OperatorRecommendedAction => item !== null),
+    active_recommendation_source: asString(root.active_recommendation_source) ?? null,
+    active_recommendation_summary: normalizeGuidanceSummary(root.active_recommendation_summary),
+    fallback_recommended_actions: extractArray(root.fallback_recommended_actions)
+      .map(normalizeRecommendedAction)
+      .filter((item): item is OperatorRecommendedAction => item !== null),
+    recommendation_summary: normalizeGuidanceSummary(root.recommendation_summary),
     swarm_status: isRecord(root.swarm_status)
       ? (root.swarm_status as unknown as OperatorDigest['swarm_status'])
       : undefined,
@@ -256,6 +327,7 @@ function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
     keepers: extractArray(root.keepers, ['items', 'keepers'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
+    resident_judge_runtime: normalizeResidentJudgeRuntime(root.resident_judge_runtime),
     recent_messages: extractArray(root.recent_messages, ['messages'])
       .map(normalizeMessage)
       .filter((item): item is Message => item !== null),

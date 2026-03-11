@@ -178,7 +178,7 @@ module Rest = struct
     | "masc_deliver" -> (PUT, "/api/v1/planning/{task_id}/deliverable")
     | "masc_plan_get" -> (GET, "/api/v1/planning/{task_id}")
     (* Agent Card *)
-    | "masc_agent_card" -> (GET, "/.well-known/agent-card.json")
+    | "masc_agent_card" -> (GET, "/.well-known/agent.json")
     (* Worktree *)
     | "masc_worktree_create" -> (POST, "/api/v1/worktrees")
     | "masc_worktree_remove" -> (DELETE, "/api/v1/worktrees/{task_id}")
@@ -194,6 +194,7 @@ module Rest = struct
       | "GET", "/" | "GET", "/api/v1/status" -> "masc_status"
       | "GET", "/api/v1/tasks" -> "masc_tasks"
       | "GET", "/api/v1/agents" -> "masc_who"
+      | "GET", "/.well-known/agent.json"
       | "GET", "/.well-known/agent-card.json" -> "masc_agent_card"
       | _, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/tools/" ->
           String.sub p 14 (String.length p - 14)

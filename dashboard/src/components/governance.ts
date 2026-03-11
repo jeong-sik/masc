@@ -183,11 +183,13 @@ async function submitDebate() {
 
 async function respondToPendingConfirm(decision: 'confirm' | 'deny') {
   const item = getSelectedDecision()
-  const confirmToken = item?.guardrail_state?.pending_confirm?.confirm_token
+  const pendingConfirm = item?.guardrail_state?.pending_confirm
+  const confirmToken = pendingConfirm?.confirm_token
   if (!confirmToken) return
+  const actor = pendingConfirm?.actor?.trim() || dashboardActor()
   governanceActing.value = true
   try {
-    await confirmOperatorAction(dashboardActor(), confirmToken, decision)
+    await confirmOperatorAction(actor, confirmToken, decision)
     showToast(decision === 'confirm' ? 'Action approved' : 'Action denied', 'success')
     await refreshGovernance()
   } catch (err) {

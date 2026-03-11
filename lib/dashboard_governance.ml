@@ -614,6 +614,7 @@ let debate_detail_json ~base_path ~debate_id : detail_status * Yojson.Safe.t =
           ] )
 
 let consensus_detail_json ~base_path ~session_id : detail_status * Yojson.Safe.t =
+  let _config = Council.make_config ~base_path in
   match Council.ConsensusApi.get ~session_id with
   | None -> (`Not_found, `Assoc [ ("error", `String "Consensus session not found") ])
   | Some session ->

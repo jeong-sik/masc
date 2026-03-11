@@ -163,6 +163,17 @@ val propose_spawn :
   urgency:urgency ->
   spawn_decision
 
+(** Propose spawning a new agent and report the actual decision path.
+
+    The provenance reflects whether the result came from the LLM judgment path
+    or a non-LLM fallback path such as cooldown, population caps, or rule-based
+    logic. *)
+val propose_spawn_with_provenance :
+  topic:string ->
+  reason:string ->
+  urgency:urgency ->
+  spawn_decision * string
+
 (** Propose retiring an agent (manual trigger).
 
     @param agent_name The agent to consider for retirement *)

@@ -241,11 +241,17 @@ let permission_for_tool = function
   | "masc_add_task" -> Some CanAddTask
   | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
   | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" -> Some CanCompleteTask
+  | "masc_keeper_action_explain"
+  | "masc_keeper_eval_replay" ->
+      Some CanReadState
   | "masc_broadcast" | "masc_listen" | "masc_heartbeat"
   | "masc_register_capabilities" | "masc_find_by_capability"
   | "masc_agent_update" | "masc_operator_action"
   | "masc_keeper_create_from_persona"
   | "masc_keeper_model_set"
+  | "masc_keeper_policy_set"
+  | "masc_keeper_feedback_record"
+  | "masc_keeper_dataset_export"
   | "masc_voice_speak" | "masc_voice_session_start"
   | "masc_voice_session_end" | "masc_voice_conference_start"
   | "masc_voice_conference_end"

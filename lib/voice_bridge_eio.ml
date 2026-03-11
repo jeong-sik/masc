@@ -31,7 +31,7 @@ let default_agent_voices =
     ("claude", "Sarah");
     ("gemini", "Roger");
     ("codex", "George");
-    ("ollama", "Laura");
+    ("llama", "Laura");
   ]
 
 let load_voice_config () = Voice_config.load ()

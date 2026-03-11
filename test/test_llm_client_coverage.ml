@@ -23,11 +23,11 @@ let test_model_to_string_claude () =
 let test_model_to_string_codex () =
   check string "codex" "codex" (Llm.model_to_string Llm.Codex)
 
-let test_model_to_string_ollama () =
-  check string "ollama" "ollama:llama3" (Llm.model_to_string (Llm.Ollama "llama3"))
+let test_model_to_string_llama () =
+  check string "llama" "llama:llama3" (Llm.model_to_string (Llm.Llama "llama3"))
 
-let test_model_to_string_ollama_custom () =
-  check string "ollama custom" "ollama:qwen2.5:7b" (Llm.model_to_string (Llm.Ollama "qwen2.5:7b"))
+let test_model_to_string_llama_custom () =
+  check string "llama custom" "llama:qwen3.5:7b" (Llm.model_to_string (Llm.Llama "qwen3.5:7b"))
 
 (* ============================================================
    build_request Tests
@@ -57,10 +57,10 @@ let test_build_request_codex () =
     try let _ = Str.search_forward (Str.regexp "\"codex\"") req 0 in true
     with Not_found -> false)
 
-let test_build_request_ollama () =
-  let req = Llm.build_request ~model:(Llm.Ollama "mistral") ~prompt:"Local" in
-  check bool "has ollama:mistral" true (
-    try let _ = Str.search_forward (Str.regexp "ollama:mistral") req 0 in true
+let test_build_request_llama () =
+  let req = Llm.build_request ~model:(Llm.Llama "mistral") ~prompt:"Local" in
+  check bool "has llama:mistral" true (
+    try let _ = Str.search_forward (Str.regexp "llama:mistral") req 0 in true
     with Not_found -> false)
 
 let test_build_request_special_chars () =
@@ -171,7 +171,7 @@ let test_model_types () =
   let _ : Llm.model = Llm.Gemini in
   let _ : Llm.model = Llm.Claude in
   let _ : Llm.model = Llm.Codex in
-  let _ : Llm.model = Llm.Ollama "test" in
+  let _ : Llm.model = Llm.Llama "test" in
   ()
 
 (* ============================================================
@@ -292,14 +292,14 @@ let () =
       test_case "gemini" `Quick test_model_to_string_gemini;
       test_case "claude" `Quick test_model_to_string_claude;
       test_case "codex" `Quick test_model_to_string_codex;
-      test_case "ollama" `Quick test_model_to_string_ollama;
-      test_case "ollama custom" `Quick test_model_to_string_ollama_custom;
+      test_case "llama" `Quick test_model_to_string_llama;
+      test_case "llama custom" `Quick test_model_to_string_llama_custom;
     ];
     "build_request", [
       test_case "gemini" `Quick test_build_request_gemini;
       test_case "claude" `Quick test_build_request_claude;
       test_case "codex" `Quick test_build_request_codex;
-      test_case "ollama" `Quick test_build_request_ollama;
+      test_case "llama" `Quick test_build_request_llama;
       test_case "special chars" `Quick test_build_request_special_chars;
       test_case "empty prompt" `Quick test_build_request_empty_prompt;
       test_case "has tools/call" `Quick test_build_request_has_tools_call;

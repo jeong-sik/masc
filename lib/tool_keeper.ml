@@ -170,6 +170,14 @@ let canonical_trigger_mode = function
   | "explicit_only" -> "explicit_only"
   | _ -> "legacy"
 
+let canonical_policy_mode = function
+  | "learned_offline_v1" -> "learned_offline_v1"
+  | _ -> "heuristic"
+
+let canonical_policy_action_budget = function
+  | "board" -> "board"
+  | _ -> "conversation"
+
 let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)
 
@@ -377,6 +385,9 @@ type keeper_meta = {
   models: string list;
   allowed_models: string list;
   active_model: string;
+  policy_mode: string;
+  policy_action_budget: string;
+  policy_reward_model_path: string;
   scope_kind: string;
   room_scope: string;
   trigger_mode: string;
@@ -458,6 +469,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ("models", `List (List.map (fun s -> `String s) m.models));
     ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
     ("active_model", `String m.active_model);
+    ("policy_mode", `String m.policy_mode);
+    ("policy_action_budget", `String m.policy_action_budget);
+    ("policy_reward_model_path", `String m.policy_reward_model_path);
     ("scope_kind", `String m.scope_kind);
     ("room_scope", `String m.room_scope);
     ("trigger_mode", `String m.trigger_mode);
@@ -562,6 +576,17 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       dedupe_keep_order base
     in
     let active_model = Safe_ops.json_string ~default:"" "active_model" json in
+    let policy_mode =
+      Safe_ops.json_string ~default:"heuristic" "policy_mode" json
+      |> canonical_policy_mode
+    in
+    let policy_action_budget =
+      Safe_ops.json_string ~default:"conversation" "policy_action_budget" json
+      |> canonical_policy_action_budget
+    in
+    let policy_reward_model_path =
+      Safe_ops.json_string ~default:"" "policy_reward_model_path" json
+    in
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
     in
@@ -698,6 +723,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         models;
         allowed_models;
         active_model;
+        policy_mode;
+        policy_action_budget;
+        policy_reward_model_path;
         scope_kind;
         room_scope;
         trigger_mode;
@@ -799,24 +827,13 @@ let env_present name =
   | Some value -> String.trim value <> ""
   | None -> false
 
-let ollama_port_listening () =
-  try
-    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect
-      ~finally:(fun () -> (try Unix.close sock with Unix.Unix_error _ -> ()))
-      (fun () ->
-        Unix.connect sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 11434));
-        true)
-  with Unix.Unix_error _ -> false
-
 let model_spec_is_local_runtime (model : Llm_client.model_spec) =
   match model.provider with
-  | Llm_client.Ollama | Llm_client.Llama -> true
+  | Llm_client.Llama -> true
   | _ -> false
 
 let model_spec_is_available (model : Llm_client.model_spec) =
   match model.provider with
-  | Llm_client.Ollama -> ollama_port_listening ()
   | Llm_client.Llama -> true
   | _ -> true
 
@@ -878,6 +895,15 @@ let keeper_session_dir config trace_id =
 let keeper_history_path config trace_id =
   Filename.concat (keeper_session_dir config trace_id) "history.jsonl"
 
+let keeper_policy_log_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".policy.jsonl")
+
+let keeper_feedback_log_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".feedback.jsonl")
+
+let keeper_dataset_export_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".dataset.json")
+
 let keeper_alerts_path config =
   Filename.concat (keeper_dir config) "_alerts.jsonl"
 
@@ -894,6 +920,212 @@ let append_jsonl_line path (json : Yojson.Safe.t) =
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
     let _ = Unix.write_substring fd line 0 (String.length line) in
     ())
+
+type keeper_reward_candidate = {
+  bias: float;
+  weights: (string * float) list;
+}
+
+type keeper_reward_model = {
+  version: string;
+  path: string;
+  candidates: (string * keeper_reward_candidate) list;
+}
+
+type keeper_policy_observation = {
+  source_kind: string;
+  room_id: string option;
+  from_agent: string;
+  message: string;
+  direct_mention: bool;
+  has_question: bool;
+  message_chars: int;
+  total_turns: int;
+  active_goal_count: int;
+  joined_room_count: int;
+  room_scope: string;
+  trigger_mode: string;
+  last_turn_ago_s: float;
+}
+
+type keeper_policy_candidate_score = {
+  action: string;
+  bias: float;
+  feature_scores: (string * float) list;
+  score: float;
+  allowed: bool;
+}
+
+let empty_keeper_reward_candidate = { bias = 0.0; weights = [] }
+
+let policy_action_order action =
+  match action with
+  | "noop" -> 0
+  | "reply_in_room" -> 1
+  | "board_post" -> 2
+  | _ -> 9
+
+let keeper_policy_mode_is_learned (meta : keeper_meta) =
+  canonical_policy_mode meta.policy_mode = "learned_offline_v1"
+
+let keeper_policy_feature_vector (obs : keeper_policy_observation) : (string * float) list =
+  let clamp01 value = max 0.0 (min 1.0 value) in
+  [
+    ("direct_mention", if obs.direct_mention then 1.0 else 0.0);
+    ("question_mark", if obs.has_question then 1.0 else 0.0);
+    ("message_chars", clamp01 (float_of_int obs.message_chars /. 400.0));
+    ("active_goal_count", clamp01 (float_of_int obs.active_goal_count /. 5.0));
+    ("joined_room_count", clamp01 (float_of_int obs.joined_room_count /. 5.0));
+    ("room_scope_all", if obs.room_scope = "all" then 1.0 else 0.0);
+    ("idle_seconds", clamp01 (obs.last_turn_ago_s /. 3600.0));
+  ]
+
+let float_assoc_to_json (items : (string * float) list) : Yojson.Safe.t =
+  `Assoc (List.map (fun (key, value) -> (key, `Float value)) items)
+
+let keeper_policy_observation_to_json (obs : keeper_policy_observation) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("source_kind", `String obs.source_kind);
+      ("room_id",
+        match obs.room_id with
+        | Some room_id -> `String room_id
+        | None -> `Null);
+      ("from_agent", `String obs.from_agent);
+      ("message", `String obs.message);
+      ("direct_mention", `Bool obs.direct_mention);
+      ("has_question", `Bool obs.has_question);
+      ("message_chars", `Int obs.message_chars);
+      ("total_turns", `Int obs.total_turns);
+      ("active_goal_count", `Int obs.active_goal_count);
+      ("joined_room_count", `Int obs.joined_room_count);
+      ("room_scope", `String obs.room_scope);
+      ("trigger_mode", `String obs.trigger_mode);
+      ("last_turn_ago_s", `Float obs.last_turn_ago_s);
+    ]
+
+let keeper_policy_candidate_score_to_json
+    (candidate : keeper_policy_candidate_score) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("action", `String candidate.action);
+      ("bias", `Float candidate.bias);
+      ("feature_scores", float_assoc_to_json candidate.feature_scores);
+      ("score", `Float candidate.score);
+      ("allowed", `Bool candidate.allowed);
+    ]
+
+let reward_candidate_of_json (json : Yojson.Safe.t) : keeper_reward_candidate =
+  let bias = Safe_ops.json_float ~default:0.0 "bias" json in
+  let weights =
+    match Yojson.Safe.Util.member "weights" json with
+    | `Assoc fields ->
+        fields
+        |> List.filter_map (fun (feature, value) ->
+               match value with
+               | `Float weight -> Some (feature, weight)
+               | `Int n -> Some (feature, float_of_int n)
+               | `Intlit raw ->
+                   Some (feature, Safe_ops.float_of_string_with_default ~default:0.0 raw)
+               | _ -> None)
+    | _ -> []
+  in
+  { bias; weights }
+
+let load_keeper_reward_model (path : string) : (keeper_reward_model, string) result =
+  let path = String.trim path in
+  if path = "" then
+    Error "reward_model_path is required for learned_offline_v1"
+  else
+    match Safe_ops.read_json_file_safe path with
+    | Error e -> Error e
+    | Ok json ->
+        let version = Safe_ops.json_string ~default:"reward-model-v1" "version" json in
+        let candidates =
+          match Yojson.Safe.Util.member "candidates" json with
+          | `Assoc fields ->
+              fields |> List.map (fun (name, value) -> (name, reward_candidate_of_json value))
+          | _ -> []
+        in
+        if candidates = [] then
+          Error "reward model must define candidates"
+        else
+          Ok { version; path; candidates }
+
+let score_keeper_policy_candidate
+    ~(model : keeper_reward_model)
+    ~(features : (string * float) list)
+    ~(action : string)
+    ~(allowed : bool) : keeper_policy_candidate_score =
+  let candidate_model =
+    model.candidates
+    |> List.find_map (fun (candidate_action, candidate_model) ->
+           if candidate_action = action then Some candidate_model else None)
+    |> Option.value ~default:empty_keeper_reward_candidate
+  in
+  let feature_scores =
+    candidate_model.weights
+    |> List.map (fun (feature_name, weight) ->
+           let feature_value =
+             features
+             |> List.find_map (fun (name, value) ->
+                    if name = feature_name then Some value else None)
+             |> Option.value ~default:0.0
+           in
+           (feature_name, weight *. feature_value))
+  in
+  let score =
+    List.fold_left (fun acc (_, value) -> acc +. value) candidate_model.bias feature_scores
+  in
+  {
+    action;
+    bias = candidate_model.bias;
+    feature_scores;
+    score;
+    allowed;
+  }
+
+let observation_has_question (message : string) =
+  String.contains message '?'
+
+let keeper_policy_observation_of_room_message
+    ~(meta : keeper_meta)
+    ~(room_id : string)
+    (msg : Types.message) : keeper_policy_observation =
+  let now_ts = Time_compat.now () in
+  let last_turn_ago_s =
+    if meta.last_turn_ts <= 0.0 then 0.0 else max 0.0 (now_ts -. meta.last_turn_ts)
+  in
+  {
+    source_kind = "room_message";
+    room_id = Some room_id;
+    from_agent = msg.from_agent;
+    message = msg.content;
+    direct_mention = true;
+    has_question = observation_has_question msg.content;
+    message_chars = String.length msg.content;
+    total_turns = meta.total_turns;
+    active_goal_count = List.length meta.active_goal_ids;
+    joined_room_count = List.length meta.joined_room_ids;
+    room_scope = meta.room_scope;
+    trigger_mode = meta.trigger_mode;
+    last_turn_ago_s;
+  }
+
+let deterministic_policy_baseline_action (obs : keeper_policy_observation) : string =
+  if obs.direct_mention then "reply_in_room" else "noop"
+
+let choose_policy_action (candidates : keeper_policy_candidate_score list) :
+    keeper_policy_candidate_score option =
+  candidates
+  |> List.filter (fun candidate -> candidate.allowed)
+  |> List.sort (fun a b ->
+         let score_cmp = Float.compare b.score a.score in
+         if score_cmp <> 0 then score_cmp
+         else compare (policy_action_order a.action) (policy_action_order b.action))
+  |> function
+  | candidate :: _ -> Some candidate
+  | [] -> None
 
 type alert_channel_result = {
   channel: string;
@@ -2259,6 +2491,47 @@ let evaluate_keeper_auto_rules
     reasons = List.rev reasons;
   }
 
+let learned_policy_auto_rules
+    ~(meta : keeper_meta)
+    ~(context_ratio : float)
+    ~(message_count : int)
+    ~(token_count : int)
+    ~(repetition_risk : float)
+    ~(goal_alignment : float)
+    ~(response_alignment : float) : keeper_auto_rule_eval =
+  let ratio_gate = meta.compaction_ratio_gate in
+  let message_gate = meta.compaction_message_gate in
+  let token_gate = meta.compaction_token_gate in
+  let goal_drift =
+    1.0 -. max 0.0 (min 1.0 (max goal_alignment response_alignment))
+    |> max 0.0
+    |> min 1.0
+  in
+  let compact =
+    context_ratio >= ratio_gate
+    || (message_gate > 0 && message_count >= message_gate)
+    || (token_gate > 0 && token_count >= token_gate)
+  in
+  let handoff = meta.auto_handoff && context_ratio >= meta.handoff_threshold in
+  {
+    repetition_risk;
+    goal_alignment;
+    response_alignment;
+    goal_drift;
+    reflect = false;
+    plan = false;
+    compact;
+    handoff;
+    guardrail_stop = false;
+    guardrail_reason = None;
+    reasons =
+      [
+        "policy_mode=learned_offline_v1";
+        (if compact then "compact_safety_gate=true" else "compact_safety_gate=false");
+        (if handoff then "handoff_safety_gate=true" else "handoff_safety_gate=false");
+      ];
+  }
+
 let recent_user_messages (msgs : Llm_client.message list) ~(max_n : int) : string list =
   msgs
   |> List.rev
@@ -2515,10 +2788,7 @@ let run_alert_channel_with_retry
     in
     loop 1 None
 
-let dedup_strings (xs : string list) : string list =
-  List.fold_left
-    (fun acc x -> if List.mem x acc then acc else acc @ [ x ])
-    [] xs
+let dedup_strings = Dashboard_utils.dedup_strings
 
 let keeper_alert_signal
     ~(message : string)
@@ -4459,6 +4729,21 @@ let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =
     ]
 
 let string_list_to_json values = `List (List.map (fun value -> `String value) values)
+
+let read_jsonl_rows path ~max_bytes ~max_lines : Yojson.Safe.t list =
+  if not (Sys.file_exists path) then
+    []
+  else
+    read_file_tail_lines path ~max_bytes ~max_lines
+    |> List.filter_map (fun line ->
+           try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
+
+let find_jsonl_row_by_action_id rows action_id =
+  rows
+  |> List.find_map (fun json ->
+         match Safe_ops.json_string_opt "action_id" json with
+         | Some candidate when candidate = action_id -> Some json
+         | _ -> None)
 
 let upsert_assoc key value fields =
   (key, value) :: List.remove_assoc key fields
@@ -6666,6 +6951,161 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               in
               Ok (updated, reply))
 
+let run_learned_policy_room_event
+    (ctx : _ context)
+    ~(meta : keeper_meta)
+    ~(room_id : string)
+    (msg : Types.message) : (keeper_meta, string) result =
+  let reward_model_path = String.trim meta.policy_reward_model_path in
+  match load_keeper_reward_model reward_model_path with
+  | Error e -> Error e
+  | Ok reward_model ->
+      let action_budget = canonical_policy_action_budget meta.policy_action_budget in
+      let observation = keeper_policy_observation_of_room_message ~meta ~room_id msg in
+      let feature_vector = keeper_policy_feature_vector observation in
+      let candidate_actions =
+        [ ("noop", true); ("reply_in_room", true) ]
+        @
+        if action_budget = "board" then [ ("board_post", true) ] else []
+      in
+      let candidate_scores =
+        List.map
+          (fun (action, allowed) ->
+            score_keeper_policy_candidate
+              ~model:reward_model
+              ~features:feature_vector
+              ~action
+              ~allowed)
+          candidate_actions
+      in
+      let chosen_candidate =
+        choose_policy_action candidate_scores
+        |> Option.value
+             ~default:
+               {
+                 action = "noop";
+                 bias = 0.0;
+                 feature_scores = [];
+                 score = 0.0;
+                 allowed = true;
+               }
+      in
+      let action_id = generate_trace_id () in
+      let now_ts = Time_compat.now () in
+      let execution_result, updated_meta =
+        match chosen_candidate.action with
+        | "reply_in_room" -> (
+            match generate_explicit_room_reply ctx ~meta ~room_id msg with
+            | Error e ->
+                ( `Assoc
+                    [
+                      ("executed", `Bool false);
+                      ("error", `String e);
+                    ],
+                  meta )
+            | Ok (updated_meta, reply) ->
+                (try
+                   ignore
+                     (Room.broadcast_in_room ctx.config ~room_id
+                        ~from_agent:updated_meta.agent_name ~content:reply)
+                 with exn ->
+                   Printf.eprintf
+                     "[keeper] learned policy room broadcast failed for %s in %s: %s\n%!"
+                     updated_meta.name room_id (Printexc.to_string exn));
+                ( `Assoc
+                    [
+                      ("executed", `Bool true);
+                      ("reply", `String reply);
+                      ("reply_preview", `String (short_preview reply));
+                    ],
+                  updated_meta ))
+        | "board_post" ->
+            let title =
+              Printf.sprintf "[keeper:%s] %s mentioned in %s"
+                meta.name msg.from_agent room_id
+            in
+            let content =
+              Printf.sprintf
+                "Learned-policy board escalation.\n\n- Keeper: %s\n- Room: %s\n- Mentioned by: %s\n- Message: %s"
+                meta.name
+                room_id
+                msg.from_agent
+                (short_preview ~max_len:400 msg.content)
+            in
+            let board_args =
+              `Assoc
+                [
+                  ("author", `String meta.name);
+                  ("title", `String title);
+                  ("content", `String content);
+                  ("tags",
+                    `List
+                      [
+                        `String "keeper-policy";
+                        `String "learned-offline-v1";
+                        `String meta.name;
+                      ]);
+                ]
+            in
+            let ok, result = Tool_board.handle_tool "masc_board_post" board_args in
+            if ok then
+              let updated_meta =
+                {
+                  meta with
+                  updated_at = now_iso ();
+                  last_autonomous_action_at = now_iso ();
+                  autonomous_action_count = meta.autonomous_action_count + 1;
+                }
+              in
+              ( `Assoc
+                  [
+                    ("executed", `Bool true);
+                    ("title", `String title);
+                    ("board_result",
+                      try Yojson.Safe.from_string result with Yojson.Json_error _ -> `String result);
+                  ],
+                updated_meta )
+            else
+              ( `Assoc
+                  [
+                    ("executed", `Bool false);
+                    ("error", `String result);
+                  ],
+                meta )
+        | _ ->
+            (`Assoc [("executed", `Bool false); ("result", `String "noop")], meta)
+      in
+      let log_json =
+        `Assoc
+          [
+            ("ts", `String (now_iso ()));
+            ("ts_unix", `Float now_ts);
+            ("action_id", `String action_id);
+            ("keeper", `String meta.name);
+            ("trace_id", `String meta.trace_id);
+            ("policy_mode", `String meta.policy_mode);
+            ("policy_action_budget", `String action_budget);
+            ("reward_model", `String reward_model.version);
+            ("reward_model_path", `String reward_model.path);
+            ("observation", keeper_policy_observation_to_json observation);
+            ("feature_vector", float_assoc_to_json feature_vector);
+            ("candidates", `List (List.map keeper_policy_candidate_score_to_json candidate_scores));
+            ("chosen_action", `String chosen_candidate.action);
+            ("chosen_score", `Float chosen_candidate.score);
+            ("heuristic_baseline_action",
+              `String (deterministic_policy_baseline_action observation));
+            ("safety_gate",
+              `Assoc
+                [
+                  ("allowed", `Bool chosen_candidate.allowed);
+                  ("reason", `String "conversation_and_board_only");
+                ]);
+            ("result", execution_result);
+          ]
+      in
+      append_jsonl_line (keeper_policy_log_path ctx.config meta.name) log_json;
+      Ok updated_meta
+
 let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : keeper_meta =
   if meta.trigger_mode <> "explicit_only" then meta
   else
@@ -6692,26 +7132,42 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
                 else if not (exact_direct_mention_present ~targets msg.content) then
                   current_meta
                 else
-                  match generate_explicit_room_reply ctx ~meta:current_meta ~room_id msg with
-                  | Error err ->
-                      Printf.eprintf "[keeper] explicit room reply failed for %s in %s: %s\n%!"
-                        current_meta.name room_id err;
-                      current_meta
-                  | Ok (updated_meta, reply) ->
-                      (try
-                         ignore
-                           (Room.broadcast_in_room ctx.config ~room_id
-                              ~from_agent:updated_meta.agent_name ~content:reply)
-                       with exn ->
+                  if keeper_policy_mode_is_learned current_meta then
+                    (match run_learned_policy_room_event ctx ~meta:current_meta ~room_id msg with
+                     | Error err ->
                          Printf.eprintf
-                           "[keeper] explicit room broadcast failed for %s in %s: %s\n%!"
-                           updated_meta.name room_id (Printexc.to_string exn));
-                      (match write_meta ctx.config updated_meta with
-                       | Ok () -> ()
-                       | Error err ->
-                           Printf.eprintf "[keeper] write_meta after explicit room reply failed: %s\n%!"
-                             err);
-                      updated_meta)
+                           "[keeper] learned policy room action failed for %s in %s: %s\n%!"
+                           current_meta.name room_id err;
+                         current_meta
+                     | Ok updated_meta ->
+                         (match write_meta ctx.config updated_meta with
+                          | Ok () -> ()
+                          | Error err ->
+                              Printf.eprintf
+                                "[keeper] write_meta after learned policy room action failed: %s\n%!"
+                                err);
+                         updated_meta)
+                  else
+                    match generate_explicit_room_reply ctx ~meta:current_meta ~room_id msg with
+                    | Error err ->
+                        Printf.eprintf "[keeper] explicit room reply failed for %s in %s: %s\n%!"
+                          current_meta.name room_id err;
+                        current_meta
+                    | Ok (updated_meta, reply) ->
+                        (try
+                           ignore
+                             (Room.broadcast_in_room ctx.config ~room_id
+                                ~from_agent:updated_meta.agent_name ~content:reply)
+                         with exn ->
+                           Printf.eprintf
+                             "[keeper] explicit room broadcast failed for %s in %s: %s\n%!"
+                             updated_meta.name room_id (Printexc.to_string exn));
+                        (match write_meta ctx.config updated_meta with
+                         | Ok () -> ()
+                         | Error err ->
+                             Printf.eprintf "[keeper] write_meta after explicit room reply failed: %s\n%!"
+                               err);
+                        updated_meta)
               meta_acc
               messages
           in
@@ -7215,6 +7671,9 @@ let handle_keeper_up ctx args : tool_result =
                models = requested_models;
                allowed_models;
                active_model;
+               policy_mode = "heuristic";
+               policy_action_budget = "conversation";
+               policy_reward_model_path = "";
                scope_kind;
                room_scope;
                trigger_mode;
@@ -7438,6 +7897,9 @@ let handle_keeper_up ctx args : tool_result =
         models;
         allowed_models;
         active_model;
+        policy_mode = canonical_policy_mode old.policy_mode;
+        policy_action_budget = canonical_policy_action_budget old.policy_action_budget;
+        policy_reward_model_path = old.policy_reward_model_path;
         scope_kind;
         room_scope;
         trigger_mode;
@@ -7917,6 +8379,14 @@ let handle_keeper_status ctx args : tool_result =
                then `Null
                else `String m.last_drift_reason);
            ]);
+           ("policy", `Assoc [
+             ("mode", `String m.policy_mode);
+             ("action_budget", `String m.policy_action_budget);
+             ("reward_model_path",
+               if String.trim m.policy_reward_model_path = ""
+               then `Null
+               else `String m.policy_reward_model_path);
+           ]);
            ("compaction_policy", `Assoc [
              ("profile", `String m.compaction_profile);
              ("ratio_gate", `Float compact_ratio_gate);
@@ -7953,6 +8423,9 @@ let handle_keeper_status ctx args : tool_result =
              ("meta", `String (keeper_meta_path ctx.config m.name));
              ("metrics", `String metrics_path);
              ("memory_bank", `String memory_bank_path);
+             ("policy", `String (keeper_policy_log_path ctx.config m.name));
+             ("feedback", `String (keeper_feedback_log_path ctx.config m.name));
+             ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));
              ("session_dir", `String session_dir);
              ("history", `String history_path);
            ]);
@@ -7998,12 +8471,6 @@ let handle_keeper_msg ctx args : tool_result =
       |> Option.map (fun v ->
              let sec = int_of_float (Float.ceil v) in
              max 5 (min 300 sec))
-    in
-    let ollama_timeout_sec_opt =
-      Safe_ops.json_float_opt "ollama_timeout_sec" args
-      |> Option.map (fun v ->
-             let sec = int_of_float (Float.ceil v) in
-             max 10 (min 300 sec))
     in
     match inline_soul_profile_res, new_soul_profile_res with
     | Error e, _ | _, Error e -> (false, "❌ " ^ e)
@@ -8128,6 +8595,9 @@ let handle_keeper_msg ctx args : tool_result =
             models = inline_models;
             allowed_models;
             active_model;
+            policy_mode = "heuristic";
+            policy_action_budget = "conversation";
+            policy_reward_model_path = "";
             scope_kind;
             room_scope;
             trigger_mode;
@@ -8328,7 +8798,7 @@ let handle_keeper_msg ctx args : tool_result =
         effective_model_labels_for_turn meta ~inline_models
       in
       let effective_models =
-        if meta.trigger_mode = "explicit_only" then effective_models
+        if meta.trigger_mode = "explicit_only" || keeper_policy_mode_is_learned meta then effective_models
         else maybe_append_keeper_fallback_models effective_models
       in
       (match model_specs_of_strings effective_models with
@@ -8376,10 +8846,22 @@ let handle_keeper_msg ctx args : tool_result =
 	                    ~desires:meta.desires
 	                    ~instructions:meta.instructions)
             in
+            let policy_mode_learned = keeper_policy_mode_is_learned meta in
+            let effective_no_skill_route = no_skill_route || policy_mode_learned in
             let fallback_skill_route =
-              route_keeper_skill ~soul_profile:meta.soul_profile ~message
+              if policy_mode_learned then
+                {
+                  primary_skill = "policy";
+                  secondary_skills = [];
+                  reason = "learned_offline_v1";
+                }
+              else
+                route_keeper_skill ~soul_profile:meta.soul_profile ~message
             in
-            let skill_selection_mode = keeper_skill_selection_mode () in
+            let skill_selection_mode =
+              if policy_mode_learned then SkillSelectHeuristic
+              else keeper_skill_selection_mode ()
+            in
             let continuity_snapshot = latest_state_snapshot_from_messages ctx_work.messages in
             let continuity_summary =
               match continuity_snapshot with
@@ -8389,7 +8871,7 @@ let handle_keeper_msg ctx args : tool_result =
                   if trimmed = "" then "No continuity snapshot available." else trimmed)
             in
             let base_turn_system_prompt =
-              if no_skill_route then
+              if effective_no_skill_route then
                 ctx_work.system_prompt
               else
                 match skill_selection_mode with
@@ -8411,7 +8893,7 @@ let handle_keeper_msg ctx args : tool_result =
             in
             let turn_system_prompt =
               let policy_guards = [
-                (no_skill_route,
+                (effective_no_skill_route,
                  "Output guard: NEVER output lines starting with SKILL: or SKILL_REASON:.");
                 (no_state_block,
                  "Output guard: NEVER output [STATE] or [/STATE] blocks in this turn.");
@@ -8472,14 +8954,9 @@ let handle_keeper_msg ctx args : tool_result =
               ) specs
             in
             let run_cascade requests =
-              match timeout_sec_opt, ollama_timeout_sec_opt with
-              | Some timeout_sec, Some ollama_timeout_sec ->
-                  Llm_client.cascade ~timeout_sec ~ollama_timeout_sec requests
-              | Some timeout_sec, None ->
-                  Llm_client.cascade ~timeout_sec requests
-              | None, Some ollama_timeout_sec ->
-                  Llm_client.cascade ~ollama_timeout_sec requests
-              | None, None -> Llm_client.cascade requests
+              match timeout_sec_opt with
+              | Some timeout_sec -> Llm_client.cascade ~timeout_sec requests
+              | None -> Llm_client.cascade requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
             match run_cascade requests with
@@ -8845,7 +9322,7 @@ let handle_keeper_msg ctx args : tool_result =
 		              in
                       let effective_skill_route = skill_route_resolution.route in
 			              let safe_reply_with_skill =
-			                if no_skill_route then
+			                if effective_no_skill_route then
                             strip_skill_route_lines safe_reply_raw
                           else
 			                    ensure_skill_route_header
@@ -8936,10 +9413,13 @@ let handle_keeper_msg ctx args : tool_result =
                 last_compaction_decision = compaction_decision;
               } in
               let (meta_turn, drift_applied, drift_reason) =
-                apply_self_model_drift
-                  ~meta:meta_turn
-                  ~user_message:message
-                  ~work_kind
+                if policy_mode_learned then
+                  (meta_turn, false, None)
+                else
+                  apply_self_model_drift
+                    ~meta:meta_turn
+                    ~user_message:message
+                    ~work_kind
               in
 
               let (memory_notes_added, memory_note_kinds) =
@@ -8965,14 +9445,24 @@ let handle_keeper_msg ctx args : tool_result =
 
 		              let handoff_eval =
                 let auto_rules =
-                  evaluate_keeper_auto_rules
-                    ~meta:meta_turn
-                    ~context_ratio:ctx_ratio
-                    ~message_count:(List.length ctx_work.messages)
-                    ~token_count:ctx_work.token_count
-                    ~repetition_risk
-                    ~goal_alignment
-                    ~response_alignment
+                  if policy_mode_learned then
+                    learned_policy_auto_rules
+                      ~meta:meta_turn
+                      ~context_ratio:ctx_ratio
+                      ~message_count:(List.length ctx_work.messages)
+                      ~token_count:ctx_work.token_count
+                      ~repetition_risk
+                      ~goal_alignment
+                      ~response_alignment
+                  else
+                    evaluate_keeper_auto_rules
+                      ~meta:meta_turn
+                      ~context_ratio:ctx_ratio
+                      ~message_count:(List.length ctx_work.messages)
+                      ~token_count:ctx_work.token_count
+                      ~repetition_risk
+                      ~goal_alignment
+                      ~response_alignment
                 in
                 (if auto_rules.guardrail_stop then
                    (try
@@ -9006,35 +9496,43 @@ let handle_keeper_msg ctx args : tool_result =
 
 	              let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
               let interesting_alert =
-                try
-                  maybe_emit_interesting_alert
-                    ctx
-                    ~meta:meta_turn
-                    ~message
-                    ~reply:safe_reply
-                    ~work_kind
-                    ~tool_call_count
-                    ~context_ratio:ctx_ratio
-                    ~goal_alignment
-                    ~response_alignment
-                    ~auto_rules
-                with exn ->
+                if policy_mode_learned then
                   {
                     empty_interesting_alert_result with
-                    enabled = Env_config.KeeperAlert.enabled;
+                    enabled = false;
                     threshold = Env_config.KeeperAlert.min_score;
-                    reasons = [ "fanout_exception" ];
-                    keywords = [];
-                    channels = [
-                      {
-                        channel = "fanout";
-                        attempted = true;
-                        success = false;
-                        attempts = 1;
-                        detail = Some (short_preview ~max_len:220 (Printexc.to_string exn));
-                      };
-                    ];
+                    reasons = [ "disabled_by_policy_mode" ];
                   }
+                else
+                  try
+                    maybe_emit_interesting_alert
+                      ctx
+                      ~meta:meta_turn
+                      ~message
+                      ~reply:safe_reply
+                      ~work_kind
+                      ~tool_call_count
+                      ~context_ratio:ctx_ratio
+                      ~goal_alignment
+                      ~response_alignment
+                      ~auto_rules
+                  with exn ->
+                    {
+                      empty_interesting_alert_result with
+                      enabled = Env_config.KeeperAlert.enabled;
+                      threshold = Env_config.KeeperAlert.min_score;
+                      reasons = [ "fanout_exception" ];
+                      keywords = [];
+                      channels = [
+                        {
+                          channel = "fanout";
+                          attempted = true;
+                          success = false;
+                          attempts = 1;
+                          detail = Some (short_preview ~max_len:220 (Printexc.to_string exn));
+                        };
+                      ];
+                    }
               in
 
               if not do_handoff then begin
@@ -9553,9 +10051,404 @@ let handle_keeper_model_set ctx args : tool_result =
                           ("allowed_models",
                             `List
                               (List.map (fun item -> `String item) updated.allowed_models));
-                          ("room_scope", `String updated.room_scope);
-                          ("trigger_mode", `String updated.trigger_mode);
-                        ]) ))
+                      ("room_scope", `String updated.room_scope);
+                      ("trigger_mode", `String updated.trigger_mode);
+                    ]) ))
+
+let handle_keeper_policy_set ctx args : tool_result =
+  let name = get_string args "name" "" in
+  let policy_mode_raw = get_string args "policy_mode" "" |> String.trim in
+  let action_budget_opt = get_string_opt args "action_budget" |> Option.map String.trim in
+  let reward_model_path =
+    get_string_opt args "reward_model_path" |> Option.value ~default:"" |> String.trim
+  in
+  let policy_mode_result =
+    match policy_mode_raw with
+    | "heuristic" | "learned_offline_v1" -> Ok policy_mode_raw
+    | "" -> Error "policy_mode is required"
+    | other -> Error (Printf.sprintf "invalid policy_mode: %s" other)
+  in
+  let action_budget_result =
+    match action_budget_opt with
+    | None -> Ok "conversation"
+    | Some "conversation" -> Ok "conversation"
+    | Some "board" -> Ok "board"
+    | Some other -> Error (Printf.sprintf "invalid action_budget: %s" other)
+  in
+  if not (validate_name name) then
+    (false, "❌ invalid keeper name")
+  else if Result.is_error policy_mode_result then
+    (false, "❌ " ^ Result.get_error policy_mode_result)
+  else if Result.is_error action_budget_result then
+    (false, "❌ " ^ Result.get_error action_budget_result)
+  else
+    let policy_mode = Result.get_ok policy_mode_result in
+    let action_budget = Result.get_ok action_budget_result in
+    match read_meta ctx.config name with
+    | Error e -> (false, "❌ " ^ e)
+    | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
+    | Ok (Some meta) ->
+        let effective_reward_model_path_raw =
+          if reward_model_path <> "" then reward_model_path else meta.policy_reward_model_path
+        in
+        let effective_reward_model_path =
+          if effective_reward_model_path_raw <> ""
+             && Filename.is_relative effective_reward_model_path_raw
+          then
+            Filename.concat ctx.config.base_path effective_reward_model_path_raw
+          else
+            effective_reward_model_path_raw
+        in
+        if policy_mode = "learned_offline_v1" then
+          match load_keeper_reward_model effective_reward_model_path with
+          | Error e -> (false, "❌ " ^ e)
+          | Ok reward_model ->
+              let updated =
+                {
+                  meta with
+                  policy_mode;
+                  policy_action_budget = action_budget;
+                  policy_reward_model_path = reward_model.path;
+                  updated_at = now_iso ();
+                }
+              in
+              (match write_meta ctx.config updated with
+               | Error e -> (false, "❌ " ^ e)
+               | Ok () ->
+                   ( true,
+                     Yojson.Safe.pretty_to_string
+                       (`Assoc
+                         [
+                           ("name", `String updated.name);
+                           ("policy_mode", `String updated.policy_mode);
+                           ("action_budget", `String updated.policy_action_budget);
+                           ("reward_model_path", `String updated.policy_reward_model_path);
+                           ("reward_model_version", `String reward_model.version);
+                         ]) ))
+        else
+          let updated =
+            {
+              meta with
+              policy_mode;
+              policy_action_budget = action_budget;
+              policy_reward_model_path = effective_reward_model_path;
+              updated_at = now_iso ();
+            }
+          in
+          match write_meta ctx.config updated with
+          | Error e -> (false, "❌ " ^ e)
+          | Ok () ->
+              ( true,
+                Yojson.Safe.pretty_to_string
+                  (`Assoc
+                    [
+                      ("name", `String updated.name);
+                      ("policy_mode", `String updated.policy_mode);
+                      ("action_budget", `String updated.policy_action_budget);
+                      ("reward_model_path",
+                        if String.trim updated.policy_reward_model_path = ""
+                        then `Null
+                        else `String updated.policy_reward_model_path);
+                    ]) )
+
+let handle_keeper_feedback_record ctx args : tool_result =
+  let name = get_string args "name" "" in
+  let action_id = get_string args "action_id" "" |> String.trim in
+  let verdict = get_string args "verdict" "" |> String.trim in
+  if not (validate_name name) then
+    (false, "❌ invalid keeper name")
+  else if action_id = "" then
+    (false, "❌ action_id is required")
+  else if verdict = "" then
+    (false, "❌ verdict is required")
+  else
+    match read_meta ctx.config name with
+    | Error e -> (false, "❌ " ^ e)
+    | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
+    | Ok (Some meta) ->
+        let score_json =
+          match Yojson.Safe.Util.member "score" args with
+          | `Float score -> Some (`Float score)
+          | `Int n -> Some (`Float (float_of_int n))
+          | `Intlit raw ->
+              Some (`Float (Safe_ops.float_of_string_with_default ~default:0.0 raw))
+          | _ -> None
+        in
+        let note = get_string_opt args "note" |> Option.value ~default:"" |> String.trim in
+        let json =
+          `Assoc
+            [
+              ("ts", `String (now_iso ()));
+              ("ts_unix", `Float (Time_compat.now ()));
+              ("keeper", `String name);
+              ("trace_id", `String meta.trace_id);
+              ("action_id", `String action_id);
+              ("verdict", `String verdict);
+              ("score", Option.value ~default:`Null score_json);
+              ("note", if note = "" then `Null else `String note);
+            ]
+        in
+        append_jsonl_line (keeper_feedback_log_path ctx.config name) json;
+        (true, Yojson.Safe.pretty_to_string json)
+
+let handle_keeper_dataset_export ctx args : tool_result =
+  let name = get_string args "name" "" in
+  let limit = max 1 (get_int args "limit" 200) in
+  if not (validate_name name) then
+    (false, "❌ invalid keeper name")
+  else
+    match read_meta ctx.config name with
+    | Error e -> (false, "❌ " ^ e)
+    | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
+    | Ok (Some meta) ->
+        let policy_rows =
+          read_jsonl_rows
+            (keeper_policy_log_path ctx.config name)
+            ~max_bytes:600000
+            ~max_lines:limit
+        in
+        let feedback_rows =
+          read_jsonl_rows
+            (keeper_feedback_log_path ctx.config name)
+            ~max_bytes:400000
+            ~max_lines:(limit * 4)
+        in
+        let feedback_by_action =
+          List.fold_left
+            (fun acc json ->
+              match Safe_ops.json_string_opt "action_id" json with
+              | Some action_id when String.trim action_id <> "" ->
+                  let current =
+                    acc
+                    |> List.find_map (fun (key, value) ->
+                           if key = action_id then Some value else None)
+                    |> Option.value ~default:[]
+                  in
+                  (action_id, json :: current)
+                  :: List.filter (fun (key, _) -> key <> action_id) acc
+              | _ -> acc)
+            []
+            feedback_rows
+        in
+        let examples =
+          policy_rows
+          |> List.map (fun row ->
+                 let action_id =
+                   Safe_ops.json_string_opt "action_id" row |> Option.value ~default:""
+                 in
+                 let feedback =
+                   feedback_by_action
+                   |> List.find_map (fun (key, rows) ->
+                          if key = action_id then Some (List.rev rows) else None)
+                   |> Option.value ~default:[]
+                 in
+                 `Assoc
+                   [
+                     ("action", row);
+                     ("feedback", `List feedback);
+                   ])
+        in
+        let output_path =
+          get_string_opt args "output_path"
+          |> Option.value ~default:(keeper_dataset_export_path ctx.config name)
+        in
+        let resolved_output_path =
+          if Filename.is_relative output_path then
+            Filename.concat ctx.config.base_path output_path
+          else
+            output_path
+        in
+        mkdir_p (Filename.dirname resolved_output_path);
+        let json =
+          `Assoc
+            [
+              ("keeper", `String name);
+              ("trace_id", `String meta.trace_id);
+              ("exported_at", `String (now_iso ()));
+              ("policy_row_count", `Int (List.length policy_rows));
+              ("feedback_row_count", `Int (List.length feedback_rows));
+              ("examples", `List examples);
+            ]
+        in
+        let oc = open_out resolved_output_path in
+        Common.protect
+          ~module_name:"tool_keeper"
+          ~finally_label:"close_out"
+          ~finally:(fun () -> close_out_noerr oc)
+          (fun () -> output_string oc (Yojson.Safe.pretty_to_string json));
+        ( true,
+          Yojson.Safe.pretty_to_string
+            (`Assoc
+              [
+                ("keeper", `String name);
+                ("output_path", `String resolved_output_path);
+                ("policy_row_count", `Int (List.length policy_rows));
+                ("feedback_row_count", `Int (List.length feedback_rows));
+              ]) )
+
+let handle_keeper_action_explain ctx args : tool_result =
+  let name = get_string args "name" "" in
+  let action_id = get_string_opt args "action_id" |> Option.value ~default:"" |> String.trim in
+  if not (validate_name name) then
+    (false, "❌ invalid keeper name")
+  else
+    match read_meta ctx.config name with
+    | Error e -> (false, "❌ " ^ e)
+    | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
+    | Ok (Some _) ->
+        let rows =
+          read_jsonl_rows
+            (keeper_policy_log_path ctx.config name)
+            ~max_bytes:400000
+            ~max_lines:120
+        in
+        let selected =
+          if action_id = "" then
+            match List.rev rows with row :: _ -> Some row | [] -> None
+          else
+            find_jsonl_row_by_action_id rows action_id
+        in
+        (match selected with
+         | None -> (false, "❌ no policy action found")
+         | Some row -> (true, Yojson.Safe.pretty_to_string row))
+
+let handle_keeper_eval_replay ctx args : tool_result =
+  let name = get_string args "name" "" in
+  let limit = max 1 (get_int args "limit" 50) in
+  if not (validate_name name) then
+    (false, "❌ invalid keeper name")
+  else
+    match read_meta ctx.config name with
+    | Error e -> (false, "❌ " ^ e)
+    | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
+    | Ok (Some meta) -> (
+        match load_keeper_reward_model meta.policy_reward_model_path with
+        | Error e -> (false, "❌ " ^ e)
+        | Ok reward_model ->
+            let rows =
+              read_jsonl_rows
+                (keeper_policy_log_path ctx.config name)
+                ~max_bytes:500000
+                ~max_lines:limit
+            in
+            let replayed =
+              rows
+              |> List.filter_map (fun row ->
+                     let feature_vector =
+                       match Yojson.Safe.Util.member "feature_vector" row with
+                       | `Assoc fields ->
+                           fields
+                           |> List.filter_map (fun (feature, value) ->
+                                  match value with
+                                  | `Float v -> Some (feature, v)
+                                  | `Int n -> Some (feature, float_of_int n)
+                                  | _ -> None)
+                       | _ -> []
+                     in
+                     let chosen_action = Safe_ops.json_string_opt "chosen_action" row in
+                     let observation = Yojson.Safe.Util.member "observation" row in
+                     let direct_mention =
+                       Safe_ops.json_bool ~default:false "direct_mention" observation
+                     in
+                     let heuristic_action =
+                       deterministic_policy_baseline_action
+                         {
+                           source_kind =
+                             Safe_ops.json_string ~default:"room_message" "source_kind" observation;
+                           room_id = Safe_ops.json_string_opt "room_id" observation;
+                           from_agent =
+                             Safe_ops.json_string ~default:"" "from_agent" observation;
+                           message =
+                             Safe_ops.json_string ~default:"" "message" observation;
+                           direct_mention;
+                           has_question =
+                             Safe_ops.json_bool ~default:false "has_question" observation;
+                           message_chars =
+                             Safe_ops.json_int ~default:0 "message_chars" observation;
+                           total_turns =
+                             Safe_ops.json_int ~default:0 "total_turns" observation;
+                           active_goal_count =
+                             Safe_ops.json_int ~default:0 "active_goal_count" observation;
+                           joined_room_count =
+                             Safe_ops.json_int ~default:0 "joined_room_count" observation;
+                           room_scope =
+                             Safe_ops.json_string ~default:"current" "room_scope" observation;
+                           trigger_mode =
+                             Safe_ops.json_string ~default:"legacy" "trigger_mode" observation;
+                           last_turn_ago_s =
+                             Safe_ops.json_float ~default:0.0 "last_turn_ago_s" observation;
+                         }
+                     in
+                     let candidate_names =
+                       match Yojson.Safe.Util.member "candidates" row with
+                       | `List xs ->
+                           xs
+                           |> List.filter_map (fun candidate ->
+                                  Safe_ops.json_string_opt "action" candidate)
+                       | _ -> []
+                     in
+                     let rescored =
+                       candidate_names
+                       |> List.map (fun action ->
+                              score_keeper_policy_candidate
+                                ~model:reward_model
+                                ~features:feature_vector
+                                ~action
+                                ~allowed:true)
+                     in
+                     choose_policy_action rescored
+                     |> Option.map (fun learned_candidate ->
+                            `Assoc
+                              [
+                                ("action_id",
+                                  match Safe_ops.json_string_opt "action_id" row with
+                                  | Some value -> `String value
+                                  | None -> `Null);
+                                ("chosen_action",
+                                  match chosen_action with
+                                  | Some value -> `String value
+                                  | None -> `Null);
+                                ("heuristic_action", `String heuristic_action);
+                                ("replayed_action", `String learned_candidate.action);
+                                ("replayed_score", `Float learned_candidate.score);
+                                ("matches_logged",
+                                  `Bool
+                                    (match chosen_action with
+                                     | Some value -> value = learned_candidate.action
+                                     | None -> false));
+                                ("differs_from_heuristic",
+                                  `Bool (heuristic_action <> learned_candidate.action));
+                              ]))
+            in
+            let matches_logged =
+              replayed
+              |> List.fold_left
+                   (fun acc json ->
+                     if Safe_ops.json_bool ~default:false "matches_logged" json then acc + 1
+                     else acc)
+                   0
+            in
+            let differs_from_heuristic =
+              replayed
+              |> List.fold_left
+                   (fun acc json ->
+                     if Safe_ops.json_bool ~default:false "differs_from_heuristic" json then acc + 1
+                     else acc)
+                   0
+            in
+            let json =
+              `Assoc
+                [
+                  ("keeper", `String name);
+                  ("reward_model_path", `String reward_model.path);
+                  ("reward_model_version", `String reward_model.version);
+                  ("replayed_count", `Int (List.length replayed));
+                  ("matches_logged_count", `Int matches_logged);
+                  ("differs_from_heuristic_count", `Int differs_from_heuristic);
+                  ("entries", `List replayed);
+                ]
+            in
+            (true, Yojson.Safe.pretty_to_string json))
 
 let handle_persona_list _ctx args : tool_result =
   let detailed = get_bool args "detailed" true in
@@ -9864,6 +10757,12 @@ let handle_keeper_list ctx args : tool_result =
               ("drift_enabled", `Bool m.drift_enabled);
               ("drift_min_turn_gap", `Int m.drift_min_turn_gap);
               ("drift_count_total", `Int m.drift_count_total);
+              ("policy_mode", `String m.policy_mode);
+              ("policy_action_budget", `String m.policy_action_budget);
+              ("policy_reward_model_path",
+                if String.trim m.policy_reward_model_path = ""
+                then `Null
+                else `String m.policy_reward_model_path);
               ("last_drift_turn", `Int m.last_drift_turn);
               ("last_drift_reason",
                 if String.trim m.last_drift_reason = ""
@@ -9886,6 +10785,9 @@ let handle_keeper_list ctx args : tool_result =
                 ("meta", `String (keeper_meta_path ctx.config m.name));
                 ("metrics", `String metrics_path);
                 ("memory_bank", `String (keeper_memory_bank_path ctx.config m.name));
+                ("policy", `String (keeper_policy_log_path ctx.config m.name));
+                ("feedback", `String (keeper_feedback_log_path ctx.config m.name));
+                ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));
                 ("session_dir", `String (keeper_session_dir ctx.config m.trace_id));
                 ("history", `String (keeper_history_path ctx.config m.trace_id));
               ]);
@@ -10198,6 +11100,11 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_status" -> Some (handle_keeper_status ctx args)
   | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)
   | "masc_keeper_model_set" -> Some (handle_keeper_model_set ctx args)
+  | "masc_keeper_policy_set" -> Some (handle_keeper_policy_set ctx args)
+  | "masc_keeper_feedback_record" -> Some (handle_keeper_feedback_record ctx args)
+  | "masc_keeper_dataset_export" -> Some (handle_keeper_dataset_export ctx args)
+  | "masc_keeper_action_explain" -> Some (handle_keeper_action_explain ctx args)
+  | "masc_keeper_eval_replay" -> Some (handle_keeper_eval_replay ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
   | "masc_keeper_autonomy" -> Some (handle_keeper_autonomy ctx args)

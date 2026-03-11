@@ -240,24 +240,16 @@ module Spawn = struct
     int_of_float (get_float ~default:60.0 "MASC_SPAWN_GRACE_PERIOD_SEC")
 end
 
-(** {1 Local Runtime Compatibility Configuration} *)
-
-module Ollama = struct
-  (** Default local runtime model — mirrors the centralized default model. *)
-  let default_model =
-    get_string ~default:"default-model" "MASC_DEFAULT_MODEL"
-
-  (** Ollama server base URL (no trailing slash). *)
-  let server_url =
-    get_string ~default:"http://127.0.0.1:11434" "OLLAMA_URL"
-end
-
-(** {1 llama.cpp Server Configuration} *)
+(** {1 Local LLM Server Configuration} *)
 
 module Llama = struct
   (** OpenAI-compatible llama.cpp server URL *)
   let server_url =
     get_string ~default:"http://127.0.0.1:8085" "LLAMA_SERVER_URL"
+
+  (** Default local runtime model id for llama.cpp/OpenAI-compatible servers. *)
+  let default_model =
+    get_string ~default:"explicit-model-required" "LLAMA_DEFAULT_MODEL"
 end
 
 (** {1 Federation Configuration} *)
@@ -421,7 +413,7 @@ module LodgeV2 = struct
 
   (** Delegate LLM calls to external Workers (Soul + Body pattern).
       When true, MASC emits heartbeat_task events instead of calling LLM directly.
-      Workers subscribe to events and invoke local LLM (Ollama). *)
+      Workers subscribe to events and invoke the local llama runtime. *)
   let delegate_llm =
     get_bool ~default:false "MASC_DELEGATE_LLM"
 end

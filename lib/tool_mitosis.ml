@@ -707,6 +707,12 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
 let normalize_agent_name agent =
   String.lowercase_ascii (String.trim agent)
 
+let validate_target_agent_label target_agent =
+  if Provider_adapter.is_bare_ollama_label target_agent then
+    Error (Provider_adapter.bare_ollama_migration_message ())
+  else
+    Ok (normalize_agent_name target_agent)
+
 let dedup_preserve_order xs =
   let rec loop seen acc = function
     | [] -> List.rev acc
@@ -724,7 +730,7 @@ let cascade_agents preferred =
     "claude";
     "codex";
     "gemini";
-    "ollama";
+    "llama";
   ]
 
 let spawn_attempts_to_json attempts =
@@ -810,9 +816,8 @@ let readiness_check agent =
       if command_available "codex" then Ok () else Error "codex CLI not found"
   | "gemini" ->
       if command_available "gemini" then Ok () else Error "gemini CLI not found"
-  | "ollama" ->
-      if not (command_available "ollama") then Error "ollama CLI not found"
-      else if not (port_listening 11434) then Error "ollama port 11434 not listening"
+  | "llama" ->
+      if not (port_listening 8085) then Error "llama port 8085 not listening"
       else Ok ()
   | _ -> Ok ()
 
@@ -941,85 +946,94 @@ let handle_mitosis_divide ctx args : result =
   let summary = get_string args "summary" "" in
   let current_task = get_string args "current_task" "" in
   let target_agent = get_string args "target_agent" "claude" in
-  let spawn_timeout =
-    int_of_float
-      (get_float args "spawn_timeout"
-         (Float.of_int Mitosis.Defaults.spawn_timeout_seconds))
-  in
-  let full_context =
-    if current_task = "" then summary
-    else Printf.sprintf "Summary: %s\n\nCurrent Task: %s" summary current_task
-  in
-  let cell = !(Mcp_server.current_cell) in
-  let config_mitosis = Mitosis.default_config in
-  let selected_agent = ref (normalize_agent_name target_agent) in
-  let spawn_attempts = ref [] in
-  let spawn_fn ~prompt =
-    let (result, actual_agent, attempts) =
-      spawn_with_cascade
-        ~ctx
-        ~preferred_agent:target_agent
-        ~total_timeout_seconds:spawn_timeout
-        ~prompt
-    in
-    selected_agent := actual_agent;
-    spawn_attempts := attempts;
-    result
-  in
-  let (spawn_result, new_cell, new_pool, handoff_dna) =
-    Mitosis.execute_mitosis ~config:config_mitosis ~pool:!(Mcp_server.stem_pool)
-      ~parent:cell ~full_context ~spawn_fn
-  in
-  let effective_agent =
-    if !selected_agent = "" then normalize_agent_name target_agent else !selected_agent
-  in
-  let attempts_json = spawn_attempts_to_json !spawn_attempts in
-  (* P0 fix: Only update state on successful spawn - no rollback needed on failure *)
-  if spawn_result.Spawn.success then begin
-    Mcp_server.current_cell := new_cell;
-    Mcp_server.stem_pool := new_pool;
-    Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
+  match validate_target_agent_label target_agent with
+  | Error msg ->
+      let json =
+        `Assoc
+          [
+            ("success", `Bool false);
+            ("error", `String msg);
+            ("target_agent", `String target_agent);
+          ]
+      in
+      (false, Yojson.Safe.pretty_to_string json)
+  | Ok normalized_target_agent ->
+      let spawn_timeout =
+        int_of_float
+          (get_float args "spawn_timeout"
+             (Float.of_int Mitosis.Defaults.spawn_timeout_seconds))
+      in
+      let full_context =
+        if current_task = "" then summary
+        else Printf.sprintf "Summary: %s\n\nCurrent Task: %s" summary current_task
+      in
+      let cell = !(Mcp_server.current_cell) in
+      let config_mitosis = Mitosis.default_config in
+      let selected_agent = ref normalized_target_agent in
+      let spawn_attempts = ref [] in
+      let spawn_fn ~prompt =
+        let (result, actual_agent, attempts) =
+          spawn_with_cascade
+            ~ctx
+            ~preferred_agent:target_agent
+            ~total_timeout_seconds:spawn_timeout
+            ~prompt
+        in
+        selected_agent := actual_agent;
+        spawn_attempts := attempts;
+        result
+      in
+      let (spawn_result, new_cell, new_pool, handoff_dna) =
+        Mitosis.execute_mitosis ~config:config_mitosis ~pool:!(Mcp_server.stem_pool)
+          ~parent:cell ~full_context ~spawn_fn
+      in
+      let effective_agent =
+        if !selected_agent = "" then normalized_target_agent else !selected_agent
+      in
+      let attempts_json = spawn_attempts_to_json !spawn_attempts in
+      if spawn_result.Spawn.success then begin
+        Mcp_server.current_cell := new_cell;
+        Mcp_server.stem_pool := new_pool;
+        Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
 
-    (* Agent Being Protocol: Queue Episode for persistence *)
-    let base_path = ctx.config.Room_utils.base_path in
-    let session_id = get_session_id () in
-    let ep_id = queue_episode
-      ~base_path
-      ~session_id
-      ~agent_name:effective_agent
-      ~generation:new_cell.Mitosis.generation
-      ~event_type:"mitosis_divide"
-      ~summary:(Printf.sprintf "Manual mitosis divide: gen %d → gen %d"
-        cell.Mitosis.generation new_cell.Mitosis.generation)
-      ~dna:handoff_dna
-      () in
+        let base_path = ctx.config.Room_utils.base_path in
+        let session_id = get_session_id () in
+        let ep_id = queue_episode
+          ~base_path
+          ~session_id
+          ~agent_name:effective_agent
+          ~generation:new_cell.Mitosis.generation
+          ~event_type:"mitosis_divide"
+          ~summary:(Printf.sprintf "Manual mitosis divide: gen %d → gen %d"
+            cell.Mitosis.generation new_cell.Mitosis.generation)
+          ~dna:handoff_dna
+          () in
 
-    let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
-    let json = `Assoc [
-      ("success", `Bool true);
-      ("previous_generation", `Int cell.Mitosis.generation);
-      ("new_generation", `Int new_cell.Mitosis.generation);
-      ("target_agent", `String target_agent);
-      ("selected_agent", `String effective_agent);
-      ("spawn_attempts", attempts_json);
-      ("successor_output", `String output_preview);
-      ("episode_queued", match ep_id with Some id -> `String id | None -> `Null);
-    ] in
-    (true, Yojson.Safe.pretty_to_string json)
-  end else begin
-    (* Spawn failed - return error without updating state *)
-    Printf.eprintf "[MITOSIS/ERROR] mitosis_divide spawn failed, state unchanged\n%!";
-    let json = `Assoc [
-      ("success", `Bool false);
-      ("error", `String "Spawn failed");
-      ("target_agent", `String target_agent);
-      ("selected_agent", `String effective_agent);
-      ("spawn_attempts", attempts_json);
-      ("spawn_output", `String spawn_result.Spawn.output);
-      ("suggestion", `String "Check agent availability and try again, or use masc_mitosis_handoff for graceful fallback");
-    ] in
-    (false, Yojson.Safe.pretty_to_string json)
-  end
+        let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
+        let json = `Assoc [
+          ("success", `Bool true);
+          ("previous_generation", `Int cell.Mitosis.generation);
+          ("new_generation", `Int new_cell.Mitosis.generation);
+          ("target_agent", `String target_agent);
+          ("selected_agent", `String effective_agent);
+          ("spawn_attempts", attempts_json);
+          ("successor_output", `String output_preview);
+          ("episode_queued", match ep_id with Some id -> `String id | None -> `Null);
+        ] in
+        (true, Yojson.Safe.pretty_to_string json)
+      end else begin
+        Printf.eprintf "[MITOSIS/ERROR] mitosis_divide spawn failed, state unchanged\n%!";
+        let json = `Assoc [
+          ("success", `Bool false);
+          ("error", `String "Spawn failed");
+          ("target_agent", `String target_agent);
+          ("selected_agent", `String effective_agent);
+          ("spawn_attempts", attempts_json);
+          ("spawn_output", `String spawn_result.Spawn.output);
+          ("suggestion", `String "Check agent availability and try again, or use masc_mitosis_handoff for graceful fallback");
+        ] in
+        (false, Yojson.Safe.pretty_to_string json)
+      end
 
 let handle_mitosis_check _ctx args : result =
   let raw_ratio = get_float args "context_ratio" 0.0 in
@@ -1254,7 +1268,7 @@ let continuity_regression_check ~full_context ~compressed_context =
     Arguments:
     - context_ratio: float (0.0-1.0) - estimated context usage
     - full_context: string - current context/summary to pass to successor
-    - target_agent: string (optional) - "claude"|"gemini"|"codex"|"ollama" (default: "claude")
+    - target_agent: string (optional) - "claude"|"gemini"|"codex"|"llama" (default: "claude")
     - prepare_threshold: float (optional) - when to prepare DNA (default: 0.5)
     - handoff_threshold: float (optional) - when to handoff (default: 0.8)
     - spawn_timeout: int (optional) - spawn timeout in seconds (default: 600)
@@ -1286,57 +1300,62 @@ let run_sync_handoff ctx args : result =
   let context_ratio = validate_context_ratio raw_ratio in
   let full_context = get_string args "full_context" "" in
   let target_agent = get_string args "target_agent" "claude" in
-  let spawn_timeout = int_of_float (get_float args "spawn_timeout" (Float.of_int Mitosis.Defaults.spawn_timeout_seconds)) in
+  match validate_target_agent_label target_agent with
+  | Error msg ->
+      let json = `Assoc [
+        ("action", `String "error");
+        ("error", `String msg);
+        ("target_agent", `String target_agent);
+      ] in
+      (false, Yojson.Safe.pretty_to_string json)
+  | Ok normalized_target_agent ->
+      let spawn_timeout = int_of_float (get_float args "spawn_timeout" (Float.of_int Mitosis.Defaults.spawn_timeout_seconds)) in
 
-  (* Warn if context_ratio is default 0.0 - likely caller forgot to provide it *)
-  if raw_ratio = 0.0 then
-    Printf.eprintf "[MITOSIS/WARN] context_ratio is 0.0 - did you forget to estimate it?\n%!";
+      if raw_ratio = 0.0 then
+        Printf.eprintf "[MITOSIS/WARN] context_ratio is 0.0 - did you forget to estimate it?\n%!";
 
-  (* P2-1: Adaptive thresholds — derive room name from base_path *)
-  let room_name = Filename.basename ctx.config.Room_utils.base_path in
-  let adaptive_enabled = Env_config.Mitosis.adaptive_thresholds_enabled in
-  let effective = Adaptive_thresholds.get_effective_thresholds
-    ~enabled:adaptive_enabled ~room:room_name in
-  (* P0-1: Allow per-call overrides via args, falling back to adaptive/default *)
-  let prepare_threshold = get_float args "prepare_threshold" effective.Adaptive_thresholds.prepare in
-  let handoff_threshold = get_float args "handoff_threshold" effective.Adaptive_thresholds.handoff in
-  if adaptive_enabled then
-    Printf.eprintf "[MITOSIS/ADAPTIVE] room=%s prepare=%.3f handoff=%.3f\n%!"
-      room_name prepare_threshold handoff_threshold;
+      let room_name = Filename.basename ctx.config.Room_utils.base_path in
+      let adaptive_enabled = Env_config.Mitosis.adaptive_thresholds_enabled in
+      let effective = Adaptive_thresholds.get_effective_thresholds
+        ~enabled:adaptive_enabled ~room:room_name in
+      let prepare_threshold = get_float args "prepare_threshold" effective.Adaptive_thresholds.prepare in
+      let handoff_threshold = get_float args "handoff_threshold" effective.Adaptive_thresholds.handoff in
+      if adaptive_enabled then
+        Printf.eprintf "[MITOSIS/ADAPTIVE] room=%s prepare=%.3f handoff=%.3f\n%!"
+          room_name prepare_threshold handoff_threshold;
 
-  let cell = !(Mcp_server.current_cell) in
-  (* Override config with custom thresholds if provided *)
-  let config_mitosis = { Mitosis.default_config with
-    prepare_threshold;
-    handoff_threshold;
-  } in
-  let pool = !(Mcp_server.stem_pool) in
+      let cell = !(Mcp_server.current_cell) in
+      let config_mitosis = { Mitosis.default_config with
+        prepare_threshold;
+        handoff_threshold;
+      } in
+      let pool = !(Mcp_server.stem_pool) in
 
-  let selected_agent = ref (normalize_agent_name target_agent) in
-  let spawn_attempts = ref [] in
-  let spawn_fn ~prompt =
-    let (result, actual_agent, attempts) =
-      spawn_with_cascade
-        ~ctx
-        ~preferred_agent:target_agent
-        ~total_timeout_seconds:spawn_timeout
-        ~prompt
-    in
-    selected_agent := actual_agent;
-    spawn_attempts := attempts;
-    result
-  in
-  
-  let result = Mitosis.auto_mitosis_check_2phase
-    ~config:config_mitosis
-    ~pool
-    ~cell
-    ~context_ratio
-    ~full_context
-    ~spawn_fn
-  in
-  
-  match result with
+      let selected_agent = ref normalized_target_agent in
+      let spawn_attempts = ref [] in
+      let spawn_fn ~prompt =
+        let (result, actual_agent, attempts) =
+          spawn_with_cascade
+            ~ctx
+            ~preferred_agent:target_agent
+            ~total_timeout_seconds:spawn_timeout
+            ~prompt
+        in
+        selected_agent := actual_agent;
+        spawn_attempts := attempts;
+        result
+      in
+
+      let result = Mitosis.auto_mitosis_check_2phase
+        ~config:config_mitosis
+        ~pool
+        ~cell
+        ~context_ratio
+        ~full_context
+        ~spawn_fn
+      in
+
+      match result with
   | Mitosis.NoAction ->
       let no_action_message =
         match cell.Mitosis.phase with
@@ -1392,7 +1411,7 @@ let run_sync_handoff ctx args : result =
         ~context_ratio)
        with exn -> Printf.eprintf "[mitosis] record_handoff failed: %s\n%!" (Printexc.to_string exn));
       let effective_agent =
-        if !selected_agent = "" then normalize_agent_name target_agent else !selected_agent
+        if !selected_agent = "" then normalized_target_agent else !selected_agent
       in
       let attempts_json = spawn_attempts_to_json !spawn_attempts in
       let continuity =

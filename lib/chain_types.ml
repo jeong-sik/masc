@@ -183,11 +183,11 @@ let context_mode_of_string s =
 (** The 23 supported node types (including Cascade) *)
 type node_type =
   | Llm of {
-      model : string;     (** Model name: gemini, claude, codex, ollama:*, glm *)
+      model : string;     (** Model name: gemini, claude, codex, llama:*, glm *)
       system : string option;  (** System instruction for role definition *)
       prompt : string;    (** Prompt template with {{var}} placeholders *)
       timeout : int option;
-      tools : Yojson.Safe.t option;  (** MCP tools for function calling (Ollama, GLM) *)
+      tools : Yojson.Safe.t option;  (** MCP tools for function calling (llama, GLM) *)
       prompt_ref : string option;  (** Reference to prompt registry entry (id or id@version) *)
       prompt_vars : (string * string) list;  (** Variable substitutions for prompt_ref *)
       thinking : bool;    (** Enable thinking/reasoning mode (GLM 4.7) - auto-enabled for complex prompts *)

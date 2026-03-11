@@ -664,6 +664,64 @@ let test_masc_keeper_create_from_persona_schema () =
             (List.mem_assoc "dry_run" props)
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
 
+let test_masc_keeper_policy_set_schema () =
+  match find_tool "masc_keeper_policy_set" with
+  | None -> Alcotest.fail "masc_keeper_policy_set not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has policy_mode" true
+            (List.mem_assoc "policy_mode" props);
+          Alcotest.(check bool) "has action_budget" true
+            (List.mem_assoc "action_budget" props);
+          Alcotest.(check bool) "has reward_model_path" true
+            (List.mem_assoc "reward_model_path" props)
+      | None -> Alcotest.fail "masc_keeper_policy_set missing properties"
+
+let test_masc_keeper_feedback_record_schema () =
+  match find_tool "masc_keeper_feedback_record" with
+  | None -> Alcotest.fail "masc_keeper_feedback_record not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has action_id" true
+            (List.mem_assoc "action_id" props);
+          Alcotest.(check bool) "has verdict" true
+            (List.mem_assoc "verdict" props)
+      | None -> Alcotest.fail "masc_keeper_feedback_record missing properties"
+
+let test_masc_keeper_dataset_export_schema () =
+  match find_tool "masc_keeper_dataset_export" with
+  | None -> Alcotest.fail "masc_keeper_dataset_export not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has output_path" true
+            (List.mem_assoc "output_path" props);
+          Alcotest.(check bool) "has limit" true
+            (List.mem_assoc "limit" props)
+      | None -> Alcotest.fail "masc_keeper_dataset_export missing properties"
+
+let test_masc_keeper_action_explain_schema () =
+  match find_tool "masc_keeper_action_explain" with
+  | None -> Alcotest.fail "masc_keeper_action_explain not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has action_id" true
+            (List.mem_assoc "action_id" props)
+      | None -> Alcotest.fail "masc_keeper_action_explain missing properties"
+
+let test_masc_keeper_eval_replay_schema () =
+  match find_tool "masc_keeper_eval_replay" with
+  | None -> Alcotest.fail "masc_keeper_eval_replay not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has limit" true
+            (List.mem_assoc "limit" props)
+      | None -> Alcotest.fail "masc_keeper_eval_replay missing properties"
+
 (* ============================================================ *)
 (* 13. Cache Tool Tests                                          *)
 (* ============================================================ *)
@@ -1039,6 +1097,16 @@ let () =
       Alcotest.test_case "persona-list" `Quick test_masc_persona_list_schema;
       Alcotest.test_case "keeper-create-from-persona" `Quick
         test_masc_keeper_create_from_persona_schema;
+      Alcotest.test_case "keeper-policy-set" `Quick
+        test_masc_keeper_policy_set_schema;
+      Alcotest.test_case "keeper-feedback-record" `Quick
+        test_masc_keeper_feedback_record_schema;
+      Alcotest.test_case "keeper-dataset-export" `Quick
+        test_masc_keeper_dataset_export_schema;
+      Alcotest.test_case "keeper-action-explain" `Quick
+        test_masc_keeper_action_explain_schema;
+      Alcotest.test_case "keeper-eval-replay" `Quick
+        test_masc_keeper_eval_replay_schema;
       Alcotest.test_case "llama-models" `Quick test_masc_llama_models_schema;
       Alcotest.test_case "team-session-step-spawn-selection-note" `Quick
         test_masc_team_session_step_spawn_selection_note_schema;

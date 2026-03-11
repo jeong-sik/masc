@@ -1452,10 +1452,10 @@ let trpg_default_fast_keeper_models () : string list =
   let gemini_available = has_nonempty_env "GEMINI_API_KEY" in
   match (glm_available, gemini_available) with
   | true, true ->
-      [ "glm:glm-4.7"; "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
-  | true, false -> [ "glm:glm-4.7"; "ollama:glm-4.7-flash" ]
-  | false, true -> [ "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
-  | false, false -> [ "ollama:glm-4.7-flash" ]
+      [ "glm:glm-4.7"; "gemini:gemini-2.5-flash"; Masc_mcp.Provider_adapter.explicit_llama_model_label () ]
+  | true, false -> [ "glm:glm-4.7"; Masc_mcp.Provider_adapter.explicit_llama_model_label () ]
+  | false, true -> [ "gemini:gemini-2.5-flash"; Masc_mcp.Provider_adapter.explicit_llama_model_label () ]
+  | false, false -> [ Masc_mcp.Provider_adapter.explicit_llama_model_label () ]
 
 let trpg_keeper_models_override_csv () : string option =
   match Sys.getenv_opt "MASC_TRPG_KEEPER_MODELS" with
@@ -1693,25 +1693,23 @@ let trpg_discover_openai_compatible_models (base_url : string) :
              (fun model_id -> Printf.sprintf "custom:%s@%s" model_id base_url)
              names)
 
-let trpg_discover_ollama_models () : (string list, string) result =
-  let base_url = trim_trailing_slashes Llm_client.ollama_glm.api_url in
-  let url = base_url ^ "/api/tags" in
-  match trpg_http_get_json_via_curl url with
+let trpg_discover_local_llama_models () : (string list, string) result =
+  match trpg_discover_openai_compatible_models Masc_mcp.Env_config.Llama.server_url with
+  | Ok specs ->
+      Ok
+        (specs
+        |> List.map (fun spec ->
+               match String.index_opt spec ':' with
+               | Some idx when idx + 1 < String.length spec ->
+                   let tail =
+                     String.sub spec (idx + 1) (String.length spec - idx - 1)
+                   in
+                   (match String.index_opt tail '@' with
+                   | Some at_idx when at_idx > 0 ->
+                       "llama:" ^ String.sub tail 0 at_idx
+                   | _ -> spec)
+               | _ -> spec))
   | Error err -> Error err
-  | Ok json -> (
-      match trpg_json_assoc_find "models" json with
-      | Some (`List entries) ->
-          let names =
-            entries
-            |> List.filter_map (fun entry ->
-                   trpg_json_string_fields ["name"; "model"] entry)
-            |> List.map (fun model_id -> Printf.sprintf "ollama:%s" model_id)
-            |> String.concat ","
-            |> split_csv_nonempty
-          in
-          if names = [] then Error "no ollama models found"
-          else Ok names
-      | _ -> Error "ollama tag list missing models array")
 
 let trpg_available_models_json_collect
     ?(warnings : string list = [])
@@ -1775,16 +1773,16 @@ let trpg_available_models_json_collect
             add_warning
               (Printf.sprintf "openai-compatible %s 조회 실패: %s" base_url err))
       (trpg_openai_compatible_urls ());
-    match trpg_discover_ollama_models () with
+    match trpg_discover_local_llama_models () with
     | Ok specs ->
         List.iter
           (fun spec ->
-            add_model ~spec ~source:"ollama" ~status:"live"
-              ~detail:Llm_client.ollama_glm.api_url ())
+            add_model ~spec ~source:"llama" ~status:"live"
+              ~detail:Masc_mcp.Env_config.Llama.server_url ())
           specs
     | Error err ->
         add_warning
-          (Printf.sprintf "ollama %s 조회 실패: %s" Llm_client.ollama_glm.api_url err));
+          (Printf.sprintf "llama %s 조회 실패: %s" Masc_mcp.Env_config.Llama.server_url err));
   `Assoc
     [
       ("ok", `Bool true);
@@ -2522,7 +2520,6 @@ let trpg_keeper_call_with_runtime
           ("goal", `String inline_goal);
           ("require_existing", `Bool true);
           ("timeout_sec", `Float timeout_sec);
-          ("ollama_timeout_sec", `Float timeout_sec);
           ("turn_instructions", `String turn_instructions);
         ])
   in
@@ -3794,7 +3791,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
       | None -> s
       | Some i ->
           let prefix = String.sub s 0 i |> String.lowercase_ascii in
-          if List.mem prefix ["ollama"; "glm"; "claude"; "gemini"; "openrouter"] then
+          if List.mem prefix ["llama"; "glm"; "claude"; "gemini"; "openrouter"] then
             String.sub s (i + 1) (String.length s - i - 1)
           else
             s
@@ -4755,7 +4752,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                  | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
                  | Ok specs ->
                      let primary =
-                       match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm
+                       match specs with m0 :: _ -> m0 | [] -> Llm_client.llama_default
                      in
                      let base_dir = Tool_keeper.session_base_dir config in
                      let (_session, ctx_opt) =
@@ -5843,6 +5840,8 @@ let mcp_transport_json_headers session_id protocol_version origin =
         cors_headers = cors_headers;
         auth_token_from_request = auth_token_from_request;
         get_server_state_opt = (fun () -> !server_state);
+        get_sw = Masc_mcp.Eio_context.get_switch_opt;
+        get_clock = Masc_mcp.Eio_context.get_clock_opt;
         verify_mcp_auth =
           (fun ~base_path request ->
             Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
@@ -6388,6 +6387,8 @@ let mcp_transport_http_deps : Server_mcp_transport_http.deps =
     cors_headers;
     auth_token_from_request;
     get_server_state_opt = (fun () -> !server_state);
+    get_sw = Masc_mcp.Eio_context.get_switch_opt;
+    get_clock = Masc_mcp.Eio_context.get_clock_opt;
     verify_mcp_auth =
       (fun ~base_path request ->
         Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));

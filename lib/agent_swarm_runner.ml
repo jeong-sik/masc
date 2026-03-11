@@ -37,7 +37,7 @@ let resolve_provider name =
   | "sonnet" -> Some (Provider.anthropic_sonnet ())
   | "haiku" -> Some (Provider.anthropic_haiku ())
   | "opus" -> Some (Provider.anthropic_opus ())
-  | "ollama" -> Some (Provider.ollama ())
+  | "llama" -> Some (Provider.local_qwen ())
   | "openrouter" -> Some (Provider.openrouter ())
   | _ -> None
 

@@ -419,13 +419,7 @@ let control_domain_of_string = function
   | "meta" -> Some Domain_meta
   | _ -> None
 
-let dedup_strings xs =
-  let rec loop acc = function
-    | [] -> List.rev acc
-    | x :: rest ->
-        if List.mem x acc then loop acc rest else loop (x :: acc) rest
-  in
-  loop [] xs
+let dedup_strings = Dashboard_utils.dedup_strings
 
 let planned_worker_key (w : planned_worker) =
   match w.runtime_actor with

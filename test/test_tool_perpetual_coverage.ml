@@ -25,10 +25,10 @@ let make_ctx () : Tool_perpetual.context = {
 
 (** Create a default model spec for testing. *)
 let test_model : Llm_client.model_spec = {
-  provider = Ollama;
+  provider = Llm_client.Llama;
   model_id = "test-model";
   max_context = 4000;
-  api_url = "http://127.0.0.1:11434/api/chat";
+  api_url = "http://127.0.0.1:8085";
   api_key_env = None;
   cost_per_1k_input = 0.0;
   cost_per_1k_output = 0.0;
@@ -133,7 +133,7 @@ let test_start_with_valid_model () =
   let ctx = make_ctx () in
   let args = `Assoc [
     ("goal", `String "write a poem");
-    ("models", `List [`String "ollama:test-model"]);
+    ("models", `List [`String "llama:test-model"]);
   ] in
   let result = Tool_perpetual.dispatch ctx ~name:"masc_perpetual_start" ~args in
   (match result with
@@ -151,7 +151,7 @@ let test_start_optional_params () =
   let ctx = make_ctx () in
   let args = `Assoc [
     ("goal", `String "test");
-    ("models", `List [`String "ollama:test-model"]);
+    ("models", `List [`String "llama:test-model"]);
     ("verify", `Bool false);
     ("heartbeat_sec", `Float 60.0);
     ("max_idle", `Int 10);

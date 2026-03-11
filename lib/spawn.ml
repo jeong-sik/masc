@@ -259,12 +259,12 @@ let default_configs = [
     working_dir = None;
     mcp_tools = masc_mcp_tools;  (* Codex: uses config.toml MCP servers *)
   });
-  ("ollama", {
-    agent_name = "ollama";
-    command = "ollama run";  (* Direct ollama CLI; model resolved by adapter policy *)
+  ("llama", {
+    agent_name = "llama";
+    command = "llama:explicit-model-required";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
-    mcp_tools = [];  (* Ollama has no MCP support *)
+    mcp_tools = masc_mcp_tools;
   });
 ]
 
@@ -292,8 +292,7 @@ let build_mcp_args agent_name tools =
   | "codex" ->
     (* Codex: Uses config.toml MCP servers automatically, no extra flags needed *)
     []
-  | "ollama" ->
-    (* Ollama: Direct CLI, no MCP support *)
+  | "llama" ->
     []
   | _ -> []
 
@@ -309,13 +308,27 @@ let parse_command cmd =
 
 let add_default_model_arg agent_name argv =
   match Provider_adapter.resolve_direct_adapter agent_name with
-  | Some adapter when adapter.canonical_name = "ollama" -> (
-      argv @ [ Provider_adapter.explicit_ollama_model_id () ])
+  | Some adapter when adapter.canonical_name = "llama" -> (
+      argv @ [ Provider_adapter.explicit_llama_model_id () ])
   | _ -> argv
 
 (** Spawn an agent with a prompt/task (direct execution, no shell) *)
 let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let start_time = Time_compat.now () in
+  let normalized_agent = String.lowercase_ascii (String.trim agent_name) in
+  if Provider_adapter.is_bare_ollama_label normalized_agent then
+    {
+      success = false;
+      output = Provider_adapter.bare_ollama_migration_message ();
+      exit_code = 2;
+      elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+      input_tokens = None;
+      output_tokens = None;
+      cache_creation_tokens = None;
+      cache_read_tokens = None;
+      cost_usd = None;
+    }
+  else
 
   (* Get config or use defaults *)
   let config = match get_config agent_name with

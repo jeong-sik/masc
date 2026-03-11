@@ -260,12 +260,14 @@ let handle_agent_card _ctx args =
         `Assoc [
           ("status", `String "refreshed");
           ("card", json);
-          ("endpoint", `String "/.well-known/agent-card.json");
+          ("endpoint", `String "/.well-known/agent.json");
+          ("legacy_endpoint", `String "/.well-known/agent-card.json");
         ]
     | _ ->
         `Assoc [
           ("card", json);
-          ("endpoint", `String "/.well-known/agent-card.json");
+          ("endpoint", `String "/.well-known/agent.json");
+          ("legacy_endpoint", `String "/.well-known/agent-card.json");
         ]
   in
   (true, Yojson.Safe.pretty_to_string response)

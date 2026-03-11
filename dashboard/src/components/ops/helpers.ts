@@ -4,8 +4,10 @@ import { signal } from '@preact/signals'
 import { showToast } from '../common/toast'
 import type {
   OperatorAttentionItem,
+  OperatorGuidanceSummary,
   OperatorKeeperSnapshot,
   OperatorRecommendedAction,
+  OperatorResidentJudgeRuntime,
   OperatorSessionSnapshot,
 } from '../../types'
 import {
@@ -59,6 +61,47 @@ export function prettyJson(value: unknown): string {
   } catch {
     return String(value)
   }
+}
+
+export function guidanceLayerLabel(value?: string | null): string {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'judgment':
+      return 'Resident judgment'
+    case 'fallback':
+      return 'Fallback read model'
+    default:
+      return value?.trim() || 'Guidance'
+  }
+}
+
+export function guidanceLayerTone(value?: string | null): OpsPriorityTone {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'judgment':
+      return 'ok'
+    case 'fallback':
+      return 'warn'
+    default:
+      return 'warn'
+  }
+}
+
+export function runtimeJudgeLabel(runtime?: OperatorResidentJudgeRuntime | null): string {
+  if (!runtime?.enabled) return '꺼짐'
+  if (runtime.refreshing) return '갱신 중'
+  if (runtime.judge_online) return '온라인'
+  return runtime.last_error ? '오류' : '대기'
+}
+
+export function runtimeJudgeTone(runtime?: OperatorResidentJudgeRuntime | null): OpsPriorityTone {
+  if (!runtime?.enabled) return 'warn'
+  if (runtime.judge_online) return 'ok'
+  if (runtime.refreshing) return 'warn'
+  return 'bad'
+}
+
+export function guidanceFreshnessLabel(summary?: OperatorGuidanceSummary | null): string {
+  if (!summary?.fresh_until) return 'freshness 없음'
+  return summary.fresh_until
 }
 
 export function relativeAge(seconds?: number): string {

@@ -101,7 +101,7 @@ let default_model_strings ~cascade_name =
         "gemini:gemini-2.5-flash";
         Printf.sprintf "llama:%s" Env_config.Llama.default_model;
       ]
-  | "governance_judge" -> llama_glm
+  | "governance_judge" | "operator_judge" -> llama_glm
   (* walph — default execution models *)
   | "walph" -> llama_glm
   (* auto_responder — agent_type-specific cascades *)

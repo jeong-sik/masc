@@ -135,6 +135,12 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_votes",
       hidden_active
         "Low-usage room vote utility hidden from the default tool list; prefer decision.*, masc_consensus_*, or masc_debate_* for primary coordination workflows." );
+    ( "masc_operator_judgment_write",
+      hidden_active
+        "Internal resident-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
+    ( "masc_operator_judgment_latest",
+      hidden_active
+        "Internal resident-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
   ]
 
 let implementation_status_to_string = function

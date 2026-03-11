@@ -37,6 +37,12 @@ import {
   surfaceRouteParams,
   toneClass,
 } from './helpers'
+import {
+  guidanceFreshnessLabel,
+  guidanceLayerLabel,
+  guidanceLayerTone,
+  runtimeJudgeLabel,
+} from '../ops/helpers'
 import { SwarmBlockerCard, SwarmHealthBar, SwarmRunResolutionCard, SwarmStoryboard } from './swarm'
 import { TraceRow } from './topology'
 
@@ -180,29 +186,37 @@ export function WarRoomSurface() {
         overlay => overlay.operation.operation_id === swarm.operation?.operation_id,
       ) ?? null
     : null
+  const swarmHasEvidence = hasSwarmActivity()
   const swarmWorkers = swarm?.workers ?? []
   const sessionWorkers = sessionDigest?.worker_cards ?? []
   const workers =
-    swarmWorkers.length > 0
+    swarmHasEvidence && swarmWorkers.length > 0
       ? swarmWorkers.map(swarmWorkerView)
       : sessionWorkers.map(operatorWorkerView)
-  const hasLiveRun = hasSwarmActivity()
+  const hasLiveRun = swarmHasEvidence
   const pendingApprovals = summary?.decisions.summary?.pending ?? 0
   const pendingConfirms = snapshot?.pending_confirms ?? []
-  const blockers = swarm?.blockers ?? []
+  const blockers = swarmHasEvidence ? (swarm?.blockers ?? []) : []
   const recommendedActions = sessionDigest?.recommended_actions ?? []
+  const activeRecommendedActions =
+    sessionDigest?.active_recommended_actions?.length
+      ? sessionDigest.active_recommended_actions
+      : recommendedActions
+  const activeSummary = sessionDigest?.active_summary
+  const guidanceLayer = sessionDigest?.active_guidance_layer ?? 'fallback'
+  const residentRuntime = sessionDigest?.resident_judge_runtime ?? snapshot?.resident_judge_runtime
   const attentionItems = sessionDigest?.attention_items ?? []
   const latestMessage = swarm?.recent_messages[0]?.timestamp ?? null
   const latestTrace = swarm?.recent_trace_events[0]?.timestamp ?? null
-  const latestSignal = latestMessage ?? latestTrace ?? null
+  const latestSignal = swarmHasEvidence ? (latestMessage ?? latestTrace ?? null) : null
   const sessionSummary = selectedSession?.summary as Record<string, unknown> | undefined
   const workerExpected =
-    swarm?.summary?.expected_workers
+    (swarmHasEvidence ? swarm?.summary?.expected_workers : undefined)
     ?? (typeof sessionSummary?.planned_worker_count === 'number' ? sessionSummary.planned_worker_count : undefined)
     ?? sessionDigest?.worker_cards.length
     ?? 0
   const workerJoined =
-    swarm?.summary?.joined_workers
+    (swarmHasEvidence ? swarm?.summary?.joined_workers : undefined)
     ?? (typeof sessionSummary?.active_agent_count === 'number' ? sessionSummary.active_agent_count : undefined)
     ?? workers.length
   const stickyTone =
@@ -211,7 +225,10 @@ export function WarRoomSurface() {
       : hasLiveRun || selectedSession
         ? 'ok'
         : 'warn'
-  const liveLanes = summary?.swarm_status?.lanes.filter((lane: CommandPlaneSwarmLane) => lane.present) ?? []
+  const liveLanes =
+    swarmHasEvidence
+      ? (summary?.swarm_status?.lanes.filter((lane: CommandPlaneSwarmLane) => lane.present) ?? [])
+      : []
 
   useEffect(() => {
     void refreshOperatorSnapshot()
@@ -252,24 +269,30 @@ export function WarRoomSurface() {
         <div class="command-warroom-strip-head">
           <div>
             <span class="command-hero-kicker">Live War Room</span>
-            <strong>${swarm?.operation?.objective ?? selectedSession?.session_id ?? 'active run'}</strong>
+            <strong>${swarmHasEvidence ? (swarm?.operation?.objective ?? selectedSession?.session_id ?? 'active run') : (selectedSession?.session_id ?? 'active run')}</strong>
             <div class="command-card-sub">
-              ${swarm?.operation?.operation_id ?? 'operation 없음'}
+              ${swarmHasEvidence ? (swarm?.operation?.operation_id ?? 'operation 없음') : 'session truth'}
               ${selectedSession?.session_id ? ` · session ${selectedSession.session_id}` : ''}
-              ${swarm?.detachment?.detachment_id ? ` · detachment ${swarm.detachment.detachment_id}` : ''}
+              ${swarmHasEvidence && swarm?.detachment?.detachment_id ? ` · detachment ${swarm.detachment.detachment_id}` : ''}
             </div>
+            ${activeSummary?.summary
+              ? html`<div class="command-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
+                  <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
+                  <span>${activeSummary.summary}</span>
+                </div>`
+              : null}
           </div>
           <div class="command-action-row">
             <${WarRoomJumpButton}
               label="스웜 상세"
               surface="swarm"
               params=${{
-                ...(swarm?.operation?.operation_id ? { operation_id: swarm.operation.operation_id } : {}),
-                ...(swarm?.run_id ? { run_id: swarm.run_id } : {}),
+                ...(swarmHasEvidence && swarm?.operation?.operation_id ? { operation_id: swarm.operation.operation_id } : {}),
+                ...(swarmHasEvidence && swarm?.run_id ? { run_id: swarm.run_id } : {}),
               }}
             />
             <${WarRoomJumpButton} label="트레이스" surface="trace" />
-            ${chainOverlay
+            ${swarmHasEvidence && chainOverlay
               ? html`<${WarRoomJumpButton}
                   label="체인"
                   surface="chains"
@@ -283,17 +306,22 @@ export function WarRoomSurface() {
           <div class="monitor-stat-card">
             <span>Workers</span>
             <strong>${workerJoined ?? 0}/${workerExpected ?? 0}</strong>
-            <small>${swarm?.summary?.completed_workers ?? 0} 완료 · ${workers.length} 카드</small>
+            <small>${swarmHasEvidence ? (swarm?.summary?.completed_workers ?? 0) : 0} 완료 · ${workers.length} 카드</small>
           </div>
           <div class="monitor-stat-card">
             <span>Runtime</span>
-            <strong>${swarm?.provider?.runtime_blocker ? 'blocked' : swarm?.provider?.provider_reachable ? 'ready' : selectedSession ? displayStatus(selectedSession.status) : 'check'}</strong>
-            <small>slots ${swarm?.provider?.active_slots_now ?? 0}/${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · ctx ${swarm?.provider?.actual_ctx ?? swarm?.provider?.ctx_per_slot ?? 0}</small>
+            <strong>${swarmHasEvidence ? (swarm?.provider?.runtime_blocker ? 'blocked' : swarm?.provider?.provider_reachable ? 'ready' : selectedSession ? displayStatus(selectedSession.status) : 'check') : (selectedSession ? displayStatus(selectedSession.status) : 'check')}</strong>
+            <small>${swarmHasEvidence ? `slots ${swarm?.provider?.active_slots_now ?? 0}/${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · ctx ${swarm?.provider?.actual_ctx ?? swarm?.provider?.ctx_per_slot ?? 0}` : `session workers ${sessionDigest?.worker_cards.length ?? 0}`}</small>
           </div>
           <div class="monitor-stat-card ${toneClass(blockers.length > 0 || pendingApprovals > 0 ? 'warn' : 'ok')}">
             <span>Pressure</span>
             <strong>${blockers.length + pendingApprovals + pendingConfirms.length}</strong>
             <small>blockers ${blockers.length} · approvals ${pendingApprovals} · confirms ${pendingConfirms.length}</small>
+          </div>
+          <div class="monitor-stat-card ${toneClass(guidanceLayerTone(guidanceLayer))}">
+            <span>Resident Judge</span>
+            <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
+            <small>${guidanceFreshnessLabel(activeSummary)}${residentRuntime?.model_used ? ` · ${residentRuntime.model_used}` : ''}</small>
           </div>
           <div class="monitor-stat-card">
             <span>Last signal</span>
@@ -353,6 +381,7 @@ export function WarRoomSurface() {
               <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
             </div>
             ${swarm && swarm.recent_messages.length > 0
+              && swarmHasEvidence
               ? html`<div class="command-trace-stack">
                   ${swarm.recent_messages.map(message => html`
                     <article class="command-trace-row">
@@ -367,9 +396,9 @@ export function WarRoomSurface() {
                     </article>
                   `)}
                 </div>`
-              : recommendedActions.length > 0 || attentionItems.length > 0
+              : activeRecommendedActions.length > 0 || attentionItems.length > 0
                 ? html`<div class="command-card-stack">
-                    ${recommendedActions.slice(0, 4).map(item => html`
+                    ${activeRecommendedActions.slice(0, 4).map(item => html`
                       <article class="command-guide-card ${warRoomRecommendationTone(item)}">
                         <div class="command-guide-head">
                           <strong>${item.action_type}</strong>
@@ -425,7 +454,7 @@ export function WarRoomSurface() {
               <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
             </div>
             <div class="command-card-stack">
-              ${swarm ? html`<${SwarmRunResolutionCard} swarm=${swarm} />` : null}
+              ${swarmHasEvidence && swarm ? html`<${SwarmRunResolutionCard} swarm=${swarm} />` : null}
               ${blockers.length > 0
                 ? blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)
                 : html`<div class="command-guide-card ok"><p>지금 보이는 blocker는 없습니다.</p></div>`}
@@ -463,7 +492,7 @@ export function WarRoomSurface() {
               <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
             </div>
             <div class="command-card-stack">
-              ${swarm?.operation
+              ${swarmHasEvidence && swarm?.operation
                 ? html`
                     <article class="command-card compact">
                       <div class="command-card-head">
@@ -482,7 +511,7 @@ export function WarRoomSurface() {
                     </article>
                   `
                 : null}
-              ${swarm?.detachment
+              ${swarmHasEvidence && swarm?.detachment
                 ? html`
                     <article class="command-card compact">
                       <div class="command-card-head">

@@ -64,6 +64,12 @@ let snapshot_schema ~remote =
   }
 
 let digest_target_type_enums = [ `String "room"; `String "team_session" ]
+let judgment_surface_enums =
+  [
+    `String "command.warroom";
+    `String "command.swarm";
+    `String "intervene";
+  ]
 
 let digest_schema ~remote =
   {
@@ -156,6 +162,82 @@ let confirm_schema =
         ];
   }
 
+let judgment_write_schema =
+  {
+    name = "masc_operator_judgment_write";
+    description =
+      "Internal operator-judge write path. Use this to store a durable resident judgment for room or team-session supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
+    input_schema =
+      `Assoc
+        [
+          ("type", `String "object");
+          ( "properties",
+            schema_properties
+              [
+                ( "surface",
+                  `Assoc
+                    [
+                      ("type", `String "string");
+                      ("enum", `List judgment_surface_enums);
+                    ] );
+                ( "target_type",
+                  `Assoc
+                    [
+                      ("type", `String "string");
+                      ("enum", `List digest_target_type_enums);
+                    ] );
+                ("target_id", `Assoc [ ("type", `String "string") ]);
+                ("summary", `Assoc [ ("type", `String "string") ]);
+                ("confidence", `Assoc [ ("type", `String "number") ]);
+                ("fresh_ttl_sec", `Assoc [ ("type", `String "integer") ]);
+                ("keeper_name", `Assoc [ ("type", `String "string") ]);
+                ("model_name", `Assoc [ ("type", `String "string") ]);
+                ("runtime_name", `Assoc [ ("type", `String "string") ]);
+                ( "evidence_refs",
+                  `Assoc
+                    [
+                      ("type", `String "array");
+                      ("items", `Assoc [ ("type", `String "string") ]);
+                    ] );
+                ("recommended_action", `Assoc [ ("type", `String "object") ]);
+                ("fallback_used", `Assoc [ ("type", `String "boolean") ]);
+                ("disagreement_with_truth", `Assoc [ ("type", `String "boolean") ]);
+              ] );
+          ("required", `List [ `String "surface"; `String "target_type"; `String "summary" ]);
+        ];
+  }
+
+let judgment_latest_schema =
+  {
+    name = "masc_operator_judgment_latest";
+    description =
+      "Internal operator-judge read path. Returns the latest stored resident judgment for a room or team session. Hidden from the default catalog.";
+    input_schema =
+      `Assoc
+        [
+          ("type", `String "object");
+          ( "properties",
+            schema_properties
+              [
+                ( "surface",
+                  `Assoc
+                    [
+                      ("type", `String "string");
+                      ("enum", `List judgment_surface_enums);
+                    ] );
+                ( "target_type",
+                  `Assoc
+                    [
+                      ("type", `String "string");
+                      ("enum", `List digest_target_type_enums);
+                    ] );
+                ("target_id", `Assoc [ ("type", `String "string") ]);
+                ("require_fresh", `Assoc [ ("type", `String "boolean") ]);
+              ] );
+          ("required", `List [ `String "surface"; `String "target_type" ]);
+        ];
+  }
+
 let json_string_of_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
@@ -196,6 +278,13 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
       Some (json_string_of_result (Operator_control.action_json control_ctx args))
   | "masc_operator_confirm" ->
       Some (json_string_of_result (Operator_control.confirm_json control_ctx args))
+  | "masc_operator_judgment_write" ->
+      Some
+        (json_string_of_result (Operator_control.judgment_write_json control_ctx args))
+  | "masc_operator_judgment_latest" ->
+      Some
+        (json_string_of_result
+           (Operator_control.judgment_latest_json control_ctx args))
   | _ -> None
 
 let schemas : tool_schema list =
@@ -204,6 +293,8 @@ let schemas : tool_schema list =
     digest_schema ~remote:false;
     action_schema ~remote:false;
     confirm_schema;
+    judgment_write_schema;
+    judgment_latest_schema;
   ]
 
 let remote_schemas : tool_schema list =

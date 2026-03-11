@@ -41,6 +41,7 @@
    dashboard
    dashboard_governance
    dashboard_governance_judge
+   dashboard_operator_judge
    dashboard_semantics
    dashboard_utils
    dashboard_execution
@@ -161,6 +162,7 @@
    nickname
    noosphere_eio
    operator_control
+   operator_judgment
    notify
    orchestrator
    planning_eio

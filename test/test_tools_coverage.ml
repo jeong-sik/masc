@@ -340,6 +340,23 @@ let test_masc_operator_confirm_schema () =
             (List.mem (`String "confirm_token") reqs)
       | None -> Alcotest.fail "masc_operator_confirm missing required field"
 
+let test_hidden_operator_judgment_schemas_are_local_only () =
+  match find_tool "masc_operator_judgment_write", find_tool "masc_operator_judgment_latest" with
+  | Some write_schema, Some latest_schema ->
+      Alcotest.(check bool) "write description present" true
+        (String.length write_schema.description > 20);
+      Alcotest.(check bool) "latest description present" true
+        (String.length latest_schema.description > 20);
+      Alcotest.(check bool) "remote excludes judgment write" false
+        (List.exists
+           (fun schema -> schema.name = "masc_operator_judgment_write")
+           Masc_mcp.Tool_operator.remote_schemas);
+      Alcotest.(check bool) "remote excludes judgment latest" false
+        (List.exists
+           (fun schema -> schema.name = "masc_operator_judgment_latest")
+           Masc_mcp.Tool_operator.remote_schemas)
+  | _ -> Alcotest.fail "hidden operator judgment schemas not found"
+
 let test_masc_room_strategy_get_schema () =
   match find_tool "masc_room_strategy_get" with
   | None -> Alcotest.fail "masc_room_strategy_get not found"
@@ -1071,6 +1088,8 @@ let () =
       Alcotest.test_case "remote_operator_action_strict" `Quick
         test_remote_operator_action_schema_is_strict;
       Alcotest.test_case "masc_operator_confirm" `Quick test_masc_operator_confirm_schema;
+      Alcotest.test_case "hidden_operator_judgment_local_only" `Quick
+        test_hidden_operator_judgment_schemas_are_local_only;
       Alcotest.test_case "masc_room_strategy_get" `Quick test_masc_room_strategy_get_schema;
       Alcotest.test_case "masc_room_strategy_set" `Quick test_masc_room_strategy_set_schema;
     ];

@@ -13,9 +13,14 @@ import {
   broadcastMessage,
   confirmPending,
   deliveryModeLabel,
+  guidanceFreshnessLabel,
+  guidanceLayerLabel,
+  guidanceLayerTone,
   hydrateRecommendedAction,
   pauseReason,
   prettyJson,
+  runtimeJudgeLabel,
+  runtimeJudgeTone,
   submitBroadcast,
   submitPause,
   submitResume,
@@ -41,6 +46,13 @@ export function OpsRoomColumn() {
   const hiddenActors = pendingSummary?.hidden_actors ?? []
   const recentMessages = snapshot?.recent_messages ?? []
   const recommendedActions = roomDigest?.recommended_actions ?? []
+  const activeRecommendedActions =
+    roomDigest?.active_recommended_actions?.length
+      ? roomDigest.active_recommended_actions
+      : recommendedActions
+  const activeSummary = roomDigest?.active_summary
+  const residentRuntime = roomDigest?.resident_judge_runtime ?? snapshot?.resident_judge_runtime
+  const guidanceLayer = roomDigest?.active_guidance_layer ?? 'fallback'
   const roomFeed = recentMessages.slice(0, 5)
 
   return html`
@@ -68,6 +80,10 @@ export function OpsRoomColumn() {
           <div class="ops-stat ${room.paused ? 'warn' : 'ok'}">
             <span>상태</span>
             <strong>${room.paused ? '일시정지' : '진행 중'}</strong>
+          </div>
+          <div class="ops-stat ${runtimeJudgeTone(residentRuntime)}">
+            <span>Resident Judge</span>
+            <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
           </div>
         </div>
 
@@ -148,11 +164,25 @@ export function OpsRoomColumn() {
           <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} />
         </div>
         <p class="ops-context-note">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
+        <article class="ops-guidance-card ${guidanceLayerTone(guidanceLayer)}">
+          <div class="ops-guidance-head">
+            <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
+            <span>${residentRuntime?.keeper_name ?? roomDigest?.judgment_owner ?? 'judge 없음'}</span>
+          </div>
+          <div class="ops-guidance-body">
+            ${activeSummary?.summary ?? '현재 active guidance 요약이 없습니다. fallback queue만 표시합니다.'}
+          </div>
+          <div class="ops-guidance-meta">
+            <span>authoritative ${roomDigest?.authoritative_judgment_available ? 'yes' : 'no'}</span>
+            <span>${guidanceFreshnessLabel(activeSummary)}</span>
+            ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
+          </div>
+        </article>
         ${operatorDigestLoading.value && !roomDigest ? html`
           <div class="ops-empty">개입 추천을 불러오는 중입니다...</div>
-        ` : recommendedActions.length > 0 ? html`
+        ` : activeRecommendedActions.length > 0 ? html`
           <div class="ops-log-list">
-            ${recommendedActions.map(item => html`
+            ${activeRecommendedActions.map(item => html`
               <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="ops-log-entry ${item.severity}">
                 <div class="ops-log-head">
                   <strong>${actionTypeLabel(item.action_type)}</strong>

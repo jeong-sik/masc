@@ -25,6 +25,9 @@ dune build
 # 실행
 ./start-masc-mcp.sh --http --port 8935
 
+# 원격 노출이 필요할 때만 명시적으로 바인드
+./start-masc-mcp.sh --http --host 0.0.0.0 --port 8935
+
 # 확인
 curl http://127.0.0.1:8935/health
 ```
@@ -68,6 +71,9 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 ```
 
 ## Streamable HTTP 기본 정책
+
+- 기본 bind host는 `127.0.0.1` 입니다.
+- `--host 0.0.0.0` 또는 `--host ::` 로 non-loopback bind 하면 `/mcp`는 `masc_auth_enable(require_token=true)`가 설정된 room에서만 동작합니다.
 
 - `POST /mcp`는 기본적으로 `Accept: application/json, text/event-stream`를 요구합니다.
 - 구형 클라이언트 호환이 필요할 때만 `MASC_ALLOW_LEGACY_ACCEPT=1`을 설정하세요.

@@ -142,6 +142,12 @@ let confirm_schema =
               [
                 ("actor", `Assoc [ ("type", `String "string") ]);
                 ("confirm_token", `Assoc [ ("type", `String "string") ]);
+                ( "decision",
+                  `Assoc
+                    [
+                      ("type", `String "string");
+                      ("enum", `List [ `String "confirm"; `String "deny" ]);
+                    ] );
               ] );
           ("required", `List [ `String "confirm_token" ]);
         ];

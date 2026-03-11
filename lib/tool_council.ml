@@ -39,6 +39,44 @@ let broadcast_decision_event ~event_type ~agent ?(data=`Null) () =
   ] in
   Sse.broadcast notification
 
+let parse_context_ref args =
+  match Yojson.Safe.Util.member "context" args with
+  | `Assoc _ as json ->
+      let get_opt key =
+        match Yojson.Safe.Util.member key json with
+        | `String value ->
+            let trimmed = String.trim value in
+            if trimmed = "" then None else Some trimmed
+        | _ -> None
+      in
+      Some Debate.
+        {
+          board_post_id = get_opt "board_post_id";
+          task_id = get_opt "task_id";
+          operation_id = get_opt "operation_id";
+          team_session_id = get_opt "team_session_id";
+        }
+  | _ -> None
+
+let parse_consensus_context_ref args =
+  match Yojson.Safe.Util.member "context" args with
+  | `Assoc _ as json ->
+      let get_opt key =
+        match Yojson.Safe.Util.member key json with
+        | `String value ->
+            let trimmed = String.trim value in
+            if trimmed = "" then None else Some trimmed
+        | _ -> None
+      in
+      Some Consensus.
+        {
+          board_post_id = get_opt "board_post_id";
+          task_id = get_opt "task_id";
+          operation_id = get_opt "operation_id";
+          team_session_id = get_opt "team_session_id";
+        }
+  | _ -> None
+
 (** {1 Debate Handlers} *)
 
 let handle_debate_start ctx args =
@@ -48,7 +86,8 @@ let handle_debate_start ctx args =
   else
     let config = Council.make_config ~base_path:ctx.base_path in
     let notify_fn = fun ~agent:_ ~message:_ -> () in
-    match DebateApi.start ~config ~topic ~notify_fn with
+    let context = parse_context_ref args in
+    match DebateApi.start ~config ~topic ~notify_fn ?context () with
     | Ok debate ->
       (* SSE: decision_issue + decision_phase(proposal) *)
       broadcast_decision_event ~event_type:"decision_issue" ~agent:ctx.agent_name
@@ -183,7 +222,8 @@ let handle_consensus_start ctx args =
   if topic = "" then
     (false, "Error: topic is required")
   else
-    match ConsensusApi.start_vote ~topic ~initiator:ctx.agent_name ~quorum ~threshold () with
+    let context = parse_consensus_context_ref args in
+    match ConsensusApi.start_vote ~topic ~initiator:ctx.agent_name ~quorum ~threshold ?context () with
     | Ok session ->
       (* SSE: decision_phase(voting) *)
       broadcast_decision_event ~event_type:"decision_phase" ~agent:ctx.agent_name

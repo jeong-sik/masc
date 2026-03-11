@@ -2976,6 +2976,13 @@ let confirm_json ?actor_hint (ctx : 'a context) args =
       | Some actor -> Some actor
       | None -> actor_hint)
   in
+  let decision =
+    match get_string_opt args "decision" with
+    | Some raw ->
+        let normalized = String.lowercase_ascii (String.trim raw) in
+        if normalized = "" then "confirm" else normalized
+    | None -> "confirm"
+  in
   match get_string_opt args "confirm_token" with
   | None -> Error "confirm_token is required"
   | Some confirm_token -> (
@@ -3020,38 +3027,64 @@ let confirm_json ?actor_hint (ctx : 'a context) args =
             };
           Error "actor is not allowed to confirm this action"
       | Some entry ->
-          let started_at = Unix.gettimeofday () in
-          let request =
-            {
-              actor = entry.actor;
-              action_type = entry.action_type;
-              target_type = entry.target_type;
-              target_id = entry.target_id;
-              payload = entry.payload;
-            }
-          in
-          let* executed = execute_action ctx request in
-          let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
-          remove_pending_confirm ctx.config confirm_token;
-          append_action_log ctx.config
-            {
-              trace_id = entry.trace_id;
-              actor = entry.actor;
-              remote_session_id = ctx.mcp_session_id;
-              remote_client_type = remote_client_type_of_context ctx;
-              action_type = entry.action_type;
-              target_type = entry.target_type;
-              target_id = entry.target_id;
-              delegated_tool = entry.delegated_tool;
-              confirmation_state = "confirmed";
-              result_status = "ok";
-              latency_ms;
-              created_at = Types.now_iso ();
-            };
-          Ok
-            (json_ok
-               [
-                 ("trace_id", `String entry.trace_id);
-                 ("executed_action", pending_confirm_to_yojson entry);
-                 ("delegated_tool_result", executed);
-               ]))
+          if String.equal decision "deny" then (
+            remove_pending_confirm ctx.config confirm_token;
+            append_action_log ctx.config
+              {
+                trace_id = entry.trace_id;
+                actor;
+                remote_session_id = ctx.mcp_session_id;
+                remote_client_type = remote_client_type_of_context ctx;
+                action_type = entry.action_type;
+                target_type = entry.target_type;
+                target_id = entry.target_id;
+                delegated_tool = entry.delegated_tool;
+                confirmation_state = "denied";
+                result_status = "ok";
+                latency_ms = 0;
+                created_at = Types.now_iso ();
+              };
+            Ok
+              (json_ok
+                 [
+                   ("trace_id", `String entry.trace_id);
+                   ("decision", `String "deny");
+                   ("executed_action", pending_confirm_to_yojson entry);
+                 ]))
+          else
+            let started_at = Unix.gettimeofday () in
+            let request =
+              {
+                actor = entry.actor;
+                action_type = entry.action_type;
+                target_type = entry.target_type;
+                target_id = entry.target_id;
+                payload = entry.payload;
+              }
+            in
+            let* executed = execute_action ctx request in
+            remove_pending_confirm ctx.config confirm_token;
+            let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
+            append_action_log ctx.config
+              {
+                trace_id = entry.trace_id;
+                actor = entry.actor;
+                remote_session_id = ctx.mcp_session_id;
+                remote_client_type = remote_client_type_of_context ctx;
+                action_type = entry.action_type;
+                target_type = entry.target_type;
+                target_id = entry.target_id;
+                delegated_tool = entry.delegated_tool;
+                confirmation_state = "confirmed";
+                result_status = "ok";
+                latency_ms;
+                created_at = Types.now_iso ();
+              };
+            Ok
+              (json_ok
+                 [
+                   ("trace_id", `String entry.trace_id);
+                   ("decision", `String "confirm");
+                   ("executed_action", pending_confirm_to_yojson entry);
+                   ("delegated_tool_result", executed);
+                 ]))

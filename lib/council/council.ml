@@ -45,8 +45,8 @@ let make_config ~base_path =
 
 module DebateApi = struct
   (** Start a new debate on a topic *)
-  let start ~config ~topic ~notify_fn =
-    Debate.start_debate config.base_path ~topic ~notify_fn ()
+  let start ~config ~topic ~notify_fn ?context () =
+    Debate.start_debate config.base_path ~topic ?context ~notify_fn ()
 
   (** Add an argument to an ongoing debate *)
   let add_argument ~config ~debate_id ~agent ~position ~content 
@@ -75,8 +75,8 @@ end
 
 module ConsensusApi = struct
   (** Start a new voting session *)
-  let start_vote ~topic ~initiator ?(quorum=2) ?(threshold=0.5) () =
-    Consensus.start_voting ~topic ~initiator ~quorum ~threshold ()
+  let start_vote ~topic ~initiator ?(quorum=2) ?(threshold=0.5) ?context () =
+    Consensus.start_voting ~topic ~initiator ~quorum ~threshold ?context ()
 
   (** Cast a vote *)
   let cast ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.0) () =
@@ -97,6 +97,10 @@ module ConsensusApi = struct
   (** List active sessions *)
   let list_active () =
     Consensus.list_active_sessions ()
+
+  (** List all sessions *)
+  let list_all () =
+    Consensus.list_all_sessions ()
 
   (** Cancel a session *)
   let cancel ~session_id =
@@ -248,7 +252,7 @@ end
 (** Run a full debate-to-vote cycle *)
 let run_cycle ~config ~topic ~initiator ~quorum ~threshold ~notify_fn =
   (* 1. Start debate *)
-  match DebateApi.start ~config ~topic ~notify_fn with
+  match DebateApi.start ~config ~topic ~notify_fn () with
   | Error e -> Error (Printf.sprintf "Failed to start debate: %s" e)
   | Ok debate ->
     let debate_id = debate.Debate.id in

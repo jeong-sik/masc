@@ -16,6 +16,10 @@ val snapshot_json :
   'a context ->
   Yojson.Safe.t
 
+val pending_confirms_json : ?actor:string -> Room.config -> Yojson.Safe.t
+
+val recent_actions_json : Room.config -> Yojson.Safe.t
+
 val digest_json :
   ?actor:string ->
   ?target_type:string ->

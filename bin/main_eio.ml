@@ -5577,10 +5577,8 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
     ]
 
 let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
-  let config = Council.make_config ~base_path in
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-  let fetch_limit = limit + offset in
   let status_filter =
     match query_param request "status" with
     | None -> None
@@ -5591,50 +5589,8 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
         | "pending" -> Some Council.Debate.Pending
         | _ -> None)
   in
-  let debates =
-    Council.DebateApi.list_all ~config ~status_filter ~limit:fetch_limit ()
-    |> drop offset |> take limit
-    |> List.map
-         (fun (debate : Council.Debate.debate) ->
-           `Assoc
-             [
-               ("id", `String debate.id);
-               ("topic", `String debate.topic);
-               ("status", `String (Council.Debate.status_to_string debate.status));
-               ("argument_count", `Int (List.length debate.arguments));
-               ("created_at", `Float debate.created_at);
-               ("created_at_iso", `String (iso8601_of_unix debate.created_at));
-             ])
-  in
-  let sessions =
-    Council.ConsensusApi.list_active () |> drop offset |> take limit
-    |> List.map
-         (fun (session : Council.Consensus.session) ->
-           `Assoc
-             [
-               ("id", `String session.id);
-               ("topic", `String session.topic);
-               ("initiator", `String session.initiator);
-               ("votes", `Int (List.length session.votes));
-               ("quorum", `Int session.quorum);
-               ("threshold", `Float session.threshold);
-               ("state", Council.Consensus.voting_state_to_yojson session.state);
-               ("created_at", `Float session.created_at);
-               ("created_at_iso", `String (iso8601_of_unix session.created_at));
-             ])
-  in
-  `Assoc
-    [
-      ("generated_at", `String (Types.now_iso ()));
-      ( "summary",
-        `Assoc
-          [
-            ("debates", `Int (List.length debates));
-            ("voting_sessions", `Int (List.length sessions));
-          ] );
-      ("debates", `List debates);
-      ("sessions", `List sessions);
-    ]
+  Masc_mcp.Dashboard_governance.dashboard_json ~base_path ~limit ~offset
+    ~status_filter
 
 let dashboard_planning_http_json request ~(config : Room.config) : Yojson.Safe.t =
   let goals = Masc_mcp.Goal_store.list_goals config () in
@@ -6405,28 +6361,26 @@ let council_sessions_json request =
     ]
 
 let council_debate_summary_json ~base_path ~debate_id =
-  let config = Council.make_config ~base_path in
-  match Council.DebateApi.status ~config ~debate_id with
-  | Error _ ->
-      (`Not_found, `Assoc [ ("error", `String "Debate not found") ])
-  | Ok (summary : Council.Debate.debate_summary) ->
-      let d : Council.Debate.debate = summary.debate in
-      let json =
-        `Assoc
-          [
-            ("id", `String d.id);
-            ("topic", `String d.topic);
-            ("status", `String (Council.Debate.status_to_string d.status));
-            ("support_count", `Int summary.support_count);
-            ("oppose_count", `Int summary.oppose_count);
-            ("neutral_count", `Int summary.neutral_count);
-            ("total_arguments", `Int summary.total_arguments);
-            ("created_at", `Float d.created_at);
-            ("created_at_iso", `String (iso8601_of_unix d.created_at));
-            ("summary_text", `String (Council.Debate.render_summary summary));
-          ]
-      in
-      (`OK, json)
+  let (status, json) =
+    Masc_mcp.Dashboard_governance.debate_detail_json ~base_path ~debate_id
+  in
+  let http_status =
+    match status with
+    | `OK -> `OK
+    | `Not_found -> `Not_found
+  in
+  (http_status, json)
+
+let council_session_summary_json ~base_path ~session_id =
+  let (status, json) =
+    Masc_mcp.Dashboard_governance.consensus_detail_json ~base_path ~session_id
+  in
+  let http_status =
+    match status with
+    | `OK -> `OK
+    | `Not_found -> `Not_found
+  in
+  (http_status, json)
 
 (** CORS preflight handler *)
 let options_handler request reqd =
@@ -8180,6 +8134,24 @@ let make_extended_handler routes =
                    let base_path = state.Mcp_server.room_config.base_path in
                    let (status, json) = council_debate_summary_json ~base_path ~debate_id in
                    Http.Response.json ~status (Yojson.Safe.to_string json) reqd)
+        | `GET, p
+          when String.length p > 33
+               && String.length p >= 25 + 8
+               && String.sub p 0 25 = "/api/v1/council/sessions/"
+               && String.ends_with ~suffix:"/summary" p ->
+            (match !server_state with
+             | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
+             | Some state ->
+                 let prefix_len = 25 in
+                 let suffix_len = 8 in
+                 let session_id_len = String.length p - prefix_len - suffix_len in
+                 if session_id_len <= 0 then
+                   Http.Response.json ~status:`Bad_request {|{"error":"session_id missing"}|} reqd
+                 else
+                   let session_id = String.sub p prefix_len session_id_len in
+                   let base_path = state.Mcp_server.room_config.base_path in
+                   let (status, json) = council_session_summary_json ~base_path ~session_id in
+                   Http.Response.json ~status (Yojson.Safe.to_string json) reqd)
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
             let post_id = String.sub p 14 (String.length p - 14) in
             let format = Option.value ~default:"nested" (query_param request "format") in
@@ -8260,6 +8232,12 @@ let run_server ~sw ~env ~port ~base_path =
   Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
   (* Internal guardian loops (no external watchdog dependency) *)
   Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
+  Masc_mcp.Dashboard_governance_judge.start ~sw ~clock
+    ~base_path:state.room_config.base_path
+    ~build_facts:(fun () ->
+      Masc_mcp.Dashboard_governance.factual_snapshot_json
+        ~base_path:state.room_config.base_path)
+    ();
   (* Start MCP session cleanup loop *)
   Masc_mcp.Session.start_mcp_session_cleanup_loop ~sw ~clock ();
 
@@ -10096,6 +10074,25 @@ let run_server ~sw ~env ~port ~base_path =
             let state = get_server_state () in
             let base_path = state.Mcp_server.room_config.base_path in
             let (status, json) = council_debate_summary_json ~base_path ~debate_id in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+              ~status ~extra_headers:cors
+
+      | `GET, p
+        when String.length p > 33
+             && String.length p >= 25 + 8
+             && String.sub p 0 25 = "/api/v1/council/sessions/"
+             && String.ends_with ~suffix:"/summary" p ->
+          let prefix_len = 25 in
+          let suffix_len = 8 in
+          let session_id_len = String.length p - prefix_len - suffix_len in
+          if session_id_len <= 0 then
+            h2_respond_json h2_reqd {|{"error":"session_id missing"}|}
+              ~status:`Bad_request ~extra_headers:cors
+          else
+            let session_id = String.sub p prefix_len session_id_len in
+            let state = get_server_state () in
+            let base_path = state.Mcp_server.room_config.base_path in
+            let (status, json) = council_session_summary_json ~base_path ~session_id in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json)
               ~status ~extra_headers:cors
 

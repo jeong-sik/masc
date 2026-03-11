@@ -132,7 +132,7 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     quiet_reason: (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason'],
     next_action_path: nextActionPath as KeeperDiagnostic['next_action_path'],
     last_reply_status: lastReplyStatus as KeeperDiagnostic['last_reply_status'],
-    last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? null,
+    last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? null, // undefined→null: field is string|null
     last_reply_preview: asString(raw.last_reply_preview) ?? null,
     last_error: asString(raw.last_error) ?? null,
     next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,

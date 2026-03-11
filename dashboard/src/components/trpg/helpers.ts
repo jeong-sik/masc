@@ -2,6 +2,7 @@
 
 import { signal } from '@preact/signals'
 import { showToast } from '../common/toast'
+// isRecord is used locally by recString/recNumber/recBool below
 import { isRecord } from '../common/normalize'
 import type { TrpgRoundRunResult } from '../../api'
 import type { TrpgEvent } from '../../types'

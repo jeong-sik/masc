@@ -814,6 +814,8 @@ function parseSessionOutcomeFromEvents(
   return parseSessionOutcomePayload(isRecord(latest.payload) ? latest.payload : {})
 }
 
+// Local helpers below return fallback values (not undefined) — intentionally
+// separate from common/normalize.ts which returns T | undefined.
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }

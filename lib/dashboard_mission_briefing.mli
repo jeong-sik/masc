@@ -12,6 +12,13 @@ module For_test : sig
   val compact_session_json : Yojson.Safe.t -> Yojson.Safe.t
   val compact_keeper_json : Yojson.Safe.t -> Yojson.Safe.t
   val compact_agent_json : Types.agent -> Yojson.Safe.t
+  val reset_cache : unit -> unit
+  val seed_cache :
+    ?cached_at:float ->
+    ?last_error:string ->
+    ?refresh_in_flight:bool ->
+    Yojson.Safe.t ->
+    unit
   val relevant_sessions_for_briefing :
     current_room:string -> now_ts:float -> Yojson.Safe.t list -> Yojson.Safe.t list
   val collect_metadata_gaps :

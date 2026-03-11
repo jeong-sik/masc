@@ -91,6 +91,7 @@ export function SummaryStat({
 export function MissionBriefingCard() {
   const briefing = missionBriefing.value
   const briefingTone = toneClass(briefing?.status ?? (missionBriefingError.value ? 'bad' : 'warn'))
+  const showEmpty = !briefing || briefing.sections.length === 0
   const retryNeedsForce =
     briefing?.status === 'error'
     || (briefing?.status === 'unavailable' && !briefing?.cached)
@@ -110,11 +111,15 @@ export function MissionBriefingCard() {
         ${briefing?.generated_at ? html`<span class="command-chip">${relativeTime(briefing.generated_at)}</span>` : null}
         ${briefing?.cached ? html`<span class="command-chip">cached</span>` : null}
         ${briefing?.stale ? html`<span class="command-chip warn">stale</span>` : null}
+        ${briefing?.refreshing ? html`<span class="command-chip warn">refreshing</span>` : null}
       </div>
 
       ${missionBriefingError.value ? html`<div class="empty-state error">${missionBriefingError.value}</div>` : null}
       ${briefing?.error ? html`<div class="empty-state error">${briefing.error}</div>` : null}
       ${briefing?.summary ? html`<div class="mission-inline-note">${briefing.summary}</div>` : null}
+      ${briefing?.last_error && !briefing.error
+        ? html`<div class="mission-inline-note">최근 refresh 실패: ${briefing.last_error}</div>`
+        : null}
 
       ${briefing && briefing.sections.length > 0
         ? html`
@@ -148,8 +153,14 @@ export function MissionBriefingCard() {
               `)}
             </div>
           `
-        : (!missionBriefingLoading.value && !missionBriefingError.value
-            ? html`<div class="empty-state">판단 레이어 결과가 아직 없습니다.</div>`
+        : (!missionBriefingLoading.value && !missionBriefingError.value && showEmpty
+            ? html`
+                <div class="empty-state">
+                  ${briefing?.status === 'pending'
+                    ? '최신 스냅샷으로 브리핑을 생성 중입니다. 마지막 성공 결과가 생기면 자동으로 다시 읽습니다.'
+                    : '판단 레이어 결과가 아직 없습니다.'}
+                </div>
+              `
             : null)}
 
       ${briefing && briefing.metadata_gaps.length > 0

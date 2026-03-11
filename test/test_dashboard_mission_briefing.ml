@@ -73,8 +73,11 @@ let test_briefing_is_model_free_and_synchronous () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
+    ~finally:(fun () ->
+      Briefing.reset_cache ();
+      cleanup_dir base_path)
     (fun () ->
+      Briefing.reset_cache ();
       let config = Room.default_config base_path in
       ignore (Room.init config ~agent_name:None);
       let json =
@@ -94,6 +97,78 @@ let test_briefing_is_model_free_and_synchronous () =
         (json |> member "authoritative" |> to_bool);
       check int "section count" 3
         (json |> member "sections" |> to_list |> List.length))
+
+let test_force_refresh_without_cache_returns_pending () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Briefing.reset_cache ();
+      cleanup_dir base_path)
+    (fun () ->
+      Briefing.reset_cache ();
+      let config = Room.default_config base_path in
+      ignore (Room.init config ~agent_name:None);
+      let json =
+        Dashboard_mission_briefing.json
+          ~force:true ~config ~sw ~clock ~proc_mgr:None ()
+      in
+      let open Yojson.Safe.Util in
+      check string "status pending" "pending"
+        (json |> member "status" |> to_string);
+      check bool "refreshing true" true
+        (json |> member "refreshing" |> to_bool))
+
+let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Briefing.reset_cache ();
+      cleanup_dir base_path)
+    (fun () ->
+      Briefing.reset_cache ();
+      let config = Room.default_config base_path in
+      ignore (Room.init config ~agent_name:None);
+      Briefing.seed_cache
+        ~cached_at:(Unix.gettimeofday ())
+        (`Assoc
+          [
+            ("generated_at", `String "2026-03-11T00:00:00Z");
+            ("cached", `Bool false);
+            ("stale", `Bool false);
+            ("refreshing", `Bool false);
+            ("status", `String "ok");
+            ("summary", `String "cached summary");
+            ("provenance", `String "narrative");
+            ("authoritative", `Bool false);
+            ("provenance_summary", `Assoc []);
+            ("model", `String "deterministic");
+            ("ttl_sec", `Int 300);
+            ("criteria", `List []);
+            ("sections", `List []);
+            ("error", `Null);
+            ("last_error", `Null);
+          ]);
+      let json =
+        Dashboard_mission_briefing.json
+          ~force:true ~config ~sw ~clock ~proc_mgr:None ()
+      in
+      let open Yojson.Safe.Util in
+      check string "status ok" "ok"
+        (json |> member "status" |> to_string);
+      check bool "cached true" true
+        (json |> member "cached" |> to_bool);
+      check bool "stale true" true
+        (json |> member "stale" |> to_bool);
+      check bool "refreshing true" true
+        (json |> member "refreshing" |> to_bool);
+      check string "summary preserved" "cached summary"
+        (json |> member "summary" |> to_string))
 
 let test_compact_session_json_normalizes_missing_fields () =
   let json =
@@ -382,6 +457,10 @@ let () =
         [
           test_case "briefing is model-free and synchronous" `Quick
             test_briefing_is_model_free_and_synchronous;
+          test_case "force refresh without cache returns pending" `Quick
+            test_force_refresh_without_cache_returns_pending;
+          test_case "force refresh with cache returns stale cached payload" `Quick
+            test_force_refresh_with_cached_result_returns_stale_cached_payload;
         ] );
       ( "normalization",
         [

@@ -313,7 +313,7 @@ let ensure_room_bootstrap config room_id =
   end;
   if room_id = "default" then begin
     List.iter mkdir_p [ agents_dir_in_room config room_id; tasks_dir_in_room config room_id; messages_dir_in_room config room_id ];
-    if not (Sys.file_exists (state_path_in_room config room_id)) then begin
+    if not (path_exists config (state_path_in_room config room_id)) then begin
       let state = {
         protocol_version = "0.1.0";
         project = Filename.basename config.base_path;
@@ -330,7 +330,7 @@ let ensure_room_bootstrap config room_id =
       } in
       write_state_in_room config room_id state
     end;
-    if not (Sys.file_exists (backlog_path_in_room config room_id)) then begin
+    if not (path_exists config (backlog_path_in_room config room_id)) then begin
       let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
       write_json config (backlog_path_in_room config room_id) (backlog_to_yojson backlog)
     end
@@ -1987,12 +1987,16 @@ let audit_orphan_tasks config : (Types.task * string) list =
 let is_agent_joined_in_room config ~room_id ~agent_name =
   if not (root_is_initialized config) then false
   else
-    let agents_path = agents_dir_in_room config room_id in
-    if not (Sys.file_exists agents_path) then false
+    let filename = safe_filename agent_name ^ ".json" in
+    (* Check room-scoped path first *)
+    let room_agents = agents_dir_in_room config room_id in
+    let room_path = Filename.concat room_agents filename in
+    if path_exists config room_path then true
     else
-      let filename = safe_filename agent_name ^ ".json" in
-      let path = Filename.concat agents_path filename in
-      Sys.file_exists path
+      (* Fallback: check root agents_dir (where default join writes) *)
+      let root_agents = agents_dir config in
+      let root_path = Filename.concat root_agents filename in
+      path_exists config root_path
 
 (** Check if an agent has joined the room *)
 let is_agent_joined config ~agent_name =
@@ -2173,10 +2177,16 @@ include Room_worktree
 let heartbeat_in_room config ~room_id ~agent_name =
   ensure_room_bootstrap config room_id;
   let actual_name = resolve_agent_name_in_room config ~room_id agent_name in
+  let filename = safe_filename actual_name ^ ".json" in
+  (* Check room-scoped path first, fallback to root agents_dir *)
+  let room_file = Filename.concat (agents_dir_in_room config room_id) filename in
+  let root_file = Filename.concat (agents_dir config) filename in
   let agent_file =
-    Filename.concat (agents_dir_in_room config room_id) (safe_filename actual_name ^ ".json")
+    if path_exists config room_file then room_file
+    else if path_exists config root_file then root_file
+    else room_file (* will fail gracefully below *)
   in
-  if Sys.file_exists agent_file then begin
+  if path_exists config agent_file then begin
     with_file_lock config agent_file (fun () ->
       let json = read_json config agent_file in
       match agent_of_yojson json with

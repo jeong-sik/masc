@@ -37,6 +37,12 @@
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
 
+; Dashboard mission test (requires Eio)
+(test
+ (name test_dashboard_mission)
+ (modules test_dashboard_mission)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
 ; Streamable HTTP test (requires Eio for Eio.Mutex)
 (test
  (name test_streamable_http)

@@ -21,12 +21,6 @@ let get_verifier_mode () =
   | Some "hybrid" -> Hybrid
   | _ -> Heuristic
 
-(** Model specs for the verifier LLM cascade.
-    Delegates to Lodge_cascade for hot-reloadable config and built-in defaults.
-    Override via config/llm_cascade.json key "verifier_models". *)
-let verifier_model_specs () =
-  Lodge_cascade.get_cascade ~cascade_name:"verifier" ()
-
 (** G-Eval rubric prompt for post quality assessment. *)
 let build_geval_prompt ~content : string =
   Printf.sprintf
@@ -121,17 +115,13 @@ let geval_response_is_valid (resp : Llm_client.completion_response) : bool =
 let verify_llm ~content : (verification_result, string) result =
   let prompt = build_geval_prompt ~content in
   match
-    Llm_client.run_prompt_cascade
-      ~temperature:0.2
-      ~timeout_sec:15
-      ~accept:geval_response_is_valid
-      ~model_specs:(verifier_model_specs ())
-      ~max_tokens:150
-      ~prompt ()
+    Lodge_cascade.call ~cascade_name:"verifier" ~prompt
+      ~temperature:0.2 ~timeout_sec:15 ~max_tokens:150
+      ~accept:geval_response_is_valid ()
   with
   | Error err -> Error err
-  | Ok resp -> (
-      match parse_geval_response resp.content with
+  | Ok r -> (
+      match parse_geval_response r.response with
       | Error err -> Error err
       | Ok (r, q, s, _reasoning) ->
           let relevance = score_to_verdict ~dim_name:"relevance" r in

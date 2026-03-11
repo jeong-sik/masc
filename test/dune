@@ -64,6 +64,11 @@
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
+ (name test_command_plane_help)
+ (modules test_command_plane_help)
+ (libraries masc_mcp alcotest yojson))
+
+(test
  (name test_dashboard_proof)
  (modules test_dashboard_proof)
  (libraries masc_mcp alcotest yojson unix))

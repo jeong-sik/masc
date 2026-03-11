@@ -787,6 +787,28 @@ let test_masc_detachment_status_schema () =
           Alcotest.(check bool) "has detachment_id" true (List.mem_assoc "detachment_id" props)
       | None -> Alcotest.fail "masc_detachment_status missing properties"
 
+let test_masc_operation_start_schema () =
+  match find_tool "masc_operation_start" with
+  | None -> Alcotest.fail "masc_operation_start not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has workload_template" true
+            (List.mem_assoc "workload_template" props);
+          Alcotest.(check bool) "has workload_profile" true
+            (List.mem_assoc "workload_profile" props)
+      | None -> Alcotest.fail "masc_operation_start missing properties"
+
+let test_masc_team_session_start_schema () =
+  match find_tool "masc_team_session_start" with
+  | None -> Alcotest.fail "masc_team_session_start not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has operation_id" true
+            (List.mem_assoc "operation_id" props)
+      | None -> Alcotest.fail "masc_team_session_start missing properties"
+
 (* ============================================================ *)
 (* 17. Walph Tool Tests                                          *)
 (* ============================================================ *)
@@ -1038,6 +1060,8 @@ let () =
         test_legacy_swarm_tools_removed;
     ];
     "command_plane_tools", [
+      Alcotest.test_case "operation_start" `Quick test_masc_operation_start_schema;
+      Alcotest.test_case "team_session_start" `Quick test_masc_team_session_start_schema;
       Alcotest.test_case "dispatch_tick" `Quick test_masc_dispatch_tick_schema;
       Alcotest.test_case "detachment_list" `Quick test_masc_detachment_list_schema;
       Alcotest.test_case "detachment_status" `Quick test_masc_detachment_status_schema;

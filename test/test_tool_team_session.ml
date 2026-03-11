@@ -82,6 +82,9 @@ let transition_task_ok config ~agent_name ~task_id ~action =
   | Ok _ -> ()
   | Error e -> failwith (Types.masc_error_to_string e)
 
+let unit_update_exn config ~actor args =
+  ignore (unwrap_ok (Command_plane_v2.unit_update_json config ~actor args))
+
 let wait_until_terminal ctx session_id =
   let rec loop attempts =
     if attempts <= 0 then
@@ -104,27 +107,33 @@ let wait_until_terminal ctx session_id =
 
 let rec start_session_exn ctx ~goal =
   start_session_custom_exn ctx ~goal ~min_agents:1 ~agents:[]
+    ~operation_id:None
 
-and start_session_custom_exn ctx ~goal ~min_agents ~agents =
+and start_session_custom_exn ctx ~goal ~min_agents ~agents ~operation_id =
   let agent_json = `List (List.map (fun a -> `String a) agents) in
+  let args =
+    [
+      ("goal", `String goal);
+      ("duration_seconds", `Int 90);
+      ("checkpoint_interval_sec", `Int 10);
+      ("min_agents", `Int min_agents);
+      ("orchestration_mode", `String "assist");
+      ("communication_mode", `String "hybrid");
+      ("model_cascade", `List [ `String "glm:glm-5" ]);
+      ("fallback_policy", `String "cascade_then_task");
+      ("instruction_profile", `String "strict");
+      ("alert_channel", `String "both");
+      ("report_formats", `List [ `String "markdown"; `String "json" ]);
+      ("agents", agent_json);
+    ]
+    @
+    match operation_id with
+    | Some value -> [ ("operation_id", `String value) ]
+    | None -> []
+  in
   let start_ok, start_body =
     dispatch_exn ctx ~name:"masc_team_session_start"
-      ~args:
-        (`Assoc
-          [
-            ("goal", `String goal);
-            ("duration_seconds", `Int 90);
-            ("checkpoint_interval_sec", `Int 10);
-            ("min_agents", `Int min_agents);
-            ("orchestration_mode", `String "assist");
-            ("communication_mode", `String "hybrid");
-            ("model_cascade", `List [ `String "glm:glm-5" ]);
-            ("fallback_policy", `String "cascade_then_task");
-            ("instruction_profile", `String "strict");
-            ("alert_channel", `String "both");
-            ("report_formats", `List [ `String "markdown"; `String "json" ]);
-            ("agents", agent_json);
-          ])
+      ~args:(`Assoc args)
   in
   Alcotest.(check bool) "start ok" true start_ok;
   parse_json_exn start_body
@@ -140,6 +149,7 @@ let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
       goal;
       created_by;
       room_id = "default";
+      operation_id = None;
       status = Team_session_types.Running;
       duration_seconds = int_of_float (max 60.0 (planned_end_at -. started_at));
       execution_scope = Team_session_types.Limited_code_change;
@@ -276,6 +286,185 @@ let test_start_status_report_stop () =
 
   cleanup_dir base_dir
 
+let test_start_attached_operation_session () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  ignore (Room.join config ~agent_name:"ally1" ~capabilities:[] ());
+  ignore (Room.join config ~agent_name:"ally2" ~capabilities:[] ());
+  unit_update_exn config ~actor:"tester"
+    (`Assoc
+      [
+        ("unit_id", `String "company-main");
+        ("kind", `String "company");
+        ("label", `String "Main Company");
+        ("leader_id", `String "tester");
+        ("roster", `List [ `String "tester"; `String "ally1"; `String "ally2" ]);
+      ]);
+  unit_update_exn config ~actor:"tester"
+    (`Assoc
+      [
+        ("unit_id", `String "platoon-main");
+        ("kind", `String "platoon");
+        ("label", `String "Main Platoon");
+        ("parent_unit_id", `String "company-main");
+        ("leader_id", `String "ally1");
+        ("roster", `List [ `String "ally1"; `String "ally2" ]);
+      ]);
+  unit_update_exn config ~actor:"tester"
+    (`Assoc
+      [
+        ("unit_id", `String "squad-main");
+        ("kind", `String "squad");
+        ("label", `String "Main Squad");
+        ("parent_unit_id", `String "platoon-main");
+        ("leader_id", `String "tester");
+        ("roster", `List [ `String "tester" ]);
+      ]);
+  let operation : Command_plane_v2.operation_record =
+    {
+      operation_id = "op-attached-session";
+      objective = "Run attached coding team";
+      intent_id = None;
+      assigned_unit_id = "squad-main";
+      autonomy_level = "L4_Autonomous";
+      policy_class = "guarded";
+      budget_class = "standard";
+      workload_template = Some "coding_team";
+      workload_profile = "coding_task";
+      stage = Some "decompose";
+      artifact_scope = [];
+      depends_on_operation_ids = [];
+      search_strategy = "best_first_v1";
+      detachment_session_id = None;
+      trace_id = "trace-attached-session";
+      checkpoint_ref = None;
+      active_goal_ids = [];
+      note = None;
+      created_by = "tester";
+      source = "managed";
+      status = Command_plane_v2.Active;
+      chain = None;
+      created_at = Types.now_iso ();
+      updated_at = Types.now_iso ();
+    }
+  in
+  Command_plane_v2.write_operations config [ operation ];
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let start_json =
+    start_session_custom_exn ctx ~goal:"Attach managed session" ~min_agents:1
+      ~agents:[ "tester" ] ~operation_id:(Some operation.operation_id)
+  in
+  let session_id = get_session_id start_json in
+  let start_result = result_field start_json in
+  Alcotest.(check string) "attached operation id in start result"
+    operation.operation_id
+    (start_result |> Yojson.Safe.Util.member "operation_id"
+    |> Yojson.Safe.Util.to_string);
+  let status_ok, status_body =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status ok" true status_ok;
+  let status_json = parse_json_exn status_body |> result_field in
+  Alcotest.(check string) "attached operation id in status"
+    operation.operation_id
+    (status_json |> Yojson.Safe.Util.member "command_plane"
+    |> Yojson.Safe.Util.member "operation_id"
+    |> Yojson.Safe.Util.to_string);
+  let operation_rows =
+    Command_plane_v2.list_operations_json ~operation_id:operation.operation_id
+      config
+    |> Yojson.Safe.Util.member "operations"
+    |> Yojson.Safe.Util.to_list
+  in
+  let attached_session_id =
+    match operation_rows with
+    | row :: _ ->
+        row |> Yojson.Safe.Util.member "operation"
+        |> Yojson.Safe.Util.member "detachment_session_id"
+        |> Yojson.Safe.Util.to_string_option
+    | [] -> None
+  in
+  Alcotest.(check (option string)) "operation linked to session"
+    (Some session_id) attached_session_id;
+  let second_ok, second_body =
+    dispatch_exn ctx ~name:"masc_team_session_start"
+      ~args:
+        (`Assoc
+          [
+            ("goal", `String "Duplicate attach should fail");
+            ("duration_seconds", `Int 90);
+            ("checkpoint_interval_sec", `Int 10);
+            ("min_agents", `Int 1);
+            ("operation_id", `String operation.operation_id);
+          ])
+  in
+  Alcotest.(check bool) "second attach rejected" false second_ok;
+  let second_json = parse_json_exn second_body in
+  Alcotest.(check bool) "second attach error mentions existing session" true
+    (match Yojson.Safe.Util.member "message" second_json with
+    | `String message -> String.starts_with ~prefix:"operation already attached to team session" message
+    | _ -> false);
+  let finalize_ok, finalize_body =
+    dispatch_exn ctx ~name:"masc_team_session_finalize"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("reason", `String "complete attached session");
+            ("generate_report", `Bool false);
+            ("generate_proof", `Bool false);
+            ("wait_timeout_sec", `Int 5);
+          ])
+  in
+  Alcotest.(check bool) "finalize ok" true finalize_ok;
+  let finalized_status =
+    finalize_body |> parse_json_exn |> result_field
+    |> Yojson.Safe.Util.member "status"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check bool) "terminal status after finalize" true
+    (finalized_status = "completed" || finalized_status = "interrupted");
+  let operation_rows_after_finalize =
+    Command_plane_v2.list_operations_json ~operation_id:operation.operation_id
+      config
+    |> Yojson.Safe.Util.member "operations"
+    |> Yojson.Safe.Util.to_list
+  in
+  let detached_session_id =
+    match operation_rows_after_finalize with
+    | row :: _ ->
+        row |> Yojson.Safe.Util.member "operation"
+        |> Yojson.Safe.Util.member "detachment_session_id"
+        |> Yojson.Safe.Util.to_string_option
+    | [] -> None
+  in
+  Alcotest.(check (option string)) "operation detached after finalize" None
+    detached_session_id;
+  let reattach_ok, reattach_body =
+    dispatch_exn ctx ~name:"masc_team_session_start"
+      ~args:
+        (`Assoc
+          [
+            ("goal", `String "Reattach after finalize");
+            ("duration_seconds", `Int 90);
+            ("checkpoint_interval_sec", `Int 10);
+            ("min_agents", `Int 1);
+            ("operation_id", `String operation.operation_id);
+          ])
+  in
+  Alcotest.(check bool) "reattach succeeds after finalize" true reattach_ok;
+  let reattach_session_id = reattach_body |> parse_json_exn |> get_session_id in
+  Alcotest.(check bool) "reattach gives new session id" true
+    (not (String.equal reattach_session_id session_id));
+  cleanup_dir base_dir
+
 let test_duration_reached_path () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -317,6 +506,7 @@ let test_recover_elapsed_session () =
       goal = "recover elapsed session";
       created_by = "tester";
       room_id = "default";
+      operation_id = None;
       status = Team_session_types.Running;
       duration_seconds = 60;
       execution_scope = Team_session_types.Observe_only;
@@ -395,6 +585,7 @@ let test_recover_orphan_session () =
       goal = "test orphan cleanup";
       created_by = "tester";
       room_id = "default";
+      operation_id = None;
       status = Team_session_types.Running;
       duration_seconds = 60;
       execution_scope = Team_session_types.Observe_only;
@@ -1059,7 +1250,7 @@ let test_prove_requires_multi_actor_turn_coverage () =
   (* Case 1: single-actor turns should be insufficient when min_agents=3 *)
   let session_single =
     start_session_custom_exn ctx ~goal:"prove-single-actor-insufficient"
-      ~min_agents:3 ~agents:participants
+      ~min_agents:3 ~agents:participants ~operation_id:None
     |> get_session_id
   in
   let single_turn_ok, _ =
@@ -1105,7 +1296,7 @@ let test_prove_requires_multi_actor_turn_coverage () =
   (* Case 2: multi-actor turns satisfy min_agents coverage *)
   let session_multi =
     start_session_custom_exn ctx ~goal:"prove-multi-actor-pass" ~min_agents:3
-      ~agents:participants
+      ~agents:participants ~operation_id:None
     |> get_session_id
   in
   let record_ok actor msg =
@@ -2413,6 +2604,8 @@ let () =
         [
           Alcotest.test_case "start-status-report-stop" `Quick
             test_start_status_report_stop;
+          Alcotest.test_case "start-attached-operation-session" `Quick
+            test_start_attached_operation_session;
           Alcotest.test_case "proof-exposes-spawn-selection-rationale" `Quick
             test_proof_exposes_spawn_selection_rationale;
           Alcotest.test_case "bootstrap-grace-suppresses-min-agents-violation"

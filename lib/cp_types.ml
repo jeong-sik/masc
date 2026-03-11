@@ -72,6 +72,7 @@ type operation_record = {
   autonomy_level : string;
   policy_class : string;
   budget_class : string;
+  workload_template : string option;
   workload_profile : string;
   stage : string option;
   artifact_scope : string list;

@@ -213,6 +213,7 @@ let handle_start ctx args : result =
     let instruction_profile = parse_instruction_profile args in
     let alert_channel = parse_alert_channel args in
     let agents = get_agent_names args "agents" in
+    let operation_id = get_string_opt args "operation_id" in
     match
       Team_session_engine_eio.start_session ~sw:ctx.sw ~clock:ctx.clock
         ~config:ctx.config ~created_by:ctx.agent_name ~goal ~duration_seconds
@@ -220,7 +221,7 @@ let handle_start ctx args : result =
         ~scale_profile ~control_profile
         ~orchestration_mode ~communication_mode ~model_cascade ~fallback_policy
         ~instruction_profile ~alert_channel ~auto_resume ~report_formats
-        ~agent_names:agents
+        ~agent_names:agents ~operation_id
     with
     | Ok json -> (true, json_ok [ ("result", json) ])
     | Error e -> (false, json_error e)
@@ -2305,6 +2306,14 @@ let schemas : tool_schema list =
                       [
                         ("type", `String "string");
                         ("description", `String "Session goal (required)");
+                      ] );
+                  ( "operation_id",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "description",
+                          `String
+                            "Optional managed CPv2 operation id to attach this team session to. When provided, the operation detachment_session_id is updated to this session." );
                       ] );
                   ( "duration_seconds",
                     `Assoc

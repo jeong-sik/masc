@@ -76,6 +76,7 @@ let seed_room config session_id =
       goal = "Validate local64 swarm role coverage, runtime visibility, and operator census";
       created_by = "fixture-root";
       room_id = "default";
+      operation_id = None;
       status = Interrupted;
       duration_seconds = 2700;
       execution_scope = Observe_only;

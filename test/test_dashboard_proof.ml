@@ -29,6 +29,7 @@ let sample_session now session_id =
     goal = "Prove multi-actor collaboration on MCP help cleanup";
     created_by = "supervisor";
     room_id = "default";
+    operation_id = None;
     status = Running;
     duration_seconds = 600;
     execution_scope = Limited_code_change;

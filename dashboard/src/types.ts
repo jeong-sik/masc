@@ -779,16 +779,7 @@ export interface LodgeRuntimeStatus {
   active_self_heartbeats?: string[]
 }
 
-// --- Dashboard batch response ---
-
-export interface DashboardData {
-  agents: { agents: Agent[] }
-  tasks: { tasks: Task[] }
-  messages: { messages: Message[] }
-  status: ServerStatus
-  keepers: Keeper[] | { keepers: Keeper[] }
-  perpetual: PerpetualStatus
-}
+// --- Dashboard projection responses ---
 
 export interface DashboardShellResponse {
   generated_at?: string

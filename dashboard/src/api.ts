@@ -3,7 +3,6 @@
 
 import { isRecord } from './components/common/normalize'
 import type {
-  DashboardData,
   DashboardExecutionResponse,
   DashboardGovernanceResponse,
   DashboardMemoryResponse,
@@ -291,13 +290,7 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   return extractMcpText(parsed)
 }
 
-// --- Dashboard (batch) ---
-
-export type DashboardMode = 'compact' | 'full'
-
-export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<DashboardData> {
-  return get(`/api/v1/dashboard?mode=${mode}`)
-}
+// --- Dashboard projections ---
 
 export function fetchDashboardShell(): Promise<DashboardShellResponse> {
   return get('/api/v1/dashboard/shell')

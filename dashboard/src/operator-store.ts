@@ -16,7 +16,7 @@ import type {
   PendingConfirmation,
   OperatorWorkerCard,
 } from './types'
-import { registerOperatorRefresh } from './store'
+import { registerOperatorRefresh } from './sse-store'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, extractArray } from './components/common/normalize'
 
 export const operatorSnapshot = signal<OperatorSnapshot | null>(null)

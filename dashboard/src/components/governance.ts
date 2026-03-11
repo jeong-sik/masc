@@ -10,7 +10,7 @@ import {
   fetchDebateStatus,
   startDebate,
 } from '../api'
-import { registerCouncilRefresh } from '../store'
+import { registerCouncilRefresh } from '../sse-store'
 import type {
   CouncilDebate,
   CouncilDebateSummary,

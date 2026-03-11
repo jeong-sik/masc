@@ -2983,6 +2983,7 @@ type tools_list_params = {
   include_deprecated : bool;
   include_usage : bool;
   mode : string option;
+  tier : string option;
 }
 
 let bool_param payload key =
@@ -3002,6 +3003,7 @@ let requested_tool_list_params params =
         include_deprecated = false;
         include_usage = false;
         mode = None;
+        tier = None;
       }
   | Some (`Assoc _ as payload) -> (
       let names_result =
@@ -3026,12 +3028,24 @@ let requested_tool_list_params params =
         | `String s -> Ok (Some s)
         | _ -> Error "Invalid params: mode must be a string"
       in
+      let tier_result =
+        match payload |> member "tier" with
+        | `Null -> Ok None
+        | `String s -> (
+            match Tool_catalog.tier_of_string (String.lowercase_ascii s) with
+            | Some _ -> Ok (Some s)
+            | None -> Error "Invalid params: tier must be one of: essential, standard, full")
+        | _ -> Error "Invalid params: tier must be a string"
+      in
       match names_result with
       | Error _ as err -> err
       | Ok names -> (
           match mode_result with
           | Error _ as err -> err
           | Ok mode -> (
+          match tier_result with
+          | Error _ as err -> err
+          | Ok tier -> (
           match bool_param payload "include_hidden" with
           | Error _ as err -> err
           | Ok include_hidden -> (
@@ -3047,7 +3061,8 @@ let requested_tool_list_params params =
                         include_deprecated;
                         include_usage;
                         mode;
-                      })))))
+                        tier;
+                      }))))))
   | Some _ -> Error "Invalid params: expected object"
 
 let handle_initialize_eio ?(profile = Full) id params =
@@ -3065,12 +3080,17 @@ let handle_initialize_eio ?(profile = Full) id params =
       ])
 
 let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_usage = false) ?mode state id =
+    ?(include_deprecated = false) ?(include_usage = false) ?mode ?tier state id =
   let usage_summary =
     if include_usage then
       Some (Telemetry_eio.summarize_tool_usage ?fs:state.Mcp_server.fs state.Mcp_server.room_config)
     else
       None
+  in
+  let tier_filter =
+    match tier with
+    | None -> None
+    | Some s -> Tool_catalog.tier_of_string (String.lowercase_ascii s)
   in
   let tools =
     tool_schemas_for_profile ~include_hidden ~include_deprecated
@@ -3080,6 +3100,11 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
        | Some wanted ->
            List.filter (fun (schema : Types.tool_schema) ->
              List.mem schema.name wanted))
+    |> (match tier_filter with
+       | None -> Fun.id
+       | Some t ->
+           List.filter (fun (schema : Types.tool_schema) ->
+             Tool_catalog.is_in_tier t schema.name))
     |> List.map (tool_json_for_profile ?usage_summary profile)
   in
   let result_fields =
@@ -3158,9 +3183,9 @@ let handle_request
                    | "tools/list" -> (
                        match requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { names; include_hidden; include_deprecated; include_usage; mode } ->
+                       | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier } ->
                            handle_list_tools_eio ~profile ?names ~include_hidden
-                             ~include_deprecated ~include_usage ?mode state id)
+                             ~include_deprecated ~include_usage ?mode ?tier state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

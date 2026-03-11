@@ -2453,7 +2453,7 @@ let gc config ?(days=7) () =
             let updated =
               Yojson.Safe.Util.(member "updated_at_iso" json |> to_string_option)
               |> Option.value ~default:"" in
-            if (status = "completed" || status = "interrupted") && updated <> "" && updated < cutoff_iso then begin
+            if (status = "completed" || status = "interrupted" || status = "cancelled") && updated <> "" && updated < cutoff_iso then begin
               mkdir_p archive_ts_dir;
               let dest = Filename.concat archive_ts_dir session_id in
               (try Unix.rename sdir dest
@@ -2466,7 +2466,7 @@ let gc config ?(days=7) () =
     )
   end;
   if !session_archive_count > 0 then
-    results := Printf.sprintf "📦 Archived %d completed/interrupted team session(s)" !session_archive_count :: !results
+    results := Printf.sprintf "📦 Archived %d completed/interrupted/cancelled team session(s)" !session_archive_count :: !results
   else
     results := "✅ No team sessions to archive" :: !results;
 

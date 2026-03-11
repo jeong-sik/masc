@@ -1820,39 +1820,51 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
   let now = Time_compat.now () in
   List.iter
     (fun (session : Team_session_types.session) ->
-      if session.status = Team_session_types.Running && session.auto_resume then
-        if now >= session.planned_end_at then
+      if session.status = Team_session_types.Running then begin
+        if session.auto_resume then begin
+          if now >= session.planned_end_at then
+            ignore
+              (finalize_session ~config ~session_id:session.session_id
+                 ~final_status:Team_session_types.Completed
+                 ~reason:"duration_elapsed_during_restart" ~generate_report:true)
+          else
+            let should_start =
+              with_runtimes_lock (fun () ->
+                  if Hashtbl.mem runtimes session.session_id then
+                    false
+                  else (
+                    Hashtbl.replace runtimes session.session_id
+                      {
+                        stop_requested = false;
+                        stop_reason = None;
+                        finalizing = false;
+                        generate_report_on_finalize = true;
+                      };
+                    true))
+            in
+            if should_start then begin
+              Team_session_store.append_event config session.session_id
+                ~event_type:"recovered_after_restart"
+                ~detail:
+                  (`Assoc
+                    [
+                      ( "remaining_sec",
+                        `Int
+                          (int_of_float (session.planned_end_at -. now)) );
+                      ("ts_iso", `String (now_iso ()));
+                    ]);
+              start_runtime_loop ~sw ~clock ~config
+                ~session_id:session.session_id
+            end
+        end else begin
+          Printf.eprintf
+            "[team_session] orphan session %s (auto_resume=false): \
+             transitioning to Interrupted\n%!"
+            session.session_id;
           ignore
             (finalize_session ~config ~session_id:session.session_id
-               ~final_status:Team_session_types.Completed
-               ~reason:"duration_elapsed_during_restart" ~generate_report:true)
-        else
-          let should_start =
-            with_runtimes_lock (fun () ->
-                if Hashtbl.mem runtimes session.session_id then
-                  false
-                else (
-                  Hashtbl.replace runtimes session.session_id
-                    {
-                      stop_requested = false;
-                      stop_reason = None;
-                      finalizing = false;
-                      generate_report_on_finalize = true;
-                    };
-                  true))
-          in
-          if should_start then begin
-            Team_session_store.append_event config session.session_id
-              ~event_type:"recovered_after_restart"
-              ~detail:
-                (`Assoc
-                  [
-                    ( "remaining_sec",
-                      `Int
-                        (int_of_float (session.planned_end_at -. now)) );
-                    ("ts_iso", `String (now_iso ()));
-                  ]);
-            start_runtime_loop ~sw ~clock ~config
-              ~session_id:session.session_id
-          end)
+               ~final_status:Team_session_types.Interrupted
+               ~reason:"no_auto_resume_on_restart" ~generate_report:true)
+        end
+      end)
     sessions

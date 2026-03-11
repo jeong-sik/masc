@@ -380,6 +380,83 @@ let test_recover_elapsed_session () =
        (Team_session_store.report_json_path config session_id));
   cleanup_dir base_dir
 
+let test_recover_orphan_session () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let session_id = Team_session_store.make_session_id () in
+  let now = Time_compat.now () in
+  Team_session_store.ensure_session_dirs config session_id;
+  let session : Team_session_types.session =
+    {
+      session_id;
+      goal = "test orphan cleanup";
+      created_by = "tester";
+      room_id = "default";
+      status = Team_session_types.Running;
+      duration_seconds = 60;
+      execution_scope = Team_session_types.Observe_only;
+      checkpoint_interval_sec = 10;
+      min_agents = 1;
+      orchestration_mode = Team_session_types.Assist;
+      communication_mode = Team_session_types.Comm_broadcast;
+      scale_profile = Team_session_types.Scale_standard;
+      control_profile = Team_session_types.Control_flat;
+      model_cascade = [ "glm:glm-5" ];
+      fallback_policy = Team_session_types.Fallback_cascade_then_task;
+      instruction_profile = Team_session_types.Profile_standard;
+      alert_channel = Team_session_types.Alert_both;
+      auto_resume = false;
+      report_formats = [ Team_session_types.Markdown; Team_session_types.Json ];
+      turn_count = 0;
+      agent_names = [ "tester" ];
+      planned_workers = [];
+      broadcast_count = 0;
+      portal_count = 0;
+      cascade_attempted = 0;
+      cascade_success = 0;
+      cascade_failed = 0;
+      fallback_task_created = 0;
+      min_agents_violation_streak = 0;
+      policy_violations = [];
+      baseline_done_counts = [];
+      final_done_delta_total = None;
+      final_done_delta_by_agent = None;
+      started_at = now -. 120.0;
+      planned_end_at = now +. 3600.0;
+      stopped_at = None;
+      last_checkpoint_at = Some (now -. 30.0);
+      last_event_at = Some (now -. 30.0);
+      last_turn_at = None;
+      stop_reason = None;
+      generated_report = false;
+      artifacts_dir = Team_session_store.session_dir config session_id;
+      created_at_iso = Types.now_iso ();
+      updated_at_iso = Types.now_iso ();
+    }
+  in
+  Team_session_store.save_session config session;
+  Team_session_engine_eio.recover_running_sessions ~sw
+    ~clock:(Eio.Stdenv.clock env) ~config;
+  let rec wait_loaded attempts =
+    if attempts <= 0 then
+      failwith "orphan session not transitioned after recover"
+    else
+      match Team_session_store.load_session config session_id with
+      | Some s -> s
+      | None ->
+          Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+          wait_loaded (attempts - 1)
+  in
+  let reloaded = wait_loaded 100 in
+  Alcotest.(check string) "orphan becomes interrupted" "interrupted"
+    (Team_session_types.status_to_string reloaded.status);
+  Alcotest.(check string) "stop reason" "no_auto_resume_on_restart"
+    (Option.value ~default:"" reloaded.stop_reason);
+  cleanup_dir base_dir
+
 let test_read_events_limit () =
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -2348,6 +2425,8 @@ let () =
             test_duration_reached_path;
           Alcotest.test_case "recover-elapsed-session" `Quick
             test_recover_elapsed_session;
+          Alcotest.test_case "recover-orphan-session" `Quick
+            test_recover_orphan_session;
           Alcotest.test_case "read-events-limit" `Quick
             test_read_events_limit;
           Alcotest.test_case "list-and-compare" `Quick test_list_and_compare;

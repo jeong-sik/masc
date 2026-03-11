@@ -98,7 +98,6 @@ let seed_room config session_id =
           "team-session-local64-smoke";
           "llama-local-alpha";
           "llama-local-beta";
-          "llama-local-gamma";
         ];
       planned_workers =
         [
@@ -271,6 +270,11 @@ let test_dashboard_mission_projection () =
           (agent_briefs
            |> List.exists (fun row ->
                 row |> member "agent_name" |> to_string = "llama-local-alpha"
+                && row |> member "related_session_id" |> to_string = session_id));
+        check bool "planned participant remains linked to fixture session" true
+          (agent_briefs
+           |> List.exists (fun row ->
+                row |> member "agent_name" |> to_string = "llama-local-gamma"
                 && row |> member "related_session_id" |> to_string = session_id));
         check bool "recent input uses full mention target" true
           (contains

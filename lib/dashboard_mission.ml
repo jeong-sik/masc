@@ -138,6 +138,12 @@ let dedup_strings items =
   List.sort_uniq String.compare
     (List.filter_map trim_to_option items)
 
+let merged_session_member_names meta summary =
+  dedup_strings
+    (string_list_of_json (member_assoc "agent_names" meta)
+    @ string_list_of_json (member_assoc "active_agents" summary)
+    @ string_list_of_json (member_assoc "planned_participants" summary))
+
 let top_item items =
   match items with
   | item :: _ -> item
@@ -292,7 +298,7 @@ let build_session_context session_json session_cards =
           | None ->
               trim_to_option (string_field "status" team_health)
               |> Option.value ~default:"ok");
-        member_names = string_list_of_json (member_assoc "agent_names" meta);
+        member_names = merged_session_member_names meta summary;
         started_at = trim_to_option (string_field "created_at_iso" meta);
         elapsed_sec =
           (match member_assoc "elapsed_sec" summary with

@@ -336,8 +336,8 @@ let test_persona_list_and_create_from_persona () =
         in
         check bool "dry run ok" true ok;
         let dry_json = Yojson.Safe.from_string dry_body in
-        check bool "dry run ready" true
-          Yojson.Safe.Util.(dry_json |> member "ready" |> to_bool);
+        check bool "dry run resident" true
+          Yojson.Safe.Util.(dry_json |> member "resident" |> to_bool);
         check string "dry run trigger mode" "explicit_only"
           Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "trigger_mode" |> to_string);
         let ok, create_body =
@@ -368,6 +368,70 @@ let test_persona_list_and_create_from_persona () =
         let status_json = Yojson.Safe.from_string status_body in
         check string "status room scope" "all"
           Yojson.Safe.Util.(status_json |> member "meta" |> member "room_scope" |> to_string)))
+
+let test_resident_keeper_and_persistent_agent_lists_split () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "resident-demo");
+              ("goal", `String "Stay resident");
+              ("models", `List [ `String "ollama:glm-4.7-flash" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "resident keeper up" true ok;
+      let ok, _ =
+        dispatch "masc_persistent_agent_up"
+          (`Assoc
+            [
+              ("name", `String "persistent-demo");
+              ("goal", `String "Stay on demand");
+              ("models", `List [ `String "ollama:glm-4.7-flash" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "persistent agent up" true ok;
+      let ok, resident_body =
+        dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool false) ])
+      in
+      check bool "resident list ok" true ok;
+      let resident_json = Yojson.Safe.from_string resident_body in
+      check bool "resident listed" true
+        Yojson.Safe.Util.(
+          resident_json |> member "keepers" |> to_list
+          |> List.exists (( = ) (`String "resident-demo")));
+      check bool "persistent hidden" false
+        Yojson.Safe.Util.(
+          resident_json |> member "keepers" |> to_list
+          |> List.exists (( = ) (`String "persistent-demo")));
+      let ok, persistent_body =
+        dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool false) ])
+      in
+      check bool "persistent list ok" true ok;
+      let persistent_json = Yojson.Safe.from_string persistent_body in
+      check bool "persistent listed" true
+        Yojson.Safe.Util.(
+          persistent_json |> member "persistent_agents" |> to_list
+          |> List.exists (( = ) (`String "persistent-demo"))))
 
 let test_keeper_policy_tools_roundtrip () =
   Eio_main.run @@ fun env ->
@@ -570,6 +634,8 @@ let () =
            test_keeper_model_set_persists_active_model;
          test_case "persona list and create from persona" `Quick
            test_persona_list_and_create_from_persona;
+         test_case "resident and persistent lists split" `Quick
+           test_resident_keeper_and_persistent_agent_lists_split;
          test_case "policy tools roundtrip" `Quick
            test_keeper_policy_tools_roundtrip;
          test_case "policy set rejects invalid mode" `Quick

@@ -3862,15 +3862,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
       s
   in
   let names =
-    let dir = Tool_keeper.keeper_dir config in
-    if not (Sys.file_exists dir) then []
-    else
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter Tool_keeper.validate_name
-      |> List.sort String.compare
+    Tool_keeper.resident_keeper_names config
   in
   let now_ts = Masc_mcp.Time_compat.now () in
   let summaries =
@@ -4880,6 +4872,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               in
 	            `Assoc ([
               ("name", `String m.name);
+              ("runtime_class", `String "resident_keeper");
+              ("desired", `Bool true);
+              ("resident_registered", `Bool true);
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));

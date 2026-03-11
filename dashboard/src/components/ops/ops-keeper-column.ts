@@ -21,6 +21,7 @@ import {
 export function OpsKeeperColumn() {
   const snapshot = operatorSnapshot.value
   const keepers = snapshot?.keepers ?? []
+  const persistentAgents = snapshot?.persistent_agents ?? []
   const availableActions = snapshot?.available_actions ?? []
   const selectedKeeper = keepers.find(keeper => keeper.name === selectedKeeperName.value) ?? keepers[0] ?? null
 
@@ -51,6 +52,24 @@ export function OpsKeeperColumn() {
               </div>
             </button>
           `)}
+        </div>
+        <div class="ops-context-note" style="margin-top:12px;">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</div>
+        <div class="ops-entity-list">
+          ${persistentAgents.length === 0
+            ? html`<div class="ops-empty">분리된 persistent agent는 없습니다.</div>`
+            : persistentAgents.map(agent => html`
+                <article key=${agent.name} class="ops-entity-card">
+                  <div class="ops-entity-title-row">
+                    <strong>${agent.name}</strong>
+                    <span class="status-badge ${agent.status ?? 'idle'}">${displayStatus(agent.status)}</span>
+                  </div>
+                  <div class="ops-entity-meta">
+                    <span>persistent</span>
+                    <span>${agent.model ?? 'model 확인 필요'}</span>
+                    <span>${relativeAge(agent.last_turn_ago_s)}</span>
+                  </div>
+                </article>
+              `)}
         </div>
       </section>
 

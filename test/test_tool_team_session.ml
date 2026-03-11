@@ -411,6 +411,58 @@ let test_start_attached_operation_session () =
     (match Yojson.Safe.Util.member "message" second_json with
     | `String message -> String.starts_with ~prefix:"operation already attached to team session" message
     | _ -> false);
+  let finalize_ok, finalize_body =
+    dispatch_exn ctx ~name:"masc_team_session_finalize"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("reason", `String "complete attached session");
+            ("generate_report", `Bool false);
+            ("generate_proof", `Bool false);
+            ("wait_timeout_sec", `Int 5);
+          ])
+  in
+  Alcotest.(check bool) "finalize ok" true finalize_ok;
+  let finalized_status =
+    finalize_body |> parse_json_exn |> result_field
+    |> Yojson.Safe.Util.member "status"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check bool) "terminal status after finalize" true
+    (finalized_status = "completed" || finalized_status = "interrupted");
+  let operation_rows_after_finalize =
+    Command_plane_v2.list_operations_json ~operation_id:operation.operation_id
+      config
+    |> Yojson.Safe.Util.member "operations"
+    |> Yojson.Safe.Util.to_list
+  in
+  let detached_session_id =
+    match operation_rows_after_finalize with
+    | row :: _ ->
+        row |> Yojson.Safe.Util.member "operation"
+        |> Yojson.Safe.Util.member "detachment_session_id"
+        |> Yojson.Safe.Util.to_string_option
+    | [] -> None
+  in
+  Alcotest.(check (option string)) "operation detached after finalize" None
+    detached_session_id;
+  let reattach_ok, reattach_body =
+    dispatch_exn ctx ~name:"masc_team_session_start"
+      ~args:
+        (`Assoc
+          [
+            ("goal", `String "Reattach after finalize");
+            ("duration_seconds", `Int 90);
+            ("checkpoint_interval_sec", `Int 10);
+            ("min_agents", `Int 1);
+            ("operation_id", `String operation.operation_id);
+          ])
+  in
+  Alcotest.(check bool) "reattach succeeds after finalize" true reattach_ok;
+  let reattach_session_id = reattach_body |> parse_json_exn |> get_session_id in
+  Alcotest.(check bool) "reattach gives new session id" true
+    (not (String.equal reattach_session_id session_id));
   cleanup_dir base_dir
 
 let test_duration_reached_path () =

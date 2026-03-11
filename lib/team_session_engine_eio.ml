@@ -265,16 +265,40 @@ let validate_operation_attachment ~(config : Room.config) ~(operation_id : strin
         |> to_string_option
       with
       | Some session_id when String.trim session_id <> "" ->
-          Error
-            (Printf.sprintf
-               "operation already attached to team session: %s"
-               session_id)
+          (match Team_session_store.load_session config session_id with
+          | Some session when session.status = Team_session_types.Running ->
+              Error
+                (Printf.sprintf
+                   "operation already attached to team session: %s"
+                   session_id)
+          | _ -> Ok ())
       | _ -> Ok ())
   | _ ->
       Error
         (Printf.sprintf
            "operation lookup failed for attachment: %s"
            operation_id)
+
+let detach_operation_attachment ~(config : Room.config) ~(session : Team_session_types.session) =
+  match session.operation_id with
+  | None -> ()
+  | Some operation_id ->
+      ignore
+        (Command_plane_v2.update_operation config ~actor:session.created_by
+           ~operation_id ~event_type:"team_session_detached"
+           ~detail:
+             (`Assoc
+               [
+                 ("session_id", `String session.session_id);
+                 ("status",
+                   `String
+                     (Team_session_types.status_to_string session.status));
+               ])
+           (fun current ->
+             if current.detachment_session_id = Some session.session_id then
+               { current with detachment_session_id = None }
+             else
+               current))
 
 let compute_live_done_delta (config : Room.config)
     (session : Team_session_types.session) =
@@ -958,6 +982,7 @@ let finalize_session ~(config : Room.config) ~(session_id : string)
               }
             in
             Team_session_store.save_session config updated;
+            detach_operation_attachment ~config ~session:updated;
             Team_session_store.append_event config session_id
               ~event_type:"session_finalized"
               ~detail:
@@ -1149,6 +1174,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         updated_at_iso = now_iso ();
       }
     in
+    Team_session_store.save_session config session;
     let* () =
       match operation_id with
       | Some value -> (
@@ -1174,7 +1200,6 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
           | Error err -> Error err)
       | None -> Ok ()
     in
-    Team_session_store.save_session config session;
     Team_session_store.append_event config session_id ~event_type:"session_started"
       ~detail:
         (`Assoc

@@ -385,7 +385,7 @@ let extract_nickname_from_join_result result =
       fail
         (Printf.sprintf "failed to extract nickname from join result:\n%s" result)
 
-let with_server f =
+let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let exe = find_main_eio_exe () in
   let port = match find_free_port () with Some p -> p | None -> Alcotest.skip () in
   let log_file = Filename.temp_file "operator-mcp-e2e-" ".log" in
@@ -415,29 +415,38 @@ let with_server f =
     |> extract_nickname_from_join_result
   in
   Mirage_crypto_rng_unix.use_default ();
-  ignore (Masc_mcp.Auth.enable_auth config.base_path ~require_token:true);
-  let supervisor_token =
-    match
-      Masc_mcp.Auth.create_token config.base_path ~agent_name:supervisor_nickname
-        ~role:Masc_mcp.Types.Admin
-    with
-    | Ok (token, _cred) -> token
-    | Error err ->
-        fail
-          (Printf.sprintf "failed to create supervisor token: %s"
-             (Masc_mcp.Types.masc_error_to_string err))
+  let supervisor_token, planner_token, implementer_a_token, implementer_b_token =
+    if enable_auth then begin
+      ignore (Masc_mcp.Auth.enable_auth config.base_path ~require_token:true);
+      let supervisor_token =
+        match
+          Masc_mcp.Auth.create_token config.base_path ~agent_name:supervisor_nickname
+            ~role:Masc_mcp.Types.Admin
+        with
+        | Ok (token, _cred) -> token
+        | Error err ->
+            fail
+              (Printf.sprintf "failed to create supervisor token: %s"
+                 (Masc_mcp.Types.masc_error_to_string err))
+      in
+      let create_worker_token agent_name =
+        match
+          Masc_mcp.Auth.create_token config.base_path ~agent_name
+            ~role:Masc_mcp.Types.Worker
+        with
+        | Ok (token, _cred) -> token
+        | Error err ->
+            fail
+              (Printf.sprintf "failed to create %s token: %s" agent_name
+                 (Masc_mcp.Types.masc_error_to_string err))
+      in
+      ( supervisor_token,
+        create_worker_token planner_nickname,
+        create_worker_token implementer_a_nickname,
+        create_worker_token implementer_b_nickname )
+    end else
+      ("", "", "", "")
   in
-  let create_worker_token agent_name =
-    match Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Masc_mcp.Types.Worker with
-    | Ok (token, _cred) -> token
-    | Error err ->
-        fail
-          (Printf.sprintf "failed to create %s token: %s" agent_name
-             (Masc_mcp.Types.masc_error_to_string err))
-  in
-  let planner_token = create_worker_token planner_nickname in
-  let implementer_a_token = create_worker_token implementer_a_nickname in
-  let implementer_b_token = create_worker_token implementer_b_nickname in
   let log_fd =
     Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
   in
@@ -448,9 +457,20 @@ let with_server f =
         ("MASC_LODGE_DAEMON_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+        ("MASC_HOST", host);
       ]
   in
-  let argv = [| exe; "--port"; string_of_int port; "--base-path"; base_path |] in
+  let argv =
+    [|
+      exe;
+      "--host";
+      host;
+      "--port";
+      string_of_int port;
+      "--base-path";
+      base_path;
+    |]
+  in
   let pid = Unix.create_process_env exe argv env Unix.stdin log_fd log_fd in
   Unix.close log_fd;
   let cleanup () =
@@ -765,6 +785,36 @@ let test_operator_mcp_supervises_team_session () =
   check bool "prove markdown path present" true
     (prove_result |> U.member "proof_md_path" <> `Null)
 
+let test_mcp_requires_auth_when_bound_non_loopback () =
+  with_server ~host:"0.0.0.0" ~enable_auth:false
+  @@ fun ~port ~supervisor_token:_ ~planner_token:_ ~implementer_a_token:_
+            ~implementer_b_token:_ ~supervisor_nickname:_ ~planner_nickname:_
+            ~implementer_a_nickname:_ ~implementer_b_nickname:_ ->
+  let result =
+    run_curl_json ~port ~path:"/mcp" ~session_id:"strict-remote"
+      ~payload:(tools_list_payload ~id:1) ()
+  in
+  Alcotest.(check (option int)) "returns unauthorized" (Some 401) result.status;
+  check bool "strict auth message" true
+    (contains_substr "requires room auth enabled with require_token=true"
+       result.body)
+
+let test_agent_json_route_served_on_canonical_path () =
+  with_server ~enable_auth:false
+  @@ fun ~port ~supervisor_token:_ ~planner_token:_ ~implementer_a_token:_
+            ~implementer_b_token:_ ~supervisor_nickname:_ ~planner_nickname:_
+            ~implementer_a_nickname:_ ~implementer_b_nickname:_ ->
+  let result = run_curl_get ~port ~path:"/.well-known/agent.json" () in
+  require_http_ok "agent.json" result;
+  let json =
+    try Yojson.Safe.from_string result.body
+    with Yojson.Json_error err ->
+      fail
+        (Printf.sprintf "agent.json invalid JSON: %s\nbody=%s" err result.body)
+  in
+  check string "agent card name present" "MASC-MCP"
+    (json |> U.member "name" |> U.to_string)
+
 let () =
   run "operator_mcp_e2e"
     [
@@ -772,5 +822,9 @@ let () =
         [
           test_case "remote operator supervises team session over MCP" `Slow
             test_operator_mcp_supervises_team_session;
+          test_case "full mcp requires auth on non-loopback bind" `Slow
+            test_mcp_requires_auth_when_bound_non_loopback;
+          test_case "canonical agent discovery route" `Quick
+            test_agent_json_route_served_on_canonical_path;
         ] );
     ]

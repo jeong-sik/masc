@@ -861,55 +861,21 @@ let status () : Yojson.Safe.t =
 
 (** Discover remote organizations by fetching their agent card.
 
-    Fetches /.well-known/agent-card.json from the endpoint via curl
-    and returns the parsed agent card or an error.
+    Tries the canonical A2A discovery path first and keeps the legacy
+    agent-card alias for backward compatibility.
 *)
 let discover_remote ~endpoint : Yojson.Safe.t =
-  let well_known = endpoint ^ "/.well-known/agent-card.json" in
-  let argv = ["curl"; "-s"; "--max-time"; "10"; "--proto"; "=https,http";
-              "-H"; "Accept: application/json"; well_known] in
-  try
-    let (status, body) = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
-    match status with
-    | Unix.WEXITED 0 when String.length body > 0 ->
-      (try
-        let card_json = Yojson.Safe.from_string body in
-        `Assoc [
+  match A2a_tools.fetch_remote_agent_card endpoint with
+  | Ok (card_json, discovered_url) ->
+      `Assoc
+        [
           ("success", `Bool true);
           ("type", `String "remote_discovery");
           ("endpoint", `String endpoint);
+          ("discovered_url", `String discovered_url);
           ("agent_card", card_json);
         ]
-      with Yojson.Json_error msg ->
-        `Assoc [
-          ("success", `Bool false);
-          ("error", `String (Printf.sprintf "Invalid JSON from %s: %s" well_known msg));
-        ])
-    | Unix.WEXITED 0 ->
-      `Assoc [
-        ("success", `Bool false);
-        ("error", `String (Printf.sprintf "Empty response from %s" well_known));
-      ]
-    | Unix.WEXITED code ->
-      `Assoc [
-        ("success", `Bool false);
-        ("error", `String (Printf.sprintf "HTTP fetch failed (exit %d): %s" code well_known));
-      ]
-    | Unix.WSIGNALED sig_num ->
-      `Assoc [
-        ("success", `Bool false);
-        ("error", `String (Printf.sprintf "Fetch killed by signal %d: %s" sig_num well_known));
-      ]
-    | Unix.WSTOPPED _ ->
-      `Assoc [
-        ("success", `Bool false);
-        ("error", `String (Printf.sprintf "Fetch stopped: %s" well_known));
-      ]
-  with exn ->
-    `Assoc [
-      ("success", `Bool false);
-      ("error", `String (Printf.sprintf "Remote discovery error: %s" (Printexc.to_string exn)));
-    ]
+  | Error err -> `Assoc [ ("success", `Bool false); ("error", `String err) ]
 
 (* ============================================ *)
 (* Cross-Room Communication                     *)

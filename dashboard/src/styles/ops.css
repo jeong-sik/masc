@@ -314,6 +314,49 @@
   gap: 8px;
 }
 
+.ops-guidance-card {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ops-guidance-card.ok {
+  border-color: rgba(74, 222, 128, 0.35);
+  background: rgba(74, 222, 128, 0.06);
+}
+
+.ops-guidance-card.warn {
+  border-color: rgba(251, 191, 36, 0.3);
+  background: rgba(251, 191, 36, 0.06);
+}
+
+.ops-guidance-card.bad {
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.06);
+}
+
+.ops-guidance-head,
+.ops-guidance-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ops-guidance-head strong {
+  color: var(--text-strong);
+}
+
+.ops-guidance-body {
+  color: var(--text-strong);
+  line-height: 1.5;
+}
+
 .ops-feed-item,
 .ops-confirmation-card,
 .ops-detail-card,
@@ -495,4 +538,3 @@
     min-width: 42px;
   }
 }
-

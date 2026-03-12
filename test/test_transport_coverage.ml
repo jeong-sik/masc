@@ -451,7 +451,7 @@ let test_rest_tool_to_endpoint_broadcast () =
 let test_rest_tool_to_endpoint_agent_card () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_agent_card" in
   check string "method" "GET" (Transport.Rest.method_to_string m);
-  check string "path" "/.well-known/agent-card.json" path
+  check string "path" "/.well-known/agent.json" path
 
 let test_rest_tool_to_endpoint_unknown () =
   let (m, path) = Transport.Rest.tool_to_endpoint "unknown_tool" in
@@ -472,6 +472,13 @@ let test_rest_parse_request_agents () =
 
 let test_rest_parse_request_agent_card () =
   let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/.well-known/agent-card.json" ~query_params:[] ~body:"" in
+  check string "method_name" "masc_agent_card" req.method_name
+
+let test_rest_parse_request_agent_card_canonical () =
+  let req =
+    Transport.Rest.parse_request ~http_method:"GET"
+      ~path:"/.well-known/agent.json" ~query_params:[] ~body:""
+  in
   check string "method_name" "masc_agent_card" req.method_name
 
 let test_rest_parse_request_tool () =
@@ -832,6 +839,8 @@ let () =
       test_case "tasks" `Quick test_rest_parse_request_tasks;
       test_case "agents" `Quick test_rest_parse_request_agents;
       test_case "agent_card" `Quick test_rest_parse_request_agent_card;
+      test_case "agent_card canonical" `Quick
+        test_rest_parse_request_agent_card_canonical;
       test_case "tool" `Quick test_rest_parse_request_tool;
       test_case "unknown" `Quick test_rest_parse_request_unknown;
       test_case "with body" `Quick test_rest_parse_request_with_body;

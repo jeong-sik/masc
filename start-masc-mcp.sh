@@ -1,6 +1,6 @@
 #!/bin/bash
 # MASC MCP Server (OCaml) - Start Script (HTTP/SSE default)
-# Usage: ./start-masc-mcp.sh [--stdio] [--http] [--eio] [--lwt] [--port PORT] [--base-path PATH|--path PATH]
+# Usage: ./start-masc-mcp.sh [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]
 # Note: Eio is the default runtime; --lwt exits with an error.
 
 set -e
@@ -66,6 +66,7 @@ fi
 PORT="${MASC_MCP_PORT:-8935}"
 HTTP_MODE="${MASC_MCP_HTTP:-true}"
 BASE_PATH="${MASC_BASE_PATH:-$SCRIPT_DIR}"
+HOST="${MASC_HOST:-127.0.0.1}"
 # NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
 EIO_MODE="true"
 
@@ -93,13 +94,17 @@ while [[ $# -gt 0 ]]; do
             PORT="$2"
             shift 2
             ;;
+        --host)
+            HOST="$2"
+            shift 2
+            ;;
         --base-path|--path)
             BASE_PATH="$2"
             shift 2
             ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--stdio] [--http] [--eio] [--lwt] [--port PORT] [--base-path PATH|--path PATH]" >&2
+            echo "Usage: $0 [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]" >&2
             echo "Note: Eio is the default runtime; --lwt exits with an error." >&2
             exit 1
             ;;
@@ -290,6 +295,7 @@ fi
 # Eio server has different CLI format and is HTTP-only
 if [ "$EIO_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
+    echo "  Host: $HOST" >&2
     echo "  Port: $PORT" >&2
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
     if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then
@@ -303,9 +309,10 @@ if [ "$EIO_MODE" = "true" ]; then
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
-    exec "$SELECTED_EXE" --port="$PORT" --base-path="$BASE_PATH"
+    exec "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$BASE_PATH"
 elif [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
+    echo "  Host: $HOST" >&2
     echo "  Port: $PORT" >&2
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
     if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then

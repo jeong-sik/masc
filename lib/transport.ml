@@ -157,7 +157,7 @@ module Rest = struct
     | "masc_who" -> [ (GET, "/api/v1/agents") ]
     | "masc_messages" -> [ (GET, "/api/v1/messages") ]
     | "masc_broadcast" -> [ (POST, "/api/v1/broadcast") ]
-    | "masc_agent_card" -> [ (GET, "/.well-known/agent-card.json") ]
+    | "masc_agent_card" -> [ (GET, "/.well-known/agent.json") ]
     | "masc_operator_snapshot" -> [ (GET, "/api/v1/operator") ]
     | "masc_operator_digest" -> [ (GET, "/api/v1/operator/digest") ]
     | "masc_operator_action" -> [ (POST, "/api/v1/operator/action") ]
@@ -546,6 +546,7 @@ module Rest = struct
       | "GET", "/api/v1/tasks" -> "masc_tasks"
       | "GET", "/api/v1/agents" -> "masc_who"
       | "POST", "/api/v1/broadcast" | "POST", "/broadcast" -> "masc_broadcast"
+      | "GET", "/.well-known/agent.json"
       | "GET", "/.well-known/agent-card.json" -> "masc_agent_card"
       | _, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/tools/" ->
           String.sub p 14 (String.length p - 14)

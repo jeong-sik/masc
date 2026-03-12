@@ -214,6 +214,43 @@ let test_run_prompt_cascade_uses_same_request_shape () =
           check string "winner" "run-prompt-2" resp.model_used
       | Error e -> fail ("unexpected run_prompt_cascade error: " ^ e))
 
+let test_llama_cache_key_uses_global_output_budget () =
+  let llama_model =
+    { Llm_client.llama_default with model_id = "qwen3.5-35b-a3b-ud-q8-xl" }
+  in
+  let req_short =
+    make_request_for_model ~model:llama_model ~prompt:"same prompt" ~max_tokens:32 ()
+  in
+  let req_long =
+    make_request_for_model ~model:llama_model ~prompt:"same prompt" ~max_tokens:8192 ()
+  in
+  check string "same cache key"
+    (Llm_client.cache_key_of_request req_short)
+    (Llm_client.cache_key_of_request req_long)
+
+let test_non_llama_cache_key_preserves_requested_budget () =
+  let model : Llm_client.model_spec =
+    {
+      provider = Llm_client.Custom "cached";
+      model_id = "shape-check";
+      max_context = 4096;
+      api_url = "http://127.0.0.1:1";
+      api_key_env = None;
+      cost_per_1k_input = 0.0;
+      cost_per_1k_output = 0.0;
+    }
+  in
+  let req_short =
+    make_request_for_model ~model ~prompt:"same prompt" ~max_tokens:32 ()
+  in
+  let req_long =
+    make_request_for_model ~model ~prompt:"same prompt" ~max_tokens:8192 ()
+  in
+  check bool "different cache key"
+    true
+    (Llm_client.cache_key_of_request req_short
+     <> Llm_client.cache_key_of_request req_long)
+
 let () =
   run "llm_client_cascade"
     [
@@ -238,5 +275,9 @@ let () =
             test_model_spec_of_string_resolves_default_override;
           test_case "run_prompt_cascade request shape" `Quick
             test_run_prompt_cascade_uses_same_request_shape;
+          test_case "llama cache key uses global output budget" `Quick
+            test_llama_cache_key_uses_global_output_budget;
+          test_case "non-llama cache key preserves requested budget" `Quick
+            test_non_llama_cache_key_preserves_requested_budget;
         ] );
     ]

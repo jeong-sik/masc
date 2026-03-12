@@ -1,7 +1,8 @@
 (** Keeper_runtime — resident keeper reconciliation and keepalive bootstrap.
     Runtime-only mutable state stays behind keeper runtime/execution modules. *)
 
-include Keeper_execution
+open Keeper_types
+open Keeper_execution
 
 let maybe_promote_live_legacy_keeper config name =
   match read_meta config name with

@@ -10,8 +10,12 @@ import {
 import {
   actionTypeLabel,
   displayStatus,
+  guidanceFreshnessLabel,
+  guidanceLayerLabel,
+  guidanceLayerTone,
   deliveryModeLabel,
   prettyJson,
+  runtimeJudgeLabel,
   selectedSessionId,
   sessionActionLabel,
   submitTeamStop,
@@ -32,6 +36,13 @@ export function OpsSessionColumn() {
   const sessions = snapshot?.sessions ?? []
   const availableSessionActions = (snapshot?.available_actions ?? []).filter(action => action.target_type === 'team_session')
   const selectedSession = sessions.find(session => session.session_id === selectedSessionId.value) ?? sessions[0] ?? null
+  const activeSummary = sessionDigest?.active_summary
+  const guidanceLayer = sessionDigest?.active_guidance_layer ?? 'fallback'
+  const residentRuntime = sessionDigest?.resident_judge_runtime ?? snapshot?.resident_judge_runtime
+  const activeRecommendedActions =
+    sessionDigest?.active_recommended_actions?.length
+      ? sessionDigest.active_recommended_actions
+      : sessionDigest?.recommended_actions ?? []
 
   return html`
     <div class="ops-column">
@@ -70,6 +81,33 @@ export function OpsSessionColumn() {
         </div>
         <p class="ops-context-note">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
         ${selectedSession && sessionDigest ? html`
+          <article class="ops-guidance-card ${guidanceLayerTone(guidanceLayer)}">
+            <div class="ops-guidance-head">
+              <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
+              <span>${runtimeJudgeLabel(residentRuntime)}</span>
+            </div>
+            <div class="ops-guidance-body">
+              ${activeSummary?.summary ?? '현재 이 session에 대한 resident guidance가 없습니다. fallback digest를 표시합니다.'}
+            </div>
+            <div class="ops-guidance-meta">
+              <span>authoritative ${sessionDigest.authoritative_judgment_available ? 'yes' : 'no'}</span>
+              <span>${guidanceFreshnessLabel(activeSummary)}</span>
+              ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
+            </div>
+          </article>
+          ${activeRecommendedActions.length > 0 ? html`
+            <div class="ops-log-list">
+              ${activeRecommendedActions.map(item => html`
+                <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'session'}`} class="ops-log-entry ${item.severity}">
+                  <div class="ops-log-head">
+                    <strong>${actionTypeLabel(item.action_type)}</strong>
+                    <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
+                  </div>
+                  <div class="ops-log-body">${item.reason}</div>
+                </article>
+              `)}
+            </div>
+          ` : null}
           <div class="ops-log-list">
             ${sessionDigest.attention_items.length > 0 ? sessionDigest.attention_items.map(item => html`
               <article key=${`${item.kind}:${item.target_id ?? 'session'}`} class="ops-log-entry ${item.severity}">

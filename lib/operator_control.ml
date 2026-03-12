@@ -96,13 +96,29 @@ let operator_server_profile_json =
       ("curated_tool_count", `Int 4);
     ]
 
+let resident_judge_runtime_json (config : Room.config) =
+  let runtime = Dashboard_operator_judge.runtime_status config.base_path in
+  `Assoc
+    [
+      ("enabled", `Bool runtime.enabled);
+      ("judge_online", `Bool runtime.judge_online);
+      ("refreshing", `Bool runtime.refreshing);
+      ("generated_at", string_option_to_json runtime.generated_at);
+      ("expires_at", string_option_to_json runtime.expires_at);
+      ("model_used", string_option_to_json runtime.model_used);
+      ("keeper_name", `String runtime.keeper_name);
+      ("last_error", string_option_to_json runtime.last_error);
+    ]
+
 let operator_surface_contract_json =
   `Assoc
     [
       ("command_plane", `String "truth");
+      ("judgment", `String "judgment");
       ("swarm_status", `String "derived");
       ("attention_items", `String "derived");
       ("recommended_actions", `String "fallback");
+      ("active_recommended_actions", `String "judgment_or_fallback");
       ("session_cards", `String "derived");
       ("worker_cards", `String "truth");
     ]
@@ -1071,6 +1087,83 @@ let summary_of_recommendations ~actor (items : recommended_action list) =
       ("provenance", `String "fallback");
       ("authoritative", `Bool false);
     ]
+
+let judgment_surface_for_target_type = function
+  | "room" -> "command.warroom"
+  | "team_session" -> "command.swarm"
+  | _ -> "command.warroom"
+
+let judgment_target_type_of_string = function
+  | "room" -> Operator_judgment.Room
+  | "team_session" -> Operator_judgment.Team_session
+  | _ -> Operator_judgment.Room
+
+let fresh_operator_judgment config ~target_type ~target_id =
+  let judgment_target_type = judgment_target_type_of_string target_type in
+  let surface = judgment_surface_for_target_type target_type in
+  match
+    Operator_judgment.latest_active config ~surface
+      ~target_type:judgment_target_type ~target_id
+  with
+  | Some value when Operator_judgment.is_fresh value ->
+      Some (Operator_judgment.to_yojson value)
+  | _ -> None
+
+let judgment_summary_json judgment_json =
+  `Assoc
+    [
+      ("summary", judgment_json |> U.member "summary");
+      ("confidence", judgment_json |> U.member "confidence");
+      ("provenance", `String "judgment");
+      ("authoritative", `Bool true);
+      ("surface", judgment_json |> U.member "surface");
+      ("fresh_until", judgment_json |> U.member "fresh_until");
+      ("keeper_name", judgment_json |> U.member "keeper_name");
+      ("fallback_used", judgment_json |> U.member "fallback_used");
+      ("disagreement_with_truth", judgment_json |> U.member "disagreement_with_truth");
+    ]
+
+let active_guidance_fields ~config ~actor ~target_type ~target_id
+    ~fallback_recommendations ~fallback_summary =
+  let fallback_recommendation_json =
+    `List
+      (List.map (recommended_action_to_yojson ~actor) fallback_recommendations)
+  in
+  match fresh_operator_judgment config ~target_type ~target_id with
+  | Some judgment_json ->
+      let judgment_actions =
+        match judgment_json |> U.member "recommended_action" with
+        | `Assoc _ as value -> `List [ value ]
+        | _ -> fallback_recommendation_json
+      in
+      let recommendation_source =
+        match judgment_json |> U.member "recommended_action" with
+        | `Assoc _ -> "judgment"
+        | _ -> "fallback"
+      in
+      [
+        ("judgment_owner", `String "resident_operator_keeper");
+        ("authoritative_judgment_available", `Bool true);
+        ("judgment", judgment_json);
+        ("active_guidance_layer", `String "judgment");
+        ("active_summary", judgment_summary_json judgment_json);
+        ("active_recommended_actions", judgment_actions);
+        ("active_recommendation_source", `String recommendation_source);
+        ("active_recommendation_summary", judgment_summary_json judgment_json);
+        ("fallback_recommended_actions", fallback_recommendation_json);
+      ]
+  | None ->
+      [
+        ("judgment_owner", `String "fallback_read_model");
+        ("authoritative_judgment_available", `Bool false);
+        ("judgment", `Null);
+        ("active_guidance_layer", `String "fallback");
+        ("active_summary", fallback_summary);
+        ("active_recommended_actions", fallback_recommendation_json);
+        ("active_recommendation_source", `String "fallback");
+        ("active_recommendation_summary", fallback_summary);
+        ("fallback_recommended_actions", fallback_recommendation_json);
+      ]
 
 let event_ts_iso json =
   match U.member "ts_iso" json with `String value -> Some value | _ -> None
@@ -2175,6 +2268,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     ([
        ("trace_id", `String trace_id);
        ("server_profile", operator_server_profile_json);
+       ("resident_judge_runtime", resident_judge_runtime_json config);
        ("judgment_owner", `String "fallback_read_model");
        ("authoritative_judgment_available", `Bool false);
        ("provenance_summary", operator_surface_contract_json);
@@ -2221,12 +2315,20 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
           ("judgment_owner", `String "fallback_read_model");
           ("authoritative_judgment_available", `Bool false);
           ("provenance_summary", operator_surface_contract_json);
+          ("judgment", `Null);
+          ("resident_judge_runtime", resident_judge_runtime_json config);
           ("command_plane", `Assoc []);
           ("swarm_status", Swarm_status.empty_json);
           ("attention_items", `List []);
           ("attention_summary", summary_of_attention_items []);
           ("recommended_actions", `List []);
           ("recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
+          ("active_guidance_layer", `String "fallback");
+          ("active_summary", summary_of_recommendations ~actor:"dashboard" []);
+          ("active_recommended_actions", `List []);
+          ("active_recommendation_source", `String "fallback");
+          ("active_recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
+          ("fallback_recommended_actions", `List []);
           ("session_cards", `List []);
           ("worker_cards", `List []);
         ])
@@ -2261,16 +2363,23 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
             @ (limited_sessions
               |> List.concat_map (fun digest -> digest.recommended_actions)))
         in
+        let fallback_recommendation_summary =
+          summary_of_recommendations ~actor:actor_name recommended_actions
+        in
+        let active_guidance =
+          active_guidance_fields ~config ~actor:actor_name ~target_type:"room"
+            ~target_id:None ~fallback_recommendations:recommended_actions
+            ~fallback_summary:fallback_recommendation_summary
+        in
         Ok
           (`Assoc
-            [
+            ([
               ("trace_id", `String (trace_id "opsd"));
               ("target_type", `String "room");
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
-              ("judgment_owner", `String "fallback_read_model");
-              ("authoritative_judgment_available", `Bool false);
               ("provenance_summary", operator_surface_contract_json);
+              ("resident_judge_runtime", resident_judge_runtime_json config);
               ("command_plane", command_plane_digest_json);
               ("swarm_status", swarm_status_json);
               ("role_census", aggregate_worker_class_counts tracked_sessions);
@@ -2288,14 +2397,14 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
                 `List
                   (List.map (recommended_action_to_yojson ~actor:actor_name)
                      recommended_actions) );
-              ( "recommendation_summary",
-                summary_of_recommendations ~actor:actor_name recommended_actions );
+              ("recommendation_summary", fallback_recommendation_summary);
               ( "session_cards",
                 `List
                   (List.map (session_card_to_yojson ~actor:actor_name) limited_sessions)
               );
               ("worker_cards", `List []);
-            ])
+            ]
+            @ active_guidance))
     | "team_session" -> (
         match target_id with
         | None -> Error "target_id is required when target_type=team_session"
@@ -2313,16 +2422,25 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
                   in
                   if should_include then digest.worker_cards else []
                 in
+                let fallback_recommendation_summary =
+                  summary_of_recommendations ~actor:actor_name
+                    digest.recommended_actions
+                in
+                let active_guidance =
+                  active_guidance_fields ~config ~actor:actor_name
+                    ~target_type:"team_session" ~target_id:(Some session_id)
+                    ~fallback_recommendations:digest.recommended_actions
+                    ~fallback_summary:fallback_recommendation_summary
+                in
                 Ok
                   (`Assoc
-                    [
+                    ([
                       ("trace_id", `String (trace_id "opsd"));
                       ("target_type", `String "team_session");
                       ("target_id", `String session_id);
                       ("health", `String digest.health);
-                      ("judgment_owner", `String "fallback_read_model");
-                      ("authoritative_judgment_available", `Bool false);
                       ("provenance_summary", operator_surface_contract_json);
+                      ("resident_judge_runtime", resident_judge_runtime_json config);
                       ("command_plane", command_plane_digest_json);
                       ("swarm_status", swarm_status_json);
                       ( "attention_items",
@@ -2334,13 +2452,120 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
                         `List
                           (List.map (recommended_action_to_yojson ~actor:actor_name)
                              digest.recommended_actions) );
-                      ( "recommendation_summary",
-                        summary_of_recommendations ~actor:actor_name
-                          digest.recommended_actions );
+                      ("recommendation_summary", fallback_recommendation_summary);
                       ("session_cards", `List [ session_card_to_yojson ~actor:actor_name digest ]);
                       ("worker_cards", `List (List.map worker_card_to_yojson worker_cards));
-                    ])))
+                    ]
+                    @ active_guidance))))
     | _ -> Error "unsupported target_type"
+
+let judgment_surface_enums =
+  [ "command.warroom"; "command.swarm"; "intervene" ]
+
+let normalize_judgment_surface value =
+  let normalized = String.trim value |> String.lowercase_ascii in
+  if List.mem normalized judgment_surface_enums then Ok normalized
+  else Error "surface must be one of command.warroom, command.swarm, intervene"
+
+let normalize_judgment_target_type value =
+  let normalized = String.trim value |> String.lowercase_ascii in
+  match normalized with
+  | "room" -> Ok ("room", Operator_judgment.Room)
+  | "team_session" -> Ok ("team_session", Operator_judgment.Team_session)
+  | _ -> Error "target_type must be room or team_session"
+
+let default_fresh_ttl_sec surface =
+  match surface with
+  | "command.warroom" -> 60
+  | "command.swarm" | "intervene" -> 300
+  | _ -> 120
+
+let judgment_write_json (ctx : 'a context) args =
+  let* surface = normalize_judgment_surface (get_string args "surface" "") in
+  let* _, judgment_target_type =
+    normalize_judgment_target_type (get_string args "target_type" "")
+  in
+  let target_id = get_string_opt args "target_id" in
+  let summary = get_string args "summary" "" |> String.trim in
+  if summary = "" then Error "summary is required"
+  else if
+    judgment_target_type = Operator_judgment.Team_session && Option.is_none target_id
+  then
+    Error "target_id is required when target_type=team_session"
+  else
+    let now_unix = Unix.gettimeofday () in
+    let generated_at = iso_of_unix now_unix in
+    let fresh_ttl_sec =
+      let default = default_fresh_ttl_sec surface in
+      max 1 (get_int args "fresh_ttl_sec" default)
+    in
+    let fresh_until_unix = now_unix +. float_of_int fresh_ttl_sec in
+    let fresh_until = iso_of_unix fresh_until_unix in
+    let confidence = get_float args "confidence" 0.5 in
+    let keeper_name =
+      match get_string_opt args "keeper_name" with
+      | Some raw when String.trim raw <> "" -> String.trim raw
+      | _ -> normalized_actor ~context_actor:ctx.agent_name None
+    in
+    let evidence_refs =
+      match U.member "evidence_refs" args with
+      | `List items -> List.filter_map U.to_string_option items
+      | _ -> []
+    in
+    let recommended_action =
+      match U.member "recommended_action" args with
+      | `Assoc _ as value -> Some value
+      | _ -> None
+    in
+    let judgment =
+      Operator_judgment.record ctx.config ~surface
+        ~target_type:judgment_target_type ~target_id ~summary ~confidence
+        ?model_name:(get_string_opt args "model_name")
+        ?runtime_name:(get_string_opt args "runtime_name")
+        ?recommended_action ~evidence_refs
+        ~fallback_used:(get_bool args "fallback_used" false)
+        ~disagreement_with_truth:
+          (get_bool args "disagreement_with_truth" false)
+        ~generated_at ~generated_at_unix:now_unix ~fresh_until ~fresh_until_unix
+        ~keeper_name ()
+    in
+    Ok
+      (`Assoc
+        [
+          ("status", `String "ok");
+          ("judgment", Operator_judgment.to_yojson judgment);
+        ])
+
+let judgment_latest_json (_ctx : 'a context) args =
+  let* surface = normalize_judgment_surface (get_string args "surface" "") in
+  let* _, judgment_target_type =
+    normalize_judgment_target_type (get_string args "target_type" "")
+  in
+  let target_id = get_string_opt args "target_id" in
+  if
+    judgment_target_type = Operator_judgment.Team_session && Option.is_none target_id
+  then
+    Error "target_id is required when target_type=team_session"
+  else
+    let require_fresh = get_bool args "require_fresh" true in
+    let judgment =
+      match
+        Operator_judgment.latest_active _ctx.config ~surface
+          ~target_type:judgment_target_type ~target_id
+      with
+      | Some value when (not require_fresh) || Operator_judgment.is_fresh value ->
+          Some value
+      | _ -> None
+    in
+    Ok
+      (`Assoc
+        [
+          ("status", `String "ok");
+          ( "judgment",
+            match judgment with
+            | Some value -> Operator_judgment.to_yojson value
+            | None -> `Null );
+        ])
 
 type action_request = {
   actor : string;

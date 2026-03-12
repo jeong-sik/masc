@@ -70,38 +70,108 @@ let extract_bearer_token request =
       None
   | None -> None
 
+let trim_opt = function
+  | None -> None
+  | Some raw ->
+      let value = String.trim raw in
+      if value = "" then None else Some value
+
+let env_flag_enabled name =
+  match Sys.getenv_opt name with
+  | None -> false
+  | Some raw ->
+      let v = String.trim raw |> String.lowercase_ascii in
+      v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
+
+let configured_bind_host () =
+  match trim_opt (Sys.getenv_opt "MASC_HTTP_BIND_HOST") with
+  | Some host -> host
+  | None -> (
+      match trim_opt (Sys.getenv_opt "MASC_HOST") with
+      | Some host -> host
+      | None -> "127.0.0.1")
+
+let ipaddr_is_loopback = function
+  | Ipaddr.V4 addr ->
+      let octets = Ipaddr.V4.to_octets addr in
+      String.length octets = 4 && Char.code octets.[0] = 127
+  | Ipaddr.V6 addr ->
+      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+
+let ipaddr_is_unspecified = function
+  | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
+  | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
+
+let is_loopback_host host =
+  let normalized = String.trim host |> String.lowercase_ascii in
+  match normalized with
+  | "localhost" -> true
+  | _ -> (
+      match Ipaddr.of_string normalized with
+      | Ok ip -> ipaddr_is_loopback ip
+      | Error _ -> false)
+
+let is_unspecified_host host =
+  match Ipaddr.of_string (String.trim host) with
+  | Ok ip -> ipaddr_is_unspecified ip
+  | Error _ -> false
+
+let http_auth_strict_enabled () =
+  env_flag_enabled "MASC_HTTP_AUTH_STRICT"
+  || not (is_loopback_host (configured_bind_host ()))
+
+let strict_http_auth_error endpoint =
+  Printf.sprintf
+    "%s requires room auth enabled with require_token=true when server is bound to a non-loopback host."
+    endpoint
+
+let ensure_strict_http_token_auth ~endpoint auth_config =
+  if not (http_auth_strict_enabled ()) then
+    Ok auth_config
+  else if not auth_config.Types.enabled then
+    Error (strict_http_auth_error endpoint)
+  else if not auth_config.require_token then
+    Error (strict_http_auth_error endpoint)
+  else
+    Ok auth_config
+
 (** Verify Bearer token for MCP endpoints *)
 let verify_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
-  if not auth_config.Types.enabled then
-    Ok None  (* Auth disabled - allow all *)
-  else
-    match extract_bearer_token request with
-    | None when not auth_config.require_token ->
-      Ok None  (* Token not required *)
-    | None ->
-      Error "Authentication required. Use 'Authorization: Bearer <token>' header."
-    | Some token ->
-      (* Try to find agent by token hash *)
-      let token_hash = Auth.sha256_hash token in
-      let creds = Auth.list_credentials base_path in
-      match List.find_opt (fun c -> c.Types.token = token_hash) creds with
-      | None -> Error "Invalid token"
-      | Some cred ->
-        (* Check expiry *)
-        match cred.expires_at with
-        | None -> Ok (Some cred)
-        | Some exp_str ->
-          let now = Types.now_iso () in
-          if now > exp_str then
-            Error ("Token expired for " ^ cred.agent_name)
-          else
-            Ok (Some cred)
+  match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
+  | Error msg -> Error msg
+  | Ok auth_config ->
+      if not auth_config.Types.enabled then
+        Ok None  (* Auth disabled - allow all *)
+      else
+        match extract_bearer_token request with
+        | None when not auth_config.require_token ->
+            Ok None  (* Token not required *)
+        | None ->
+            Error
+              "Authentication required. Use 'Authorization: Bearer <token>' header."
+        | Some token ->
+            (* Try to find agent by token hash *)
+            let token_hash = Auth.sha256_hash token in
+            let creds = Auth.list_credentials base_path in
+            match List.find_opt (fun c -> c.Types.token = token_hash) creds with
+            | None -> Error "Invalid token"
+            | Some cred -> (
+                (* Check expiry *)
+                match cred.expires_at with
+                | None -> Ok (Some cred)
+                | Some exp_str ->
+                    let now = Types.now_iso () in
+                    if now > exp_str then
+                      Error ("Token expired for " ^ cred.agent_name)
+                    else
+                      Ok (Some cred))
 
 let verify_operator_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   if not auth_config.Types.enabled then
-    Error "/mcp/operator requires token auth to be enabled for this room."
+    Error
+      "/mcp/operator requires room auth enabled with require_token=true."
   else if not auth_config.require_token then
     Error "/mcp/operator requires bearer token auth (require_token=true)."
   else
@@ -2740,15 +2810,6 @@ let auth_token_from_request request =
   | Some v -> bearer_token_from_header v
   | None -> query_param request "token"
 
-let env_flag_enabled name =
-  match Sys.getenv_opt name with
-  | None -> false
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
-
-let http_auth_strict_enabled () = env_flag_enabled "MASC_HTTP_AUTH_STRICT"
-
 (** TTS proxy — forwards text to ElevenLabs and returns audio/mpeg bytes.
     Reads ELEVENLABS_API_KEY from environment. *)
 let trpg_tts_proxy ~body_str : (string, [> `Bad_request | `Internal_server_error] * string) result =
@@ -2891,17 +2952,22 @@ let authorize_permission_request ~base_path ~permission request :
     (unit, Types.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
-  match resolve_agent_name_for_auth ~base_path request ~token with
-  | Error err -> Error err
-  | Ok agent_name_opt ->
-      let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-      if auth_cfg.enabled && auth_cfg.require_token && token <> None && agent_name_opt = None then
-        Error
-          (Types.Unauthorized
-             "Agent name required (X-MASC-Agent or token-bound credential)")
-      else
-        Auth.check_permission base_path ~agent_name ~token
-          ~permission
+  match ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg with
+  | Error msg -> Error (Types.Unauthorized msg)
+  | Ok auth_cfg -> (
+      match resolve_agent_name_for_auth ~base_path request ~token with
+      | Error err -> Error err
+      | Ok agent_name_opt ->
+          let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+          if
+            auth_cfg.enabled && auth_cfg.require_token && token <> None
+            && agent_name_opt = None
+          then
+            Error
+              (Types.Unauthorized
+                 "Agent name required (X-MASC-Agent or token-bound credential)")
+          else
+            Auth.check_permission base_path ~agent_name ~token ~permission)
 
 let authorize_read_request ~base_path request : (unit, Types.masc_error) result =
   authorize_permission_request ~base_path ~permission:Types.CanReadState request
@@ -2933,6 +2999,33 @@ and with_permission_auth ~permission handler request reqd =
       match authorize_permission_request ~base_path ~permission request with
       | Ok () -> handler state request reqd
       | Error err -> respond_auth_error request reqd err
+
+let serve_agent_card ~host ~port request reqd =
+  with_read_auth
+    (fun _state req reqd ->
+      let host_header = Httpun.Headers.get req.Httpun.Request.headers "host" in
+      let resolved_host, resolved_port =
+        match host_header with
+        | None -> (host, port)
+        | Some host_value -> (
+            match String.split_on_char ':' host_value with
+            | [ host_name ] -> (host_name, port)
+            | host_name :: port_str :: _ ->
+                let resolved_port =
+                  try int_of_string port_str with Failure _ -> port
+                in
+                (host_name, resolved_port)
+            | _ -> (host, port))
+      in
+      let card =
+        Masc_mcp.Agent_card.generate_default ~host:resolved_host
+          ~port:resolved_port ()
+      in
+      let json = Masc_mcp.Agent_card.to_json card |> Yojson.Safe.to_string in
+      let a2a_version = Masc_mcp.A2a_tools.default_a2a_version in
+      Http.Response.json ~extra_headers:[ ("A2A-Version", a2a_version) ] json
+        reqd)
+    request reqd
 
 (* ================================================================ *)
 (* Dashboard Data (Batch API)                                       *)
@@ -6608,15 +6701,8 @@ let make_routes ~port ~host ~sw ~clock =
          let body = Masc_mcp.Prometheus.to_prometheus_text () in
          Http.Response.bytes ~content_type:"text/plain; version=0.0.4; charset=utf-8" body reqd
        ) request reqd)
-  |> Http.Router.get "/.well-known/agent-card.json" (fun request reqd ->
-       with_read_auth (fun _state req reqd ->
-         let host_header = Httpun.Headers.get req.Httpun.Request.headers "host" in
-         let (resolved_host, resolved_port) = parse_host_port host_header host port in
-         let card = Masc_mcp.Agent_card.generate_default ~host:resolved_host ~port:resolved_port () in
-         let json = Masc_mcp.Agent_card.to_json card |> Yojson.Safe.to_string in
-         let a2a_version = Masc_mcp.A2a_tools.default_a2a_version in
-         Http.Response.json ~extra_headers:[("A2A-Version", a2a_version)] json reqd
-       ) request reqd)
+  |> Http.Router.get "/.well-known/agent.json" (serve_agent_card ~host ~port)
+  |> Http.Router.get "/.well-known/agent-card.json" (serve_agent_card ~host ~port)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
   (* Dashboard sub-routes: credits and lodge must come before the SPA catchall *)
   |> Http.Router.get "/dashboard/credits" (fun request reqd ->
@@ -8160,7 +8246,7 @@ let make_extended_handler routes =
       Http.Response.internal_error msg reqd
 
 (** Main server loop *)
-let run_server ~sw ~env ~port ~base_path =
+let run_server ~sw ~env ~host ~port ~base_path =
   (* Extract components from Eio environment *)
   let clock = Eio.Stdenv.clock env in
   let mono_clock = Eio.Stdenv.mono_clock env in
@@ -8237,6 +8323,21 @@ let run_server ~sw ~env ~port ~base_path =
       Masc_mcp.Dashboard_governance.factual_snapshot_json
         ~base_path:state.room_config.base_path)
     ();
+  let operator_judge_ctx : _ Operator_control.context =
+    {
+      config = state.room_config;
+      agent_name = "operator-judge";
+      sw;
+      clock;
+      proc_mgr = Some proc_mgr;
+      mcp_session_id = None;
+    }
+  in
+  Masc_mcp.Dashboard_operator_judge.start ~sw ~clock ~config:state.room_config
+    ~build_facts:(fun () ->
+      Operator_control.snapshot_json ~actor:"operator-judge" ~view:"summary"
+        ~include_messages:false ~include_keepers:false operator_judge_ctx)
+    ();
   (* Start MCP session cleanup loop *)
   Masc_mcp.Session.start_mcp_session_cleanup_loop ~sw ~clock ();
 
@@ -8262,18 +8363,25 @@ let run_server ~sw ~env ~port ~base_path =
     in
     loop ());
 
-  let config = { Http.default_config with port; host = "0.0.0.0" } in
+  let config = { Http.default_config with port; host } in
+  Unix.putenv "MASC_HTTP_BIND_HOST" config.host;
   Unix.putenv "MASC_HTTP_PORT" (string_of_int config.port);
   (match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
    | Some existing when String.trim existing <> "" -> ()
    | _ ->
+       let advertised_host =
+         if is_unspecified_host config.host then "127.0.0.1" else config.host
+       in
        Unix.putenv "MASC_HTTP_BASE_URL"
-         (Printf.sprintf "http://127.0.0.1:%d" config.port));
+         (Printf.sprintf "http://%s:%d" advertised_host config.port));
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
   let request_handler = make_extended_handler routes in
 
-  (* Listen on all interfaces for Cloudflare tunnel access *)
-  let ip = Eio.Net.Ipaddr.V4.any in
+  let ip =
+    match Ipaddr.of_string config.host with
+    | Ok addr -> Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr)
+    | Error _ -> Eio.Net.Ipaddr.V4.loopback
+  in
   let addr = `Tcp (ip, config.port) in
   let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
 
@@ -10281,6 +10389,17 @@ let port =
   let doc = "Port to listen on" in
   Arg.(value & opt int 8935 & info ["p"; "port"] ~docv:"PORT" ~doc)
 
+let host =
+  let default =
+    match trim_opt (Sys.getenv_opt "MASC_HOST") with
+    | Some value -> value
+    | None -> "127.0.0.1"
+  in
+  let doc =
+    "Host/IP to bind. Defaults to loopback (`127.0.0.1`). Use `0.0.0.0` or `::` only when you also enable room auth with `require_token=true`."
+  in
+  Arg.(value & opt string default & info ["host"] ~docv:"HOST" ~doc)
+
 let base_path =
   let doc = "Base path for MASC data (.masc folder location)" in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
@@ -10288,7 +10407,7 @@ let base_path =
 (** Graceful shutdown exception *)
 exception Shutdown
 
-let run_cmd port base_path =
+let run_cmd host port base_path =
   Eio_main.run @@ fun env ->
   (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
   Mirage_crypto_rng_unix.use_default ();
@@ -10348,7 +10467,7 @@ let run_cmd port base_path =
     (try
       Eio.Switch.run @@ fun sw ->
       switch_ref := Some sw;
-      run_server ~sw ~env ~port ~base_path
+      run_server ~sw ~env ~host ~port ~base_path
     with
     | Shutdown ->
         Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
@@ -10374,6 +10493,6 @@ let run_cmd port base_path =
 let cmd =
   let doc = "MASC MCP Server" in
   let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
-  Cmd.v info Term.(const run_cmd $ port $ base_path)
+  Cmd.v info Term.(const run_cmd $ host $ port $ base_path)
 
 let () = exit (Cmd.eval cmd)

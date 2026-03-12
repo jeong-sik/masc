@@ -41,6 +41,7 @@
    dashboard
    dashboard_governance
    dashboard_governance_judge
+   dashboard_operator_judge
    dashboard_semantics
    dashboard_utils
    dashboard_execution
@@ -161,6 +162,7 @@
    nickname
    noosphere_eio
    operator_control
+   operator_judgment
    notify
    orchestrator
    planning_eio
@@ -290,11 +292,16 @@
    keeper_verifier
    keeper_schema
    keeper_config
+   keeper_contract
    keeper_types
    keeper_memory
    keeper_alerting
    keeper_execution
    keeper_runtime
+   keeper_turn
+   keeper_status
+   keeper_policy
+   keeper_persona
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)

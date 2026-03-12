@@ -1580,6 +1580,13 @@ let handle_observe_alerts (ctx : (_, _) context) : result =
 let handle_observe_operations (ctx : (_, _) context) : result =
   (true, Yojson.Safe.to_string (Command_plane_v2.observe_operations_json ctx.config))
 
+let handle_observe_swarm (ctx : (_, _) context) args : result =
+  let run_id = get_string_opt args "run_id" in
+  let operation_id = get_string_opt args "operation_id" in
+  ( true,
+    Yojson.Safe.to_string
+      (Command_plane_v2.swarm_live_json ctx.config ?run_id ?operation_id ()) )
+
 let handle_observe_capacity (ctx : (_, _) context) : result =
   (true, Yojson.Safe.to_string (Command_plane_v2.observe_capacity_json ctx.config))
 
@@ -1905,6 +1912,7 @@ let dispatch (ctx : (_, _) context) ~name ~args : result option =
   | "masc_observe_topology" -> Some (handle_observe_topology ctx)
   | "masc_observe_alerts" -> Some (handle_observe_alerts ctx)
   | "masc_observe_operations" -> Some (handle_observe_operations ctx)
+  | "masc_observe_swarm" -> Some (handle_observe_swarm ctx args)
   | "masc_observe_capacity" -> Some (handle_observe_capacity ctx)
   | "masc_observe_traces" -> Some (handle_observe_traces ctx args)
   | "masc_swarm_live_run" -> Some (handle_swarm_live_run ctx args)
@@ -2357,6 +2365,17 @@ let schemas : tool_schema list =
       description =
         "Read operations and detachments together for operator triage.";
       input_schema = object_schema [];
+    };
+    {
+      name = "masc_observe_swarm";
+      description =
+        "Read the swarm-live projection for a run or operation, including pass/fail summary, hot-slot proof, runtime blocker, and next tool guidance.";
+      input_schema =
+        object_schema
+          [
+            ("run_id", string_prop "Swarm-live run id.");
+            ("operation_id", string_prop "Optional managed operation id.");
+          ];
     };
     {
       name = "masc_observe_alerts";

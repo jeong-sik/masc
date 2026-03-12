@@ -977,6 +977,51 @@ let test_tick_reuses_existing_backlog_triage_session () =
            raise Exit)
        with Exit -> ()))
 
+let test_tick_opens_backlog_triage_session_with_inactive_joined_agent () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room.default_config dir in
+      ignore (Room.init config ~agent_name:(Some "fixture-root"));
+      ignore (Room.join config ~agent_name:"worker-a" ~capabilities:[ "executor" ] ());
+      let joined_agents =
+        Room.get_agents_raw_in_room config (Room.current_room_id config)
+      in
+      List.iter
+        (fun (agent : Types.agent) ->
+          match
+            Room.update_agent_r config ~agent_name:agent.name ~status:"inactive" ()
+          with
+          | Ok _ -> ()
+          | Error _ -> Alcotest.fail "Expected inactive update to succeed")
+        joined_agents;
+      ignore
+        (Room.add_task config ~title:"Dormant Worker Backlog" ~priority:1
+           ~description:"joined but inactive worker should still be enrolled");
+      let gardener_config =
+        { (Gardener.load_config ()) with
+          enabled = true;
+          use_llm_decision = false;
+          check_interval_sec = 1.0;
+        }
+      in
+      Eio_main.run @@ fun env ->
+      (try
+         Eio.Switch.run (fun sw ->
+             Gardener.tick ~sw ~clock:(Eio.Stdenv.clock env)
+               ~config:gardener_config ~room_config:config;
+             let sessions =
+               Team_session_store.list_sessions config
+               |> List.filter (fun (session : Team_session_types.session) ->
+                      session.created_by = "gardener"
+                      && String.starts_with ~prefix:"[Gardener] Backlog triage"
+                           session.goal)
+             in
+             check int "one gardener session" 1 (List.length sessions);
+             raise Exit)
+       with Exit -> ()))
+
 (** {1 Test Suite} *)
 
 let suite = [
@@ -1096,6 +1141,8 @@ let suite = [
   "health_json_with_task_backlog", `Quick, test_health_json_with_task_backlog;
   "tick_opens_backlog_session", `Quick, test_tick_opens_backlog_triage_session_for_orphans;
   "tick_reuses_backlog_session", `Quick, test_tick_reuses_existing_backlog_triage_session;
+  "tick_opens_backlog_session_with_inactive_joined_agent", `Quick,
+  test_tick_opens_backlog_triage_session_with_inactive_joined_agent;
 ]
 
 let () =

@@ -998,14 +998,16 @@ let handle_ag_ui_events ~deps request reqd =
           Eio.Fiber.fork ~sw (fun () ->
               let rec loop () =
                 if not !(info.stop) then (
-                  (try Eio.Time.sleep clock sse_ping_interval_s with _ -> ());
+                  (try Eio.Time.sleep clock sse_ping_interval_s
+                   with Eio.Cancel.Cancelled _ as exn -> raise exn | _ -> ());
                   (try
                      if info.closed then
                        stop_sse_session info.session_id
                      else if not !(info.stop) then
                        ignore (send_raw info ": ping\n\n")
-                   with _ -> stop_sse_session info.session_id);
+                   with Eio.Cancel.Cancelled _ as exn -> raise exn
+                      | _ -> stop_sse_session info.session_id);
                   loop ())
               in
-              try loop () with _ -> ())
+              try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn | _ -> ())
       | _ -> ())

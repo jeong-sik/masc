@@ -48,8 +48,8 @@ if [ -z "$s2" ]; then
   exit 1
 fi
 
-echo "[6/12] masc_team_session_turn + events"
-r6_turn="$(call_tool 4106 "masc_team_session_turn" "{\"session_id\":\"$s1\",\"turn_kind\":\"broadcast\",\"message\":\"contract turn broadcast\"}")"
+echo "[6/12] masc_team_session_step + events"
+r6_turn="$(call_tool 4106 "masc_team_session_step" "{\"session_id\":\"$s1\",\"turn_kind\":\"broadcast\",\"message\":\"contract turn broadcast\"}")"
 require_ok "$r6_turn"
 r6_events="$(call_tool 4107 "masc_team_session_events" "{\"session_id\":\"$s1\",\"event_types\":[\"team_turn\"],\"limit\":20}")"
 require_ok "$r6_events"

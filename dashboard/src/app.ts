@@ -36,7 +36,7 @@ export function App() {
     refreshDashboardSemantics()
     refreshMissionSnapshot()
 
-    // Setup SSE → store reaction (debounced refresh on events)
+    // Setup SSE -> store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()
 
     // Periodic refresh for keeper heartbeats (no SSE events)

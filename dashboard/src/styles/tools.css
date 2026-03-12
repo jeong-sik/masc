@@ -1,0 +1,120 @@
+.tool-inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.tool-inventory-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.tool-inventory-stat .stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.tool-inventory-stat .stat-label {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.tool-inventory-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.tool-inventory-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.tool-inventory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tool-inventory-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.tool-inventory-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.tool-inventory-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.tool-inventory-desc {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.tool-inventory-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.tool-inventory-meta,
+.tool-inventory-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.tool-inventory-meta strong,
+.tool-inventory-links strong {
+  color: #e2e8f0;
+}
+
+.tool-inventory-reason {
+  font-size: 12px;
+  color: #fbbf24;
+}
+
+.tool-inventory-usage-hint {
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+@media (max-width: 900px) {
+  .tool-inventory-head {
+    flex-direction: column;
+  }
+
+  .tool-inventory-badges {
+    justify-content: flex-start;
+  }
+}

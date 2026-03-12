@@ -143,9 +143,9 @@ let tool_audit_json_fields agent_name =
         if task.seq > result.seq
         then
           ( task.allowed_tools,
-            [],
-            None,
-            Some "heartbeat_task",
+            result.tool_names,
+            Some result.tool_call_count,
+            Some "heartbeat_task_pending_result",
             Some task.created_at )
         else
           ( task.allowed_tools,
@@ -188,7 +188,7 @@ let keeper_tool_audit_json_fields keeper agent_name =
     match member_assoc "latest_tool_call_count" keeper with
     | `Int value -> Some value
     | `Intlit raw -> (try Some (int_of_string raw) with Failure _ -> None)
-    | _ -> if fallback_latest = [] then None else Some (List.length fallback_latest)
+    | _ -> None
   in
   let fallback_source =
     trim_to_option (string_field "tool_audit_source" keeper)
@@ -202,7 +202,11 @@ let keeper_tool_audit_json_fields keeper agent_name =
           A2a_tools.latest_heartbeat_result agent_name with
     | Some task, Some result ->
         if task.seq > result.seq then
-          (task.allowed_tools, [], None, Some "heartbeat_task", Some task.created_at)
+          ( task.allowed_tools,
+            result.tool_names,
+            Some result.tool_call_count,
+            Some "heartbeat_task_pending_result",
+            Some task.created_at )
         else
           ( task.allowed_tools,
             result.tool_names,

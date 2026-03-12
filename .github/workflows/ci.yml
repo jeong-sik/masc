@@ -12,6 +12,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pr-hygiene:
+    name: PR Hygiene
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run PR hygiene guards
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          HEAD_REF: ${{ github.sha }}
+        run: |
+          chmod +x scripts/check-pr-hygiene.sh
+          git fetch origin "${{ github.base_ref }}" --depth=100
+          scripts/check-pr-hygiene.sh \
+            --base "$BASE_REF" \
+            --head "$HEAD_REF" \
+            --recent-main 50 \
+            --duplicate-policy warn
+
   build:
     name: Build and Test
     runs-on: ubuntu-latest

@@ -7,6 +7,14 @@ import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import {
+  allowlistEmptyState,
+  auditMetadataState,
+  linkedRecentToolsEmptyState,
+  observedToolsEmptyState,
+  openToolsInventory,
+  toolAuditStateLabel,
+} from './common/tool-audit'
+import {
   agents,
   executionContinuityBriefs,
   executionLodgeCheckins,
@@ -89,6 +97,13 @@ function recentToolsForAgent(agentName: string | null): string[] {
   const keeper = keeperForAgent(agentName)
   if (!keeper) return []
   return keeper.recent_tool_names && keeper.recent_tool_names.length > 0 ? keeper.recent_tool_names : []
+}
+
+function firstNonEmptyToolList(...candidates: Array<string[] | null | undefined>): string[] {
+  for (const candidate of candidates) {
+    if (candidate && candidate.length > 0) return candidate
+  }
+  return []
 }
 
 function continuityBriefForAgent(agentName: string | null): DashboardExecutionContinuityBrief | null {
@@ -198,31 +213,43 @@ export function AgentDetailOverlay() {
   const recentTools = recentToolsForAgent(agentName)
   const topTools = windowTopTools(keeper)
   const allowedTools =
-    continuityBrief?.allowed_tool_names
-    ?? missionBrief?.allowed_tool_names
-    ?? lodgeCheckin?.allowed_tool_names
-    ?? []
+    firstNonEmptyToolList(
+      continuityBrief?.allowed_tool_names,
+      missionBrief?.allowed_tool_names,
+      lodgeCheckin?.allowed_tool_names,
+      keeper?.allowed_tool_names,
+    )
   const observedTools =
-    continuityBrief?.latest_tool_names
-    ?? missionBrief?.latest_tool_names
-    ?? lodgeCheckin?.used_tool_names
-    ?? []
+    firstNonEmptyToolList(
+      continuityBrief?.latest_tool_names,
+      missionBrief?.latest_tool_names,
+      lodgeCheckin?.used_tool_names,
+      keeper?.latest_tool_names,
+    )
   const toolCallCount =
     continuityBrief?.latest_tool_call_count
     ?? missionBrief?.latest_tool_call_count
     ?? lodgeCheckin?.used_tool_call_count
+    ?? keeper?.latest_tool_call_count
   const auditSource =
     continuityBrief?.tool_audit_source
     ?? missionBrief?.tool_audit_source
     ?? lodgeCheckin?.tool_audit_source
+    ?? keeper?.tool_audit_source
   const auditAt =
     continuityBrief?.tool_audit_at
     ?? missionBrief?.tool_audit_at
     ?? lodgeCheckin?.tool_audit_at
+    ?? keeper?.tool_audit_at
   const capabilities = agent?.capabilities ?? []
   const room = serverStatus.value?.room ?? 'default'
   const project = serverStatus.value?.project ?? '확인 없음'
   const cluster = serverStatus.value?.cluster ?? '확인 없음'
+  const allowlistFallback = toolAuditStateLabel(allowlistEmptyState(keeper))
+  const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
+  const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
+  const linkedRecentFallback = toolAuditStateLabel(linkedRecentToolsEmptyState(keeper))
+  const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? recentTools[0] ?? null
 
   return html`
     <div
@@ -323,28 +350,35 @@ export function AgentDetailOverlay() {
                   : html`<span class="empty-state" style="font-size:12px;">No capability metadata</span>`}
               </div>
             </div>
+            <div style="display:flex; justify-content:flex-end;">
+              <button class="control-btn ghost" onClick=${() => { openToolsInventory(openToolsQuery) }}>
+                Open tools panel
+              </button>
+            </div>
             <div>
               <div style="font-size:12px; color:#888; margin-bottom:6px;">Allowed tools</div>
+              <div style="font-size:11px; color:#64748b; margin-bottom:6px;">Currently permitted tools for this runtime, not the full system inventory.</div>
               <div style="display:flex; flex-wrap:wrap; gap:6px;">
                 ${allowedTools.length > 0
                   ? allowedTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
-                  : html`<span class="empty-state" style="font-size:12px;">No allowlist reported</span>`}
+                  : html`<span class="empty-state" style="font-size:12px;">${allowlistFallback}</span>`}
               </div>
             </div>
             <div>
               <div style="font-size:12px; color:#888; margin-bottom:6px;">Observed tools</div>
+              <div style="font-size:11px; color:#64748b; margin-bottom:6px;">Recent execution evidence, not policy allowlist.</div>
               <div style="display:flex; flex-wrap:wrap; gap:6px;">
                 ${observedTools.length > 0
                   ? observedTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
-                  : html`<span class="empty-state" style="font-size:12px;">No observed tool-use evidence</span>`}
+                  : html`<span class="empty-state" style="font-size:12px;">${observedFallback}</span>`}
               </div>
             </div>
             <div class="agent-detail-sub">
-              <span>Tool calls: ${typeof toolCallCount === 'number' ? toolCallCount : '—'}</span>
-              <span>Evidence source: ${auditSource ?? 'unreported'}</span>
+              <span>Tool calls: ${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback}</span>
+              <span>Evidence source: ${auditSource ?? metadataFallback}</span>
               <span>
                 Observed at:
-                ${auditAt ? html` <${TimeAgo} timestamp=${auditAt} />` : ' unreported'}
+                ${auditAt ? html` <${TimeAgo} timestamp=${auditAt} />` : ` ${metadataFallback}`}
               </span>
             </div>
             <div>
@@ -352,7 +386,7 @@ export function AgentDetailOverlay() {
               <div style="display:flex; flex-wrap:wrap; gap:6px;">
                 ${recentTools.length > 0
                   ? recentTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
-                  : html`<span class="empty-state" style="font-size:12px;">No keeper tool telemetry</span>`}
+                  : html`<span class="empty-state" style="font-size:12px;">${linkedRecentFallback}</span>`}
               </div>
             </div>
             ${topTools.length > 0

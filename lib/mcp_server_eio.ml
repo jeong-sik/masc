@@ -3416,7 +3416,7 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
     ]
-    @ Tool_catalog.metadata_to_fields schema.name
+    @ Tool_catalog.public_contract_fields schema.name
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
     @

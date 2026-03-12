@@ -707,9 +707,9 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                     let protocol_version =
                       get_protocol_version_for_session ~session_id request
                     in
-                    respond_mcp_internal_error ~deps request reqd ~session_id
-                      ~protocol_version
-                      ("Internal error: " ^ Printexc.to_string exn))))
+	                    respond_mcp_internal_error ~deps request reqd ~session_id
+	                      ~protocol_version
+	                      ("Internal error: " ^ Printexc.to_string exn)))))
 
 let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
     request reqd =

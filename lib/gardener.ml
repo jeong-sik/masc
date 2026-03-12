@@ -1162,14 +1162,24 @@ let backlog_objective room_id (backlog : task_backlog_summary) =
     backlog_goal_prefix room_id backlog.todo_count backlog.high_priority_todo
     backlog.orphan_count
 
-let active_room_agents ~(room_config : Room_utils.config) ~(room_id : string) =
-  Room.get_agents_raw_in_room room_config room_id
-  |> List.filter_map (fun (agent : Types.agent) ->
-         match agent.status with
-         | Types.Active | Types.Busy | Types.Listening -> Some agent.name
-         | Types.Inactive -> None)
-  |> Team_session_types.dedup_strings
-  |> List.sort String.compare
+let backlog_triage_session_agents ~(room_config : Room_utils.config) ~(room_id : string) =
+  let agents = Room.get_agents_raw_in_room room_config room_id in
+  let active_agents =
+    agents
+    |> List.filter_map (fun (agent : Types.agent) ->
+           match agent.status with
+           | Types.Active | Types.Busy | Types.Listening -> Some agent.name
+           | Types.Inactive -> None)
+    |> Team_session_types.dedup_strings
+    |> List.sort String.compare
+  in
+  if active_agents <> [] then
+    active_agents
+  else
+    agents
+    |> List.map (fun (agent : Types.agent) -> agent.name)
+    |> Team_session_types.dedup_strings
+    |> List.sort String.compare
 
 let existing_backlog_session ~(room_config : Room_utils.config) ~(room_id : string) =
   Team_session_store.list_sessions room_config
@@ -1280,14 +1290,43 @@ let inject_backlog_tasks ~(room_config : Room_utils.config) ~(session_id : strin
 let start_backlog_triage_session ~sw ~clock ~(room_config : Room_utils.config)
     ~(backlog : task_backlog_summary) =
   let room_id = Room.current_room_id room_config in
+  let start_session ~agents ~operation_id =
+    Team_session_engine_eio.start_session ~sw ~clock ~config:room_config
+      ~created_by:"gardener"
+      ~goal:(backlog_objective room_id backlog)
+      ~duration_seconds:1800
+      ~execution_scope:Team_session_types.Observe_only
+      ~checkpoint_interval_sec:60 ~min_agents:1
+      ~scale_profile:Team_session_types.Scale_standard
+      ~control_profile:Team_session_types.Control_flat
+      ~orchestration_mode:Team_session_types.Assist
+      ~communication_mode:Team_session_types.Comm_broadcast
+      ~model_cascade:[]
+      ~fallback_policy:Team_session_types.Fallback_cascade_then_task
+      ~instruction_profile:Team_session_types.Profile_standard
+      ~alert_channel:Team_session_types.Alert_both ~auto_resume:true
+      ~report_formats:[ Team_session_types.Markdown; Team_session_types.Json ]
+      ~agent_names:agents ~operation_id
+  in
+  let session_id_of_result ~orphan_tasks ~todo_tasks = function
+    | Ok (`Assoc _ as json) -> (
+        match Yojson.Safe.Util.member "session_id" json with
+        | `String session_id ->
+            inject_backlog_tasks ~room_config ~session_id ~backlog
+              ~orphan_tasks ~todo_tasks;
+            Ok session_id
+        | _ -> Error "backlog triage session missing session_id")
+    | Ok _ -> Error "unexpected backlog triage session response"
+    | Error err -> Error err
+  in
   match existing_backlog_session ~room_config ~room_id with
   | Some session ->
       Eio.traceln "[Gardener] Reusing backlog triage session %s" session.session_id;
       Ok session.session_id
   | None ->
-      let agents = active_room_agents ~room_config ~room_id in
+      let agents = backlog_triage_session_agents ~room_config ~room_id in
       if agents = [] then
-        Error "no active room agents available for backlog triage"
+        Error "no joined room agents available for backlog triage"
       else
         let orphan_tasks = Room.audit_orphan_tasks room_config in
         let todo_tasks = top_todo_tasks ~room_config ~room_id ~limit:5 in
@@ -1304,35 +1343,23 @@ let start_backlog_triage_session ~sw ~clock ~(room_config : Room_utils.config)
             ]
         in
         match Command_plane_v2.start_operation room_config ~actor:"gardener" operation_json with
-        | Error err -> Error err
+        | Error err ->
+            Eio.traceln
+              "[Gardener] Backlog triage falling back to session without operation attachment: %s"
+              err;
+            session_id_of_result ~orphan_tasks ~todo_tasks
+              (start_session ~agents ~operation_id:None)
         | Ok operation -> (
-            match
-              Team_session_engine_eio.start_session ~sw ~clock ~config:room_config
-                ~created_by:"gardener"
-                ~goal:(backlog_objective room_id backlog)
-                ~duration_seconds:1800
-                ~execution_scope:Team_session_types.Observe_only
-                ~checkpoint_interval_sec:60 ~min_agents:1
-                ~scale_profile:Team_session_types.Scale_standard
-                ~control_profile:Team_session_types.Control_flat
-                ~orchestration_mode:Team_session_types.Assist
-                ~communication_mode:Team_session_types.Comm_broadcast
-                ~model_cascade:[]
-                ~fallback_policy:Team_session_types.Fallback_cascade_then_task
-                ~instruction_profile:Team_session_types.Profile_standard
-                ~alert_channel:Team_session_types.Alert_both ~auto_resume:true
-                ~report_formats:
-                  [ Team_session_types.Markdown; Team_session_types.Json ]
-                ~agent_names:agents ~operation_id:(Some operation.operation_id)
+            match start_session ~agents ~operation_id:(Some operation.operation_id)
             with
-            | Error err -> Error err
-            | Ok (`Assoc _ as json) -> (
-                match Yojson.Safe.Util.member "session_id" json with
-                | `String session_id ->
-                    inject_backlog_tasks ~room_config ~session_id ~backlog
-                      ~orphan_tasks ~todo_tasks;
-                    Ok session_id
-                | _ -> Error "backlog triage session missing session_id")
+            | Error err -> (
+                Eio.traceln
+                  "[Gardener] Backlog triage falling back to session without operation attachment: %s"
+                  err;
+                session_id_of_result ~orphan_tasks ~todo_tasks
+                  (start_session ~agents ~operation_id:None))
+            | Ok (`Assoc _ as json) ->
+                session_id_of_result ~orphan_tasks ~todo_tasks (Ok json)
             | Ok _ -> Error "unexpected backlog triage session response")
 
 (** {1 Background Loop} *)

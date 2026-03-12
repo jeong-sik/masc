@@ -783,7 +783,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           if Option.is_some mcp_session_id then
             generated_fallback_agent_name
           else
-            let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "" in
+            let term_session_id = Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID") in
             let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
             (try
               let ic = open_in term_file in
@@ -1681,9 +1681,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       let path = arg_get_string "path" "" in
       let expanded =
         if String.length path > 0 && path.[0] = '~' then
-          Filename.concat (Sys.getenv "HOME") (String.sub path 1 (String.length path - 1))
-        else if Filename.is_relative path then
-          Filename.concat (Sys.getcwd ()) path
+          let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in
+          Filename.concat home (String.sub path 1 (String.length path - 1))
+        else if Filename.is_relative path then          Filename.concat (Sys.getcwd ()) path
         else
           path
       in
@@ -1721,7 +1721,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       Printf.eprintf "[DEBUG] masc_join: saved nickname=%s to MCP session (original=%s)\n%!" nickname agent_name;
       (* Also save to TERM_SESSION_ID file (terminal persistence) *)
       if Option.is_none mcp_session_id then begin
-        let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
+        let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
         let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
         (try
           let oc = open_out agent_file in
@@ -1767,7 +1767,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       unregister_sync registry ~agent_name;
       (* Clean up self-echo filter file *)
       if Option.is_none mcp_session_id then begin
-        let session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
+        let session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
         let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
         Safe_ops.remove_file_logged ~context:"masc_leave" agent_file
       end;

@@ -380,6 +380,15 @@
    tool_perpetual
    tool_shard
    tool_keeper
+   tool_lodge_config_http
+   tool_lodge_llm_cycle
+   tool_lodge_agents_cache
+   tool_lodge_react_core
+   tool_lodge_discussion_defs
+   tool_lodge_orchestrate
+   tool_lodge_agents_ops
+   tool_lodge_project
+   tool_lodge_autonomous
    trpg_schema
    trpg_types
    trpg_action
@@ -426,6 +435,7 @@
    ;; SWARM-RISC Phase 4: Speculative Execution + MCTS
    mcts_tree
    speculative_engine)
+<<<<<<< HEAD
 (private_modules
  room_utils_backend_setup
  room_utils_paths_backend
@@ -464,6 +474,15 @@
  tool_command_plane_dispatch
  tool_command_plane_schemas_01
  tool_command_plane_schemas_02
+ tool_lodge_config_http
+ tool_lodge_llm_cycle
+ tool_lodge_agents_cache
+ tool_lodge_react_core
+ tool_lodge_discussion_defs
+ tool_lodge_orchestrate
+ tool_lodge_agents_ops
+ tool_lodge_project
+ tool_lodge_autonomous
  tools_schemas_01
  tools_schemas_02
  tools_schemas_03

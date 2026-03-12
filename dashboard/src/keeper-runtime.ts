@@ -1,9 +1,17 @@
 import { signal } from '@preact/signals'
-import { callMcpTool, runOperatorAction, sendKeeperMessage } from './api'
+import {
+  callMcpTool,
+  runOperatorAction,
+  sendKeeperMessageDetailed,
+  streamKeeperMessage,
+  type KeeperChatStreamEvent,
+} from './api'
+import { normalizeKeeperConversationDetails } from './keeper-message'
 import type {
   Keeper,
   KeeperConversationDelivery,
   KeeperConversationEntry,
+  KeeperConversationStreamState,
   KeeperConversationRole,
   KeeperDiagnostic,
   KeeperProbeResult,
@@ -24,6 +32,9 @@ export const keeperSending = signal<Record<string, boolean>>({})
 export const keeperProbing = signal<Record<string, boolean>>({})
 export const keeperRecovering = signal<Record<string, boolean>>({})
 export const keeperActionErrors = signal<Record<string, string | null>>({})
+
+const keeperStreamControllers = new Map<string, AbortController>()
+const keeperStreamEntryIds = new Map<string, string>()
 
 function setRecordValue<T>(state: typeof keeperThreads | typeof keeperHydrating | typeof keeperSending | typeof keeperProbing | typeof keeperRecovering | typeof keeperActionErrors, key: string, value: T): void {
   state.value = {
@@ -298,6 +309,8 @@ function normalizeHistoryEntry(raw: unknown, index: number): KeeperConversationE
     text,
     timestamp,
     delivery: 'history',
+    streamState: null,
+    details: null,
   }
 }
 
@@ -324,6 +337,51 @@ function appendThreadEntry(name: string, entry: KeeperConversationEntry): void {
     ...keeperThreads.value,
     [name]: [...existing, entry].slice(-50),
   }
+}
+
+function updateThreadEntry(
+  name: string,
+  entryId: string,
+  updater: (entry: KeeperConversationEntry) => KeeperConversationEntry,
+): void {
+  const existing = keeperThreads.value[name] ?? []
+  keeperThreads.value = {
+    ...keeperThreads.value,
+    [name]: existing.map(entry => (entry.id === entryId ? updater(entry) : entry)),
+  }
+}
+
+function setAssistantStreamState(
+  name: string,
+  entryId: string,
+  streamState: KeeperConversationStreamState,
+  delivery: KeeperConversationDelivery,
+): void {
+  updateThreadEntry(name, entryId, entry => ({
+    ...entry,
+    streamState,
+    delivery,
+  }))
+}
+
+function appendAssistantDelta(name: string, entryId: string, delta: string): void {
+  updateThreadEntry(name, entryId, entry => ({
+    ...entry,
+    text: `${entry.text}${delta}`,
+    streamState: 'streaming',
+    delivery: 'streaming',
+  }))
+}
+
+function finalizeAssistantEntry(
+  name: string,
+  entryId: string,
+  patch: Partial<KeeperConversationEntry>,
+): void {
+  updateThreadEntry(name, entryId, entry => ({
+    ...entry,
+    ...patch,
+  }))
 }
 
 function sameConversationEntry(
@@ -371,6 +429,75 @@ function updateDiagnostic(name: string, patch: Partial<KeeperDiagnostic>): void 
       ...patch,
     },
   })
+}
+
+function setActiveStream(name: string, entryId: string, controller: AbortController): void {
+  keeperStreamEntryIds.set(name, entryId)
+  keeperStreamControllers.set(name, controller)
+}
+
+function clearActiveStream(name: string): void {
+  keeperStreamEntryIds.delete(name)
+  keeperStreamControllers.delete(name)
+}
+
+function activeStreamEntryId(name: string): string | null {
+  return keeperStreamEntryIds.get(name) ?? null
+}
+
+export function abortKeeperThreadMessage(name: string): void {
+  const keeperName = name.trim()
+  if (!keeperName) return
+  const controller = keeperStreamControllers.get(keeperName)
+  const entryId = activeStreamEntryId(keeperName)
+  if (controller) controller.abort()
+  if (entryId) {
+    finalizeAssistantEntry(keeperName, entryId, {
+      delivery: 'timeout',
+      streamState: null,
+      error: 'Stream cancelled',
+      timestamp: new Date().toISOString(),
+    })
+  }
+  clearActiveStream(keeperName)
+  setRecordValue(keeperSending, keeperName, false)
+}
+
+function applyKeeperStreamEvent(
+  keeperName: string,
+  assistantEntryId: string,
+  event: KeeperChatStreamEvent,
+): string | null {
+  switch (event.type) {
+    case 'RUN_STARTED':
+      setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'sending')
+      return null
+    case 'TEXT_MESSAGE_START':
+      setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+      return null
+    case 'TEXT_MESSAGE_CONTENT': {
+      const delta = typeof event.delta === 'string' ? event.delta : ''
+      if (delta) appendAssistantDelta(keeperName, assistantEntryId, delta)
+      return null
+    }
+    case 'TEXT_MESSAGE_END':
+      setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
+      return null
+    case 'CUSTOM':
+      if (event.name === 'KEEPER_REPLY_DETAILS') {
+        const details = normalizeKeeperConversationDetails(event.value)
+        if (details) {
+          finalizeAssistantEntry(keeperName, assistantEntryId, { details })
+        }
+      }
+      return null
+    case 'RUN_ERROR':
+      return typeof event.value === 'string'
+        ? event.value
+        : (isRecord(event.value) ? asString(event.value.message) : null) ?? 'Keeper stream failed'
+    default:
+      return null
+  }
 }
 
 async function refreshDashboardState(): Promise<void> {
@@ -426,7 +553,9 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
   const keeperName = name.trim()
   const message = prompt.trim()
   if (!keeperName || !message) return
+  abortKeeperThreadMessage(keeperName)
   const localId = `local-${Date.now()}`
+  const assistantId = `reply-${Date.now()}`
   appendThreadEntry(keeperName, {
     id: localId,
     role: 'user',
@@ -434,51 +563,121 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     text: message,
     timestamp: new Date().toISOString(),
     delivery: 'sending',
+    streamState: null,
+    details: null,
+  })
+  appendThreadEntry(keeperName, {
+    id: assistantId,
+    role: 'assistant',
+    label: keeperName,
+    text: '',
+    timestamp: null,
+    delivery: 'sending',
+    streamState: 'opening',
+    details: null,
   })
   setRecordValue(keeperSending, keeperName, true)
   setRecordValue(keeperActionErrors, keeperName, null)
+  const controller = new AbortController()
+  setActiveStream(keeperName, assistantId, controller)
   try {
-    const reply = await sendKeeperMessage(keeperName, message)
-    keeperThreads.value = {
-      ...keeperThreads.value,
-      [keeperName]: (keeperThreads.value[keeperName] ?? []).map(entry =>
-        entry.id === localId ? { ...entry, delivery: 'delivered' } : entry
-      ),
-    }
-    appendThreadEntry(keeperName, {
-      id: `reply-${Date.now()}`,
-      role: 'assistant',
-      label: keeperName,
-      text: reply.trim() || '(empty reply)',
-      timestamp: new Date().toISOString(),
+    finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
+
+    await streamKeeperMessage(keeperName, message, undefined, {
+      signal: controller.signal,
+      onEvent: event => {
+        const error = applyKeeperStreamEvent(keeperName, assistantId, event)
+        if (error) {
+          throw new Error(error)
+        }
+      },
+    })
+
+    const finalEntry =
+      (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
+    const finalText = finalEntry?.text.trim() || '(empty reply)'
+
+    finalizeAssistantEntry(keeperName, assistantId, {
+      text: finalText,
       delivery: 'delivered',
+      streamState: null,
+      timestamp: new Date().toISOString(),
+      error: null,
     })
     updateDiagnostic(keeperName, {
       last_reply_status: 'delivered',
       last_reply_at: new Date().toISOString(),
-      last_reply_preview: (reply.trim() || '(empty reply)').slice(0, 200),
+      last_reply_preview: finalText.slice(0, 200),
       last_error: null,
     })
-    await refreshDashboardState()
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : `Failed to send direct message to ${keeperName}`
-    keeperThreads.value = {
-      ...keeperThreads.value,
-      [keeperName]: (keeperThreads.value[keeperName] ?? []).map(entry =>
-        entry.id === localId
-          ? { ...entry, delivery: 'error' as KeeperConversationDelivery, error: message }
-          : entry
-      ),
+    const isAbort =
+      err instanceof Error && err.name === 'AbortError'
+    if (isAbort) {
+      finalizeAssistantEntry(keeperName, assistantId, {
+        delivery: 'timeout',
+        streamState: null,
+        error: 'Stream cancelled',
+        timestamp: new Date().toISOString(),
+      })
+      updateDiagnostic(keeperName, {
+        last_reply_status: 'error',
+        last_error: 'Stream cancelled',
+      })
+      setRecordValue(keeperActionErrors, keeperName, 'Stream cancelled')
+      throw err
     }
+
+    const fallbackAllowed =
+      !((keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId)?.text.trim())
+
+    if (fallbackAllowed) {
+      try {
+        const reply = await sendKeeperMessageDetailed(keeperName, message)
+        finalizeAssistantEntry(keeperName, assistantId, {
+          text: reply.text.trim() || '(empty reply)',
+          delivery: 'delivered',
+          streamState: null,
+          details: reply.details,
+          error: null,
+          timestamp: new Date().toISOString(),
+        })
+        finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered', error: null })
+        updateDiagnostic(keeperName, {
+          last_reply_status: 'delivered',
+          last_reply_at: new Date().toISOString(),
+          last_reply_preview: (reply.text.trim() || '(empty reply)').slice(0, 200),
+          last_error: null,
+        })
+        await refreshDashboardState()
+        return
+      } catch {
+        // Fall through to the shared error path below.
+      }
+    }
+
+    const errorMessage =
+      err instanceof Error ? err.message : `Failed to send direct message to ${keeperName}`
+    finalizeAssistantEntry(keeperName, assistantId, {
+      delivery: 'error' as KeeperConversationDelivery,
+      streamState: null,
+      error: errorMessage,
+      timestamp: new Date().toISOString(),
+    })
+    finalizeAssistantEntry(keeperName, localId, {
+      delivery: 'error' as KeeperConversationDelivery,
+      error: errorMessage,
+    })
     updateDiagnostic(keeperName, {
       last_reply_status: 'error',
-      last_error: message,
+      last_error: errorMessage,
     })
-    setRecordValue(keeperActionErrors, keeperName, message)
+    setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
+    clearActiveStream(keeperName)
     setRecordValue(keeperSending, keeperName, false)
+    await refreshDashboardState()
   }
 }
 

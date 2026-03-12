@@ -233,9 +233,35 @@ export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 
 export type KeeperConversationDelivery =
   | 'history'
   | 'sending'
+  | 'streaming'
   | 'delivered'
   | 'timeout'
   | 'error'
+
+export interface KeeperConversationUsage {
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+}
+
+export interface KeeperConversationDetails {
+  traceId?: string | null
+  generation?: number | null
+  modelUsed?: string | null
+  latencyMs?: number | null
+  costUsd?: number | null
+  usage?: KeeperConversationUsage | null
+  skillPrimary?: string | null
+  skillReason?: string | null
+  stateBlock?: string | null
+  rawPayload?: unknown
+}
+
+export type KeeperConversationStreamState =
+  | 'opening'
+  | 'streaming'
+  | 'finalizing'
+  | null
 
 export interface KeeperConversationEntry {
   id: string
@@ -244,6 +270,8 @@ export interface KeeperConversationEntry {
   text: string
   timestamp?: string | null
   delivery: KeeperConversationDelivery
+  streamState?: KeeperConversationStreamState
+  details?: KeeperConversationDetails | null
   error?: string | null
 }
 

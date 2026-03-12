@@ -1,7 +1,8 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import type { Keeper, KeeperDiagnostic, KeeperConversationEntry } from '../types'
+import type { Keeper, KeeperDiagnostic } from '../types'
 import {
+  abortKeeperThreadMessage,
   hydrateKeeperStatus,
   keeperActionErrors,
   keeperHydrating,
@@ -14,6 +15,7 @@ import {
   recoverKeeperRuntime,
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
+import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
 
 function quietReasonLabel(reason?: string | null): string {
@@ -50,29 +52,6 @@ function nextActionLabel(path: string): string {
     default:
       return 'Message'
   }
-}
-
-function deliveryLabel(entry: KeeperConversationEntry): string {
-  switch (entry.delivery) {
-    case 'sending':
-      return 'sending'
-    case 'timeout':
-      return 'timeout'
-    case 'error':
-      return 'error'
-    case 'delivered':
-      return 'delivered'
-    default:
-      return entry.role
-  }
-}
-
-function chipClass(entry: KeeperConversationEntry): string {
-  if (entry.delivery === 'error' || entry.delivery === 'timeout') return 'bad'
-  if (entry.delivery === 'sending') return 'warn'
-  if (entry.role === 'assistant') return 'assistant'
-  if (entry.role === 'user') return 'user'
-  return 'warn'
 }
 
 function formatTime(timestamp?: string | null): string | null {
@@ -174,40 +153,20 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="keeper-conversation-shell">
-      <div class="keeper-conversation-list">
-        ${thread.length === 0
-          ? html`<div class="control-status-copy">No direct keeper conversation yet.</div>`
-          : thread.map(entry => html`
-              <div class="keeper-conversation-item" key=${entry.id}>
-                <div class="keeper-conversation-meta">
-                  <span class=${`keeper-role-chip ${chipClass(entry)}`}>${entry.label}</span>
-                  <span class=${`keeper-role-chip ${chipClass(entry)}`}>${deliveryLabel(entry)}</span>
-                  ${entry.timestamp ? html`<span class="keeper-conversation-time">${formatTime(entry.timestamp)}</span>` : null}
-                </div>
-                <div class="keeper-conversation-text">${entry.text}</div>
-                ${entry.error ? html`<div class="keeper-conversation-error">${entry.error}</div>` : null}
-              </div>
-            `)}
-      </div>
-      <div class="keeper-conversation-compose">
-        <textarea
-          class="control-textarea"
-          placeholder=${placeholder}
-          value=${draft}
-          onInput=${(event: Event) => { setDraft((event.target as HTMLTextAreaElement).value) }}
-          disabled=${sending || !keeperName}
-        ></textarea>
-        <div class="control-actions">
-          <button
-            class="control-btn"
-            onClick=${() => { void submit() }}
-            disabled=${sending || draft.trim() === '' || !keeperName}
-          >
-            ${sending ? 'Waiting...' : 'Send Direct Message'}
-          </button>
-        </div>
-        ${error ? html`<div class="control-status-copy control-error-copy">${error}</div>` : null}
-      </div>
+      <${ChatTranscript}
+        entries=${thread}
+        emptyText="No direct keeper conversation yet."
+      />
+      <${ChatComposer}
+        draft=${draft}
+        placeholder=${placeholder}
+        disabled=${!keeperName}
+        streaming=${sending}
+        onDraftChange=${setDraft}
+        onSend=${() => { void submit() }}
+        onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+      />
+      ${error ? html`<div class="control-status-copy control-error-copy">${error}</div>` : null}
     </div>
   `
 }

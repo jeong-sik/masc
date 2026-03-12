@@ -16,9 +16,11 @@ module Room = Room
 module Room_utils = Room_utils
 module Tool_keeper = Tool_keeper
 module Keeper_types = Keeper_types
+module Keeper_alerting = Keeper_alerting
 module Keeper_memory = Keeper_memory
 module Keeper_execution = Keeper_execution
 module Keeper_runtime = Keeper_runtime
+module Ag_ui = Ag_ui
 module Tool_operator = Tool_operator
 module Operator_control = Operator_control
 module Command_plane_v2 = Command_plane_v2
@@ -932,6 +934,249 @@ let handle_ag_ui_events request reqd =
   Server_mcp_transport_http.handle_ag_ui_events ~deps:mcp_transport_http_deps
     request reqd
 
+type keeper_chat_stream_request = {
+  name : string;
+  message : string;
+  models : string list;
+}
+
+let keeper_chat_stream_error_json message =
+  `Assoc
+    [
+      ( "error",
+        `Assoc [ ("message", `String message) ] );
+    ]
+
+let parse_keeper_chat_stream_request body_str =
+  let open Yojson.Safe.Util in
+  try
+    let json = Yojson.Safe.from_string body_str in
+    if not (match json with `Assoc _ -> true | _ -> false) then
+      Error "request body must be a JSON object"
+    else
+      let name = json |> member "name" |> to_string_option |> Option.value ~default:"" |> String.trim in
+      let message =
+        json |> member "message" |> to_string_option |> Option.value ~default:""
+        |> String.trim
+      in
+      let models =
+        match json |> member "models" with
+        | `Null -> Ok []
+        | `List items ->
+            Ok
+              (List.filter_map
+                 (function
+                   | `String model when String.trim model <> "" -> Some (String.trim model)
+                   | _ -> None)
+                 items)
+        | _ -> Error "models must be an array of strings"
+      in
+      if name = "" then
+        Error "name is required"
+      else if message = "" then
+        Error "message is required"
+      else
+        Result.map (fun models -> { name; message; models }) models
+  with Yojson.Json_error e ->
+    Error ("invalid json: " ^ e)
+
+let strip_keeper_visible_reply (reply : string) =
+  reply
+  |> Keeper_alerting.strip_skill_route_lines
+  |> Keeper_execution.strip_state_blocks_text
+  |> String.trim
+
+let split_keeper_reply_chunks (text : string) : string list =
+  let len = String.length text in
+  if len = 0 then
+    []
+  else
+    let whitespace = function
+      | ' ' | '\n' | '\t' -> true
+      | _ -> false
+    in
+    let chunks = ref [] in
+    let start = ref 0 in
+    let last_space = ref None in
+    let push stop =
+      if stop > !start then
+        chunks := String.sub text !start (stop - !start) :: !chunks;
+      start := stop;
+      last_space := None
+    in
+    for i = 0 to len - 1 do
+      let ch = text.[i] in
+      if ch = ' ' then last_space := Some i;
+      let next_is_boundary =
+        i + 1 >= len || whitespace text.[i + 1]
+      in
+      let hard_wrap =
+        i - !start >= 180
+        &&
+        match !last_space with
+        | Some idx -> idx > !start
+        | None -> false
+      in
+      let should_break =
+        (match ch with
+         | '.' | '!' | '?' -> next_is_boundary
+         | '\n' -> i + 1 < len && text.[i + 1] = '\n'
+         | _ -> false)
+        || hard_wrap
+      in
+      if should_break then
+        match !last_space with
+        | Some idx when hard_wrap -> push (idx + 1)
+        | _ -> push (i + 1)
+    done;
+    if !start < len then
+      chunks := String.sub text !start (len - !start) :: !chunks;
+    List.rev !chunks |> List.filter (fun chunk -> String.trim chunk <> "")
+
+let keeper_stream_send_raw writer mutex closed data =
+  if !closed || Httpun.Body.Writer.is_closed writer then begin
+    closed := true;
+    false
+  end else
+    try
+      Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+          Httpun.Body.Writer.write_string writer data;
+          Httpun.Body.Writer.flush writer (fun _ -> ()));
+      true
+    with _ ->
+      closed := true;
+      false
+
+let keeper_stream_send_event writer mutex closed event =
+  keeper_stream_send_raw writer mutex closed (Ag_ui.event_to_sse event)
+
+let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
+  let origin = get_origin request in
+  let headers =
+    Httpun.Headers.of_list
+      ([
+         ("content-type", "text/event-stream");
+         ("cache-control", "no-cache");
+         ("connection", "keep-alive");
+         ("x-accel-buffering", "no");
+       ]
+      @ cors_headers origin)
+  in
+  let response = Httpun.Response.create ~headers `OK in
+  let writer = Httpun.Reqd.respond_with_streaming reqd response in
+  let mutex = Eio.Mutex.create () in
+  let closed = ref false in
+  let close_stream () =
+    if not !closed then begin
+      closed := true;
+      (try Httpun.Body.Writer.close writer with _ -> ())
+    end
+  in
+  let now_id () =
+    int_of_float (Time_compat.now () *. 1000.0)
+  in
+  let thread_id = "keeper:" ^ payload.name in
+  let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
+  let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
+  ignore (keeper_stream_send_raw writer mutex closed "retry: 1500\n\n");
+  Eio.Fiber.fork ~sw (fun () ->
+      Fun.protect
+        ~finally:close_stream
+        (fun () ->
+          ignore
+            (keeper_stream_send_event writer mutex closed
+               Ag_ui.(
+                 make_event ~thread_id ~run_id:(Some run_id) Run_started));
+          ignore
+            (keeper_stream_send_event writer mutex closed
+               Ag_ui.(
+                 make_event ~thread_id ~run_id:(Some run_id)
+                   ~message_id:(Some message_id) ~role:(Some Assistant)
+                   Text_message_start));
+          let keeper_ctx : _ Tool_keeper.context =
+            { config = state.Mcp_server.room_config; sw; clock }
+          in
+          let args =
+            `Assoc
+              ([
+                 ("name", `String payload.name);
+                 ("message", `String payload.message);
+               ]
+              @
+              if payload.models = [] then []
+              else [ ("models", `List (List.map (fun model -> `String model) payload.models)) ])
+          in
+          match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
+          | None ->
+              ignore
+                (keeper_stream_send_event writer mutex closed
+                   Ag_ui.(
+                     make_event ~thread_id ~run_id:(Some run_id)
+                       ~custom_name:(Some "KEEPER_CHAT_ERROR")
+                       ~custom_value:(Some (`Assoc [ ("message", `String "keeper dispatch unavailable") ]))
+                       Run_error))
+          | Some (false, err) ->
+              ignore
+                (keeper_stream_send_event writer mutex closed
+                   Ag_ui.(
+                     make_event ~thread_id ~run_id:(Some run_id)
+                       ~custom_name:(Some "KEEPER_CHAT_ERROR")
+                       ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
+                       Run_error))
+          | Some (true, body) -> (
+              try
+                let payload_json = Yojson.Safe.from_string body in
+                let reply_raw =
+                  payload_json |> Yojson.Safe.Util.member "reply"
+                  |> Yojson.Safe.Util.to_string_option
+                  |> Option.value ~default:""
+                in
+                let visible_reply =
+                  if String.trim reply_raw = "" then
+                    String.trim body
+                  else
+                    strip_keeper_visible_reply reply_raw
+                in
+                let visible_reply =
+                  if visible_reply = "" then Option.value ~default:"(empty reply)" (Yojson.Safe.Util.to_string_option payload_json)
+                  else visible_reply
+                in
+                split_keeper_reply_chunks visible_reply
+                |> List.iter (fun chunk ->
+                       ignore
+                         (keeper_stream_send_event writer mutex closed
+                            Ag_ui.(
+                              make_event ~thread_id ~run_id:(Some run_id)
+                                ~message_id:(Some message_id)
+                                ~delta:(Some chunk)
+                                Text_message_content)));
+                ignore
+                  (keeper_stream_send_event writer mutex closed
+                     Ag_ui.(
+                       make_event ~thread_id ~run_id:(Some run_id)
+                         ~custom_name:(Some "KEEPER_REPLY_DETAILS")
+                         ~custom_value:(Some payload_json)
+                         Custom));
+                ignore
+                  (keeper_stream_send_event writer mutex closed
+                     Ag_ui.(
+                       make_event ~thread_id ~run_id:(Some run_id)
+                         ~message_id:(Some message_id)
+                         Text_message_end));
+                ignore
+                  (keeper_stream_send_event writer mutex closed
+                     Ag_ui.(
+                       make_event ~thread_id ~run_id:(Some run_id) Run_finished))
+              with exn ->
+                ignore
+                  (keeper_stream_send_event writer mutex closed
+                     Ag_ui.(
+                       make_event ~thread_id ~run_id:(Some run_id)
+                         ~custom_name:(Some "KEEPER_CHAT_ERROR")
+                         ~custom_value:(Some (`Assoc [ ("message", `String (Printexc.to_string exn)) ]))
+                         Run_error))));
+        )
+
 (** Build routes for MCP server *)
 let make_routes ~port ~host ~sw ~clock =
   Http.Router.empty
@@ -1645,6 +1890,17 @@ let make_routes ~port ~host ~sw ~clock =
        with_public_read (fun state req reqd ->
          let json = dashboard_proof_http_json ~state req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           match parse_keeper_chat_stream_request body_str with
+           | Ok payload ->
+               handle_keeper_chat_stream ~sw ~clock state request reqd payload
+           | Error message ->
+               respond_json_with_cors ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string (keeper_chat_stream_error_json message))
+         )
        ) request reqd)
 
   (* Tool metrics — unified registry stats for dashboard (P4 Phase 4.5) *)

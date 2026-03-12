@@ -3467,10 +3467,15 @@ let requested_tool_list_params params =
                       })))))))
   | Some _ -> Error "Invalid params: expected object"
 
+let validate_optional_meta payload =
+  match Yojson.Safe.Util.member "_meta" payload with
+  | `Null
+  | `Assoc _ -> Ok ()
+  | _ -> Error "Invalid params: _meta must be an object"
 let parse_cursor_only_params params =
   let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
-  let allowed = [ "cursor" ] in
+  let allowed = [ "_meta"; "cursor" ] in
   let unknown =
     fields
     |> List.filter_map (fun (key, _value) ->
@@ -3482,6 +3487,7 @@ let parse_cursor_only_params params =
          (String.concat ", " unknown))
   else
     let payload = `Assoc fields in
+    let* () = validate_optional_meta payload in
     match payload |> member "cursor" with
     | `Null -> Ok { cursor = None }
     | `String cursor -> Ok { cursor = Some cursor }

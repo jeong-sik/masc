@@ -600,16 +600,22 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
     ("id", `Int 120);
     ("method", `String "tools/list");
     ("params", `Assoc [
-      ("names", `List [ `String "masc_status"; `String "masc_broadcast" ]);
+      ("names", `List [ `String "masc_messages"; `String "masc_status" ]);
     ]);
   ]) in
   let response =
     Mcp_eio.handle_request ~clock ~sw state request
   in
-  (match response with
-   | `Assoc fields ->
-       Alcotest.(check bool) "has error" true (List.mem_assoc "error" fields)
-   | _ -> Alcotest.fail "response not an object");
+  let tools = tools_from_response response in
+  let names =
+    tools
+    |> List.filter_map (function
+         | `Assoc fields -> List.assoc_opt "name" fields
+         | _ -> None)
+    |> List.filter_map (function `String s -> Some s | _ -> None)
+  in
+  Alcotest.(check (list string)) "requested tools only"
+    [ "masc_messages"; "masc_status" ] names;
   cleanup_dir base_path
 
 let test_handle_request_tools_list_with_placeholder_flag () =
@@ -703,11 +709,21 @@ let test_handle_request_tools_list_include_usage_metadata () =
     ("params", `Assoc [ ("include_usage", `Bool true) ]);
   ]) in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
-  (match response with
-   | `Assoc fields ->
-       Alcotest.(check bool) "include_usage rejected" true
-         (List.mem_assoc "error" fields)
-   | _ -> Alcotest.fail "response not an object");
+  let result_fields = result_fields_exn response in
+  Alcotest.(check bool) "usage telemetry availability exposed" true
+    (List.mem_assoc "usageTelemetryAvailable" result_fields);
+  Alcotest.(check bool) "usage total exposed" true
+    (List.mem_assoc "usageTotalCalls" result_fields);
+  let first_tool =
+    match tools_from_response response with
+    | tool :: _ -> tool
+    | [] -> Alcotest.fail "tools list empty"
+  in
+  Alcotest.(check bool) "per-tool usage count exposed" true
+    (Yojson.Safe.Util.member "usageCount" first_tool <> `Null);
+  Alcotest.(check bool) "per-tool last-used field present" true
+    (List.mem_assoc "usageLastUsedAt"
+       (match first_tool with `Assoc fields -> fields | _ -> []));
   cleanup_dir base_path
 
 let test_execute_tool_trpg_flow () =
@@ -1296,6 +1312,7 @@ let test_handle_request_prompts_list_cursor () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let cursor = Base64.encode_string "prompts:1" in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -1303,7 +1320,7 @@ let test_handle_request_prompts_list_cursor () =
           ("jsonrpc", `String "2.0");
           ("id", `Int 210);
           ("method", `String "prompts/list");
-          ("params", `Assoc [ ("cursor", `String "1") ]);
+          ("params", `Assoc [ ("cursor", `String cursor) ]);
         ])
   in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
@@ -1679,7 +1696,7 @@ let eio_tests = [
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
   "handle tools/list mdal descriptions", `Quick,
     test_handle_request_tools_list_mdal_descriptions;
-  "handle tools/list rejects nonstandard names filter", `Quick,
+  "handle tools/list filters requested names", `Quick,
     test_handle_request_tools_list_rejects_nonstandard_names_filter;
   "handle tools/list operator profile", `Quick,
     test_handle_request_tools_list_operator_profile;

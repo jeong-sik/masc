@@ -140,21 +140,16 @@ let active_agents : (string, Perpetual_loop.loop_state * Perpetual_loop.loop_con
 let latest_trace_id : string option ref = ref None
 
 let handle_start ctx args =
-  let open Yojson.Safe.Util in
-  let goal = args |> member "goal" |> to_string in
-  let model_strs = args |> member "models" |> to_list |> List.map to_string in
-  let verify = args |> member "verify" |> to_bool_option
-               |> Option.value ~default:true in
-  let heartbeat = args |> member "heartbeat_sec" |> to_number_option
-                  |> Option.value ~default:30.0 in
-  let max_idle = args |> member "max_idle" |> to_int_option
-                 |> Option.value ~default:5 in
-  let coding_mode = args |> member "coding_mode" |> to_bool_option
-                    |> Option.value ~default:false in
-  let coding_agent = args |> member "coding_agent" |> to_string_option
-                     |> Option.value ~default:(Provider_adapter.default_cli_agent_name ()) in
-  let coding_timeout = args |> member "coding_timeout_sec" |> to_int_option
-                       |> Option.value ~default:Env_config.Spawn.coding_timeout_seconds in
+  let goal = Safe_ops.json_string "goal" args in
+  let model_strs = Safe_ops.json_string_list "models" args in
+  let verify = Safe_ops.json_bool ~default:true "verify" args in
+  let heartbeat = Safe_ops.json_float ~default:30.0 "heartbeat_sec" args in
+  let max_idle = Safe_ops.json_int ~default:5 "max_idle" args in
+  let coding_mode = Safe_ops.json_bool ~default:false "coding_mode" args in
+  let coding_agent = match Safe_ops.json_string_opt "coding_agent" args with
+                     | Some s -> s
+                     | None -> Provider_adapter.default_cli_agent_name () in
+  let coding_timeout = Safe_ops.json_int ~default:Env_config.Spawn.coding_timeout_seconds "coding_timeout_sec" args in
   (* Parse model specs *)
   let models = List.filter_map (fun s ->
     match Llm_client.model_spec_of_string s with

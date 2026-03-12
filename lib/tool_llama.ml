@@ -286,10 +286,11 @@ let raw_completion_at ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec () 
                   { success = false; latency_ms; error = Some "llama returned error" })
           | _ ->
               ignore
-                (json |> member "choices" |> to_list |> List.hd
-                |> member "message" |> member "content" |> to_string_option);
+                (match json |> member "choices" |> to_list with
+                 | choice :: _ -> choice |> member "message" |> member "content" |> to_string_option
+                 | [] -> None);
               { success = true; latency_ms; error = None }
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ ->
           { success = false; latency_ms; error = Some "invalid llama response json" })
     | Unix.WEXITED code ->
         {

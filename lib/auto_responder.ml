@@ -204,8 +204,9 @@ let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
           try
             let json = Yojson.Safe.from_string body_str in
             let txt =
-              json |> member "result" |> member "content" |> to_list |> List.hd
-                  |> member "text" |> to_string
+              match json |> member "result" |> member "content" |> to_list with
+              | item :: _ -> item |> member "text" |> to_string
+              | [] -> raise (Failure "empty content list")
             in
             Ok txt
           with exn ->

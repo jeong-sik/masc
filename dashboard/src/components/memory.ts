@@ -63,13 +63,6 @@ function isUpdated(post: BoardPost): boolean {
   return post.updated_at !== post.created_at
 }
 
-function isLikelyTestPost(post: BoardPost): boolean {
-  const haystack = `${post.title} ${post.author} ${post.tags.join(' ')} ${post.flair ?? ''}`.toLowerCase()
-  return /\b(test|smoke|harness|sandbox|dummy|sample|tmp|qa|e2e)\b/.test(haystack)
-    || haystack.includes('테스트')
-    || haystack.includes('실험')
-}
-
 function isAutomationBoardPost(post: BoardPost): boolean {
   if (post.post_kind) return post.post_kind === 'automation'
   const hearth = (post.hearth ?? '').toLowerCase()
@@ -79,14 +72,43 @@ function isAutomationBoardPost(post: BoardPost): boolean {
   return false
 }
 
-function visiblePosts(posts: BoardPost[]): BoardPost[] {
-  if (!hideAutomationPosts.value) return posts
-  return posts.filter(post => {
-    if (isAutomationBoardPost(post)) return false
-    if (post.post_kind) return true
-    if (post.hearth || post.visibility || post.expires_at) return true
-    return !isLikelyTestPost(post)
+function isSystemBoardAuthor(author: string): boolean {
+  return author === 'lodge-system' || author === 'team-session'
+}
+
+function boardPostKind(post: BoardPost): 'human' | 'automation' | 'system' {
+  if (post.post_kind) return post.post_kind
+  if (isSystemBoardAuthor(post.author)) return 'system'
+  if (isAutomationBoardPost(post)) return 'automation'
+  return 'human'
+}
+
+function splitVisiblePosts(posts: BoardPost[]): { human: BoardPost[]; operations: BoardPost[]; hiddenAutomation: number } {
+  const human: BoardPost[] = []
+  const operations: BoardPost[] = []
+  let hiddenAutomation = 0
+  posts.forEach(post => {
+    const kind = boardPostKind(post)
+    if (kind === 'system' && boardExcludeSystem.value) return
+    if (kind === 'automation' && hideAutomationPosts.value) {
+      hiddenAutomation += 1
+      return
+    }
+    if (kind === 'human') {
+      human.push(post)
+      return
+    }
+    operations.push(post)
   })
+  return { human, operations, hiddenAutomation }
+}
+
+function expiryChip(post: BoardPost) {
+  if (!post.expires_at) return null
+  const expiresAtMs = Date.parse(post.expires_at)
+  if (!Number.isFinite(expiresAtMs)) return null
+  if (expiresAtMs <= Date.now()) return html`<span class="board-meta-chip">expired</span>`
+  return html`<span class="board-meta-chip">expires <${TimeAgo} timestamp=${post.expires_at} /></span>`
 }
 
 async function loadPostDetail(postId: string) {
@@ -101,7 +123,9 @@ async function loadPostDetail(postId: string) {
       id: data.id,
       author: data.author,
       title: data.title,
+      body: data.body,
       content: data.content,
+      meta: data.meta,
       tags: data.tags,
       votes: data.votes,
       vote_balance: data.vote_balance,
@@ -147,7 +171,7 @@ async function submitComment(postId: string) {
 
 function SortBar() {
   const current = boardSortMode.value
-  const hideLabel = hideAutomationPosts.value ? 'Hiding automation posts' : 'Show automation posts'
+  const hideLabel = hideAutomationPosts.value ? 'Automation lane collapsed' : 'Automation lane visible'
   return html`
     <div class="board-toolbar">
       <div class="board-controls">
@@ -180,7 +204,7 @@ function SortBar() {
             refreshBoard()
           }}
         >
-          ${boardExcludeSystem.value ? 'Hiding auto reports' : 'Show auto reports'}
+          ${boardExcludeSystem.value ? 'System posts hidden' : 'System posts visible'}
         </button>
         <button class="control-btn ghost" onClick=${refreshBoard} disabled=${boardLoading.value}>
           ${boardLoading.value ? 'Refreshing...' : 'Refresh'}
@@ -192,13 +216,13 @@ function SortBar() {
 
 function MemorySummary() {
   const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
-  const filtered = visiblePosts(boardPosts.value)
-  const hiddenCount = boardPosts.value.length - filtered.length
+  const grouped = splitVisiblePosts(boardPosts.value)
+  const visibleCount = grouped.human.length + grouped.operations.length
   return html`
     <div class="board-summary-strip">
       <div class="board-summary-item">
         <span class="board-summary-label">Visible posts</span>
-        <strong>${filtered.length}</strong>
+        <strong>${visibleCount}</strong>
       </div>
       <div class="board-summary-item">
         <span class="board-summary-label">Sort</span>
@@ -206,11 +230,11 @@ function MemorySummary() {
       </div>
       <div class="board-summary-item">
         <span class="board-summary-label">Noise filter</span>
-        <strong>${hideAutomationPosts.value ? `automation ${hiddenCount} hidden` : 'full feed'}</strong>
+        <strong>${hideAutomationPosts.value ? `automation ${grouped.hiddenAutomation} hidden` : 'separate lane'}</strong>
       </div>
       <div class="board-summary-item">
         <span class="board-summary-label">Noise policy</span>
-        <strong>${boardExcludeSystem.value ? 'Auto reports hidden' : 'Full memory feed'}</strong>
+        <strong>${boardExcludeSystem.value ? 'System posts hidden' : 'System lane visible'}</strong>
       </div>
       <div class="board-summary-item">
         <span class="board-summary-label">Last refresh</span>
@@ -244,6 +268,7 @@ function PostCard({ post }: { post: BoardPost }) {
               <div class="post-title">${post.title}</div>
               <div class="post-chip-row">
                 ${isUpdated(post) ? html`<span class="board-meta-chip">Updated</span>` : null}
+                ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip">${boardPostKind(post)}</span>` : null}
                 ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
                 ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
               </div>
@@ -256,7 +281,7 @@ function PostCard({ post }: { post: BoardPost }) {
             <span>${post.votes ?? 0} votes</span>
           </div>
         </div>
-        <div class="post-snippet">${previewText(post.content)}</div>
+        <div class="post-snippet">${previewText(post.body)}</div>
       </div>
     </div>
   `
@@ -321,7 +346,7 @@ function PostDetail({ post }: { post: BoardPost }) {
       <${Card} title=${post.title} semanticId="memory.feed">
         <div class="board-detail">
           <div class="post-body">
-            <${Markdown} text=${post.content} />
+            <${Markdown} text=${post.body} />
           </div>
           <div class="post-meta" style="margin-top:12px;">
             <span>${post.author}</span>
@@ -333,8 +358,22 @@ function PostDetail({ post }: { post: BoardPost }) {
                 <div class="post-chip-row" style="margin-top:8px;">
                   ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
                   ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
-                  ${post.expires_at ? html`<span class="board-meta-chip">expires <${TimeAgo} timestamp=${post.expires_at} /></span>` : null}
+                  ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip">${boardPostKind(post)}</span>` : null}
+                  ${expiryChip(post)}
                 </div>
+              `
+            : null}
+          ${post.meta
+            ? html`
+                <details style="margin-top:12px;">
+                  <summary>Operational meta</summary>
+                  <div class="post-body" style="margin-top:8px;">
+                    ${post.meta.source ? html`<div><strong>source</strong>: ${post.meta.source}</div>` : null}
+                    ${post.meta.state_block
+                      ? html`<pre style="white-space:pre-wrap; margin-top:8px;">${post.meta.state_block}</pre>`
+                      : null}
+                  </div>
+                </details>
               `
             : null}
           <div style="margin-top:8px; display:flex; gap:6px;">
@@ -355,7 +394,8 @@ function PostDetail({ post }: { post: BoardPost }) {
 }
 
 export function Memory() {
-  const posts = visiblePosts(boardPosts.value)
+  const grouped = splitVisiblePosts(boardPosts.value)
+  const posts = [...grouped.human, ...grouped.operations]
   const postId = route.value.params.post ?? null
   const post = postId
     ? posts.find(row => row.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)
@@ -394,21 +434,30 @@ export function Memory() {
         : posts.length === 0
           ? html`<div class="empty-state">No posts in durable memory right now</div>`
           : html`
-              <${Card} title="Posts / Comments" class="section" semanticId="memory.feed">
+              <${Card} title="Human Posts" class="section" semanticId="memory.feed">
                 <div class="board-post-list">
-                  ${posts.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
+                  ${grouped.human.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                 </div>
-                ${posts.length > visibleLimit.value ? html`
+                ${grouped.human.length > visibleLimit.value ? html`
                   <div style="text-align:center; padding:12px 0;">
                     <button
                       class="control-btn ghost"
                       onClick=${() => { visibleLimit.value = visibleLimit.value + PAGE_SIZE }}
                     >
-                      Show more (${posts.length - visibleLimit.value} remaining)
+                      Show more (${grouped.human.length - visibleLimit.value} remaining)
                     </button>
                   </div>
                 ` : null}
               <//>
+              ${grouped.operations.length > 0
+                ? html`
+                    <${Card} title="Automation & System" class="section" semanticId="memory.feed">
+                      <div class="board-post-list">
+                        ${grouped.operations.map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
+                      </div>
+                    <//>
+                  `
+                : null}
             `}
     </div>
   `

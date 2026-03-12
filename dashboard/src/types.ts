@@ -51,7 +51,12 @@ export interface BoardPost {
   author: string
   post_kind?: 'human' | 'automation' | 'system'
   title: string
+  body: string
   content: string
+  meta?: {
+    source?: string | null
+    state_block?: string | null
+  } | null
   tags: string[]
   votes: number
   vote_balance?: number

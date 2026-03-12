@@ -6,6 +6,22 @@ open Keeper_types
 open Keeper_memory
 open Keeper_alerting
 
+let ensure_keeper_board_post_args ~author ~source = function
+  | `Assoc fields ->
+      let fields =
+        List.filter
+          (fun (k, _) -> k <> "author" && k <> "post_kind" && k <> "meta")
+          fields
+      in
+      `Assoc
+        ([
+           ("author", `String author);
+           ("post_kind", `String "automation");
+           ("meta", `Assoc [ ("source", `String source) ]);
+         ]
+        @ fields)
+  | other -> other
+
 let execute_keeper_tool_call
     ~(config : Room.config)
     ~(meta : keeper_meta)
@@ -90,6 +106,9 @@ let execute_keeper_tool_call
             let fields' = List.filter (fun (k, _) -> k <> "author") fields in
             `Assoc (("author", `String author) :: fields')
         | other -> other
+      in
+      let board_args =
+        ensure_keeper_board_post_args ~author ~source:"keeper_board_post" board_args
       in
       Printf.eprintf "[TRPG-TRACE] board_args: %s\n%!" (Yojson.Safe.to_string board_args);
       let (ok, msg) = Tool_board.handle_tool "masc_board_post" board_args in
@@ -2701,6 +2720,10 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                      `String meta.name;
                    ]);
                  ] in
+                 let board_args =
+                   ensure_keeper_board_post_args ~author:meta.name
+                     ~source:"keeper_autonomy_suggestion" board_args
+                 in
                  let (ok, _msg) = Tool_board.handle_tool "masc_board_post" board_args in
                  if not ok then
                    Printf.eprintf "[keeper-autonomy] %s L2 board post failed\n%!" meta.name;
@@ -2727,6 +2750,10 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                      `String meta.name;
                    ]);
                  ] in
+                 let board_args =
+                   ensure_keeper_board_post_args ~author:meta.name
+                     ~source:"keeper_autonomy_perpetual_suggestion" board_args
+                 in
                  (match Tool_board.handle_tool "masc_board_post" board_args with
                   | (true, _) -> ()
                   | (false, err) ->
@@ -2800,6 +2827,10 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                           `String meta.name;
                         ]);
                       ] in
+                      let board_args =
+                        ensure_keeper_board_post_args ~author:meta.name
+                          ~source:"keeper_autonomy_perpetual_start" board_args
+                      in
                       (match Tool_board.handle_tool "masc_board_post" board_args with
                        | (true, _) -> ()
                        | (false, err) ->
@@ -2872,6 +2903,10 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                      `String meta.name;
                    ]);
                  ] in
+                 let report_args =
+                   ensure_keeper_board_post_args ~author:meta.name
+                     ~source:"keeper_autonomy_execution_report" report_args
+                 in
                  let (_ok, _msg) = Tool_board.handle_tool "masc_board_post" report_args in
                  (* 5-4: SSE — keeper_autonomy_complete *)
                  (try Sse.broadcast (`Assoc [
@@ -2959,6 +2994,10 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                      `String meta.name;
                    ]);
                  ] in
+                 let report_args =
+                   ensure_keeper_board_post_args ~author:meta.name
+                     ~source:"keeper_autonomy_cautioned_report" report_args
+                 in
                  let (_ok, _msg) = Tool_board.handle_tool "masc_board_post" report_args in
                  (try Sse.broadcast (`Assoc [
                    ("type", `String "keeper_autonomy_complete");
@@ -3431,6 +3470,10 @@ let run_learned_policy_room_event
                         `String meta.name;
                       ]);
                 ]
+            in
+            let board_args =
+              ensure_keeper_board_post_args ~author:meta.name
+                ~source:"keeper_policy_learned_offline" board_args
             in
             let ok, result = Tool_board.handle_tool "masc_board_post" board_args in
             if ok then

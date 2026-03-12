@@ -447,8 +447,8 @@ function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
-      ${row.continuity_summary || row.recent_output_preview
-        ? html`<div class="monitor-footnote">${row.continuity_summary ?? row.recent_output_preview}</div>`
+      ${row.recent_output_preview || row.continuity_summary
+        ? html`<div class="monitor-footnote">${row.recent_output_preview ?? row.continuity_summary}</div>`
         : null}
       ${row.skill_route_summary || row.tool_audit_source
         ? html`<div class="monitor-footnote">

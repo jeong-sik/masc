@@ -582,59 +582,8 @@ let save_governance (config : Room.config) (g : governance_config) =
   ] in
   Room_utils.write_json config (governance_path config) json
 
-type audit_event = {
-  timestamp: float;
-  agent: string;
-  event_type: string;
-  success: bool;
-  detail: string option;
-}
-
-let audit_log_path (config : Room.config) =
-  Filename.concat (Room_utils.masc_dir config) "audit.jsonl"
-
-let audit_event_to_json (e : audit_event) : Yojson.Safe.t =
-  `Assoc [
-    ("timestamp", `Float e.timestamp);
-    ("agent", `String e.agent);
-    ("event_type", `String e.event_type);
-    ("success", `Bool e.success);
-    ("detail", match e.detail with Some d -> `String d | None -> `Null);
-  ]
-
-let append_audit_event (config : Room.config) (e : audit_event) =
-  let g = load_governance config in
-  if g.audit_enabled then begin
-    ensure_masc_dir config;
-    let path = audit_log_path config in
-    let line = Yojson.Safe.to_string (audit_event_to_json e) ^ "\n" in
-    Room_utils.with_file_lock config path (fun () ->
-      let oc = open_out_gen [Open_creat; Open_append; Open_wronly] 0o600 path in
-      Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-        output_string oc line)
-    )
-  end
-
-let read_audit_events (config : Room.config) ~since : audit_event list =
-  let path = audit_log_path config in
-  if not (Sys.file_exists path) then []
-  else
-    let content = In_channel.with_open_text path In_channel.input_all in
-    let lines = String.split_on_char '\n' content |> List.filter (fun s -> String.trim s <> "") in
-    List.filter_map (fun line ->
-      try
-        let json = Yojson.Safe.from_string line in
-        let module U = Yojson.Safe.Util in
-        let timestamp = match Json_util.get_float json "timestamp" with Some v -> v | None -> raise Not_found in
-        if timestamp < since then None
-        else
-          let agent = match Json_util.get_string json "agent" with Some v -> v | None -> raise Not_found in
-          let event_type = match Json_util.get_string json "event_type" with Some v -> v | None -> raise Not_found in
-          let success = match Json_util.get_bool json "success" with Some v -> v | None -> raise Not_found in
-          let detail = Json_util.get_string json "detail" in
-          Some { timestamp; agent; event_type; success; detail }
-      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
-    ) lines
+(* Inline audit system removed in Phase 2 — all audit logging
+   now goes through the canonical Audit_log module. *)
 
 (* ============================================ *)
 (* MCP Session (HTTP Session ID) helpers        *)
@@ -2446,6 +2395,12 @@ Time: %s
              ("message", `String (Printf.sprintf "Found %d relevant items for query: %s"
                (List.length result.items) query));
            ] in
+           (* Audit: log search refinement *)
+           let agent_name = Safe_ops.json_string ~default:"unknown" "agent_name" arguments in
+           Audit_log.log_action config ~agent_id:agent_name ~action:Audit_log.SearchRefinement
+             ~room_id:(Filename.basename config.base_path)
+             ~details:(`Assoc [("query", `String query); ("results", `Int (List.length result.items))])
+             ~outcome:Audit_log.Success ();
            (true, Yojson.Safe.pretty_to_string response))
   (* Board tools delegated to Tool_board module *)
   | "masc_board_post" ->
@@ -2866,20 +2821,10 @@ in
   let agent_name =
     Safe_ops.json_string ~default:"unknown" "agent_name" arguments
   in
-  let audit_detail =
-    Printf.sprintf
-      "%s|timeout=%d|duration_ms=%d"
-      name
-      (if !timeout_hit then 1 else 0)
-      duration_ms
-  in
-  append_audit_event state.Mcp_server.room_config {
-    timestamp = Time_compat.now ();
-    agent = agent_name;
-    event_type = "tool_call";
-    success;
-    detail = Some audit_detail;
-  };
+  (* Audit: log tool_call via canonical Audit_log *)
+  let error_msg = if success then None else Some (Printf.sprintf "timeout=%d|duration_ms=%d" (if !timeout_hit then 1 else 0) duration_ms) in
+  Audit_log.log_tool_call state.Mcp_server.room_config
+    ~agent_id:agent_name ~tool_name:name ~success ~error_msg ();
 
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled =

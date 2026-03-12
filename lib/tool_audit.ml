@@ -28,7 +28,9 @@ let audit_event_to_json (e : audit_event) : Yojson.Safe.t =
     ("detail", match e.detail with Some d -> `String d | None -> `Null);
   ]
 
-(* Read audit events since given timestamp *)
+(* Read audit events since given timestamp.
+   Supports both legacy simple format ("agent"/"event_type"/"success")
+   and canonical Audit_log rich format ("agent_id"/"action"/"outcome"). *)
 let read_audit_events (config : Room.config) ~since : audit_event list =
   let path = audit_log_path config in
   if not (Sys.file_exists path) then []
@@ -42,12 +44,35 @@ let read_audit_events (config : Room.config) ~since : audit_event list =
         let timestamp = json |> U.member "timestamp" |> U.to_float in
         if timestamp < since then None
         else
-          let agent = json |> U.member "agent" |> U.to_string in
-          let event_type = json |> U.member "event_type" |> U.to_string in
-          let success = json |> U.member "success" |> U.to_bool in
-          let detail = json |> U.member "detail" |> U.to_string_option in
+          (* Try rich format first (agent_id/action/outcome), fall back to legacy *)
+          let agent =
+            match U.to_string_option (U.member "agent_id" json) with
+            | Some a -> a
+            | None -> json |> U.member "agent" |> U.to_string
+          in
+          let event_type =
+            match U.to_string_option (U.member "action" json) with
+            | Some a -> a
+            | None -> json |> U.member "event_type" |> U.to_string
+          in
+          let success =
+            match U.member "outcome" json with
+            | `Assoc _ as outcome ->
+                let status = U.to_string_option (U.member "status" outcome) in
+                (match status with Some "success" -> true | _ -> false)
+            | `String "success" -> true
+            | _ ->
+                (match U.to_bool_option (U.member "success" json) with
+                 | Some b -> b
+                 | None -> false)
+          in
+          let detail =
+            match U.to_string_option (U.member "detail" json) with
+            | Some _ as d -> d
+            | None -> U.to_string_option (U.member "details" json)
+          in
           Some { timestamp; agent; event_type; success; detail }
-      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Not_found -> None
     ) lines
 
 (* Handle masc_audit_query *)

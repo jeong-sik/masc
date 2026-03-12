@@ -566,11 +566,9 @@ let latest_keeper_tools_from_metrics config keeper_name =
 let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
   let fallback_allowed = Keeper_execution.keeper_allowed_tool_names meta in
   let fallback_latest = latest_keeper_tools_from_metrics config meta.name in
-  let fallback_count =
-    if fallback_latest = [] then None else Some (List.length fallback_latest)
-  in
+  let fallback_count = None in
   let fallback_source =
-    if fallback_latest <> [] then Some "keeper_metrics" else Some "keeper_policy"
+    if fallback_latest <> [] then Some "keeper_metrics" else None
   in
   let fallback_at =
     let last_autonomous = String.trim meta.last_autonomous_action_at in
@@ -581,7 +579,11 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
         A2a_tools.latest_heartbeat_result meta.agent_name with
   | Some task, Some result ->
       if task.seq > result.seq then
-        (task.allowed_tools, [], None, Some "heartbeat_task", Some task.created_at)
+        ( task.allowed_tools,
+          result.tool_names,
+          Some result.tool_call_count,
+          Some "heartbeat_task_pending_result",
+          Some task.created_at )
       else
         ( task.allowed_tools,
           result.tool_names,

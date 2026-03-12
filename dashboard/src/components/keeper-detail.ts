@@ -23,6 +23,7 @@ import {
   allowlistEmptyState,
   auditMetadataState,
   linkedRecentToolsEmptyState,
+  linkedRuntimeState,
   observedToolsEmptyState,
   openToolsInventory,
   toolAuditStateLabel,
@@ -466,12 +467,13 @@ function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
   const linkedRecentFallback = toolAuditStateLabel(linkedRecentToolsEmptyState(keeper))
+  const runtimeState = linkedRuntimeState(keeper)
   const currentTaskLabel =
     keeper.agent?.current_task
-    ?? (keeper.status === 'offline' ? 'offline' : 'not_collected')
+    ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')
   const skillRouteLabel =
     keeper.skill_primary
-    ?? (keeper.status === 'offline' ? 'offline' : 'not_collected')
+    ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')
   const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? recentTools[0] ?? null
 
   return html`

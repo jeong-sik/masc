@@ -379,10 +379,10 @@ let test_dashboard_mission_projection () =
           (alpha_brief |> member "latest_tool_call_count" |> to_int);
         check string "tool audit source" "heartbeat_result"
           (alpha_brief |> member "tool_audit_source" |> to_string);
-        check string "newer task wins audit source" "heartbeat_task"
+        check string "newer task keeps prior result evidence" "heartbeat_task_pending_result"
           (beta_brief |> member "tool_audit_source" |> to_string);
-        check bool "newer task suppresses stale observed tools" true
-          ((beta_brief |> member "latest_tool_names" |> to_list) = []);
+        check bool "newer task preserves latest observed tools" true
+          ((beta_brief |> member "latest_tool_names" |> to_list) <> []);
         check bool "internal signal includes pending confirm" true
           (internal_signals
            |> List.exists (fun row ->
@@ -463,8 +463,8 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
         in
         check bool "fallback allowed tools present" true
           ((brief |> member "allowed_tool_names" |> to_list) <> []);
-        check string "fallback source" "keeper_policy"
-          (brief |> member "tool_audit_source" |> to_string);
+        check bool "fallback source omitted without evidence" true
+          (brief |> member "tool_audit_source" = `Null);
         check bool "no observed tools without evidence" true
           ((brief |> member "latest_tool_names" |> to_list) = []);
       ))

@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { fetchToolMetrics, type ToolMetricsResponse, type ToolMetricsTopEntry } from '../api'
 
 const metricsData = signal<ToolMetricsResponse | null>(null)
@@ -82,6 +83,12 @@ export function ToolMetrics() {
   const data = metricsData.value
   const loading = metricsLoading.value
   const error = metricsError.value
+
+  useEffect(() => {
+    if (!metricsData.value && !metricsLoading.value) {
+      void loadMetrics()
+    }
+  }, [])
 
   return html`
     <div class="tool-metrics">

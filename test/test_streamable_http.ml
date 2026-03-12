@@ -59,10 +59,12 @@ let test_handle_post_batch () =
   let body = {|[{"jsonrpc":"2.0","method":"a","id":1},{"jsonrpc":"2.0","method":"b","id":2}]|} in
   let (response, _session) = SH.handle_post ~body () in
   match response with
-  | SH.Json_batch jsons ->
-      Alcotest.(check int) "batch has 2 responses" 2 (List.length jsons)
+  | SH.Error_response (code, message) ->
+      Alcotest.(check int) "400 error" 400 code;
+      Alcotest.(check bool) "mentions batch unsupported" true
+        (String.length message > 0 && String.contains message 'b')
   | _ ->
-      Alcotest.fail "expected Json_batch"
+      Alcotest.fail "expected Error_response"
 
 let test_handle_post_handler_dispatch () =
   let called = ref 0 in

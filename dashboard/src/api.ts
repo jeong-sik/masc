@@ -431,6 +431,30 @@ export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
 
 // --- Tool metrics (P4 Phase 4.5) ---
 
+export interface DashboardToolInventoryItem {
+  name: string
+  description: string
+  category: string
+  category_description?: string | null
+  enabled_in_current_mode: boolean
+  direct_call_allowed: boolean
+  required_permission?: string | null
+  doc_refs: string[]
+  prompt_hints: string[]
+  visibility: string
+  lifecycle: string
+  implementationStatus: string
+  tier: string
+  canonicalName?: string | null
+  replacement?: string | null
+  reason?: string | null
+}
+
+export interface DashboardToolInventoryResponse {
+  count: number
+  tools: DashboardToolInventoryItem[]
+}
+
 export interface ToolMetricsTopEntry {
   name: string
   call_count: number
@@ -447,8 +471,18 @@ export interface ToolMetricsResponse {
   registered_count: number
 }
 
+export interface DashboardToolsResponse {
+  generated_at?: string
+  tool_inventory: DashboardToolInventoryResponse
+  tool_usage: ToolMetricsResponse
+}
+
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
+}
+
+export function fetchDashboardTools(): Promise<DashboardToolsResponse> {
+  return get('/api/v1/dashboard/tools')
 }
 
 // --- Individual resource fetchers (selective SSE-driven refresh) ---

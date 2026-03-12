@@ -19,7 +19,11 @@ MIN_HOT_SLOTS="${MIN_HOT_SLOTS:-10}"
 REQUIRED_FINAL_MARKERS="${REQUIRED_FINAL_MARKERS:-$WORKER_COUNT}"
 MAX_TURNS="${MAX_TURNS:-8}"
 START_SERVER="${START_SERVER:-1}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
+HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-10}"
+PROVIDER_SMOKE_TIMEOUT_SEC="${PROVIDER_SMOKE_TIMEOUT_SEC:-15}"
+HARNESS_TIMEOUT_SEC="${HARNESS_TIMEOUT_SEC:-180}"
 SLOT_SAMPLE_INTERVAL_SEC="${SLOT_SAMPLE_INTERVAL_SEC:-0.25}"
 EXPECTED_SLOTS="${EXPECTED_SLOTS:-$WORKER_COUNT}"
 EXPECTED_CTX="${EXPECTED_CTX:-262144}"
@@ -54,7 +58,7 @@ jsonrpc_call() {
   local method="$2"
   local params="$3"
   local raw
-  raw="$(curl -sS -X POST "$MCP_URL" \
+  raw="$(curl -sS --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H "mcp-session-id: $MCP_SESSION_ID" \
@@ -114,6 +118,51 @@ call_tool_checked() {
   printf "%s" "$payload"
 }
 
+call_tool_result_checked() {
+  local payload
+  payload="$(call_tool_checked "$@")"
+  printf "%s" "$payload" | extract_result
+}
+
+runtime_verify_result() {
+  local runtime_pool="${1:-}"
+  local expected_model="${2:-}"
+  local expected_slots="${3:-}"
+  local expected_ctx="${4:-}"
+  local args
+  args="$(
+    jq -cn \
+      --arg runtime_pool "$runtime_pool" \
+      --arg expected_model "$expected_model" \
+      --arg expected_slots_raw "$expected_slots" \
+      --arg expected_ctx_raw "$expected_ctx" \
+      '
+      {}
+      | if $runtime_pool != "" then .runtime_pool = $runtime_pool else . end
+      | if $expected_model != "" then .expected_model = $expected_model else . end
+      | if $expected_slots_raw != "" then .expected_slots = ($expected_slots_raw | tonumber) else . end
+      | if $expected_ctx_raw != "" then .expected_ctx = ($expected_ctx_raw | tonumber) else . end
+      '
+  )"
+  call_tool_result_checked $((98000 + RANDOM % 1000)) "masc_llama_runtime_verify" "$args"
+}
+
+observe_swarm_result() {
+  local run_id="$1"
+  local operation_id="${2:-}"
+  local args
+  args="$(
+    jq -cn \
+      --arg run_id "$run_id" \
+      --arg operation_id "$operation_id" \
+      '
+      {run_id:$run_id}
+      | if $operation_id != "" then .operation_id = $operation_id else . end
+      '
+  )"
+  call_tool_result_checked $((99000 + RANDOM % 1000)) "masc_observe_swarm" "$args"
+}
+
 extract_added_task_id() {
   local payload="$1"
   local text
@@ -136,7 +185,7 @@ wait_for_http() {
   local delay="${3:-1}"
   local i=0
   while [ "$i" -lt "$attempts" ]; do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if curl -fsS --max-time "$HTTP_TIMEOUT_SEC" "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$delay"
@@ -188,20 +237,16 @@ start_slot_sampler() {
     while true; do
       local ts payload sample
       ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-      payload="$(curl -fsS "${SLOT_URL}/slots" 2>/dev/null || printf '[]')"
+      payload="$(runtime_verify_result "" "" "" "" 2>/dev/null || printf '{}')"
       sample="$(
         printf '%s' "$payload" \
           | jq -c --arg ts "$ts" '
-              def active:
-                ((.is_processing // false) == true)
-                or (((.state // 0) | tonumber? // 0) != 0)
-                or (((.status // "") | ascii_downcase) as $status | ($status == "processing" or $status == "prompt" or $status == "generating"));
               {
                 timestamp: $ts,
-                total_slots: length,
-                active_slots: (map(select(active)) | length),
-                active_slot_ids: (map(select(active) | (.id // .slot_id // .slot // -1))),
-                ctx_per_slot: (map(.n_ctx // empty) | map(select(type == "number")) | if length > 0 then .[0] else null end)
+                total_slots: (.actual_slots // 0),
+                active_slots: (.active_slots_now // 0),
+                active_slot_ids: [],
+                ctx_per_slot: (.actual_ctx // null)
               }'
       )"
       printf '%s\n' "$sample" >>"$SLOT_SAMPLES_FILE"
@@ -220,19 +265,16 @@ stop_slot_sampler() {
 }
 
 write_slot_telemetry() {
-  local props_file
-  props_file="$(mktemp -t agent-swarm-live-props).json"
-  curl -fsS "${SLOT_URL}/props" >"$props_file"
-  python3 - "$SLOT_SAMPLES_FILE" "$props_file" "$SLOT_URL" "$MIN_HOT_SLOTS" "$SLOT_TELEMETRY_FILE" <<'PY'
+  python3 - "$SLOT_SAMPLES_FILE" "$SLOT_URL" "$MIN_HOT_SLOTS" "$SLOT_TELEMETRY_FILE" "$MODEL_ID" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 samples_path = Path(sys.argv[1])
-props_path = Path(sys.argv[2])
-slot_url = sys.argv[3]
-min_hot_slots = int(sys.argv[4])
-output_path = Path(sys.argv[5])
+slot_url = sys.argv[2]
+min_hot_slots = int(sys.argv[3])
+output_path = Path(sys.argv[4])
+model_id = sys.argv[5]
 
 samples = []
 if samples_path.exists():
@@ -242,9 +284,9 @@ if samples_path.exists():
             continue
         samples.append(json.loads(line))
 
-props = json.loads(props_path.read_text()) if props_path.exists() else {}
-default_generation = props.get("default_generation_settings") or {}
 active_counts = [int(sample.get("active_slots") or 0) for sample in samples]
+slot_counts = [int(sample.get("total_slots") or 0) for sample in samples]
+ctx_values = [sample.get("ctx_per_slot") for sample in samples if isinstance(sample.get("ctx_per_slot"), int)]
 peak_active_slots = max(active_counts) if active_counts else 0
 samples_over_threshold = sum(1 for value in active_counts if value >= min_hot_slots)
 timeline = [
@@ -258,10 +300,10 @@ timeline = [
 
 payload = {
     "slot_url": slot_url,
-    "total_slots": int(props.get("total_slots") or 0),
-    "ctx_per_slot": int(default_generation.get("n_ctx") or 0),
-    "model_alias": props.get("model_alias"),
-    "model_path": props.get("model_path"),
+    "total_slots": max(slot_counts) if slot_counts else 0,
+    "ctx_per_slot": ctx_values[-1] if ctx_values else 0,
+    "model_alias": model_id,
+    "model_path": None,
     "sample_count": len(samples),
     "active_slots_now": active_counts[-1] if active_counts else 0,
     "peak_active_slots": peak_active_slots,
@@ -274,94 +316,49 @@ payload = {
 output_path.write_text(json.dumps(payload, indent=2))
 print(json.dumps(payload))
 PY
-  rm -f "$props_file"
 }
 
 write_runtime_doctor() {
   local stage="${1:-$CURRENT_STAGE}"
   [ -n "$RUNTIME_DOCTOR_FILE" ] || return 0
-  local provider_file slot_health_file props_file models_file provider_status slot_health_status
-  provider_file="$(mktemp -t agent-swarm-live-provider).json"
-  slot_health_file="$(mktemp -t agent-swarm-live-slot-health).txt"
-  props_file="$(mktemp -t agent-swarm-live-props).json"
-  models_file="$(mktemp -t agent-swarm-live-models).json"
+  local verify_file
+  verify_file="$(mktemp -t agent-swarm-live-runtime-verify).json"
+  runtime_verify_result "" "$MODEL_ID" "$EXPECTED_SLOTS" "$EXPECTED_CTX" >"$verify_file"
 
-  provider_status="$(curl -sS -o "$provider_file" -w '%{http_code}' \
-    -X POST "${PROVIDER_BASE_URL}/v1/messages" \
-    -H 'content-type: application/json' \
-    -H 'x-api-key: dummy' \
-    -H 'anthropic-version: 2023-06-01' \
-    -d "{\"model\":\"${MODEL_ID}\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"Say ok\"}]}" || printf '000')"
-  slot_health_status="$(curl -sS -o "$slot_health_file" -w '%{http_code}' "${SLOT_URL}/health" || printf '000')"
-  curl -fsS "${SLOT_URL}/props" >"$props_file" 2>/dev/null || printf '{}' >"$props_file"
-  curl -fsS "${SLOT_URL}/v1/models" >"$models_file" 2>/dev/null || printf '{}' >"$models_file"
-
-  python3 - "$provider_file" "$slot_health_file" "$props_file" "$models_file" \
-    "$provider_status" "$slot_health_status" "$PROVIDER_BASE_URL" "$SLOT_URL" \
+  python3 - "$verify_file" "$PROVIDER_BASE_URL" "$SLOT_URL" \
     "$MODEL_ID" "$EXPECTED_SLOTS" "$EXPECTED_CTX" "$stage" "$FAIL_BLOCKER" "$FAIL_DETAIL" \
     "$RUNTIME_DOCTOR_FILE" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-provider_path = Path(sys.argv[1])
-slot_health_path = Path(sys.argv[2])
-props_path = Path(sys.argv[3])
-models_path = Path(sys.argv[4])
-provider_status = int(sys.argv[5]) if sys.argv[5].isdigit() else 0
-slot_status = int(sys.argv[6]) if sys.argv[6].isdigit() else 0
-provider_base_url = sys.argv[7]
-slot_url = sys.argv[8]
-model_id = sys.argv[9]
-expected_slots = int(sys.argv[10])
-expected_ctx = int(sys.argv[11])
-stage = sys.argv[12]
-fail_blocker = sys.argv[13].strip()
-fail_detail = sys.argv[14].strip()
-output_path = Path(sys.argv[15])
+verify_json = json.loads(Path(sys.argv[1]).read_text())
+provider_base_url = sys.argv[2]
+slot_url = sys.argv[3]
+model_id = sys.argv[4]
+expected_slots = int(sys.argv[5])
+expected_ctx = int(sys.argv[6])
+stage = sys.argv[7]
+fail_blocker = sys.argv[8].strip()
+fail_detail = sys.argv[9].strip()
+output_path = Path(sys.argv[10])
 
-def read_json(path: Path):
-    try:
-        return json.loads(path.read_text())
-    except Exception:
-        return {}
-
-provider_json = read_json(provider_path)
-props_json = read_json(props_path)
-models_json = read_json(models_path)
-provider_reachable = provider_status == 200 and provider_json.get("error") is None
-slot_reachable = slot_status == 200
-actual_slots = props_json.get("total_slots")
-default_generation = props_json.get("default_generation_settings") or {}
-actual_ctx = default_generation.get("n_ctx")
-actual_model = None
-data = models_json.get("data")
-if isinstance(data, list) and data:
-    first = data[0]
-    if isinstance(first, dict):
-        actual_model = first.get("id")
+runtimes = verify_json.get("runtimes") or []
+first_runtime = runtimes[0] if runtimes and isinstance(runtimes[0], dict) else {}
+provider_reachable = bool(verify_json.get("provider_reachable"))
+slot_reachable = bool(verify_json.get("slot_reachable"))
+actual_slots = verify_json.get("actual_slots")
+actual_ctx = verify_json.get("actual_ctx")
+actual_model = verify_json.get("actual_model_id")
+provider_status = first_runtime.get("provider_status_code")
+slot_status = first_runtime.get("slot_status_code")
+provider_error = first_runtime.get("provider_error")
 
 runtime_blocker = fail_blocker or None
 detail = fail_detail or None
 if runtime_blocker is None:
-    if not provider_reachable or not slot_reachable:
-        runtime_blocker = "provider_unreachable"
-        detail = detail or provider_json.get("error", {}).get("message") or "provider smoke request failed"
-    elif actual_model and actual_model != model_id:
-        runtime_blocker = "provider_model_mismatch"
-        detail = detail or f"expected model {model_id}, got {actual_model}"
-    elif not isinstance(actual_slots, int):
-        runtime_blocker = "slot_count_insufficient"
-        detail = detail or "slot telemetry did not report total_slots"
-    elif isinstance(actual_slots, int) and actual_slots < expected_slots:
-        runtime_blocker = "slot_count_insufficient"
-        detail = detail or f"expected at least {expected_slots} slots, got {actual_slots}"
-    elif not isinstance(actual_ctx, int):
-        runtime_blocker = "ctx_mismatch"
-        detail = detail or "slot telemetry did not report ctx_per_slot"
-    elif isinstance(actual_ctx, int) and actual_ctx != expected_ctx:
-        runtime_blocker = "ctx_mismatch"
-        detail = detail or f"expected ctx {expected_ctx}, got {actual_ctx}"
+    runtime_blocker = verify_json.get("runtime_blocker")
+    detail = verify_json.get("detail")
 
 payload = {
     "checked_at": __import__("datetime").datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
@@ -371,7 +368,7 @@ payload = {
     "provider_status_code": provider_status,
     "provider_model_id": model_id,
     "actual_model_id": actual_model,
-    "provider_error": provider_json.get("error", {}).get("message") if isinstance(provider_json.get("error"), dict) else None,
+    "provider_error": provider_error,
     "slot_url": slot_url,
     "slot_reachable": slot_reachable,
     "slot_status_code": slot_status,
@@ -386,8 +383,7 @@ payload = {
 output_path.write_text(json.dumps(payload, indent=2))
 print(json.dumps(payload))
 PY
-
-  rm -f "$provider_file" "$slot_health_file" "$props_file" "$models_file"
+  rm -f "$verify_file"
 }
 
 write_harness_summary() {
@@ -537,7 +533,9 @@ HARNESS_ARTIFACT_FILE=""
 RUNTIME_DOCTOR_FILE=""
 
 CURRENT_STAGE="build"
-if [ "$SKIP_BUILD" = "1" ]; then
+if [ "$PREFLIGHT_ONLY" = "1" ]; then
+  echo "[1/11] preflight-only: skip build"
+elif [ "$SKIP_BUILD" = "1" ]; then
   echo "[1/11] reuse existing harness binaries"
   [ -x "$REPO_ROOT/_build/default/bin/main_eio.exe" ] || fail_stage "build_missing" "main_eio.exe missing while SKIP_BUILD=1"
   [ -x "$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" ] || fail_stage "build_missing" "agent_swarm_harness_cli.exe missing while SKIP_BUILD=1"
@@ -560,13 +558,34 @@ rm -rf "$RUN_ARTIFACT_DIR"
 mkdir -p "$RUN_ARTIFACT_DIR"
 
 CURRENT_STAGE="verify-provider"
-echo "[2/11] verify local providers"
+echo "[2/12] verify bootstrap provider health"
 wait_for_http "${PROVIDER_BASE_URL}/health" 20 1 || fail_stage "provider_unreachable" "timeout waiting for ${PROVIDER_BASE_URL}/health"
 wait_for_http "${SLOT_URL}/health" 20 1 || fail_stage "provider_unreachable" "timeout waiting for ${SLOT_URL}/health"
+
+if [ "$START_SERVER" = "1" ]; then
+  CURRENT_STAGE="start-masc"
+  echo "[3/12] start isolated masc-mcp on :$PORT"
+  nohup "$REPO_ROOT/start-masc-mcp.sh" --http --port "$PORT" --base-path "$BASE_PATH" >/tmp/agent-swarm-live-${RUN_ID}.log 2>&1 &
+  SERVER_PID="$!"
+  wait_for_http "${MASC_URL}/health"
+else
+  CURRENT_STAGE="reuse-masc"
+  echo "[3/12] reusing existing masc-mcp ${MASC_URL}"
+  wait_for_http "${MASC_URL}/health"
+fi
+
+CURRENT_STAGE="verify-runtime-contract"
+echo "[4/12] verify runtime contract through MCP"
 write_runtime_doctor "$CURRENT_STAGE" >/dev/null
 RUNTIME_BLOCKER_FROM_DOCTOR="$(jq -r '.runtime_blocker // empty' "$RUNTIME_DOCTOR_FILE")"
 if [ -n "$RUNTIME_BLOCKER_FROM_DOCTOR" ]; then
   fail_stage "$RUNTIME_BLOCKER_FROM_DOCTOR" "$(jq -r '.detail // "runtime contract verification failed"' "$RUNTIME_DOCTOR_FILE")"
+fi
+
+if [ "$PREFLIGHT_ONLY" = "1" ]; then
+  CURRENT_STAGE="preflight-only"
+  jq -cn --arg run_id "$RUN_ID" '{status:"ok",preflight_only:true,run_id:$run_id}'
+  exit 0
 fi
 
 if [ "$START_SERVER" = "1" ]; then
@@ -580,9 +599,8 @@ else
   echo "[3/11] reusing existing masc-mcp ${MASC_URL}"
   wait_for_http "${MASC_URL}/health"
 fi
-
 CURRENT_STAGE="manifest"
-echo "[4/11] describe deterministic swarm manifest"
+echo "[5/12] describe deterministic swarm manifest"
 MANIFEST_JSON="$("$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" \
   --describe \
   --run-id "$RUN_ID" \
@@ -599,7 +617,7 @@ EXPECTED_WORKERS="$(printf "%s" "$MANIFEST_JSON" | jq -r '.expected_worker_count
 SQUAD_ROSTER_JSON="$(printf "%s" "$MANIFEST_JSON" | jq -c '[.workers[].name]')"
 
 CURRENT_STAGE="room-task-hygiene"
-echo "[5/11] room/task hygiene"
+echo "[6/12] room/task hygiene"
 call_tool_checked 90001 "masc_set_room" "$(jq -cn --arg path "$BASE_PATH" '{path:$path}')" >/dev/null
 call_tool_checked 90002 "masc_init" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')" >/dev/null
 call_tool_checked 90003 "masc_join" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a,capabilities:["agent-swarm","command-plane","benchmark"]}')" >/dev/null
@@ -615,13 +633,13 @@ call_tool_checked 90006 "masc_plan_set_task" "$(jq -cn --arg task_id "$HARNESS_T
 call_tool_checked 90007 "masc_heartbeat" "$(jq -cn --arg a "$HARNESS_AGENT" '{agent_name:$a}')" >/dev/null
 
 CURRENT_STAGE="define-units"
-echo "[6/11] define company/platoon/squad"
+echo "[7/12] define company/platoon/squad"
 call_tool_checked 90010 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" '{unit_id:("company-" + $run_id),kind:"company",label:("Live Swarm Company " + $run_id),leader_id:"swarm-harness"}')" >/dev/null
 call_tool_checked 90011 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" '{unit_id:("platoon-" + $run_id),kind:"platoon",label:("Live Swarm Platoon " + $run_id),parent_unit_id:("company-" + $run_id),leader_id:"swarm-harness",policy:{autonomy_level:"L4_Autonomous",escalation_timeout_sec:180}}')" >/dev/null
 call_tool_checked 90012 "masc_unit_define" "$(jq -cn --arg run_id "$RUN_ID" --argjson roster "$SQUAD_ROSTER_JSON" '{unit_id:("squad-" + $run_id),kind:"squad",label:("Live Swarm Squad " + $run_id),parent_unit_id:("platoon-" + $run_id),leader_id:"swarm-harness",roster:$roster,policy:{autonomy_level:"L4_Autonomous",escalation_timeout_sec:180},budget:{headcount_cap:16,active_operation_cap:1}}')" >/dev/null
 
 CURRENT_STAGE="seed-worker-tasks"
-echo "[7/11] seed per-worker tasks"
+echo "[8/12] seed per-worker tasks"
 printf "%s" "$MANIFEST_JSON" \
   | jq -c '.workers[]' \
   | while IFS= read -r worker; do
@@ -630,7 +648,7 @@ printf "%s" "$MANIFEST_JSON" \
       call_tool_checked 90100 "masc_add_task" "$(jq -cn --arg title "$TITLE" --arg description "$DESC" '{title:$title,description:$description,priority:2}')" >/dev/null
     done
 CURRENT_STAGE="run-harness"
-echo "[8/11] run live harness against local qwen"
+echo "[9/12] run live harness against local qwen"
 HARNESS_RESULT_FILE="$(mktemp -t agent-swarm-live-result)"
 start_slot_sampler
 "$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" \
@@ -648,7 +666,7 @@ HARNESS_PID="$!"
 attempt=0
 RUN_ID_QUERY="$(urlencode "$RUN_ID")"
 while [ "$attempt" -lt 60 ]; do
-  SWARM_LIVE_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}")"
+  SWARM_LIVE_JSON="$(observe_swarm_result "$RUN_ID")"
   LIVE_WORKERS="$(printf "%s" "$SWARM_LIVE_JSON" | jq -r '.summary.live_workers // 0')"
   if [ "$LIVE_WORKERS" -ge "$EXPECTED_WORKERS" ]; then
     break
@@ -661,7 +679,7 @@ while [ "$attempt" -lt 60 ]; do
 done
 
 CURRENT_STAGE="start-operation"
-echo "[9/11] start managed operation"
+echo "[10/12] start managed operation"
 OPERATION_RAW="$(call_tool_checked 90120 "masc_operation_start" "$(jq -cn --arg run_id "$RUN_ID" --arg expected_workers "$EXPECTED_WORKERS" --arg required_final_markers "$REQUIRED_FINAL_MARKERS" --arg min_hot_slots "$MIN_HOT_SLOTS" '{assigned_unit_id:("squad-" + $run_id),objective:("Run deterministic " + $expected_workers + "-worker live harness " + $run_id),autonomy_level:"L4_Autonomous",policy_class:"guarded",budget_class:"standard",note:("run_id=" + $run_id + " worker_count=" + $expected_workers + " required_final_markers=" + $required_final_markers + " min_hot_slots=" + $min_hot_slots)}')")"
 OPERATION_ID="$(printf "%s" "$OPERATION_RAW" | extract_result | jq -r '.operation_id // empty')"
 if [ -z "$OPERATION_ID" ]; then
@@ -672,7 +690,27 @@ fi
 call_tool_checked 90121 "masc_dispatch_tick" "$(jq -cn --arg operation_id "$OPERATION_ID" '{operation_id:$operation_id}')" >/dev/null
 OPERATION_ID_QUERY="$(urlencode "$OPERATION_ID")"
 
+HARNESS_STARTED_AT="$(date +%s)"
+while kill -0 "$HARNESS_PID" >/dev/null 2>&1; do
+  NOW_TS="$(date +%s)"
+  if [ $((NOW_TS - HARNESS_STARTED_AT)) -ge "$HARNESS_TIMEOUT_SEC" ]; then
+    kill "$HARNESS_PID" >/dev/null 2>&1 || true
+    sleep 1
+    kill -9 "$HARNESS_PID" >/dev/null 2>&1 || true
+    wait "$HARNESS_PID" >/dev/null 2>&1 || true
+    HARNESS_PID=""
+    fail_stage "harness_timeout" "agent swarm live harness exceeded ${HARNESS_TIMEOUT_SEC}s"
+  fi
+  sleep 1
+done
+set +e
 wait "$HARNESS_PID"
+HARNESS_EXIT="$?"
+set -e
+HARNESS_PID=""
+if [ "$HARNESS_EXIT" -ne 0 ]; then
+  fail_stage "harness_failed" "agent swarm live harness exited with ${HARNESS_EXIT}"
+fi
 HARNESS_PID=""
 HARNESS_RESULT="$(cat "$HARNESS_RESULT_FILE")"
 require_json "$HARNESS_RESULT"
@@ -683,11 +721,11 @@ write_runtime_doctor "$CURRENT_STAGE" >/dev/null
 write_harness_summary >/dev/null
 
 CURRENT_STAGE="checkpoint-finalize"
-echo "[10/11] checkpoint + finalize"
+echo "[11/12] checkpoint + finalize"
 SUCCESSFUL_WORKERS="$(printf "%s" "$HARNESS_RESULT" | jq -r '.summary.successful_workers')"
 call_tool_checked 90130 "masc_operation_checkpoint" "$(jq -cn --arg operation_id "$OPERATION_ID" --arg checkpoint_ref "live-harness-${RUN_ID}" --arg note "successful_workers=${SUCCESSFUL_WORKERS}/${EXPECTED_WORKERS}" '{operation_id:$operation_id,checkpoint_ref:$checkpoint_ref,note:$note}')" >/dev/null
 
-SWARM_JSON="$(curl -fsS "${MASC_URL}/api/v1/command-plane/swarm?run_id=${RUN_ID_QUERY}&operation_id=${OPERATION_ID_QUERY}")"
+SWARM_JSON="$(observe_swarm_result "$RUN_ID" "$OPERATION_ID")"
 require_json "$SWARM_JSON"
 printf "%s" "$SWARM_JSON" | write_live_swarm_summary >/dev/null
 PASS="$(printf "%s" "$SWARM_JSON" | jq -r '.summary.pass // false')"
@@ -705,7 +743,7 @@ if [ "$PASS" = "true" ]; then
   OPERATION_ID=""
 fi
 
-echo "[11/11] summary"
+echo "[12/12] summary"
 printf "%s\n" "$SWARM_JSON" | jq \
   --arg expected "$EXPECTED_WORKERS" \
   --arg joined "$JOINED" \

@@ -151,7 +151,7 @@ let tool_category tool_name =
   | "masc_autoresearch_swarm_start"
   (* LLM runtime *)
   | "masc_llama_models" | "masc_llama_runtime_status"
-  | "masc_llama_runtime_bench"
+  | "masc_llama_runtime_verify" | "masc_llama_runtime_bench"
   (* Units *)
   | "masc_unit_define" | "masc_unit_update" | "masc_unit_list"
   | "masc_unit_reparent" | "masc_unit_reassign"
@@ -171,7 +171,7 @@ let tool_category tool_name =
   | "masc_policy_freeze_unit" | "masc_policy_kill_switch"
   (* Observe *)
   | "masc_observe_topology" | "masc_observe_operations"
-  | "masc_observe_capacity" | "masc_observe_alerts"
+  | "masc_observe_swarm" | "masc_observe_capacity" | "masc_observe_alerts"
   | "masc_observe_traces"
   (* Operator *)
   | "masc_operator_snapshot" | "masc_operator_digest"

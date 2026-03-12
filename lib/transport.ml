@@ -187,6 +187,7 @@ module Rest = struct
     | "masc_policy_kill_switch" -> [ (POST, "/api/v1/command-plane/policy/kill-switch") ]
     | "masc_observe_topology" -> [ (GET, "/api/v1/command-plane/topology") ]
     | "masc_observe_operations" -> [ (GET, "/api/v1/command-plane/operations") ]
+    | "masc_observe_swarm" -> [ (GET, "/api/v1/command-plane/swarm") ]
     | "masc_observe_capacity" -> [ (GET, "/api/v1/command-plane/capacity") ]
     | "masc_observe_alerts" -> [ (GET, "/api/v1/command-plane/alerts") ]
     | "masc_observe_traces" -> [ (GET, "/api/v1/command-plane/traces") ]

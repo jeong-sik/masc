@@ -183,6 +183,7 @@ module Server_trpg_rest = Server_trpg_rest
 module Server_dashboard_http = Server_dashboard_http
 module Server_routes_http = Server_routes_http
 module Server_h2_gateway = Server_h2_gateway
+module Server_runtime_bootstrap = Server_runtime_bootstrap
 module Server_command_plane_http = Server_command_plane_http
 module Server_mcp_transport_http = Server_mcp_transport_http
 module Swarm_status = Swarm_status
@@ -308,7 +309,11 @@ module Keeper_verifier = Keeper_verifier
 module Keeper_types = Keeper_types
 module Keeper_memory = Keeper_memory
 module Keeper_alerting = Keeper_alerting
+module Keeper_exec_tools = Keeper_exec_tools
+module Keeper_exec_status = Keeper_exec_status
+module Keeper_exec_persona = Keeper_exec_persona
 module Keeper_execution = Keeper_execution
+module Keeper_keepalive = Keeper_keepalive
 module Keeper_runtime = Keeper_runtime
 
 (* Autonomy Adjuster — Feedback Closure (Phase 4) *)

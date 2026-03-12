@@ -1633,8 +1633,8 @@ let test_snapshot_keeper_tool_audit_fallback () =
         (keeper |> member "status" |> to_string);
       Alcotest.(check bool) "allowed tool fallback present" true
         ((keeper |> member "allowed_tool_names" |> to_list) <> []);
-      Alcotest.(check string) "tool audit source fallback" "keeper_policy"
-        (keeper |> member "tool_audit_source" |> to_string);
+      Alcotest.(check bool) "tool audit source omitted without evidence" true
+        (keeper |> member "tool_audit_source" = `Null);
       Alcotest.(check bool) "diagnostic present" true
         (keeper |> member "diagnostic" <> `Null);
       Alcotest.(check string) "diagnostic health offline" "offline"

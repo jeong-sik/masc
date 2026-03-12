@@ -376,9 +376,7 @@
    speculative_engine)
  (private_modules
   keeper_exec_tools
-  keeper_exec_status
-  keeper_exec_persona
-  keeper_keepalive)
+  keeper_exec_persona)
  (libraries
    yojson
    base64

@@ -1210,8 +1210,9 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       | Error e -> fail e);
       let stats = Masc_mcp.Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
       check bool "bootstrap enabled" true stats.enabled;
-      check int "started stale resident" 0 stats.started;
+      check int "started stale resident" 1 stats.started;
       check int "stale resident counted" 1 stats.stale;
+      check int "recovering stale resident counted" 1 stats.recovering;
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -1226,8 +1227,12 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       in
       check bool "status ok" true ok;
       let status_json = Yojson.Safe.from_string status_body in
-      check bool "keepalive running" false
-        Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
+      check bool "keepalive running" true
+        Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool);
+      check string "continuity state recovering" "recovering"
+        Yojson.Safe.Util.(
+          status_json |> member "diagnostic" |> member "continuity_state"
+          |> to_string))
 
 let () =
   run "Tool_keeper" [

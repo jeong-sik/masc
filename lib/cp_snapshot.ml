@@ -459,6 +459,7 @@ type runtime_doctor = {
   actual_slots : int option;
   expected_ctx : int option;
   actual_ctx : int option;
+  configured_capacity : int option;
   runtime_blocker : string option;
   detail : string option;
 }
@@ -563,6 +564,7 @@ let read_runtime_doctor_json run_dir =
             actual_slots = U.member "actual_slots" json |> U.to_int_option;
             expected_ctx = U.member "expected_ctx" json |> U.to_int_option;
             actual_ctx = U.member "actual_ctx" json |> U.to_int_option;
+            configured_capacity = U.member "configured_capacity" json |> U.to_int_option;
             runtime_blocker = get_string_opt json "runtime_blocker";
             detail = get_string_opt json "detail";
           }

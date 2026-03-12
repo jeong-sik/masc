@@ -1185,6 +1185,7 @@ function normalizeSwarmProvider(raw: unknown): CommandPlaneSwarmProvider | undef
     actual_slots: asNumber(raw.actual_slots),
     expected_ctx: asNumber(raw.expected_ctx),
     actual_ctx: asNumber(raw.actual_ctx),
+    configured_capacity: asNumber(raw.configured_capacity),
     slot_reachable: asBoolean(raw.slot_reachable) ?? null,
     slot_status_code: asNumber(raw.slot_status_code) ?? null,
     runtime_blocker: asString(raw.runtime_blocker) ?? null,

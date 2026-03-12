@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
-import { extractAgentInfo } from './common/agent-info'
 import { KeeperCard, type CanonicalKeeperCardModel } from './common/keeper-card'
 import { keeperRuntimeLabel } from './common/keeper-identity'
 import { linkedRecentToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'

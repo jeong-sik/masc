@@ -13,6 +13,7 @@ import type {
   OperatorKeeperSnapshot,
   OperatorResidentJudgeRuntime,
   OperatorRecommendedAction,
+  LinkedAutoresearchStatus,
   OperatorSessionSnapshot,
   OperatorSessionCard,
   OperatorSnapshot,
@@ -210,6 +211,31 @@ function normalizeSessionCard(raw: unknown): OperatorSessionCard | null {
   }
 }
 
+function normalizeLinkedAutoresearch(raw: unknown): LinkedAutoresearchStatus | undefined {
+  if (!isRecord(raw)) return undefined
+  const loopId = asString(raw.loop_id)
+  const status = asString(raw.status)
+  if (!loopId && !status) return undefined
+  return {
+    loop_id: loopId ?? undefined,
+    session_id: asString(raw.session_id) ?? undefined,
+    status: status ?? undefined,
+    current_cycle: asNumber(raw.current_cycle) ?? undefined,
+    best_score: asNumber(raw.best_score) ?? undefined,
+    last_decision: asString(raw.last_decision) ?? null,
+    target_file: asString(raw.target_file) ?? undefined,
+    workdir: asString(raw.workdir) ?? undefined,
+    source_workdir: asString(raw.source_workdir) ?? undefined,
+    program_note: asString(raw.program_note) ?? null,
+    operation_id: asString(raw.operation_id) ?? null,
+    queued_hypothesis: asString(raw.queued_hypothesis) ?? null,
+    warnings: extractArray(raw.warnings)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    error: asString(raw.error) ?? null,
+  }
+}
+
 function normalizeOperatorDigest(raw: unknown): OperatorDigest {
   const root = isRecord(raw) ? raw : {}
   return {
@@ -279,12 +305,8 @@ function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
     orchestration_state: isRecord(raw.orchestration_state) ? raw.orchestration_state : isRecord(statusBlock?.orchestration_state) ? statusBlock.orchestration_state : undefined,
     cascade_metrics: isRecord(raw.cascade_metrics) ? raw.cascade_metrics : isRecord(statusBlock?.cascade_metrics) ? statusBlock.cascade_metrics : undefined,
     report_paths: reportPaths,
-    linked_autoresearch:
-      isRecord(raw.linked_autoresearch)
-        ? raw.linked_autoresearch
-        : (isRecord(statusBlock?.linked_autoresearch)
-            ? statusBlock.linked_autoresearch
-            : undefined),
+    linked_autoresearch: normalizeLinkedAutoresearch(raw.linked_autoresearch)
+      ?? normalizeLinkedAutoresearch(statusBlock?.linked_autoresearch),
     session,
     recent_events: recentEvents,
   }

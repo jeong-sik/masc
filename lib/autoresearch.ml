@@ -46,6 +46,7 @@ type loop_state = {
   mutable baseline : float;
   mutable best_score : float;
   mutable best_cycle : int;
+  mutable queued_hypothesis : string option;
   mutable history : cycle_record list;  (** Most recent first *)
   mutable total_keeps : int;
   mutable total_discards : int;
@@ -54,7 +55,10 @@ type loop_state = {
   mutable updated_at : float;
   cycle_timeout_s : float;
   max_cycles : int;
-  workdir : string;
+  mutable workdir : string;
+  source_workdir : string;
+  mutable program_note : string option;
+  mutable warnings : string list;
 }
 
 type swarm_link = {
@@ -74,6 +78,7 @@ type persisted_summary = {
   baseline : float;
   best_score : float;
   best_cycle : int;
+  queued_hypothesis : string option;
   total_keeps : int;
   total_discards : int;
   goal : string;
@@ -85,6 +90,9 @@ type persisted_summary = {
   max_cycles : int;
   error_message : string option;
   elapsed_s : float;
+  source_workdir : string;
+  program_note : string option;
+  warnings : string list;
 }
 
 let active_loops : (string, loop_state) Hashtbl.t = Hashtbl.create 4
@@ -108,6 +116,9 @@ let generate_loop_id () =
 (* ================================================================ *)
 
 let decision_to_string = function Keep -> "keep" | Discard -> "discard"
+
+let option_first_some left right =
+  match left with Some _ -> left | None -> right
 
 let decision_of_string = function
   | "keep" -> Keep
@@ -169,14 +180,24 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
     ("baseline", `Float s.baseline);
     ("best_score", `Float s.best_score);
     ("best_cycle", `Int s.best_cycle);
+    ( "queued_hypothesis",
+      match s.queued_hypothesis with
+      | Some value -> `String value
+      | None -> `Null );
     ("total_keeps", `Int s.total_keeps);
     ("total_discards", `Int s.total_discards);
     ("max_cycles", `Int s.max_cycles);
     ("cycle_timeout_s", `Float s.cycle_timeout_s);
     ("workdir", `String s.workdir);
+    ("source_workdir", `String s.source_workdir);
     ("elapsed_s", `Float (Time_compat.now () -. s.start_time));
     ("history_count", `Int (List.length s.history));
     ("insights_count", `Int (List.length s.insights));
+    ( "program_note",
+      match s.program_note with
+      | Some value -> `String value
+      | None -> `Null );
+    ("warnings", `List (List.map (fun value -> `String value) s.warnings));
     ("error", match s.error_message with
       | Some e -> `String e | None -> `Null);
   ]
@@ -192,6 +213,7 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
     baseline = json |> member "baseline" |> to_float;
     best_score = json |> member "best_score" |> to_float;
     best_cycle = json |> member "best_cycle" |> to_int;
+    queued_hypothesis = json |> member "queued_hypothesis" |> to_string_option;
     total_keeps = json |> member "total_keeps" |> to_int;
     total_discards = json |> member "total_discards" |> to_int;
     goal = json |> member "goal" |> to_string;
@@ -203,6 +225,20 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
     max_cycles = json |> member "max_cycles" |> to_int;
     error_message = json |> member "error" |> to_string_option;
     elapsed_s = json |> member "elapsed_s" |> to_float;
+    source_workdir =
+      json |> member "source_workdir" |> to_string_option
+      |> Option.value ~default:(json |> member "workdir" |> to_string);
+    program_note = json |> member "program_note" |> to_string_option;
+    warnings =
+      match json |> member "warnings" with
+      | `List items ->
+          items
+          |> List.filter_map (function
+               | `String value ->
+                   let trimmed = String.trim value in
+                   if trimmed = "" then None else Some trimmed
+               | _ -> None)
+      | _ -> [];
   }
 
 let swarm_link_to_yojson (link : swarm_link) : Yojson.Safe.t =
@@ -250,6 +286,9 @@ let state_file ~base_path loop_id =
 
 let loop_link_file ~base_path loop_id =
   Filename.concat (results_dir ~base_path loop_id) "swarm.json"
+
+let managed_worktree_dir ~base_path loop_id =
+  Filename.concat (results_dir ~base_path loop_id) "worktree"
 
 let session_link_file ~base_path session_id =
   Filename.concat base_path
@@ -369,6 +408,7 @@ let stop_loop ~base_path ?reason loop_id =
               baseline = persisted.baseline;
               best_score = persisted.best_score;
               best_cycle = persisted.best_cycle;
+              queued_hypothesis = persisted.queued_hypothesis;
               history = [];
               total_keeps = persisted.total_keeps;
               total_discards = persisted.total_discards;
@@ -378,26 +418,49 @@ let stop_loop ~base_path ?reason loop_id =
               cycle_timeout_s = persisted.cycle_timeout_s;
               max_cycles = persisted.max_cycles;
               workdir = persisted.workdir;
+              source_workdir = persisted.source_workdir;
+              program_note = persisted.program_note;
+              warnings = persisted.warnings;
             }
           in
           Some (stop_state state))
 
 let linked_status_json ~base_path (link : swarm_link) =
-  let current_cycle, status, best_score, error_message =
+  let current_cycle, status, best_score, error_message, workdir, source_workdir,
+      program_note, warnings, queued_hypothesis =
     match Hashtbl.find_opt active_loops link.loop_id with
     | Some state ->
         ( state.current_cycle,
           status_to_string state.status,
           state.best_score,
-          state.error_message )
+          state.error_message,
+          state.workdir,
+          state.source_workdir,
+          state.program_note,
+          state.warnings,
+          state.queued_hypothesis )
     | None -> (
         match load_state ~base_path link.loop_id with
         | Some persisted ->
             ( persisted.current_cycle,
               status_to_string persisted.status,
               persisted.best_score,
-              persisted.error_message )
-        | None -> (0, "missing", 0.0, Some "state file missing"))
+              persisted.error_message,
+              persisted.workdir,
+              persisted.source_workdir,
+              persisted.program_note,
+              persisted.warnings,
+              persisted.queued_hypothesis )
+        | None ->
+            ( 0,
+              "missing",
+              0.0,
+              Some "state file missing",
+              managed_worktree_dir ~base_path link.loop_id,
+              "",
+              link.program_note,
+              [],
+              None ))
   in
   let last_decision =
     match latest_cycle_record ~base_path link.loop_id with
@@ -415,9 +478,14 @@ let linked_status_json ~base_path (link : swarm_link) =
         match last_decision with Some value -> `String value | None -> `Null );
       ("target_file", `String link.target_file);
       ( "program_note",
-        match link.program_note with Some value -> `String value | None -> `Null );
+        match option_first_some program_note link.program_note with Some value -> `String value | None -> `Null );
       ( "operation_id",
         match link.operation_id with Some value -> `String value | None -> `Null );
+      ("workdir", `String workdir);
+      ("source_workdir", `String source_workdir);
+      ("warnings", `List (List.map (fun value -> `String value) warnings));
+      ( "queued_hypothesis",
+        match queued_hypothesis with Some value -> `String value | None -> `Null );
       ("error", match error_message with Some value -> `String value | None -> `Null);
     ]
 
@@ -519,6 +587,12 @@ let git_commit ~workdir ~message
     | _ ->
       let output = String.concat "\n" (List.rev !lines) in
       Result.error (Printf.sprintf "git commit failed: %s" output)
+
+(** Restore worktree files to current HEAD without moving the branch. *)
+let git_restore_head ~workdir =
+  let cmd = Printf.sprintf "cd %s && git reset --hard HEAD 2>/dev/null"
+    (Filename.quote workdir) in
+  ignore (Sys.command cmd)
 
 (** Reset to HEAD~1, discarding the last commit. *)
 let git_reset_last ~workdir =
@@ -752,6 +826,7 @@ let create_state ~goal ~metric_fn ?(llm_model = "glm") ~target_file ~cycle_timeo
     baseline = 0.0;
     best_score = 0.0;
     best_cycle = 0;
+    queued_hypothesis = None;
     history = [];
     total_keeps = 0;
     total_discards = 0;
@@ -761,7 +836,89 @@ let create_state ~goal ~metric_fn ?(llm_model = "glm") ~target_file ~cycle_timeo
     cycle_timeout_s;
     max_cycles;
     workdir;
+    source_workdir = workdir;
+    program_note = None;
+    warnings = [];
   }
+
+let run_capture_lines cmd =
+  let ic = Unix.open_process_in cmd in
+  let lines = ref [] in
+  (try
+     while true do
+       lines := input_line ic :: !lines
+     done
+   with End_of_file -> ());
+  let status = Unix.close_process_in ic in
+  (status, List.rev !lines)
+
+let git_top_level ~workdir =
+  let cmd =
+    Printf.sprintf "cd %s && git rev-parse --show-toplevel 2>/dev/null"
+      (Filename.quote workdir)
+  in
+  match run_capture_lines cmd with
+  | Unix.WEXITED 0, top :: _ ->
+      let trimmed = String.trim top in
+      if trimmed = "" then Result.error "git top-level was empty"
+      else Result.ok trimmed
+  | _ -> Result.error "workdir is not inside a git repository"
+
+let git_current_branch ~workdir =
+  let cmd =
+    Printf.sprintf "cd %s && git rev-parse --abbrev-ref HEAD 2>/dev/null"
+      (Filename.quote workdir)
+  in
+  match run_capture_lines cmd with
+  | Unix.WEXITED 0, branch :: _ ->
+      let trimmed = String.trim branch in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let git_is_dirty ~workdir =
+  let cmd =
+    Printf.sprintf "cd %s && git status --porcelain 2>/dev/null"
+      (Filename.quote workdir)
+  in
+  match run_capture_lines cmd with
+  | Unix.WEXITED 0, lines -> List.exists (fun line -> String.trim line <> "") lines
+  | _ -> false
+
+let managed_branch_name loop_id =
+  "autoresearch/" ^ loop_id
+
+let prepare_managed_worktree ~base_path ~source_workdir ~loop_id =
+  match git_top_level ~workdir:source_workdir with
+  | Error _ as err -> err
+  | Ok repo_root ->
+      let warnings = ref [] in
+      if git_is_dirty ~workdir:source_workdir then
+        warnings := "source_workdir_dirty" :: !warnings;
+      (match git_current_branch ~workdir:source_workdir with
+      | Some branch when not (String.equal branch "main" || String.equal branch "master") ->
+          warnings := ("source_branch:" ^ branch) :: !warnings
+      | _ -> ());
+      let workdir = managed_worktree_dir ~base_path loop_id in
+      if Sys.file_exists workdir then
+        Result.error (Printf.sprintf "managed worktree already exists: %s" workdir)
+      else begin
+        ensure_dir (Filename.dirname workdir);
+        let branch = managed_branch_name loop_id in
+        let cmd =
+          Printf.sprintf
+            "cd %s && git worktree add -b %s %s HEAD 2>&1"
+            (Filename.quote repo_root)
+            (Filename.quote branch)
+            (Filename.quote workdir)
+        in
+        match run_capture_lines cmd with
+        | Unix.WEXITED 0, _ ->
+            Result.ok (workdir, repo_root, List.rev !warnings)
+        | _, lines ->
+            Result.error
+              (Printf.sprintf "failed to create managed worktree: %s"
+                 (String.concat "\n" lines))
+      end
 
 (** Append an insight, maintaining FIFO max 10 entries. *)
 let add_insight (state : loop_state) msg =

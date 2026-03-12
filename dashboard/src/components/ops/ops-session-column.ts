@@ -1,11 +1,20 @@
 // Ops — Session column: session list, selected session digest, session actions
 
+import { signal } from '@preact/signals'
 import { html } from 'htm/preact'
 import { PanelSemanticDetails } from '../common/semantic-layer'
+import {
+  fetchAutoresearchStatus,
+  injectAutoresearchHypothesis,
+  runAutoresearchCycle,
+  stopAutoresearchLoop,
+} from '../../api'
 import {
   operatorActionBusy,
   operatorSessionDigest,
   operatorSnapshot,
+  refreshOperatorSessionDigest,
+  refreshOperatorSnapshot,
 } from '../../operator-store'
 import {
   actionTypeLabel,
@@ -30,6 +39,10 @@ import {
   teamTurnKind,
 } from './helpers'
 
+const autoresearchHypothesis = signal('')
+const autoresearchBusy = signal(false)
+const autoresearchError = signal<string | null>(null)
+
 export function OpsSessionColumn() {
   const snapshot = operatorSnapshot.value
   const sessionDigest = operatorSessionDigest.value
@@ -39,10 +52,60 @@ export function OpsSessionColumn() {
   const activeSummary = sessionDigest?.active_summary
   const guidanceLayer = sessionDigest?.active_guidance_layer ?? 'fallback'
   const residentRuntime = sessionDigest?.resident_judge_runtime ?? snapshot?.resident_judge_runtime
+  const linkedAutoresearch = selectedSession?.linked_autoresearch ?? null
+  const busy = operatorActionBusy.value || autoresearchBusy.value
   const activeRecommendedActions =
     sessionDigest?.active_recommended_actions?.length
       ? sessionDigest.active_recommended_actions
       : sessionDigest?.recommended_actions ?? []
+
+  const refreshSelectedSession = async () => {
+    await refreshOperatorSnapshot()
+    if (selectedSession?.session_id) {
+      await refreshOperatorSessionDigest(selectedSession.session_id)
+    }
+  }
+
+  const runAutoresearchAction = async (
+    effect: () => Promise<Record<string, unknown>>,
+  ) => {
+    autoresearchBusy.value = true
+    autoresearchError.value = null
+    try {
+      await effect()
+      await refreshSelectedSession()
+    } catch (err) {
+      autoresearchError.value = err instanceof Error ? err.message : 'Autoresearch action failed'
+    } finally {
+      autoresearchBusy.value = false
+    }
+  }
+
+  const refreshAutoresearch = async () => {
+    if (!linkedAutoresearch?.loop_id) return
+    await runAutoresearchAction(() => fetchAutoresearchStatus(linkedAutoresearch.loop_id!))
+  }
+
+  const injectHypothesis = async () => {
+    if (!linkedAutoresearch?.loop_id || !autoresearchHypothesis.value.trim()) return
+    const hypothesis = autoresearchHypothesis.value.trim()
+    await runAutoresearchAction(() =>
+      injectAutoresearchHypothesis(linkedAutoresearch.loop_id!, hypothesis),
+    )
+    autoresearchHypothesis.value = ''
+  }
+
+  const cycleAutoresearch = async () => {
+    if (!linkedAutoresearch?.loop_id) return
+    await runAutoresearchAction(() => runAutoresearchCycle(linkedAutoresearch.loop_id!))
+  }
+
+  const stopAutoresearch = async () => {
+    if (!linkedAutoresearch?.loop_id) return
+    await runAutoresearchAction(() =>
+      stopAutoresearchLoop(linkedAutoresearch.loop_id!, 'dashboard stop request'),
+    )
+  }
 
   return html`
     <div class="ops-column">
@@ -171,12 +234,63 @@ export function OpsSessionColumn() {
                 <span>Cycle: ${String(selectedSession.linked_autoresearch.current_cycle ?? 0)}</span>
                 <span>Best: ${String(selectedSession.linked_autoresearch.best_score ?? 'n/a')}</span>
               </div>
+              <div class="ops-detail-meta">
+                <span>파일: ${selectedSession.linked_autoresearch.target_file ?? 'n/a'}</span>
+                <span>최근 결정: ${selectedSession.linked_autoresearch.last_decision ?? 'n/a'}</span>
+                <span>세션 연결: ${selectedSession.linked_autoresearch.session_id ?? selectedSession.session_id}</span>
+                ${selectedSession.linked_autoresearch.operation_id
+                  ? html`<span>작전: ${selectedSession.linked_autoresearch.operation_id}</span>`
+                  : null}
+              </div>
+              ${selectedSession.linked_autoresearch.program_note
+                ? html`<div class="ops-context-note">Program note: ${selectedSession.linked_autoresearch.program_note}</div>`
+                : null}
+              ${selectedSession.linked_autoresearch.queued_hypothesis
+                ? html`<div class="ops-context-note">Queued hypothesis: ${selectedSession.linked_autoresearch.queued_hypothesis}</div>`
+                : null}
+              ${selectedSession.linked_autoresearch.warnings && selectedSession.linked_autoresearch.warnings.length > 0
+                ? html`<div class="ops-context-note">Warnings: ${selectedSession.linked_autoresearch.warnings.join(', ')}</div>`
+                : null}
+              ${selectedSession.linked_autoresearch.error
+                ? html`<div class="ops-empty">${selectedSession.linked_autoresearch.error}</div>`
+                : null}
             ` : null}
             ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
               <pre class="ops-code-block compact">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
             ` : null}
           </div>
         ` : html`<div class="ops-empty">먼저 세션을 하나 고르세요.</div>`}
+
+        ${linkedAutoresearch?.loop_id ? html`
+          <label class="control-label" for="ops-autoresearch-hypothesis">Autoresearch 제어</label>
+          <div class="control-row ops-split-row">
+            <button class="control-btn ghost" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
+              상태 새로고침
+            </button>
+            <button class="control-btn" onClick=${() => { void cycleAutoresearch() }} disabled=${busy}>
+              1 cycle 실행
+            </button>
+            <button class="control-btn ghost" onClick=${() => { void stopAutoresearch() }} disabled=${busy}>
+              loop 중지
+            </button>
+          </div>
+          <textarea
+            id="ops-autoresearch-hypothesis"
+            class="control-textarea"
+            rows=${2}
+            placeholder="다음 cycle에 넣을 hypothesis"
+            value=${autoresearchHypothesis.value}
+            onInput=${(event: Event) => { autoresearchHypothesis.value = (event.target as HTMLTextAreaElement).value }}
+            disabled=${busy}
+          ></textarea>
+          <div class="control-row ops-split-row">
+            <button class="control-btn" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
+              hypothesis 주입
+            </button>
+            <span class="ops-context-note">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
+          </div>
+          ${autoresearchError.value ? html`<div class="ops-empty">${autoresearchError.value}</div>` : null}
+        ` : null}
 
         <label class="control-label" for="ops-turn-kind">세션 액션</label>
         <div class="control-row ops-split-row">
@@ -185,14 +299,14 @@ export function OpsSessionColumn() {
             class="control-input ops-select"
             value=${teamTurnKind.value}
             onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
-            disabled=${operatorActionBusy.value || !selectedSession}
+            disabled=${busy || !selectedSession}
           >
             <option value="note">노트</option>
             <option value="broadcast">방송</option>
             <option value="task">작업</option>
             <option value="worker_spawn_batch">worker 교체</option>
           </select>
-          <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${operatorActionBusy.value || !selectedSession}>
+          <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSession}>
             적용
           </button>
         </div>
@@ -204,7 +318,7 @@ export function OpsSessionColumn() {
           placeholder="세션에 남길 메시지"
           value=${teamMessage.value}
           onInput=${(event: Event) => { teamMessage.value = (event.target as HTMLTextAreaElement).value }}
-          disabled=${operatorActionBusy.value || !selectedSession}
+          disabled=${busy || !selectedSession}
         ></textarea>
 
         ${teamTurnKind.value === 'task' ? html`
@@ -214,7 +328,7 @@ export function OpsSessionColumn() {
             placeholder="주입할 작업 제목"
             value=${teamTaskTitle.value}
             onInput=${(event: Event) => { teamTaskTitle.value = (event.target as HTMLInputElement).value }}
-            disabled=${operatorActionBusy.value || !selectedSession}
+            disabled=${busy || !selectedSession}
           />
           <textarea
             class="control-textarea"
@@ -222,13 +336,13 @@ export function OpsSessionColumn() {
             placeholder="주입할 작업 설명"
             value=${teamTaskDescription.value}
             onInput=${(event: Event) => { teamTaskDescription.value = (event.target as HTMLTextAreaElement).value }}
-            disabled=${operatorActionBusy.value || !selectedSession}
+            disabled=${busy || !selectedSession}
           ></textarea>
           <select
             class="control-input ops-select"
             value=${teamTaskPriority.value}
             onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
-            disabled=${operatorActionBusy.value || !selectedSession}
+            disabled=${busy || !selectedSession}
           >
             <option value="1">P1</option>
             <option value="2">P2</option>
@@ -243,7 +357,7 @@ export function OpsSessionColumn() {
             placeholder='spawn_batch JSON, 예: [{"spawn_agent":"llama","spawn_prompt":"...", "spawn_role":"replacement"}]'
             value=${teamSpawnBatchJson.value}
             onInput=${(event: Event) => { teamSpawnBatchJson.value = (event.target as HTMLTextAreaElement).value }}
-            disabled=${operatorActionBusy.value || !selectedSession}
+            disabled=${busy || !selectedSession}
           ></textarea>
         ` : null}
 
@@ -253,9 +367,9 @@ export function OpsSessionColumn() {
             type="text"
             value=${teamStopReason.value}
             onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
-            disabled=${operatorActionBusy.value || !selectedSession}
+            disabled=${busy || !selectedSession}
           />
-          <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${operatorActionBusy.value || !selectedSession}>
+          <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSession}>
             세션 중지
           </button>
         </div>

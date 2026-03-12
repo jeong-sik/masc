@@ -1536,9 +1536,26 @@ export interface OperatorSessionSnapshot {
   orchestration_state?: Record<string, unknown>
   cascade_metrics?: Record<string, unknown>
   report_paths?: Record<string, string>
-  linked_autoresearch?: Record<string, unknown>
+  linked_autoresearch?: LinkedAutoresearchStatus
   session?: Record<string, unknown>
   recent_events?: Record<string, unknown>[]
+}
+
+export interface LinkedAutoresearchStatus {
+  loop_id?: string
+  session_id?: string
+  status?: string
+  current_cycle?: number
+  best_score?: number
+  last_decision?: string | null
+  target_file?: string
+  workdir?: string
+  source_workdir?: string
+  program_note?: string | null
+  operation_id?: string | null
+  queued_hypothesis?: string | null
+  warnings?: string[]
+  error?: string | null
 }
 
 export interface OperatorKeeperSnapshot {

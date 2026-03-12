@@ -5290,12 +5290,16 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
       ~min_v:10
       ~max_v:86400
   in
+  let current_room =
+    Option.value ~default:"default" (Room.read_current_room config)
+  in
   let status_json =
     `Assoc [
-      ("room", `String room_state.project);
+      ("room", `String current_room);
       ("room_base_path", `String config.base_path);
       ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
       ("project", `String room_state.project);
+      ("current_room", `String current_room);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
       ("tool_call_health", tool_call_health_json config);
@@ -5473,6 +5477,9 @@ let dashboard_proof_http_json ~state request =
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
+  let current_room =
+    Option.value ~default:"default" (Room.read_current_room config)
+  in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let gardener_json = Masc_mcp.Gardener.status_json () in
@@ -5481,12 +5488,13 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let build = Build_identity.current () in
   `Assoc
     [
-      ("room", `String room_state.project);
+      ("room", `String current_room);
       ("room_base_path", `String config.base_path);
       ( "cluster",
         `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME"))
       );
       ("project", `String room_state.project);
+      ("current_room", `String current_room);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
       ("lodge", lodge_json);

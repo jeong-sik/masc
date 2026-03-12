@@ -97,6 +97,39 @@ let test_dashboard_execution_live_empty_room () =
           (json |> member "continuity_briefs" |> to_list |> List.length);
       ))
 
+let test_dashboard_execution_current_room_status () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Room.room_create config ~name:"Focus Room" ~description:None);
+      let enter_result =
+        Lib.Room.room_enter config ~room_id:"focus-room" ~agent_type:"claude" ()
+      in
+      let open Yojson.Safe.Util in
+      check string "room enter current_room" "focus-room"
+        (enter_result |> member "current_room" |> to_string);
+      check (option string) "room state current_room" (Some "focus-room")
+        (Lib.Room.read_current_room config);
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Dashboard_execution.json
+            ~config
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~proc_mgr:None
+            ()
+        in
+        let status = json |> member "status" in
+        check string "status room follows current room" "focus-room"
+          (status |> member "room" |> to_string);
+        check string "status current_room exposed" "focus-room"
+          (status |> member "current_room" |> to_string);
+      ))
+
 let () =
   Alcotest.run "Dashboard Execution"
     [
@@ -104,5 +137,7 @@ let () =
         [
           Alcotest.test_case "fixture mode" `Quick test_dashboard_execution_fixture;
           Alcotest.test_case "live empty room is safe" `Quick test_dashboard_execution_live_empty_room;
+          Alcotest.test_case "current room drives status" `Quick
+            test_dashboard_execution_current_room_status;
         ] );
     ]

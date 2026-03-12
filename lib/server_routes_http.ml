@@ -947,6 +947,90 @@ let keeper_chat_stream_error_json message =
         `Assoc [ ("message", `String message) ] );
     ]
 
+let contains_casefold haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec loop idx =
+    if nlen = 0 then true
+    else if idx + nlen > hlen then false
+    else if String.sub haystack idx nlen = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let keeper_stream_timeout_sec arguments =
+  let default_timeout_sec =
+    float_of_int
+      (Keeper_config.int_of_env_default
+         "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
+         ~default:45
+         ~min_v:10
+         ~max_v:300)
+  in
+  match Safe_ops.json_float_opt "timeout_sec" arguments with
+  | None -> default_timeout_sec
+  | Some raw when raw <= 0.0 -> default_timeout_sec
+  | Some raw ->
+      let raw_sec = int_of_float (Float.ceil raw) in
+      float_of_int (max 5 (min 300 raw_sec))
+
+let execute_keeper_stream_tool ~sw ~clock ?auth_token state ~agent_name ~arguments =
+  let timeout_sec = keeper_stream_timeout_sec arguments in
+  let start_time = Eio.Time.now clock in
+  let timeout_hit = ref false in
+  let success, body =
+    try
+      Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
+          Mcp_eio.execute_tool_eio ~sw ~clock ?auth_token state
+            ~name:"masc_keeper_msg" ~arguments)
+    with
+    | Eio.Time.Timeout ->
+        timeout_hit := true;
+        Log.Mcp.error "tools/call timeout: masc_keeper_msg after %.0fs" timeout_sec;
+        ( false,
+          Printf.sprintf
+            "❌ Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
+            timeout_sec "masc_keeper_msg" )
+    | exn ->
+        let err = Printexc.to_string exn in
+        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
+          (false, Types.masc_error_to_string Types.NotInitialized)
+        else (
+          Log.Mcp.error "tools/call crashed: %s" err;
+          (false, Printf.sprintf "❌ Internal error: %s" err))
+  in
+  let end_time = Eio.Time.now clock in
+  let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+  let error_msg =
+    if success then None
+    else Some
+      (Printf.sprintf "timeout=%d|duration_ms=%d"
+         (if !timeout_hit then 1 else 0) duration_ms)
+  in
+  Audit_log.log_tool_call state.Mcp_server.room_config
+    ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
+  let telemetry_enabled =
+    match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
+    | Some "false" | Some "0" -> false
+    | _ -> true
+  in
+  if telemetry_enabled then (
+    match state.Mcp_server.fs with
+    | Some fs ->
+        (try
+           Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
+             ~tool_name:"masc_keeper_msg" ~success ~duration_ms ()
+         with exn ->
+           Printf.eprintf "[WARN] telemetry tracking failed: %s\n%!"
+             (Printexc.to_string exn))
+    | None -> ()
+  );
+  Tool_registry.record_call_if_known ~tool_name:"masc_keeper_msg" ~success
+    ~duration_ms;
+  (success, body)
+
 let parse_keeper_chat_stream_request body_str =
   let open Yojson.Safe.Util in
   try
@@ -1098,9 +1182,6 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                  make_event ~thread_id ~run_id:(Some run_id)
                    ~message_id:(Some message_id) ~role:(Some Assistant)
                    Text_message_start));
-          let keeper_ctx : _ Tool_keeper.context =
-            { config = state.Mcp_server.room_config; sw; clock }
-          in
           let args =
             `Assoc
               ([
@@ -1111,8 +1192,17 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
               if payload.models = [] then []
               else [ ("models", `List (List.map (fun model -> `String model) payload.models)) ])
           in
+          let agent_name =
+            match agent_from_request request with
+            | Some raw when String.trim raw <> "" -> String.trim raw
+            | _ -> "unknown"
+          in
           let dispatch_result =
-            try Ok (Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args)
+            try
+              Ok
+                (execute_keeper_stream_tool ~sw ~clock
+                   ?auth_token:(auth_token_from_request request)
+                   state ~agent_name ~arguments:args)
             with exn -> Error (Printexc.to_string exn)
           in
           match dispatch_result with
@@ -1124,15 +1214,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                        ~custom_name:(Some "KEEPER_CHAT_ERROR")
                        ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
                        Run_error))
-          | Ok None ->
-              ignore
-                (keeper_stream_send_event writer mutex closed
-                   Ag_ui.(
-                     make_event ~thread_id ~run_id:(Some run_id)
-                       ~custom_name:(Some "KEEPER_CHAT_ERROR")
-                       ~custom_value:(Some (`Assoc [ ("message", `String "keeper dispatch unavailable") ]))
-                       Run_error))
-          | Ok (Some (false, err)) ->
+          | Ok (false, err) ->
               ignore
                 (keeper_stream_send_event writer mutex closed
                    Ag_ui.(
@@ -1140,7 +1222,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                        ~custom_name:(Some "KEEPER_CHAT_ERROR")
                        ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
                        Run_error))
-          | Ok (Some (true, body)) -> (
+          | Ok (true, body) -> (
               try
                 let payload_json_opt =
                   try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
@@ -1922,7 +2004,7 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanReadState (fun state _req reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match parse_keeper_chat_stream_request body_str with
            | Ok payload ->

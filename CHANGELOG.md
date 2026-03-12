@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.85.1] - 2026-03-12
+
+### Changed
+- **Dashboard Surface Follow-up** — current-room truth, low-value surface pruning, keeper naming clarity, and war room README entrypoints are aligned on `main` (#891, #893, #896, #919)
+- **Keeper Boundary Follow-up** — keeper runtime/env helpers continue the split toward narrower public seams (#892, #894)
+
+### Fixed
+- Resident keepers auto-recover more reliably after offline drift (#887)
+- Heartbeat fibers now re-raise cancellation instead of swallowing it inside the loop (#888)
+- Keeper metrics surface hides low-confidence values from dashboard-facing views (#889)
+- Unsafe list access in spawn, lodge, and session helpers is hardened (#890)
+
 ## [2.85.0] - 2026-03-12
 
 ### Added

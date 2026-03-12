@@ -70,9 +70,9 @@ function SurfaceTabs() {
   `
 }
 
-function SurfaceBody() {
+function SurfaceBody({ wallboard = false }: { wallboard?: boolean }) {
   if (commandPlaneSurface.value === 'warroom') {
-    return html`<${WarRoomSurface} />`
+    return html`<${WarRoomSurface} wallboard=${wallboard} />`
   }
   if (commandPlaneSurface.value === 'summary') {
     return html`<${SummarySurface} />`
@@ -104,6 +104,10 @@ function SurfaceBody() {
 }
 
 export function Command() {
+  const wallboardMode =
+    commandPlaneSurface.value === 'warroom'
+    && route.value.params.presentation === 'wallboard'
+
   useEffect(() => {
     void refreshCommandPlaneCurrentSurface()
     void refreshCommandPlaneChainSummary()
@@ -216,39 +220,50 @@ export function Command() {
   }, [])
 
   return html`
-    <section class="dashboard-panel command-plane-view">
-      <div class="panel-header">
-        <div>
-          <h2>지휘면</h2>
-          <p>기본 진입은 라이브 워룸입니다. 실제 run, worker, message, trace를 먼저 보고 필요할 때만 detail surface로 내려갑니다.</p>
+    <section class="dashboard-panel command-plane-view ${wallboardMode ? 'wallboard' : ''}">
+      ${wallboardMode ? null : html`
+        <div class="panel-header">
+          <div>
+            <h2>지휘면</h2>
+            <p>기본 진입은 라이브 워룸입니다. 실제 run, worker, message, trace를 먼저 보고 필요할 때만 detail surface로 내려갑니다.</p>
+          </div>
+          <div class="panel-actions">
+            <button
+              class="control-btn ghost"
+              onClick=${() => {
+                void fire(() => runCommandPlaneDispatchTick())
+              }}
+              disabled=${actionDisabled('dispatch:tick')}
+            >
+              ${actionDisabled('dispatch:tick') ? '정리 중...' : 'Tick 실행'}
+            </button>
+            <button
+              class="control-btn ghost"
+              onClick=${() => {
+                void refreshRoomTruth()
+                void refreshCommandPlaneCurrentSurface()
+                void refreshCommandPlaneChainSummary()
+                void refreshCommandPlaneSwarm()
+                if (commandPlaneSurface.value === 'warroom') {
+                  void refreshOperatorSnapshot()
+                }
+              }}
+              disabled=${commandPlaneLoading.value}
+            >
+              ${commandPlaneLoading.value ? '새로고침 중...' : '새로고침'}
+            </button>
+            <button
+              class="control-btn ghost"
+              onClick=${() => {
+                setCommandPlaneSurface('warroom')
+                navigate('command', { ...surfaceRouteParams('warroom'), presentation: 'wallboard' })
+              }}
+            >
+              Wallboard
+            </button>
+          </div>
         </div>
-        <div class="panel-actions">
-          <button
-            class="control-btn ghost"
-            onClick=${() => {
-              void fire(() => runCommandPlaneDispatchTick())
-            }}
-            disabled=${actionDisabled('dispatch:tick')}
-          >
-            ${actionDisabled('dispatch:tick') ? '정리 중...' : 'Tick 실행'}
-          </button>
-          <button
-            class="control-btn ghost"
-            onClick=${() => {
-              void refreshRoomTruth()
-              void refreshCommandPlaneCurrentSurface()
-              void refreshCommandPlaneChainSummary()
-              void refreshCommandPlaneSwarm()
-              if (commandPlaneSurface.value === 'warroom') {
-                void refreshOperatorSnapshot()
-              }
-            }}
-            disabled=${commandPlaneLoading.value}
-          >
-            ${commandPlaneLoading.value ? '새로고침 중...' : '새로고침'}
-          </button>
-        </div>
-      </div>
+      `}
 
       ${commandPlaneError.value
         ? html`<div class="empty-state error">${commandPlaneError.value}</div>`
@@ -256,12 +271,12 @@ export function Command() {
       ${commandPlaneActionError.value
         ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
         : null}
-      <${SurfaceSemanticIntro} surfaceId="command" />
-      <${RoomTruthStrip} />
-      <${CommandWorkflowBanner} />
-      ${commandPlaneSurface.value === 'warroom' ? null : html`<${CommandEntryStrip} />`}
-      <${SurfaceTabs} />
-      <${SurfaceBody} />
+      ${wallboardMode ? null : html`<${SurfaceSemanticIntro} surfaceId="command" />`}
+      ${wallboardMode ? null : html`<${RoomTruthStrip} />`}
+      ${wallboardMode ? null : html`<${CommandWorkflowBanner} />`}
+      ${wallboardMode || commandPlaneSurface.value === 'warroom' ? null : html`<${CommandEntryStrip} />`}
+      ${wallboardMode ? null : html`<${SurfaceTabs} />`}
+      <${SurfaceBody} wallboard=${wallboardMode} />
     </section>
   `
 }

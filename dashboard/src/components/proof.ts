@@ -61,6 +61,8 @@ function verdictLabel(verdict: DashboardProofVerdict): string {
 
 function verdictReasonLines(
   verdict: DashboardProofVerdict,
+  liveVerdict: DashboardProofVerdict,
+  historicalVerdict: DashboardProofVerdict | null,
   actorCount: number,
   plannedActorCount: number,
   unansweredActorCount: number,
@@ -80,6 +82,20 @@ function verdictReasonLines(
       ? `CPv2 backing trace가 ${cpTraceCount}건 있어 실행 흔적은 남아 있습니다.`
       : '관리형 backing trace는 아직 없습니다.',
   ]
+  if (historicalVerdict === 'proven' && liveVerdict === 'insufficient') {
+    return [
+      lines[0] ?? '',
+      '왜 이렇게 판정됐나: 과거 proof는 proved였지만, 현재 보이는 live evidence는 부족해서 partial로 완화했습니다.',
+      '다음 보강 포인트: 최근 응답 턴이나 도구 호출을 다시 남겨 historical proof를 현재 상태와 연결해야 합니다.',
+    ]
+  }
+  if (historicalVerdict === 'proven' && liveVerdict === 'partial') {
+    return [
+      lines[0] ?? '',
+      '왜 이렇게 판정됐나: historical proof는 강하지만, 현재 live evidence는 아직 partial 수준입니다.',
+      '다음 보강 포인트: 최근 상호작용과 실행 근거를 더 남기면 proven으로 회복할 수 있습니다.',
+    ]
+  }
   if (verdict === 'partial') {
     return [
       lines[0] ?? '',
@@ -109,6 +125,12 @@ function verdictReasonLines(
       ? '다음 보강 포인트: 응답 턴과 도구 근거를 서로 연결해 남겨야 합니다.'
       : '다음 보강 포인트: 참여자 간 턴, 도구 근거, 산출물 연결을 더 남겨야 합니다.',
   ]
+}
+
+function verdictBasisLabel(basis?: string | null): string {
+  if (basis === 'historical_only') return 'historical only'
+  if (basis === 'live_and_historical') return 'live + historical'
+  return 'live'
 }
 
 function selectionTone(selection?: DashboardProofSelection | null): string {
@@ -153,8 +175,21 @@ function toolEvidenceTags(item: DashboardProofToolEvidence): string[] {
   return Array.isArray(item.tool_names) ? item.tool_names : []
 }
 
-function SelectionCard({ selection }: { selection?: DashboardProofSelection | null }) {
+function SelectionCard({
+  selection,
+  summary,
+}: {
+  selection?: DashboardProofSelection | null
+  summary?: {
+    historical_verdict?: DashboardProofVerdict | null
+    live_verdict?: DashboardProofVerdict | null
+  } | null
+}) {
   if (!selection || selection.mode === 'explicit') return null
+  const historicalStronger =
+    selection.mode === 'latest_auto_selected'
+    && summary?.historical_verdict === 'proven'
+    && summary?.live_verdict !== 'proven'
   return html`
     <div class="command-guide-card ${selectionTone(selection)}">
       <div class="command-guide-head">
@@ -162,6 +197,9 @@ function SelectionCard({ selection }: { selection?: DashboardProofSelection | nu
         <span class="command-chip ${selectionTone(selection)}">${selection.mode ?? 'none'}</span>
       </div>
       <p>${selection.reason ?? '근거 컨텍스트 선택 정보가 없습니다.'}</p>
+      ${historicalStronger
+        ? html`<p>선택된 최신 세션은 historical proof가 더 강하고 current live evidence는 더 약합니다.</p>`
+        : null}
       <div class="command-card-grid">
         <span>선택된 세션</span><span>${selection.selected_session_id ?? '없음'}</span>
         <span>작성자</span><span>${selection.selected_created_by ?? '없음'}</span>
@@ -411,6 +449,9 @@ export function Proof() {
   const artifacts = safeArray<DashboardProofArtifactRef>(snapshot?.artifacts)
   const toolEvidence = safeArray<DashboardProofToolEvidence>(snapshot?.tool_evidence)
   const verdict = snapshot?.proof_verdict ?? 'insufficient'
+  const liveVerdict = summary?.live_verdict ?? verdict
+  const historicalVerdict = summary?.historical_verdict ?? null
+  const verdictBasis = summary?.verdict_basis ?? 'live'
   const cpEvidence = snapshot?.cp_backing_evidence ?? null
   const traceCount = Array.isArray((cpEvidence as { traces?: { events?: unknown[] } } | null)?.traces?.events)
     ? ((cpEvidence as { traces?: { events?: unknown[] } }).traces?.events?.length ?? 0)
@@ -432,6 +473,8 @@ export function Proof() {
   const missingArtifacts = artifacts.length - presentArtifacts
   const reasonLines = verdictReasonLines(
     verdict,
+    liveVerdict,
+    historicalVerdict,
     actorCount,
     plannedActorCount,
     unansweredActorCount,
@@ -459,13 +502,23 @@ export function Proof() {
         ? html`<div class="error-card">${proofError.value}</div>`
         : null}
 
-      <${SelectionCard} selection=${selection} />
+      <${SelectionCard} selection=${selection} summary=${summary ?? null} />
 
       <div class="mission-stat-grid">
         <div class="summary-stat-card ${verdictTone(verdict)}">
           <span>판정</span>
           <strong>${verdictLabel(verdict)}</strong>
           <small>${summary?.detail ?? '협업 증거를 verdict로 요약합니다.'}</small>
+        </div>
+        <div class="summary-stat-card ${verdictTone(liveVerdict)}">
+          <span>Live 판정</span>
+          <strong>${liveVerdict}</strong>
+          <small>${verdictBasisLabel(verdictBasis)} 기준 최종 판정에 반영</small>
+        </div>
+        <div class="summary-stat-card ${verdictTone(historicalVerdict ?? 'insufficient')}">
+          <span>Historical proof</span>
+          <strong>${historicalVerdict ?? 'none'}</strong>
+          <small>persisted proof 문서 기준</small>
         </div>
         <div class="summary-stat-card">
           <span>실제 흔적</span>

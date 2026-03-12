@@ -3,6 +3,17 @@ open Alcotest
 module U = Yojson.Safe.Util
 module M = Masc_mcp
 
+let contains_substring haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > hay_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
 let find_lane json lane_id =
   json |> U.member "lanes" |> U.to_list
   |> List.find (fun lane ->
@@ -187,6 +198,8 @@ let test_stale_supervised_session_keeps_stale_flag () =
        hard_flags);
   check string "stale supervised recommendation" "masc_team_session_status"
     (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string);
+  check string "stale narrative lane" "supervised"
+    (json |> U.member "narrative" |> U.member "lane_id" |> U.to_string);
   let stale_gap =
     json |> U.member "gaps" |> U.member "items" |> U.to_list
     |> List.find (fun row ->
@@ -196,6 +209,78 @@ let test_stale_supervised_session_keeps_stale_flag () =
     (stale_gap |> U.member "next_tool" |> U.to_string);
   check bool "stale gap why" true
     (stale_gap |> U.member "why_it_matters" |> U.to_string <> "")
+
+let test_recommendation_lane_drives_narrative_lane_and_start_event () =
+  let now = M.Time_compat.now () in
+  let current_iso = M.Command_plane_v2.iso_of_unix now in
+  let stale_iso = M.Command_plane_v2.iso_of_unix (now -. 1200.) in
+  let old_iso = M.Command_plane_v2.iso_of_unix (now -. 90.) in
+  let recent_iso = M.Command_plane_v2.iso_of_unix (now -. 30.) in
+  let operation : M.Swarm_status.operation_info =
+    {
+      operation_id = "op-managed";
+      objective = "Managed work should win the narrative";
+      source = "managed";
+      status = "running";
+      trace_id = "trace-managed";
+      detachment_session_id = None;
+      note = Some "managed work";
+      updated_at = Some current_iso;
+    }
+  in
+  let supervised : M.Swarm_status.session_info =
+    {
+      session_id = "sess-stale";
+      goal = "Old supervised lane";
+      status = "running";
+      started_at = now -. 3600.;
+      updated_at_iso = stale_iso;
+      last_event_at = Some stale_iso;
+      last_turn_at = Some stale_iso;
+      worker_names = [ "worker-a" ];
+      min_agents_violation_streak = 0;
+      policy_violation_count = 0;
+    }
+  in
+  let old_trace : M.Swarm_status.trace_info =
+    {
+      event_id = "trace-old";
+      event_type = "operation_progress";
+      source = "control_plane";
+      trace_id = "trace-managed";
+      operation_id = Some "op-managed";
+      actor = Some "manager";
+      timestamp = Some old_iso;
+      detail = `Assoc [ ("message", `String "older managed progress") ];
+    }
+  in
+  let recent_trace : M.Swarm_status.trace_info =
+    {
+      event_id = "trace-new";
+      event_type = "operation_progress";
+      source = "control_plane";
+      trace_id = "trace-managed";
+      operation_id = Some "op-managed";
+      actor = Some "manager";
+      timestamp = Some recent_iso;
+      detail = `Assoc [ ("message", `String "newer managed progress") ];
+    }
+  in
+  let json =
+    M.Swarm_status.build_json_from_inputs
+      ~timeline_limit_override:M.Swarm_status.timeline_limit ~now
+      ~operations:[ operation ] ~detachments:[] ~alerts:[]
+      ~decisions:[] ~traces:[ old_trace; recent_trace ] ~sessions:[ supervised ]
+  in
+  check string "managed recommendation chosen" "managed"
+    (json |> U.member "recommended_next_action" |> U.member "lane_id"
+   |> U.to_string);
+  check string "narrative lane follows recommendation" "managed"
+    (json |> U.member "narrative" |> U.member "lane_id" |> U.to_string);
+  check bool "started uses earliest managed event" true
+    (contains_substring
+       (json |> U.member "narrative" |> U.member "started" |> U.to_string)
+       "older managed progress")
 
 let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_present ()
     =
@@ -340,6 +425,9 @@ let () =
             test_supervised_session_keeps_lane_present;
           test_case "stale_session_keeps_stale_flag" `Quick
             test_stale_supervised_session_keeps_stale_flag;
+          test_case "recommendation_lane_drives_narrative_lane_and_start_event"
+            `Quick
+            test_recommendation_lane_drives_narrative_lane_and_start_event;
           test_case "terminal_projected_artifacts_do_not_keep_supervised_lane_present"
             `Quick
             test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_present;

@@ -2,6 +2,8 @@
 
 This file is the AI-friendly narrow waist for `masc-mcp`.
 
+Public MCP surface boundaries, compatibility aliases, and internal prompt-plane notes live in `docs/MCP-SURFACE-AUDIT.md`.
+
 ## Goal
 
 Use `CPv2 command plane` as the single source of execution truth. Other orchestration surfaces should attach to it instead of bypassing it.

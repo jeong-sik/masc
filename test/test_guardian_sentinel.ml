@@ -3,9 +3,24 @@ open Masc_mcp
 
 module U = Yojson.Safe.Util
 
+let with_temp_room_root f =
+  let dir = Filename.temp_dir "guardian-sentinel-" "" in
+  let config = Room.default_config dir in
+  Fun.protect
+    ~finally:(fun () ->
+      if Room.is_initialized config then ignore (Room.reset config);
+      Unix.rmdir dir)
+    (fun () -> f config)
+
 let reset_runtime_state () =
   Guardian.reset_runtime_state_for_tests ();
   Sentinel.reset_runtime_state_for_tests ()
+
+let test_sentinel_ensures_room_initialized () =
+  with_temp_room_root (fun config ->
+    check bool "room starts uninitialized" false (Room.is_initialized config);
+    Sentinel.ensure_room_initialized_for_start config;
+    check bool "room initialized by sentinel helper" true (Room.is_initialized config))
 
 let test_guardian_status_defaults () =
   reset_runtime_state ();
@@ -43,6 +58,7 @@ let () =
   run "Guardian/Sentinel"
     [
       ("runtime", [
+        test_case "sentinel ensures room initialized" `Quick test_sentinel_ensures_room_initialized;
         test_case "guardian status defaults" `Quick test_guardian_status_defaults;
         test_case "guardian embedded loops ignore master switch" `Quick test_guardian_embedded_loops_ignore_master_switch;
         test_case "sentinel reports embedded guardian runtime" `Quick test_sentinel_status_reports_embedded_guardian_runtime;

@@ -310,6 +310,10 @@ let mark_started_for_tests () =
   started := true;
   start_ts := Time_compat.now ()
 
+let ensure_room_initialized_for_start config =
+  if not (Room.is_initialized config) then
+    ignore (Room.init config ~agent_name:None)
+
 let status_json () : Yojson.Safe.t =
   let embedded_guardian_loops_running = Guardian.masc_loops_running () in
   let consumers =
@@ -344,6 +348,7 @@ let start ~sw ~clock ~net config =
   if not Env_config.Sentinel.enabled then
     log "disabled (set MASC_SENTINEL_ENABLED=true)"
   else begin
+    ensure_room_initialized_for_start config;
     (* 1. Join room as sentinel agent *)
     let join_result = Room.join config ~agent_name ~capabilities:["sentinel"; "housekeeping"] () in
     log (sprintf "join: %s" (String.sub join_result 0 (min 80 (String.length join_result))));

@@ -85,6 +85,33 @@ let with_test_room f =
     ~finally:(fun () -> (try let _ = Room.reset config in () with _ -> ()); rm_rf dir)
     (fun () -> f config)
 
+let rec find_repo_root path =
+  if path = Filename.dirname path then None
+  else
+    let has_lib = Sys.file_exists (Filename.concat path "lib") in
+    let has_test = Sys.file_exists (Filename.concat path "test") in
+    if has_lib && has_test then Some path else find_repo_root (Filename.dirname path)
+
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some d -> d
+  | None ->
+      let argv0 =
+        if Array.length Sys.argv > 0 then Sys.argv.(0) else Sys.executable_name
+      in
+      let exe_path =
+        if Filename.is_relative argv0 then Filename.concat (Sys.getcwd ()) argv0
+        else argv0
+      in
+      let exe_dir = Filename.dirname exe_path in
+      (match find_repo_root exe_dir with
+       | Some d -> d
+       | None ->
+           let cwd = Sys.getcwd () in
+           match find_repo_root cwd with
+           | Some d -> d
+           | None -> cwd)
+
 (* ============================================================
    social: vote on nonexistent post → "[social]"
    ============================================================ *)
@@ -110,11 +137,7 @@ let test_social_vote_missing_post_logs () =
     This is a static verification test — it checks that the source code
     contains the expected Printf.eprintf calls. *)
 let file_contains_pattern file_rel pattern =
-  let source_root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some d -> d
-    | None -> Sys.getcwd ()
-  in
-  let path = Filename.concat source_root file_rel in
+  let path = Filename.concat (source_root ()) file_rel in
   if not (Sys.file_exists path) then begin
     Printf.eprintf "Warning: source file not found: %s\n%!" path;
     false
@@ -128,8 +151,8 @@ let file_contains_pattern file_rel pattern =
 (* HIGH priority patterns *)
 
 let test_source_main_keeper_bootstrap () =
-  check bool "main_eio.ml has keeper bootstrap logging"
-    true (file_contains_pattern "bin/main_eio.ml"
+  check bool "server_runtime_bootstrap.ml has keeper bootstrap logging"
+    true (file_contains_pattern "lib/server_runtime_bootstrap.ml"
       {|[main] keeper bootstrap failed:|})
 
 let test_source_metrics_fd_close () =
@@ -148,8 +171,8 @@ let test_source_llm_token_parse () =
       {|[llm] token field missing or wrong type|})
 
 let test_source_keeper_proactive () =
-  check bool "keeper_execution.ml has proactive emission logging"
-    true (file_contains_pattern "lib/keeper_execution.ml"
+  check bool "keeper_keepalive.ml has proactive emission logging"
+    true (file_contains_pattern "lib/keeper_keepalive.ml"
       {|[keeper] proactive emission failed:|})
 
 (* MEDIUM priority patterns *)

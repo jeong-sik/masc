@@ -174,8 +174,9 @@ def baseline_from_file(args: argparse.Namespace) -> tuple[dict, str]:
 
 
 def compute_changed_paths(repo_root: Path, ref: str, roots: list[str]) -> list[str]:
+    diff_ref = f"{ref}...HEAD"
     diff = subprocess.run(
-        ["git", "diff", "--name-only", ref, "HEAD", "--", *roots],
+        ["git", "diff", "--name-only", diff_ref, "--", *roots],
         cwd=repo_root,
         check=True,
         stdout=subprocess.PIPE,

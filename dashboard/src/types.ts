@@ -2370,6 +2370,7 @@ export interface CommandPlaneSwarmProvider {
   actual_slots?: number
   expected_ctx?: number
   actual_ctx?: number
+  configured_capacity?: number
   slot_reachable?: boolean | null
   slot_status_code?: number | null
   runtime_blocker?: string | null

@@ -669,6 +669,9 @@ let swarm_live_json config ?run_id ?operation_id () =
       (Option.bind runtime_doctor (fun doctor -> doctor.actual_ctx))
       (fun () -> Some ctx_per_slot)
   in
+  let configured_capacity =
+    Option.bind runtime_doctor (fun doctor -> doctor.configured_capacity)
+  in
   let slot_reachable =
     Option.bind runtime_doctor (fun doctor -> doctor.slot_reachable)
   in
@@ -1050,6 +1053,7 @@ let swarm_live_json config ?run_id ?operation_id () =
             ("actual_slots", match actual_slots with Some value -> `Int value | None -> `Null);
             ("expected_ctx", match expected_ctx with Some value -> `Int value | None -> `Null);
             ("actual_ctx", match actual_ctx with Some value -> `Int value | None -> `Null);
+            ("configured_capacity", match configured_capacity with Some value -> `Int value | None -> `Null);
             ("slot_reachable", match slot_reachable with Some value -> `Bool value | None -> `Null);
             ("slot_status_code", match slot_status_code with Some value -> `Int value | None -> `Null);
             ("runtime_blocker", match runtime_blocker with Some value -> `String value | None -> `Null);

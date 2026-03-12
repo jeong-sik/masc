@@ -1570,6 +1570,7 @@ let test_swarm_live_json_reads_runtime_doctor_and_blockers () =
             ("actual_slots", `Int 0);
             ("expected_ctx", `Int 262144);
             ("actual_ctx", `Int 0);
+            ("configured_capacity", `Int 12);
             ("runtime_blocker", `String "provider_unreachable");
             ("detail", `String "provider smoke request failed");
           ]);
@@ -1581,6 +1582,8 @@ let test_swarm_live_json_reads_runtime_doctor_and_blockers () =
         (swarm |> member "provider" |> member "expected_slots" |> to_int);
       Alcotest.(check int) "actual ctx from doctor" 0
         (swarm |> member "provider" |> member "actual_ctx" |> to_int);
+      Alcotest.(check int) "configured capacity from doctor" 12
+        (swarm |> member "provider" |> member "configured_capacity" |> to_int);
       Alcotest.(check string) "runtime blocker surfaced" "provider_unreachable"
         (swarm |> member "provider" |> member "runtime_blocker" |> to_string);
       Alcotest.(check bool) "blocker list contains runtime issue" true

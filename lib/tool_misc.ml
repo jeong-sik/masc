@@ -383,12 +383,10 @@ let apply_keeper_policy_update config ~runtime_class args =
         in
         let autonomy_level =
           match autonomy_level_opt with
-          | None -> (
-              match Keeper_contract.parse_autonomy_level meta.autonomy_level with
-              | Some level -> Ok level
-              | None ->
-                  Error
-                    (Printf.sprintf "invalid stored autonomy_level: %s" meta.autonomy_level))
+          | None ->
+              Ok
+                (Keeper_contract.parse_autonomy_level meta.autonomy_level
+                 |> Option.value ~default:Keeper_autonomy.L1_Reactive)
           | Some raw -> (
               match Keeper_autonomy.autonomy_level_of_string raw with
               | Some level -> Ok level

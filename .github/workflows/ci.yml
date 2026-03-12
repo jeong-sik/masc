@@ -12,6 +12,73 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  health:
+    name: Health
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.4.x
+          dune-cache: true
+
+      - name: Pin external dependencies
+        run: |
+          chmod +x scripts/opam-pin-external-deps.sh
+          scripts/opam-pin-external-deps.sh
+
+      - name: Refresh system package index
+        run: sudo apt-get update -qq
+
+      - name: Install OS dependencies
+        run: sudo apt-get install -y ripgrep bc
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            opam install . --deps-only --yes && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
+            sleep 15
+          done
+
+      - name: Fetch base branch for health ratchet
+        if: github.event_name == 'pull_request'
+        run: git fetch origin "${{ github.base_ref }}" --depth=1
+
+      - name: Run health snapshot
+        env:
+          HEALTH_BASELINE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: |
+          chmod +x scripts/health_snapshot.sh scripts/anti-fake-audit.sh
+          if [ -n "${HEALTH_BASELINE_REF}" ]; then
+            opam exec -- bash scripts/health_snapshot.sh \
+              --json-out .health/health-snapshot.json \
+              --baseline-ref "${HEALTH_BASELINE_REF}" \
+              --fail-on-lib-regression
+          else
+            opam exec -- bash scripts/health_snapshot.sh \
+              --json-out .health/health-snapshot.json \
+              --baseline-file .ci/health-baseline.json \
+              --fail-on-lib-regression
+          fi
+
+      - name: Upload health snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: health-snapshot
+          path: .health/health-snapshot.json
+
   build:
     name: Build and Test
     runs-on: ubuntu-latest

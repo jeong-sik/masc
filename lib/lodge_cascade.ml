@@ -59,7 +59,10 @@ let default_config_path () =
   in
   match List.find_opt Sys.file_exists candidates with
   | Some path -> path
-  | None -> List.hd candidates
+  | None -> (
+      match candidates with
+      | first :: _ -> first
+      | [] -> Filename.concat (Sys.getcwd ()) "config/llm_cascade.json")
 
 let default_model_strings ~cascade_name =
   let llama_glm =

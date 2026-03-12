@@ -10,8 +10,21 @@ cd "$REPO_ROOT"
 echo "=== Anti-Fake Test Audit ==="
 echo ""
 
+if ! command -v rg >/dev/null 2>&1; then
+  echo "ERROR: ripgrep (rg) is required"
+  exit 2
+fi
+
+if ! command -v bc >/dev/null 2>&1; then
+  echo "ERROR: bc is required"
+  exit 2
+fi
+
 # Collect test files
-mapfile -t TEST_FILES < <(find test -name "test_*.ml" -type f | sort)
+TEST_FILES=()
+while IFS= read -r file; do
+  TEST_FILES+=("$file")
+done < <(find test -name "test_*.ml" -type f | sort)
 FILE_COUNT=${#TEST_FILES[@]}
 
 echo "Found $FILE_COUNT test files"

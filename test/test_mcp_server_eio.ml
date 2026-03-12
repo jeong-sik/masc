@@ -60,23 +60,12 @@ let extract_json_from_text text =
   with Not_found ->
     Alcotest.failf "expected JSON payload in text: %s" text
 
-let tools_list_response ~clock ~sw ?profile ?names ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_usage = false) state =
-  let fields =
-    []
-    |> (fun acc ->
-         match names with
-         | Some items ->
-             ("names", `List (List.map (fun name -> `String name) items)) :: acc
-         | None -> acc)
-    |> (fun acc ->
-         if include_hidden then ("include_hidden", `Bool true) :: acc else acc)
-    |> (fun acc ->
-         if include_deprecated then ("include_deprecated", `Bool true) :: acc else acc)
-    |> (fun acc ->
-         if include_usage then ("include_usage", `Bool true) :: acc else acc)
+let tools_list_response ~clock ~sw ?profile ?cursor state =
+  let params =
+    match cursor with
+    | Some cursor -> `Assoc [ ("cursor", `String cursor) ]
+    | None -> `Assoc []
   in
-  let params = `Assoc (List.rev fields) in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -101,6 +90,64 @@ let tools_from_response response =
           | _ -> Alcotest.fail "tools not a list")
       | _ -> Alcotest.fail "result not an object")
   | _ -> Alcotest.fail "response not an object"
+
+let next_cursor_from_response field_name response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "result" fields with
+      | Some (`Assoc result_fields) -> (
+          match List.assoc_opt "nextCursor" result_fields with
+          | Some (`String value) when value <> "" -> Some value
+          | Some `Null | None -> None
+          | _ -> Alcotest.failf "%s nextCursor invalid" field_name)
+      | _ -> Alcotest.failf "%s result not an object" field_name)
+  | _ -> Alcotest.failf "%s response not an object" field_name
+
+let rec collect_tools ~clock ~sw ?profile ?cursor state acc =
+  let response = tools_list_response ~clock ~sw ?profile ?cursor state in
+  let tools = tools_from_response response in
+  match next_cursor_from_response "tools/list" response with
+  | Some next -> collect_tools ~clock ~sw ?profile ~cursor:next state (acc @ tools)
+  | None -> acc @ tools
+
+let tools_list_all ~clock ~sw ?profile state =
+  collect_tools ~clock ~sw ?profile state []
+
+let resources_list_response ~clock ~sw ?cursor state =
+  let params =
+    match cursor with
+    | Some cursor -> `Assoc [ ("cursor", `String cursor) ]
+    | None -> `Assoc []
+  in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 23);
+          ("method", `String "resources/list");
+          ("params", params);
+        ])
+  in
+  Mcp_eio.handle_request ~clock ~sw state request
+
+let resources_from_response response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "result" fields with
+      | Some (`Assoc result_fields) -> (
+          match List.assoc_opt "resources" result_fields with
+          | Some (`List resources) -> resources
+          | _ -> Alcotest.fail "resources not a list")
+      | _ -> Alcotest.fail "result not an object")
+  | _ -> Alcotest.fail "response not an object"
+
+let rec resources_list_all ~clock ~sw ?cursor state acc =
+  let response = resources_list_response ~clock ~sw ?cursor state in
+  let resources = resources_from_response response in
+  match next_cursor_from_response "resources/list" response with
+  | Some next -> resources_list_all ~clock ~sw ~cursor:next state (acc @ resources)
+  | None -> acc @ resources
 
 let find_tool_exn tools name =
   match
@@ -284,73 +331,61 @@ let test_handle_request_tools_list () =
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
 
-  let response = tools_list_response ~clock ~sw state in
+  let tools = tools_list_all ~clock ~sw state in
 
-  (match response with
-   | `Assoc fields ->
-       Alcotest.(check bool) "has result" true (List.mem_assoc "result" fields);
-       (match List.assoc_opt "result" fields with
-        | Some (`Assoc result_fields) ->
-            Alcotest.(check bool) "has tools" true
-              (List.mem_assoc "tools" result_fields);
-            (match List.assoc_opt "tools" result_fields with
-             | Some (`List tools) ->
-                 let names =
-                   tools
-                   |> List.filter_map (function
-                        | `Assoc fields -> List.assoc_opt "name" fields
-                        | _ -> None)
-                   |> List.filter_map (function `String s -> Some s | _ -> None)
-                 in
-                 (* Full is now the room default, so TRPG tools are available immediately. *)
-                 Alcotest.(check bool)
-                   "contains trpg.dice.roll in full default"
-                   true
-                   (List.mem "trpg.dice.roll" names);
-                 Alcotest.(check bool)
-                   "contains trpg.turn.advance in full default"
-                   true
-                   (List.mem "trpg.turn.advance" names);
-                 (* Plan and Board categories remain available. *)
-                 Alcotest.(check bool)
-                   "contains masc_goal_upsert (Plan category)"
-                   true
-                   (List.mem "masc_goal_upsert" names);
-                 Alcotest.(check bool)
-                   "contains masc_board_post (Board category)"
-                   true
-                   (List.mem "masc_board_post" names);
-                 Alcotest.(check bool)
-                   "legacy masc_trpg_dice_roll hidden from list"
-                   false
-                   (List.mem "masc_trpg_dice_roll" names);
-                 Alcotest.(check bool)
-                   "legacy experiment_start hidden from list"
-                   false
-                   (List.mem "experiment_start" names);
-                 Alcotest.(check bool)
-                   "superseded masc_claim hidden from list"
-                   false
-                   (List.mem "masc_claim" names);
-                 Alcotest.(check bool)
-                   "superseded masc_dispatch_route hidden from list"
-                   false
-                   (List.mem "masc_dispatch_route" names);
-                 Alcotest.(check bool)
-                   "low-usage social tool hidden from list"
-                   false
-                   (List.mem "masc_post_create" names);
-                 Alcotest.(check bool)
-                   "low-usage vote utility hidden from list"
-                   false
-                   (List.mem "masc_vote_create" names);
-                 Alcotest.(check bool)
-                   "placeholder tool hidden by default"
-                   false
-                   (List.mem "masc_archive_save" names)
-             | _ -> Alcotest.fail "tools not a list")
-        | _ -> Alcotest.fail "result not an object")
-   | _ -> Alcotest.fail "response not an object");
+  let names =
+    tools
+    |> List.filter_map (function
+         | `Assoc fields -> List.assoc_opt "name" fields
+         | _ -> None)
+    |> List.filter_map (function `String s -> Some s | _ -> None)
+  in
+  (* Full is now the room default, so TRPG tools are available immediately. *)
+  Alcotest.(check bool)
+    "contains trpg.dice.roll in full default"
+    true
+    (List.mem "trpg.dice.roll" names);
+  Alcotest.(check bool)
+    "contains trpg.turn.advance in full default"
+    true
+    (List.mem "trpg.turn.advance" names);
+  (* Plan and Board categories remain available. *)
+  Alcotest.(check bool)
+    "contains masc_goal_upsert (Plan category)"
+    true
+    (List.mem "masc_goal_upsert" names);
+  Alcotest.(check bool)
+    "contains masc_board_post (Board category)"
+    true
+    (List.mem "masc_board_post" names);
+  Alcotest.(check bool)
+    "legacy masc_trpg_dice_roll hidden from list"
+    false
+    (List.mem "masc_trpg_dice_roll" names);
+  Alcotest.(check bool)
+    "legacy experiment_start hidden from list"
+    false
+    (List.mem "experiment_start" names);
+  Alcotest.(check bool)
+    "superseded masc_claim hidden from list"
+    false
+    (List.mem "masc_claim" names);
+  Alcotest.(check bool)
+    "superseded masc_dispatch_route hidden from list"
+    false
+    (List.mem "masc_dispatch_route" names);
+  Alcotest.(check bool)
+    "low-usage social tool hidden from list"
+    false
+    (List.mem "masc_post_create" names);
+  Alcotest.(check bool)
+    "low-usage vote utility hidden from list"
+    false
+    (List.mem "masc_vote_create" names);
+  Alcotest.(check bool)
+    "placeholder tool hidden by default"
+    false
+    (List.mem "masc_archive_save" names);
 
   cleanup_dir base_path
 
@@ -365,12 +400,17 @@ let test_handle_request_tools_list_mdal_descriptions () =
      Switch to Full so the names filter can find them. *)
   let room_path = Masc_mcp.Room.masc_dir state.room_config in
   let _ = Config.switch_mode room_path Mode.Full in
-  let response =
-    tools_list_response ~clock ~sw
-      ~names:[ "masc_mdal_start"; "masc_mdal_iterate" ]
-      state
+  let tools =
+    tools_list_all ~clock ~sw state
+    |> List.filter
+         (function
+           | `Assoc fields -> (
+               match List.assoc_opt "name" fields with
+               | Some (`String "masc_mdal_start" | `String "masc_mdal_iterate") ->
+                   true
+               | _ -> false)
+           | _ -> false)
   in
-  let tools = tools_from_response response in
   Alcotest.(check int) "exactly two mdal tools" 2 (List.length tools);
 
   let start_description =
@@ -462,10 +502,10 @@ let test_handle_request_tools_list_operator_profile () =
                  in
                  Alcotest.(check (list string)) "operator-only tools"
                    [
-                     "masc_operator_snapshot";
-                     "masc_operator_digest";
                      "masc_operator_action";
                      "masc_operator_confirm";
+                     "masc_operator_digest";
+                     "masc_operator_snapshot";
                    ]
                    names;
                  let find_tool name =
@@ -493,8 +533,10 @@ let test_handle_request_tools_list_operator_profile () =
                    | Some tool -> tool
                    | None -> Alcotest.fail "digest tool missing"
                  in
-                 Alcotest.(check bool) "snapshot has annotations" true
-                   (Yojson.Safe.Util.member "annotations" snapshot_tool <> `Null);
+                 Alcotest.(check bool) "snapshot has title" true
+                   (Yojson.Safe.Util.member "title" snapshot_tool <> `Null);
+                 Alcotest.(check bool) "snapshot has icons" true
+                   (Yojson.Safe.Util.member "icons" snapshot_tool <> `Null);
                  Alcotest.(check bool) "snapshot readonly hint" true
                    (snapshot_tool |> Yojson.Safe.Util.member "annotations"
                     |> Yojson.Safe.Util.member "readOnlyHint"
@@ -543,7 +585,7 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
 
-let test_handle_request_tools_list_with_names_filter () =
+let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -562,22 +604,7 @@ let test_handle_request_tools_list_with_names_filter () =
   in
   (match response with
    | `Assoc fields ->
-       (match List.assoc_opt "result" fields with
-        | Some (`Assoc result_fields) ->
-            (match List.assoc_opt "tools" result_fields with
-             | Some (`List tools) ->
-                 let names =
-                   tools
-                   |> List.filter_map (function
-                        | `Assoc tool_fields -> List.assoc_opt "name" tool_fields
-                        | _ -> None)
-                   |> List.filter_map (function `String s -> Some s | _ -> None)
-                 in
-                 Alcotest.(check (list string)) "filtered tool names"
-                   [ "masc_status"; "masc_broadcast" ]
-                   names
-             | _ -> Alcotest.fail "tools not a list")
-        | _ -> Alcotest.fail "result not an object")
+       Alcotest.(check bool) "has error" true (List.mem_assoc "error" fields)
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
 
@@ -589,37 +616,18 @@ let test_handle_request_tools_list_with_placeholder_flag () =
 
     let base_path = temp_dir () in
     let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-
-    let request = Yojson.Safe.to_string (`Assoc [
-      ("jsonrpc", `String "2.0");
-      ("id", `Int 2);
-      ("method", `String "tools/list");
-      ("params", `Assoc []);
-    ]) in
-
-    let response = Mcp_eio.handle_request ~clock ~sw state request in
-
-    (match response with
-     | `Assoc fields ->
-         Alcotest.(check bool) "has result" true (List.mem_assoc "result" fields);
-         (match List.assoc_opt "result" fields with
-          | Some (`Assoc result_fields) ->
-              (match List.assoc_opt "tools" result_fields with
-               | Some (`List tools) ->
-                   let names =
-                     tools
-                     |> List.filter_map (function
-                          | `Assoc fields -> List.assoc_opt "name" fields
-                          | _ -> None)
-                     |> List.filter_map (function `String s -> Some s | _ -> None)
-                   in
-                   Alcotest.(check bool)
-                     "placeholder tool visible with flag"
-                     true
-                     (List.mem "masc_archive_save" names)
-               | _ -> Alcotest.fail "tools not a list")
-          | _ -> Alcotest.fail "result not an object")
-     | _ -> Alcotest.fail "response not an object");
+    let tools = tools_list_all ~clock ~sw state in
+    let names =
+      tools
+      |> List.filter_map (function
+           | `Assoc fields -> List.assoc_opt "name" fields
+           | _ -> None)
+      |> List.filter_map (function `String s -> Some s | _ -> None)
+    in
+    Alcotest.(check bool)
+      "placeholder tool visible with flag"
+      true
+      (List.mem "masc_archive_save" names);
 
     cleanup_dir base_path)
 
@@ -630,83 +638,22 @@ let test_handle_request_tools_list_include_hidden_metadata () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Full in
-  let tools =
-    tools_list_response ~clock ~sw ~include_hidden:true
-      ~names:
-        [
-          "masc_claim";
-          "masc_transition";
-          "masc_archive_save";
-          "masc_team_session_turn";
-          "masc_team_session_step";
-          "masc_trpg_dice_roll";
-          "experiment_start";
-          "masc_post_create";
-          "masc_vote_create";
-        ]
-      state
-    |> tools_from_response
-  in
-
-  let masc_claim = find_tool_exn tools "masc_claim" in
-  Alcotest.(check string) "masc_claim hidden" "hidden"
-    (tool_string_field masc_claim "visibility");
-  Alcotest.(check string) "masc_claim deprecated" "deprecated"
-    (tool_string_field masc_claim "lifecycle");
-  Alcotest.(check string) "masc_claim canonical" "masc_transition"
-    (tool_string_field masc_claim "canonicalName");
-  Alcotest.(check string) "masc_claim replacement" "masc_transition"
-    (tool_string_field masc_claim "replacement");
-
-  let placeholder = find_tool_exn tools "masc_archive_save" in
-  Alcotest.(check string) "placeholder hidden" "hidden"
-    (tool_string_field placeholder "visibility");
-  Alcotest.(check string) "placeholder active" "active"
-    (tool_string_field placeholder "lifecycle");
-
-  let legacy_team_turn = find_tool_exn tools "masc_team_session_turn" in
-  Alcotest.(check string) "team turn hidden" "hidden"
-    (tool_string_field legacy_team_turn "visibility");
-  Alcotest.(check string) "team turn deprecated" "deprecated"
-    (tool_string_field legacy_team_turn "lifecycle");
-  Alcotest.(check string) "team turn canonical" "masc_team_session_step"
-    (tool_string_field legacy_team_turn "canonicalName");
-  Alcotest.(check string) "team turn replacement" "masc_team_session_step"
-    (tool_string_field legacy_team_turn "replacement");
-
-  let canonical_team_step = find_tool_exn tools "masc_team_session_step" in
-  Alcotest.(check string) "team step visible" "default"
-    (tool_string_field canonical_team_step "visibility");
-  Alcotest.(check string) "team step active" "active"
-    (tool_string_field canonical_team_step "lifecycle");
-
-  let legacy_trpg = find_tool_exn tools "masc_trpg_dice_roll" in
-  Alcotest.(check string) "legacy trpg canonical" "trpg.dice.roll"
-    (tool_string_field legacy_trpg "canonicalName");
-
-  let legacy_experiment = find_tool_exn tools "experiment_start" in
-  Alcotest.(check string) "legacy experiment canonical" "experiment.start"
-    (tool_string_field legacy_experiment "canonicalName");
-
-  let social_tool = find_tool_exn tools "masc_post_create" in
-  Alcotest.(check string) "social tool hidden" "hidden"
-    (tool_string_field social_tool "visibility");
-  Alcotest.(check string) "social tool active" "active"
-    (tool_string_field social_tool "lifecycle");
-
-  let vote_tool = find_tool_exn tools "masc_vote_create" in
-  Alcotest.(check string) "vote utility hidden" "hidden"
-    (tool_string_field vote_tool "visibility");
-  Alcotest.(check string) "vote utility active" "active"
-    (tool_string_field vote_tool "lifecycle");
-
-  let canonical = find_tool_exn tools "masc_transition" in
-  Alcotest.(check string) "canonical visible" "default"
-    (tool_string_field canonical "visibility");
-  Alcotest.(check string) "canonical active" "active"
-    (tool_string_field canonical "lifecycle");
+  let tools = tools_list_all ~clock ~sw state in
+  let status_tool = find_tool_exn tools "masc_status" in
+  Alcotest.(check bool) "standard tools expose title" true
+    (tool_string_field status_tool "title" <> "");
+  Alcotest.(check bool) "standard tools expose icons" true
+    (Yojson.Safe.Util.member "icons" status_tool <> `Null);
+  Alcotest.(check bool) "standard tools expose annotations" true
+    (Yojson.Safe.Util.member "annotations" status_tool <> `Null);
+  Alcotest.(check bool) "hidden metadata not leaked" false
+    (Yojson.Safe.Util.member "visibility" status_tool <> `Null);
+  Alcotest.(check bool) "hidden utility omitted" false
+    (List.exists
+       (function
+         | `Assoc fields -> List.assoc_opt "name" fields = Some (`String "masc_post_create")
+         | _ -> false)
+       tools);
 
   cleanup_dir base_path
 
@@ -718,12 +665,7 @@ let test_handle_request_tools_list_hides_team_session_turn_by_default () =
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   let room_path = Masc_mcp.Room.masc_dir state.room_config in
   let _ = Config.switch_mode room_path Mode.Full in
-  let tools =
-    tools_list_response ~clock ~sw
-      ~names:[ "masc_team_session_step"; "masc_team_session_turn" ]
-      state
-    |> tools_from_response
-  in
+  let tools = tools_list_all ~clock ~sw state in
   Alcotest.(check bool) "step still visible" true
     (List.exists
        (function
@@ -745,43 +687,24 @@ let test_handle_request_tools_list_hides_team_session_turn_by_default () =
   cleanup_dir base_path
 
 let test_handle_request_tools_list_include_usage_metadata () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-      let telemetry_dir = Filename.concat base_path ".masc" in
-      Unix.mkdir telemetry_dir 0o755;
-      let telemetry_path = Filename.concat telemetry_dir "telemetry.jsonl" in
-      write_text_file telemetry_path
-        {|{"timestamp":100.0,"event":["Tool_called",{"tool_name":"masc_status","success":true,"duration_ms":3,"agent_id":null}]}
-{"timestamp":125.0,"event":["Tool_called",{"tool_name":"masc_status","success":false,"duration_ms":4,"agent_id":null}]}
-{"timestamp":130.0,"event":["Tool_called",{"tool_name":"masc_goal_list","success":true,"duration_ms":5,"agent_id":null}]}
-|};
-      Eio_main.run @@ fun env ->
-      let clock = Eio.Stdenv.clock env in
-      Eio.Switch.run @@ fun sw ->
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let response = tools_list_response ~clock ~sw ~include_usage:true state in
-      let open Yojson.Safe.Util in
-      Alcotest.(check bool) "telemetry available" true
-        (response |> member "result" |> member "usageTelemetryAvailable" |> to_bool);
-      Alcotest.(check string) "telemetry path" telemetry_path
-        (response |> member "result" |> member "usageTelemetryPath" |> to_string);
-      Alcotest.(check int) "usage total calls" 3
-        (response |> member "result" |> member "usageTotalCalls" |> to_int);
-      let tools = tools_from_response response in
-      let status_tool = find_tool_exn tools "masc_status" in
-      Alcotest.(check int) "masc_status usage count" 2
-        (status_tool |> member "usageCount" |> to_int);
-      Alcotest.(check int) "masc_status success count" 1
-        (status_tool |> member "usageSuccessCount" |> to_int);
-      Alcotest.(check int) "masc_status failure count" 1
-        (status_tool |> member "usageFailureCount" |> to_int);
-      Alcotest.(check (float 0.001)) "masc_status last used at" 125.0
-        (status_tool |> member "usageLastUsedAt" |> to_float);
-      let who_tool = find_tool_exn tools "masc_who" in
-      Alcotest.(check int) "unused tool usage count" 0
-        (who_tool |> member "usageCount" |> to_int))
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 121);
+    ("method", `String "tools/list");
+    ("params", `Assoc [ ("include_usage", `Bool true) ]);
+  ]) in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  (match response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "include_usage rejected" true
+         (List.mem_assoc "error" fields)
+   | _ -> Alcotest.fail "response not an object");
+  cleanup_dir base_path
 
 let test_execute_tool_trpg_flow () =
   Eio_main.run @@ fun env ->
@@ -1461,28 +1384,7 @@ let test_handle_request_resources_list_includes_tool_help () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let request =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ("id", `Int 23);
-          ("method", `String "resources/list");
-          ("params", `Assoc []);
-        ])
-  in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  let resources =
-    match response with
-    | `Assoc fields -> (
-        match List.assoc_opt "result" fields with
-        | Some (`Assoc result_fields) -> (
-            match List.assoc_opt "resources" result_fields with
-            | Some (`List resources) -> resources
-            | _ -> Alcotest.fail "resources not a list")
-        | _ -> Alcotest.fail "result not an object")
-    | _ -> Alcotest.fail "response not an object"
-  in
+  let resources = resources_list_all ~clock ~sw state [] in
   let tool_help_index_present =
     List.exists
       (function
@@ -1539,6 +1441,76 @@ let test_handle_request_tool_help_resource_read () =
     (contains_substring text "# masc_status");
   cleanup_dir base_path
 
+let test_handle_request_resources_subscribe_requires_session () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 240);
+          ("method", `String "resources/subscribe");
+          ("params", `Assoc [ ("uri", `String "masc://status") ]);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  (match response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "subscribe requires session" true
+         (List.mem_assoc "error" fields)
+   | _ -> Alcotest.fail "response not an object");
+  cleanup_dir base_path
+
+let test_handle_request_resources_subscribe_roundtrip () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let subscribe_request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 241);
+          ("method", `String "resources/subscribe");
+          ("params", `Assoc [ ("uri", `String "masc://status") ]);
+        ])
+  in
+  let subscribe_response =
+    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-spec" state
+      subscribe_request
+  in
+  (match subscribe_response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "subscribe ok" true
+         (List.mem_assoc "result" fields)
+   | _ -> Alcotest.fail "subscribe response not an object");
+  let unsubscribe_request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 242);
+          ("method", `String "resources/unsubscribe");
+          ("params", `Assoc [ ("uri", `String "masc://status") ]);
+        ])
+  in
+  let unsubscribe_response =
+    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-spec" state
+      unsubscribe_request
+  in
+  (match unsubscribe_response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "unsubscribe ok" true
+         (List.mem_assoc "result" fields)
+   | _ -> Alcotest.fail "unsubscribe response not an object");
+  cleanup_dir base_path
+
 let test_execute_tool_help_tool () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1590,11 +1562,15 @@ let eio_tests = [
     test_handle_request_prompts_get_command_truth_filters_run_id;
   "handle resources/list includes tool-help", `Quick, test_handle_request_resources_list_includes_tool_help;
   "handle resources/read tool-help", `Quick, test_handle_request_tool_help_resource_read;
+  "handle resources/subscribe requires session", `Quick,
+    test_handle_request_resources_subscribe_requires_session;
+  "handle resources/subscribe roundtrip", `Quick,
+    test_handle_request_resources_subscribe_roundtrip;
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
   "handle tools/list mdal descriptions", `Quick,
     test_handle_request_tools_list_mdal_descriptions;
-  "handle tools/list with names filter", `Quick,
-    test_handle_request_tools_list_with_names_filter;
+  "handle tools/list rejects nonstandard names filter", `Quick,
+    test_handle_request_tools_list_rejects_nonstandard_names_filter;
   "handle tools/list operator profile", `Quick,
     test_handle_request_tools_list_operator_profile;
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;

@@ -102,6 +102,66 @@ let test_voice_auth_env_resolution () =
   check (option string) "endpoint override auth env"
     (Some "VOICE_PROXY_KEY")
     (Adapter.voice_auth_env_name ~endpoint_api_key_env:"VOICE_PROXY_KEY" openai_compat)
+
+let test_voice_http_request_openai_compat () =
+  let endpoint : Masc_mcp.Voice_config.endpoint =
+    {
+      id = "railway-elevenlabs-proxy";
+      kind = Openai_compat;
+      base_url = Some "https://example.test/v1/";
+      mcp_url = None;
+      health_url = None;
+      api_key_env = None;
+      enabled = true;
+      timeout_seconds = None;
+      max_retries = None;
+    }
+  in
+  let tuning : Masc_mcp.Voice_config.voice_tuning =
+    { stability = 0.28; similarity_boost = 0.82; style = 0.45 }
+  in
+  match
+    Adapter.voice_http_request_for_tts endpoint ~api_key:"" ~message:"hello"
+      ~voice:"Roger" ~model:"eleven_multilingual_v2" ~tuning
+  with
+  | Error msg -> fail msg
+  | Ok request ->
+      check string "openai compat url" "https://example.test/v1/audio/speech"
+        request.url;
+      check bool "has content-type" true
+        (List.mem ("Content-Type", "application/json") request.headers);
+      check string "body input" "hello"
+        Yojson.Safe.Util.(request.body_json |> member "input" |> to_string)
+
+let test_voice_http_request_elevenlabs_direct () =
+  let endpoint : Masc_mcp.Voice_config.endpoint =
+    {
+      id = "elevenlabs-direct";
+      kind = Elevenlabs_direct;
+      base_url = Some "https://api.elevenlabs.io/v1/";
+      mcp_url = None;
+      health_url = None;
+      api_key_env = Some "ELEVENLABS_API_KEY";
+      enabled = true;
+      timeout_seconds = None;
+      max_retries = None;
+    }
+  in
+  let tuning : Masc_mcp.Voice_config.voice_tuning =
+    { stability = 0.28; similarity_boost = 0.82; style = 0.45 }
+  in
+  match
+    Adapter.voice_http_request_for_tts endpoint ~api_key:"secret" ~message:"hello"
+      ~voice:"Roger" ~model:"eleven_multilingual_v2" ~tuning
+  with
+  | Error msg -> fail msg
+  | Ok request ->
+      check bool "uses elevenlabs path" true
+        (String.ends_with ~suffix:"/text-to-speech/CwhRBWXzGAHq8TQ4Fs17" request.url);
+      check bool "has xi-api-key" true
+        (List.mem ("xi-api-key", "secret") request.headers);
+      check string "body text" "hello"
+        Yojson.Safe.Util.(request.body_json |> member "text" |> to_string)
 let () =
   run "Provider Adapter"
     [
@@ -123,5 +183,9 @@ let () =
           test_case "resolve voice aliases" `Quick test_resolve_voice_aliases;
           test_case "voice auth env resolution" `Quick
             test_voice_auth_env_resolution;
+          test_case "voice http request openai compat" `Quick
+            test_voice_http_request_openai_compat;
+          test_case "voice http request elevenlabs direct" `Quick
+            test_voice_http_request_elevenlabs_direct;
         ] );
     ]

@@ -58,6 +58,12 @@ type voice_adapter = {
   aliases : string list;
 }
 
+type voice_http_request = {
+  url : string;
+  headers : (string * string) list;
+  body_json : Yojson.Safe.t;
+}
+
 type gemini_direct_auth =
   | Gemini_vertex_adc of {
       project : string;
@@ -313,6 +319,107 @@ let voice_auth_env_name ?endpoint_api_key_env (adapter : voice_adapter) =
 let voice_endpoint_auth_env_name (endpoint : Voice_config.endpoint) =
   let adapter = voice_adapter_for_endpoint endpoint in
   voice_auth_env_name ?endpoint_api_key_env:endpoint.api_key_env adapter
+
+let voice_transport_supports_http_tts (adapter : voice_adapter) =
+  match adapter.transport with
+  | Voice_openai_compat | Voice_elevenlabs_direct -> true
+  | Voice_mcp -> false
+
+let voice_endpoint_supports_http_tts (endpoint : Voice_config.endpoint) =
+  voice_adapter_for_endpoint endpoint
+  |> voice_transport_supports_http_tts
+
+let default_elevenlabs_base_url = "https://api.elevenlabs.io/v1"
+
+let normalize_base_url value =
+  let trimmed = String.trim value in
+  if String.length trimmed > 1 && trimmed.[String.length trimmed - 1] = '/' then
+    String.sub trimmed 0 (String.length trimmed - 1)
+  else
+    trimmed
+
+let voice_endpoint_base_url (endpoint : Voice_config.endpoint) =
+  match voice_adapter_for_endpoint endpoint with
+  | { transport = Voice_elevenlabs_direct; _ } -> (
+      match endpoint.base_url with
+      | Some value -> Some (normalize_base_url value)
+      | None -> Some default_elevenlabs_base_url)
+  | _ -> Option.map normalize_base_url endpoint.base_url
+
+let elevenlabs_voice_id voice =
+  match String.trim voice with
+  | "Sarah" -> "EXAVITQu4vr4xnSDxMaL"
+  | "Roger" -> "CwhRBWXzGAHq8TQ4Fs17"
+  | "George" -> "JBFqnCBsd6RMkjVDRZzb"
+  | "Laura" -> "FGY2WhTYpPnrIDTdsKH5"
+  | "" -> "21m00Tcm4TlvDq8ikWAM"
+  | value -> value
+
+let voice_http_request_for_tts (endpoint : Voice_config.endpoint) ~api_key
+    ~message ~voice ~model ~(tuning : Voice_config.voice_tuning) =
+  let adapter = voice_adapter_for_endpoint endpoint in
+  match voice_endpoint_base_url endpoint, adapter.transport with
+  | None, _ ->
+      Error
+        (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
+  | Some _, Voice_mcp ->
+      Error
+        (Printf.sprintf
+           "voice config endpoint %s uses voice_mcp and cannot build HTTP TTS request"
+           endpoint.id)
+  | Some base_url, Voice_openai_compat ->
+      let headers =
+        [ ("Content-Type", "application/json"); ("Accept", "audio/mpeg") ]
+        @
+        if api_key = "" then [] else [ ("Authorization", "Bearer " ^ api_key) ]
+      in
+      let body_json =
+        `Assoc
+          [
+            ("input", `String message);
+            ("voice", `String voice);
+            ("model", `String model);
+            ("response_format", `String "mp3");
+            ( "voice_settings",
+              `Assoc
+                [
+                  ("stability", `Float tuning.stability);
+                  ("similarity_boost", `Float tuning.similarity_boost);
+                  ("style", `Float tuning.style);
+                ] );
+          ]
+      in
+      Ok { url = base_url ^ "/audio/speech"; headers; body_json }
+  | Some base_url, Voice_elevenlabs_direct ->
+      let headers =
+        [
+          ("xi-api-key", api_key);
+          ("Content-Type", "application/json");
+          ("Accept", "audio/mpeg");
+        ]
+      in
+      let body_json =
+        `Assoc
+          [
+            ("text", `String message);
+            ("model_id", `String model);
+            ( "voice_settings",
+              `Assoc
+                [
+                  ("stability", `Float tuning.stability);
+                  ("similarity_boost", `Float tuning.similarity_boost);
+                  ("style", `Float tuning.style);
+                ] );
+          ]
+      in
+      Ok
+        {
+          url =
+            Printf.sprintf "%s/text-to-speech/%s" base_url
+              (elevenlabs_voice_id voice);
+          headers;
+          body_json;
+        }
 
 let default_cli_agent_name () = "claude"
 

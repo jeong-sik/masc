@@ -266,6 +266,11 @@ let actor_status_detail (acc : actor_acc) =
 
 let build_actor_contributions ?config ?session_id session events =
   let table = Hashtbl.create 16 in
+  let session_agent_names =
+    match session with
+    | Some current -> current.Team_session_types.agent_names
+    | None -> []
+  in
   (match session with
   | Some current ->
       Team_session_types.planned_participant_names current
@@ -316,7 +321,8 @@ let build_actor_contributions ?config ?session_id session events =
             (fun (actor, delta) ->
               if delta > 0 then
                 let acc = get_or_create_actor table session actor in
-                acc.observed_event_count <- max acc.observed_event_count 1;
+                if List.exists (String.equal actor) session_agent_names then
+                  acc.observed_event_count <- max acc.observed_event_count 1;
                 acc.recent_event_summary <-
                   Some (Printf.sprintf "Checkpoint progress +%d" delta);
                 acc.recent_output_preview <-

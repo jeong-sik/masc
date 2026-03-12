@@ -17,6 +17,8 @@ val snapshot_json :
   Yojson.Safe.t
 
 val pending_confirms_json : ?actor:string -> Room.config -> Yojson.Safe.t
+val pending_confirm_envelope_json : ?actor:string -> Room.config -> Yojson.Safe.t
+val pending_confirm_summary_json : ?actor:string -> Room.config -> Yojson.Safe.t
 
 val recent_actions_json : Room.config -> Yojson.Safe.t
 

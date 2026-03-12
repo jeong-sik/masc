@@ -23,6 +23,7 @@ import type {
   GovernanceResolvedAction,
   GovernanceTimelineEvent,
 } from '../types'
+import { selectPendingConfirmState } from '../pending-confirm'
 
 type GovernanceFilter =
   | 'open'
@@ -204,6 +205,11 @@ async function respondToPendingConfirm(decision: 'confirm' | 'deny') {
 function GovernanceSummaryStrip() {
   const summary = governanceData.value?.summary
   const judge = governanceData.value?.judge
+  const pendingState = selectPendingConfirmState({
+    pending_confirm_envelope: governanceData.value?.pending_confirm_envelope,
+    pending_confirm_summary: governanceData.value?.pending_confirm_summary,
+    pending_confirms: governanceData.value?.pending_actions,
+  })
   return html`
     <div class="board-summary-strip">
       <div class="board-summary-item">
@@ -221,6 +227,10 @@ function GovernanceSummaryStrip() {
       <div class="board-summary-item">
         <span class="board-summary-label">실행 준비</span>
         <strong>${summary?.ready_to_execute ?? 0}</strong>
+      </div>
+      <div class="board-summary-item">
+        <span class="board-summary-label">승인 대기</span>
+        <strong>${pendingState.hidden_count > 0 ? `${pendingState.visible_count}/${pendingState.total_count}` : pendingState.total_count}</strong>
       </div>
       <div class="board-summary-item">
         <span class="board-summary-label">판정기</span>

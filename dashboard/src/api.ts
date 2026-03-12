@@ -49,6 +49,11 @@ import type {
   CommandPlaneOrchestraResponse,
   CommandPlaneSummarySnapshot,
 } from './types'
+import {
+  normalizePendingConfirmation,
+  normalizePendingConfirmEnvelope,
+  normalizePendingConfirmSummary,
+} from './pending-confirm'
 
 // --- Auth ---
 
@@ -407,6 +412,8 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
         : [],
       judge: normalizeGovernanceJudgeSummary(raw.judge),
       pending_actions: pendingActions,
+      pending_confirm_summary: normalizePendingConfirmSummary(raw.pending_confirm_summary),
+      pending_confirm_envelope: normalizePendingConfirmEnvelope(raw.pending_confirm_envelope),
     }
   })
 }
@@ -693,22 +700,6 @@ function asNullableString(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed ? trimmed : null
-}
-
-function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
-  if (!isRecord(raw)) return null
-  const confirmToken = asString(raw.confirm_token ?? raw.token, '').trim()
-  if (!confirmToken) return null
-  return {
-    confirm_token: confirmToken,
-    actor: asNullableString(raw.actor) ?? undefined,
-    action_type: asNullableString(raw.action_type) ?? undefined,
-    target_type: asNullableString(raw.target_type) ?? undefined,
-    target_id: asNullableString(raw.target_id),
-    delegated_tool: asNullableString(raw.delegated_tool) ?? undefined,
-    created_at: asNullableIsoTimestamp(raw.created_at) ?? undefined,
-    preview: raw.preview,
-  }
 }
 
 function normalizeGovernanceContextRef(raw: unknown): GovernanceContextRef {

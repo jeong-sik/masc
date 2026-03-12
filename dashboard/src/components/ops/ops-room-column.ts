@@ -30,20 +30,18 @@ import {
   taskPriority,
   taskTitle,
 } from './helpers'
+import { selectPendingConfirmState } from '../../pending-confirm'
 
 export function OpsRoomColumn() {
   const snapshot = operatorSnapshot.value
   const roomDigest = operatorRoomDigest.value
   const room = snapshot?.room ?? {}
-  const pendingConfirms = snapshot?.pending_confirms ?? []
-  const pendingSummary = snapshot?.pending_confirm_summary
-  const confirmRequiredActions =
-    pendingSummary
-      ? pendingSummary.confirm_required_actions
-      : (snapshot?.available_actions ?? []).filter(action => action.confirm_required)
-  const actorFilter = pendingSummary?.actor_filter?.trim() || null
-  const hiddenCount = pendingSummary?.hidden_count ?? 0
-  const hiddenActors = pendingSummary?.hidden_actors ?? []
+  const pendingState = selectPendingConfirmState(snapshot)
+  const pendingConfirms = pendingState.items
+  const confirmRequiredActions = pendingState.confirm_required_actions
+  const actorFilter = pendingState.actor_filter
+  const hiddenCount = pendingState.hidden_count
+  const hiddenActors = pendingState.hidden_actors
   const recentMessages = snapshot?.recent_messages ?? []
   const recommendedActions = roomDigest?.recommended_actions ?? []
   const activeRecommendedActions =

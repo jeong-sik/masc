@@ -566,6 +566,22 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
       | Ok () ->
           remember_mcp_profile session_id profile;
           match auth_result with
+      | Error msg ->
+          let body =
+            Printf.sprintf
+              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
+              (Yojson.Safe.to_string (`String msg))
+          in
+          let headers =
+            Httpun.Headers.of_list
+              (("content-length", string_of_int (String.length body))
+              :: json_headers ~deps session_id protocol_version origin)
+          in
+          let response = Httpun.Response.create ~headers `Bad_request in
+          Httpun.Reqd.respond_with_string reqd response body
+      | Ok () ->
+          remember_mcp_profile session_id profile;
+          match auth_result with
           | Error msg ->
               respond_mcp_auth_error ~deps request reqd ~session_id
                 ~protocol_version msg

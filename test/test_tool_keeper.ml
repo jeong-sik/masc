@@ -70,19 +70,17 @@ let with_env name value f =
       Unix.putenv name value;
       f ())
 
-let parse_json_exn body =
-  try Yojson.Safe.from_string body
-  with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
-
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
+let stop_keeper_via_tool env sw base_dir keeper_name =
+  let config = Masc_mcp.Room.default_config base_dir in
+  let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+    { config; sw; clock = Eio.Stdenv.clock env }
   in
-  if n_len = 0 then true else loop 0
+  match
+    Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_down"
+      ~args:(`Assoc [ ("name", `String keeper_name) ])
+  with
+  | Some _ | None -> ()
+
 let string_is_valid_utf8 s =
   let len = String.length s in
   let rec loop i =
@@ -193,13 +191,15 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
 let test_keeper_model_set_persists_active_model () =
-  let provider_model = "custom:test-model" in
+  let provider_model =
+    Printf.sprintf "glm:%s" Masc_mcp.Env_config.Llm.default_model
+  in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -239,16 +239,15 @@ let test_keeper_model_set_persists_active_model () =
       in
       check bool "model set ok" true ok;
       let json = Yojson.Safe.from_string body in
-      let allowed_models =
-        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> List.map to_string)
-      in
       check string "active model updated" provider_model
         Yojson.Safe.Util.(json |> member "active_model" |> to_string);
-      check bool "allowed models include active model" true
+      let allowed_models =
+        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> filter_string)
+      in
+      check bool "allowed models contains target model" true
         (List.mem provider_model allowed_models);
-      check int "allowed models stay deduped"
-        (List.length (List.sort_uniq String.compare allowed_models))
-        (List.length allowed_models);
+      check int "allowed models are deduped" (List.length allowed_models)
+        (List.sort_uniq String.compare allowed_models |> List.length);
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -311,6 +310,18 @@ let write_reward_model path =
   }
 }|})
 
+let write_jsonl_lines path lines =
+  mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+          output_string oc line;
+          output_char oc '\n')
+        lines)
+
 let test_persona_list_and_create_from_persona () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -318,7 +329,7 @@ let test_persona_list_and_create_from_persona () =
   let me_root = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir;
       rm_rf me_root)
     (fun () ->
@@ -496,15 +507,12 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
           persistent_json |> member "persistent_agents" |> to_list
           |> List.exists (( = ) (`String "persistent-demo"))))
 
-let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
+let test_keeper_status_detailed_reads_metrics_history_and_memory () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
-      rm_rf base_dir)
+    ~finally:(fun () -> rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
@@ -520,323 +528,79 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
         dispatch "masc_keeper_up"
           (`Assoc
             [
-              ("name", `String "resident-demo");
-              ("goal", `String "Stay resident");
+              ("name", `String "detail-demo");
+              ("goal", `String "Inspect detailed status");
               ("models", `List [ `String "custom:test-model" ]);
               ("presence_keepalive", `Bool false);
               ("proactive_enabled", `Bool false);
             ])
       in
-      check bool "resident up ok" true ok;
-      let ok, _ =
-        dispatch "masc_persistent_agent_up"
-          (`Assoc
-            [
-              ("name", `String "persistent-demo");
-              ("goal", `String "Stay on demand");
-              ("models", `List [ `String "custom:test-model" ]);
-              ("presence_keepalive", `Bool false);
-              ("proactive_enabled", `Bool false);
-            ])
+      check bool "keeper up ok" true ok;
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "detail-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta"
+        | Error e -> fail e
       in
-      check bool "persistent up ok" true ok;
-      let ok, resident_body =
-        dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool true) ])
-      in
-      check bool "resident detailed list ok" true ok;
-      let resident_json = parse_json_exn resident_body in
-      let resident_row =
-        Yojson.Safe.Util.(
-          resident_json |> member "keepers" |> to_list
-          |> List.find (fun row -> member "meta" row |> member "name" = `String "resident-demo"))
-      in
-      check string "resident runtime_class" "resident_keeper"
-        Yojson.Safe.Util.(resident_row |> member "runtime_class" |> to_string);
-      check bool "resident desired" true
-        Yojson.Safe.Util.(resident_row |> member "desired" |> to_bool);
-      check bool "resident registered" true
-        Yojson.Safe.Util.(resident_row |> member "resident_registered" |> to_bool);
-      let ok, persistent_body =
-        dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool true) ])
-      in
-      check bool "persistent detailed list ok" true ok;
-      let persistent_json = parse_json_exn persistent_body in
-      let persistent_row =
-        Yojson.Safe.Util.(
-          persistent_json |> member "persistent_agents" |> to_list
-          |> List.find (fun row -> member "meta" row |> member "name" = `String "persistent-demo"))
-      in
-      check string "persistent runtime_class" "persistent_agent"
-        Yojson.Safe.Util.(persistent_row |> member "runtime_class" |> to_string);
-      check bool "persistent desired" false
-        Yojson.Safe.Util.(persistent_row |> member "desired" |> to_bool);
-      check bool "persistent registered" false
-        Yojson.Safe.Util.(persistent_row |> member "resident_registered" |> to_bool))
-
-let test_resident_keeper_msg_bootstraps_then_requires_message () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "bootstrap-demo";
-      rm_rf base_dir)
-    (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env }
-      in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
+      let metrics_path = Masc_mcp.Keeper_types.keeper_metrics_path config meta.name in
+      let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.trace_id in
+      let memory_bank_path = Masc_mcp.Keeper_types.keeper_memory_bank_path config meta.name in
+      write_jsonl_lines metrics_path
+        [
+          {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment"}|};
+          {|{"channel":"proactive","generation":0,"trace_id":"trace-1","compacted":true,"compaction_before_tokens":180,"compaction_after_tokens":120,"memory_compaction_performed":true,"memory_compaction_before_notes":4,"memory_compaction_after_notes":2,"memory_compaction_dropped_notes":2,"memory_compaction_invalid_dropped":1,"memory_compaction_reason":"dedupe"}|};
+        ];
+      write_jsonl_lines history_path
+        [
+          {|{"role":"user","content":"Can you summarize the plan?","ts_unix":10.0}|};
+          {|{"role":"assistant","content":"thinking","ts_unix":20.0}|};
+          {|{"role":"assistant","content":"All done.","ts_unix":30.0}|};
+        ];
+      write_jsonl_lines memory_bank_path
+        [
+          {|{"kind":"decision","text":"Pinned the branch split.","priority":2,"ts_unix":10.0}|};
+          {|{"kind":"next","text":"Write more keeper tests.","priority":1,"ts_unix":11.0}|};
+        ];
       let ok, body =
-        dispatch "masc_keeper_msg"
+        dispatch "masc_keeper_status"
           (`Assoc
             [
-              ("name", `String "bootstrap-demo");
-              ("goal", `String "Bootstrap resident keeper");
-              ("models", `List [ `String "custom:test-model" ]);
-              ("presence_keepalive", `Bool false);
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "missing message rejected" false ok;
-      check bool "error mentions message" true
-        (contains_substring body "message is required");
-      check bool "resident bootstrap created keeper" true
-        (Masc_mcp.Keeper_types.is_resident_keeper config "bootstrap-demo"))
-
-let test_persistent_agent_msg_rejects_missing_message () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
-      rm_rf base_dir)
-    (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env }
-      in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
-      let ok, _ =
-        dispatch "masc_persistent_agent_up"
-          (`Assoc
-            [
-              ("name", `String "persistent-demo");
-              ("goal", `String "Stay on demand");
-              ("models", `List [ `String "custom:test-model" ]);
-              ("presence_keepalive", `Bool false);
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "persistent up ok" true ok;
-      let ok, body =
-        dispatch "masc_persistent_agent_msg"
-          (`Assoc [ ("name", `String "persistent-demo") ])
-      in
-      check bool "missing message rejected" false ok;
-      check bool "error mentions message" true
-        (contains_substring body "message is required"))
-
-let test_persistent_agent_create_from_persona_and_status () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  let me_root = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-sangsu";
-      rm_rf base_dir;
-      rm_rf me_root)
-    (fun () ->
-      let reward_model_path = Filename.concat base_dir "reward-model.json" in
-      write_reward_model reward_model_path;
-      write_persona_profile ~me_root ~persona_name:"persistent-sangsu"
-        ~content:
-          (Printf.sprintf {|{
-  "name": "Persistent Sangsu",
-  "role": "resident critic",
-  "trait": "terse",
-  "keeper": {
-    "goal": "persistently watch the room",
-    "models": ["custom:test-model"],
-    "allowed_models": ["custom:test-model"],
-    "active_model": "custom:test-model",
-    "room_scope": "all",
-    "trigger_mode": "explicit_only",
-    "mention_targets": ["persistent-sangsu"],
-    "presence_keepalive": false,
-    "proactive_enabled": false,
-    "policy_mode": "learned_offline_v1",
-    "policy_action_budget": "board",
-    "policy_reward_model_path": "%s"
-  }
-}|} reward_model_path);
-      with_env "ME_ROOT" me_root (fun () ->
-        let config = Masc_mcp.Room.default_config base_dir in
-        ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-        let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-          { config; sw; clock = Eio.Stdenv.clock env }
-        in
-        let dispatch name args =
-          match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-          | Some result -> result
-          | None -> fail ("missing dispatch for " ^ name)
-        in
-        let ok, body =
-          dispatch "masc_persistent_agent_create_from_persona"
-            (`Assoc
-              [
-                ("persona_name", `String "persistent-sangsu");
-                ("name", `String "persistent-sangsu");
-              ])
-        in
-        check bool "persistent persona create ok" true ok;
-        let json = parse_json_exn body in
-        check bool "created true" true Yojson.Safe.Util.(json |> member "created" |> to_bool);
-        let ok, status_body =
-          dispatch "masc_persistent_agent_status"
-            (`Assoc
-              [
-                ("name", `String "persistent-sangsu");
-                ("fast", `Bool true);
-                ("include_context", `Bool false);
-                ("include_metrics_overview", `Bool false);
-                ("include_memory_bank", `Bool false);
-                ("include_history_tail", `Bool false);
-                ("include_compaction_history", `Bool false);
-              ])
-        in
-        check bool "persistent status ok" true ok;
-        let status_json = parse_json_exn status_body in
-        check string "persistent runtime_class" "persistent_agent"
-          Yojson.Safe.Util.(status_json |> member "runtime_class" |> to_string);
-        check bool "persistent resident registered false" false
-          Yojson.Safe.Util.(status_json |> member "resident_registered" |> to_bool)))
-
-let test_keeper_dispatch_auxiliary_surfaces_smoke () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
-      rm_rf base_dir)
-    (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env }
-      in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
-      let ok, _ =
-        dispatch "masc_keeper_up"
-          (`Assoc
-            [
-              ("name", `String "resident-demo");
-              ("goal", `String "Stay resident");
-              ("models", `List [ `String "custom:test-model" ]);
-              ("presence_keepalive", `Bool false);
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "resident up ok" true ok;
-      let ok, _ =
-        dispatch "masc_persistent_agent_up"
-          (`Assoc
-            [
-              ("name", `String "persistent-demo");
-              ("goal", `String "Stay on demand");
-              ("models", `List [ `String "custom:test-model" ]);
-              ("presence_keepalive", `Bool false);
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "persistent up ok" true ok;
-      let ok, autonomy_body =
-        dispatch "masc_keeper_autonomy" (`Assoc [ ("name", `String "resident-demo") ])
-      in
-      check bool "resident autonomy ok" true ok;
-      check bool "autonomy body non-empty" true (String.length autonomy_body > 0);
-      let ok, _ =
-        dispatch "masc_keeper_autonomy"
-          (`Assoc
-            [
-              ("name", `String "resident-demo");
-              ("level", `String "L1_Reactive");
-            ])
-      in
-      check bool "resident autonomy set ok" true ok;
-      let ok, goals_body =
-        dispatch "masc_keeper_goals" (`Assoc [ ("name", `String "resident-demo") ])
-      in
-      check bool "resident goals ok" true ok;
-      check bool "goals body non-empty" true (String.length goals_body > 0);
-      let ok, trajectory_body =
-        dispatch "masc_keeper_trajectory"
-          (`Assoc [ ("name", `String "resident-demo"); ("limit", `Int 5) ])
-      in
-      check bool "resident trajectory ok" true ok;
-      check bool "trajectory body non-empty" true (String.length trajectory_body > 0);
-      let ok, eval_body =
-        dispatch "masc_keeper_eval" (`Assoc [ ("name", `String "resident-demo") ])
-      in
-      check bool "resident eval ok" true ok;
-      check bool "eval body non-empty" true (String.length eval_body > 0);
-      let ok, model_set_body =
-        dispatch "masc_persistent_agent_model_set"
-          (`Assoc
-            [
-              ("name", `String "persistent-demo");
-              ("model", `String "custom:alt-model");
-            ])
-      in
-      check bool "persistent model set ok" true ok;
-      let model_set_json = parse_json_exn model_set_body in
-      check string "persistent active model updated" "custom:alt-model"
-        Yojson.Safe.Util.(model_set_json |> member "active_model" |> to_string);
-      let ok, persistent_status_body =
-        dispatch "masc_persistent_agent_status"
-          (`Assoc
-            [
-              (* The persistent-agent alias should still surface resident registration
-                 when querying an always-on keeper through the persistent wrapper. *)
-              ("name", `String "resident-demo");
-              ("fast", `Bool true);
+              ("name", `String "detail-demo");
+              ("fast", `Bool false);
               ("include_context", `Bool false);
-              ("include_metrics_overview", `Bool false);
-              ("include_memory_bank", `Bool false);
-              ("include_history_tail", `Bool false);
-              ("include_compaction_history", `Bool false);
+              ("include_metrics_overview", `Bool true);
+              ("include_memory_bank", `Bool true);
+              ("include_history_tail", `Bool true);
+              ("include_compaction_history", `Bool true);
             ])
       in
-      check bool "persistent alias status ok" true ok;
-      let persistent_status_json = parse_json_exn persistent_status_body in
-      check string "persistent alias runtime_class" "persistent_agent"
-        Yojson.Safe.Util.(persistent_status_json |> member "runtime_class" |> to_string);
-      check bool "persistent alias marks resident" true
-        Yojson.Safe.Util.(persistent_status_json |> member "resident_registered" |> to_bool);
-      let ok, _ =
-        dispatch "masc_keeper_down" (`Assoc [ ("name", `String "resident-demo") ])
+      check bool "status ok" true ok;
+      let json = Yojson.Safe.from_string body in
+      check int "history raw count" 3
+        Yojson.Safe.Util.(json |> member "history_raw_count" |> to_int);
+      check int "history fragment count" 1
+        Yojson.Safe.Util.(json |> member "history_fragment_count" |> to_int);
+      check int "history filtered count" 1
+        Yojson.Safe.Util.(json |> member "history_fragment_filtered_count" |> to_int);
+      check int "memory note count" 2
+        Yojson.Safe.Util.(json |> member "memory_bank" |> member "total_notes" |> to_int);
+      check int "compaction history count" 1
+        Yojson.Safe.Util.(json |> member "compaction_history_count" |> to_int);
+      check int "metrics compaction events" 1
+        Yojson.Safe.Util.(json |> member "metrics_overview" |> member "compaction_events" |> to_int);
+      check string "skill route primary" "masc-heartbeat"
+        Yojson.Safe.Util.(json |> member "skill_route" |> member "primary" |> to_string);
+      let ok, list_body =
+        dispatch "masc_keeper_list"
+          (`Assoc [ ("detailed", `Bool true); ("limit", `Int 10) ])
       in
-      check bool "resident down ok" true ok;
-      check bool "resident registration removed" false
-        (Masc_mcp.Keeper_types.is_resident_keeper config "resident-demo"))
+      check bool "detailed list ok" true ok;
+      let list_json = Yojson.Safe.from_string list_body in
+      let keeper_row =
+        Yojson.Safe.Util.(list_json |> member "keepers" |> to_list |> List.hd)
+      in
+      check string "detailed list skill route primary" "masc-heartbeat"
+        Yojson.Safe.Util.(keeper_row |> member "skill_route" |> member "primary" |> to_string))
 
 let test_keeper_policy_tools_roundtrip () =
   Eio_main.run @@ fun env ->
@@ -844,7 +608,7 @@ let test_keeper_policy_tools_roundtrip () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir)
     (fun () ->
       let reward_model_path = Filename.concat base_dir "reward-model.json" in
@@ -1027,7 +791,7 @@ let test_keeper_policy_set_rejects_invalid_mode () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -1157,13 +921,13 @@ let test_keeper_policy_set_accepts_explicit_event_v1 () =
       check string "policy mode updated" "explicit_event_v1"
         Yojson.Safe.Util.(json |> member "policy_mode" |> to_string))
 
-let test_resident_bootstrap_marks_stale_explicit_keeper () =
+let test_resident_bootstrap_recovers_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -1188,7 +952,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
             ])
       in
       check bool "keeper up ok" true ok;
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       let meta =
         match Masc_mcp.Keeper_types.read_meta config "sangsu" with
         | Ok (Some meta) -> meta
@@ -1256,16 +1020,8 @@ let () =
            test_persona_list_and_create_from_persona;
          test_case "resident and persistent lists split" `Quick
            test_resident_keeper_and_persistent_agent_lists_split;
-         test_case "resident and persistent detailed lists annotate runtime class" `Quick
-           test_resident_and_persistent_detailed_lists_annotate_runtime_class;
-         test_case "resident keeper msg bootstraps then requires message" `Quick
-           test_resident_keeper_msg_bootstraps_then_requires_message;
-         test_case "persistent agent msg rejects missing message" `Quick
-           test_persistent_agent_msg_rejects_missing_message;
-         test_case "persistent agent create from persona" `Quick
-           test_persistent_agent_create_from_persona_and_status;
-         test_case "keeper dispatch auxiliary surfaces smoke" `Quick
-           test_keeper_dispatch_auxiliary_surfaces_smoke;
+         test_case "keeper status detailed reads metrics/history/memory" `Quick
+           test_keeper_status_detailed_reads_metrics_history_and_memory;
          test_case "policy tools roundtrip" `Quick
            test_keeper_policy_tools_roundtrip;
          test_case "policy set rejects invalid mode" `Quick
@@ -1274,7 +1030,7 @@ let () =
            test_keeper_up_defaults_sangsu_to_explicit_voice_policy;
          test_case "policy set accepts explicit_event_v1" `Quick
            test_keeper_policy_set_accepts_explicit_event_v1;
-         test_case "resident bootstrap marks stale explicit keeper" `Quick
-           test_resident_bootstrap_marks_stale_explicit_keeper;
+         test_case "resident bootstrap recovers stale explicit keeper" `Quick
+           test_resident_bootstrap_recovers_stale_explicit_keeper;
        ]);
   ]

@@ -17,7 +17,7 @@ module Mode = Masc_mcp.Mode
    ============================================================ *)
 
 let test_default_mode () =
-  check bool "default mode is Standard" true (Config.default.mode = Mode.Standard)
+  check bool "default mode is Full" true (Config.default.mode = Mode.Full)
 
 let test_default_has_categories () =
   check bool "has categories" true (List.length Config.default.enabled_categories > 0)
@@ -100,12 +100,12 @@ let test_of_json_solo () =
 let test_of_json_invalid_mode () =
   let json = `Assoc [("mode", `String "invalid")] in
   let config = Config.of_json json in
-  check bool "defaults to Standard" true (config.mode = Mode.Standard)
+  check bool "defaults to Full" true (config.mode = Mode.Full)
 
 let test_of_json_missing_mode () =
   let json = `Assoc [] in
   let config = Config.of_json json in
-  check bool "defaults to Standard" true (config.mode = Mode.Standard)
+  check bool "defaults to Full" true (config.mode = Mode.Full)
 
 let test_of_json_custom_with_categories () =
   let json = `Assoc [
@@ -162,7 +162,7 @@ let test_load_nonexistent () =
   let dir = setup_temp_dir () in
   let config = Config.load dir in
   cleanup_temp_dir dir;
-  check bool "defaults to Standard" true (config.mode = Mode.Standard)
+  check bool "defaults to Full" true (config.mode = Mode.Full)
 
 let test_save_and_load () =
   let dir = setup_temp_dir () in
@@ -319,12 +319,12 @@ let test_get_config_summary_mode_description () =
 let test_of_json_mode_not_string () =
   let json = `Assoc [("mode", `Int 123)] in
   let config = Config.of_json json in
-  check bool "defaults to Standard" true (config.mode = Mode.Standard)
+  check bool "defaults to Full" true (config.mode = Mode.Full)
 
 let test_of_json_completely_invalid () =
   let json = `String "not an object" in
   let config = Config.of_json json in
-  check bool "defaults to Standard" true (config.mode = Mode.Standard)
+  check bool "defaults to Full" true (config.mode = Mode.Full)
 
 (* ============================================================
    Test Runners

@@ -233,9 +233,13 @@ let get_tty () =
     | Some tty -> Some tty
     | None ->
         (* Try to read from tty command — argv-based (no shell) *)
-        let output = Process_eio.run_argv ~timeout_sec:5.0 ["tty"] in
-        let trimmed = String.trim output in
-        if String.length trimmed > 0 then Some trimmed else None
+        try
+          if Unix.isatty Unix.stdin then
+            let output = Process_eio.run_argv ~timeout_sec:5.0 ["tty"] in
+            let trimmed = String.trim output in
+            if String.length trimmed > 0 then Some trimmed else None
+          else None
+        with Unix.Unix_error _ -> None
   with e ->
     Printf.eprintf "[WARN] get_tty failed: %s\n%!" (Printexc.to_string e);
     None

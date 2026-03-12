@@ -125,7 +125,6 @@ let file_contains_pattern file_rel pattern =
     str_contains content pattern
   end
 
-<<<<<<< HEAD
 let any_file_contains_pattern files pattern =
   List.exists (fun file_rel -> file_contains_pattern file_rel pattern) files
 

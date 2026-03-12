@@ -168,6 +168,11 @@
  (libraries masc_mcp alcotest yojson unix))
 
 (test
+ (name test_chain_native_eio_bootstrap)
+ (modules test_chain_native_eio_bootstrap)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_metrics_store_eio)
  (modules test_metrics_store_eio)
  (libraries masc_mcp alcotest str yojson))

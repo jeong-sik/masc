@@ -140,6 +140,14 @@ let first_some a b =
   | Some _ -> a
   | None -> b
 
+let resolve_allowed_models ~explicit_allowed_models ~seed_allowed_models ~models =
+  if explicit_allowed_models <> [] then
+    dedupe_keep_order explicit_allowed_models
+  else if seed_allowed_models <> [] then
+    dedupe_keep_order seed_allowed_models
+  else
+    dedupe_keep_order models
+
 let canonical_room_scope = function
   | "all" -> "all"
   | _ -> "current"
@@ -175,6 +183,27 @@ let canonical_policy_action_budget = function
   | "board" -> "board"
   | _ -> "conversation"
 
+let canonical_policy_shell_mode = function
+  | "readonly" -> "readonly"
+  | _ -> "disabled"
+
+let canonical_initiative_scope = function
+  | "board_only" -> "board_only"
+  | _ -> "board_only"
+
+let canonical_initiative_context_mode = function
+  | "board_snapshot" -> "board_snapshot"
+  | _ -> "board_snapshot"
+
+let normalize_initiative_idle_sec (v : int) : int =
+  clamp_int v ~min_v:3600 ~max_v:604800
+
+let normalize_initiative_cooldown_sec (v : int) : int =
+  clamp_int v ~min_v:3600 ~max_v:604800
+
+let normalize_initiative_post_ttl_hours (v : int) : int =
+  clamp_int v ~min_v:1 ~max_v:168
+
 let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)
 
@@ -207,6 +236,17 @@ type keeper_profile_defaults = {
   models : string list;
   allowed_models : string list;
   active_model : string option;
+  policy_mode : string option;
+  policy_action_budget : string option;
+  policy_reward_model_path : string option;
+  policy_voice_enabled : bool option;
+  policy_shell_mode : string option;
+  initiative_enabled : bool option;
+  initiative_scope : string option;
+  initiative_idle_sec : int option;
+  initiative_cooldown_sec : int option;
+  initiative_context_mode : string option;
+  initiative_post_ttl_hours : int option;
   room_scope : string option;
   scope_kind : string option;
   trigger_mode : string option;
@@ -239,6 +279,17 @@ let empty_keeper_profile_defaults = {
   models = [];
   allowed_models = [];
   active_model = None;
+  policy_mode = None;
+  policy_action_budget = None;
+  policy_reward_model_path = None;
+  policy_voice_enabled = None;
+  policy_shell_mode = None;
+  initiative_enabled = None;
+  initiative_scope = None;
+  initiative_idle_sec = None;
+  initiative_cooldown_sec = None;
+  initiative_context_mode = None;
+  initiative_post_ttl_hours = None;
   room_scope = None;
   scope_kind = None;
   trigger_mode = None;
@@ -289,6 +340,40 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
                 models = Safe_ops.json_string_list "models" keeper_json;
                 allowed_models = Safe_ops.json_string_list "allowed_models" keeper_json;
                 active_model = Safe_ops.json_string_opt "active_model" keeper_json;
+                policy_mode =
+                  Safe_ops.json_string_opt "policy_mode" keeper_json
+                  |> Option.map canonical_policy_mode;
+                policy_action_budget =
+                  Safe_ops.json_string_opt "policy_action_budget" keeper_json
+                  |> Option.map canonical_policy_action_budget;
+                policy_reward_model_path =
+                  Safe_ops.json_string_opt "policy_reward_model_path" keeper_json;
+                policy_voice_enabled =
+                  (match Yojson.Safe.Util.member "policy_voice_enabled" keeper_json with
+                  | `Bool flag -> Some flag
+                  | _ -> None);
+                policy_shell_mode =
+                  Safe_ops.json_string_opt "policy_shell_mode" keeper_json
+                  |> Option.map canonical_policy_shell_mode;
+                initiative_enabled =
+                  (match Yojson.Safe.Util.member "initiative_enabled" keeper_json with
+                  | `Bool flag -> Some flag
+                  | _ -> None);
+                initiative_scope =
+                  Safe_ops.json_string_opt "initiative_scope" keeper_json
+                  |> Option.map canonical_initiative_scope;
+                initiative_idle_sec =
+                  Safe_ops.json_int_opt "initiative_idle_sec" keeper_json
+                  |> Option.map normalize_initiative_idle_sec;
+                initiative_cooldown_sec =
+                  Safe_ops.json_int_opt "initiative_cooldown_sec" keeper_json
+                  |> Option.map normalize_initiative_cooldown_sec;
+                initiative_context_mode =
+                  Safe_ops.json_string_opt "initiative_context_mode" keeper_json
+                  |> Option.map canonical_initiative_context_mode;
+                initiative_post_ttl_hours =
+                  Safe_ops.json_int_opt "initiative_post_ttl_hours" keeper_json
+                  |> Option.map normalize_initiative_post_ttl_hours;
                 room_scope = Safe_ops.json_string_opt "room_scope" keeper_json;
                 scope_kind = Safe_ops.json_string_opt "scope_kind" keeper_json;
                 trigger_mode = Safe_ops.json_string_opt "trigger_mode" keeper_json;
@@ -372,6 +457,14 @@ type keeper_meta = {
   policy_mode: string;
   policy_action_budget: string;
   policy_reward_model_path: string;
+  policy_voice_enabled: bool;
+  policy_shell_mode: string;
+  initiative_enabled: bool;
+  initiative_scope: string;
+  initiative_idle_sec: int;
+  initiative_cooldown_sec: int;
+  initiative_context_mode: string;
+  initiative_post_ttl_hours: int;
   scope_kind: string;
   room_scope: string;
   trigger_mode: string;
@@ -459,6 +552,14 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("policy_mode", `String m.policy_mode);
       ("policy_action_budget", `String m.policy_action_budget);
       ("policy_reward_model_path", `String m.policy_reward_model_path);
+      ("policy_voice_enabled", `Bool m.policy_voice_enabled);
+      ("policy_shell_mode", `String m.policy_shell_mode);
+      ("initiative_enabled", `Bool m.initiative_enabled);
+      ("initiative_scope", `String m.initiative_scope);
+      ("initiative_idle_sec", `Int m.initiative_idle_sec);
+      ("initiative_cooldown_sec", `Int m.initiative_cooldown_sec);
+      ("initiative_context_mode", `String m.initiative_context_mode);
+      ("initiative_post_ttl_hours", `Int m.initiative_post_ttl_hours);
       ("scope_kind", `String m.scope_kind);
       ("room_scope", `String m.room_scope);
       ("trigger_mode", `String m.trigger_mode);
@@ -585,6 +686,36 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     in
     let voice_agent_id =
       Safe_ops.json_string ~default:(default_voice_agent_id_for name) "voice_agent_id" json
+    in
+    let policy_voice_enabled =
+      Safe_ops.json_bool ~default:false "policy_voice_enabled" json
+    in
+    let policy_shell_mode =
+      Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json
+      |> canonical_policy_shell_mode
+    in
+    let initiative_enabled =
+      Safe_ops.json_bool ~default:false "initiative_enabled" json
+    in
+    let initiative_scope =
+      Safe_ops.json_string ~default:"board_only" "initiative_scope" json
+      |> canonical_initiative_scope
+    in
+    let initiative_idle_sec =
+      Safe_ops.json_int ~default:3600 "initiative_idle_sec" json
+      |> normalize_initiative_idle_sec
+    in
+    let initiative_cooldown_sec =
+      Safe_ops.json_int ~default:3600 "initiative_cooldown_sec" json
+      |> normalize_initiative_cooldown_sec
+    in
+    let initiative_context_mode =
+      Safe_ops.json_string ~default:"board_snapshot" "initiative_context_mode" json
+      |> canonical_initiative_context_mode
+    in
+    let initiative_post_ttl_hours =
+      Safe_ops.json_int ~default:24 "initiative_post_ttl_hours" json
+      |> normalize_initiative_post_ttl_hours
     in
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
@@ -743,6 +874,14 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           policy_mode;
           policy_action_budget;
           policy_reward_model_path;
+          policy_voice_enabled;
+          policy_shell_mode;
+          initiative_enabled;
+          initiative_scope;
+          initiative_idle_sec;
+          initiative_cooldown_sec;
+          initiative_context_mode;
+          initiative_post_ttl_hours;
           scope_kind;
           room_scope;
           trigger_mode;

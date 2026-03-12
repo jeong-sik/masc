@@ -97,6 +97,25 @@ let resolve_targets mode ~available_agents =
       available_agents
       |> List.filter (fun name -> agent_type_of_mention name = agent_type)
 
+let is_mentioned target content =
+  let target = String.trim target in
+  if target = "" then
+    false
+  else
+    let pattern =
+      Printf.sprintf "\\(^\\|[^@A-Za-z0-9_-]\\)@%s\\([^A-Za-z0-9_-]\\|$\\)"
+        (Str.quote target)
+    in
+    try
+      ignore (Str.search_forward (Str.regexp_case_fold pattern) content 0);
+      true
+    with Not_found -> false
+
+let any_mentioned ~targets content =
+  targets
+  |> List.filter (fun target -> String.trim target <> "")
+  |> List.exists (fun target -> is_mentioned target content)
+
 (** Agent types that can be auto-spawned by Auto-Responder *)
 let spawnable_agents = ["gemini"; "codex"; "claude"; "llama"; "glm"]
 

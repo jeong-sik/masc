@@ -100,10 +100,8 @@ let trigger_mode_is_explicit_only = function
   | Explicit_only -> true
   | Legacy -> false
 
-let autonomy_level_of_string raw =
-  match Keeper_autonomy.autonomy_level_of_string raw with
-  | Some level -> level
-  | None -> Keeper_autonomy.L1_Reactive
+let parse_autonomy_level raw =
+  Keeper_autonomy.autonomy_level_of_string raw
 
 let autonomy_level_to_storage_string level =
   Keeper_autonomy.autonomy_level_to_string level

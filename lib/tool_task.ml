@@ -55,7 +55,11 @@ let handle_claim ctx args =
          ("task_id", `String task_id);
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
-       ])
+       ]);
+       (* Audit: log claim event *)
+       Audit_log.log_claim_task ctx.config ~agent_id:ctx.agent_name
+         ~room_id:(Filename.basename ctx.config.base_path)
+         ~task_id ()
    | Error _ -> ());
   result_to_response result
 
@@ -127,7 +131,11 @@ let handle_done ctx args =
        (try ignore (Metrics_store_eio.record ctx.config metric)
         with exn -> Printf.eprintf "[task] Metrics_store_eio.record(done) failed: %s\n%!" (Printexc.to_string exn));
        (* Feed success into Thompson Sampling quality signal *)
-       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up
+       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
+       (* Audit: log done event *)
+       Audit_log.log_done_task ctx.config ~agent_id:ctx.agent_name
+         ~room_id:(Filename.basename ctx.config.base_path)
+         ~task_id ()
    | Error err ->
        Printf.eprintf "[task] metrics record failed: %s\n%!" (Types.masc_error_to_string err));
   result_to_response result
@@ -173,7 +181,11 @@ let handle_cancel_task ctx args =
          ("agent_name", `String ctx.agent_name);
          ("reason", `String reason);
          ("timestamp", `Float (Time_compat.now ()));
-       ])
+       ]);
+       (* Audit: log cancel event *)
+       Audit_log.log_cancel_task ctx.config ~agent_id:ctx.agent_name
+         ~room_id:(Filename.basename ctx.config.base_path)
+         ~task_id ~reason ()
    | Error err ->
        Printf.eprintf "[task] metrics record failed: %s\n%!" (Types.masc_error_to_string err));
   result_to_response result
@@ -222,7 +234,18 @@ let handle_transition ctx args =
          ("action", `String action);
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
-       ])
+       ]);
+       (* Audit: log transition event by action type *)
+       let room_id = Filename.basename ctx.config.base_path in
+       (match action_lc with
+        | "claim" ->
+            Audit_log.log_claim_task ctx.config ~agent_id:ctx.agent_name ~room_id ~task_id ()
+        | "done" ->
+            Audit_log.log_done_task ctx.config ~agent_id:ctx.agent_name ~room_id ~task_id ()
+        | "cancel" ->
+            Audit_log.log_cancel_task ctx.config ~agent_id:ctx.agent_name ~room_id ~task_id
+              ~reason:(if reason = "" then "cancelled" else reason) ()
+        | _ -> ())
    | Error err ->
        Printf.eprintf "[task] task transition failed: %s\n%!" (Types.masc_error_to_string err));
   (* Record metrics *)

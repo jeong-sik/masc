@@ -45,6 +45,7 @@ import type {
   CommandPlaneChainSummary,
   CommandPlaneSnapshot,
   CommandPlaneSwarmResponse,
+  CommandPlaneOrchestraResponse,
   CommandPlaneSummarySnapshot,
 } from './types'
 
@@ -428,6 +429,28 @@ export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
   return get('/api/v1/dashboard/planning')
 }
 
+// --- Tool metrics (P4 Phase 4.5) ---
+
+export interface ToolMetricsTopEntry {
+  name: string
+  call_count: number
+  tier: string
+}
+
+export interface ToolMetricsResponse {
+  total_calls: number
+  distinct_tools_called: number
+  top_20: ToolMetricsTopEntry[]
+  never_called_count: number
+  tier_distribution: { essential: number; standard: number; full: number }
+  dispatch_v2_enabled: boolean
+  registered_count: number
+}
+
+export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
+  return get('/api/v1/tool-metrics')
+}
+
 // --- Individual resource fetchers (selective SSE-driven refresh) ---
 
 export interface PaginatedAgentsResponse {
@@ -542,6 +565,17 @@ export function fetchCommandPlaneSwarm(
   if (operationId) params.set('operation_id', operationId)
   const query = params.toString()
   return get(`/api/v1/command-plane/swarm${query ? `?${query}` : ''}`)
+}
+
+export function fetchCommandPlaneOrchestra(
+  runId?: string,
+  operationId?: string,
+): Promise<CommandPlaneOrchestraResponse> {
+  const params = new URLSearchParams()
+  if (runId) params.set('run_id', runId)
+  if (operationId) params.set('operation_id', operationId)
+  const query = params.toString()
+  return get(`/api/v1/command-plane/orchestra${query ? `?${query}` : ''}`)
 }
 
 export function runCommandPlaneAction(

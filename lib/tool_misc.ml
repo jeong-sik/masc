@@ -141,20 +141,30 @@ let keeper_gate_config_for_level
       }
 
 let keeper_tool_policy_json autonomy_level =
-  let level = Keeper_contract.autonomy_level_of_string autonomy_level in
-  let gate = keeper_gate_config_for_level ~autonomy_level:level in
-  `Assoc
-    [
-      ("configured_tool_policy", `String (if gate.allowlist_enabled then "allowlist" else "all"));
-      ( "configured_tool_names",
-        `List
-          (if gate.allowlist_enabled
-           then List.map (fun name -> `String name) gate.allowed_tools
-           else []) );
-      ("denied_tool_names", `List (List.map (fun name -> `String name) gate.denied_tools));
-      ("max_tool_calls_per_turn", `Int gate.max_tool_calls_per_turn);
-      ("destructive_check_enabled", `Bool gate.destructive_check_enabled);
-    ]
+  match Keeper_contract.parse_autonomy_level autonomy_level with
+  | Some level ->
+      let gate = keeper_gate_config_for_level ~autonomy_level:level in
+      `Assoc
+        [
+          ("configured_tool_policy", `String (if gate.allowlist_enabled then "allowlist" else "all"));
+          ( "configured_tool_names",
+            `List
+              (if gate.allowlist_enabled
+               then List.map (fun name -> `String name) gate.allowed_tools
+               else []) );
+          ("denied_tool_names", `List (List.map (fun name -> `String name) gate.denied_tools));
+          ("max_tool_calls_per_turn", `Int gate.max_tool_calls_per_turn);
+          ("destructive_check_enabled", `Bool gate.destructive_check_enabled);
+        ]
+  | None ->
+      `Assoc
+        [
+          ("configured_tool_policy", `String "unknown");
+          ("configured_tool_names", `List []);
+          ("denied_tool_names", `List []);
+          ("max_tool_calls_per_turn", `Null);
+          ("destructive_check_enabled", `Null);
+        ]
 
 let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
   let status_json = Keeper_execution.parse_agent_status ctx.config ~agent_name:meta.agent_name in
@@ -373,10 +383,10 @@ let apply_keeper_policy_update config ~runtime_class args =
         in
         let autonomy_level =
           match autonomy_level_opt with
-          | None -> Ok (Keeper_contract.autonomy_level_of_string meta.autonomy_level)
+          | None -> Ok meta.autonomy_level
           | Some raw -> (
               match Keeper_autonomy.autonomy_level_of_string raw with
-              | Some level -> Ok level
+              | Some level -> Ok (Keeper_contract.autonomy_level_to_storage_string level)
               | None -> Error (Printf.sprintf "invalid autonomy_level: %s" raw))
         in
         (match policy_mode, action_budget, autonomy_level with
@@ -412,8 +422,7 @@ let apply_keeper_policy_update config ~runtime_class args =
                     policy_action_budget =
                       Keeper_contract.policy_action_budget_to_string action_budget;
                     policy_reward_model_path = effective_reward_path;
-                    autonomy_level =
-                      Keeper_contract.autonomy_level_to_storage_string autonomy_level;
+                    autonomy_level;
                     updated_at = Types.now_iso ();
                   }
                 in
@@ -649,6 +658,69 @@ let handle_tool_help _ctx args =
     | Some entry ->
         (true, Yojson.Safe.pretty_to_string (Tool_help_registry.entry_json entry))
 
+let handle_keeper_tool_catalog _ctx args =
+  let include_hidden = get_bool args "include_hidden" false in
+  let include_deprecated = get_bool args "include_deprecated" false in
+  let tier_filter =
+    match get_string_opt args "tier" |> Option.map String.lowercase_ascii with
+    | None -> None
+    | Some raw -> Tool_catalog.tier_of_string raw
+  in
+  let server_tools =
+    (if include_hidden || include_deprecated then
+       Config.all_tool_schemas
+       |> List.filter (fun schema ->
+              Tool_catalog.is_visible
+                ~include_hidden
+                ~include_deprecated
+                schema.Types.name)
+     else
+       Config.visible_tool_schemas ())
+    |> List.filter (fun schema -> String.length schema.Types.name >= 5
+                                 && String.equal (String.sub schema.Types.name 0 5) "masc_")
+    |> (match tier_filter with
+        | None -> Fun.id
+        | Some tier ->
+            List.filter (fun schema -> Tool_catalog.is_in_tier tier schema.Types.name))
+  in
+  let tool_json (schema : Types.tool_schema) =
+    `Assoc
+      (("name", `String schema.name)
+       :: Tool_catalog.metadata_to_fields schema.name)
+  in
+  let wrapped_internal_tools =
+    Tool_shard.keeper_llm_tools
+    |> List.map (fun tool -> tool.Llm_client.tool_name)
+    |> List.sort_uniq String.compare
+  in
+  let wrapped_server_names =
+    [
+      "masc_board_post";
+      "masc_board_comment";
+      "masc_board_list";
+      "masc_voice_speak";
+    ]
+  in
+  let server_only_tools =
+    server_tools
+    |> List.map (fun schema -> schema.Types.name)
+    |> List.filter (fun name -> not (List.mem name wrapped_server_names))
+  in
+  let json =
+    `Assoc
+      [
+        ("count", `Int (List.length server_tools));
+        ("server_tools", `List (List.map tool_json server_tools));
+        ("wrapped_internal_tools",
+          `List (List.map (fun name -> `String name) wrapped_internal_tools));
+        ("wrapped_server_tools",
+          `List (List.map (fun name -> `String name) wrapped_server_names));
+        ("server_only_tools",
+          `List (List.map (fun name -> `String name) server_only_tools));
+      ]
+  in
+  (true, Yojson.Safe.pretty_to_string json)
+
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =
   match name with
@@ -660,4 +732,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_tool_help" -> Some (handle_tool_help ctx args)
   | "masc_tool_admin_snapshot" -> Some (handle_tool_admin_snapshot ctx args)
   | "masc_tool_admin_update" -> Some (handle_tool_admin_update ctx args)
+  | "masc_keeper_tool_catalog" -> Some (handle_keeper_tool_catalog ctx args)
   | _ -> None

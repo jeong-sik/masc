@@ -24,6 +24,7 @@
         test_swarm test_heartbeat_qw test_sse_qw test_agent_health
         test_post_verifier test_post_verifier_llm test_mdal
         test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
+        test_keeper_memory
         test_tool_tier)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
@@ -35,6 +36,7 @@
           test_swarm test_heartbeat_qw test_sse_qw test_agent_health
           test_post_verifier test_post_verifier_llm test_mdal
           test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
+          test_keeper_memory
           test_tool_tier)
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
@@ -834,6 +836,18 @@
 (test
  (name test_tool_registry)
  (modules test_tool_registry)
+ (libraries masc_mcp alcotest yojson))
+
+; Tool Dispatch — O(1) Hashtbl central dispatch registry (P4 Phase 4.3)
+(test
+ (name test_tool_dispatch)
+ (modules test_tool_dispatch)
+ (libraries masc_mcp alcotest yojson))
+
+; Tool Unified — unified query interface across catalog, registry, dispatch (P4 Phase 4.4)
+(test
+ (name test_tool_unified)
+ (modules test_tool_unified)
  (libraries masc_mcp alcotest yojson))
 
 ; Mode Tool Count — end-to-end Config.enabled_tool_schemas per mode

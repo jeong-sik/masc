@@ -28,6 +28,7 @@
    checkpoint_types
    common
    command_plane_v2
+   command_plane_orchestra
    cp_types
    cp_paths
    cp_serde
@@ -254,6 +255,8 @@
    tool_gardener
    tool_library
    tool_catalog
+   tool_dispatch
+   tool_unified
    tool_help_registry
    tool_registry
    library_bridge

@@ -10,6 +10,7 @@ import {
   refreshCommandPlaneChainSummary,
   refreshCommandPlaneCurrentSurface,
   refreshCommandPlaneHelp,
+  refreshCommandPlaneOrchestra,
   refreshCommandPlaneSwarm,
   runCommandPlaneDispatchTick,
   setCommandPlaneSurface,
@@ -33,6 +34,7 @@ import {
 } from './helpers'
 import { CommandEntryStrip, CommandWorkflowBanner } from './summary-hero'
 import { DetailLoadingState, SummarySurface } from './guided-panel'
+import { OrchestraSurface } from './orchestra'
 import { WarRoomSurface } from './war-room'
 import { SwarmSurface } from './swarm'
 import { ChainsSurface, OperationsSurface } from './operations'
@@ -73,6 +75,9 @@ function SurfaceBody() {
   if (commandPlaneSurface.value === 'summary') {
     return html`<${SummarySurface} />`
   }
+  if (commandPlaneSurface.value === 'orchestra') {
+    return html`<${OrchestraSurface} />`
+  }
   if (commandPlaneSurface.value === 'swarm') {
     return html`<${SwarmSurface} />`
   }
@@ -102,6 +107,7 @@ export function Command() {
     void refreshCommandPlaneChainSummary()
     void refreshCommandPlaneHelp()
     void refreshCommandPlaneSwarm()
+    void refreshCommandPlaneOrchestra()
   }, [])
 
   useEffect(() => {
@@ -124,8 +130,11 @@ export function Command() {
     if (requestedOperation) {
       focusCommandPlaneChainOperation(requestedOperation)
     }
-    if (requestedSurface === 'swarm' || requestedSurface === 'warroom' || commandPlaneSurface.value === 'warroom') {
+    if (requestedSurface === 'swarm' || requestedSurface === 'warroom' || requestedSurface === 'orchestra' || commandPlaneSurface.value === 'warroom' || commandPlaneSurface.value === 'orchestra') {
       void refreshCommandPlaneSwarm()
+    }
+    if (requestedSurface === 'orchestra' || commandPlaneSurface.value === 'orchestra') {
+      void refreshCommandPlaneOrchestra()
     }
     if (requestedSurface === 'warroom' || commandPlaneSurface.value === 'warroom') {
       void refreshOperatorSnapshot()
@@ -151,8 +160,11 @@ export function Command() {
         refreshTimer = null
         void refreshCommandPlaneCurrentSurface()
         void refreshCommandPlaneChainSummary()
-        if (commandPlaneSurface.value === 'swarm' || commandPlaneSurface.value === 'warroom') {
+        if (commandPlaneSurface.value === 'swarm' || commandPlaneSurface.value === 'warroom' || commandPlaneSurface.value === 'orchestra') {
           void refreshCommandPlaneSwarm()
+        }
+        if (commandPlaneSurface.value === 'orchestra') {
+          void refreshCommandPlaneOrchestra()
         }
         if (commandPlaneSurface.value === 'warroom') {
           void refreshOperatorSnapshot()
@@ -185,9 +197,12 @@ export function Command() {
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return
       const surface = commandPlaneSurface.value
-      if (surface !== 'swarm' && surface !== 'warroom') return
+      if (surface !== 'swarm' && surface !== 'warroom' && surface !== 'orchestra') return
       void refreshCommandPlaneCurrentSurface()
       void refreshCommandPlaneSwarm()
+      if (surface === 'orchestra') {
+        void refreshCommandPlaneOrchestra()
+      }
       if (surface === 'warroom') {
         void refreshOperatorSnapshot()
       }

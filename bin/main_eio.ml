@@ -5766,6 +5766,10 @@ let command_plane_swarm_http_json ~state request =
   Server_command_plane_http.command_plane_swarm_http_json
     ~deps:command_plane_http_deps ~state request
 
+let command_plane_orchestra_http_json ~state request =
+  Server_command_plane_http.command_plane_orchestra_http_json
+    ~deps:command_plane_http_deps ~state request
+
 let command_plane_unit_define_http_json ~state request ~args =
   Server_command_plane_http.command_plane_unit_define_http_json
     ~deps:command_plane_http_deps ~state request ~args
@@ -7380,6 +7384,13 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  (* Tool metrics — unified registry stats for dashboard (P4 Phase 4.5) *)
+  |> Http.Router.get "/api/v1/tool-metrics" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = Masc_mcp.Tool_unified.summary_report () in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/mdal/loops" (fun request reqd ->
        with_public_read (fun state req reqd ->
          match mdal_loops_json ~config:state.Mcp_server.room_config req with
@@ -7470,6 +7481,12 @@ let make_routes ~port ~host ~sw ~clock =
   |> Http.Router.get "/api/v1/command-plane/swarm" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = command_plane_swarm_http_json ~state req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/command-plane/orchestra" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = command_plane_orchestra_http_json ~state req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
@@ -8937,6 +8954,11 @@ let run_server ~sw ~env ~host ~port ~base_path =
       | `GET, "/api/v1/command-plane/swarm" ->
           let state = get_server_state () in
           let json = command_plane_swarm_http_json ~state httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/command-plane/orchestra" ->
+          let state = get_server_state () in
+          let json = command_plane_orchestra_http_json ~state httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/chains/summary" ->

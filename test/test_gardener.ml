@@ -402,9 +402,12 @@ let make_mock_post ~id ~author ~content ~created_at =
     | Ok aid -> aid
     | Error _ -> failwith ("Invalid test author: " ^ author)
   in
+  let title =
+    if String.trim content = "" then "test-post" else content
+  in
   { Board.id = post_id;
     author = author_id;
-    title = content;
+    title;
     body = content;
     content;
     post_kind = Board.Human_post;

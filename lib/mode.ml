@@ -194,7 +194,7 @@ let tool_category tool_name =
   | "masc_swarm_live_run"
   (* Mode management - always available *)
   | "masc_switch_mode" | "masc_get_config" -> Core
-  | "masc_tool_help" | "masc_tool_admin_snapshot" -> Core
+  | "masc_tool_help" | "masc_tool_admin_snapshot" | "masc_keeper_tool_catalog" -> Core
 
   (* ── Communication ── *)
   | "masc_broadcast" | "masc_messages"

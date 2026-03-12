@@ -425,8 +425,9 @@ let handle_keeper_autonomy ctx args : tool_result =
          let info = Printf.sprintf
            "Keeper: %s\nAutonomy Level: %s\nActive Goals: [%s]\nAutonomous Actions: %d\nLast Autonomous Action: %s"
            m.name
-           (Keeper_contract.autonomy_level_of_string m.autonomy_level
-            |> Keeper_autonomy.autonomy_level_to_string)
+           (match Keeper_contract.parse_autonomy_level m.autonomy_level with
+            | Some level -> Keeper_autonomy.autonomy_level_to_string level
+            | None -> m.autonomy_level)
            (String.concat ", " m.active_goal_ids)
            m.autonomous_action_count
            (if m.last_autonomous_action_at = "" then "never" else m.last_autonomous_action_at)

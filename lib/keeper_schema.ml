@@ -53,6 +53,32 @@ let resident_schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
         ]);
         ("active_model", `Assoc [("type", `String "string")]);
+        ("policy_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "heuristic"; `String "learned_offline_v1"]);
+        ]);
+        ("policy_action_budget", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "conversation"; `String "board"]);
+        ]);
+        ("policy_reward_model_path", `Assoc [("type", `String "string")]);
+        ("policy_voice_enabled", `Assoc [("type", `String "boolean")]);
+        ("policy_shell_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "disabled"; `String "readonly"]);
+        ]);
+        ("initiative_enabled", `Assoc [("type", `String "boolean")]);
+        ("initiative_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "board_only"]);
+        ]);
+        ("initiative_idle_sec", `Assoc [("type", `String "integer")]);
+        ("initiative_cooldown_sec", `Assoc [("type", `String "integer")]);
+        ("initiative_context_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "board_snapshot"]);
+        ]);
+        ("initiative_post_ttl_hours", `Assoc [("type", `String "integer")]);
         ("room_scope", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "current"; `String "all"]);
@@ -145,7 +171,51 @@ let resident_schemas : tool_schema list = [
         ("policy_mode", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "heuristic"; `String "learned_offline_v1"; `String "explicit_event_v1"]);
-          ("description", `String "Behavior selection mode. explicit_event_v1 disables heuristic routing and uses explicit lifecycle/timer events only.");
+          ("description", `String "Behavior selection mode persisted on the keeper. explicit_event_v1 disables heuristic routing and uses explicit lifecycle/timer events only.");
+        ]);
+        ("policy_action_budget", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "conversation"; `String "board"]);
+          ("description", `String "Maximum autonomous action surface. board is only valid with learned_offline_v1.");
+        ]);
+        ("policy_reward_model_path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Offline reward-model JSON path for learned_offline_v1.");
+        ]);
+        ("policy_voice_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, keeper-safe voice speak output is allowed.");
+        ]);
+        ("policy_shell_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "disabled"; `String "readonly"]);
+          ("description", `String "Keeper shell wrapper mode. readonly adds a structured read-only shell tool without enabling raw bash.");
+        ]);
+        ("initiative_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, the keeper may run initiative ticks on keepalive and choose noop vs board_post.");
+        ]);
+        ("initiative_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "board_only"]);
+          ("description", `String "Initiative action surface. v1 only supports board_only.");
+        ]);
+        ("initiative_idle_sec", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Minimum idle seconds before initiative is allowed (default/min: 3600).");
+        ]);
+        ("initiative_cooldown_sec", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Minimum seconds between initiative actions (default/min: 3600).");
+        ]);
+        ("initiative_context_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "board_snapshot"]);
+          ("description", `String "Structured initiative context source. v1 only supports board_snapshot.");
+        ]);
+        ("initiative_post_ttl_hours", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "TTL for initiative-created internal board posts (default: 24).");
         ]);
         ("scope_kind", `Assoc [
           ("type", `String "string");

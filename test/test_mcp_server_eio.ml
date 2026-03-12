@@ -1223,10 +1223,11 @@ let test_convo_start_uses_current_room () =
   in
   Alcotest.(check bool) "room enter success" true ok_enter;
 
-  (* After entering a new room, its mode defaults to Standard.
-     Convo tools are Consensus category — switch the new room to Full. *)
+  (* After entering a new room, its mode defaults to Full, so convo tools are
+     immediately available. *)
   let new_room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode new_room_path Mode.Full in
+  let mode_config = Config.load new_room_path in
+  Alcotest.(check bool) "new room defaults to full" true (mode_config.mode = Mode.Full);
 
   let (ok_start, start_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state

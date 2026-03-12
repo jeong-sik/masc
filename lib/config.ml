@@ -13,8 +13,8 @@ type t = {
 
 (** Default configuration *)
 let default = {
-  mode = Standard;
-  enabled_categories = categories_for_mode Standard;
+  mode = Full;
+  enabled_categories = categories_for_mode Full;
 }
 
 (** Config file name *)
@@ -37,12 +37,12 @@ let of_json json =
     let mode_str =
       match Yojson.Safe.Util.member "mode" json with
       | `String s -> s
-      | _ -> "standard"
+      | _ -> "full"
     in
     let mode =
       match mode_of_string mode_str with
       | Some m -> m
-      | None -> Standard
+      | None -> Full
     in
     let enabled_categories =
       match mode with

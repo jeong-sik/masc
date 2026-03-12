@@ -315,6 +315,7 @@ let tool_category tool_name =
   (* ── Ecosystem: gardener, keeper, perpetual, MDAL, autoresearch, handover, library ── *)
   (* Gardener *)
   | "masc_gardener_health" | "masc_gardener_config"
+  | "masc_gardener_status"
   | "masc_gardener_propose_spawn" | "masc_gardener_execute_spawn"
   | "masc_gardener_retire_agent" | "masc_gardener_execute_retire"
   | "masc_gardener_reset_circuit"

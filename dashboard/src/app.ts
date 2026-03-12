@@ -147,6 +147,7 @@ function refreshForTab(tab: string) {
 function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
   const build = serverStatus.value?.build
+  const gardener = serverStatus.value?.gardener
   return html`
     <section class="rail-card">
       <div class="rail-card-head">
@@ -190,6 +191,38 @@ function SnapshotCard({ currentTab }: { currentTab: string }) {
       ${build
         ? html`<div class="rail-build-hint">Server Build · v${build.release_version} · ${shortCommit(build.commit)}</div>`
         : null}
+      ${gardener ? html`
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; gap:6px;">
+          <div class="rail-card-head" style="margin:0;">
+            <h3 style="font-size:12px;">Gardener</h3>
+            <span class="rail-section-chip ${gardener.alive ? 'ok' : gardener.enabled ? 'warn' : 'bad'}">
+              ${gardener.alive ? 'Live' : gardener.enabled ? 'Starting' : 'Disabled'}
+            </span>
+          </div>
+          <div class="build-badge-row">
+            <span>Last tick</span>
+            <strong>${gardener.last_tick_completed_at ? html`<${TimeAgo} timestamp=${gardener.last_tick_completed_at} />` : 'never'}</strong>
+          </div>
+          <div class="build-badge-row">
+            <span>Decision</span>
+            <strong>${gardener.last_intervention ?? 'none'} · ${gardener.last_decision_source ?? 'none'}</strong>
+          </div>
+          <div class="build-badge-row">
+            <span>Action</span>
+            <strong>${gardener.last_action ?? 'none'}</strong>
+          </div>
+          <div class="build-badge-row">
+            <span>Backlog</span>
+            <strong>${gardener.health_summary?.todo_count ?? 0} todo · P1/2 ${gardener.health_summary?.high_priority_todo ?? 0}</strong>
+          </div>
+          ${gardener.last_reason
+            ? html`<div class="rail-build-hint">Reason · ${gardener.last_reason}</div>`
+            : null}
+          ${gardener.last_error
+            ? html`<div class="rail-build-hint" style="color:#fca5a5;">Error · ${gardener.last_error}</div>`
+            : null}
+        </div>
+      ` : null}
     </section>
   `
 }

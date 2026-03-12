@@ -201,12 +201,29 @@ val show_retirement_decision : retirement_decision -> string
 *)
 type gardener_state = {
   mutable last_health_check: float;
+  mutable last_tick_started_at: float;
+  mutable last_tick_completed_at: float;
   mutable last_spawn_attempt: float;
   mutable last_retirement_attempt: float;
   mutable consecutive_failures: int;
   mutable circuit_open_until: float option;
   mutable spawns_today: int;
   mutable retirements_today: int;
+  mutable last_intervention: string;
+  mutable last_decision_source: string;
+  mutable last_action: string;
+  mutable last_target: string;
+  mutable last_reason: string;
+  mutable last_error: string;
+  mutable tick_count: int;
+  mutable last_total_agents: int;
+  mutable last_active_agents: int;
+  mutable last_idle_agents: int;
+  mutable last_todo_count: int;
+  mutable last_high_priority_todo: int;
+  mutable last_orphan_count: int;
+  mutable last_homeostatic_score: float;
+  mutable last_needs_workers: bool;
   mutable day_start: float;  (** Start of current "day" for budget tracking *)
 }
 

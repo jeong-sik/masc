@@ -271,23 +271,57 @@ let retirement_decision_to_yojson = function
 (** Persistent state for the Gardener Agent *)
 type gardener_state = {
   mutable last_health_check: float;
+  mutable last_tick_started_at: float;
+  mutable last_tick_completed_at: float;
   mutable last_spawn_attempt: float;
   mutable last_retirement_attempt: float;
   mutable consecutive_failures: int;
   mutable circuit_open_until: float option;
   mutable spawns_today: int;
   mutable retirements_today: int;
+  mutable last_intervention: string;
+  mutable last_decision_source: string;
+  mutable last_action: string;
+  mutable last_target: string;
+  mutable last_reason: string;
+  mutable last_error: string;
+  mutable tick_count: int;
+  mutable last_total_agents: int;
+  mutable last_active_agents: int;
+  mutable last_idle_agents: int;
+  mutable last_todo_count: int;
+  mutable last_high_priority_todo: int;
+  mutable last_orphan_count: int;
+  mutable last_homeostatic_score: float;
+  mutable last_needs_workers: bool;
   mutable day_start: float;  (** Start of current "day" for budget tracking *)
 } [@@deriving show]
 
 let make_gardener_state () = {
   last_health_check = 0.0;
+  last_tick_started_at = 0.0;
+  last_tick_completed_at = 0.0;
   last_spawn_attempt = 0.0;
   last_retirement_attempt = 0.0;
   consecutive_failures = 0;
   circuit_open_until = None;
   spawns_today = 0;
   retirements_today = 0;
+  last_intervention = "none";
+  last_decision_source = "none";
+  last_action = "none";
+  last_target = "";
+  last_reason = "";
+  last_error = "";
+  tick_count = 0;
+  last_total_agents = 0;
+  last_active_agents = 0;
+  last_idle_agents = 0;
+  last_todo_count = 0;
+  last_high_priority_todo = 0;
+  last_orphan_count = 0;
+  last_homeostatic_score = 0.0;
+  last_needs_workers = false;
   day_start = Time_compat.now ();
 }
 

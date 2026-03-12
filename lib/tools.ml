@@ -3994,6 +3994,15 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
   };
 
   {
+    name = "masc_gardener_status";
+    description = "Get truth-only gardener loop runtime status. Returns liveness, last tick timestamps, last decision source, last action, last error, cooldown/circuit state, and the last observed health summary.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
     name = "masc_gardener_propose_spawn";
     description = "Evaluate whether a new agent should be spawned for a given topic. Uses LLM decision (if enabled) or rule-based logic. Returns approval/deferral/rejection with reasons. Does NOT actually create the agent — use masc_gardener_execute_spawn for that.";
     input_schema = `Assoc [

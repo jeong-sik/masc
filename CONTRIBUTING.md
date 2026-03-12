@@ -17,7 +17,7 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 
 # 4. Build
-dune build
+dune build --root .
 
 # 5. Run tests
 make test

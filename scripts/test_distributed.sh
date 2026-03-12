@@ -21,16 +21,16 @@ mkdir -p "$SHARED_DIR"
 # Build
 echo "[Build] Building test executable..."
 cd "$PROJECT_DIR"
-dune build test/test_a2a_distributed.exe
+dune build --root "$PROJECT_DIR" test/test_a2a_distributed.exe
 
 # Run producer first
 echo ""
 echo "[Step 1/2] Running PRODUCER process..."
-dune exec test/test_a2a_distributed.exe -- producer --dir "$SHARED_DIR"
+dune exec --root "$PROJECT_DIR" test/test_a2a_distributed.exe -- producer --dir "$SHARED_DIR"
 
 echo ""
 echo "[Step 2/2] Running CONSUMER process (separate process)..."
-dune exec test/test_a2a_distributed.exe -- consumer --dir "$SHARED_DIR"
+dune exec --root "$PROJECT_DIR" test/test_a2a_distributed.exe -- consumer --dir "$SHARED_DIR"
 
 # Cleanup
 echo ""

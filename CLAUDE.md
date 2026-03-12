@@ -107,8 +107,8 @@ script-based 실행에서는 표준 출력/표준 오류를 현재 셸 또는 �
 ## Build
 
 ```bash
-dune build                    # 빌드
-dune clean && dune build      # 클린 빌드 (캐시 문제 시)
+dune build --root .           # 빌드
+dune clean --root . && dune build --root .  # 클린 빌드 (캐시 문제 시)
 make test                     # 테스트
 ```
 
@@ -151,7 +151,7 @@ cd dashboard && npm run build  # Production build → ../assets/dashboard/
 2. Test with `npm run dev` (hot reload)
 3. Build: `npm run build`
 4. Commit both source changes AND `assets/dashboard/` build output
-5. `dune build` + `make test` (OCaml side unchanged since Phase 2)
+5. `dune build --root .` + `make test` (OCaml side unchanged since Phase 2)
 
 ### OCaml Integration
 

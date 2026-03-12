@@ -1328,7 +1328,13 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (* === V2 Dispatch: O(1) Hashtbl-based central dispatch ===
      When MASC_DISPATCH_V2=1, register all schema-exporting modules
      and try O(1) lookup first.  Falls through to the legacy chain
-     for inline tools and modules without exported schemas. *)
+     for inline tools and modules without exported schemas.
+
+     NOTE: Registration happens on every call because handler closures
+     capture per-call state (e.g. simple_ctx_keeper holds the request's
+     Eio.Switch [sw]).  Hashtbl.replace is idempotent and the cost
+     (~210 replace ops) is negligible vs. the legacy 40-module sequential
+     match chain.  The primary win is O(1) dispatch lookup. *)
   let v2_result =
     if Tool_dispatch.v2_enabled then begin
       let reg = Tool_dispatch.register_module in

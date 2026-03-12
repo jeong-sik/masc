@@ -131,4 +131,19 @@ let () =
               let _ = Tool_dispatch.dispatch ~name:tool ~args:test_args in
               check bool "args match" true (!received_args = test_args));
         ] );
+      ( "handler_exception_safety",
+        [
+          test_case "throwing handler returns error tuple" `Quick (fun () ->
+              let tool = "__test_dispatch_throw" in
+              let throwing_handler ~name:_ ~args:_ =
+                failwith "boom"
+              in
+              Tool_dispatch.register ~tool_name:tool ~handler:throwing_handler;
+              let result = Tool_dispatch.dispatch ~name:tool ~args:`Null in
+              check bool "still returns Some" true (Option.is_some result);
+              let (ok, msg) = Option.get result in
+              check bool "marked as failure" false ok;
+              check bool "contains error info" true
+                (String.length msg > 0 && Astring.String.is_infix ~affix:"boom" msg));
+        ] );
     ]

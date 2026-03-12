@@ -31,10 +31,18 @@ let register_module ~(schemas : Types.tool_schema list) ~(handler : handler) =
     schemas
 
 (** O(1) dispatch.  Returns [Some (success, message)] when a handler is
-    found, [None] when the tool name is unknown to the registry. *)
+    found, [None] when the tool name is unknown to the registry.
+    Handler exceptions are caught and returned as error tuples so the
+    caller gets a consistent result shape. *)
 let dispatch ~name ~args : (bool * string) option =
   match Hashtbl.find_opt registry name with
-  | Some handler -> handler ~name ~args
+  | Some handler -> (
+      try handler ~name ~args
+      with exn ->
+        Some
+          ( false,
+            Printf.sprintf "dispatch_v2 handler error for %s: %s" name
+              (Printexc.to_string exn) ))
   | None -> None
 
 (** Feature flag: use the new dispatch path. *)

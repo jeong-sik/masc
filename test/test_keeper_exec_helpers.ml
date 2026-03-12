@@ -248,6 +248,61 @@ let test_deterministic_recall_fallback_returns_grounded_reply () =
         (String.contains reply '[');
       check bool "second eval performed" true eval2.performed
 
+let test_keeper_allowed_tool_names_respects_policy_branches () =
+  let learned_meta =
+    {
+      (keeper_meta ()) with
+      policy_mode = "learned_offline_v1";
+      policy_action_budget = "board";
+      policy_voice_enabled = true;
+      policy_shell_mode = "readonly";
+    }
+  in
+  let heuristic_meta = { (keeper_meta ()) with policy_mode = "heuristic" } in
+  let learned_tools = Keeper_exec_tools.keeper_allowed_tool_names learned_meta in
+  let heuristic_tools =
+    Keeper_exec_tools.keeper_allowed_tool_names ~write_done:true heuristic_meta
+  in
+  check bool "learned includes board tool" true
+    (List.mem "keeper_board_post" learned_tools);
+  check bool "learned includes shell readonly tool" true
+    (List.mem "keeper_shell_readonly" learned_tools);
+  check bool "heuristic write done blocks tools" true (heuristic_tools = [])
+
+let test_execute_keeper_tool_call_readonly_branches () =
+  let meta =
+    { (keeper_meta ~goal:"remember continuity" ()) with continuity_summary = "steady" }
+  in
+  let ctx_work =
+    let ctx =
+      Masc_mcp.Context_manager.create ~system_prompt:"system" ~max_tokens:1024
+    in
+    let ctx =
+      Masc_mcp.Context_manager.append ctx
+        (Masc_mcp.Llm_client.user_msg "how is the weather today?")
+    in
+    Masc_mcp.Context_manager.append ctx
+      (Masc_mcp.Llm_client.user_msg "where are we meeting?")
+  in
+  let config = Masc_mcp.Room.default_config (Filename.get_temp_dir_name ()) in
+  let run call_name args =
+    Keeper_exec_tools.execute_keeper_tool_call ~config ~meta ~ctx_work
+      { Masc_mcp.Llm_client.call_id = "1"; call_name; call_arguments = args }
+    |> Yojson.Safe.from_string
+  in
+  let now_json = run "keeper_time_now" "{}" in
+  check bool "time tool has now_iso" true
+    Yojson.Safe.Util.(now_json |> member "now_iso" <> `Null);
+  let status_json = run "keeper_context_status" "{}" in
+  check string "context status continuity summary" "steady"
+    Yojson.Safe.Util.(status_json |> member "continuity_summary" |> to_string);
+  let memory_json =
+    run "keeper_memory_search"
+      {|{"query":"weather","limit":2}|}
+  in
+  check int "memory search match count" 1
+    Yojson.Safe.Util.(memory_json |> member "match_count" |> to_int)
+
 let () =
   run "Keeper_exec helpers"
     [
@@ -286,5 +341,9 @@ let () =
             test_recall_fallback_reply_formats_state_block;
           test_case "deterministic recall fallback grounded reply" `Quick
             test_deterministic_recall_fallback_returns_grounded_reply;
+          test_case "allowed tool names respects policy branches" `Quick
+            test_keeper_allowed_tool_names_respects_policy_branches;
+          test_case "execute keeper tool call readonly branches" `Quick
+            test_execute_keeper_tool_call_readonly_branches;
         ] );
     ]

@@ -203,7 +203,7 @@ export const COMMAND_SURFACE_GUIDE: Record<CommandPlaneSurface, { title: string;
   },
   topology: {
     title: '지휘 계층',
-    description: 'company에서 agent까지 지휘 계층과 live roster를 확인합니다.',
+    description: '실제 managed unit인지, live agent 기반 자동 투영인지 구분해서 봅니다.',
   },
   alerts: {
     title: '경보 모음',
@@ -317,7 +317,7 @@ export function currentSurfaceRecommendation(surface: CommandPlaneSurface): {
     case 'topology':
       return {
         tool: 'masc_observe_topology',
-        reason: '지휘 계층과 live roster를 같이 봐야 빈 squad나 고립 unit을 놓치지 않습니다.',
+        reason: '이 구조가 실제 관리 단위인지 자동 투영인지 먼저 구분해야 command-plane을 오해하지 않습니다.',
       }
     case 'alerts':
       return {

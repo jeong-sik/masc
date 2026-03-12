@@ -194,7 +194,7 @@ let tool_category tool_name =
   | "masc_swarm_live_run"
   (* Mode management - always available *)
   | "masc_switch_mode" | "masc_get_config" -> Core
-  | "masc_tool_help" | "masc_tool_admin_snapshot" -> Core
+  | "masc_tool_help" | "masc_tool_admin_snapshot" | "masc_keeper_tool_catalog" -> Core
 
   (* ── Communication ── *)
   | "masc_broadcast" | "masc_messages"
@@ -315,6 +315,7 @@ let tool_category tool_name =
   (* ── Ecosystem: gardener, keeper, perpetual, MDAL, autoresearch, handover, library ── *)
   (* Gardener *)
   | "masc_gardener_health" | "masc_gardener_config"
+  | "masc_gardener_status"
   | "masc_gardener_propose_spawn" | "masc_gardener_execute_spawn"
   | "masc_gardener_retire_agent" | "masc_gardener_execute_retire"
   | "masc_gardener_reset_circuit"

@@ -166,6 +166,42 @@ let test_post_create_success () =
   Alcotest.(check bool) "create ok" true ok;
   Alcotest.(check bool) "body has post" true (String.length body > 0)
 
+let test_post_create_structured_payload () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_post"
+    (make_args
+       [
+         ("title", `String "Why");
+         ("content", `String "Visible answer\n\n[STATE]\nGoal: keep context\n[/STATE]");
+         ("author", `String "sangsu");
+         ("post_kind", `String "automation");
+         ("meta", `Assoc [ ("source", `String "keeper_autonomy") ]);
+       ])
+  in
+  Alcotest.(check bool) "create ok" true ok;
+  let json =
+    match String.index_opt body '\n' with
+    | Some idx ->
+        Yojson.Safe.from_string
+          (String.sub body (idx + 1) (String.length body - idx - 1))
+    | None -> Alcotest.fail "expected JSON payload in create response"
+  in
+  Alcotest.(check string) "title kept" "Why"
+    Yojson.Safe.Util.(json |> member "title" |> to_string);
+  Alcotest.(check string) "body stripped" "Visible answer"
+    Yojson.Safe.Util.(json |> member "body" |> to_string);
+  Alcotest.(check string) "content alias" "Visible answer"
+    Yojson.Safe.Util.(json |> member "content" |> to_string);
+  Alcotest.(check string) "explicit kind" "automation"
+    Yojson.Safe.Util.(json |> member "post_kind" |> to_string);
+  Alcotest.(check string) "source meta kept" "keeper_autonomy"
+    Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string);
+  Alcotest.(check bool) "state extracted" true
+    (String.length
+       Yojson.Safe.Util.(json |> member "meta" |> member "state_block" |> to_string)
+     > 0)
+
 let test_post_create_empty_content () =
   Eio_main.run @@ fun _env ->
   cleanup ();
@@ -418,6 +454,8 @@ let () =
       ( "post_crud",
         [
           Alcotest.test_case "create success" `Quick test_post_create_success;
+          Alcotest.test_case "create structured payload" `Quick
+            test_post_create_structured_payload;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
           Alcotest.test_case "list empty" `Quick test_post_list_empty;
           Alcotest.test_case "cleanup clears persisted jsonl" `Quick

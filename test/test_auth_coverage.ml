@@ -320,6 +320,16 @@ let test_permission_for_tool_keeper_eval_replay () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
+let test_permission_for_tool_gardener_status () =
+  match Auth.permission_for_tool "masc_gardener_status" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_gardener_execute_spawn () =
+  match Auth.permission_for_tool "masc_gardener_execute_spawn" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
 let test_permission_for_tool_unknown () =
   match Auth.permission_for_tool "unknown_tool_xyz" with
   | None -> ()
@@ -411,6 +421,10 @@ let () =
         test_permission_for_tool_keeper_action_explain;
       test_case "keeper_eval_replay" `Quick
         test_permission_for_tool_keeper_eval_replay;
+      test_case "gardener_status" `Quick
+        test_permission_for_tool_gardener_status;
+      test_case "gardener_execute_spawn" `Quick
+        test_permission_for_tool_gardener_execute_spawn;
       test_case "unknown" `Quick test_permission_for_tool_unknown;
       test_case "empty" `Quick test_permission_for_tool_empty;
     ];

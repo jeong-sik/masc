@@ -141,7 +141,7 @@ let keeper_gate_config_for_level
       }
 
 let keeper_tool_policy_json autonomy_level =
-  match Keeper_autonomy.autonomy_level_of_string autonomy_level with
+  match Keeper_contract.parse_autonomy_level autonomy_level with
   | Some level ->
       let gate = keeper_gate_config_for_level ~autonomy_level:level in
       `Assoc
@@ -355,7 +355,7 @@ let apply_keeper_policy_update config ~runtime_class args =
     | "persistent_agent" -> List.mem name (Keeper_types.persistent_agent_names config)
     | _ -> false
   in
-  if not (Keeper_config.validate_name name) then
+  if not (Keeper_types.validate_name name) then
     Error "invalid keeper name"
   else if not membership_ok then
     Error
@@ -367,27 +367,26 @@ let apply_keeper_policy_update config ~runtime_class args =
     | Ok (Some meta) ->
         let policy_mode =
           match policy_mode_opt with
-          | None -> Ok meta.policy_mode
-          | Some "heuristic" -> Ok "heuristic"
-          | Some "learned_offline_v1" -> Ok "learned_offline_v1"
-          | Some other -> Error (Printf.sprintf "invalid policy_mode: %s" other)
+          | None -> Ok (Keeper_contract.policy_mode_of_string meta.policy_mode)
+          | Some raw -> (
+              match Keeper_contract.parse_policy_mode raw with
+              | Some mode -> Ok mode
+              | None -> Error (Printf.sprintf "invalid policy_mode: %s" raw))
         in
         let action_budget =
           match action_budget_opt with
-          | None -> Ok meta.policy_action_budget
-          | Some "conversation" -> Ok "conversation"
-          | Some "board" -> Ok "board"
-          | Some other -> Error (Printf.sprintf "invalid action_budget: %s" other)
+          | None -> Ok (Keeper_contract.policy_action_budget_of_string meta.policy_action_budget)
+          | Some raw -> (
+              match Keeper_contract.parse_policy_action_budget raw with
+              | Some budget -> Ok budget
+              | None -> Error (Printf.sprintf "invalid action_budget: %s" raw))
         in
         let autonomy_level =
           match autonomy_level_opt with
           | None -> Ok meta.autonomy_level
           | Some raw -> (
               match Keeper_autonomy.autonomy_level_of_string raw with
-              | Some level ->
-                  Ok
-                    (String.lowercase_ascii
-                       (Keeper_autonomy.autonomy_level_to_string level))
+              | Some level -> Ok (Keeper_contract.autonomy_level_to_storage_string level)
               | None -> Error (Printf.sprintf "invalid autonomy_level: %s" raw))
         in
         (match policy_mode, action_budget, autonomy_level with
@@ -407,7 +406,7 @@ let apply_keeper_policy_update config ~runtime_class args =
                 reward_model_path_raw
             in
             let effective_reward_result =
-              if String.equal policy_mode "learned_offline_v1" then
+              if Keeper_contract.policy_mode_is_learned policy_mode then
                 Keeper_memory.load_keeper_reward_model reward_model_path
                 |> Result.map (fun _ -> (reward_model_path, None))
               else
@@ -419,8 +418,9 @@ let apply_keeper_policy_update config ~runtime_class args =
                 let updated =
                   {
                     meta with
-                    policy_mode;
-                    policy_action_budget = action_budget;
+                    policy_mode = Keeper_contract.policy_mode_to_string policy_mode;
+                    policy_action_budget =
+                      Keeper_contract.policy_action_budget_to_string action_budget;
                     policy_reward_model_path = effective_reward_path;
                     autonomy_level;
                     updated_at = Types.now_iso ();
@@ -658,6 +658,69 @@ let handle_tool_help _ctx args =
     | Some entry ->
         (true, Yojson.Safe.pretty_to_string (Tool_help_registry.entry_json entry))
 
+let handle_keeper_tool_catalog _ctx args =
+  let include_hidden = get_bool args "include_hidden" false in
+  let include_deprecated = get_bool args "include_deprecated" false in
+  let tier_filter =
+    match get_string_opt args "tier" |> Option.map String.lowercase_ascii with
+    | None -> None
+    | Some raw -> Tool_catalog.tier_of_string raw
+  in
+  let server_tools =
+    (if include_hidden || include_deprecated then
+       Config.all_tool_schemas
+       |> List.filter (fun schema ->
+              Tool_catalog.is_visible
+                ~include_hidden
+                ~include_deprecated
+                schema.Types.name)
+     else
+       Config.visible_tool_schemas ())
+    |> List.filter (fun schema -> String.length schema.Types.name >= 5
+                                 && String.equal (String.sub schema.Types.name 0 5) "masc_")
+    |> (match tier_filter with
+        | None -> Fun.id
+        | Some tier ->
+            List.filter (fun schema -> Tool_catalog.is_in_tier tier schema.Types.name))
+  in
+  let tool_json (schema : Types.tool_schema) =
+    `Assoc
+      (("name", `String schema.name)
+       :: Tool_catalog.metadata_to_fields schema.name)
+  in
+  let wrapped_internal_tools =
+    Tool_shard.keeper_llm_tools
+    |> List.map (fun tool -> tool.Llm_client.tool_name)
+    |> List.sort_uniq String.compare
+  in
+  let wrapped_server_names =
+    [
+      "masc_board_post";
+      "masc_board_comment";
+      "masc_board_list";
+      "masc_voice_speak";
+    ]
+  in
+  let server_only_tools =
+    server_tools
+    |> List.map (fun schema -> schema.Types.name)
+    |> List.filter (fun name -> not (List.mem name wrapped_server_names))
+  in
+  let json =
+    `Assoc
+      [
+        ("count", `Int (List.length server_tools));
+        ("server_tools", `List (List.map tool_json server_tools));
+        ("wrapped_internal_tools",
+          `List (List.map (fun name -> `String name) wrapped_internal_tools));
+        ("wrapped_server_tools",
+          `List (List.map (fun name -> `String name) wrapped_server_names));
+        ("server_only_tools",
+          `List (List.map (fun name -> `String name) server_only_tools));
+      ]
+  in
+  (true, Yojson.Safe.pretty_to_string json)
+
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =
   match name with
@@ -669,4 +732,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_tool_help" -> Some (handle_tool_help ctx args)
   | "masc_tool_admin_snapshot" -> Some (handle_tool_admin_snapshot ctx args)
   | "masc_tool_admin_update" -> Some (handle_tool_admin_update ctx args)
+  | "masc_keeper_tool_catalog" -> Some (handle_keeper_tool_catalog ctx args)
   | _ -> None

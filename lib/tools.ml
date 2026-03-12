@@ -3994,6 +3994,15 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
   };
 
   {
+    name = "masc_gardener_status";
+    description = "Get truth-only gardener loop runtime status. Returns liveness, last tick timestamps, last decision source, last action, last error, cooldown/circuit state, and the last observed health summary.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
     name = "masc_gardener_propose_spawn";
     description = "Evaluate whether a new agent should be spawned for a given topic. Uses LLM decision (if enabled) or rule-based logic. Returns approval/deferral/rejection with reasons. Does NOT actually create the agent — use masc_gardener_execute_spawn for that.";
     input_schema = `Assoc [
@@ -4385,7 +4394,6 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
       ("required", `List [`String "tool_name"]);
     ];
   };
-
   {
     name = "masc_tool_admin_snapshot";
     description = "Return a unified admin snapshot of tool inventory, auth/RBAC, mode gates, keeper policy, and command-plane policy surfaces.";
@@ -4405,7 +4413,6 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
       ]);
     ];
   };
-
   {
     name = "masc_tool_admin_update";
     description = "Apply mode, auth, unit-policy, or keeper-policy updates through a single admin entrypoint.";
@@ -4475,6 +4482,27 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
         ]);
       ]);
       ("required", `List [`String "section"]);
+    ];
+  };
+  {
+    name = "masc_keeper_tool_catalog";
+    description = "List visible server-side masc_* tools alongside keeper-internal wrapper coverage.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("tier", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional tier filter: essential, standard, full");
+        ]);
+        ("include_hidden", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include hidden tools in the catalog");
+        ]);
+        ("include_deprecated", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include deprecated tools in the catalog");
+        ]);
+      ]);
     ];
   };
 ]

@@ -298,7 +298,9 @@ let filter_board_posts ~exclude_system posts =
   if not exclude_system then posts
   else
     List.filter
-      (fun (p : Board.post) -> not (is_system_board_author (Board.Agent_id.to_string p.author)))
+      (fun (p : Board.post) ->
+         Board.classify_post_kind p <> Board.System_post
+         && not (is_system_board_author (Board.Agent_id.to_string p.author)))
       posts
 
 let max_filtered_board_window = 5200
@@ -306,26 +308,6 @@ let max_filtered_board_window = 5200
 let board_fetch_limit ~exclude_system ~limit ~offset =
   let base = limit + offset in
   if exclude_system then max base max_filtered_board_window else base
-
-let board_title_of_content content =
-  let trimmed = String.trim content in
-  let without_flair =
-    if String.length trimmed >= 7 && String.sub trimmed 0 7 = "[flair:" then
-      match String.index_opt trimmed ']' with
-      | Some idx when idx + 1 < String.length trimmed ->
-          String.trim (String.sub trimmed (idx + 1) (String.length trimmed - idx - 1))
-      | _ -> trimmed
-    else
-      trimmed
-  in
-  let first_line =
-    match String.split_on_char '\n' without_flair with
-    | line :: _ -> String.trim line
-    | [] -> ""
-  in
-  let line = if first_line = "" then "Untitled post" else first_line in
-  if String.length line <= 96 then line
-  else String.sub line 0 93 ^ "..."
 
 let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
   let base_fields =
@@ -346,7 +328,8 @@ let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
   `Assoc
     ( fields
       @ [
-          ("title", `String (board_title_of_content p.content));
+          ("title", `String p.title);
+          ("body", `String p.body);
           ("votes", `Int score);
           ("comment_count", `Int p.reply_count);
           ("created_at_iso", `String (iso8601_of_unix p.created_at));
@@ -5492,6 +5475,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let gardener_json = Masc_mcp.Gardener.status_json () in
   let build = Build_identity.current () in
   `Assoc
     [
@@ -5504,6 +5488,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
       ("lodge", lodge_json);
+      ("gardener", gardener_json);
       ("version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
     ]
@@ -6300,6 +6285,7 @@ let health_handler _request reqd =
   in
   let build = Build_identity.current () in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let gardener_json = Masc_mcp.Gardener.status_json () in
   let guardian_json = Masc_mcp.Guardian.status_json () in
   let sentinel_json = Masc_mcp.Sentinel.status_json () in
   let health_json = `Assoc [
@@ -6325,6 +6311,7 @@ let health_handler _request reqd =
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Masc_mcp.Sse.client_count ()));
     ("lodge", lodge_json);
+    ("gardener", gardener_json);
     ("guardian", guardian_json);
     ("sentinel", sentinel_json);
   ] in
@@ -8289,6 +8276,7 @@ let run_server ~sw ~env ~host ~port ~base_path =
   (* Initialize server state with Eio context *)
   let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~net ~base_path in
   server_state := Some state;
+  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
   Masc_mcp.Chain_native_eio.configure_storage_paths state.room_config;
   (try Masc_mcp.Tool_command_plane.backfill_chain_overlays state.room_config
    with exn ->
@@ -8322,8 +8310,15 @@ let run_server ~sw ~env ~host ~port ~base_path =
   Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
   (* Gardener — self-organizing agent ecosystem (task-aware, LLM-primary) *)
   Masc_mcp.Gardener.start ~sw ~clock ~room_config:state.room_config;
-  (* Internal guardian loops (no external watchdog dependency) *)
-  Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
+  if Masc_mcp.Env_config.Sentinel.enabled then begin
+    (* Sentinel is the SSOT for housekeeping. It embeds zombie/gc loops itself. *)
+    Masc_mcp.Sentinel.start ~sw ~clock ~net state.room_config;
+    (* Lodge patrol remains a Guardian concern and can still be enabled explicitly. *)
+    if Masc_mcp.Env_config.Guardian.enabled then
+      Masc_mcp.Guardian.start_lodge_loop ~sw ~clock ~net
+  end else
+    (* Fallback runtime when sentinel is disabled. *)
+    Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
   Masc_mcp.Dashboard_governance_judge.start ~sw ~clock
     ~base_path:state.room_config.base_path
     ~build_facts:(fun () ->
@@ -8583,6 +8578,7 @@ let run_server ~sw ~env ~host ~port ~base_path =
           in
           let build = Build_identity.current () in
           let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+          let gardener_json = Masc_mcp.Gardener.status_json () in
           let guardian_json = Masc_mcp.Guardian.status_json () in
           let sentinel_json = Masc_mcp.Sentinel.status_json () in
           let health_json = `Assoc [
@@ -8595,6 +8591,7 @@ let run_server ~sw ~env ~host ~port ~base_path =
             ("uptime", `String uptime_str);
             ("sse_clients", `Int (Sse.client_count ()));
             ("lodge", lodge_json);
+            ("gardener", gardener_json);
             ("guardian", guardian_json);
             ("sentinel", sentinel_json);
           ] in

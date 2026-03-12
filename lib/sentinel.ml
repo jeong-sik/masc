@@ -302,21 +302,44 @@ let make_keeper_health_consumer _config : (module Pulse.Consumer) =
 let started = ref false
 let start_ts : float ref = ref 0.0
 
+let reset_runtime_state_for_tests () =
+  started := false;
+  start_ts := 0.0
+
+let mark_started_for_tests () =
+  started := true;
+  start_ts := Time_compat.now ()
+
+let ensure_room_initialized_for_start config =
+  if not (Room.is_initialized config) then
+    ignore (Room.init config ~agent_name:None)
+
 let status_json () : Yojson.Safe.t =
+  let embedded_guardian_loops_running = Guardian.masc_loops_running () in
+  let consumers =
+    [
+      `String "sentinel-heartbeat";
+    ]
+    @
+    (if embedded_guardian_loops_running then
+       [ `String "guardian-zombie"; `String "guardian-gc" ]
+     else [])
+    @
+    [
+      `String "sentinel-board-patrol";
+      `String "sentinel-task-hygiene";
+      `String "sentinel-keeper-health";
+    ]
+  in
   `Assoc [
     ("enabled", `Bool Env_config.Sentinel.enabled);
     ("started", `Bool !started);
     ("agent_name", `String agent_name);
     ("llm_enabled", `Bool Env_config.Sentinel.llm_enabled);
     ("uptime_s", `Float (if !started then Time_compat.now () -. !start_ts else 0.0));
-    ("consumers", `List [
-      `String "sentinel-heartbeat";
-      `String "guardian-zombie";
-      `String "guardian-gc";
-      `String "sentinel-board-patrol";
-      `String "sentinel-task-hygiene";
-      `String "sentinel-keeper-health";
-    ]);
+    ("embedded_guardian_loops_running", `Bool embedded_guardian_loops_running);
+    ("guardian_runtime_owner", `String (Guardian.masc_runtime_owner_label ()));
+    ("consumers", `List consumers);
   ]
 
 (* ── Start ─────────────────────────────────────────────────── *)
@@ -325,6 +348,7 @@ let start ~sw ~clock ~net config =
   if not Env_config.Sentinel.enabled then
     log "disabled (set MASC_SENTINEL_ENABLED=true)"
   else begin
+    ensure_room_initialized_for_start config;
     (* 1. Join room as sentinel agent *)
     let join_result = Room.join config ~agent_name ~capabilities:["sentinel"; "housekeeping"] () in
     log (sprintf "join: %s" (String.sub join_result 0 (min 80 (String.length join_result))));
@@ -338,8 +362,8 @@ let start ~sw ~clock ~net config =
     in
     Pulse.run ~sw p_hb;
 
-    (* 3. Guardian consumers: zombie + gc (reuse existing factories) *)
-    Guardian.start_masc_loops ~sw ~clock config;
+    (* 3. Embedded guardian masc loops: zombie + gc stay under sentinel ownership. *)
+    Guardian.start_embedded_masc_loops ~sw ~clock config;
 
     (* 4. Board patrol (10min) *)
     let p_board = Pulse.create
@@ -365,5 +389,5 @@ let start ~sw ~clock ~net config =
     started := true;
     start_ts := Time_compat.now ();
     ignore net;  (* net reserved for future HTTP-based health checks *)
-    log "started (6 consumers: heartbeat, zombie, gc, board-patrol, task-hygiene, keeper-health)"
+    log "started (heartbeat, embedded zombie/gc, board-patrol, task-hygiene, keeper-health)"
   end

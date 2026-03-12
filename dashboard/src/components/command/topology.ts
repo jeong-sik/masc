@@ -8,11 +8,69 @@ import { commandPlaneSnapshot } from '../../command-store'
 import { PanelSemanticDetails } from '../common/semantic-layer'
 import { prettyJson, relativeTime, toneClass, unitKindLabel } from './helpers'
 
+function topologySourceLabel(source?: string) {
+  switch (source) {
+    case 'explicit':
+      return '실제 관리 단위'
+    case 'hybrid':
+      return '관리 단위 + 자동 보강'
+    case 'auto':
+      return '자동 투영'
+    default:
+      return 'source unknown'
+  }
+}
+
+function topologySourceTone(source?: string) {
+  switch (source) {
+    case 'explicit':
+      return 'ok'
+    case 'hybrid':
+      return 'warn'
+    case 'auto':
+      return 'warn'
+    default:
+      return 'warn'
+  }
+}
+
+function topologySourceExplanation(source?: string) {
+  switch (source) {
+    case 'explicit':
+      return '지금 보이는 unit은 실제로 정의된 command-plane 관리 단위입니다.'
+    case 'hybrid':
+      return '일부는 실제 관리 단위이고, 비어 있는 부분은 live agent roster를 보고 자동 보강한 구조입니다.'
+    case 'auto':
+      return '이 화면은 live agent roster를 command-plane 모양으로 자동 투영한 것입니다. 실제 명령 체계와 1:1로 같다고 보면 안 됩니다.'
+    default:
+      return '이 화면은 managed topology와 effective topology가 섞여 있을 수 있습니다.'
+  }
+}
+
+function nodeRealitySummary(node: CommandPlaneTreeNode) {
+  const source = node.unit.source ?? 'unknown'
+  if (source === 'explicit') {
+    return node.active_operation_count && node.active_operation_count > 0
+      ? '실제 관리 단위이며 연결된 작전이 있습니다.'
+      : '실제 관리 단위이지만 현재 연결된 작전은 없습니다.'
+  }
+  if (source === 'hybrid') {
+    return node.active_operation_count && node.active_operation_count > 0
+      ? '관리 단위를 기반으로 자동 보강된 구조이며 일부 작전이 연결돼 있습니다.'
+      : '관리 단위를 기반으로 자동 보강된 구조이며 현재 실행 연결은 약합니다.'
+  }
+  return node.active_operation_count && node.active_operation_count > 0
+    ? '자동 생성된 구조이지만 이 노드에 연결된 작전 흔적은 있습니다.'
+    : '자동 생성된 구조이며 현재 실행 연결은 없습니다.'
+}
+
 function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?: number }) {
   const rosterLive = node.roster_live ?? 0
   const rosterTotal = node.roster_total ?? node.unit.roster.length
   const activeOps = node.active_operation_count ?? 0
   const policy = node.unit.policy
+  const source = node.unit.source ?? 'unknown'
+  const connectionLabel = activeOps > 0 ? `${activeOps}개 작전 연결` : '실행 연결 없음'
   return html`
     <div class="command-tree-node depth-${Math.min(depth, 3)}">
       <div class="command-tree-head">
@@ -21,6 +79,8 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
             <strong>${node.unit.label}</strong>
             <span class="command-chip">${unitKindLabel(node.unit.kind)}</span>
             <span class="command-chip ${toneClass(node.health)}">${node.health ?? 'ok'}</span>
+            <span class="command-chip ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
+            <span class="command-chip ${activeOps > 0 ? 'ok' : 'warn'}">${connectionLabel}</span>
             ${policy?.frozen ? html`<span class="command-chip warn">frozen</span>` : null}
             ${policy?.kill_switch ? html`<span class="command-chip bad">kill-switch</span>` : null}
           </div>
@@ -31,6 +91,7 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
             <span>Ops ${activeOps}</span>
             <span>Autonomy ${policy?.autonomy_level ?? 'n/a'}</span>
           </div>
+          <div class="command-card-sub">${nodeRealitySummary(node)}</div>
           ${node.reasons && node.reasons.length > 0
             ? html`<div class="command-tag-row">
                 ${node.reasons.map(reason => html`<span class="command-tag warn">${reason}</span>`)}
@@ -85,15 +146,32 @@ export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
 
 export function TopologySurface() {
   const snapshot = commandPlaneSnapshot.value
+  const topology = snapshot?.topology
+  const source = topology?.source
+  const summary = topology?.summary
+  const managedUnits = summary?.managed_unit_count ?? 0
+  const activeOps = summary?.active_operation_count ?? 0
   return html`
     <section class="card command-section">
       <div class="card-title-row">
         <div class="card-title">지휘 계층</div>
         <${PanelSemanticDetails} panelId="command.topology" compact=${true} />
       </div>
+      ${snapshot
+        ? html`
+            <div class="command-topology-explainer">
+              <div class="command-tree-title-row">
+                <span class="command-chip ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
+                <span class="command-chip">${managedUnits} managed</span>
+                <span class="command-chip ${activeOps > 0 ? 'ok' : 'warn'}">${activeOps} active ops</span>
+              </div>
+              <p>${topologySourceExplanation(source)}</p>
+            </div>
+          `
+        : null}
       ${snapshot && snapshot.topology.units.length > 0
         ? html`${snapshot.topology.units.map(node => html`<${TopologyNode} node=${node} />`)}`
-        : html`<div class="empty-state">아직 그려진 지휘 계층이 없습니다.</div>`}
+        : html`<div class="empty-state">지금은 live agent나 managed unit 기준으로 그릴 지휘 계층이 없습니다.</div>`}
     </section>
   `
 }

@@ -404,7 +404,11 @@ let make_mock_post ~id ~author ~content ~created_at =
   in
   { Board.id = post_id;
     author = author_id;
+    title = content;
+    body = content;
     content;
+    post_kind = Board.Human_post;
+    meta_json = None;
     visibility = Board.Public;
     created_at;
     updated_at = created_at;

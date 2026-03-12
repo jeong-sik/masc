@@ -178,11 +178,23 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
 let test_keeper_model_set_persists_active_model () =
+  let provider_model =
+    match Masc_mcp.Tool_llama.fetch_models () with
+    | Ok (_, model_id :: _) -> Some ("llama:" ^ model_id)
+    | Ok (_, []) -> None
+    | Error _ -> None
+  in
+  match provider_model with
+  | None ->
+      check bool "skip when local llama inventory unavailable" true true
+  | Some provider_model ->
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> rm_rf base_dir)
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
@@ -200,8 +212,8 @@ let test_keeper_model_set_persists_active_model () =
             [
               ("name", `String "sangsu");
               ("goal", `String "Maintain Sangsu persona");
-              ("models", `List [ `String "custom:initial-model" ]);
-              ("active_model", `String "custom:initial-model");
+              ("models", `List [ `String provider_model ]);
+              ("active_model", `String provider_model);
               ("room_scope", `String "all");
               ("trigger_mode", `String "explicit_only");
               ("mention_targets", `List [ `String "sangsu" ]);
@@ -215,13 +227,16 @@ let test_keeper_model_set_persists_active_model () =
           (`Assoc
             [
               ("name", `String "sangsu");
-              ("model", `String "custom:updated-model");
+              ("model", `String provider_model);
+              ("allowed_models", `List [ `String provider_model ]);
             ])
       in
       check bool "model set ok" true ok;
       let json = Yojson.Safe.from_string body in
-      check string "active model updated" "custom:updated-model"
+      check string "active model updated" provider_model
         Yojson.Safe.Util.(json |> member "active_model" |> to_string);
+      check int "allowed models pruned to explicit list" 1
+        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> List.length);
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -237,7 +252,7 @@ let test_keeper_model_set_persists_active_model () =
       in
       check bool "status ok" true ok;
       let status_json = Yojson.Safe.from_string status_body in
-      check string "status active model" "custom:updated-model"
+      check string "status active model" provider_model
         Yojson.Safe.Util.(status_json |> member "active_model" |> to_string))
 
 let write_persona_profile ~me_root ~persona_name ~content =
@@ -274,7 +289,11 @@ let write_reward_model path =
     "board_post": {
       "bias": -0.3,
       "weights": {
-        "active_goal_count": 0.8
+        "active_goal_count": 0.8,
+        "idle_seconds": 1.0,
+        "room_scope_all": 0.3,
+        "board_recent_external_post_count": 0.4,
+        "board_newest_external_post_freshness": 0.4
       }
     }
   }
@@ -287,12 +306,15 @@ let test_persona_list_and_create_from_persona () =
   let me_root = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
+      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
       rm_rf base_dir;
       rm_rf me_root)
     (fun () ->
+      let reward_model_path = Filename.concat base_dir "reward-model.json" in
+      write_reward_model reward_model_path;
       write_persona_profile ~me_root ~persona_name:"sangsu"
         ~content:
-          {|{
+          (Printf.sprintf {|{
   "name": "상수",
   "role": "홍상수 영화 속 찌질한 40대 남자",
   "trait": "직설적이고 현실적",
@@ -305,9 +327,20 @@ let test_persona_list_and_create_from_persona () =
     "trigger_mode": "explicit_only",
     "mention_targets": ["sangsu"],
     "presence_keepalive": false,
-    "proactive_enabled": false
+    "proactive_enabled": false,
+    "policy_mode": "learned_offline_v1",
+    "policy_action_budget": "board",
+    "policy_reward_model_path": "%s",
+    "policy_voice_enabled": true,
+    "policy_shell_mode": "readonly",
+    "initiative_enabled": true,
+    "initiative_scope": "board_only",
+    "initiative_idle_sec": 3600,
+    "initiative_cooldown_sec": 3600,
+    "initiative_context_mode": "board_snapshot",
+    "initiative_post_ttl_hours": 24
   }
-}|};
+}|} reward_model_path);
       with_env "ME_ROOT" me_root (fun () ->
         let config = Masc_mcp.Room.default_config base_dir in
         ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
@@ -340,6 +373,14 @@ let test_persona_list_and_create_from_persona () =
           Yojson.Safe.Util.(dry_json |> member "resident" |> to_bool);
         check string "dry run trigger mode" "explicit_only"
           Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "trigger_mode" |> to_string);
+        check string "dry run policy mode" "learned_offline_v1"
+          Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "policy_mode" |> to_string);
+        check bool "dry run voice enabled" true
+          Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "policy_voice_enabled" |> to_bool);
+        check string "dry run shell mode" "readonly"
+          Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "policy_shell_mode" |> to_string);
+        check bool "dry run initiative enabled" true
+          Yojson.Safe.Util.(dry_json |> member "resolved_args" |> member "initiative_enabled" |> to_bool);
         let ok, create_body =
           dispatch "masc_keeper_create_from_persona"
             (`Assoc
@@ -367,7 +408,15 @@ let test_persona_list_and_create_from_persona () =
         check bool "status ok" true ok;
         let status_json = Yojson.Safe.from_string status_body in
         check string "status room scope" "all"
-          Yojson.Safe.Util.(status_json |> member "meta" |> member "room_scope" |> to_string)))
+          Yojson.Safe.Util.(status_json |> member "meta" |> member "room_scope" |> to_string);
+        check string "status policy mode" "learned_offline_v1"
+          Yojson.Safe.Util.(status_json |> member "policy" |> member "mode" |> to_string);
+        check bool "status voice enabled" true
+          Yojson.Safe.Util.(status_json |> member "policy" |> member "voice_enabled" |> to_bool);
+        check string "status shell mode" "readonly"
+          Yojson.Safe.Util.(status_json |> member "policy" |> member "shell_mode" |> to_string);
+        check bool "status initiative enabled" true
+          Yojson.Safe.Util.(status_json |> member "initiative" |> member "enabled" |> to_bool)))
 
 let test_resident_keeper_and_persistent_agent_lists_split () =
   Eio_main.run @@ fun env ->
@@ -440,7 +489,9 @@ let test_keeper_policy_tools_roundtrip () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> rm_rf base_dir)
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      rm_rf base_dir)
     (fun () ->
       let reward_model_path = Filename.concat base_dir "reward-model.json" in
       write_reward_model reward_model_path;
@@ -484,6 +535,51 @@ let test_keeper_policy_tools_roundtrip () =
       let policy_json = Yojson.Safe.from_string policy_body in
       check string "policy mode updated" "learned_offline_v1"
         Yojson.Safe.Util.(policy_json |> member "policy_mode" |> to_string);
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("policy_voice_enabled", `Bool true);
+              ("policy_shell_mode", `String "readonly");
+            ])
+      in
+      check bool "keeper policy extras update ok" true ok;
+      let ok, status_body =
+        dispatch "masc_keeper_status"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("fast", `Bool true);
+              ("include_context", `Bool false);
+              ("include_metrics_overview", `Bool false);
+              ("include_memory_bank", `Bool false);
+              ("include_history_tail", `Bool false);
+              ("include_compaction_history", `Bool false);
+            ])
+      in
+      check bool "status after policy set ok" true ok;
+      let status_json = Yojson.Safe.from_string status_body in
+      check bool "allowed tools contains board post" true
+        Yojson.Safe.Util.(
+          status_json |> member "policy" |> member "allowed_tools" |> to_list
+          |> List.exists (fun item -> item = `String "keeper_board_post"));
+      check bool "allowed tools contains voice speak" true
+        Yojson.Safe.Util.(
+          status_json |> member "policy" |> member "allowed_tools" |> to_list
+          |> List.exists (fun item -> item = `String "keeper_voice_speak"));
+      check bool "allowed tools contains readonly shell" true
+        Yojson.Safe.Util.(
+          status_json |> member "policy" |> member "allowed_tools" |> to_list
+          |> List.exists (fun item -> item = `String "keeper_shell_readonly"));
+      check bool "available internal tools contains bash" true
+        Yojson.Safe.Util.(
+          status_json |> member "policy" |> member "available_internal_tools" |> to_list
+          |> List.exists (fun item -> item = `String "keeper_bash"));
+      check bool "blocked internal tools contains bash" true
+        Yojson.Safe.Util.(
+          status_json |> member "policy" |> member "blocked_internal_tools" |> to_list
+          |> List.exists (fun item -> item = `String "keeper_bash"));
       Masc_mcp.Keeper_types.append_jsonl_line
         (Masc_mcp.Keeper_types.keeper_policy_log_path config "sangsu")
         (`Assoc
@@ -576,7 +672,9 @@ let test_keeper_policy_set_rejects_invalid_mode () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> rm_rf base_dir)
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));

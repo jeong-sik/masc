@@ -100,13 +100,16 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
 
 (** {1 Dispatch Functions} *)
 
-let create_post ~author ~content ?(visibility=Board.Internal)
+let create_post ~author ~content ?title ?body ?post_kind ?meta_json
+    ?(visibility=Board.Internal)
     ?(ttl_hours=Board.Limits.default_ttl_hours) ?hearth ?thread_id () =
   match backend () with
   | Jsonl store ->
-      Board.create_post store ~author ~content ~visibility ~ttl_hours ?hearth ?thread_id ()
+      Board.create_post store ~author ~content ?title ?body ?post_kind ?meta_json
+        ~visibility ~ttl_hours ?hearth ?thread_id ()
   | Postgres t ->
-      Board_pg.create_post t ~author ~content ~visibility ~ttl_hours ?hearth ?thread_id ()
+      Board_pg.create_post t ~author ~content ?title ?body ?post_kind ?meta_json
+        ~visibility ~ttl_hours ?hearth ?thread_id ()
 
 let get_post ~post_id =
   match backend () with

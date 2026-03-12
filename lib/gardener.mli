@@ -66,6 +66,9 @@ val calculate_health : config:gardener_config -> room_config:Room_utils.config o
 (** Convenience function for MCP tools — uses default config *)
 val get_health : unit -> ecosystem_health
 
+(** Truth-only runtime status for the active gardener loop. *)
+val status_json : unit -> Yojson.Safe.t
+
 (** {1 Decision Making} *)
 
 (** Decide whether to spawn a new agent for a gap.

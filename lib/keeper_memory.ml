@@ -1,7 +1,7 @@
 (** Keeper_memory — memory-bank paths, reward-model evaluation,
     state snapshots, recall scoring, and metrics summaries. *)
 
-include Keeper_types
+open Keeper_types
 
 type keeper_reward_candidate = {
   bias: float;
@@ -25,8 +25,8 @@ type keeper_policy_observation = {
   total_turns: int;
   active_goal_count: int;
   joined_room_count: int;
-  room_scope: string;
-  trigger_mode: string;
+  room_scope: Keeper_contract.room_scope;
+  trigger_mode: Keeper_contract.trigger_mode;
   last_turn_ago_s: float;
 }
 
@@ -48,7 +48,8 @@ let policy_action_order action =
   | _ -> 9
 
 let keeper_policy_mode_is_learned (meta : keeper_meta) =
-  canonical_policy_mode meta.policy_mode = "learned_offline_v1"
+  Keeper_contract.policy_mode_of_string meta.policy_mode
+  |> Keeper_contract.policy_mode_is_learned
 
 let keeper_policy_feature_vector (obs : keeper_policy_observation) : (string * float) list =
   let clamp01 value = max 0.0 (min 1.0 value) in
@@ -58,7 +59,8 @@ let keeper_policy_feature_vector (obs : keeper_policy_observation) : (string * f
     ("message_chars", clamp01 (float_of_int obs.message_chars /. 400.0));
     ("active_goal_count", clamp01 (float_of_int obs.active_goal_count /. 5.0));
     ("joined_room_count", clamp01 (float_of_int obs.joined_room_count /. 5.0));
-    ("room_scope_all", if obs.room_scope = "all" then 1.0 else 0.0);
+    ( "room_scope_all",
+      if Keeper_contract.room_scope_to_string obs.room_scope = "all" then 1.0 else 0.0 );
     ("idle_seconds", clamp01 (obs.last_turn_ago_s /. 3600.0));
   ]
 
@@ -81,8 +83,8 @@ let keeper_policy_observation_to_json (obs : keeper_policy_observation) : Yojson
       ("total_turns", `Int obs.total_turns);
       ("active_goal_count", `Int obs.active_goal_count);
       ("joined_room_count", `Int obs.joined_room_count);
-      ("room_scope", `String obs.room_scope);
-      ("trigger_mode", `String obs.trigger_mode);
+      ("room_scope", `String (Keeper_contract.room_scope_to_string obs.room_scope));
+      ("trigger_mode", `String (Keeper_contract.trigger_mode_to_string obs.trigger_mode));
       ("last_turn_ago_s", `Float obs.last_turn_ago_s);
     ]
 
@@ -189,8 +191,8 @@ let keeper_policy_observation_of_room_message
     total_turns = meta.total_turns;
     active_goal_count = List.length meta.active_goal_ids;
     joined_room_count = List.length meta.joined_room_ids;
-    room_scope = meta.room_scope;
-    trigger_mode = meta.trigger_mode;
+    room_scope = Keeper_contract.room_scope_of_string meta.room_scope;
+    trigger_mode = Keeper_contract.trigger_mode_of_string meta.trigger_mode;
     last_turn_ago_s;
   }
 

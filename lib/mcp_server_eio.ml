@@ -591,7 +591,7 @@ type audit_event = {
 }
 
 let audit_log_path (config : Room.config) =
-  Filename.concat (Room_utils.masc_dir config) "audit.log"
+  Filename.concat (Room_utils.masc_dir config) "audit.jsonl"
 
 let audit_event_to_json (e : audit_event) : Yojson.Safe.t =
   `Assoc [
@@ -1662,6 +1662,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           ("agent_name", `String nickname);
           ("timestamp", `Float (Time_compat.now ()));
         ]) in
+      (* Audit: log join event *)
+      Audit_log.log_join config ~agent_id:nickname
+        ~room_id:(Filename.basename config.base_path) ();
       (true, final_result)
 
   | "masc_leave" ->
@@ -1680,6 +1683,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
         Safe_ops.remove_file_logged ~context:"masc_leave" agent_file
       end;
+      (* Audit: log leave event *)
+      Audit_log.log_leave config ~agent_id:agent_name
+        ~room_id:(Filename.basename config.base_path) ();
       (true, result)
 
 
@@ -1773,6 +1779,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         (* Increment broadcast_count in active team sessions *)
         Team_session_engine_eio.increment_broadcast_from_external config
           ~agent_name;
+        (* Audit: log broadcast event *)
+        Audit_log.log_broadcast config ~agent_id:agent_name
+          ~room_id:(Filename.basename config.base_path)
+          ~message_preview:message ();
         (true, result)
       end
 

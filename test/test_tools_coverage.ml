@@ -678,8 +678,44 @@ let test_masc_keeper_create_from_persona_schema () =
           Alcotest.(check bool) "has persona_name" true
             (List.mem_assoc "persona_name" props);
           Alcotest.(check bool) "has dry_run" true
-            (List.mem_assoc "dry_run" props)
+            (List.mem_assoc "dry_run" props);
+          Alcotest.(check bool) "has policy_mode" true
+            (List.mem_assoc "policy_mode" props);
+          Alcotest.(check bool) "has policy_voice_enabled" true
+            (List.mem_assoc "policy_voice_enabled" props);
+          Alcotest.(check bool) "has policy_shell_mode" true
+            (List.mem_assoc "policy_shell_mode" props);
+          Alcotest.(check bool) "has initiative_enabled" true
+            (List.mem_assoc "initiative_enabled" props)
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
+
+let test_masc_keeper_up_initiative_schema () =
+  match find_tool "masc_keeper_up" with
+  | None -> Alcotest.fail "masc_keeper_up not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has policy_mode" true
+            (List.mem_assoc "policy_mode" props);
+          Alcotest.(check bool) "has policy_action_budget" true
+            (List.mem_assoc "policy_action_budget" props);
+          Alcotest.(check bool) "has policy_voice_enabled" true
+            (List.mem_assoc "policy_voice_enabled" props);
+          Alcotest.(check bool) "has policy_shell_mode" true
+            (List.mem_assoc "policy_shell_mode" props);
+          Alcotest.(check bool) "has initiative_enabled" true
+            (List.mem_assoc "initiative_enabled" props);
+          Alcotest.(check bool) "has initiative_scope" true
+            (List.mem_assoc "initiative_scope" props);
+          Alcotest.(check bool) "has initiative_idle_sec" true
+            (List.mem_assoc "initiative_idle_sec" props);
+          Alcotest.(check bool) "has initiative_cooldown_sec" true
+            (List.mem_assoc "initiative_cooldown_sec" props);
+          Alcotest.(check bool) "has initiative_context_mode" true
+            (List.mem_assoc "initiative_context_mode" props);
+          Alcotest.(check bool) "has initiative_post_ttl_hours" true
+            (List.mem_assoc "initiative_post_ttl_hours" props)
+      | None -> Alcotest.fail "masc_keeper_up missing properties"
 
 let test_masc_keeper_policy_set_schema () =
   match find_tool "masc_keeper_policy_set" with
@@ -1140,6 +1176,8 @@ let () =
       Alcotest.test_case "persona-list" `Quick test_masc_persona_list_schema;
       Alcotest.test_case "keeper-create-from-persona" `Quick
         test_masc_keeper_create_from_persona_schema;
+      Alcotest.test_case "keeper-up-initiative" `Quick
+        test_masc_keeper_up_initiative_schema;
       Alcotest.test_case "keeper-policy-set" `Quick
         test_masc_keeper_policy_set_schema;
       Alcotest.test_case "keeper-feedback-record" `Quick

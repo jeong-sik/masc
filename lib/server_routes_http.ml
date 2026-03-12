@@ -1217,8 +1217,8 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                   in
                   wait_for_disconnect ())
             with
-            | Eio.Cancel.Cancelled _ ->
-                Error "client disconnected"
+            | Eio.Cancel.Cancelled _ as exn ->
+                raise exn
             | exn ->
                 Error (Printexc.to_string exn)
           in

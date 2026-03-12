@@ -11,6 +11,7 @@ import type {
   DashboardMissionSessionDetailResponse,
   DashboardProofResponse,
   DashboardPlanningResponse,
+  DashboardRoomTruthResponse,
   DashboardShellResponse,
   BoardPost,
   BoardComment,
@@ -307,6 +308,10 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
 
 export function fetchDashboardShell(): Promise<DashboardShellResponse> {
   return get('/api/v1/dashboard/shell')
+}
+
+export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
+  return get('/api/v1/dashboard/room-truth')
 }
 
 export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {

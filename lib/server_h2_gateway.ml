@@ -398,6 +398,13 @@ let make_request_handler ~sw ~clock ~server_start_time =
           let json = dashboard_shell_http_json state.Mcp_server.room_config in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/room-truth" ->
+          let state = get_server_state () in
+          let json =
+            dashboard_room_truth_http_json ~state ~sw ~clock httpun_request
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/dashboard/execution" ->
           let state = get_server_state () in
           let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in

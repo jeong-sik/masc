@@ -182,7 +182,7 @@ let claude_opus = {
 
 let claude_sonnet = {
   provider = Claude;
-  model_id = "claude-sonnet-4-5-20250929";
+  model_id = Env_config.Claude.default_model;
   max_context = 200000;
   api_url = "https://api.anthropic.com";
   api_key_env = Some "ANTHROPIC_API_KEY";
@@ -192,7 +192,7 @@ let claude_sonnet = {
 
 let openai_default = {
   provider = OpenAI;
-  model_id = "gpt-5";
+  model_id = Env_config.OpenAI.default_model;
   max_context = 400000;
   api_url = "https://api.openai.com";
   api_key_env = Some "OPENAI_API_KEY";
@@ -202,7 +202,7 @@ let openai_default = {
 
 let glm_cloud = {
   provider = Glm_cloud;
-  model_id = "glm-4.7";
+  model_id = Env_config.Llm.default_model;
   max_context = 128000;
   api_url = "https://api.z.ai";
   api_key_env = Some "ZAI_API_KEY";
@@ -212,7 +212,7 @@ let glm_cloud = {
 
 let gemini_pro = {
   provider = Gemini;
-  model_id = "gemini-2.5-pro";
+  model_id = Env_config.Gemini.default_model;
   max_context = 1000000;
   api_url = "https://generativelanguage.googleapis.com";
   api_key_env = Some "GEMINI_API_KEY";

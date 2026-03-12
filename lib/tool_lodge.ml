@@ -1961,10 +1961,11 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
 	      let peak_hour = 9 + Random.int 12 in (* 9-20 KST *)
 	      (* Build GraphQL query string, then wrap with JSON (no shell quoting). *)
 	      let gql = Printf.sprintf
-	        "mutation { createAgent(name: \"%s\", role: \"%s\", description: \"%s\", peakHour: %d, preferredHours: [%d, %d, %d], traits: [\"%s\"], model: \"glm-4.7\", status: \"active\") { success message agent { name } } }"
+	        "mutation { createAgent(name: \"%s\", role: \"%s\", description: \"%s\", peakHour: %d, preferredHours: [%d, %d, %d], traits: [\"%s\"], model: \"%s\", status: \"active\") { success message agent { name } } }"
 	        agent_name escaped_role escaped_prompt
 	        peak_hour ((peak_hour - 1 + 24) mod 24) peak_hour ((peak_hour + 1) mod 24)
 	        escaped_role
+	        Env_config.Llm.default_model
 	      in
 	      let body = Yojson.Safe.to_string (`Assoc [("query", `String gql)]) in
 	      Printf.eprintf "[spawn_agent] GraphQL mutation: createAgent(name=%s, role=%s)\n%!" agent_name child_role;

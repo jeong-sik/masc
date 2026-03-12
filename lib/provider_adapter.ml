@@ -307,12 +307,18 @@ let preferred_execution_model_labels () =
          (match explicit_llama_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
-         if env_present "ZAI_API_KEY" then Some "glm:glm-4.7" else None;
-         if gemini_direct_available () then Some "gemini:gemini-2.5-pro" else None;
-         if env_present "ANTHROPIC_API_KEY" then
-           Some "claude:claude-sonnet-4-5-20250929"
+         if env_present "ZAI_API_KEY" then
+           Some (Printf.sprintf "glm:%s" Env_config.Llm.default_model)
          else None;
-         if env_present "OPENAI_API_KEY" then Some "openai:gpt-5" else None;
+         if gemini_direct_available () then
+           Some (Printf.sprintf "gemini:%s" Env_config.Gemini.default_model)
+         else None;
+         if env_present "ANTHROPIC_API_KEY" then
+           Some (Printf.sprintf "claude:%s" Env_config.Claude.default_model)
+         else None;
+         if env_present "OPENAI_API_KEY" then
+           Some (Printf.sprintf "openai:%s" Env_config.OpenAI.default_model)
+         else None;
        ])
 
 let preferred_verifier_model_labels () =
@@ -326,12 +332,18 @@ let preferred_verifier_model_labels () =
          (match explicit_llama_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
-         if env_present "ZAI_API_KEY" then Some "glm:glm-4.7" else None;
-         if gemini_direct_available () then Some "gemini:gemini-2.5-flash" else None;
-         if env_present "ANTHROPIC_API_KEY" then
-           Some "claude:claude-sonnet-4-5-20250929"
+         if env_present "ZAI_API_KEY" then
+           Some (Printf.sprintf "glm:%s" Env_config.Llm.default_model)
          else None;
-         if env_present "OPENAI_API_KEY" then Some "openai:gpt-5" else None;
+         if gemini_direct_available () then
+           Some (Printf.sprintf "gemini:%s" Env_config.Gemini.flash_model)
+         else None;
+         if env_present "ANTHROPIC_API_KEY" then
+           Some (Printf.sprintf "claude:%s" Env_config.Claude.default_model)
+         else None;
+         if env_present "OPENAI_API_KEY" then
+           Some (Printf.sprintf "openai:%s" Env_config.OpenAI.default_model)
+         else None;
        ])
 
 let default_model_labels_result () =

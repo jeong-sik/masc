@@ -202,7 +202,8 @@ let test_print_counts () =
     Printf.printf "%s: %d\n" name (count_for_mode mode)
   ) modes;
   Printf.printf "=========================\n%!";
-  check bool "diagnostic" true true
+  check bool "all_tool_schemas > 0" true (all_count > 0);
+  check bool "visible_tool_schemas > 0" true (visible_count > 0)
 
 (* ============================================================
    Test runner

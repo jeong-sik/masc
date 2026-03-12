@@ -64,7 +64,7 @@ let default_config_path () =
 let default_model_strings ~cascade_name =
   let llama_glm =
     [
-      "llama:qwen3.5-35b-a3b-ud-q8-xl";
+      Printf.sprintf "llama:%s" Env_config.Llama.default_model;
       Printf.sprintf "glm:%s" Env_config.Llm.default_model;
     ]
   in
@@ -96,25 +96,29 @@ let default_model_strings ~cascade_name =
   (* briefing — llama first, flash-tier cloud chain, local llama final fallback *)
   | "briefing" ->
       [
-        "llama:qwen3.5-35b-a3b";
-        "glm:glm-4.7-flash";
-        "gemini:gemini-2.5-flash";
         Printf.sprintf "llama:%s" Env_config.Llama.default_model;
+        Printf.sprintf "glm:%s" Env_config.Llm.flash_model;
+        Printf.sprintf "gemini:%s" Env_config.Gemini.flash_model;
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
       ]
   | "governance_judge" | "operator_judge" -> llama_glm
   (* walph — default execution models *)
   | "walph" -> llama_glm
   (* auto_responder — agent_type-specific cascades *)
   | "auto_responder_claude" ->
-      [ "claude:sonnet"; Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+      [ Printf.sprintf "claude:%s" Env_config.Claude.default_model;
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
   | "auto_responder_gemini" ->
-      [ "gemini:flash"; Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+      [ Printf.sprintf "gemini:%s" Env_config.Gemini.flash_model;
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
   | "auto_responder_glm" ->
       [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
   | "auto_responder" -> llama_glm
   (* spawn glm — cloud cascade for spawn_eio direct client path *)
   | "spawn_glm" ->
-      [ "glm:glm-4.7"; "glm:glm-4.7-flash"; "glm:glm-5"; "glm:glm-5-code" ]
+      [ Printf.sprintf "glm:%s" Env_config.Llm.default_model;
+        Printf.sprintf "glm:%s" Env_config.Llm.flash_model;
+        "glm:glm-5"; "glm:glm-5-code" ]
   (* unregistered cascade: llama + glm as safety net *)
   | _ -> llama_glm
 

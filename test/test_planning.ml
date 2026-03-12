@@ -107,7 +107,8 @@ let test_error_markdown_format () =
   | Ok ctx ->
       let md = Planning.get_context_markdown ctx in
       Alcotest.(check bool) "contains PDCA Plan" true (String.length md > 0 && (String.sub md 0 10 = "# Planning"));
-      Alcotest.(check bool) "contains Check section" true (Str.string_match (Str.regexp ".*Errors.*Failures.*PDCA.*Check.*") md 0 || true);
+      Alcotest.(check bool) "contains Check section" true
+        (Str.string_match (Str.regexp {|.*\(Errors\|Failures\|PDCA\|Check\).*|}) md 0);
       ()
   | Error e -> Alcotest.fail e
 

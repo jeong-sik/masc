@@ -17,7 +17,7 @@ function topologySourceLabel(source?: string) {
     case 'auto':
       return '자동 투영'
     default:
-      return 'source unknown'
+      return '출처 미상'
   }
 }
 
@@ -37,13 +37,13 @@ function topologySourceTone(source?: string) {
 function topologySourceExplanation(source?: string) {
   switch (source) {
     case 'explicit':
-      return '지금 보이는 unit은 실제로 정의된 command-plane 관리 단위입니다.'
+      return '지금 보이는 유닛은 실제로 정의된 지휘면 관리 단위입니다.'
     case 'hybrid':
-      return '일부는 실제 관리 단위이고, 비어 있는 부분은 live agent roster를 보고 자동 보강한 구조입니다.'
+      return '일부는 실제 관리 단위이고, 비어 있는 부분은 실시간 에이전트 편성을 보고 자동 보강한 구조입니다.'
     case 'auto':
-      return '이 화면은 live agent roster를 command-plane 모양으로 자동 투영한 것입니다. 실제 명령 체계와 1:1로 같다고 보면 안 됩니다.'
+      return '이 화면은 실시간 에이전트 편성을 지휘면 모양으로 자동 투영한 것입니다. 실제 명령 체계와 1:1로 같다고 보면 안 됩니다.'
     default:
-      return '이 화면은 managed topology와 effective topology가 섞여 있을 수 있습니다.'
+      return '이 화면은 관리 토폴로지와 실효 토폴로지가 섞여 있을 수 있습니다.'
   }
 }
 
@@ -81,15 +81,15 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
             <span class="command-chip ${toneClass(node.health)}">${node.health ?? 'ok'}</span>
             <span class="command-chip ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
             <span class="command-chip ${activeOps > 0 ? 'ok' : 'warn'}">${connectionLabel}</span>
-            ${policy?.frozen ? html`<span class="command-chip warn">frozen</span>` : null}
-            ${policy?.kill_switch ? html`<span class="command-chip bad">kill-switch</span>` : null}
+            ${policy?.frozen ? html`<span class="command-chip warn">동결됨</span>` : null}
+            ${policy?.kill_switch ? html`<span class="command-chip bad">킬 스위치</span>` : null}
           </div>
           <div class="command-tree-meta">
             <span>ID ${node.unit.unit_id}</span>
-            <span>Leader ${node.unit.leader_id ?? 'unassigned'} / ${node.leader_status ?? 'unknown'}</span>
-            <span>Roster ${rosterLive}/${rosterTotal}</span>
-            <span>Ops ${activeOps}</span>
-            <span>Autonomy ${policy?.autonomy_level ?? 'n/a'}</span>
+            <span>리더 ${node.unit.leader_id ?? '미지정'} / ${node.leader_status ?? '확인 필요'}</span>
+            <span>편성 ${rosterLive}/${rosterTotal}</span>
+            <span>작전 ${activeOps}</span>
+            <span>자율성 ${policy?.autonomy_level ?? '정보 없음'}</span>
           </div>
           <div class="command-card-sub">${nodeRealitySummary(node)}</div>
           ${node.reasons && node.reasons.length > 0
@@ -116,7 +116,7 @@ function AlertCard({ alert }: { alert: CommandPlaneAlert }) {
         <span class="command-chip ${toneClass(alert.severity)}">${alert.severity ?? 'warn'}</span>
       </div>
       <div class="command-alert-meta">
-        <span>${alert.scope_type ?? 'scope'}:${alert.scope_id ?? 'n/a'}</span>
+        <span>${alert.scope_type ?? '범위'}:${alert.scope_id ?? '정보 없음'}</span>
         <span>${relativeTime(alert.timestamp)}</span>
       </div>
       ${alert.detail ? html`<p>${alert.detail}</p>` : null}
@@ -162,8 +162,8 @@ export function TopologySurface() {
             <div class="command-topology-explainer">
               <div class="command-tree-title-row">
                 <span class="command-chip ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
-                <span class="command-chip">${managedUnits} managed</span>
-                <span class="command-chip ${activeOps > 0 ? 'ok' : 'warn'}">${activeOps} active ops</span>
+                <span class="command-chip">관리 유닛 ${managedUnits}</span>
+                <span class="command-chip ${activeOps > 0 ? 'ok' : 'warn'}">활성 작전 ${activeOps}</span>
               </div>
               <p>${topologySourceExplanation(source)}</p>
             </div>
@@ -171,7 +171,7 @@ export function TopologySurface() {
         : null}
       ${snapshot && snapshot.topology.units.length > 0
         ? html`${snapshot.topology.units.map(node => html`<${TopologyNode} node=${node} />`)}`
-        : html`<div class="empty-state">지금은 live agent나 managed unit 기준으로 그릴 지휘 계층이 없습니다.</div>`}
+        : html`<div class="empty-state">지금은 실시간 에이전트나 관리 유닛 기준으로 그릴 지휘 계층이 없습니다.</div>`}
     </section>
   `
 }
@@ -188,7 +188,7 @@ export function AlertsSurface() {
         ? html`<div class="command-card-stack">
             ${snapshot.alerts.alerts.map(alert => html`<${AlertCard} alert=${alert} />`)}
           </div>`
-        : html`<div class="empty-state">지금 올라온 command-plane 경보는 없습니다.</div>`}
+        : html`<div class="empty-state">지금 올라온 지휘면 경보는 없습니다.</div>`}
     </section>
   `
 }
@@ -205,7 +205,7 @@ export function TraceSurface() {
         ? html`<div class="command-trace-stack">
             ${snapshot.traces.events.map(event => html`<${TraceRow} event=${event} />`)}
           </div>`
-        : html`<div class="empty-state">최근 trace event가 없습니다.</div>`}
+        : html`<div class="empty-state">최근 트레이스 이벤트가 없습니다.</div>`}
     </section>
   `
 }

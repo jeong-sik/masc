@@ -207,7 +207,7 @@ export function SummaryHero() {
       />
       <${SignalRail}
         label="알림 압력"
-        value=${`${badAlerts} bad / ${warnAlerts} warn`}
+        value=${`치명 ${badAlerts} / 주의 ${warnAlerts}`}
         detail=${badAlerts > 0 ? '치명 신호가 이미 요약면에서 보입니다' : '보드를 지배하는 hard-stop 알림은 아직 없습니다'}
         percent=${ratioPercent(badAlerts * 2 + warnAlerts, Math.max((badAlerts + warnAlerts) * 2, 1))}
         tone=${badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok'}
@@ -221,8 +221,8 @@ export function SummaryHero() {
       />
       <${SignalRail}
         label="캐시 신뢰도"
-        value=${cacheHit ? formatPercent(cacheHit) : 'n/a'}
-        detail=${cacheHit ? 'microarch 캐시 텔레메트리에서 집계한 L1 hit rate' : '캐시 텔레메트리가 아직 집계되지 않았습니다'}
+        value=${cacheHit ? formatPercent(cacheHit) : '정보 없음'}
+        detail=${cacheHit ? 'microarch 캐시 텔레메트리에서 집계한 L1 적중률' : '캐시 텔레메트리가 아직 집계되지 않았습니다'}
         percent=${clampPercent((cacheHit ?? 0) * 100)}
         tone=${cacheHit >= 0.75 ? 'ok' : cacheHit >= 0.4 ? 'warn' : 'bad'}
       />
@@ -248,10 +248,10 @@ export function SummaryCards() {
       <div class="monitor-stat-card"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
       <div class="monitor-stat-card"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
       <div class="monitor-stat-card"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
-      <div class="monitor-stat-card ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 warn</small></div>
+      <div class="monitor-stat-card ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
       <div class="monitor-stat-card"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
       <div class="monitor-stat-card ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
-      <div class="monitor-stat-card ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 hit` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? 'n/a'}</small></div>
+      <div class="monitor-stat-card ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
     </div>
   `
 }

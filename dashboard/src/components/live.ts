@@ -1,5 +1,5 @@
-// Live Monitor — 3-panel real-time swarm observation view
-// Pulse Strip (top) + Activity Stream (left 60%) + Focus Sidebar (right 40%)
+// 라이브 모니터 — 3패널 실시간 관찰 화면
+// 상단 pulse strip + 좌측 activity stream + 우측 focus sidebar
 
 import { html } from 'htm/preact'
 import { PulseStrip } from './live/pulse-strip'
@@ -14,14 +14,14 @@ export function Live() {
   return html`
     <div class="live-monitor">
       <div class="live-header">
-        <h2>Live Monitor</h2>
+        <h2>라이브 모니터</h2>
         <div class="live-header-stats">
           <span class="live-stat">
             <span class="live-stat-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
-            ${isConnected ? 'Connected' : 'Offline'}
+            ${isConnected ? '연결됨' : '오프라인'}
           </span>
-          <span class="live-stat">${agents.value.length} agents</span>
-          <span class="live-stat">${eventCount.value} events</span>
+          <span class="live-stat">에이전트 ${agents.value.length}</span>
+          <span class="live-stat">이벤트 ${eventCount.value}</span>
         </div>
       </div>
 

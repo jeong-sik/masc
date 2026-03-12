@@ -8192,6 +8192,7 @@ let run_server ~sw ~env ~port ~base_path =
   (* Initialize server state with Eio context *)
   let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~net ~base_path in
   server_state := Some state;
+  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
   Masc_mcp.Chain_native_eio.configure_storage_paths state.room_config;
   (try Masc_mcp.Tool_command_plane.backfill_chain_overlays state.room_config
    with exn ->

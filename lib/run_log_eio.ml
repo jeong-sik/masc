@@ -1,4 +1,4 @@
-(** LLM-MCP run log (JSONL) - Pure Eio Version
+(** Native MASC chain run log (JSONL) - Pure Eio Version
 
     This is designed for lightweight observability and data collection.
     It intentionally avoids logging prompts/responses; only lengths + metadata.
@@ -9,12 +9,12 @@
 open Types
 
 let enabled () =
-  match Sys.getenv_opt "LLM_MCP_RUN_LOG" with
+  match Sys.getenv_opt "MASC_CHAIN_RUN_LOG" with
   | Some "0" | Some "false" | Some "no" -> false
   | _ -> true
 
 let stream_enabled () =
-  match Sys.getenv_opt "LLM_MCP_RUN_LOG_STREAM" with
+  match Sys.getenv_opt "MASC_CHAIN_RUN_LOG_STREAM" with
   | Some "1" | Some "true" | Some "yes" | Some "on" -> true
   | _ -> false
 
@@ -24,7 +24,7 @@ let default_log_path () =
     | Some path when String.trim path <> "" -> path
     | _ -> "/tmp"
   in
-  Filename.concat home "logs/llm_mcp_runs.jsonl"
+  Filename.concat home "logs/masc_chain_runs.jsonl"
 
 let ensure_dir path =
   let rec ensure current =
@@ -54,7 +54,7 @@ let read_lines_tail ~max_bytes:_ ~max_lines path =
       List.rev !lines |> take max_lines)
 
 let log_path () =
-  match Sys.getenv_opt "LLM_MCP_RUN_LOG_PATH" with
+  match Sys.getenv_opt "MASC_CHAIN_RUN_LOG_PATH" with
   | Some p when String.length p > 0 -> p
   | _ -> default_log_path ()
 
@@ -189,8 +189,8 @@ let read_events () =
   let path = log_path () in
   if not (Sys.file_exists path) then []
   else
-    let max_bytes = Safe_parse.env_int ~var:"LLM_MCP_RUN_LOG_MAX_BYTES" ~default:(10 * 1024 * 1024) in
-    let max_lines = Safe_parse.env_int ~var:"LLM_MCP_RUN_LOG_MAX_LINES" ~default:100_000 in
+    let max_bytes = Safe_parse.env_int ~var:"MASC_CHAIN_RUN_LOG_MAX_BYTES" ~default:(10 * 1024 * 1024) in
+    let max_lines = Safe_parse.env_int ~var:"MASC_CHAIN_RUN_LOG_MAX_LINES" ~default:100_000 in
     read_lines_tail ~max_bytes ~max_lines path
     |> List.filter_map (fun line ->
       let line = String.trim line in

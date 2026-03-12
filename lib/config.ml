@@ -73,6 +73,52 @@ let save room_path config =
   output_string oc content;
   close_out oc
 
+let audit_log_path room_path =
+  Filename.concat room_path "audit.jsonl"
+
+let json_string_option = function
+  | Some value when String.trim value <> "" -> `String (String.trim value)
+  | _ -> `Null
+
+let mode_change_audit_json ~actor ~source ~room_path ~previous_config ~config =
+  let categories_to_json_values categories =
+    `List
+      (List.map
+         (fun category -> `String (category_to_string category))
+         categories)
+  in
+  let old_mode = mode_to_string previous_config.mode in
+  let new_mode = mode_to_string config.mode in
+  let actor_name =
+    actor
+    |> Option.map String.trim
+    |> Option.value ~default:"unknown"
+  in
+  let detail =
+    Printf.sprintf "mode=%s -> %s source=%s"
+      old_mode new_mode
+      (source |> Option.map String.trim |> Option.value ~default:"config")
+  in
+  `Assoc
+    [
+      ("timestamp", `Float (Unix.gettimeofday ()));
+      ("agent", `String actor_name);
+      ("event_type", `String "mode_change");
+      ("success", `Bool true);
+      ("detail", `String detail);
+      ("room_path", `String room_path);
+      ("source", json_string_option source);
+      ("previous_mode", `String old_mode);
+      ("mode", `String new_mode);
+      ( "previous_enabled_categories",
+        categories_to_json_values previous_config.enabled_categories );
+      ("enabled_categories", categories_to_json_values config.enabled_categories);
+    ]
+
+let append_mode_change_audit ~actor ~source ~room_path ~previous_config ~config =
+  Fs_compat.append_jsonl (audit_log_path room_path)
+    (mode_change_audit_json ~actor ~source ~room_path ~previous_config ~config)
+
 let dedupe_schemas (schemas : Types.tool_schema list) =
   let seen = Hashtbl.create (List.length schemas) in
   List.filter
@@ -165,20 +211,24 @@ let enabled_tool_schemas ?(include_hidden = false) ?(include_deprecated = false)
            || Mode.is_tool_enabled enabled_categories schema.name)
 
 (** Switch to a preset mode *)
-let switch_mode room_path mode =
+let switch_mode ?actor ?source room_path mode =
+  let previous_config = load room_path in
   let enabled_categories = categories_for_mode mode in
   let config = { mode; enabled_categories } in
   save room_path config;
+  append_mode_change_audit ~actor ~source ~room_path ~previous_config ~config;
   config
 
 (** Enable specific categories (switches to Custom mode) *)
-let set_categories room_path categories =
+let set_categories ?actor ?source room_path categories =
+  let previous_config = load room_path in
   let config = { mode = Custom; enabled_categories = categories } in
   save room_path config;
+  append_mode_change_audit ~actor ~source ~room_path ~previous_config ~config;
   config
 
 (** Enable a category *)
-let enable_category room_path category =
+let enable_category ?actor ?source room_path category =
   let current = load room_path in
   let new_cats =
     if List.mem category current.enabled_categories then
@@ -186,13 +236,13 @@ let enable_category room_path category =
     else
       category :: current.enabled_categories
   in
-  set_categories room_path new_cats
+  set_categories ?actor ?source room_path new_cats
 
 (** Disable a category *)
-let disable_category room_path category =
+let disable_category ?actor ?source room_path category =
   let current = load room_path in
   let new_cats = List.filter (fun c -> c <> category) current.enabled_categories in
-  set_categories room_path new_cats
+  set_categories ?actor ?source room_path new_cats
 
 (** Get current config summary as JSON for tool response *)
 let get_config_summary room_path =

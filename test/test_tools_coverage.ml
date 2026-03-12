@@ -83,6 +83,7 @@ let test_find_tool_existing () =
                "masc_team_session_list"; "masc_team_session_compare";
                "masc_team_session_turn"; "masc_team_session_events";
                "masc_team_session_prove"; "masc_llama_models";
+               "masc_runtime_verify";
                "masc_llama_runtime_verify"; "masc_observe_swarm";
                "masc_operator_snapshot"; "masc_operator_digest";
                "masc_operator_action"; "masc_operator_confirm";
@@ -657,6 +658,22 @@ let test_masc_llama_runtime_verify_schema () =
             (List.mem_assoc "expected_ctx" props)
       | None -> Alcotest.fail "masc_llama_runtime_verify missing properties"
 
+let test_masc_runtime_verify_schema () =
+  match find_tool "masc_runtime_verify" with
+  | None -> Alcotest.fail "masc_runtime_verify not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has runtime_pool" true
+            (List.mem_assoc "runtime_pool" props);
+          Alcotest.(check bool) "has expected_model" true
+            (List.mem_assoc "expected_model" props);
+          Alcotest.(check bool) "has expected_slots" true
+            (List.mem_assoc "expected_slots" props);
+          Alcotest.(check bool) "has expected_ctx" true
+            (List.mem_assoc "expected_ctx" props)
+      | None -> Alcotest.fail "masc_runtime_verify missing properties"
+
 let test_masc_observe_swarm_schema () =
   match find_tool "masc_observe_swarm" with
   | None -> Alcotest.fail "masc_observe_swarm not found"
@@ -1221,6 +1238,8 @@ let () =
       Alcotest.test_case "tool-admin-update" `Quick
         test_masc_tool_admin_update_schema;
       Alcotest.test_case "llama-models" `Quick test_masc_llama_models_schema;
+      Alcotest.test_case "runtime-verify" `Quick
+        test_masc_runtime_verify_schema;
       Alcotest.test_case "llama-runtime-verify" `Quick
         test_masc_llama_runtime_verify_schema;
       Alcotest.test_case "team-session-step-spawn-selection-note" `Quick

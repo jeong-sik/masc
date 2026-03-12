@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
+import { RoomTruthStrip } from './common/room-truth-strip'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { StatusBadge } from './common/status-badge'
 import { MitosisRing } from './common/mitosis-ring'
@@ -547,6 +548,7 @@ export function Execution() {
   return html`
     <div class="agents-monitor">
       <${SurfaceSemanticIntro} surfaceId="execution" />
+      <${RoomTruthStrip} />
       <div class="stats-grid">
         <${MonitorStat} label="활성 세션" value=${summary?.active_sessions ?? sessionRowsAll.length} color="#4ade80" caption="실행 관점 세션 수" />
         <${MonitorStat} label="막힌 세션" value=${summary?.blocked_sessions ?? sessionRowsAll.filter(item => toneClass(item.health ?? item.status) !== 'ok').length} color="#fbbf24" caption="개입이 필요한 세션 수" />

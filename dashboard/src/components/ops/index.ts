@@ -2,6 +2,8 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import { refreshRoomTruth } from '../../room-truth-store'
+import { RoomTruthStrip } from '../common/room-truth-strip'
 import { PanelSemanticDetails, SurfaceSemanticIntro } from '../common/semantic-layer'
 import { route } from '../../router'
 import {
@@ -175,12 +177,13 @@ export function Ops() {
             value=${actorName.value}
             onInput=${(event: Event) => persistActorName((event.target as HTMLInputElement).value)}
           />
-          <button
-            class="control-btn ghost"
-            onClick=${() => {
-              void refreshOperatorSnapshot()
-              void refreshOperatorRoomDigest()
-              void refreshOperatorSessionDigest(selectedSession?.session_id ?? null)
+            <button
+              class="control-btn ghost"
+              onClick=${() => {
+                void refreshRoomTruth()
+                void refreshOperatorSnapshot()
+                void refreshOperatorRoomDigest()
+                void refreshOperatorSessionDigest(selectedSession?.session_id ?? null)
             }}
             disabled=${operatorLoading.value || operatorActionBusy.value}
           >
@@ -191,6 +194,7 @@ export function Ops() {
 
       ${operatorError.value ? html`<section class="ops-banner error">${operatorError.value}</section>` : null}
       ${operatorDigestError.value ? html`<section class="ops-banner error">${operatorDigestError.value}</section>` : null}
+      <${RoomTruthStrip} />
       ${workflowContext ? html`
         <section class="ops-banner ${workflowReady ? 'info' : 'warn'} ops-handoff-banner">
           <div class="ops-handoff-head">

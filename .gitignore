@@ -32,6 +32,7 @@ config/llm_cascade.json
 *.log
 benchmarks/results/
 _coverage/
+.health/
 
 
 # Downloaded release binary

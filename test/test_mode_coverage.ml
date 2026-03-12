@@ -189,6 +189,8 @@ let test_tool_category_core () =
     (Mode.tool_category "masc_operator_digest" = Mode.Core);
   check bool "llama_models" true
     (Mode.tool_category "masc_llama_models" = Mode.Core);
+  check bool "runtime_verify" true
+    (Mode.tool_category "masc_runtime_verify" = Mode.Core);
   check bool "llama_runtime_verify" true
     (Mode.tool_category "masc_llama_runtime_verify" = Mode.Core);
   check bool "observe_swarm" true

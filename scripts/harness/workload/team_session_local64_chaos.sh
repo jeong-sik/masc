@@ -79,7 +79,7 @@ runtime_verify_result() {
       '
   )"
   local payload
-  payload="$(call_tool 92898 "masc_llama_runtime_verify" "$args")"
+  payload="$(call_tool 92898 "masc_runtime_verify" "$args")"
   require_tool_success "$payload"
   printf '%s' "$payload" | extract_result
 }

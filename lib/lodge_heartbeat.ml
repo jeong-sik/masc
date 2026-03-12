@@ -1353,14 +1353,13 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
       try
         let json = Yojson.Safe.from_string json_str in
         (match Yojson.Safe.Util.member "errors" json with
-         | `List errors when errors <> [] ->
+         | `List (first_err :: _) ->
            let msg = try
-             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-           with Failure _ | Yojson.Safe.Util.Type_error (_, _) -> "unknown error" in
+             first_err |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+           with Yojson.Safe.Util.Type_error (_, _) -> "unknown error" in
            Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
            Error msg
-         | _ ->
-           let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
+         | _ ->           let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
            let success = result |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
            if not success then begin
              let msg = result |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option |> Option.value ~default:"unknown error" in

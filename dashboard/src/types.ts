@@ -875,6 +875,64 @@ export interface DashboardShellResponse {
   }
 }
 
+export interface DashboardRoomTruthAttentionSummary {
+  count: number
+  bad_count: number
+  warn_count: number
+  provenance?: string | null
+  top_item?: OperatorAttentionItem | null
+}
+
+export interface DashboardRoomTruthRecommendationSummary {
+  count: number
+  provenance?: string | null
+  top_action?: OperatorRecommendedAction | null
+}
+
+export interface DashboardRoomTruthFocus {
+  label: string
+  reason: string
+  source: string
+  provenance: string
+  target_kind?: string | null
+  target_id?: string | null
+  suggested_tab?: 'command' | 'intervene' | string | null
+  suggested_surface?: CommandPlaneSurface | string | null
+  suggested_params?: Record<string, string>
+}
+
+export interface DashboardRoomTruthResponse {
+  generated_at?: string
+  room: {
+    status?: ServerStatus | null
+    counts?: DashboardShellResponse['counts']
+    provenance?: string | null
+  }
+  execution?: {
+    summary?: DashboardExecutionSummary | null
+    top_queue?: DashboardExecutionQueueItem | null
+    provenance?: string | null
+  }
+  command?: {
+    active_operations?: number
+    active_detachments?: number
+    pending_approvals?: number
+    bad_alerts?: number
+    warn_alerts?: number
+    moving_lanes?: number
+    active_lanes?: number
+    provenance?: string | null
+  }
+  operator?: {
+    health?: string | null
+    attention_summary?: DashboardRoomTruthAttentionSummary | null
+    recommendation_summary?: DashboardRoomTruthRecommendationSummary | null
+    pending_confirm_summary?: PendingConfirmSummary | null
+    provenance?: string | null
+  }
+  focus?: DashboardRoomTruthFocus | null
+}
+
 export interface ServerBuildIdentity {
   release_version: string
   commit?: string | null
@@ -2414,6 +2472,7 @@ export interface CommandPlaneSwarmProvider {
   actual_slots?: number
   expected_ctx?: number
   actual_ctx?: number
+  configured_capacity?: number
   slot_reachable?: boolean | null
   slot_status_code?: number | null
   runtime_blocker?: string | null

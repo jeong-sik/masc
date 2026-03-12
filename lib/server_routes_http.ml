@@ -834,15 +834,15 @@ let options_handler request reqd =
   let response = Httpun.Response.create ~headers `No_content in
   Httpun.Reqd.respond_with_string reqd response ""
 
-(** Helper functions to get initialized state or fail *)
-let get_server_state () = match !server_state with
-  | Some s -> s
-  | None -> failwith "Server state not initialized"
-
-
 let http_status_of_graphql = function
   | `OK -> `OK
   | `Bad_request -> `Bad_request
+
+(** Shared by HTTP/2 gateway handlers that require initialized server state. *)
+let get_server_state () =
+  match !server_state with
+  | Some s -> s
+  | None -> failwith "Server state not initialized"
 
 let handle_get_graphql _request reqd =
   let nonce =
@@ -859,16 +859,19 @@ let handle_get_graphql _request reqd =
 let handle_post_graphql request reqd =
   let origin = get_origin request in
   Http.Request.read_body_async reqd (fun body_str ->
-    let state = get_server_state ()
-    in
-    let response = Graphql_api.handle_request ~config:state.room_config body_str in
-    let status = http_status_of_graphql response.status in
-    let headers = Httpun.Headers.of_list (
-      ("content-length", string_of_int (String.length response.body))
-      :: graphql_headers origin
-    ) in
-    let http_response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd http_response response.body
+    match !server_state with
+    | None ->
+        respond_json_with_cors ~status:`Internal_server_error request reqd
+          {|{"error":"server state not initialized"}|}
+    | Some state ->
+        let response = Graphql_api.handle_request ~config:state.room_config body_str in
+        let status = http_status_of_graphql response.status in
+        let headers = Httpun.Headers.of_list (
+          ("content-length", string_of_int (String.length response.body))
+          :: graphql_headers origin
+        ) in
+        let http_response = Httpun.Response.create ~headers status in
+        Httpun.Reqd.respond_with_string reqd http_response response.body
   )
 
 let handle_graphql request reqd =
@@ -1581,6 +1584,11 @@ let make_routes ~port ~host ~sw ~clock =
   |> Http.Router.get "/api/v1/dashboard/shell" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_shell_http_json state.Mcp_server.room_config in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/room-truth" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = dashboard_room_truth_http_json ~state ~sw ~clock req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->

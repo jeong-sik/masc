@@ -1550,9 +1550,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   if String.length name >= 11 && String.equal (String.sub name 0 11) "masc_walph_" then
-    match Tool_walph.dispatch (Lazy.force simple_ctx_walph) ~name ~args:arguments with
-    | Some result -> result
-    | None -> (false, Printf.sprintf "Unknown Walph tool: %s" name)
+    try
+      match Tool_walph.dispatch (Lazy.force simple_ctx_walph) ~name ~args:arguments with
+      | Some result -> result
+      | None -> (false, Printf.sprintf "Unknown Walph tool: %s" name)
+    with Failure msg -> (false, msg)
   else
   match Tool_agent.dispatch simple_ctx_agent ~name ~args:arguments with
   | Some result -> result

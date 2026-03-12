@@ -34,9 +34,12 @@ let list_uncons = function
 
 (** Safe last element - O(n) but safe *)
 let list_last_opt lst =
-  match lst with
-  | [] -> None
-  | _ -> Some (List.hd (List.rev lst))
+  let rec loop = function
+    | [] -> None
+    | [ last ] -> Some last
+    | _ :: rest -> loop rest
+  in
+  loop lst
 
 (** {1 Safe String Helpers} *)
 

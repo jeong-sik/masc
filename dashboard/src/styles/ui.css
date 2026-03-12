@@ -216,6 +216,71 @@ button.agent-card:hover {
   gap: 2px;
 }
 
+.room-truth-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.room-truth-strip-loading,
+.room-truth-strip-error {
+  border-radius: 14px;
+  border: 1px solid rgba(138, 163, 211, 0.18);
+  background: rgba(19, 29, 51, 0.72);
+  padding: 12px 14px;
+  color: #9db4de;
+}
+
+.room-truth-strip-error {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.room-truth-card {
+  border-radius: 14px;
+  border: 1px solid rgba(138, 163, 211, 0.18);
+  background:
+    linear-gradient(180deg, rgba(40, 56, 92, 0.34), rgba(19, 29, 51, 0.9)),
+    rgba(19, 29, 51, 0.82);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.room-truth-card strong {
+  color: #edf4ff;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.room-truth-card p {
+  margin: 0;
+  color: #96add7;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.room-truth-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 10px;
+  color: #7fa5d8;
+}
+
+.room-truth-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.room-truth-actions {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-start;
+}
+
 .agent-card .agent-task {
   margin-top: 10px;
   color: #89a3cf;

@@ -151,7 +151,8 @@ let tool_category tool_name =
   | "masc_autoresearch_swarm_start"
   (* LLM runtime *)
   | "masc_llama_models" | "masc_llama_runtime_status"
-  | "masc_llama_runtime_verify" | "masc_llama_runtime_bench"
+  | "masc_runtime_verify" | "masc_llama_runtime_verify"
+  | "masc_llama_runtime_bench"
   (* Units *)
   | "masc_unit_define" | "masc_unit_update" | "masc_unit_list"
   | "masc_unit_reparent" | "masc_unit_reassign"

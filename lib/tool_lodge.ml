@@ -1709,16 +1709,16 @@ let lodge_orchestrate ~net (_args : Yojson.Safe.t) =
           in
           find_all 0 []
         in
-        if post_ids = [] then
-          log "📭 No posts to discuss"
-        else begin
-          ctx.post_id <- List.hd post_ids;
-          ctx.turn_count <- 0;
-          ctx.participants <- [];
-          ctx.last_speaker <- None;
-          ctx.state <- Topic;
-          log (Printf.sprintf "📌 Selected topic: %s" ctx.post_id);
-        end
+        (match post_ids with
+        | [] ->
+            log "📭 No posts to discuss"
+        | first_post :: _ ->
+            ctx.post_id <- first_post;
+            ctx.turn_count <- 0;
+            ctx.participants <- [];
+            ctx.last_speaker <- None;
+            ctx.state <- Topic;
+            log (Printf.sprintf "📌 Selected topic: %s" ctx.post_id))
       end
 
   | Topic ->
@@ -2192,19 +2192,18 @@ let agent_patrol ~net (args : Yojson.Safe.t) =
       else
         let unreacted = List.filter (fun pid -> not (has_agent_commented agent_name pid)) post_ids in
 
-        if unreacted = [] then
-          (true, Printf.sprintf "✅ %s: Already reacted to all recent posts (checked %d)" agent_name (List.length post_ids))
-        else
-          let target_post = List.hd unreacted in
-
-          let (react_ok, react_msg) = react ~net (`Assoc [
-            ("post_id", `String target_post);
-            ("agent", `String agent_name);
-          ]) in
-          if react_ok then
-            (true, Printf.sprintf "💬 %s patrolled and reacted to %s:\n%s" agent_name target_post react_msg)
-          else
-            (false, Printf.sprintf "❌ Lodge: Patrol failed [agent=%s, post=%s, error=%s]" agent_name target_post react_msg)
+        match unreacted with
+        | [] ->
+            (true, Printf.sprintf "✅ %s: Already reacted to all recent posts (checked %d)" agent_name (List.length post_ids))
+        | target_post :: _ ->
+            let (react_ok, react_msg) = react ~net (`Assoc [
+              ("post_id", `String target_post);
+              ("agent", `String agent_name);
+            ]) in
+            if react_ok then
+              (true, Printf.sprintf "💬 %s patrolled and reacted to %s:\n%s" agent_name target_post react_msg)
+            else
+              (false, Printf.sprintf "❌ Lodge: Patrol failed [agent=%s, post=%s, error=%s]" agent_name target_post react_msg)
 
 let tool_agent_patrol : Types.tool_schema = {
   name = "lodge_agent_patrol";

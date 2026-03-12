@@ -10,6 +10,7 @@ import {
   refreshDashboardSemantics,
   refreshShell,
 } from './store'
+import { refreshRoomTruth } from './room-truth-store'
 import { setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshForTab } from './tab-refresh'
 import {
@@ -32,6 +33,7 @@ export function App() {
     // Connect SSE and start data fetching
     connectSSE()
     refreshShell()
+    refreshRoomTruth()
     refreshExecution()
     refreshDashboardSemantics()
     refreshMissionSnapshot()

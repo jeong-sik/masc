@@ -554,10 +554,9 @@ let configured_default_model_label_result () =
   match Sys.getenv_opt "MASC_DEFAULT_CASCADE" with
   | Some raw ->
       let labels = split_csv_nonempty raw in
-      if labels = [] then
-        Error "MASC_DEFAULT_CASCADE is set but empty"
-      else
-        Ok (List.hd labels)
+      (match labels with
+       | first :: _ -> Ok first
+       | [] -> Error "MASC_DEFAULT_CASCADE is set but empty")
   | None -> (
       match
         ( nonempty_env "MASC_DEFAULT_PROVIDER",

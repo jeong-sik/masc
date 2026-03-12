@@ -1763,7 +1763,6 @@ let handle_keeper_msg ctx args : tool_result =
                 match
                   deterministic_recall_fallback
                     ~meta
-                    ~ctx_work
                     ~user_message:message
                     ~eval:eval_after_prompt_fallback
                     ~candidates:recall_candidates

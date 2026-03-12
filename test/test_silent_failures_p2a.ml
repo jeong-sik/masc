@@ -148,8 +148,8 @@ let test_source_llm_token_parse () =
       {|[llm] token field missing or wrong type|})
 
 let test_source_keeper_proactive () =
-  check bool "tool_keeper.ml has proactive emission logging"
-    true (file_contains_pattern "lib/tool_keeper.ml"
+  check bool "keeper_execution.ml has proactive emission logging"
+    true (file_contains_pattern "lib/keeper_execution.ml"
       {|[keeper] proactive emission failed:|})
 
 (* MEDIUM priority patterns *)

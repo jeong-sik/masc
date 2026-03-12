@@ -81,6 +81,11 @@
  (modules test_dashboard_execution)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
+(test
+ (name test_local_agent_eio)
+ (modules test_local_agent_eio)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
 ; Voice tool wrapper tests
 (test
  (name test_tool_voice)

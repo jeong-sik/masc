@@ -2659,10 +2659,10 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
   if not (keeper_autonomy_enabled ()) then None
   else if meta.active_goal_ids = [] then None
   else
-    let level = Keeper_contract.autonomy_level_of_string meta.autonomy_level in
-    match level with
-    | L1_Reactive -> None
-    | level ->
+    match Keeper_contract.parse_autonomy_level meta.autonomy_level with
+    | None -> None
+    | Some L1_Reactive -> None
+    | Some level ->
         let primary = match specs with p :: _ -> p | [] -> Llm_client.default_local_model_spec () in
         let verify_model =
           match Llm_client.default_verifier_model_spec () with

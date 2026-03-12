@@ -1,0 +1,466 @@
+open Masc_mcp
+open Test_operator_control_support
+
+let test_snapshot_has_expected_sections () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore (Room.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
+      ignore (Room.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
+      let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
+      let room = Yojson.Safe.Util.member "room" json in
+      Alcotest.(check bool) "room present" true
+        (Yojson.Safe.Util.member "room" json <> `Null);
+      Alcotest.(check string) "room mirrors current_room"
+        Yojson.Safe.Util.(room |> member "current_room" |> to_string)
+        Yojson.Safe.Util.(room |> member "room" |> to_string);
+      Alcotest.(check bool) "sessions present" true
+        (Yojson.Safe.Util.member "sessions" json <> `Null);
+      Alcotest.(check bool) "keepers present" true
+        (Yojson.Safe.Util.member "keepers" json <> `Null);
+      Alcotest.(check bool) "recent_messages present" true
+        (Yojson.Safe.Util.member "recent_messages" json <> `Null);
+      Alcotest.(check bool) "pending_confirms present" true
+        (Yojson.Safe.Util.member "pending_confirms" json <> `Null);
+      Alcotest.(check bool) "trace_id present" true
+        (json |> Yojson.Safe.Util.member "trace_id" |> Yojson.Safe.Util.to_string
+       <> "");
+      Alcotest.(check string) "server profile" "operator_remote_v1"
+        (json |> Yojson.Safe.Util.member "server_profile"
+         |> Yojson.Safe.Util.member "name" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check bool) "attention summary present" true
+        (Yojson.Safe.Util.member "attention_summary" json <> `Null);
+      Alcotest.(check bool) "recommendation summary present" true
+        (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
+      Alcotest.(check bool) "resident judge runtime present" true
+        (Yojson.Safe.Util.member "resident_judge_runtime" json <> `Null);
+      Alcotest.(check bool) "resident judge disabled by default" false
+        Yojson.Safe.Util.
+          (json |> member "resident_judge_runtime" |> member "enabled" |> to_bool);
+      Alcotest.(check string) "judgment owner" "fallback_read_model"
+        Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
+      Alcotest.(check bool) "no authoritative judgment" false
+        Yojson.Safe.Util.(json |> member "authoritative_judgment_available" |> to_bool);
+      Alcotest.(check string) "command plane provenance" "truth"
+        Yojson.Safe.Util.
+          (json |> member "provenance_summary" |> member "command_plane" |> to_string);
+      Alcotest.(check bool) "recent_actions list present" true
+        (match Yojson.Safe.Util.member "recent_actions" json with
+        | `List _ -> true
+        | _ -> false);
+      Alcotest.(check bool) "swarm_status present" true
+        (Yojson.Safe.Util.member "swarm_status" json <> `Null))
+
+let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      let ctx = operator_ctx env sw config "owner" in
+      let inject_task actor title =
+        match
+          Operator_control.action_json ctx
+            (`Assoc
+              [
+                ("actor", `String actor);
+                ("action_type", `String "task_inject");
+                ("target_type", `String "room");
+                ( "payload",
+                  `Assoc
+                    [
+                      ("title", `String title);
+                      ("description", `String "created by operator");
+                      ("priority", `Int 2);
+                    ] );
+              ])
+        with
+        | Ok _ -> ()
+        | Error err -> Alcotest.fail err
+      in
+      inject_task "operator-a" "alpha preview";
+      inject_task "operator-b" "beta preview";
+      let snapshot = Operator_control.snapshot_json ~actor:"operator-a" ctx in
+      let summary = Yojson.Safe.Util.(snapshot |> member "pending_confirm_summary") in
+      Alcotest.(check string) "actor filter" "operator-a"
+        Yojson.Safe.Util.(summary |> member "actor_filter" |> to_string);
+      Alcotest.(check bool) "filter active" true
+        Yojson.Safe.Util.(summary |> member "filter_active" |> to_bool);
+      Alcotest.(check int) "visible count" 1
+        Yojson.Safe.Util.(summary |> member "visible_count" |> to_int);
+      Alcotest.(check int) "total count" 2
+        Yojson.Safe.Util.(summary |> member "total_count" |> to_int);
+      Alcotest.(check int) "hidden count" 1
+        Yojson.Safe.Util.(summary |> member "hidden_count" |> to_int);
+      Alcotest.(check bool) "hidden actor listed" true
+        (List.mem (`String "operator-b")
+           Yojson.Safe.Util.(summary |> member "hidden_actors" |> to_list));
+      let confirm_required_actions =
+        Yojson.Safe.Util.(summary |> member "confirm_required_actions" |> to_list)
+      in
+      Alcotest.(check bool) "task inject listed" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "task_inject")
+           confirm_required_actions))
+
+let test_orchestra_room_core_shape () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore (Room.add_task config ~title:"orchestra backlog" ~priority:2 ~description:"");
+      ignore (Room.broadcast config ~from_agent:"owner" ~content:"orchestra seed");
+      let json = Command_plane_orchestra.json (operator_ctx env sw config "owner") in
+      let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
+      Alcotest.(check bool) "room node exists" true
+        (List.exists
+           (fun row -> Yojson.Safe.Util.(row |> member "kind" |> to_string) = "room")
+           nodes);
+      Alcotest.(check int) "session count" 0
+        Yojson.Safe.Util.(json |> member "summary" |> member "session_count" |> to_int);
+      Alcotest.(check string) "focus kind" "node"
+        Yojson.Safe.Util.(json |> member "focus" |> member "target_kind" |> to_string))
+
+let test_orchestra_includes_session_edge_and_pending_signal () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let ctx = operator_ctx env sw config "dashboard" in
+      (match
+         Operator_control.action_json ctx
+           (`Assoc
+             [
+               ("actor", `String "dashboard");
+               ("action_type", `String "task_inject");
+               ("target_type", `String "room");
+               ( "payload",
+                 `Assoc
+                   [
+                     ("title", `String "Injected task");
+                     ("description", `String "created by operator");
+                     ("priority", `Int 1);
+                   ] );
+             ])
+       with
+      | Ok _ -> ()
+      | Error err -> Alcotest.fail err);
+      let json = Command_plane_orchestra.json ctx in
+      let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
+      let edges = Yojson.Safe.Util.(json |> member "edges" |> to_list) in
+      let signals = Yojson.Safe.Util.(json |> member "signals" |> to_list) in
+      Alcotest.(check bool) "session node exists" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "id" |> to_string) = "session:" ^ session_id)
+           nodes);
+      Alcotest.(check bool) "room-session edge exists" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "source" |> to_string) = "room:default"
+             && Yojson.Safe.Util.(row |> member "target" |> to_string)
+                = "session:" ^ session_id)
+           edges);
+      Alcotest.(check bool) "pending confirm signal exists" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "kind" |> to_string) = "pending_confirm")
+           signals))
+
+let test_digest_room_exposes_pending_confirm_attention () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let action_json =
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "operator");
+              ("action_type", `String "task_inject");
+              ("target_type", `String "room");
+              ( "payload",
+                `Assoc
+                  [
+                    ("title", `String "Injected task");
+                    ("description", `String "created by operator");
+                    ("priority", `Int 1);
+                  ] );
+            ])
+      in
+      (match action_json with Ok _ -> () | Error err -> Alcotest.fail err);
+      let digest =
+        match Operator_control.digest_json ~actor:"operator" ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "target_type" "room"
+        Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
+      Alcotest.(check string) "health" "bad"
+        Yojson.Safe.Util.(digest |> member "health" |> to_string);
+      Alcotest.(check bool) "command_plane present" true
+        (Yojson.Safe.Util.member "command_plane" digest <> `Null);
+      Alcotest.(check bool) "resident judge runtime present" true
+        (Yojson.Safe.Util.member "resident_judge_runtime" digest <> `Null);
+      Alcotest.(check bool) "command_plane microarch present" true
+        (Yojson.Safe.Util.
+           (digest |> member "command_plane" |> member "operations"
+          |> member "microarch")
+         <> `Null);
+      Alcotest.(check bool) "swarm_status present" true
+        (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
+      let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
+      Alcotest.(check bool) "pending confirm attention present" true
+        (List.exists
+           (fun item ->
+             Yojson.Safe.Util.(item |> member "kind" |> to_string)
+             = "pending_confirm_waiting")
+           attention_items);
+      Alcotest.(check bool) "attention provenance present" true
+        (List.for_all
+           (fun item ->
+             String.equal "derived"
+               Yojson.Safe.Util.(item |> member "provenance" |> to_string))
+           attention_items);
+      Alcotest.(check bool) "command attention present" true
+        (List.exists
+           (fun item ->
+             String.starts_with
+               ~prefix:"command_"
+               Yojson.Safe.Util.(item |> member "kind" |> to_string))
+           attention_items))
+
+let test_digest_team_session_shape () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let ctx = operator_ctx env sw config "dashboard" in
+      let digest =
+        match
+          Operator_control.digest_json ~actor:"dashboard"
+            ~target_type:"team_session" ~target_id:session_id ctx
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "target_type" "team_session"
+        Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
+      Alcotest.(check string) "target_id" session_id
+        Yojson.Safe.Util.(digest |> member "target_id" |> to_string);
+      Alcotest.(check string) "recommendation provenance summary" "fallback"
+        Yojson.Safe.Util.
+          (digest |> member "provenance_summary" |> member "recommended_actions"
+         |> to_string);
+      Alcotest.(check bool) "swarm_status present" true
+        (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
+      Alcotest.(check bool) "command_plane present" true
+        (Yojson.Safe.Util.member "command_plane" digest <> `Null);
+      Alcotest.(check int) "single session card" 1
+        Yojson.Safe.Util.(digest |> member "session_cards" |> to_list |> List.length);
+      Alcotest.(check bool) "worker_cards list" true
+        (match Yojson.Safe.Util.member "worker_cards" digest with
+        | `List _ -> true
+        | _ -> false))
+
+let test_digest_team_session_can_skip_workers () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let ctx = operator_ctx env sw config "dashboard" in
+      let digest =
+        match
+          Operator_control.digest_json ~actor:"dashboard"
+            ~target_type:"team_session" ~target_id:session_id ~include_workers:false
+            ctx
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check int) "worker_cards skipped" 0
+        Yojson.Safe.Util.(digest |> member "worker_cards" |> to_list |> List.length))
+
+let test_snapshot_and_digest_expose_role_runtime_census () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let update_result =
+        Team_session_store.update_session config session_id (fun session ->
+            {
+              session with
+              planned_workers =
+                [
+                  {
+                    Team_session_types.spawn_agent = "llama";
+                    runtime_actor = Some "llama-local-manager";
+                    spawn_role = Some "middle-manager";
+                    spawn_model = Some "qwen3.5";
+                    worker_class = Some Team_session_types.Worker_manager;
+                    parent_actor = None;
+                    capsule_mode = Some Team_session_types.Capsule_capsule;
+                    runtime_pool = Some "local64";
+                    lane_id = Some "lane-a";
+                    controller_level = Some Team_session_types.Controller_lane;
+                    control_domain = Some Team_session_types.Domain_execution;
+                    supervisor_actor = Some "ctrl-root";
+                    model_tier = Some Team_session_types.Tier_35b;
+                    task_profile = Some Team_session_types.Profile_decide;
+                    risk_level = Some Team_session_types.Risk_high;
+                    routing_confidence = Some 0.94;
+                    routing_reason = Some "explicit:lead_manager";
+                    routing_escalated = false;
+                  };
+                  {
+                    Team_session_types.spawn_agent = "llama";
+                    runtime_actor = Some "llama-local-metacog";
+                    spawn_role = Some "metacog-observer";
+                    spawn_model = Some "qwen3.5";
+                    worker_class = Some Team_session_types.Worker_metacog;
+                    parent_actor = Some "llama-local-manager";
+                    capsule_mode = Some Team_session_types.Capsule_capsule;
+                    runtime_pool = Some "local64";
+                    lane_id = Some "global";
+                    controller_level = Some Team_session_types.Controller_submanager;
+                    control_domain = Some Team_session_types.Domain_meta;
+                    supervisor_actor = Some "ctrl-global-metacog";
+                    model_tier = Some Team_session_types.Tier_35b;
+                    task_profile = Some Team_session_types.Profile_verify;
+                    risk_level = Some Team_session_types.Risk_high;
+                    routing_confidence = Some 0.88;
+                    routing_reason = Some "policy:metacog_guard";
+                    routing_escalated = true;
+                  };
+                  {
+                    Team_session_types.spawn_agent = "llama";
+                    runtime_actor = Some "llama-local-executor";
+                    spawn_role = Some "executor-1";
+                    spawn_model = Some "qwen3.5";
+                    worker_class = Some Team_session_types.Worker_executor;
+                    parent_actor = Some "llama-local-manager";
+                    capsule_mode = Some Team_session_types.Capsule_inherit;
+                    runtime_pool = Some "local64";
+                    lane_id = Some "lane-a";
+                    controller_level = Some Team_session_types.Controller_worker;
+                    control_domain = Some Team_session_types.Domain_execution;
+                    supervisor_actor = Some "ctrl-lane-a";
+                    model_tier = Some Team_session_types.Tier_9b;
+                    task_profile = Some Team_session_types.Profile_normalize;
+                    risk_level = Some Team_session_types.Risk_low;
+                    routing_confidence = Some 0.83;
+                    routing_reason = Some "rule:machine_checkable";
+                    routing_escalated = false;
+                  };
+                ];
+              updated_at_iso = Types.now_iso ();
+            })
+      in
+      (match update_result with Ok _ -> () | Error err -> Alcotest.fail err);
+      let ctx = operator_ctx env sw config "dashboard" in
+      let snapshot = Operator_control.snapshot_json ctx in
+      Alcotest.(check int) "room role census manager" 1
+        Yojson.Safe.Util.(snapshot |> member "role_census" |> member "manager" |> to_int);
+      Alcotest.(check int) "room role census metacog" 1
+        Yojson.Safe.Util.(snapshot |> member "role_census" |> member "metacog" |> to_int);
+      Alcotest.(check int) "room runtime pool local64" 3
+        Yojson.Safe.Util.(snapshot |> member "runtime_pools" |> member "local64" |> to_int);
+      Alcotest.(check int) "room tier 35b count" 2
+        Yojson.Safe.Util.(snapshot |> member "model_tiers" |> member "35b" |> to_int);
+      Alcotest.(check int) "room tier 9b count" 1
+        Yojson.Safe.Util.(snapshot |> member "model_tiers" |> member "9b" |> to_int);
+      Alcotest.(check int) "room task profile normalize" 1
+        Yojson.Safe.Util.(snapshot |> member "task_profiles" |> member "normalize" |> to_int);
+      Alcotest.(check int) "room escalation count" 1
+        Yojson.Safe.Util.(snapshot |> member "escalation_count" |> to_int);
+      let digest =
+        match
+          Operator_control.digest_json ~actor:"dashboard"
+            ~target_type:"team_session" ~target_id:session_id ctx
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let session_card = Yojson.Safe.Util.(digest |> member "session_cards" |> index 0) in
+      Alcotest.(check string) "scale_profile" "standard"
+        Yojson.Safe.Util.(session_card |> member "scale_profile" |> to_string);
+      Alcotest.(check int) "session card manager count" 1
+        Yojson.Safe.Util.
+          (session_card |> member "worker_class_counts" |> member "manager" |> to_int);
+      Alcotest.(check int) "session card metacog count" 1
+        Yojson.Safe.Util.
+          (session_card |> member "worker_class_counts" |> member "metacog" |> to_int);
+      Alcotest.(check int) "session card runtime pool local64" 3
+        Yojson.Safe.Util.
+          (session_card |> member "runtime_pool_counts" |> member "local64" |> to_int);
+      Alcotest.(check int) "session card tier 35b count" 2
+        Yojson.Safe.Util.(session_card |> member "tier_counts" |> member "35b" |> to_int);
+      Alcotest.(check int) "session card tier 9b count" 1
+        Yojson.Safe.Util.(session_card |> member "tier_counts" |> member "9b" |> to_int);
+      Alcotest.(check int) "session card profile decide count" 1
+        Yojson.Safe.Util.
+          (session_card |> member "task_profile_counts" |> member "decide" |> to_int);
+      Alcotest.(check int) "session card escalation count" 1
+        Yojson.Safe.Util.(session_card |> member "escalation_count" |> to_int);
+      let worker_cards = Yojson.Safe.Util.(digest |> member "worker_cards" |> to_list) in
+      let manager_card =
+        match
+          List.find_opt
+            (fun card ->
+              Yojson.Safe.Util.(card |> member "actor" |> to_string)
+              = "llama-local-manager")
+            worker_cards
+        with
+        | Some card -> card
+        | None -> Alcotest.fail "expected manager worker card"
+      in
+      Alcotest.(check string) "manager card model tier" "35b"
+        Yojson.Safe.Util.(manager_card |> member "model_tier" |> to_string);
+      Alcotest.(check string) "manager card task profile" "decide"
+        Yojson.Safe.Util.(manager_card |> member "task_profile" |> to_string);
+      Alcotest.(check string) "manager card risk level" "high"
+        Yojson.Safe.Util.(manager_card |> member "risk_level" |> to_string))

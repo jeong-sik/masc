@@ -58,19 +58,22 @@ jobs:
 
       - name: Run health snapshot
         env:
-          HEALTH_BASELINE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+          HEALTH_COMPARE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event_name == 'push' && github.event.before || '') }}
         run: |
-          chmod +x scripts/health_snapshot.sh scripts/anti-fake-audit.sh
-          if [ -n "${HEALTH_BASELINE_REF}" ]; then
+          chmod +x scripts/health_snapshot.sh scripts/anti-fake-audit.sh scripts/ml_line_cap_audit.sh
+          if [ -n "${HEALTH_COMPARE_REF}" ] && git rev-parse --verify "${HEALTH_COMPARE_REF}^{commit}" >/dev/null 2>&1; then
             opam exec -- bash scripts/health_snapshot.sh \
               --json-out .health/health-snapshot.json \
-              --baseline-ref "${HEALTH_BASELINE_REF}" \
-              --fail-on-lib-regression
+              --baseline-ref "${HEALTH_COMPARE_REF}" \
+              --changed-ref "${HEALTH_COMPARE_REF}" \
+              --fail-on-lib-regression \
+              --fail-on-ml-line-cap-regression
           else
             opam exec -- bash scripts/health_snapshot.sh \
               --json-out .health/health-snapshot.json \
               --baseline-file .ci/health-baseline.json \
-              --fail-on-lib-regression
+              --fail-on-lib-regression \
+              --fail-on-ml-line-cap-regression
           fi
 
       - name: Upload health snapshot

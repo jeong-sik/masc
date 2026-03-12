@@ -6,10 +6,16 @@
     "lib_list_tl": 4,
     "lib_option_get": 0,
     "lib_obj_magic": 0,
+    "manual_ml_over_500": 163,
+    "excepted_ml_over_500": 1,
+    "lib_ml_over_500": 113,
+    "bin_ml_over_500": 0,
     "test_failwith": 275,
+    "test_ml_over_500": 50,
     "test_list_hd": 172,
     "test_list_tl": 0,
     "test_option_get": 33,
-    "test_obj_magic": 1
+    "test_obj_magic": 1,
+    "examples_ml_over_500": 1
   }
 }

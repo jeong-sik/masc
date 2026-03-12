@@ -1,0 +1,161 @@
+module Http = Http_server_eio
+module Http_negotiation = Mcp_protocol.Http_negotiation
+
+type deps = Server_mcp_transport_http_types.deps
+
+let is_http_error_response = function
+  | `Assoc fields ->
+      let id_is_null =
+        match List.assoc_opt "id" fields with
+        | Some `Null -> true
+        | _ -> false
+      in
+      let code =
+        match List.assoc_opt "error" fields with
+        | Some (`Assoc err_fields) -> (
+            match List.assoc_opt "code" err_fields with
+            | Some (`Int c) -> Some c
+            | _ -> None)
+        | _ -> None
+      in
+      id_is_null && (code = Some (-32700) || code = Some (-32600))
+  | _ -> false
+
+let request_runtime_result (deps : deps) =
+  match (deps.get_server_state_opt (), deps.get_sw (), deps.get_clock ()) with
+  | Some state, Some sw, Some clock -> Ok (state, sw, clock)
+  | None, _, _ -> Error "Server state not initialized"
+  | _, None, _ -> Error "Eio switch not available"
+  | _, _, None -> Error "Eio clock not available"
+
+let env_flag name =
+  match Sys.getenv_opt name with
+  | Some raw -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "1" | "true" | "yes" | "on" -> true
+      | _ -> false)
+  | None -> false
+
+let header_truthy_value value =
+  match String.lowercase_ascii (String.trim value) with
+  | "1" | "true" | "yes" | "on" -> true
+  | _ -> false
+
+let request_force_json_response (request : Httpun.Request.t) =
+  match
+    Server_mcp_transport_http_session.get_header_any_case request.headers
+      "x-masc-force-json"
+  with
+  | Some value -> header_truthy_value value
+  | None -> false
+
+let allow_legacy_accept = env_flag "MASC_ALLOW_LEGACY_ACCEPT"
+
+let classify_mcp_accept (request : Httpun.Request.t) =
+  Http_negotiation.classify_mcp_accept ~allow_legacy:allow_legacy_accept
+    (Httpun.Headers.get request.headers "accept")
+
+let legacy_accept_warning_headers = function
+  | Http_negotiation.Legacy_accepted ->
+      [
+        ( "warning",
+          "299 - \"Legacy Accept is deprecated; use 'application/json, text/event-stream'\"" );
+        ("x-masc-legacy-accept", "1");
+      ]
+  | Http_negotiation.Streamable | Http_negotiation.Rejected -> []
+
+let legacy_transport_deprecation_headers =
+  [
+    ("deprecation", "true");
+    ( "warning",
+      "299 - \"Legacy SSE endpoints (/sse,/messages) are deprecated; use /mcp\"" );
+    ("link", "</mcp>; rel=\"successor-version\"");
+  ]
+
+let force_json_response =
+  env_flag "MASC_FORCE_JSON_RESPONSE" || env_flag "MCP_FORCE_JSON_RESPONSE"
+
+let sse_retry_ms = 3000
+
+let sse_prime_event () =
+  let id = Sse.next_id () in
+  Printf.sprintf "retry: %d\nid: %d\n\n" sse_retry_ms id
+
+let sse_ping_interval_s = 30.0
+
+let get_last_event_id (request : Httpun.Request.t) =
+  match Httpun.Headers.get request.headers "last-event-id" with
+  | Some id -> (
+      try Some (int_of_string id) with Failure _ -> None)
+  | None -> None
+
+let mcp_headers session_id protocol_version =
+  [ ("mcp-session-id", session_id); ("mcp-protocol-version", protocol_version) ]
+
+let session_cookie_header session_id =
+  ( "set-cookie",
+    Printf.sprintf "mcp-session-id=%s; Path=/; Max-Age=86400; SameSite=Lax"
+      session_id )
+
+let sse_headers ~(deps : deps) session_id protocol_version origin =
+  [
+    ("content-type", Http_negotiation.sse_content_type);
+    session_cookie_header session_id;
+  ]
+  @ mcp_headers session_id protocol_version
+  @ deps.cors_headers origin
+
+let sse_stream_headers ~(deps : deps) session_id protocol_version origin =
+  [
+    ("content-type", Http_negotiation.sse_content_type);
+    ("cache-control", "no-cache");
+    ("connection", "keep-alive");
+    session_cookie_header session_id;
+  ]
+  @ mcp_headers session_id protocol_version
+  @ deps.cors_headers origin
+
+let json_headers ~(deps : deps) session_id protocol_version origin =
+  [ ("content-type", "application/json") ]
+  @ mcp_headers session_id protocol_version
+  @ deps.cors_headers origin
+
+let respond_mcp_auth_error ?(extra_headers = []) ~(deps : deps) request reqd ~session_id
+    ~protocol_version msg =
+  let origin = deps.get_origin request in
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("error", `Assoc [ ("code", `Int (-32001)); ("message", `String msg) ]);
+        ])
+  in
+  let headers =
+    Httpun.Headers.of_list
+      ((("content-length", string_of_int (String.length body))
+       :: ("www-authenticate", "Bearer")
+       :: extra_headers)
+      @ json_headers ~deps session_id protocol_version origin)
+  in
+  let response = Httpun.Response.create ~headers `Unauthorized in
+  Httpun.Reqd.respond_with_string reqd response body
+
+let respond_mcp_internal_error ?(extra_headers = []) ~(deps : deps) request reqd
+    ~session_id ~protocol_version msg =
+  let origin = deps.get_origin request in
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("error", `Assoc [ ("code", `Int (-32603)); ("message", `String msg) ]);
+        ])
+  in
+  let headers =
+    Httpun.Headers.of_list
+      ((("content-length", string_of_int (String.length body)) :: extra_headers)
+      @ json_headers ~deps session_id protocol_version origin)
+  in
+  let response = Httpun.Response.create ~headers `Internal_server_error in
+  Httpun.Reqd.respond_with_string reqd response body

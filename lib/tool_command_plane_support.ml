@@ -1,0 +1,350 @@
+module U = Yojson.Safe.Util
+
+type ('clock, 'net) context = {
+  config : Room.config;
+  agent_name : string;
+  sw : Eio.Switch.t option;
+  clock : 'clock Eio.Time.clock option;
+  net : 'net option;
+  mcp_state : Mcp_server.server_state option;
+  mcp_session_id : string option;
+  auth_token : string option;
+}
+
+type result = bool * string
+
+let get_string_opt = Tool_args.get_string_opt
+let get_bool = Tool_args.get_bool
+
+let get_json_opt args key =
+  match U.member key args with
+  | `Null -> None
+  | value -> Some value
+
+let json_error message =
+  Yojson.Safe.to_string
+    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
+
+let json_ok fields =
+  Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
+
+let json_error_fields message fields =
+  Yojson.Safe.to_string
+    (`Assoc
+      ([
+         ("status", `String "error");
+         ("message", `String message);
+       ]
+      @ fields))
+
+let json_result = function
+  | Ok json -> (true, Yojson.Safe.to_string json)
+  | Error message -> (false, json_error message)
+
+let assoc_field key value = (key, value)
+
+let env_int_or ~name ~default =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some value when value > 0 -> value
+      | _ -> default)
+
+let env_bool_or ~name ~default =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "1" | "true" | "yes" | "on" -> true
+      | "0" | "false" | "no" | "off" -> false
+      | _ -> default)
+
+let merge_env_overrides overrides =
+  let override_keys = List.map fst overrides in
+  let is_override entry =
+    match String.index_opt entry '=' with
+    | None -> false
+    | Some idx ->
+        let key = String.sub entry 0 idx in
+        List.mem key override_keys
+  in
+  let base =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun entry -> not (is_override entry))
+  in
+  let injected =
+    overrides |> List.map (fun (key, value) -> key ^ "=" ^ value)
+  in
+  Array.of_list (base @ injected)
+
+let read_all ic =
+  let buf = Buffer.create 1024 in
+  (try
+     while true do
+       Buffer.add_channel buf ic 4096
+     done
+   with End_of_file -> ());
+  Buffer.contents buf
+
+let tail_text ?(max_chars = 4000) text =
+  let len = String.length text in
+  if len <= max_chars then text
+  else String.sub text (len - max_chars) max_chars
+
+let swarm_live_run_dir config run_id =
+  Filename.concat
+    (Filename.concat (Cp_paths.control_plane_root_dir config) "swarm-live")
+    (Agent_swarm_live_harness.safe_run_id run_id)
+
+let swarm_live_summary_path config run_id =
+  Filename.concat (swarm_live_run_dir config run_id) "swarm-live-summary.json"
+
+let swarm_live_runtime_doctor_path config run_id =
+  Filename.concat (swarm_live_run_dir config run_id) "runtime-doctor.json"
+
+let json_string_member_opt json key =
+  match U.member key json with
+  | `String value when String.trim value <> "" -> Some value
+  | _ -> None
+
+let read_json_file_opt path =
+  if Sys.file_exists path then
+    Some (Yojson.Safe.from_file path)
+  else
+    None
+
+let rec find_repo_root_with_script dir depth =
+  if depth < 0 then None
+  else
+    let script_path =
+      Filename.concat dir "scripts/harness/workload/agent_swarm_live.sh"
+    in
+    if Sys.file_exists script_path then Some script_path
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None
+      else find_repo_root_with_script parent (depth - 1)
+
+let resolve_swarm_live_script () =
+  match Sys.getenv_opt "MASC_SWARM_LIVE_SCRIPT" with
+  | Some value when String.trim value <> "" ->
+      let path = String.trim value in
+      if Sys.file_exists path then Some path else None
+  | _ ->
+      let seeds =
+        [ Sys.getcwd (); Filename.dirname Sys.executable_name ]
+        |> List.sort_uniq String.compare
+      in
+      List.find_map (fun seed -> find_repo_root_with_script seed 8) seeds
+
+type process_result = {
+  exit_code : int;
+  stdout : string;
+  stderr : string;
+}
+
+let run_process ~prog ~argv ~env =
+  let ic, oc, ec =
+    Unix.open_process_args_full prog (Array.of_list argv) env
+  in
+  close_out_noerr oc;
+  let stdout = read_all ic in
+  let stderr = read_all ec in
+  let exit_code =
+    match Unix.close_process_full (ic, oc, ec) with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED code -> 128 + code
+    | Unix.WSTOPPED code -> 256 + code
+  in
+  { exit_code; stdout; stderr }
+
+let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
+  let start = Unix.gettimeofday () in
+  let rec loop () =
+    match Unix.waitpid [ Unix.WNOHANG ] pid with
+    | 0, _ ->
+        if Unix.gettimeofday () -. start >= float_of_int timeout_sec then
+          `Timeout
+        else (
+          (match clock_opt with
+          | Some clock -> Eio.Time.sleep clock 0.2
+          | None -> Unix.sleepf 0.2);
+          loop ())
+    | _, status -> `Exited status
+  in
+  loop ()
+
+let run_process_with_timeout ~clock_opt ~timeout_sec ~prog ~argv ~env =
+  let stdout_path = Filename.temp_file "masc_swarm_live_stdout_" ".log" in
+  let stderr_path = Filename.temp_file "masc_swarm_live_stderr_" ".log" in
+  let stdin_fd = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
+  let stdout_fd =
+    Unix.openfile stdout_path
+      [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
+  in
+  let stderr_fd =
+    Unix.openfile stderr_path
+      [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
+  in
+  let pid =
+    Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd
+      stderr_fd
+  in
+  Unix.close stdin_fd;
+  Unix.close stdout_fd;
+  Unix.close stderr_fd;
+  let finalize exit_code =
+    let stdout = In_channel.with_open_bin stdout_path In_channel.input_all in
+    let stderr = In_channel.with_open_bin stderr_path In_channel.input_all in
+    (try Sys.remove stdout_path with _ -> ());
+    (try Sys.remove stderr_path with _ -> ());
+    { exit_code; stdout; stderr }
+  in
+  match wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid with
+  | `Exited (Unix.WEXITED code) -> finalize code
+  | `Exited (Unix.WSIGNALED code) -> finalize (128 + code)
+  | `Exited (Unix.WSTOPPED code) -> finalize (256 + code)
+  | `Timeout ->
+      (try Unix.kill pid Sys.sigterm with _ -> ());
+      (match clock_opt with
+      | Some clock -> Eio.Time.sleep clock 1.0
+      | None -> Unix.sleepf 1.0);
+      let exit_code =
+        match Unix.waitpid [ Unix.WNOHANG ] pid with
+        | 0, _ ->
+            (try Unix.kill pid Sys.sigkill with _ -> ());
+            let _, status = Unix.waitpid [] pid in
+            (match status with
+            | Unix.WEXITED code -> code
+            | Unix.WSIGNALED code -> 128 + code
+            | Unix.WSTOPPED code -> 256 + code)
+        | _, status -> (
+            match status with
+            | Unix.WEXITED code -> code
+            | Unix.WSIGNALED code -> 128 + code
+            | Unix.WSTOPPED code -> 256 + code)
+      in
+      finalize
+        (if exit_code = 0 then 124 else exit_code)
+
+let json_with_process_metadata json ({ exit_code; stdout; stderr } : process_result) =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        @ [
+            assoc_field "harness_exit_code" (`Int exit_code);
+            assoc_field "harness_stdout_tail" (`String (tail_text stdout));
+            assoc_field "harness_stderr_tail" (`String (tail_text stderr));
+          ])
+  | other ->
+      `Assoc
+        [
+          assoc_field "result" other;
+          assoc_field "harness_exit_code" (`Int exit_code);
+          assoc_field "harness_stdout_tail" (`String (tail_text stdout));
+          assoc_field "harness_stderr_tail" (`String (tail_text stderr));
+        ]
+
+let swarm_live_error_message ?runtime_doctor ~default () =
+  match runtime_doctor with
+  | None -> default
+  | Some json -> (
+      match
+        ( json_string_member_opt json "runtime_blocker",
+          json_string_member_opt json "detail" )
+      with
+      | Some blocker, Some detail -> Printf.sprintf "%s: %s" blocker detail
+      | Some blocker, None -> blocker
+      | None, Some detail -> detail
+      | None, None -> default)
+
+let swarm_live_error_payload config ~run_id ~message ?proc () =
+  let runtime_doctor_path = swarm_live_runtime_doctor_path config run_id in
+  let summary_path = swarm_live_summary_path config run_id in
+  let runtime_doctor = read_json_file_opt runtime_doctor_path in
+  let detailed_json = Command_plane_v2.swarm_live_json config ~run_id () in
+  let fields =
+    [
+      assoc_field "run_id" (`String run_id);
+      assoc_field "runtime_doctor_path" (`String runtime_doctor_path);
+      assoc_field "summary_path" (`String summary_path);
+      assoc_field "swarm" detailed_json;
+    ]
+    @
+    match runtime_doctor with
+    | None -> []
+    | Some doctor ->
+        [ assoc_field "runtime_doctor" doctor ]
+        @
+        (match json_string_member_opt doctor "runtime_blocker" with
+        | Some blocker -> [ assoc_field "runtime_blocker" (`String blocker) ]
+        | None -> [])
+        @
+        (match json_string_member_opt doctor "detail" with
+        | Some detail -> [ assoc_field "detail" (`String detail) ]
+        | None -> [])
+  in
+  let payload = `Assoc (("status", `String "error") :: ("message", `String message) :: fields) in
+  match proc with
+  | Some process -> Yojson.Safe.to_string (json_with_process_metadata payload process)
+  | None -> Yojson.Safe.to_string payload
+
+let handle_unit_define (ctx : (_, _) context) args : result =
+  try
+    match Command_plane_v2.upsert_unit ctx.config ~actor:ctx.agent_name args with
+    | Ok unit ->
+        ( true,
+          json_ok
+            [
+              ("result", Command_plane_v2.unit_to_json unit);
+              ("topology", Command_plane_v2.topology_json ctx.config);
+            ] )
+    | Error message -> (false, json_error message)
+  with Invalid_argument message -> (false, json_error message)
+
+let handle_unit_list (ctx : (_, _) context) : result =
+  (true, Yojson.Safe.to_string (Command_plane_v2.list_units_json ctx.config))
+
+let object_schema ?(required = []) properties =
+  `Assoc
+    [
+      ("type", `String "object");
+      ("properties", `Assoc properties);
+      ("required", `List (List.map (fun key -> `String key) required));
+    ]
+
+let string_prop description =
+  `Assoc [ ("type", `String "string"); ("description", `String description) ]
+
+let integer_prop ?default description =
+  `Assoc
+    ([
+       ("type", `String "integer");
+       ("description", `String description);
+     ]
+    @
+    match default with
+    | Some value -> [ ("default", `Int value) ]
+    | None -> [])
+
+let boolean_prop ?default description =
+  `Assoc
+    ([
+       ("type", `String "boolean");
+       ("description", `String description);
+     ]
+    @
+    match default with
+    | Some value -> [ ("default", `Bool value) ]
+    | None -> [])
+
+let string_array_prop description =
+  `Assoc
+    [
+      ("type", `String "array");
+      ("description", `String description);
+      ("items", `Assoc [ ("type", `String "string") ]);
+    ]

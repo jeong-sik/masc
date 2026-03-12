@@ -383,7 +383,13 @@
 
 (test
  (name test_operator_control)
- (modules test_operator_control)
+ (modules test_operator_control
+          test_operator_control_support
+          test_operator_control_snapshot
+          test_operator_control_actions
+          test_operator_control_judgment
+          test_operator_control_swarm
+          test_operator_control_keeper)
  (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test

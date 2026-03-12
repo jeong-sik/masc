@@ -26,7 +26,9 @@ let handle_resume ctx _args =
 
 let handle_pause_status ctx args =
   let requested_room = get_string args "room_id" "" |> String.trim in
-  let current_room = Room.current_room_id ctx.config in
+  let current_room =
+    Room.read_current_room ctx.config |> Option.value ~default:"default"
+  in
   let room_id = if requested_room = "" then current_room else requested_room in
   let payload =
     match Room.pause_info ctx.config with
@@ -98,10 +100,14 @@ let handle_switch_mode ctx args =
                     |> List.filter_map (function Ok cat -> Some cat | Error _ -> None)
                     |> List.sort_uniq Stdlib.compare
                   in
-                  ignore (Config.set_categories room_path categories);
+                  ignore
+                    (Config.set_categories ~actor:ctx.agent_name
+                       ~source:"masc_switch_mode:custom" room_path categories);
                   Ok ()
           | _ ->
-              ignore (Config.switch_mode room_path mode);
+              ignore
+                (Config.switch_mode ~actor:ctx.agent_name
+                   ~source:"masc_switch_mode" room_path mode);
               Ok ()
         in
         (match switched with

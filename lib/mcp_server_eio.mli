@@ -195,20 +195,6 @@ type governance_config = {
     - "enterprise"/"paranoid": audit=true, anomaly=true *)
 val governance_defaults : string -> governance_config
 
-(** {1 Audit Events} *)
-
-(** Audit event record *)
-type audit_event = {
-  timestamp: float;
-  agent: string;
-  event_type: string;
-  success: bool;
-  detail: string option;
-}
-
-(** Serialize audit event to JSON *)
-val audit_event_to_json : audit_event -> Yojson.Safe.t
-
 (** {1 MCP Sessions} *)
 
 (** MCP session record for HTTP session persistence *)

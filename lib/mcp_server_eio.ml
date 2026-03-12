@@ -3301,6 +3301,7 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
     ]
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
+    @ Tool_catalog.metadata_to_fields schema.name
     @
     match usage_summary with
     | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name

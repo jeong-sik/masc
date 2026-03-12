@@ -154,8 +154,8 @@ export function Mission() {
 
       <${Card} title="키퍼 연속성" class="mission-list-card" semanticId="mission.keeper_activity">
         <div class="mission-section-head">
-          <h3>연속성 보조 면</h3>
-          <p>키퍼는 세션과 별개로 보고, 연속성 판단에 필요한 정보만 먼저 보여줍니다.</p>
+          <h3>키퍼 연속성 요약</h3>
+          <p>카드 제목은 keeper 이름이고, runtime agent 이름은 상세에만 보조 라벨로 보여줍니다.</p>
         </div>
         <div class="mission-activity-list">
           ${keeperRows.length > 0

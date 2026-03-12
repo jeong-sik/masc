@@ -15,6 +15,7 @@ import {
   KeeperRuntimeActions,
 } from './keeper-shared'
 import { showToast } from './common/toast'
+import { keeperIdentityHint } from './common/keeper-identity'
 
 export const selectedKeeper = signal<Keeper | null>(null)
 
@@ -216,6 +217,7 @@ export function KeeperDetailOverlay() {
   const keeper = selectedKeeper.value
   if (!keeper) return null
 
+  const keeperIdentity = keeperIdentityHint(keeper.name, keeper.agent_name)
   const profileItems = (keeper.traits?.length ?? 0) > 0 || (keeper.interests?.length ?? 0) > 0 || Boolean(keeper.skill_primary) || Boolean(keeper.last_heartbeat)
 
   return html`
@@ -236,6 +238,8 @@ export function KeeperDetailOverlay() {
             <div>
               <h2 style="margin:0; font-size:20px; color:#e0e0e0;">${keeper.name}</h2>
               ${keeper.koreanName ? html`<div style="font-size:13px; color:#888;">${keeper.koreanName}</div>` : null}
+              ${keeperIdentity ? html`<div style="font-size:12px; color:#94a3b8;">${keeperIdentity}</div>` : null}
+              ${keeper.agent_name ? html`<div style="font-size:12px; color:#888;">Runtime agent: ${keeper.agent_name}</div>` : null}
             </div>
             <${StatusBadge} status=${keeper.status} />
           </div>

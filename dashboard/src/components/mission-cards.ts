@@ -1,5 +1,8 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { KeeperCard, type CanonicalKeeperCardModel } from './common/keeper-card'
+import { keeperRuntimeLabel } from './common/keeper-identity'
+import { linkedRecentToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import {
@@ -511,58 +514,48 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
   ]
     .filter((value): value is string => value !== null)
     .join(' · ')
+  const recentToolsLabel =
+    row.recentTools.length > 0
+      ? row.recentTools.join(', ')
+      : toolAuditStateLabel(linkedRecentToolsEmptyState(row.keeper))
+  const runtimeLabel = keeperRuntimeLabel(
+    row.brief.name,
+    row.brief.agent_name ?? row.keeper?.agent_name,
+  )
+  const model: CanonicalKeeperCardModel = {
+    name: row.brief.name,
+    koreanName: row.keeper?.koreanName ?? null,
+    runtimeLabel,
+    emoji: row.keeper?.emoji ?? null,
+    tone: toneClass(row.brief.status ?? row.keeper?.status),
+    statusRaw: row.brief.status ?? row.keeper?.status ?? null,
+    statusLabel: statusLabel(row.brief.status ?? row.keeper?.status),
+    focus: row.currentWork,
+    lastActivityAt: row.keeper?.last_heartbeat ?? null,
+    lastActivityFallback: '최근 활동 없음',
+    continuity: continuity || '연속성 정보 없음',
+    contextRatio: row.brief.context_ratio ?? row.keeper?.context_ratio ?? null,
+    summary: row.keeper?.skill_reason ? `판단 요약 · ${trimText(row.keeper.skill_reason, 120)}` : null,
+    relatedSessionId: null,
+    recentEvent: row.recentEvent,
+    recentInput: row.recentInput,
+    recentOutput: row.recentOutput,
+    recentTools: row.recentTools,
+    allowedTools: [],
+    disclosureLabel: '연속성 상세',
+  }
 
-  return html`
-    <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)}">
-      <button class="mission-card-select" onClick=${() => { if (row.keeper) openKeeperDetail(row.keeper) }}>
-        <div class="mission-activity-head">
-          <div class="mission-activity-title">
-            <span class="agent-emoji">${row.keeper?.emoji ?? ''}</span>
-            <div>
-              <strong>${row.brief.name}</strong>
-              ${row.keeper?.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
-            </div>
-          </div>
-          <span class="command-chip ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
-        </div>
-
-        <div class="mission-activity-meta">
-          <span>최근 하트비트 · ${row.keeper?.last_heartbeat ? relativeTime(row.keeper.last_heartbeat) : '기록 없음'}</span>
-          <span>${continuity || '연속성 정보 없음'}</span>
-        </div>
-
-        <div class="mission-activity-focus">
-          <span>무엇을</span>
-          <strong>${row.currentWork}</strong>
-          ${row.keeper?.skill_reason ? html`<small>판단 요약 · ${trimText(row.keeper.skill_reason, 120)}</small>` : null}
-        </div>
-      </button>
-
-      <details class="mission-card-disclosure">
-        <summary>연속성 상세</summary>
-        <div class="mission-activity-foot">
-          <span>에이전트 · ${row.brief.agent_name ?? row.keeper?.agent_name ?? '기록 없음'}</span>
-          ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : null}
-        </div>
-        <details class="mission-card-disclosure compact">
-          <summary>입력 · 응답 · 도구</summary>
-          <div class="mission-io-stack">
-            <div class="mission-io-item">
-              <span>최근 입력</span>
-              <strong>${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'}</strong>
-            </div>
-            <div class="mission-io-item">
-              <span>최근 응답</span>
-              <strong>${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
-            </div>
-          </div>
-          <div class="mission-activity-foot">
-            <span>최근 도구 · ${row.recentTools.length > 0 ? row.recentTools.join(', ') : '도구 사용 없음'}</span>
-          </div>
-        </details>
-      </details>
-    </article>
-  `
+  return html`<${KeeperCard}
+    variant="mission"
+    model=${{
+      ...model,
+      recentTools: row.recentTools.length > 0 ? row.recentTools : [recentToolsLabel],
+      recentEvent:
+        row.recentEvent
+        ?? `runtime agent · ${row.brief.agent_name ?? row.keeper?.agent_name ?? '기록 없음'}`,
+    }}
+    onClick=${() => { if (row.keeper) openKeeperDetail(row.keeper) }}
+  />`
 }
 
 export function InternalSignalCard({ item }: { item: DashboardMissionInternalSignal }) {

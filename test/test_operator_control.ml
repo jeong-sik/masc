@@ -246,6 +246,85 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
              = "task_inject")
            confirm_required_actions))
 
+let test_orchestra_room_core_shape () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore (Room.add_task config ~title:"orchestra backlog" ~priority:2 ~description:"");
+      ignore (Room.broadcast config ~from_agent:"owner" ~content:"orchestra seed");
+      let json = Command_plane_orchestra.json (operator_ctx env sw config "owner") in
+      let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
+      Alcotest.(check bool) "room node exists" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "kind" |> to_string) = "room")
+           nodes);
+      Alcotest.(check int) "session count" 0
+        Yojson.Safe.Util.(json |> member "summary" |> member "session_count" |> to_int);
+      Alcotest.(check string) "focus kind" "node"
+        Yojson.Safe.Util.(json |> member "focus" |> member "target_kind" |> to_string))
+
+let test_orchestra_includes_session_edge_and_pending_signal () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let ctx = operator_ctx env sw config "dashboard" in
+      (match
+         Operator_control.action_json ctx
+           (`Assoc
+             [
+               ("actor", `String "dashboard");
+               ("action_type", `String "task_inject");
+               ("target_type", `String "room");
+               ( "payload",
+                 `Assoc
+                   [
+                     ("title", `String "Injected task");
+                     ("description", `String "created by operator");
+                     ("priority", `Int 1);
+                   ] );
+             ])
+       with
+      | Ok _ -> ()
+      | Error err -> Alcotest.fail err);
+      let json = Command_plane_orchestra.json ctx in
+      let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
+      let edges = Yojson.Safe.Util.(json |> member "edges" |> to_list) in
+      let signals = Yojson.Safe.Util.(json |> member "signals" |> to_list) in
+      Alcotest.(check bool) "session node exists" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "id" |> to_string)
+             = "session:" ^ session_id)
+           nodes);
+      Alcotest.(check bool) "room-session edge exists" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "source" |> to_string)
+             = "room:default"
+             && Yojson.Safe.Util.(row |> member "target" |> to_string)
+                = "session:" ^ session_id)
+           edges);
+      Alcotest.(check bool) "pending confirm signal exists" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "kind" |> to_string)
+             = "pending_confirm")
+           signals))
+
 let test_digest_room_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1557,6 +1636,10 @@ let () =
             test_snapshot_has_expected_sections;
           Alcotest.test_case "snapshot pending confirm summary tracks actor scope" `Quick
             test_snapshot_pending_confirm_summary_tracks_actor_scope;
+          Alcotest.test_case "orchestra room core shape" `Quick
+            test_orchestra_room_core_shape;
+          Alcotest.test_case "orchestra session edge and pending signal" `Quick
+            test_orchestra_includes_session_edge_and_pending_signal;
           Alcotest.test_case "digest room pending confirm attention" `Quick
             test_digest_room_exposes_pending_confirm_attention;
           Alcotest.test_case "digest room prefers fresh resident judgment"

@@ -50,6 +50,11 @@
    dashboard_proof
    dashboard_mission_briefing
    drift_guard
+   server_utils
+   server_auth
+   server_tts_proxy
+   server_trpg_rest
+   server_dashboard_http
    server_command_plane_http
    server_mcp_transport_http
    web_dashboard

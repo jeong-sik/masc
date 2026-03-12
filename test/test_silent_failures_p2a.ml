@@ -189,9 +189,9 @@ let test_source_heartbeat_interests () =
     true (file_contains_pattern "lib/lodge_heartbeat.ml"
       {|[heartbeat] interests parse:|})
 
-let test_source_main_keeper_log_parse () =
-  check bool "main_eio.ml has keeper log parse logging"
-    true (file_contains_pattern "bin/main_eio.ml"
+let test_source_keeper_log_parse () =
+  check bool "dashboard http route has keeper log parse logging"
+    true (file_contains_pattern "lib/server_dashboard_http.ml"
       {|[main] keeper log parse:|})
 
 let test_source_trpg_npc_heal () =
@@ -237,7 +237,7 @@ let () =
       test_case "MA-M4c: heartbeat interests logging present"
         `Quick test_source_heartbeat_interests;
       test_case "MA-M5: keeper log parse logging present"
-        `Quick test_source_main_keeper_log_parse;
+        `Quick test_source_keeper_log_parse;
       test_case "MA-M7: trpg npc heal logging present"
         `Quick test_source_trpg_npc_heal;
     ];

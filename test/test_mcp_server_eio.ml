@@ -173,42 +173,6 @@ let resource_read_response ~clock ~sw state uri =
   in
   Mcp_eio.handle_request ~clock ~sw state request
 
-let error_code_exn response =
-  match response with
-  | `Assoc fields -> (
-      match List.assoc_opt "error" fields with
-      | Some (`Assoc error_fields) -> (
-          match List.assoc_opt "code" error_fields with
-          | Some (`Int code) -> code
-          | _ -> Alcotest.fail "error code missing")
-      | _ -> Alcotest.fail "error not an object")
-  | _ -> Alcotest.fail "response not an object"
-
-let error_message_exn response =
-  match response with
-  | `Assoc fields -> (
-      match List.assoc_opt "error" fields with
-      | Some (`Assoc error_fields) -> (
-          match List.assoc_opt "message" error_fields with
-          | Some (`String message) -> message
-          | _ -> Alcotest.fail "error message missing")
-      | _ -> Alcotest.fail "error not an object")
-  | _ -> Alcotest.fail "response not an object"
-
-let resource_text_exn response =
-  match response with
-  | `Assoc fields -> (
-      match List.assoc_opt "result" fields with
-      | Some (`Assoc result_fields) -> (
-          match List.assoc_opt "contents" result_fields with
-          | Some (`List (`Assoc content_fields :: _)) -> (
-              match List.assoc_opt "text" content_fields with
-              | Some (`String value) -> value
-              | _ -> Alcotest.fail "resource text missing")
-          | _ -> Alcotest.fail "resource contents missing")
-      | _ -> Alcotest.fail "result not an object")
-  | _ -> Alcotest.fail "response not an object"
-
 let resource_uris resources =
   resources
   |> List.filter_map (function
@@ -1957,6 +1921,95 @@ let test_handle_request_resource_not_found_error_code () =
   Alcotest.(check string) "resource miss message" "Resource not found"
     (error_message_exn response);
   cleanup_dir base_path
+
+let test_handle_request_resources_read_matrix () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Room.init state.room_config ~agent_name:(Some "fixture-root"));
+  let ensure_dir path =
+    if not (Sys.file_exists path) then Unix.mkdir path 0o755
+  in
+  let library_dir = Filename.concat base_path "docs/library" in
+  let masc_dir = Filename.concat base_path ".masc" in
+  ensure_dir (Filename.concat base_path "docs");
+  ensure_dir library_dir;
+  ensure_dir masc_dir;
+  write_text_file (Filename.concat library_dir "alpha.md")
+    {|---
+title: Alpha Doc
+source: https://example.com/alpha
+verified_by: codex
+date: 2026-03-12
+tags: [alpha, keeper]
+---
+Alpha body
+|};
+  write_text_file (Filename.concat masc_dir "institution.json")
+    {|{
+  "identity": {
+    "id": "inst-1",
+    "name": "Fixture Institution",
+    "mission": "Keep collective memory coherent",
+    "founded_at": 0.0,
+    "generation": 1
+  },
+  "memory": {
+    "episodic": [],
+    "semantic": [],
+    "procedural": []
+  },
+  "culture": [],
+  "succession": {
+    "onboarding_steps": ["Read mission"],
+    "required_knowledge": [],
+    "mentor_assignment": "best_fit",
+    "probation_period": 24.0,
+    "graduation_criteria": ["Ship one task"]
+  },
+  "current_agents": [],
+  "alumni": []
+}|};
+  let cases =
+    [
+      ("masc://status.json", "application/json", "\"base_path\"");
+      ("masc://tasks.json", "application/json", "\"tasks\"");
+      ("masc://who.json", "application/json", "[");
+      ("masc://agents.json", "application/json", "{");
+      ("masc://messages.json", "application/json", "[");
+      ("masc://events.json", "application/json", "[");
+      ("masc://worktrees.json", "application/json", "{");
+      ("masc://schema.json", "application/json", "{");
+      ("masc://institution", "text/markdown", "Mission");
+      ("masc://institution.json", "application/json", "\"identity\"");
+      ("masc://library", "text/markdown", "Library Index");
+      ("masc://library.json", "application/json", "\"documents\"");
+      ("masc://library/alpha", "text/markdown", "Alpha body");
+      ("masc://library/alpha.json", "application/json", "\"Alpha body\"");
+    ]
+  in
+  List.iter
+    (fun (uri, expected_mime, expected_text) ->
+      let request =
+        Yojson.Safe.to_string
+          (`Assoc
+            [
+              ("jsonrpc", `String "2.0");
+              ("id", `Int 250);
+              ("method", `String "resources/read");
+              ("params", `Assoc [ ("uri", `String uri) ]);
+            ])
+      in
+      let response = Mcp_eio.handle_request ~clock ~sw state request in
+      Alcotest.(check string) (uri ^ " mime type") expected_mime
+        (resource_mime_type_exn response);
+      Alcotest.(check bool) (uri ^ " text contains expected") true
+        (contains_substring (resource_text_exn response) expected_text))
+    cases;
+  cleanup_dir base_path
+
 let test_handle_request_resources_subscribe_requires_session () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in

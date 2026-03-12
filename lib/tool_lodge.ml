@@ -796,8 +796,12 @@ let builtin_core_agent_configs () =
   ]
 
 (** In-memory cache for dynamic agents (protected by mutex for concurrent access) *)
-let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
+let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 16
 let agent_cache_mu = Mutex.create ()
+
+let with_agent_cache_lock f =
+  Mutex.lock agent_cache_mu;
+  Fun.protect ~finally:(fun () -> Mutex.unlock agent_cache_mu) f
 
 (** {2 File-based cache for offline fallback} *)
 
@@ -850,9 +854,9 @@ let agent_config_of_yojson (json : Yojson.Safe.t) : agent_config option =
 
 (** Save in-memory agent cache to file *)
 let save_agents_to_file_cache () =
-  Mutex.lock agent_cache_mu;
-  let agents = Hashtbl.fold (fun _ v acc -> v :: acc) agent_cache [] in
-  Mutex.unlock agent_cache_mu;
+  let agents = with_agent_cache_lock (fun () ->
+    Hashtbl.fold (fun _ v acc -> v :: acc) agent_cache []
+  ) in
   if agents = [] then ()
   else begin
     let cache_json = `Assoc [
@@ -892,9 +896,9 @@ let load_agents_from_file_cache () : bool =
       end else begin
         let agents_json = json |> member "agents" |> to_list in
         let loaded = List.filter_map agent_config_of_yojson agents_json in
-        Mutex.lock agent_cache_mu;
-        List.iter (fun a -> Hashtbl.replace agent_cache a.name a) loaded;
-        Mutex.unlock agent_cache_mu;
+        with_agent_cache_lock (fun () ->
+          List.iter (fun a -> Hashtbl.replace agent_cache a.name a) loaded
+        );
         Printf.eprintf "[Lodge] Loaded %d agents from file cache (%.1f hours old)\n%!" (List.length loaded) age_hours;
         true
       end
@@ -904,9 +908,7 @@ let load_agents_from_file_cache () : bool =
   end
 
 let has_cached_agents_in_memory () =
-  Mutex.lock agent_cache_mu;
-  let n = Hashtbl.length agent_cache in
-  Mutex.unlock agent_cache_mu;
+  let n = with_agent_cache_lock (fun () -> Hashtbl.length agent_cache) in
   n > 0
 
 let load_agents_from_cache_if_available () =
@@ -958,16 +960,13 @@ let load_agents_config () =
                      model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:(default_model ());
                      interests;
                    } in
-                   Mutex.lock agent_cache_mu;
-                   Hashtbl.replace agent_cache config.name config;
-                   Mutex.unlock agent_cache_mu
-                 with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
-               ) edges;
-               Mutex.lock agent_cache_mu;
-               let n = Hashtbl.length agent_cache in
-               Mutex.unlock agent_cache_mu;
-               if n > 0 then begin
-                 graphql_success := true;
+                   with_agent_cache_lock (fun () ->
+                     Hashtbl.replace agent_cache config.name config
+                   )
+                   with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
+                   ) edges;
+                   let n = with_agent_cache_lock (fun () -> Hashtbl.length agent_cache) in
+                   if n > 0 then begin                 graphql_success := true;
                  Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n;
                  save_agents_to_file_cache ()
                end)
@@ -979,21 +978,17 @@ let load_agents_config () =
       Printf.eprintf "[Lodge] Trying file cache fallback...\n%!";
       if not (load_agents_from_file_cache ()) then begin
         Printf.eprintf "[Lodge] Falling back to builtin core identities\n%!";
-        Mutex.lock agent_cache_mu;
-        List.iter (fun cfg -> Hashtbl.replace agent_cache cfg.name cfg) (builtin_core_agent_configs ());
-        Mutex.unlock agent_cache_mu;
-      end;
-      if not (has_cached_agents_in_memory ()) then
+        with_agent_cache_lock (fun () ->
+          List.iter (fun cfg -> Hashtbl.replace agent_cache cfg.name cfg) (builtin_core_agent_configs ())
+        );
+        end;      if not (has_cached_agents_in_memory ()) then
         Printf.eprintf "[Lodge] ⚠ No agents available (GraphQL failed, no valid cache)\n%!"
     end
   end
 
 (** Get cached agent config, or None if not loaded *)
 let get_cached_agent name =
-  Mutex.lock agent_cache_mu;
-  let r = Hashtbl.find_opt agent_cache name in
-  Mutex.unlock agent_cache_mu;
-  r
+  with_agent_cache_lock (fun () -> Hashtbl.find_opt agent_cache name)
 
 (** Get primary value from cached agent (for SOUL-based decisions) *)
 let get_agent_primary_value name =
@@ -1094,13 +1089,13 @@ let evolve_agent ~name ~dimension ~outcome =
         let (status, _output) = run_cmd_with_status ~timeout_sec:60.0 argv in
         (match status with Unix.WEXITED 0 -> () | _ -> raise (Failure "cypher-shell failed"));
         (* Update cache *)
-        Mutex.lock agent_cache_mu;
-        Hashtbl.replace agent_cache name {
-          config with
-          value_weights = Some new_weights_json;
-          generation = new_gen;
-        };
-        Mutex.unlock agent_cache_mu;
+        with_agent_cache_lock (fun () ->
+          Hashtbl.replace agent_cache name {
+            config with
+            value_weights = Some new_weights_json;
+            generation = new_gen;
+          }
+        );
         Printf.eprintf "[Evolution] %s evolved: %s %s%.2f -> gen %d\n%!"
           name dimension
           (if delta >= 0.0 then "+" else "") delta new_gen;
@@ -1138,10 +1133,7 @@ let () =
 
 (** Get all cached agent names *)
 let get_all_agent_names () =
-  Mutex.lock agent_cache_mu;
-  let r = Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache [] in
-  Mutex.unlock agent_cache_mu;
-  r
+  with_agent_cache_lock (fun () -> Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache [])
 
 (** Pick a random agent name from cache *)
 let random_agent_name () =
@@ -1156,13 +1148,12 @@ let validate_agent_name name =
     | Some _ -> Some name
     | None ->
       (* Try Korean name lookup *)
-      Mutex.lock agent_cache_mu;
-      let found = Hashtbl.fold (fun k v acc ->
-        match acc with Some _ -> acc | None ->
-        if v.korean_name = name then Some k else None
-      ) agent_cache None in
-      Mutex.unlock agent_cache_mu;
-      found
+      with_agent_cache_lock (fun () ->
+        Hashtbl.fold (fun k v acc ->
+          match acc with Some _ -> acc | None ->
+          if v.korean_name = name then Some k else None
+        ) agent_cache None
+      )
 
 (** Get model for agent (from Neo4j cache) *)
 let get_agent_model name =
@@ -1841,15 +1832,14 @@ let core_lodge_agents () = get_all_agent_names ()
 
 (** Get all Lodge agents via GraphQL *)
 let get_cached_agents_tuple () =
-  Mutex.lock agent_cache_mu;
-  let agents = Hashtbl.fold (fun _ cfg acc ->
-    if cfg.status = "active" then
-      (cfg.name, Option.value cfg.primary_value ~default:"unknown", Option.value cfg.prompt_template ~default:"", cfg.korean_name, cfg.generation) :: acc
-    else
-      acc
-  ) agent_cache [] in
-  Mutex.unlock agent_cache_mu;
-  agents
+  with_agent_cache_lock (fun () ->
+    Hashtbl.fold (fun _ cfg acc ->
+      if cfg.status = "active" then
+        (cfg.name, Option.value cfg.primary_value ~default:"unknown", Option.value cfg.prompt_template ~default:"", cfg.korean_name, cfg.generation) :: acc
+      else
+        acc
+    ) agent_cache []
+  )
 
 let get_all_agents () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)

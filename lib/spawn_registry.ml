@@ -420,7 +420,7 @@ let stats reg =
         | Failed _ -> "failed"
         | Cancelled -> "cancelled"
       in
-      let current = try List.assoc key acc with Not_found -> 0 in
+      let current = Option.value ~default:0 (List.assoc_opt key acc) in
       (key, current + 1) :: (List.remove_assoc key acc)
     ) reg.entries [] in
     let cooldown_count = Hashtbl.length reg.cooldowns in

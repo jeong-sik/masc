@@ -879,9 +879,7 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state_opt =
     if Room.is_initialized config then Some (Room.read_state config) else None
   in
-  let current_room =
-    if Room.is_initialized config then Room.current_room_id config else "default"
-  in
+  let current_room = Room.current_room_id config in
   let project =
     match room_state_opt with
     | Some room_state -> room_state.project
@@ -908,7 +906,7 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
     ]
 
 let current_room_id config =
-  if Room.is_initialized config then Room.current_room_id config else "default"
+  Room.current_room_id config
 
 let tasks_safe config =
   if Room.is_initialized config then Room.get_tasks_raw_in_room config (current_room_id config)

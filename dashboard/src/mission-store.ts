@@ -253,7 +253,17 @@ function normalizeSummary(raw: unknown): DashboardMissionSummary {
     room_health: asString(root.room_health),
     cluster: asString(root.cluster),
     project: asString(root.project),
-    current_room: asString(root.current_room) ?? null,
+    current_room: asString(root.current_room) ?? asString(root.room) ?? null,
+    paused: asBoolean(root.paused),
+    tempo_interval_s: asNumber(root.tempo_interval_s),
+    active_agents: asNumber(root.active_agents),
+    keeper_pressure: asNumber(root.keeper_pressure),
+    active_operations: asNumber(root.active_operations),
+    pending_approvals: asNumber(root.pending_approvals),
+    incident_count: asNumber(root.incident_count),
+    recommended_action_count: asNumber(root.recommended_action_count),
+    top_attention: normalizeAttentionItem(root.top_attention),
+    top_action: normalizeRecommendedAction(root.top_action),
   }
 }
 

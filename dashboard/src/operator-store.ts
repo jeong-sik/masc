@@ -50,9 +50,10 @@ function normalizeMessage(raw: unknown): Message | null {
 
 function normalizeRoom(raw: unknown): OperatorRoomSnapshot {
   if (!isRecord(raw)) return {}
+  const currentRoom = asString(raw.current_room) ?? asString(raw.room)
   return {
-    room_id: asString(raw.room_id),
-    current_room: asString(raw.current_room) ?? asString(raw.room),
+    room_id: asString(raw.room_id) ?? currentRoom,
+    current_room: currentRoom,
     project: asString(raw.project),
     cluster: asString(raw.cluster),
     paused: asBoolean(raw.paused),

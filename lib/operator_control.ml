@@ -759,10 +759,14 @@ let sessions_json config =
 
 let room_json config =
   let initialized = Room.is_initialized config in
+  let current_room = Room.current_room_id config in
   if not initialized then
     `Assoc
       [
         ("initialized", `Bool false);
+        ("room", `String current_room);
+        ("room_id", `String current_room);
+        ("current_room", `String current_room);
         ("project", `String (Filename.basename config.base_path));
       ]
   else
@@ -773,9 +777,11 @@ let room_json config =
     `Assoc
       [
         ("initialized", `Bool true);
+        ("room", `String current_room);
+        ("room_id", `String current_room);
         ("cluster", `String (Option.value ~default:"default" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
         ("project", `String state.project);
-        ("current_room", string_option_to_json (Room.read_current_room config));
+        ("current_room", `String current_room);
         ("paused", `Bool state.paused);
         ("pause_reason", string_option_to_json state.pause_reason);
         ("paused_by", string_option_to_json state.paused_by);

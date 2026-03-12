@@ -2691,7 +2691,7 @@ Time: %s
       let initial_content = arg_get_string "initial_content" "" in
       let max_turns = arg_get_int "max_turns" 50 in
       let source_post_id = arg_get_string_opt "post_id" in
-      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
+      let current_room = Room.current_room_id config in
       if topic = "" then (false, "❌ topic required")
       else begin
         let convo_config : Council.Conversation.config = {
@@ -2723,7 +2723,7 @@ Time: %s
       let confidence = arg_get_float_opt "confidence" in
       let reply_to = arg_get_string_opt "reply_to" in
       let mentions = arg_get_string_list "mentions" in
-      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
+      let current_room = Room.current_room_id config in
       if thread_id = "" || content = "" then
         (false, "❌ thread_id and content required")
       else begin
@@ -2756,7 +2756,7 @@ Time: %s
       let thread_id = arg_get_string "thread_id" "" in
       let concluder = arg_get_string "concluder" agent_name in
       let conclusion = arg_get_string "conclusion" "" in
-      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
+      let current_room = Room.current_room_id config in
       if thread_id = "" || conclusion = "" then
         (false, "❌ thread_id and conclusion required")
       else begin
@@ -2775,7 +2775,7 @@ Time: %s
 
   | "masc_convo_get" ->
       let thread_id = arg_get_string "thread_id" "" in
-      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
+      let current_room = Room.current_room_id config in
       if thread_id = "" then (false, "❌ thread_id required")
       else begin
         let convo_config : Council.Conversation.config = {
@@ -2790,7 +2790,7 @@ Time: %s
       end
 
   | "masc_convo_list" ->
-      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
+      let current_room = Room.current_room_id config in
       let convo_config : Council.Conversation.config = {
         base_path = config.base_path;
         room = current_room;

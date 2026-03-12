@@ -1050,6 +1050,22 @@
   word-break: break-word;
 }
 
+.command-topology-explainer {
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.command-topology-explainer p {
+  margin: 10px 0 0;
+  color: rgba(255,255,255,0.78);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .command-card-grid {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);

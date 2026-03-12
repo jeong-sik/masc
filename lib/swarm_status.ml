@@ -293,6 +293,135 @@ let summarize_detail json =
       else
         rendered
 
+let humanize_identifier value =
+  let normalized =
+    value
+    |> String.split_on_char '_'
+    |> List.map String.trim
+    |> List.filter (fun item -> item <> "")
+    |> String.concat " "
+  in
+  if normalized = "" then
+    value
+  else
+    let capitalized = Bytes.of_string normalized in
+    Bytes.set capitalized 0 (Char.uppercase_ascii (Bytes.get capitalized 0));
+    Bytes.to_string capitalized
+
+let movement_reason_summary = function
+  | "recent_trace_event" -> "Recent trace evidence shows the lane is moving."
+  | "pending_manual_confirmation" -> "Progress is paused until a manual confirmation is resolved."
+  | "awaiting_policy_approval" -> "A policy approval is still gating the next transition."
+  | "recent_worker_progress" -> "Recent worker progress is visible in the freshness window."
+  | "recent_detachment_event" -> "A detachment event moved this lane recently."
+  | "operation_updated" -> "The lane changed because its operation record was updated."
+  | "session_event" -> "The lane changed because the team session recorded a new event."
+  | "session_updated" -> "The team session metadata was updated recently."
+  | "detachment_updated" -> "The detachment metadata was updated recently."
+  | "no_active_data" -> "No active lane data is currently present."
+  | "missing_runtime_progress" -> "No fresh runtime progress is currently visible."
+  | other -> humanize_identifier other
+
+let gap_guidance ~lane_ids code =
+  let has_lane lane_id = List.exists (String.equal lane_id) lane_ids in
+  match code with
+  | "pending_manual_confirmation" when has_lane "managed" ->
+      ( "Managed runtime cannot continue while a confirmation is pending.",
+        "masc_policy_approve",
+        "Approve or deny the pending managed action before checking more traces." )
+  | "pending_manual_confirmation" ->
+      ( "The supervised lane is waiting on an operator confirmation.",
+        "masc_operator_confirm",
+        "Confirm or deny the pending operator action before expecting more movement." )
+  | "missing_worker_binding" ->
+      ( "A supervised session with no worker binding cannot produce meaningful collaboration evidence.",
+        "masc_team_session_status",
+        "Inspect the team session and attach or restart a worker before reading proof." )
+  | "projected_only" ->
+      ( "Projected swarm state shows intent, but not a live runtime.",
+        "masc_operation_start",
+        "Materialize a managed operation if this projected lane should become real work." )
+  | "stale_data" when has_lane "managed" ->
+      ( "Managed runtime exists, but the freshness window has expired.",
+        "masc_dispatch_tick",
+        "Run a dispatch tick or inspect managed traces to confirm whether progress is stuck." )
+  | "stale_data" when has_lane "supervised" ->
+      ( "The supervised session has gone stale and may no longer reflect active collaboration.",
+        "masc_team_session_status",
+        "Check the session status and recent worker events before treating it as active." )
+  | "missing_trace_events" ->
+      ( "Without trace events, the dashboard cannot show why the swarm moved or stalled.",
+        "masc_observe_traces",
+        "Collect or inspect recent trace events for the affected lane." )
+  | "missing_runtime_progress" ->
+      ( "The dashboard sees the lane, but not a fresh progress signal.",
+        "masc_observe_traces",
+        "Inspect traces and recent runtime messages to find the missing progress signal." )
+  | "dashboard_source_split" ->
+      ( "Projected and runtime-backed lanes are both active, so one surface can look contradictory.",
+        "masc_observe_operations",
+        "Compare projected state against managed operations before interpreting the swarm as one story." )
+  | _ ->
+      ( "This flag marks a gap between visible state and trustworthy runtime proof.",
+        "masc_observe_traces",
+        "Inspect recent traces before taking an operational action." )
+
+let narrative_json (lanes : lane list) (timeline : timeline_event list)
+    (recommendation : recommendation) =
+  let present_lanes = List.filter (fun (lane : lane) -> lane.present) lanes in
+  let primary_lane =
+    match present_lanes with
+    | lane :: _ -> Some lane
+    | [] -> None
+  in
+  let state =
+    if present_lanes = [] then
+      "idle"
+    else if List.exists (fun (lane : lane) -> String.equal lane.motion_state "stalled") present_lanes then
+      "stalled"
+    else if List.exists (fun (lane : lane) -> String.equal lane.phase "completed") present_lanes then
+      "completed"
+    else if List.exists (fun (lane : lane) -> String.equal lane.motion_state "moving") present_lanes then
+      "running"
+    else
+      "waiting"
+  in
+  let started =
+    match List.rev timeline with
+    | event :: _ -> Printf.sprintf "%s. %s" event.title event.detail
+    | [] -> (
+        match primary_lane with
+        | Some lane ->
+            Printf.sprintf "%s became the primary visible lane." lane.label
+        | None -> "No visible swarm start signal is recorded yet.")
+  in
+  let active_work =
+    match primary_lane with
+    | Some lane ->
+        Printf.sprintf "%s. %s" lane.current_step
+          (movement_reason_summary lane.movement_reason)
+    | None -> recommendation.reason
+  in
+  let completion =
+    match
+      List.find_opt
+        (fun (lane : lane) -> String.equal lane.phase "completed")
+        present_lanes
+    with
+    | Some lane ->
+        Printf.sprintf "Completion evidence is visible for %s." lane.label
+    | None -> "No completion evidence is visible yet."
+  in
+  `Assoc
+    [
+      ("state", `String state);
+      ("started", `String started);
+      ("active_work", `String active_work);
+      ("completion", `String completion);
+      ( "lane_id",
+        match primary_lane with Some lane -> `String lane.lane_id | None -> `Null );
+    ]
+
 let operation_of_json row =
   let json = U.member "operation" row in
   {
@@ -676,7 +805,7 @@ let lane_timeline_events kind traces sessions decisions =
                    lane_id = lane_id kind;
                    kind = trace.event_type;
                    timestamp;
-                   title = trace.event_type;
+                   title = humanize_identifier trace.event_type;
                    detail = summarize_detail (`Assoc [ ("detail", trace.detail) ]);
                    tone = if String.equal trace.source "operator" then "warn" else "ok";
                    source = trace.source;
@@ -692,10 +821,11 @@ let lane_timeline_events kind traces sessions decisions =
              timestamp =
                Option.value ~default:session.updated_at_iso
                  (first_some session.last_turn_at session.last_event_at);
-             title = session.goal;
+             title =
+               Printf.sprintf "Session %s" (humanize_identifier session.status);
              detail =
-               Printf.sprintf "session %s is %s"
-                 session.session_id session.status;
+               Printf.sprintf "%s (session %s)"
+                 session.goal session.session_id;
              tone =
                if String.equal session.status "running" then "ok" else "warn";
              source = "team_session";
@@ -715,7 +845,8 @@ let lane_timeline_events kind traces sessions decisions =
                    kind = "pending_confirmation";
                    timestamp;
                    title =
-                     Option.value ~default:"Pending approval" decision.requested_action;
+                     Option.value ~default:"Pending approval"
+                       (Option.map humanize_identifier decision.requested_action);
                    detail = "Manual confirmation is still pending.";
                    tone = "warn";
                    source = decision.source;
@@ -1154,11 +1285,17 @@ let build_json_from_inputs ~timeline_limit_override ~now
     |> List.of_seq
     |> List.map (fun (_, (flag, lane_ids)) ->
            let lane_ids = lane_ids |> List.rev |> List.sort_uniq String.compare in
+           let why_it_matters, next_tool, next_step =
+             gap_guidance ~lane_ids flag.code
+           in
            `Assoc
              [
                ("code", `String flag.code);
                ("severity", `String flag.severity);
                ("summary", `String flag.summary);
+               ("why_it_matters", `String why_it_matters);
+               ("next_tool", `String next_tool);
+               ("next_step", `String next_step);
                ("lane_ids", `List (List.map (fun lane_id -> `String lane_id) lane_ids));
                ("count", `Int (List.length lane_ids));
                ("provenance", `String "derived");
@@ -1202,6 +1339,7 @@ let build_json_from_inputs ~timeline_limit_override ~now
       ("judgment_owner", `String "fallback_read_model");
       ("authoritative_judgment_available", `Bool false);
       ("provenance_summary", swarm_surface_contract_json);
+      ("narrative", narrative_json lanes timeline recommendation);
       ( "overview",
         `Assoc
           [
@@ -1276,6 +1414,15 @@ let empty_json =
       ("judgment_owner", `String "fallback_read_model");
       ("authoritative_judgment_available", `Bool false);
       ("provenance_summary", swarm_surface_contract_json);
+      ( "narrative",
+        `Assoc
+          [
+            ("state", `String "idle");
+            ("started", `String "No visible swarm start signal is recorded yet.");
+            ("active_work", `String "No active swarm lane is visible yet.");
+            ("completion", `String "No completion evidence is visible yet.");
+            ("lane_id", `Null);
+          ] );
       ( "overview",
         `Assoc
           [

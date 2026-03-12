@@ -1415,9 +1415,24 @@ export interface DashboardProofSummary {
   goal?: string
   verdict?: DashboardProofVerdict
   actors_count?: number
+  planned_actor_count?: number
+  mentioned_actor_count?: number
+  unanswered_actor_count?: number
   interaction_count?: number
   evidence_count?: number
   cp_trace_count?: number
+}
+
+export interface DashboardProofSelection {
+  mode?: 'explicit' | 'latest_auto_selected' | 'requested_not_found' | 'none' | string
+  reason?: string
+  requested_session_id?: string | null
+  requested_operation_id?: string | null
+  selected_session_id?: string | null
+  selected_goal?: string | null
+  selected_created_by?: string | null
+  selected_operation_id?: string | null
+  available_session_count?: number
 }
 
 export interface DashboardProofTimelineItem {
@@ -1436,15 +1451,30 @@ export interface DashboardProofTimelineItem {
 export interface DashboardProofActorContribution {
   actor: string
   role?: string | null
+  activity_state?: 'acted' | 'mentioned_only' | 'planned_only' | string
+  activity_detail?: string | null
+  observed_event_count?: number
   turn_count?: number
   spawn_count?: number
   tool_evidence_count?: number
   interaction_count?: number
+  mention_count?: number
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_event_summary?: string | null
+  requested_by?: string | null
+  recent_request_preview?: string | null
+  recent_request_at?: string | null
   recent_tool_names?: string[]
   last_active_at?: string | null
+}
+
+export interface DashboardProofToolEvidence {
+  actor?: string | null
+  event_type?: string | null
+  tool_names?: string[]
+  summary?: string | null
+  timestamp?: string | null
 }
 
 export interface DashboardProofArtifactRef {
@@ -1466,6 +1496,7 @@ export interface DashboardProofResponse {
   schema_version?: string
   generated_at?: string
   room?: Record<string, unknown>
+  selection?: DashboardProofSelection
   session_id?: string | null
   operation_id?: string | null
   proof_verdict?: DashboardProofVerdict
@@ -1473,7 +1504,7 @@ export interface DashboardProofResponse {
   timeline?: DashboardProofTimelineItem[]
   actor_contributions?: DashboardProofActorContribution[]
   goal_binding?: Record<string, unknown>
-  tool_evidence?: Record<string, unknown>[]
+  tool_evidence?: DashboardProofToolEvidence[]
   cp_backing_evidence?: DashboardProofBackingEvidence | null
   artifacts?: DashboardProofArtifactRef[]
   raw_proof?: Record<string, unknown> | null
@@ -2130,6 +2161,9 @@ export interface CommandPlaneSwarmGap {
   code: string
   severity: string
   summary: string
+  why_it_matters?: string
+  next_tool?: string
+  next_step?: string
   lane_ids: string[]
   count: number
 }
@@ -2143,6 +2177,13 @@ export interface CommandPlaneSwarmRecommendation {
 
 export interface CommandPlaneSwarmStatus {
   generated_at?: string
+  narrative?: {
+    state?: string
+    started?: string
+    active_work?: string
+    completion?: string
+    lane_id?: string | null
+  }
   overview: {
     active_lanes?: number
     moving_lanes?: number
@@ -2162,6 +2203,8 @@ export interface CommandPlaneSwarmStatus {
 export interface CommandPlaneSwarmProof {
   status: 'present' | 'fallback' | 'missing' | string
   source: 'artifact' | 'slot_samples' | 'none' | string
+  reason_code?: string | null
+  status_summary?: string | null
   run_id?: string | null
   captured_at?: string | null
   pass?: boolean
@@ -2175,6 +2218,7 @@ export interface CommandPlaneSwarmProof {
     done?: number
     final?: number
   }
+  expected_artifact_dir?: string | null
   artifact_ref?: string | null
   missing_reason?: string | null
 }

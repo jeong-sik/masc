@@ -323,19 +323,11 @@ let chain_viewer_path operation_id =
 
 type chain_backend =
   | Native
-  | Compat_llm_mcp
 
-let chain_backend () =
-  match Sys.getenv_opt "MASC_CHAIN_BACKEND" with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "compat_llm_mcp" | "compat" | "llm-mcp" -> Compat_llm_mcp
-      | _ -> Native)
-  | None -> Native
+let chain_backend () = Native
 
 let chain_backend_to_string = function
   | Native -> "native"
-  | Compat_llm_mcp -> "compat_llm_mcp"
 
 let is_valid_run_id_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
@@ -351,13 +343,6 @@ let validate_run_id run_id =
     Ok trimmed
   else
     Error "invalid chain run_id: only [A-Za-z0-9_-] are allowed"
-
-let compat_chain_error_message = function
-  | Llm_client_eio.ConnectionError message -> "llm-mcp connection error: " ^ message
-  | Llm_client_eio.ParseError message -> "llm-mcp parse error: " ^ message
-  | Llm_client_eio.ServerError (status, message) ->
-      Printf.sprintf "llm-mcp server error (%d): %s" status message
-  | Llm_client_eio.Timeout -> "llm-mcp timeout"
 
 let native_runtime (ctx : (_, _) context) ~agent_name =
   match ctx.sw, ctx.clock, ctx.mcp_state with
@@ -927,86 +912,11 @@ let launch_chain_background (ctx : (_, _) context) (operation : Command_plane_v2
                             ( "summary_preview",
                               `String (preview_text ~max_chars:240 response.summary) );
                           ]
-                      in
+                  in
                       finish_run_response ~kind:"chain.orchestrate"
                         ~chain_id:response.chain_id ~goal:(Some spec.goal)
                         ~run_id:response.run_id ~detail
-                  | Error message -> fail_chain message))
-          | Compat_llm_mcp, Chain_run spec -> (
-              match ctx.clock, ctx.net with
-              | Some clock, Some net -> (
-                  match
-                    Llm_client_eio.call_chain_run ~net ~clock
-                      ~chain_id:spec.chain_id ?input_json:spec.input_json
-                      ~checkpoint_enabled:spec.checkpoint_enabled ()
-                  with
-                  | Ok response ->
-                      let detail =
-                        `Assoc
-                          [
-                            ("backend", `String backend_name);
-                            ("chain_id", `String spec.chain_id);
-                            ( "run_id",
-                              match response.run_id with
-                              | Some value -> `String value
-                              | None -> `Null );
-                            ( "duration_ms",
-                              match response.duration_ms with
-                              | Some value -> `Int value
-                              | None -> `Null );
-                            ( "trace_count",
-                              match response.trace_count with
-                              | Some value -> `Int value
-                              | None -> `Null );
-                            ( "output_preview",
-                              `String (preview_text ~max_chars:240 response.output) );
-                          ]
-                      in
-                      finish_run_response ~kind:"chain.run"
-                        ~chain_id:
-                          (match response.chain_id with
-                          | Some value -> Some value
-                          | None -> Some spec.chain_id)
-                        ~goal:None ~run_id:response.run_id ~detail
-                  | Error err -> fail_chain (compat_chain_error_message err))
-              | _ -> fail_chain "compat llm-mcp runtime unavailable")
-          | Compat_llm_mcp, Chain_orchestrate spec -> (
-              match ctx.clock, ctx.net with
-              | Some clock, Some net -> (
-                  match
-                    Llm_client_eio.call_chain_orchestrate ~net ~clock ~goal:spec.goal ()
-                  with
-                  | Ok response ->
-                      let detail =
-                        `Assoc
-                          [
-                            ("backend", `String backend_name);
-                            ("goal", `String spec.goal);
-                            ( "chain_id",
-                              match response.chain_id with
-                              | Some value -> `String value
-                              | None -> `Null );
-                            ( "run_id",
-                              match response.run_id with
-                              | Some value -> `String value
-                              | None -> `Null );
-                            ( "success",
-                              match response.success with
-                              | Some value -> `Bool value
-                              | None -> `Null );
-                            ( "total_replans",
-                              match response.total_replans with
-                              | Some value -> `Int value
-                              | None -> `Null );
-                            ( "summary_preview",
-                              `String (preview_text ~max_chars:240 response.summary) );
-                          ]
-                      in
-                      finish_run_response ~kind:"chain.orchestrate"
-                        ~chain_id:response.chain_id ~goal:(Some spec.goal)
-                        ~run_id:response.run_id ~detail
-                  | Error err -> fail_chain (compat_chain_error_message err))
-              | _ -> fail_chain "compat llm-mcp runtime unavailable"))
+                  | Error message -> fail_chain message)))
   | _ -> ()
 
 let handle_operation_start (ctx : (_, _) context) args : result =
@@ -1021,9 +931,6 @@ let handle_operation_start (ctx : (_, _) context) args : result =
           | Some _, Native
             when ctx.sw = None || ctx.clock = None || ctx.mcp_state = None ->
               Some "native chain-backed operations require local server runtime context"
-          | Some _, Compat_llm_mcp
-            when ctx.sw = None || ctx.clock = None || ctx.net = None ->
-              Some "compat chain-backed operations require llm-mcp runtime context"
           | _ -> None
         in
     match runtime_error with
@@ -1427,95 +1334,33 @@ let chain_summary_json (ctx : (_, _) context) =
           ("recent_history", `List (List.map history_event_json recent_history));
         ])
   in
-  match backend with
-  | Native ->
-      let connection =
-        `Assoc
-          [
-            ("status", `String "connected");
-            ("base_url", `String "native://masc");
-            ("message", `String "Chain summary is served from the native MASC chain plane.");
-            ("backend", `String backend_name);
-          ]
-      in
-      build_summary ~connection ~status_rows:(Chain_native_eio.running_chains_json ())
-        ~recent_history:(Chain_native_eio.read_history_events ~limit:100)
-  | Compat_llm_mcp -> (
-      match ctx.clock, ctx.net with
-      | None, _ | _, None ->
-          Error "compat chain summary requires server Eio runtime context"
-      | Some clock, Some net ->
-          let endpoint = Llm_client_eio.resolve_endpoint () in
-          let base_url =
-            Printf.sprintf "http://%s:%d%s" endpoint.host endpoint.port
-              endpoint.base_path
-          in
-          let status_result = Llm_client_eio.fetch_chain_status_json ~net ~clock () in
-          let history_result = Llm_client_eio.fetch_chain_history_json ~net ~clock () in
-          let connection =
-            match status_result, history_result with
-            | Ok _, Ok _ ->
-                `Assoc
-                  [
-                    ("status", `String "connected");
-                    ("base_url", `String base_url);
-                    ("message", `Null);
-                    ("backend", `String backend_name);
-                  ]
-            | Error err, Ok _ | Ok _, Error err ->
-                `Assoc
-                  [
-                    ("status", `String "degraded");
-                    ("base_url", `String base_url);
-                    ("message", `String (compat_chain_error_message err));
-                    ("backend", `String backend_name);
-                  ]
-            | Error err, Error _ ->
-                `Assoc
-                  [
-                    ("status", `String "disconnected");
-                    ("base_url", `String base_url);
-                    ("message", `String (compat_chain_error_message err));
-                    ("backend", `String backend_name);
-                  ]
-          in
-          let status_rows =
-            match status_result with
-            | Ok (`List rows) -> rows
-            | _ -> []
-          in
-          let recent_history =
-            match history_result with
-            | Ok (`List rows) -> rows
-            | _ -> []
-          in
-          build_summary ~connection ~status_rows ~recent_history)
+  let connection =
+    `Assoc
+      [
+        ("status", `String "connected");
+        ("base_url", `String "native://masc");
+        ("message", `String "Chain summary is served from the native MASC chain plane.");
+        ("backend", `String backend_name);
+      ]
+  in
+  build_summary ~connection ~status_rows:(Chain_native_eio.running_chains_json ())
+    ~recent_history:(Chain_native_eio.read_history_events ~limit:100)
 
-let chain_run_get_json (ctx : (_, _) context) ~run_id =
+let chain_run_get_json (_ctx : (_, _) context) ~run_id =
   match validate_run_id run_id with
   | Error _ as err -> err
   | Ok run_id -> (
-      match chain_backend () with
-      | Native -> (
-          match Chain_native_eio.run_json ~run_id with
-          | Some json ->
-              Ok
-                (`Assoc
-                  [
-                    ("schema_version", `Int 1);
-                    ("version", `String "chain-run-v1");
-                    ("backend", `String "native");
-                    ("run", json);
-                  ])
-          | None -> Error (Printf.sprintf "chain run not found: %s" run_id))
-      | Compat_llm_mcp -> (
-          match ctx.clock, ctx.net with
-          | None, _ | _, None ->
-              Error "compat chain run lookup requires server Eio runtime context"
-          | Some clock, Some net -> (
-              match Llm_client_eio.fetch_chain_run_json ~net ~clock ~run_id () with
-              | Ok json -> Ok json
-              | Error err -> Error (compat_chain_error_message err))))
+      match Chain_native_eio.run_json ~run_id with
+      | Some json ->
+          Ok
+            (`Assoc
+              [
+                ("schema_version", `Int 1);
+                ("version", `String "chain-run-v1");
+                ("backend", `String "native");
+                ("run", json);
+              ])
+      | None -> Error (Printf.sprintf "chain run not found: %s" run_id))
 
 let handle_chain_snapshot (ctx : (_, _) context) : result =
   json_result (chain_summary_json ctx)
@@ -2087,7 +1932,7 @@ let schemas : tool_schema list =
     {
       name = "masc_operation_start";
       description =
-        "CPv2 benchmark step 2. Start a managed operation on a ready unit after leadership, live-roster, and capacity checks pass. Set orchestration_kind=chain_dsl to attach llm-mcp Chain DSL execution.";
+        "CPv2 benchmark step 2. Start a managed operation on a ready unit after leadership, live-roster, and capacity checks pass. Set orchestration_kind=chain_dsl to attach native chain-plane execution.";
       input_schema =
         object_schema ~required:[ "assigned_unit_id"; "objective" ]
           [
@@ -2109,10 +1954,10 @@ let schemas : tool_schema list =
             ("note", string_prop "Optional operator note.");
             ("status", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "planned"; `String "active"; `String "paused" ]) ]);
             ("orchestration_kind", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "native"; `String "chain_dsl" ]); ("description", `String "native (default) or chain_dsl") ]);
-            ("chain_id", string_prop "Preset llm-mcp chain id. Mutually exclusive with chain_goal.");
-            ("chain_goal", string_prop "Goal string for llm-mcp chain.orchestrate. Mutually exclusive with chain_id.");
+            ("chain_id", string_prop "Preset native chain id. Mutually exclusive with chain_goal.");
+            ("chain_goal", string_prop "Goal string for native chain orchestration. Mutually exclusive with chain_id.");
             ("chain_input", `Assoc [ ("type", `String "object"); ("description", `String "Optional JSON input forwarded to chain.run input.") ]);
-            ("chain_checkpoint_enabled", boolean_prop ~default:true "Enable llm-mcp checkpoint capture for chain.run.");
+            ("chain_checkpoint_enabled", boolean_prop ~default:true "Enable native checkpoint capture for chain.run.");
           ];
     };
     {
@@ -2178,17 +2023,17 @@ let schemas : tool_schema list =
     {
       name = "masc_chain_snapshot";
       description =
-        "Summarize llm-mcp chain runtime and history, linked back to CPv2 managed operations.";
+        "Summarize native chain runtime and history, linked back to CPv2 managed operations.";
       input_schema = object_schema [];
     };
     {
       name = "masc_chain_run_get";
       description =
-        "Fetch llm-mcp run-store details for a completed chain run by run_id.";
+        "Fetch native chain run-store details for a completed chain run by run_id.";
       input_schema =
         object_schema ~required:[ "run_id" ]
           [
-            ("run_id", string_prop "llm-mcp run id from a chain-backed operation.");
+            ("run_id", string_prop "Native chain run id from a chain-backed operation.");
           ];
     };
     {

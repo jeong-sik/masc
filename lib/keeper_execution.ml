@@ -475,9 +475,37 @@ let strip_state_blocks_text (s : string) : string =
   loop 0 buf;
   Buffer.contents buf
 
+let trim_to_option (s : string) : string option =
+  let trimmed = String.trim s in
+  if trimmed = "" then None else Some trimmed
+
+let state_snapshot_reply_fallback (snapshot : keeper_state_snapshot option) :
+    string option =
+  match snapshot with
+  | Some { progress = Some progress; _ } -> trim_to_option progress
+  | Some { goal = Some goal; _ } -> trim_to_option goal
+  | _ -> None
+
+let strip_internal_reply_markup (raw : string) : string =
+  raw
+  |> strip_skill_route_lines
+  |> strip_state_blocks_text
+  |> String.trim
+
+let user_visible_reply_text ?fallback (raw : string) : string =
+  match trim_to_option (strip_internal_reply_markup raw) with
+  | Some text -> text
+  | None -> (
+      match Option.bind fallback trim_to_option with
+      | Some text -> text
+      | None -> (
+          match state_snapshot_reply_fallback (parse_state_snapshot_from_reply raw) with
+          | Some text -> text
+          | None -> "State updated."))
+
 let normalize_proactive_text (raw : string) : string =
   raw
-  |> strip_state_blocks_text
+  |> strip_internal_reply_markup
   |> Str.global_replace (Str.regexp "[ \t\r\n]+") " "
   |> String.trim
 
@@ -1448,6 +1476,9 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                  None)
 
 let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
+  let log_proactive_failure reason =
+    Printf.eprintf "[keeper] proactive emission failed: %s\n%!" reason
+  in
   if not meta.proactive_enabled then meta
   else
     let now_ts = Time_compat.now () in
@@ -1470,10 +1501,14 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
     if idle_seconds < idle_gate || cooldown_elapsed < cooldown_gate then meta
     else
       match model_specs_of_strings meta.models with
-      | Error _ -> meta
+      | Error msg ->
+          log_proactive_failure ("model specs: " ^ msg);
+          meta
       | Ok specs ->
           (match ensure_api_keys specs with
-           | Error _ -> meta
+           | Error msg ->
+               log_proactive_failure ("api keys: " ^ msg);
+               meta
            | Ok () ->
                (* Phase 2: Autonomous goal turn (L2+ with active goals) *)
                (match run_autonomous_goal_turn ~config:ctx.config ~meta ~specs with
@@ -1497,7 +1532,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                    ~base_dir
                in
                match ctx_opt with
-               | None -> meta
+               | None ->
+                   log_proactive_failure "continuity context unavailable";
+                   meta
                | Some ctx_work ->
                    let continuity_snapshot = latest_state_snapshot_from_messages ctx_work.messages in
                    let continuity_summary =
@@ -1534,8 +1571,11 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                        ~continuity_summary
                        ~idle_seconds
                    with
-                       | None -> meta
-	                   | Some generated ->
+                       | None ->
+                           log_proactive_failure
+                             "generation returned no proactive reply";
+                           meta
+                       | Some generated ->
 	                       let model_used =
 	                         let m = String.trim generated.model_used in
 	                         if m <> "" then m else primary.model_id
@@ -1545,7 +1585,12 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
 	                           ~soul_profile:meta.soul_profile
 	                           ~message:"proactive idle checkin"
 	                       in
-	                       let safe_reply = generated.reply in
+	                       let raw_reply = generated.reply in
+	                       let safe_reply =
+	                         user_visible_reply_text
+	                           ~fallback:(proactive_fallback_reply ~meta ~idle_seconds)
+	                           raw_reply
+	                       in
 	                       let assistant_msg = Llm_client.assistant_msg safe_reply in
 	                       let ctx_work = Context_manager.append ctx_work assistant_msg in
                        Context_manager.persist_message session assistant_msg;

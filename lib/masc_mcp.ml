@@ -59,7 +59,6 @@ module Chain_executor_eio = Chain_executor_eio
 module Chain_orchestrator_eio = Chain_orchestrator_eio
 module Chain_run_store = Chain_run_store
 module Chain_native_eio = Chain_native_eio
-module Llm_client_eio = Llm_client_eio
 module Room_git = Room_git
 module Room_portal = Room_portal
 module Room_worktree = Room_worktree

@@ -60,6 +60,12 @@ let masc_mcp_tools = [
   "mcp__masc__masc_board_comment";
   "mcp__masc__masc_board_vote";
   "mcp__masc__masc_board_get";
+  "mcp__masc__masc_tool_help";
+  "mcp__masc__masc_tool_admin_snapshot";
+  "mcp__masc__masc_keeper_tool_catalog";
+  "mcp__masc__masc_tool_list";
+  "mcp__masc__masc_tool_grant";
+  "mcp__masc__masc_tool_revoke";
   "mcp__masc__masc_portal_open";
   "mcp__masc__masc_portal_send";
   "mcp__masc__masc_portal_status";

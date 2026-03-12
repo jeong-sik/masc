@@ -161,6 +161,30 @@ let test_masc_mcp_tools_has_run_deliverable () =
   check bool "has run_deliverable" true
     (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools)
 
+let test_masc_mcp_tools_has_tool_help () =
+  check bool "has tool_help" true
+    (List.mem "mcp__masc__masc_tool_help" Spawn.masc_mcp_tools)
+
+let test_masc_mcp_tools_has_tool_admin_snapshot () =
+  check bool "has tool_admin_snapshot" true
+    (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools)
+
+let test_masc_mcp_tools_has_keeper_tool_catalog () =
+  check bool "has keeper_tool_catalog" true
+    (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools)
+
+let test_masc_mcp_tools_has_tool_list () =
+  check bool "has tool_list" true
+    (List.mem "mcp__masc__masc_tool_list" Spawn.masc_mcp_tools)
+
+let test_masc_mcp_tools_has_tool_grant () =
+  check bool "has tool_grant" true
+    (List.mem "mcp__masc__masc_tool_grant" Spawn.masc_mcp_tools)
+
+let test_masc_mcp_tools_has_tool_revoke () =
+  check bool "has tool_revoke" true
+    (List.mem "mcp__masc__masc_tool_revoke" Spawn.masc_mcp_tools)
+
 (* ============================================================
    masc_lifecycle_suffix Tests
    ============================================================ *)
@@ -689,6 +713,12 @@ let () =
       test_case "has a2a_delegate" `Quick test_masc_mcp_tools_has_a2a_delegate;
       test_case "has vote_create" `Quick test_masc_mcp_tools_has_vote_create;
       test_case "has run_deliverable" `Quick test_masc_mcp_tools_has_run_deliverable;
+      test_case "has tool_help" `Quick test_masc_mcp_tools_has_tool_help;
+      test_case "has tool_admin_snapshot" `Quick test_masc_mcp_tools_has_tool_admin_snapshot;
+      test_case "has keeper_tool_catalog" `Quick test_masc_mcp_tools_has_keeper_tool_catalog;
+      test_case "has tool_list" `Quick test_masc_mcp_tools_has_tool_list;
+      test_case "has tool_grant" `Quick test_masc_mcp_tools_has_tool_grant;
+      test_case "has tool_revoke" `Quick test_masc_mcp_tools_has_tool_revoke;
     ];
     "lifecycle_suffix", [
       test_case "not empty" `Quick test_lifecycle_suffix_not_empty;

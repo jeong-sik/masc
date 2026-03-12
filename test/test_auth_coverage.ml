@@ -245,6 +245,11 @@ let test_permission_for_tool_auth_status () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
+let test_permission_for_tool_stats () =
+  match Auth.permission_for_tool "masc_tool_stats" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
 let test_permission_for_tool_admin_snapshot () =
   match Auth.permission_for_tool "masc_tool_admin_snapshot" with
   | Some Types.CanReadState -> ()
@@ -252,6 +257,31 @@ let test_permission_for_tool_admin_snapshot () =
 
 let test_permission_for_tool_admin_update () =
   match Auth.permission_for_tool "masc_tool_admin_update" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
+let test_permission_for_tool_help () =
+  match Auth.permission_for_tool "masc_tool_help" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_keeper_tool_catalog () =
+  match Auth.permission_for_tool "masc_keeper_tool_catalog" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_list () =
+  match Auth.permission_for_tool "masc_tool_list" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_grant () =
+  match Auth.permission_for_tool "masc_tool_grant" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
+let test_permission_for_tool_revoke () =
+  match Auth.permission_for_tool "masc_tool_revoke" with
   | Some Types.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
@@ -399,6 +429,12 @@ let () =
       test_case "approve" `Quick test_permission_for_tool_approve;
       test_case "auth_enable" `Quick test_permission_for_tool_auth_enable;
       test_case "auth_status" `Quick test_permission_for_tool_auth_status;
+      test_case "tool_stats" `Quick test_permission_for_tool_stats;
+      test_case "tool_help" `Quick test_permission_for_tool_help;
+      test_case "keeper_tool_catalog" `Quick test_permission_for_keeper_tool_catalog;
+      test_case "tool_list" `Quick test_permission_for_tool_list;
+      test_case "tool_grant" `Quick test_permission_for_tool_grant;
+      test_case "tool_revoke" `Quick test_permission_for_tool_revoke;
       test_case "tool_admin_snapshot" `Quick test_permission_for_tool_admin_snapshot;
       test_case "tool_admin_update" `Quick test_permission_for_tool_admin_update;
       test_case "llama_models" `Quick test_permission_for_tool_llama_models;

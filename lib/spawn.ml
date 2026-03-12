@@ -53,6 +53,19 @@ let masc_mcp_tools = [
   "mcp__masc__masc_memento_mori";
   "mcp__masc__masc_relay_status";
   "mcp__masc__masc_relay_checkpoint";
+  (* Board tools *)
+  "mcp__masc__masc_board_list";
+  "mcp__masc__masc_board_post";
+  "mcp__masc__masc_board_comment";
+  "mcp__masc__masc_board_vote";
+  "mcp__masc__masc_board_get";
+  (* Tool management + discovery *)
+  "mcp__masc__masc_tool_help";
+  "mcp__masc__masc_tool_admin_snapshot";
+  "mcp__masc__masc_keeper_tool_catalog";
+  "mcp__masc__masc_tool_list";
+  "mcp__masc__masc_tool_grant";
+  "mcp__masc__masc_tool_revoke";
   (* Team session + communication tools *)
   "mcp__masc__masc_portal_open";
   "mcp__masc__masc_portal_send";
@@ -80,6 +93,8 @@ let masc_mcp_tools = [
   "mcp__masc__masc_run_log";
   "mcp__masc__masc_run_deliverable";
   "mcp__masc__masc_run_get";
+  "mcp__masc__masc_spawn";
+  "mcp__masc__masc_heartbeat_list";
   (* TRPG tools *)
   "mcp__masc__masc_trpg_dice_roll";
   "mcp__masc__masc_trpg_turn_advance";

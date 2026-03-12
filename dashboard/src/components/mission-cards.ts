@@ -54,10 +54,6 @@ export function MissionContextBar({
   return html`
     <div class="mission-context-bar">
       <div class="mission-context-item">
-        <span>클러스터</span>
-        <strong>${cluster ?? '확인 없음'}</strong>
-      </div>
-      <div class="mission-context-item">
         <span>프로젝트</span>
         <strong>${project ?? '확인 없음'}</strong>
       </div>
@@ -69,6 +65,14 @@ export function MissionContextBar({
         <span>갱신 시각</span>
         <strong>${generatedAt ? relativeTime(generatedAt) : '기록 없음'}</strong>
       </div>
+      ${cluster && cluster !== 'unknown'
+        ? html`
+            <div class="mission-context-item">
+              <span>배포 메타</span>
+              <strong>${cluster}</strong>
+            </div>
+          `
+        : null}
     </div>
   `
 }

@@ -571,6 +571,16 @@ export function SwarmSurface() {
               ? html`<div class="empty-state error">${commandPlaneSwarmError.value}</div>`
               : swarm
                 ? html`
+                    <div class="command-tag-row">
+                      <span class="command-tag">experimental</span>
+                      <span class="command-tag">derived read-model</span>
+                      <span class="command-tag ${swarm.run_resolution || swarm.resolution_recommendation ? 'warn' : 'ok'}">
+                        ${swarm.run_resolution || swarm.resolution_recommendation ? 'operator resolution aware' : 'no resolution advice'}
+                      </span>
+                    </div>
+                    <div class="command-card-sub">
+                      이 화면은 swarm-live의 사회 truth 자체가 아니라, 실험적 오케스트레이션을 읽기 위한 파생 관찰면입니다.
+                    </div>
                     <div class="command-summary-grid">
                       <div class="monitor-stat-card"><span>실행 런</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room 정보 없음'}</small></div>
                       <div class="monitor-stat-card"><span>워커</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0}개 가동 · ${swarm.summary?.completed_workers ?? 0}개 완료</small></div>

@@ -2578,7 +2578,8 @@ let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
                  end
                in
                try loop () with exn ->
-                 if not (is_cancelled exn) then
+                 if is_cancelled exn then raise exn
+                 else
                    Printf.eprintf "[TRPG-SSE] poll loop error for room %s: %s\n%!"
                      room_id (Printexc.to_string exn))
          | _ ->

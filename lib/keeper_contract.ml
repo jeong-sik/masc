@@ -4,6 +4,7 @@
 type policy_mode =
   | Heuristic
   | Learned_offline_v1
+  | Explicit_event_v1
 
 type policy_action_budget =
   | Conversation
@@ -25,20 +26,23 @@ type autonomy_level = Keeper_autonomy.autonomy_level
 
 let policy_mode_of_string = function
   | "learned_offline_v1" -> Learned_offline_v1
+  | "explicit_event_v1" -> Explicit_event_v1
   | _ -> Heuristic
 
 let parse_policy_mode = function
   | "heuristic" -> Some Heuristic
   | "learned_offline_v1" -> Some Learned_offline_v1
+  | "explicit_event_v1" -> Some Explicit_event_v1
   | _ -> None
 
 let policy_mode_to_string = function
   | Heuristic -> "heuristic"
   | Learned_offline_v1 -> "learned_offline_v1"
+  | Explicit_event_v1 -> "explicit_event_v1"
 
 let policy_mode_is_learned = function
   | Learned_offline_v1 -> true
-  | Heuristic -> false
+  | Heuristic | Explicit_event_v1 -> false
 
 let policy_action_budget_of_string = function
   | "board" -> Board

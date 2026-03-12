@@ -124,7 +124,139 @@ let test_voice_agent_uses_configured_voice () =
         (Some "Sarah")
         (match json_field "voice" body with Some (`String s) -> Some s | _ -> None))
 
-let test_voice_speak_without_net_falls_back_to_text () =
+let test_voice_agent_reads_nested_tuning_config () =
+  let config_json =
+    {|
+{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "Sarah",
+    "default_voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "style": 0.0
+    },
+    "agent_voices": {
+      "sangsu": "Roger"
+    },
+    "agent_voice_settings": {
+      "sangsu": {
+        "stability": 0.28,
+        "similarity_boost": 0.82,
+        "style": 0.45
+      }
+    },
+    "endpoints": [
+      {
+        "id": "test-tts",
+        "kind": "openai_compat",
+        "base_url": "https://example.invalid/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      {
+        "id": "test-stt",
+        "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      {
+        "id": "test-session",
+        "kind": "voice_mcp",
+        "base_url": "http://127.0.0.1:8936",
+        "enabled": true
+      }
+    ]
+  },
+  "local_playback": {
+    "enabled": true,
+    "agents": ["sangsu"]
+  }
+}
+|}
+  in
+  with_temp_voice_config config_json @@ fun () ->
+      with_ctx_no_net @@ fun ctx ->
+      let ok, body =
+        dispatch_exn ctx ~name:"masc_voice_agent"
+          ~args:(`Assoc [ ("agent_id", `String "sangsu") ])
+      in
+      check bool "ok" true ok;
+      check (option string) "voice"
+        (Some "Roger")
+        (match json_field "voice" body with Some (`String s) -> Some s | _ -> None);
+      let tuning = Masc_mcp.Voice_bridge.tuning_for_agent "sangsu" in
+      check (float 0.001) "stability" 0.28 tuning.stability;
+      check (float 0.001) "similarity_boost" 0.82 tuning.similarity_boost;
+      check (float 0.001) "style" 0.45 tuning.style;
+      check bool "local playback enabled" true
+        (Masc_mcp.Voice_bridge.local_playback_enabled_for_agent "sangsu")
+
+let test_voice_provider_alias_selects_adapter_endpoint () =
+  let config_json =
+    {|
+{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "Sarah",
+    "agent_voices": {
+      "sangsu": "Roger"
+    },
+    "endpoints": [
+      {
+        "id": "elevenlabs-direct",
+        "kind": "elevenlabs_direct",
+        "base_url": "https://api.elevenlabs.io/v1",
+        "api_key_env": "ELEVENLABS_API_KEY",
+        "enabled": true
+      },
+      {
+        "id": "railway-elevenlabs-proxy",
+        "kind": "openai_compat",
+        "base_url": "https://example.test/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      {
+        "id": "openai-stt",
+        "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      {
+        "id": "local-session",
+        "kind": "voice_mcp",
+        "base_url": "http://127.0.0.1:8936",
+        "enabled": true
+      }
+    ]
+  }
+}
+|}
+  in
+  with_temp_voice_config config_json @@ fun () ->
+      let endpoints = Masc_mcp.Voice_bridge.available_tts_endpoints ~provider:"elevenlabs" () in
+      check int "one endpoint" 1 (List.length endpoints);
+      let endpoint = List.hd endpoints in
+      check string "selected direct endpoint" "elevenlabs-direct" endpoint.id
+
+let test_voice_speak_without_net_errors () =
   with_ctx_no_net (fun ctx ->
       let ok, body =
         dispatch_exn ctx ~name:"masc_voice_speak"
@@ -135,13 +267,8 @@ let test_voice_speak_without_net_falls_back_to_text () =
                 ("message", `String "hello from voice");
               ])
       in
-      check bool "ok" true ok;
-      check (option string) "status"
-        (Some "text_fallback")
-        (match json_field "status" body with Some (`String s) -> Some s | _ -> None);
-      check (option string) "voice"
-        (Some "Roger")
-        (match json_field "voice" body with Some (`String s) -> Some s | _ -> None))
+      check bool "fails" false ok;
+      check bool "mentions net" true (contains body "net"))
 
 let test_voice_session_start_without_net_errors () =
   with_ctx_no_net (fun ctx ->
@@ -152,34 +279,32 @@ let test_voice_session_start_without_net_errors () =
       check bool "fails" false ok;
       check bool "mentions net" true (contains body "net"))
 
-let test_voice_sessions_without_net_returns_empty_list () =
+let test_voice_sessions_without_net_errors () =
   with_ctx_no_net (fun ctx ->
       let ok, body =
         dispatch_exn ctx ~name:"masc_voice_sessions" ~args:(`Assoc [])
       in
-      check bool "ok" true ok;
-      check (option string) "status"
-        (Some "voice_server_unavailable")
-        (match json_field "status" body with Some (`String s) -> Some s | _ -> None))
+      check bool "fails" false ok;
+      check bool "mentions net" true (contains body "net"))
 
-let test_voice_conference_end_without_net_returns_zero () =
+let test_voice_transcript_without_net_errors () =
+  with_ctx_no_net (fun ctx ->
+      let ok, body =
+        dispatch_exn ctx ~name:"masc_voice_transcript" ~args:(`Assoc [])
+      in
+      check bool "fails" false ok;
+      check bool "mentions net" true (contains body "net"))
+
+let test_voice_conference_end_without_net_errors () =
   with_ctx_no_net (fun ctx ->
       let ok, body =
         dispatch_exn ctx ~name:"masc_voice_conference_end"
           ~args:(`Assoc [ ("agent_ids", `List [ `String "claude"; `String "gemini" ]) ])
       in
-      check bool "ok" true ok;
-      check (option int) "ended"
-        (Some 0)
-        (match json_field "ended" body with Some (`Int n) -> Some n | _ -> None);
-      check (option int) "skipped"
-        (Some 2)
-        (match json_field "skipped" body with Some (`Int n) -> Some n | _ -> None);
-      check (option int) "failed"
-        (Some 0)
-        (match json_field "failed" body with Some (`Int n) -> Some n | _ -> None))
+      check bool "fails" false ok;
+      check bool "mentions net" true (contains body "net"))
 
-let test_voice_conference_end_with_unavailable_server_counts_skipped () =
+let test_voice_conference_end_with_unavailable_server_errors () =
   let config_json =
     {|
 {
@@ -233,16 +358,9 @@ let test_voice_conference_end_with_unavailable_server_counts_skipped () =
         dispatch_exn ctx ~name:"masc_voice_conference_end"
           ~args:(`Assoc [ ("agent_ids", `List [ `String "claude"; `String "gemini" ]) ])
       in
-      check bool "ok" true ok;
-      check (option int) "ended"
-        (Some 0)
-        (match json_field "ended" body with Some (`Int n) -> Some n | _ -> None);
-      check (option int) "skipped"
-        (Some 2)
-        (match json_field "skipped" body with Some (`Int n) -> Some n | _ -> None);
-      check (option int) "failed"
-        (Some 0)
-        (match json_field "failed" body with Some (`Int n) -> Some n | _ -> None)
+      check bool "fails" false ok;
+      check bool "mentions unavailable" true
+        (contains body "unavailable" || contains body "cannot end conference")
 
 let test_voice_public_config_json () =
   let config_json =
@@ -311,7 +429,9 @@ let test_voice_public_config_json () =
          |> List.exists (function `String "sangsu" -> true | _ -> false));
       check bool "includes sangsu voice" true
         (json |> member "tts" |> member "available_voices" |> to_list
-         |> List.exists (function `String "Josh" -> true | _ -> false))
+         |> List.exists (function `String "Roger" -> true | _ -> false));
+      check bool "local playback enabled surfaced" true
+        (json |> member "local_playback" |> member "enabled" |> to_bool)
 
 let touch_executable dir name =
   let path = Filename.concat dir name in
@@ -361,12 +481,21 @@ let () =
       ( "handlers",
         [
           test_case "voice agent" `Quick test_voice_agent_uses_configured_voice;
-          test_case "speak fallback" `Quick test_voice_speak_without_net_falls_back_to_text;
+          test_case "voice agent reads nested config" `Quick
+            test_voice_agent_reads_nested_tuning_config;
+          test_case "voice provider alias selects adapter endpoint" `Quick
+            test_voice_provider_alias_selects_adapter_endpoint;
+          test_case "speak without net errors" `Quick
+            test_voice_speak_without_net_errors;
           test_case "session start no net" `Quick test_voice_session_start_without_net_errors;
-          test_case "sessions no net" `Quick test_voice_sessions_without_net_returns_empty_list;
-          test_case "conference end no net" `Quick test_voice_conference_end_without_net_returns_zero;
-          test_case "conference end unavailable server counts skipped" `Quick
-            test_voice_conference_end_with_unavailable_server_counts_skipped;
+          test_case "sessions no net errors" `Quick
+            test_voice_sessions_without_net_errors;
+          test_case "transcript no net errors" `Quick
+            test_voice_transcript_without_net_errors;
+          test_case "conference end no net errors" `Quick
+            test_voice_conference_end_without_net_errors;
+          test_case "conference end unavailable server errors" `Quick
+            test_voice_conference_end_with_unavailable_server_errors;
           test_case "voice public config json" `Quick
             test_voice_public_config_json;
           test_case "local playback argv prefers ffplay" `Quick

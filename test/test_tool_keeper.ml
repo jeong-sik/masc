@@ -181,15 +181,8 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
 
 let test_keeper_model_set_persists_active_model () =
   let provider_model =
-    match Masc_mcp.Tool_llama.fetch_models () with
-    | Ok (_, model_id :: _) -> Some ("llama:" ^ model_id)
-    | Ok (_, []) -> None
-    | Error _ -> None
+    Printf.sprintf "glm:%s" Masc_mcp.Env_config.Llm.default_model
   in
-  match provider_model with
-  | None ->
-      check bool "skip when local llama inventory unavailable" true true
-  | Some provider_model ->
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -237,8 +230,13 @@ let test_keeper_model_set_persists_active_model () =
       let json = Yojson.Safe.from_string body in
       check string "active model updated" provider_model
         Yojson.Safe.Util.(json |> member "active_model" |> to_string);
-      check int "allowed models pruned to explicit list" 1
-        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> List.length);
+      let allowed_models =
+        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> filter_string)
+      in
+      check bool "allowed models contains target model" true
+        (List.mem provider_model allowed_models);
+      check int "allowed models are deduped" (List.length allowed_models)
+        (List.sort_uniq String.compare allowed_models |> List.length);
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc

@@ -3,11 +3,11 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
+import { KeeperCard, type CanonicalKeeperCardModel } from './common/keeper-card'
 import { RoomTruthStrip } from './common/room-truth-strip'
 import { keeperRuntimeLabel } from './common/keeper-identity'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { StatusBadge } from './common/status-badge'
-import { MitosisRing } from './common/mitosis-ring'
 import { TimeAgo } from './common/time-ago'
 import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
@@ -87,11 +87,6 @@ function statusLabel(value?: string | null): string {
 
 function queueKindLabel(kind: DashboardExecutionQueueItem['kind']): string {
   return kind === 'session' ? '세션' : '작전'
-}
-
-function formatContext(value?: number | null): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
-  return `${Math.round(value * 100)}%`
 }
 
 function findKeeper(name?: string | null): Keeper | null {
@@ -410,38 +405,41 @@ function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
     if (keeper) openKeeperDetail(keeper)
   }
   const runtimeLabel = keeperRuntimeLabel(row.name, row.agent_name)
+  const model: CanonicalKeeperCardModel = {
+    name: row.name,
+    koreanName: row.korean_name ?? null,
+    runtimeLabel,
+    emoji: row.emoji ?? null,
+    tone: row.tone,
+    statusRaw: row.status ?? null,
+    statusLabel: statusLabel(row.status),
+    stateClass: row.state,
+    stateLabel: continuityStateLabel(row.state),
+    contextRatio: row.context_ratio ?? null,
+    note: row.note,
+    focus: row.focus,
+    lastActivityAt: row.last_signal_at ?? null,
+    lastActivityFallback: '최근 활동 없음',
+    relatedSessionId: row.related_session_id ?? null,
+    continuity: row.continuity ?? null,
+    lifecycle: row.lifecycle ?? null,
+    summary: row.continuity_summary ?? row.recent_output_preview ?? null,
+    recentInput: row.recent_input_preview ?? null,
+    recentOutput: row.recent_output_preview ?? null,
+    recentTools: row.recent_tool_names ?? [],
+    allowedTools: row.allowed_tool_names ?? [],
+    routeSummary: row.skill_route_summary ?? null,
+    auditSource: row.tool_audit_source ?? null,
+    auditAt: row.tool_audit_at ?? null,
+    disclosureLabel: '연속성 상세',
+  }
 
-  return html`
-    <button class="monitor-row ${row.tone} state-${row.state}" data-testid="execution.continuity-card" onClick=${onClick}>
-      <div class="monitor-row-header">
-        <span class="agent-emoji">${row.emoji ?? ''}</span>
-        <div class="monitor-row-title">
-          <div class="monitor-name-line">
-            <span class="monitor-title">${row.name}</span>
-            ${row.korean_name ? html`<span class="monitor-sub">${row.korean_name}</span>` : null}
-          </div>
-          ${runtimeLabel ? html`<div class="monitor-sub">${runtimeLabel}</div>` : null}
-          <div class="monitor-note">${row.note}</div>
-        </div>
-        <${MitosisRing} ratio=${row.context_ratio ?? 0} size=${34} stroke=${4} />
-        <${StatusBadge} status=${row.status ?? 'unknown'} />
-        <span class="monitor-pill ${row.tone}">${continuityStateLabel(row.state)}</span>
-      </div>
-
-      <div class="monitor-meta">
-        ${row.last_signal_at ? html`<span>최근 활동 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 활동 없음</span>`}
-        ${row.related_session_id ? html`<span>세션 · ${row.related_session_id}</span>` : null}
-        ${row.continuity ? html`<span>${row.continuity}</span>` : null}
-        ${row.lifecycle ? html`<span>생애주기 ${row.lifecycle}</span>` : null}
-        <span>컨텍스트 ${formatContext(row.context_ratio)}</span>
-      </div>
-
-      <div class="monitor-focus">${row.focus}</div>
-      ${row.recent_output_preview || row.continuity_summary
-        ? html`<div class="monitor-footnote">${row.recent_output_preview ?? row.continuity_summary}</div>`
-        : null}
-    </button>
-  `
+  return html`<${KeeperCard}
+    variant="execution"
+    model=${model}
+    onClick=${onClick}
+    testId="execution.continuity-card"
+  />`
 }
 
 export function Execution() {

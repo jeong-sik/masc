@@ -14,6 +14,22 @@ type runtime = {
   auth_token : string option;
 }
 
+type chain_run_response = {
+  output : string;
+  chain_id : string option;
+  run_id : string option;
+  duration_ms : int option;
+  trace_count : int option;
+}
+
+type chain_orchestrate_response = {
+  summary : string;
+  success : bool option;
+  total_replans : int option;
+  chain_id : string option;
+  run_id : string option;
+}
+
 type tool_executor =
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -93,7 +109,7 @@ let load_prompt_dir dir =
   if Sys.file_exists dir && Sys.is_directory dir then
     Sys.readdir dir
     |> Array.iter (fun file ->
-           if Filename.check_suffix file ".json" then
+           if Filename.check_suffix file ".json" then (
              let path = Filename.concat dir file in
              try
                let content = In_channel.with_open_text path In_channel.input_all in
@@ -101,11 +117,11 @@ let load_prompt_dir dir =
                match Prompt_registry.prompt_entry_of_yojson json with
                | Ok entry -> Prompt_registry.register entry
                | Error msg ->
-                   eprintf "[chain_native_eio] prompt parse failed for %s: %s\n%!" path
-                     msg
+                   eprintf "[chain_native_eio] prompt parse failed for %s: %s\n%!"
+                     path msg
              with exn ->
-               eprintf "[chain_native_eio] prompt load failed for %s: %s\n%!" path
-                 (Printexc.to_string exn))
+               eprintf "[chain_native_eio] prompt load failed for %s: %s\n%!"
+                 path (Printexc.to_string exn)))
 
 let chain_source_roots (config : Room.config) =
   let add acc value =
@@ -132,16 +148,10 @@ let configure_storage_paths (config : Room.config) =
   ensure_dir checkpoints_dir;
   putenv_default "MASC_CHAIN_HISTORY_FILE"
     (Filename.concat control_plane_dir "chain_history.jsonl");
-  putenv_default "LLM_MCP_CHAIN_HISTORY_FILE"
-    (Filename.concat control_plane_dir "chain_history.jsonl");
   putenv_default "MASC_CHAIN_CHECKPOINT_DIR" checkpoints_dir;
-  putenv_default "LLM_MCP_RUN_LOG_PATH"
-    (Filename.concat logs_dir "chain_runs.jsonl");
   putenv_default "MASC_CHAIN_RUN_LOG_PATH"
     (Filename.concat logs_dir "chain_runs.jsonl");
   putenv_default "MASC_CHAIN_RUN_STORE_PATH"
-    (Filename.concat control_plane_dir "chain_run_store.jsonl");
-  putenv_default "LLM_MCP_CHAIN_RUN_STORE_PATH"
     (Filename.concat control_plane_dir "chain_run_store.jsonl")
 
 let ensure_bootstrap (config : Room.config) =
@@ -151,10 +161,13 @@ let ensure_bootstrap (config : Room.config) =
         Chain_registry.init ();
         chain_source_roots config
         |> List.iter (fun root ->
-               ignore (Chain_registry.load_from_dir (Filename.concat root "data/chains")));
+               ignore
+                 (Chain_registry.load_from_dir
+                    (Filename.concat root "data/chains")));
         Prompt_registry.init ();
         chain_source_roots config
-        |> List.iter (fun root -> load_prompt_dir (Filename.concat root "data/prompts"));
+        |> List.iter (fun root ->
+               load_prompt_dir (Filename.concat root "data/prompts"));
         Hashtbl.replace bootstrapped_roots config.base_path ()))
 
 let llm_tool_defs_of_json = function
@@ -192,7 +205,12 @@ let llm_tool_defs_of_json = function
                    | `String value -> value
                    | _ -> ""
                  in
-                 Some { Llm_client.tool_name; tool_description; parameters })
+                 Some
+                   {
+                     Llm_client.tool_name = tool_name;
+                     tool_description = tool_description;
+                     parameters = parameters;
+                   })
   | Some _ -> []
 
 let llm_tool_calls_json (calls : Llm_client.tool_call list) =
@@ -433,7 +451,7 @@ let registered_chain_mermaid ~config ~chain_id =
   | Error _ -> None
 
 let run_chain (runtime : runtime) ?chain_id ?mermaid ?input_json ~checkpoint_enabled () :
-    (Llm_client_eio.chain_run_response, string) result =
+    (chain_run_response, string) result =
   let* chain = chain_of_source ~config:runtime.config ?chain_id ?mermaid () in
   let* plan =
     match Chain_compiler.compile chain with
@@ -459,7 +477,7 @@ let run_chain (runtime : runtime) ?chain_id ?mermaid ?input_json ~checkpoint_ena
   let run_id = List.assoc_opt "run_id" result.metadata in
   Ok
     {
-      Llm_client_eio.output = result.output;
+      output = result.output;
       chain_id = Some result.chain_id;
       run_id;
       duration_ms = Some result.duration_ms;
@@ -471,7 +489,7 @@ let default_orchestrator_model () =
   |> Option.value ~default:"gemini:pro"
 
 let orchestrate_goal (runtime : runtime) ~(on_chain_designed : Chain_types.chain -> unit) ~goal :
-    (Llm_client_eio.chain_orchestrate_response, string) result =
+    (chain_orchestrate_response, string) result =
   ensure_bootstrap runtime.config;
   let llm_call ~prompt =
     match
@@ -489,7 +507,7 @@ let orchestrate_goal (runtime : runtime) ~(on_chain_designed : Chain_types.chain
   | Ok result ->
       Ok
         {
-          Llm_client_eio.summary = result.summary;
+          summary = result.summary;
           success = Some result.success;
           total_replans = Some result.total_replans;
           chain_id = result.chain_id;
@@ -583,7 +601,6 @@ let running_chains_json () =
 let read_history_events ~limit =
   let history_file =
     option_trim (Sys.getenv_opt "MASC_CHAIN_HISTORY_FILE")
-    |> option_first_some (option_trim (Sys.getenv_opt "LLM_MCP_CHAIN_HISTORY_FILE"))
     |> Option.value ~default:"data/chain_history.jsonl"
   in
   if not (Sys.file_exists history_file) then []

@@ -2,7 +2,7 @@
 
     Enables checkpoint/resume for chains that may be interrupted or need
     to continue across sessions. Checkpoints are stored as JSON files
-    in ~/.cache/llm-mcp/checkpoints/
+    in ~/.cache/masc/checkpoints/
 
     Key features:
     - Save checkpoint after each node completes
@@ -39,16 +39,13 @@ type checkpoint_store = {
 let default_base_dir () =
   match Sys.getenv_opt "MASC_CHAIN_CHECKPOINT_DIR" with
   | Some path when String.trim path <> "" -> path
-  | _ -> (
-      match Sys.getenv_opt "LLM_MCP_CHECKPOINT_DIR" with
-      | Some path when String.trim path <> "" -> path
-      | _ ->
-          let home =
-            match Sys.getenv_opt "HOME" with
-            | Some h -> h
-            | None -> "/tmp"
-          in
-          Filename.concat home ".cache/llm-mcp/checkpoints")
+  | _ ->
+      let home =
+        match Sys.getenv_opt "HOME" with
+        | Some h -> h
+        | None -> "/tmp"
+      in
+      Filename.concat home ".cache/masc/checkpoints"
 
 (** Create a new checkpoint store *)
 let create ?(base_dir = default_base_dir ()) () =

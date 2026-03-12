@@ -148,7 +148,11 @@ let test_supervised_session_keeps_lane_present () =
   check bool "supervised lane present" true
     (supervised |> U.member "present" |> U.to_bool);
   check string "next action" "masc_observe_traces"
-    (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string)
+    (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string);
+  check string "narrative state" "running"
+    (json |> U.member "narrative" |> U.member "state" |> U.to_string);
+  check bool "narrative active work present" true
+    (json |> U.member "narrative" |> U.member "active_work" |> U.to_string <> "")
 
 let test_stale_supervised_session_keeps_stale_flag () =
   let stale_iso = M.Command_plane_v2.iso_of_unix (M.Time_compat.now () -. 1200.) in
@@ -182,7 +186,16 @@ let test_stale_supervised_session_keeps_stale_flag () =
          String.equal "stale_data" (flag |> U.member "code" |> U.to_string))
        hard_flags);
   check string "stale supervised recommendation" "masc_team_session_status"
-    (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string)
+    (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string);
+  let stale_gap =
+    json |> U.member "gaps" |> U.member "items" |> U.to_list
+    |> List.find (fun row ->
+           String.equal "stale_data" (row |> U.member "code" |> U.to_string))
+  in
+  check string "stale gap next tool" "masc_team_session_status"
+    (stale_gap |> U.member "next_tool" |> U.to_string);
+  check bool "stale gap why" true
+    (stale_gap |> U.member "why_it_matters" |> U.to_string <> "")
 
 let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_present ()
     =

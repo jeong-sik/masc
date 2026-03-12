@@ -22,8 +22,8 @@ Earlier revisions mixed actionable architecture with speculative "mind/noosphere
 | 1 | Room | Shared task/message/state surface for collaboration | Implemented |
 | 2 | Organization | Roles, policy, metrics, selection | Partial |
 | 3 | Federation | Cross-room or cross-cluster coordination | Experimental |
-| 4 | Swarm | Emergent multi-agent search and selection | Research |
-| 5 | Institution | Durable memory, succession, long-lived norms | Research |
+| 4 | Swarm | Emergent multi-agent search and selection | Experimental |
+| 5 | Institution | Durable memory, succession, long-lived norms | Experimental |
 
 ---
 

@@ -1619,6 +1619,15 @@ let make_routes ~port ~host ~sw ~clock =
          let json = dashboard_session_http_json ~state ~sw ~clock req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tools" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json =
+           dashboard_tools_http_json
+             ?actor:(agent_from_request request)
+             state.Mcp_server.room_config
+         in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission/briefing" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_mission_briefing_http_json ~state ~sw ~clock req in

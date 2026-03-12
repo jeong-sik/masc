@@ -9,6 +9,7 @@ import { Command } from './command'
 import { Ops } from './ops'
 import { Memory } from './memory'
 import { Execution } from './agents'
+import { Tools } from './tools'
 import { Planning } from './goals'
 import { Governance } from './governance'
 import { Lab } from './lab'
@@ -147,6 +148,8 @@ export function TabContent() {
       return html`<${Proof} />`
     case 'execution':
       return html`<${Execution} />`
+    case 'tools':
+      return html`<${Tools} />`
     case 'live':
       return html`<${Live} />`
     case 'memory':

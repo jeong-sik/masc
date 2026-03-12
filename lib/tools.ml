@@ -2764,7 +2764,7 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
 
   {
     name = "masc_mcp_session";
-    description = "Manage MCP sessions (X-MCP-Session-ID). Sessions track client context across requests.";
+    description = "Manage MCP sessions (Mcp-Session-Id; legacy X-MCP-Session-ID also accepted). Sessions track client context across requests.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

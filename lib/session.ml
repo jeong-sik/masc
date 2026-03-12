@@ -427,7 +427,8 @@ let restore_from_disk registry ~agents_path =
   end
 
 (* ============================================ *)
-(* MCP 2025-11-25 Spec: X-MCP-Session-ID        *)
+(* MCP 2025-11-25 Spec: Mcp-Session-Id          *)
+(* Legacy compatibility: X-MCP-Session-ID       *)
 (* ============================================ *)
 
 (** MCP Session ID store - separate from agent sessions *)
@@ -522,7 +523,9 @@ let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_
     loop ()
   )
 
-(** Extract MCP Session ID from HTTP headers (supports both naming conventions) *)
+(** Extract MCP Session ID from HTTP headers.
+    Prefers the canonical Mcp-Session-Id header and falls back to the legacy
+    X-MCP-Session-ID alias for compatibility. *)
 let extract_mcp_session_id (headers : Cohttp.Header.t) : string option =
   match Cohttp.Header.get headers "Mcp-Session-Id" with
   | Some _ as result -> result

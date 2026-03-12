@@ -94,6 +94,11 @@ let client_for_uri ~net uri =
   else
     Cohttp_eio.Client.make ~https:None net
 
+let client_for_uri_result ~net uri =
+  try Ok (client_for_uri ~net uri)
+  with exn ->
+    Error (Printf.sprintf "HTTPS client init error: %s" (Printexc.to_string exn))
+
 (** ============================================
     Structured Logging
     ============================================ *)
@@ -659,21 +664,25 @@ let call_voice_mcp ~sw ~clock ~net ~tool_name ~arguments =
     ("Content-Type", "application/json");
     ("Accept", "application/json");
   ] in
-  let client = client_for_uri ~net uri in
-  let operation () =
-    with_timeout ~clock (fun () ->
-      single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str)
-  in
-  let result = retry_with_backoff ~clock
-    ~attempt:1
-    ~max_attempts:(max_retries ())
-    ~backoff_sec:(initial_backoff_seconds ())
-    operation
-  in
-  (match result with
-  | Ok _ -> log_debug (Printf.sprintf "Tool %s succeeded" tool_name)
-  | Error e -> log_error (Printf.sprintf "Tool %s failed: %s" tool_name e));
-  result
+  match client_for_uri_result ~net uri with
+  | Error error ->
+      log_error (Printf.sprintf "Tool %s failed: %s" tool_name error);
+      Error error
+  | Ok client ->
+      let operation () =
+        with_timeout ~clock (fun () ->
+          single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str)
+      in
+      let result = retry_with_backoff ~clock
+        ~attempt:1
+        ~max_attempts:(max_retries ())
+        ~backoff_sec:(initial_backoff_seconds ())
+        operation
+      in
+      (match result with
+      | Ok _ -> log_debug (Printf.sprintf "Tool %s succeeded" tool_name)
+      | Error e -> log_error (Printf.sprintf "Tool %s failed: %s" tool_name e));
+      result
 
 (** Extract result from MCP response *)
 let extract_mcp_result json =
@@ -718,17 +727,19 @@ let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
     Cohttp.Header.of_list
       [ ("Content-Type", "application/json"); ("Accept", "application/json") ]
   in
-  let client = client_for_uri ~net uri in
-  let operation () =
-    let timeout =
-      Option.value endpoint.timeout_seconds ~default:(request_timeout_seconds ())
-    in
-    with_timeout ~clock ~timeout (fun () ->
-        single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str)
-  in
-  retry_with_backoff ~clock ~attempt:1
-    ~max_attempts:(Option.value endpoint.max_retries ~default:(max_retries ()))
-    ~backoff_sec:(initial_backoff_seconds ()) operation
+  match client_for_uri_result ~net uri with
+  | Error error -> Error error
+  | Ok client ->
+      let operation () =
+        let timeout =
+          Option.value endpoint.timeout_seconds ~default:(request_timeout_seconds ())
+        in
+        with_timeout ~clock ~timeout (fun () ->
+            single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str)
+      in
+      retry_with_backoff ~clock ~attempt:1
+        ~max_attempts:(Option.value endpoint.max_retries ~default:(max_retries ()))
+        ~backoff_sec:(initial_backoff_seconds ()) operation
 
 let attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
     ~priority endpoint =
@@ -829,14 +840,16 @@ let is_voice_server_available ~sw ~clock ~net =
               | Ok url -> Uri.of_string url
               | Error _ -> voice_health_uri ()
             in
-            let client = client_for_uri ~net uri in
-            let resp, _ = Cohttp_eio.Client.get ~sw client uri in
-            let status = Cohttp.Response.status resp in
-            let available =
-              Cohttp.Code.is_success (Cohttp.Code.code_of_status status)
-            in
-            voice_server_available := Some available;
-            Ok available
+            match client_for_uri_result ~net uri with
+            | Error error -> Error error
+            | Ok client ->
+                let resp, _ = Cohttp_eio.Client.get ~sw client uri in
+                let status = Cohttp.Response.status resp in
+                let available =
+                  Cohttp.Code.is_success (Cohttp.Code.code_of_status status)
+                in
+                voice_server_available := Some available;
+                Ok available
           with exn ->
             Eio.traceln "[WARN] voice server check failed: %s"
               (Printexc.to_string exn);

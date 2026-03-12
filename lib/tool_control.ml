@@ -100,10 +100,14 @@ let handle_switch_mode ctx args =
                     |> List.filter_map (function Ok cat -> Some cat | Error _ -> None)
                     |> List.sort_uniq Stdlib.compare
                   in
-                  ignore (Config.set_categories room_path categories);
+                  ignore
+                    (Config.set_categories ~actor:ctx.agent_name
+                       ~source:"masc_switch_mode:custom" room_path categories);
                   Ok ()
           | _ ->
-              ignore (Config.switch_mode room_path mode);
+              ignore
+                (Config.switch_mode ~actor:ctx.agent_name
+                   ~source:"masc_switch_mode" room_path mode);
               Ok ()
         in
         (match switched with

@@ -1876,13 +1876,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ~keepalive_running
                   ~history_items:conversation_items
                   ~now_ts
-                |> Keeper_exec_status.augment_keeper_diagnostic_json
-                     ~desired:true
-                     ~meta:m
-                     ~keepalive_running
-                     ~keepalive_started_at:
-                       (Keeper_keepalive.keeper_keepalive_started_at m.name)
-                     ~now_ts
               in
               let detail_fields =
                 if compact then []
@@ -1941,10 +1934,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("auto_handoff", `Bool m.auto_handoff);
               ("handoff_threshold", `Float m.handoff_threshold);
               ("agent", agent);
-              ( "status",
-                `String
-                  (Keeper_exec_status.keeper_surface_status ~agent_status:agent
-                     ~diagnostic) );
               ("diagnostic", diagnostic);
               ("keeper_age_s", `Float keeper_age_s);
               ("uptime_hours", `Float (keeper_age_s /. 3600.0));
@@ -2478,6 +2467,7 @@ let dashboard_proof_http_json ~state request =
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
+  let current_room = Room.current_room_id config in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let gardener_json = Gardener.status_json () in
@@ -2486,7 +2476,8 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let build = Build_identity.current () in
   `Assoc
     [
-      ("room", `String room_state.project);
+      ("room", `String current_room);
+      ("current_room", `String current_room);
       ("room_base_path", `String config.base_path);
       ( "cluster",
         `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME"))
@@ -2571,6 +2562,11 @@ let json_record_field key json =
   match Yojson.Safe.Util.member key json with
   | `Assoc _ as value -> Some value
   | _ -> None
+
+let count_where items predicate =
+  List.fold_left
+    (fun acc item -> if predicate item then acc + 1 else acc)
+    0 items
 
 let dashboard_current_room_id config =
   Room.current_room_id config
@@ -2687,10 +2683,64 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
     | `List items -> items
     | _ -> []
   in
+  let execution_session_briefs = json_list_field "session_briefs" execution_json in
+  let execution_operation_briefs = json_list_field "operation_briefs" execution_json in
+  let execution_worker_support =
+    json_list_field "worker_support_briefs" execution_json
+  in
+  let execution_continuity =
+    json_list_field "continuity_briefs" execution_json
+  in
+  let execution_keepers = json_list_field "keepers" execution_json in
   let top_queue =
     match execution_queue with
     | head :: _ -> head
     | [] -> `Null
+  in
+  let has_text key json =
+    match json_string_field_opt key json with
+    | Some _ -> true
+    | None -> false
+  in
+  let execution_summary =
+    let existing = json_assoc_field "summary" execution_json in
+    match Yojson.Safe.Util.member "blocked_sessions" existing with
+    | `Int _ | `Intlit _ ->
+        existing
+    | _ ->
+        `Assoc
+          [
+            ("active_sessions", `Int (List.length execution_session_briefs));
+            ( "blocked_sessions",
+              `Int
+                (count_where execution_session_briefs
+                   (fun row ->
+                     let health = json_string_field_opt "health" row in
+                     let status = json_string_field_opt "status" row in
+                     has_text "blocker_summary" row
+                     || health = Some "warn"
+                     || health = Some "bad"
+                     || status = Some "blocked")) );
+            ("active_operations", `Int (List.length execution_operation_briefs));
+            ( "blocked_operations",
+              `Int (count_where execution_operation_briefs (has_text "blocker_summary")) );
+            ( "worker_alerts",
+              `Int
+                (count_where execution_worker_support
+                   (fun row ->
+                     match json_string_field_opt "tone" row with
+                     | Some "warn" | Some "bad" -> true
+                     | _ -> false)) );
+            ( "continuity_alerts",
+              `Int
+                (count_where execution_continuity
+                   (fun row ->
+                     match json_string_field_opt "tone" row with
+                     | Some "warn" | Some "bad" -> true
+                     | _ -> false)) );
+            ("priority_items", `Int (List.length execution_queue));
+            ("keepers", `Int (List.length execution_keepers));
+          ]
   in
   let command_ops = json_assoc_field "operations" command_summary_json in
   let command_detachments = json_assoc_field "detachments" command_summary_json in
@@ -2794,7 +2844,7 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       ( "execution",
         `Assoc
           [
-            ("summary", json_assoc_field "summary" execution_json);
+            ("summary", execution_summary);
             ("top_queue", top_queue);
             ("provenance", `String "derived");
           ] );

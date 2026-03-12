@@ -53,6 +53,10 @@ type operation_context = {
   updated_at : string option;
 }
 
+type archived_agent_meta = {
+  last_event_at : string option;
+}
+
 let json_string_option value =
   match value with
   | Some text when String.trim text <> "" -> `String (String.trim text)
@@ -72,18 +76,6 @@ let int_field ?(default = 0) key json =
   | `Int value -> value
   | `Intlit raw -> (try int_of_string raw with Failure _ -> default)
   | `Float value -> int_of_float value
-  | _ -> default
-
-let float_field ?(default = 0.0) key json =
-  match member_assoc key json with
-  | `Float value -> value
-  | `Int value -> float_of_int value
-  | `Intlit raw -> (try float_of_string raw with Failure _ -> default)
-  | _ -> default
-
-let bool_field ?(default = false) key json =
-  match member_assoc key json with
-  | `Bool value -> value
   | _ -> default
 
 let string_field ?(default = "") key json =
@@ -133,50 +125,6 @@ let compact_text ?(max_len = 160) raw =
 let string_list_json values =
   `List (List.map (fun value -> `String value) values)
 
-let tool_audit_json_fields agent_name =
-  let task_snapshot = A2a_tools.latest_heartbeat_task agent_name in
-  let result_snapshot = A2a_tools.latest_heartbeat_result agent_name in
-  let allowed_tool_names, latest_tool_names, latest_tool_call_count,
-      tool_audit_source, tool_audit_at =
-    match task_snapshot, result_snapshot with
-    | Some task, Some result ->
-        if task.seq > result.seq
-        then
-          ( task.allowed_tools,
-            result.tool_names,
-            Some result.tool_call_count,
-            Some "heartbeat_task_pending_result",
-            Some task.created_at )
-        else
-          ( task.allowed_tools,
-            result.tool_names,
-            Some result.tool_call_count,
-            Some "heartbeat_result",
-            Some result.updated_at )
-    | Some task, None ->
-        ( task.allowed_tools,
-          [],
-          None,
-          Some "heartbeat_task",
-          Some task.created_at )
-    | None, Some result ->
-        ( [],
-          result.tool_names,
-          Some result.tool_call_count,
-          Some "heartbeat_result",
-          Some result.updated_at )
-    | None, None ->
-        ([], [], None, None, None)
-  in
-  [
-    ("allowed_tool_names", string_list_json allowed_tool_names);
-    ("latest_tool_names", string_list_json latest_tool_names);
-    ( "latest_tool_call_count",
-      option_to_json (fun value -> `Int value) latest_tool_call_count );
-    ("tool_audit_source", json_string_option tool_audit_source);
-    ("tool_audit_at", json_string_option tool_audit_at);
-  ]
-
 let keeper_tool_audit_json_fields keeper agent_name =
   let fallback_allowed =
     Dashboard_utils.string_list_of_json (member_assoc "allowed_tool_names" keeper)
@@ -191,7 +139,10 @@ let keeper_tool_audit_json_fields keeper agent_name =
     | _ -> None
   in
   let fallback_source =
-    trim_to_option (string_field "tool_audit_source" keeper)
+    match trim_to_option (string_field "tool_audit_source" keeper) with
+    | Some _ as value -> value
+    | None when fallback_allowed <> [] -> Some "keeper_policy"
+    | None -> None
   in
   let fallback_at =
     trim_to_option (string_field "tool_audit_at" keeper)
@@ -233,11 +184,6 @@ let keeper_tool_audit_json_fields keeper agent_name =
     ("tool_audit_at", json_string_option tool_audit_at);
   ]
 
-let recent_tool_names_for_agent agent_name =
-  match A2a_tools.latest_heartbeat_result agent_name with
-  | Some snapshot -> snapshot.tool_names
-  | None -> []
-
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
 let string_list_of_json = Dashboard_utils.string_list_of_json
 
@@ -252,35 +198,6 @@ let top_item items =
   match items with
   | item :: _ -> item
   | [] -> `Null
-
-let keeper_pressure_count snapshot_json =
-  let keepers = member_assoc "keepers" snapshot_json |> member_assoc "items" |> function
-    | `List items -> items
-    | _ -> []
-  in
-  List.fold_left
-    (fun acc keeper ->
-      let status = string_field ~default:"unknown" "status" keeper in
-      let context_ratio = float_field "context_ratio" keeper in
-      let last_turn_ago_s = float_field "last_turn_ago_s" keeper in
-      if List.mem status [ "offline"; "inactive"; "error" ]
-         || context_ratio >= 0.80
-         || last_turn_ago_s >= 3600.0
-      then acc + 1
-      else acc)
-    0 keepers
-
-let active_agent_count config =
-  if not (Room.is_initialized config) then
-    0
-  else
-    Room.get_agents_raw config
-    |> List.fold_left
-         (fun acc (agent : Types.agent) ->
-           match agent.status with
-           | Types.Active | Types.Busy | Types.Listening -> acc + 1
-           | Types.Inactive -> acc)
-         0
 
 let session_payload_json session_json =
   match member_assoc "status" session_json with
@@ -777,17 +694,139 @@ let latest_message_to agent_name messages =
             if message.seq >= current.seq then Some message else best)
     None messages
 
-let build_agent_briefs config sessions attention_queue room_json =
+let read_recent_room_event_lines config ~limit =
+  let events_dir = Filename.concat (Room.masc_dir config) "events" in
+  if not (Sys.file_exists events_dir) then []
+  else
+    let month_dirs =
+      Sys.readdir events_dir |> Array.to_list |> List.sort compare |> List.rev
+    in
+    let collected = ref [] in
+    let remaining = ref limit in
+    let read_lines path =
+      let ic = open_in path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          let rec loop acc =
+            match input_line ic with
+            | line -> loop (line :: acc)
+            | exception End_of_file -> List.rev acc
+          in
+          loop [])
+    in
+    let add_lines path =
+      if !remaining <= 0 then ()
+      else
+        let lines = read_lines path in
+        let rec take lines_rev =
+          match lines_rev with
+          | [] -> ()
+          | line :: rest ->
+              if !remaining > 0 then (
+                collected := line :: !collected;
+                decr remaining;
+                take rest)
+        in
+        take (List.rev lines)
+    in
+    List.iter
+      (fun month ->
+        if !remaining > 0 then
+          let month_path = Filename.concat events_dir month in
+          if Sys.file_exists month_path && Sys.is_directory month_path then
+            let files =
+              Sys.readdir month_path |> Array.to_list |> List.sort compare |> List.rev
+            in
+            List.iter
+              (fun file ->
+                if !remaining > 0 then
+                  let path = Filename.concat month_path file in
+                  if Sys.file_exists path then add_lines path)
+              files)
+      month_dirs;
+    List.rev !collected
+
+let status_of_archived_session (session : session_context option) =
+  match session with
+  | Some session ->
+      if List.mem session.status [ "completed"; "interrupted"; "cancelled" ]
+      then "inactive"
+      else "offline"
+  | None -> "unknown"
+
+let archived_reason_for_session (session : session_context option) =
+  match session with
+  | Some session ->
+      Some
+        (if List.mem session.status [ "completed"; "interrupted"; "cancelled" ]
+         then "not in current room state"
+         else "missing from current room state")
+  | None -> None
+
+let archived_agent_meta_map config agent_names =
+  let wanted = Hashtbl.create (List.length agent_names) in
+  List.iter (fun agent_name -> Hashtbl.replace wanted agent_name ()) agent_names;
+  let table = Hashtbl.create (List.length agent_names) in
+  let ensure_row agent_name =
+    match Hashtbl.find_opt table agent_name with
+    | Some row -> row
+    | None ->
+        let row =
+          {
+            last_event_at = None;
+          }
+        in
+        Hashtbl.add table agent_name row;
+        row
+  in
+  read_recent_room_event_lines config ~limit:2000
+  |> List.rev
+  |> List.iter (fun line ->
+         try
+           let json = Yojson.Safe.from_string line in
+           let agent_name = string_field "agent" json in
+           if agent_name <> "" && Hashtbl.mem wanted agent_name then (
+             let row = ensure_row agent_name in
+             let last_event_at =
+               match trim_to_option (string_field "ts" json) with
+               | Some _ as value -> value
+               | None -> trim_to_option (string_field "timestamp" json)
+             in
+             let row =
+               if row.last_event_at = None
+               then { last_event_at }
+               else row
+             in
+             Hashtbl.replace table agent_name row)
+         with Yojson.Json_error _ -> ());
+  table
+
+let keeper_alias_by_agent_name snapshot_json =
+  let table = Hashtbl.create 8 in
+  let keepers =
+    match member_assoc "keepers" snapshot_json |> member_assoc "items" with
+    | `List items -> items
+    | _ -> []
+  in
+  List.iter
+    (fun keeper ->
+      let keeper_name = trim_to_option (string_field "name" keeper) in
+      let agent_name = trim_to_option (string_field "agent_name" keeper) in
+      match keeper_name, agent_name with
+      | Some keeper_name, Some agent_name ->
+          Hashtbl.replace table agent_name keeper_name
+      | _ -> ())
+    keepers;
+  table
+
+let build_agent_briefs config sessions attention_queue _room_json snapshot_json =
   let task_lookup = build_task_lookup config in
   let messages =
     if Room.is_initialized config then
       Room.get_messages_raw config ~since_seq:0 ~limit:200
     else
       []
-  in
-  let current_room =
-    trim_to_option (string_field "current_room" room_json)
-    |> Option.value ~default:"room"
   in
   let task_label task_id =
     match task_id with
@@ -809,6 +848,8 @@ let build_agent_briefs config sessions attention_queue room_json =
       (List.map (fun (agent : Types.agent) -> agent.name) room_agents
       @ List.concat_map (fun (session : session_context) -> session.member_names) sessions)
   in
+  let archived_meta_by_name = archived_agent_meta_map config agent_names in
+  let keeper_aliases = keeper_alias_by_agent_name snapshot_json in
   agent_names
   |> List.map (fun agent_name ->
          let agent = List.assoc_opt agent_name room_agent_by_name in
@@ -831,26 +872,12 @@ let build_agent_briefs config sessions attention_queue room_json =
          in
          let latest_out = latest_message_from agent_name messages in
          let latest_in = latest_message_to agent_name messages in
-         let where =
-           match related_session with
-           | Some session ->
-               compact_text
-                 (session.goal
-                 ^
-                 match session.room with
-                 | Some room -> " · " ^ room
-                 | None -> "")
-           | None -> current_room
-         in
-         let with_whom =
-           match related_session with
-           | Some session ->
-               session.member_names
-               |> List.filter (fun name -> not (String.equal name agent_name))
-           | None -> []
-         in
          let current_work =
            task_label (Option.bind agent (fun value -> value.current_task))
+         in
+         let archived_meta = Hashtbl.find_opt archived_meta_by_name agent_name in
+         let display_name =
+           Hashtbl.find_opt keeper_aliases agent_name |> Option.value ~default:agent_name
          in
          let recent_output_preview =
            latest_out |> Option.map (fun (message : Types.message) -> compact_text message.content)
@@ -858,53 +885,53 @@ let build_agent_briefs config sessions attention_queue room_json =
          let recent_input_preview =
            latest_in |> Option.map (fun (message : Types.message) -> compact_text message.content)
          in
-         let recent_event =
-           related_session |> Option.map (fun session -> session.last_event_summary)
-         in
          let status =
            match agent with
            | Some value -> Types.agent_status_to_string value.status
-           | None ->
-               if Option.is_some related_session then "active" else "unknown"
+           | None -> status_of_archived_session related_session
          in
          let last_activity_at =
            match agent with
            | Some value -> trim_to_option value.last_seen
-           | None ->
-               (match related_session with
-               | Some session -> session.last_event_at
-               | None -> None)
+            | None ->
+               (match archived_meta with
+               | Some meta when meta.last_event_at <> None -> meta.last_event_at
+               | _ ->
+                   match related_session with
+                   | Some session -> session.last_event_at
+                   | None -> None)
          in
          let last_seen_ts =
            match agent with
-           | Some value ->
-               parse_iso_opt (trim_to_option value.last_seen) |> Option.value ~default:0.0
-           | None ->
-               (match related_session with
-               | Some session -> session.last_event_ts
-               | None -> 0.0)
+            | Some value ->
+                parse_iso_opt (trim_to_option value.last_seen) |> Option.value ~default:0.0
+            | None ->
+                (match related_session with
+                | Some session -> session.last_event_ts
+                | None -> 0.0)
          in
          ({
            status_rank = status_rank status;
            related_attention_count;
            last_seen_ts;
            json =
-             `Assoc
-               ([
-                  ("agent_name", `String agent_name);
+              `Assoc
+                ([
+                   ("agent_name", `String agent_name);
+                  ("display_name", `String display_name);
+                  ("is_live", `Bool (Option.is_some agent));
+                  ( "archived_reason",
+                    json_string_option
+                      (if Option.is_some agent
+                       then None
+                       else archived_reason_for_session related_session) );
                   ("status", `String status);
-                  ("where", `String where);
-                  ("with_whom", `List (List.map (fun value -> `String value) with_whom));
                   ("current_work", json_string_option current_work);
                   ("related_session_id", json_string_option (Option.map (fun s -> s.session_id) related_session));
-                  ("related_attention_count", `Int related_attention_count);
                   ("last_activity_at", json_string_option last_activity_at);
                   ("recent_output_preview", json_string_option recent_output_preview);
                   ("recent_input_preview", json_string_option recent_input_preview);
-                  ("recent_event", json_string_option recent_event);
-                  ("recent_tool_names", string_list_json (recent_tool_names_for_agent agent_name));
-                ]
-                @ tool_audit_json_fields agent_name);
+                ]);
          } : agent_context))
   |> List.sort (fun (left : agent_context) (right : agent_context) ->
          let by_attention = Int.compare right.related_attention_count left.related_attention_count in
@@ -1143,12 +1170,12 @@ let participant_preview_json session_id member_names agent_briefs =
              (`Assoc
                [
                  ("agent_name", `String agent_name);
-                 ("status", member_assoc "status" row);
+                 ("display_name", member_assoc "display_name" row);
+                 ("is_live", member_assoc "is_live" row);
                  ("current_work", member_assoc "current_work" row);
-                 ("recent_input_preview", member_assoc "recent_input_preview" row);
-                 ("recent_output_preview", member_assoc "recent_output_preview" row);
-                 ("recent_tool_names", member_assoc "recent_tool_names" row);
-                 ("last_activity_at", member_assoc "last_activity_at" row);
+                  ("recent_input_preview", member_assoc "recent_input_preview" row);
+                  ("recent_output_preview", member_assoc "recent_output_preview" row);
+                  ("last_activity_at", member_assoc "last_activity_at" row);
                ]))
 
 let keeper_refs_for_session member_names keeper_briefs =
@@ -1260,26 +1287,6 @@ let session_timeline_json session_json =
              ("summary", `String (event_summary event_json));
            ])
 
-let summarize_queue_counts attention_queue =
-  let session_count =
-    attention_queue
-    |> List.concat_map (fun item -> item.related_session_ids)
-    |> dedup_strings
-    |> List.length
-  in
-  let agent_count =
-    attention_queue
-    |> List.concat_map (fun item -> item.related_agent_names)
-    |> dedup_strings
-    |> List.length
-  in
-  `Assoc
-    [
-      ("count", `Int (List.length attention_queue));
-      ("session_count", `Int session_count);
-      ("agent_count", `Int agent_count);
-    ]
-
 type mission_projection = {
   generated_at : string;
   snapshot_json : Yojson.Safe.t;
@@ -1355,7 +1362,9 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
   in
   let attention_queue = build_attention_queue incidents recommended_actions sessions in
   let session_briefs = build_session_briefs sessions attention_queue recommended_actions in
-  let agent_briefs = build_agent_briefs config sessions attention_queue room_json in
+  let agent_briefs =
+    build_agent_briefs config sessions attention_queue room_json snapshot_json
+  in
   let keeper_briefs = build_keeper_briefs snapshot_json in
   let internal_signals = build_internal_signals incidents recommended_actions in
   {
@@ -1390,17 +1399,6 @@ let json ?actor ~config ~sw ~clock ~proc_mgr () =
         ("cluster", json_string_option (Some (string_field "cluster" projection.room_json)));
         ("project", json_string_option (Some (string_field "project" projection.room_json)));
         ("current_room", member_assoc "current_room" projection.room_json);
-        ("paused", `Bool (bool_field "paused" projection.room_json));
-        ("tempo_interval_s", member_assoc "tempo_interval_s" projection.room_json);
-        ("active_agents", `Int (active_agent_count config));
-        ("keeper_pressure", `Int (keeper_pressure_count projection.snapshot_json));
-        ("active_operations", `Int (int_field "active" operations_summary));
-        ("pending_approvals", `Int (int_field "pending" decisions_summary));
-        ("incident_count", `Int (List.length projection.incidents));
-        ("recommended_action_count", `Int (List.length projection.recommended_actions));
-        ("top_attention", top_item projection.incidents);
-        ("top_action", top_item projection.recommended_actions);
-        ("attention_queue", summarize_queue_counts projection.attention_queue);
       ]
   in
   let command_focus_json =

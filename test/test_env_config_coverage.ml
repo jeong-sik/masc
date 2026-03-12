@@ -79,28 +79,55 @@ let test_get_bool_default_false () =
 let test_me_root_prefers_env () =
   with_env "ME_ROOT" "/tmp/masc-custom-root" (fun () ->
     check (option string) "me_root_opt" (Some "/tmp/masc-custom-root") (Env_config.me_root_opt ());
+    check (result string string) "me_root_result" (Ok "/tmp/masc-custom-root")
+      (Env_config.me_root_result ());
     check string "me_root" "/tmp/masc-custom-root" (Env_config.me_root ()))
 
 let test_me_root_prefers_explicit_workspace_root () =
   with_env "MASC_WORKSPACE_ROOT" "/tmp/masc-workspace-root" (fun () ->
     with_env "ME_ROOT" "" (fun () ->
       check (option string) "me_root_opt explicit" (Some "/tmp/masc-workspace-root") (Env_config.me_root_opt ());
+      check (result string string) "me_root_result explicit"
+        (Ok "/tmp/masc-workspace-root") (Env_config.me_root_result ());
       check string "me_root explicit" "/tmp/masc-workspace-root" (Env_config.me_root ())))
 
 let test_masc_http_base_url_prefers_env_and_trims () =
   with_env "MASC_HTTP_BASE_URL" "http://example.test:9911/" (fun () ->
+    check (result string string) "base url result trimmed"
+      (Ok "http://example.test:9911")
+      (Env_config.masc_http_base_url_result ());
     check string "base url trimmed" "http://example.test:9911" (Env_config.masc_http_base_url ()))
 
 let test_masc_http_base_url_uses_explicit_host_and_port () =
   with_env "MASC_HTTP_BASE_URL" "" (fun () ->
     with_env "MASC_HOST" "masc.example.test" (fun () ->
       with_env "MASC_HTTP_PORT" "7777" (fun () ->
+        check (result string string) "base url result from host+port"
+          (Ok "http://masc.example.test:7777")
+          (Env_config.masc_http_base_url_result ());
         check string "base url from host+port" "http://masc.example.test:7777" (Env_config.masc_http_base_url ()))))
+
+let test_sb_path_result_missing_is_error () =
+  with_env "MASC_SB_PATH" "" (fun () ->
+    with_env "MASC_WORKSPACE_ROOT" "" (fun () ->
+      with_env "ME_ROOT" "" (fun () ->
+        check bool "sb path result is error" true
+          (match Env_config.sb_path_result () with Error _ -> true | Ok _ -> false))))
 
 let test_libdatachannel_candidates_include_env_override () =
   with_env "LIBDATACHANNEL_PATH" "/tmp/libdatachannel-custom.dylib" (fun () ->
     check bool "env path present" true
       (List.mem "/tmp/libdatachannel-custom.dylib" (Env_config.libdatachannel_path_candidates ())))
+
+let test_endpoints_result_helpers () =
+  with_env "MASC_HTTP_BASE_URL" "https://masc.example.test" (fun () ->
+    check (result string string) "masc_host_result"
+      (Ok "masc.example.test") (Env_config.Endpoints.masc_host_result ());
+    check (result int string) "masc_port_result"
+      (Ok 443) (Env_config.Endpoints.masc_port_result ());
+    check (result string string) "masc_sse_url_result"
+      (Ok "https://masc.example.test/sse")
+      (Env_config.Endpoints.masc_sse_url_result ()))
 
 (* ============================================================
    print_summary Tests
@@ -316,6 +343,8 @@ let () =
       test_case "me_root prefers explicit workspace root" `Quick test_me_root_prefers_explicit_workspace_root;
       test_case "base url prefers env and trims" `Quick test_masc_http_base_url_prefers_env_and_trims;
       test_case "base url uses explicit host+port" `Quick test_masc_http_base_url_uses_explicit_host_and_port;
+      test_case "sb_path_result missing is error" `Quick test_sb_path_result_missing_is_error;
+      test_case "endpoint result helpers" `Quick test_endpoints_result_helpers;
       test_case "libdatachannel candidates include env override" `Quick test_libdatachannel_candidates_include_env_override;
     ];
     "print_summary", [

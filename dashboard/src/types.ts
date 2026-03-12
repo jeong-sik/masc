@@ -214,12 +214,6 @@ export type KeeperReplyStatus =
   | 'error'
   | 'unknown'
 
-export type KeeperContinuityState =
-  | 'desired_offline'
-  | 'recovering'
-  | 'healthy'
-  | 'offline'
-
 export interface KeeperDiagnostic {
   health_state: KeeperHealthState
   quiet_reason?: KeeperQuietReason | null
@@ -232,8 +226,6 @@ export interface KeeperDiagnostic {
   recoverable?: boolean
   summary?: string
   keepalive_running?: boolean
-  continuity_state?: KeeperContinuityState | null
-  continuity_summary?: string | null
 }
 
 export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
@@ -241,9 +233,35 @@ export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 
 export type KeeperConversationDelivery =
   | 'history'
   | 'sending'
+  | 'streaming'
   | 'delivered'
   | 'timeout'
   | 'error'
+
+export interface KeeperConversationUsage {
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+}
+
+export interface KeeperConversationDetails {
+  traceId?: string | null
+  generation?: number | null
+  modelUsed?: string | null
+  latencyMs?: number | null
+  costUsd?: number | null
+  usage?: KeeperConversationUsage | null
+  skillPrimary?: string | null
+  skillReason?: string | null
+  stateBlock?: string | null
+  rawPayload?: unknown
+}
+
+export type KeeperConversationStreamState =
+  | 'opening'
+  | 'streaming'
+  | 'finalizing'
+  | null
 
 export interface KeeperConversationEntry {
   id: string
@@ -252,6 +270,8 @@ export interface KeeperConversationEntry {
   text: string
   timestamp?: string | null
   delivery: KeeperConversationDelivery
+  streamState?: KeeperConversationStreamState
+  details?: KeeperConversationDetails | null
   error?: string | null
 }
 
@@ -1259,6 +1279,8 @@ export interface DashboardMissionSessionBrief {
 
 export interface DashboardMissionParticipantPreview {
   agent_name: string
+  display_name?: string | null
+  is_live?: boolean
   status?: string
   current_work?: string | null
   recent_input_preview?: string | null
@@ -1294,6 +1316,9 @@ export interface DashboardMissionSessionCard extends DashboardMissionSessionBrie
 
 export interface DashboardMissionAgentBrief {
   agent_name: string
+  display_name?: string | null
+  is_live?: boolean
+  archived_reason?: string | null
   status?: string
   where?: string | null
   with_whom: string[]
@@ -1422,6 +1447,9 @@ export interface DashboardProofSummary {
   session_id?: string
   goal?: string
   verdict?: DashboardProofVerdict
+  live_verdict?: DashboardProofVerdict
+  historical_verdict?: DashboardProofVerdict | null
+  verdict_basis?: 'live' | 'live_and_historical' | 'historical_only' | string
   actors_count?: number
   planned_actor_count?: number
   mentioned_actor_count?: number

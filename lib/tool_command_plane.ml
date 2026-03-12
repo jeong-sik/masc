@@ -2248,7 +2248,7 @@ let schemas : tool_schema list =
     {
       name = "masc_swarm_live_run";
       description =
-        "Execute the deterministic swarm-live harness. Spawns workers against a synthetic fixture, runs them through the Agent SDK, and persists the summary artifact to .masc/control-plane/swarm-live/<run_id>/. Results are then visible via masc_observe_traces.";
+        "Preflight and optionally execute the deterministic swarm-live harness. The tool always writes runtime doctor and summary artifacts under .masc/control-plane/swarm-live/<run_id>/. By default, synchronous self-execution is disabled to avoid MCP server reentrancy hangs, so callers should treat this as a preflight-first orchestration surface that may return structured runtime blockers instead of an inline full run.";
       input_schema =
         object_schema
           [

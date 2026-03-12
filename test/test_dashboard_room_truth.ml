@@ -38,10 +38,12 @@ let test_dashboard_room_truth_empty_room () =
             (request "/api/v1/dashboard/room-truth")
         in
         let open Yojson.Safe.Util in
-        let expected_room = Filename.basename dir in
         check string "room default"
-          expected_room
+          "default"
           (json |> member "room" |> member "status" |> member "room" |> to_string);
+        check string "current_room exposed"
+          "default"
+          (json |> member "room" |> member "status" |> member "current_room" |> to_string);
         check int "pending confirms zero"
           0
           (json |> member "operator" |> member "pending_confirm_summary" |> member "total_count" |> to_int);

@@ -1,4 +1,4 @@
-// Execution surface — session/operation-first execution diagnostics
+// 실행 표면 — 세션/작전 중심 실행 진단
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -46,6 +46,44 @@ function toneClass(tone?: string | null): string {
   return 'ok'
 }
 
+function statusLabel(value?: string | null): string {
+  const normalized = (value ?? '').trim().toLowerCase()
+  switch (normalized) {
+    case 'ok':
+    case 'healthy':
+    case 'green':
+      return '안정'
+    case 'active':
+    case 'running':
+      return '진행 중'
+    case 'paused':
+      return '일시정지'
+    case 'blocked':
+      return '막힘'
+    case 'interrupted':
+      return '중단됨'
+    case 'warn':
+      return '주의'
+    case 'bad':
+    case 'critical':
+      return '위험'
+    case 'offline':
+      return '오프라인'
+    case 'idle':
+    case 'quiet':
+      return '대기'
+    case 'unknown':
+    case '':
+      return '확인 필요'
+    default:
+      return value?.trim() || '확인 필요'
+  }
+}
+
+function queueKindLabel(kind: DashboardExecutionQueueItem['kind']): string {
+  return kind === 'session' ? '세션' : '작전'
+}
+
 function formatContext(value?: number | null): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—'
   return `${Math.round(value * 100)}%`
@@ -81,7 +119,7 @@ function openHandoff(handoff: DashboardExecutionHandoff | null | undefined): voi
     focusKind: handoff.focus_kind,
     operationId: handoff.operation_id ?? null,
     commandSurface: handoff.command_surface ?? null,
-    sourceLabel: 'Execution 진단',
+    sourceLabel: '실행 진단',
     summary: handoff.label,
   })
   persistWorkflowContext(context)
@@ -170,11 +208,11 @@ function QueueCard({ item, selected }: { item: DashboardExecutionQueueItem; sele
           <div class="mission-card-target">${item.kind === 'session' ? item.target_id : item.linked_session_id ?? item.target_id}</div>
           <div class="mission-card-title">${item.summary}</div>
         </div>
-        <span class="command-chip ${toneClass(item.severity)}">${item.status ?? item.severity}</span>
+        <span class="command-chip ${toneClass(item.severity)}">${statusLabel(item.status ?? item.severity)}</span>
       </div>
       <div class="mission-card-meta">
-        <span>${item.kind}</span>
-        ${item.linked_operation_id ? html`<span>linked op · ${item.linked_operation_id}</span>` : null}
+        <span>${queueKindLabel(item.kind)}</span>
+        ${item.linked_operation_id ? html`<span>연결 작전 · ${item.linked_operation_id}</span>` : null}
         ${item.last_seen_at ? html`<span><${TimeAgo} timestamp=${item.last_seen_at} /></span>` : null}
       </div>
       <${HandoffButtons} intervene=${item.intervene_handoff} command=${item.command_handoff} />
@@ -197,11 +235,11 @@ function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrie
           <div class="mission-card-target">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           <div class="mission-card-title">${brief.goal}</div>
         </div>
-        <span class="command-chip ${toneClass(brief.health ?? brief.status)}">${brief.status ?? 'unknown'}</span>
+        <span class="command-chip ${toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
       </div>
       <div class="mission-card-meta">
-        <span>health · ${brief.health ?? 'ok'}</span>
-        ${brief.linked_operation_id ? html`<span>op · ${brief.linked_operation_id}</span>` : null}
+        <span>건강도 · ${statusLabel(brief.health ?? 'ok')}</span>
+        ${brief.linked_operation_id ? html`<span>연결 작전 · ${brief.linked_operation_id}</span>` : null}
         ${brief.last_activity_at ? html`<span><${TimeAgo} timestamp=${brief.last_activity_at} /></span>` : null}
       </div>
       ${brief.runtime_blocker
@@ -230,15 +268,15 @@ function OperationCard({ brief, selected }: { brief: DashboardExecutionOperation
           <div class="mission-card-target">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
           <div class="mission-card-title">${brief.objective}</div>
         </div>
-        <span class="command-chip ${toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${brief.status ?? 'unknown'}</span>
+        <span class="command-chip ${toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>
       </div>
       <div class="mission-card-meta">
-        ${brief.stage ? html`<span>stage · ${brief.stage}</span>` : null}
-        ${brief.linked_session_id ? html`<span>session · ${brief.linked_session_id}</span>` : null}
+        ${brief.stage ? html`<span>단계 · ${brief.stage}</span>` : null}
+        ${brief.linked_session_id ? html`<span>세션 · ${brief.linked_session_id}</span>` : null}
         ${brief.updated_at ? html`<span><${TimeAgo} timestamp=${brief.updated_at} /></span>` : null}
       </div>
       ${brief.blocker_summary ? html`<div class="mission-card-detail">${brief.blocker_summary}</div>` : null}
-      ${brief.next_tool ? html`<div class="monitor-footnote">next tool · ${brief.next_tool}</div>` : null}
+      ${brief.next_tool ? html`<div class="monitor-footnote">다음 도구 · ${brief.next_tool}</div>` : null}
       <${HandoffButtons} command=${brief.command_handoff} />
     </button>
   `
@@ -269,8 +307,8 @@ function WorkerSupportRow({
       <div class="monitor-meta">
         ${row.last_signal_at ? html`<span>신호 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 신호 없음</span>`}
         <span>${(row.active_task_count ?? 0) > 0 ? `활성 작업 ${row.active_task_count}개` : '활성 작업 없음'}</span>
-        ${row.related_session_id ? html`<span>session · ${row.related_session_id}</span>` : null}
-        ${row.related_operation_id ? html`<span>op · ${row.related_operation_id}</span>` : null}
+        ${row.related_session_id ? html`<span>세션 · ${row.related_session_id}</span>` : null}
+        ${row.related_operation_id ? html`<span>작전 · ${row.related_operation_id}</span>` : null}
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
@@ -305,9 +343,9 @@ function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
 
       <div class="monitor-meta">
         ${row.last_signal_at ? html`<span>최근 활동 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 활동 없음</span>`}
-        ${row.related_session_id ? html`<span>session · ${row.related_session_id}</span>` : null}
+        ${row.related_session_id ? html`<span>세션 · ${row.related_session_id}</span>` : null}
         ${row.continuity ? html`<span>${row.continuity}</span>` : null}
-        ${row.lifecycle ? html`<span>라이프사이클 ${row.lifecycle}</span>` : null}
+        ${row.lifecycle ? html`<span>생애주기 ${row.lifecycle}</span>` : null}
         <span>컨텍스트 ${formatContext(row.context_ratio)}</span>
       </div>
 
@@ -392,113 +430,113 @@ export function Execution() {
     <div class="agents-monitor">
       <${SurfaceSemanticIntro} surfaceId="execution" />
       <div class="stats-grid">
-        <${MonitorStat} label="활성 세션" value=${summary?.active_sessions ?? sessionRowsAll.length} color="#4ade80" caption="실행 관점의 session" />
-        <${MonitorStat} label="막힌 세션" value=${summary?.blocked_sessions ?? sessionRowsAll.filter(item => toneClass(item.health ?? item.status) !== 'ok').length} color="#fbbf24" caption="개입 후보 session" />
-        <${MonitorStat} label="활성 작전" value=${summary?.active_operations ?? operationRowsAll.length} color="#22d3ee" caption="command-plane operation" />
-        <${MonitorStat} label="막힌 작전" value=${summary?.blocked_operations ?? operationRowsAll.filter(item => item.blocker_summary).length} color="#fb7185" caption="원인 분석이 필요한 작전" />
-        <${MonitorStat} label="worker 경고" value=${summary?.worker_alerts ?? workerSupportAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="supporting worker pressure" />
-        <${MonitorStat} label="연속성 경고" value=${summary?.continuity_alerts ?? continuityAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="keeper continuity pressure" />
+        <${MonitorStat} label="활성 세션" value=${summary?.active_sessions ?? sessionRowsAll.length} color="#4ade80" caption="실행 관점 세션 수" />
+        <${MonitorStat} label="막힌 세션" value=${summary?.blocked_sessions ?? sessionRowsAll.filter(item => toneClass(item.health ?? item.status) !== 'ok').length} color="#fbbf24" caption="개입이 필요한 세션 수" />
+        <${MonitorStat} label="활성 작전" value=${summary?.active_operations ?? operationRowsAll.length} color="#22d3ee" caption="지휘 평면 작전 수" />
+        <${MonitorStat} label="막힌 작전" value=${summary?.blocked_operations ?? operationRowsAll.filter(item => item.blocker_summary).length} color="#fb7185" caption="원인 확인이 필요한 작전 수" />
+        <${MonitorStat} label="인력 경고" value=${summary?.worker_alerts ?? workerSupportAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="지원 인력 압박" />
+        <${MonitorStat} label="연속성 경고" value=${summary?.continuity_alerts ?? continuityAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="키퍼 연속성 압박" />
       </div>
 
       <${Card}
-        title="Execution Queue"
+        title="실행 대기열"
         class="section"
         semanticId="execution.queue"
         testId="execution.queue"
       >
         <div class="monitor-section-head">
-          <h2 class="monitor-headline">지금 막힌 실행과 다음 handoff</h2>
-          <p class="monitor-subheadline">session과 operation을 한 queue로 보고, 어디를 먼저 Intervene/Command로 넘길지 판단합니다.</p>
+          <h2 class="monitor-headline">지금 막힌 실행과 다음 인계</h2>
+          <p class="monitor-subheadline">세션과 작전을 한 대기열로 보고, 어디를 먼저 개입 화면과 원인 화면으로 넘길지 판단합니다.</p>
         </div>
         <div class="monitor-alert-list">
           ${queueRows.length === 0
-            ? html`<div class="empty-state">지금은 막힌 실행이 없습니다</div>`
+            ? html`<div class="empty-state">지금은 막힌 실행이 없습니다.</div>`
             : queueRows.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)}
         </div>
       <//>
 
       <div class="agents-workbench">
         <${Card}
-          title="Affected Sessions"
+          title="영향받는 세션"
           class="section"
           semanticId="execution.sessions"
           testId="execution.session-briefs"
         >
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">영향받는 session</h2>
-            <p class="monitor-subheadline">queue에서 고른 실행이 어떤 session 목표와 runtime blocker를 갖는지 요약합니다.</p>
+            <h2 class="monitor-headline">영향받는 세션</h2>
+            <p class="monitor-subheadline">대기열에서 고른 실행이 어떤 세션 목표와 실행 막힘을 갖는지 요약합니다.</p>
           </div>
           <div class="monitor-list">
             ${sessionRows.length === 0
-              ? html`<div class="empty-state">선택된 실행과 연결된 session이 없습니다</div>`
+              ? html`<div class="empty-state">선택된 실행과 연결된 세션이 없습니다.</div>`
               : sessionRows.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)}
           </div>
         <//>
 
         <${Card}
-          title="Affected Operations"
+          title="영향받는 작전"
           class="section"
           semanticId="execution.operations"
           testId="execution.operation-briefs"
         >
           <div class="monitor-section-head">
             <h2 class="monitor-headline">영향받는 작전</h2>
-            <p class="monitor-subheadline">command-plane operation의 blocker와 next tool을 얇게 보여주고, deep truth는 Command로 넘깁니다.</p>
+            <p class="monitor-subheadline">지휘 평면 작전의 막힘과 다음 도구만 얇게 보여주고, 자세한 근거는 원인 화면으로 넘깁니다.</p>
           </div>
           <div class="monitor-list">
             ${operationRows.length === 0
-              ? html`<div class="empty-state">선택된 실행과 연결된 operation이 없습니다</div>`
+              ? html`<div class="empty-state">선택된 실행과 연결된 작전이 없습니다.</div>`
               : operationRows.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)}
           </div>
         <//>
 
         <${Card}
-          title="Worker Support"
+          title="작업 인력"
           class="section"
           semanticId="execution.worker_support"
           testId="execution.worker-support"
         >
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">지원 worker</h2>
-            <p class="monitor-subheadline">선택된 session/operation에 연결된 worker만 보이고, 전체 worker wall은 더 이상 첫 화면을 차지하지 않습니다.</p>
+            <h2 class="monitor-headline">지원 작업자</h2>
+            <p class="monitor-subheadline">선택된 세션이나 작전에 연결된 작업자만 보이고, 전체 작업자 벽은 첫 화면을 차지하지 않게 합니다.</p>
           </div>
           <div class="monitor-list">
             ${workerSupportRows.length === 0
-              ? html`<div class="empty-state">연결된 worker가 없습니다</div>`
+              ? html`<div class="empty-state">연결된 작업자가 없습니다.</div>`
               : workerSupportRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.worker-card" />`)}
           </div>
         <//>
 
         <${Card}
-          title="Continuity"
+          title="연속성"
           class="section"
           semanticId="execution.continuity"
           testId="execution.continuity"
         >
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">연속성 보조 lane</h2>
-            <p class="monitor-subheadline">keeper continuity는 supporting lane으로만 남기고, unhealthy keeper 위주로 노출합니다.</p>
+            <h2 class="monitor-headline">연속성 보조 면</h2>
+            <p class="monitor-subheadline">키퍼 연속성은 보조 면으로만 두고, 상태가 좋지 않은 키퍼 위주로 보여줍니다.</p>
           </div>
           <div class="monitor-list">
             ${continuityRows.length === 0
-              ? html`<div class="empty-state">지금은 연속성 경고가 없습니다</div>`
+              ? html`<div class="empty-state">지금은 연속성 경고가 없습니다.</div>`
               : continuityRows.map(row => html`<${ContinuityRow} key=${row.name} row=${row} />`)}
           </div>
         <//>
 
         <${Card}
-          title="Offline Workers"
+          title="오프라인 인력"
           class="section"
           semanticId="execution.offline"
           testId="execution.offline-workers"
         >
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">오프라인 worker</h2>
-            <p class="monitor-subheadline">빠진 worker는 하단 lane으로 분리해 활성 실행 판단을 방해하지 않게 유지합니다.</p>
+            <h2 class="monitor-headline">오프라인 작업자</h2>
+            <p class="monitor-subheadline">빠진 작업자는 하단 보조 면으로 분리해 활성 실행 판단을 방해하지 않게 유지합니다.</p>
           </div>
           <div class="monitor-list">
             ${offlineRows.length === 0
-              ? html`<div class="empty-state">지금은 오프라인 worker가 없습니다</div>`
+              ? html`<div class="empty-state">지금은 오프라인 작업자가 없습니다.</div>`
               : offlineRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.offline-worker-card" />`)}
           </div>
         <//>

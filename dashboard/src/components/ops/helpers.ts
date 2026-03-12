@@ -66,11 +66,11 @@ export function prettyJson(value: unknown): string {
 export function guidanceLayerLabel(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'judgment':
-      return 'Resident judgment'
+      return '상주 판단'
     case 'fallback':
-      return 'Fallback read model'
+      return '보조 읽기 모델'
     default:
-      return value?.trim() || 'Guidance'
+      return value?.trim() || '안내'
   }
 }
 
@@ -100,7 +100,7 @@ export function runtimeJudgeTone(runtime?: OperatorResidentJudgeRuntime | null):
 }
 
 export function guidanceFreshnessLabel(summary?: OperatorGuidanceSummary | null): string {
-  if (!summary?.fresh_until) return 'freshness 없음'
+  if (!summary?.fresh_until) return '갱신 기준 없음'
   return summary.fresh_until
 }
 
@@ -165,9 +165,9 @@ export function actionTypeLabel(value?: string | null): string {
     case 'broadcast':
       return '방송'
     case 'room_pause':
-      return 'room 일시정지'
+      return '방 일시정지'
     case 'room_resume':
-      return 'room 재개'
+      return '방 재개'
     case 'team_turn':
       return '세션 업데이트'
     case 'team_note':
@@ -177,21 +177,21 @@ export function actionTypeLabel(value?: string | null): string {
     case 'team_task_inject':
       return '세션 작업 주입'
     case 'team_worker_spawn_batch':
-      return '세션 worker 교체'
+      return '세션 작업자 교체'
     case 'task_inject':
       return '작업 주입'
     case 'team_stop':
       return '세션 중지'
     case 'keeper_message':
-      return 'keeper 메시지'
+      return '키퍼 메시지'
     case 'keeper_msg':
-      return 'keeper 메시지'
+      return '키퍼 메시지'
     case 'swarm_run_continue':
-      return 'swarm run 계속'
+      return '스웜 실행 계속'
     case 'swarm_run_rerun':
-      return 'swarm run 재실행'
+      return '스웜 실행 재실행'
     case 'swarm_run_abandon':
-      return 'swarm run 포기'
+      return '스웜 실행 포기'
     default:
       return value?.trim() || '액션'
   }
@@ -200,15 +200,15 @@ export function actionTypeLabel(value?: string | null): string {
 export function targetTypeLabel(value?: string | null): string {
   switch (value) {
     case 'room':
-      return 'room'
+      return '방'
     case 'team_session':
-      return 'session'
+      return '세션'
     case 'keeper':
-      return 'keeper'
+      return '키퍼'
     case 'swarm_run':
-      return 'swarm run'
+      return '스웜 실행'
     default:
-      return value?.trim() || 'target'
+      return value?.trim() || '대상'
   }
 }
 
@@ -248,7 +248,7 @@ export function sessionActionLabel(value: typeof teamTurnKind.value): string {
     case 'task':
       return '작업'
     case 'worker_spawn_batch':
-      return 'worker 교체'
+      return '작업자 교체'
     default:
       return value
   }
@@ -419,7 +419,7 @@ export async function submitPause() {
     action_type: 'room_pause',
     target_type: 'room',
     payload: { reason: pauseReason.value.trim() || '운영 점검' },
-    successMessage: 'room 일시정지를 요청했습니다',
+    successMessage: '방 일시정지를 요청했습니다',
   })
 }
 
@@ -428,7 +428,7 @@ export async function submitResume() {
     action_type: 'room_resume',
     target_type: 'room',
     payload: {},
-    successMessage: 'room 재개를 요청했습니다',
+    successMessage: '방 재개를 요청했습니다',
   })
 }
 
@@ -440,7 +440,7 @@ export async function submitTaskInject() {
     target_type: 'room',
     payload: {
       title,
-      description: taskDescription.value.trim() || 'Intervene 화면에서 주입',
+      description: taskDescription.value.trim() || '개입 화면에서 주입',
       priority: Number.parseInt(taskPriority.value, 10) || 2,
     },
     successMessage: '작업 주입을 보냈습니다',
@@ -485,7 +485,7 @@ export async function submitTeamTurn() {
       target_type: 'team_session',
       target_id: sessionId,
       payload,
-      successMessage: 'worker 교체 요청을 적용했습니다',
+      successMessage: '작업자 교체 요청을 적용했습니다',
     })
     if (result) teamSpawnBatchJson.value = ''
     return
@@ -500,7 +500,7 @@ export async function submitTeamTurn() {
   }
   if (teamTurnKind.value === 'task') {
     payload.task_title = teamTaskTitle.value.trim() || '운영자 주입 작업'
-    payload.task_description = teamTaskDescription.value.trim() || 'Intervene 화면에서 주입'
+    payload.task_description = teamTaskDescription.value.trim() || '개입 화면에서 주입'
     payload.task_priority = Number.parseInt(teamTaskPriority.value, 10) || 2
   }
   const result = await executeAction({
@@ -540,7 +540,7 @@ export async function submitKeeperMessage() {
   const keeperName = selectedKeeperName.value || snapshot?.keepers[0]?.name || ''
   const message = keeperMessage.value.trim()
   if (!keeperName) {
-    showToast('먼저 keeper를 고르세요', 'warning')
+    showToast('먼저 키퍼를 고르세요', 'warning')
     return
   }
   if (!message) return

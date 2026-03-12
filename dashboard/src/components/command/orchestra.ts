@@ -28,6 +28,27 @@ type Point = { x: number; y: number }
 const SVG_WIDTH = 1280
 const SVG_HEIGHT = 760
 
+function orchestraNodeKindLabel(kind?: string | null): string {
+  switch ((kind ?? '').trim().toLowerCase()) {
+    case 'room':
+      return '룸'
+    case 'session':
+      return '세션'
+    case 'operation':
+      return '작전'
+    case 'detachment':
+      return '분견대'
+    case 'lane':
+      return '레인'
+    case 'worker':
+      return '워커'
+    case 'keeper':
+      return '키퍼'
+    default:
+      return kind?.trim() || '노드'
+  }
+}
+
 function spreadX(count: number, min: number, max: number): number[] {
   if (count <= 0) return []
   if (count === 1) return [Math.round((min + max) / 2)]
@@ -44,10 +65,6 @@ function groupBy<T>(items: T[], getKey: (item: T) => string): Map<string, T[]> {
     out.set(key, bucket)
   }
   return out
-}
-
-function nodeMap(orchestra: CommandPlaneOrchestraResponse): Map<string, CommandPlaneOrchestraNode> {
-  return new Map(orchestra.nodes.map(node => [node.id, node]))
 }
 
 function layout(orchestra: CommandPlaneOrchestraResponse): Map<string, Point> {
@@ -310,9 +327,9 @@ function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOrchestra
     const signalNode = selected.value
     return html`
       <aside class="orchestra-drawer card ${toneClass(signalNode.tone)}">
-        <div class="card-title-row">
-          <div class="card-title">${signalNode.label}</div>
-          <span class="command-chip ${toneClass(signalNode.tone)}">${signalNode.kind}</span>
+          <div class="card-title-row">
+            <div class="card-title">${signalNode.label}</div>
+          <span class="command-chip ${toneClass(signalNode.tone)}">${orchestraNodeKindLabel(signalNode.kind)}</span>
         </div>
         <p>${signalNode.detail ?? '세부 설명이 없습니다.'}</p>
         ${signalNode.suggested_surface
@@ -322,7 +339,7 @@ function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOrchestra
                   class="control-btn"
                   onClick=${() => jumpTo('command', signalNode.suggested_surface, signalNode.suggested_params ?? {})}
                 >
-                  ${signalNode.suggested_surface} 열기
+                  추천 화면 열기
                 </button>
               </div>
             `
@@ -338,7 +355,7 @@ function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOrchestra
     <aside class="orchestra-drawer card ${toneClass(node.tone)}">
       <div class="card-title-row">
         <div class="card-title">${node.label}</div>
-        <span class="command-chip ${toneClass(node.tone)}">${node.kind}</span>
+        <span class="command-chip ${toneClass(node.tone)}">${orchestraNodeKindLabel(node.kind)}</span>
       </div>
       ${node.subtitle ? html`<p class="command-card-sub">${node.subtitle}</p>` : null}
       <div class="orchestra-fact-list">
@@ -354,7 +371,7 @@ function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOrchestra
           ${relatedSignals.map(signalNode => html`<span class="command-chip ${toneClass(signalNode.tone)}">${signalNode.label}</span>`)}
         </div>
       ` : null}
-      <div class="command-card-sub">연결 ${relatedEdges.length}개 · provenance ${node.provenance}</div>
+      <div class="command-card-sub">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>
       ${(node.link_tab && (node.link_surface || Object.keys(node.link_params ?? {}).length > 0))
         ? html`
             <div class="command-action-row">
@@ -362,7 +379,7 @@ function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOrchestra
                 class="control-btn"
                 onClick=${() => jumpTo(node.link_tab ?? 'command', node.link_surface, node.link_params ?? {})}
               >
-                열기
+                이 화면 열기
               </button>
             </div>
           `
@@ -393,10 +410,10 @@ export function OrchestraSurface() {
   return html`
     <section class="card command-section orchestra-surface">
       <div class="card-title-row">
-        <div class="card-title">오케스트라</div>
+        <div class="card-title">오케스트라 맵</div>
         <${PanelSemanticDetails} panelId="command.orchestra" compact=${true} />
       </div>
-      <p class="command-card-sub">room 전체를 한 장의 작전판으로 읽는 시각화입니다. 클릭하면 drill-down 대상과 관련 신호를 바로 볼 수 있습니다.</p>
+      <p class="command-card-sub">룸 전체를 한 장의 작전판으로 읽는 시각화입니다. 노드를 누르면 관련 신호와 내려볼 대상을 바로 확인할 수 있습니다.</p>
 
       <div class="orchestra-shell">
         <div class="orchestra-canvas-wrap">
@@ -417,13 +434,13 @@ export function OrchestraSurface() {
             />
           </svg>
           <div class="orchestra-summary-strip">
-            <span class="command-chip">sessions ${orchestra.summary?.session_count ?? 0}</span>
-            <span class="command-chip">workers ${orchestra.summary?.worker_count ?? 0}</span>
-            <span class="command-chip">keepers ${orchestra.summary?.keeper_count ?? 0}</span>
+            <span class="command-chip">세션 ${orchestra.summary?.session_count ?? 0}</span>
+            <span class="command-chip">워커 ${orchestra.summary?.worker_count ?? 0}</span>
+            <span class="command-chip">키퍼 ${orchestra.summary?.keeper_count ?? 0}</span>
             <span class="command-chip ${toneClass(orchestra.signals.some(signalNode => signalNode.tone === 'bad') ? 'bad' : orchestra.signals.length > 0 ? 'warn' : 'ok')}">
-              signals ${orchestra.summary?.signal_count ?? orchestra.signals.length}
+              신호 ${orchestra.summary?.signal_count ?? orchestra.signals.length}
             </span>
-            <span class="command-chip">${relativeTime(orchestra.generated_at)}</span>
+            <span class="command-chip">갱신 ${relativeTime(orchestra.generated_at)}</span>
           </div>
         </div>
 

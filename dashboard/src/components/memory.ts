@@ -22,11 +22,11 @@ import { navigate, navigateToPost, route } from '../router'
 import type { BoardComment, BoardPost, BoardSortMode } from '../types'
 
 const SORT_MODES: { id: BoardSortMode; label: string }[] = [
-  { id: 'recent', label: 'Latest' },
-  { id: 'hot', label: 'Hot' },
-  { id: 'trending', label: 'Trending' },
-  { id: 'updated', label: 'Updated' },
-  { id: 'discussed', label: 'Discussed' },
+  { id: 'recent', label: '최신순' },
+  { id: 'hot', label: '인기순' },
+  { id: 'trending', label: '급상승' },
+  { id: 'updated', label: '최근 갱신' },
+  { id: 'discussed', label: '토론 많은 순' },
 ]
 
 const detailPost = signal<BoardPost | null>(null)
@@ -55,7 +55,7 @@ function previewText(content: string): string {
     .replace(/[`#>*_~-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  if (!flattened) return 'No preview available'
+  if (!flattened) return '미리보기 없음'
   return flattened.length > 180 ? `${flattened.slice(0, 177)}...` : flattened
 }
 
@@ -107,8 +107,8 @@ function expiryChip(post: BoardPost) {
   if (!post.expires_at) return null
   const expiresAtMs = Date.parse(post.expires_at)
   if (!Number.isFinite(expiresAtMs)) return null
-  if (expiresAtMs <= Date.now()) return html`<span class="board-meta-chip">expired</span>`
-  return html`<span class="board-meta-chip">expires <${TimeAgo} timestamp=${post.expires_at} /></span>`
+  if (expiresAtMs <= Date.now()) return html`<span class="board-meta-chip">만료됨</span>`
+  return html`<span class="board-meta-chip">만료까지 <${TimeAgo} timestamp=${post.expires_at} /></span>`
 }
 
 async function loadPostDetail(postId: string) {
@@ -159,11 +159,11 @@ async function submitComment(postId: string) {
   try {
     await commentPost(postId, commentAuthor.value, text)
     commentText.value = ''
-    showToast('Comment posted', 'success')
+    showToast('댓글을 등록했습니다', 'success')
     await loadPostDetail(postId)
     refreshBoard()
   } catch {
-    showToast('Failed to post comment', 'error')
+    showToast('댓글 등록에 실패했습니다', 'error')
   } finally {
     commentSubmitting.value = false
   }
@@ -171,7 +171,7 @@ async function submitComment(postId: string) {
 
 function SortBar() {
   const current = boardSortMode.value
-  const hideLabel = hideAutomationPosts.value ? 'Automation lane collapsed' : 'Automation lane visible'
+  const hideLabel = hideAutomationPosts.value ? '자동화 글 숨김' : '자동화 글 표시 중'
   return html`
     <div class="board-toolbar">
       <div class="board-controls">
@@ -204,10 +204,10 @@ function SortBar() {
             refreshBoard()
           }}
         >
-          ${boardExcludeSystem.value ? 'System posts hidden' : 'System posts visible'}
+          ${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 글 표시 중'}
         </button>
         <button class="control-btn ghost" onClick=${refreshBoard} disabled=${boardLoading.value}>
-          ${boardLoading.value ? 'Refreshing...' : 'Refresh'}
+          ${boardLoading.value ? '새로고침 중...' : '새로고침'}
         </button>
       </div>
     </div>
@@ -221,24 +221,24 @@ function MemorySummary() {
   return html`
     <div class="board-summary-strip">
       <div class="board-summary-item">
-        <span class="board-summary-label">Visible posts</span>
+        <span class="board-summary-label">보이는 글</span>
         <strong>${visibleCount}</strong>
       </div>
       <div class="board-summary-item">
-        <span class="board-summary-label">Sort</span>
+        <span class="board-summary-label">정렬</span>
         <strong>${sortLabel}</strong>
       </div>
       <div class="board-summary-item">
-        <span class="board-summary-label">Noise filter</span>
-        <strong>${hideAutomationPosts.value ? `automation ${grouped.hiddenAutomation} hidden` : 'separate lane'}</strong>
+        <span class="board-summary-label">잡음 필터</span>
+        <strong>${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'}</strong>
       </div>
       <div class="board-summary-item">
-        <span class="board-summary-label">Noise policy</span>
-        <strong>${boardExcludeSystem.value ? 'System posts hidden' : 'System lane visible'}</strong>
+        <span class="board-summary-label">시스템 글 정책</span>
+        <strong>${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 레인 표시'}</strong>
       </div>
       <div class="board-summary-item">
-        <span class="board-summary-label">Last refresh</span>
-        <strong>${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : 'Not loaded'}</strong>
+        <span class="board-summary-label">최근 갱신</span>
+        <strong>${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : '아직 불러오지 않음'}</strong>
       </div>
     </div>
   `
@@ -251,7 +251,7 @@ function PostCard({ post }: { post: BoardPost }) {
       await votePost(post.id, dir)
       refreshBoard()
     } catch {
-      showToast('Failed to vote', 'error')
+      showToast('투표에 실패했습니다', 'error')
     }
   }
 
@@ -267,18 +267,18 @@ function PostCard({ post }: { post: BoardPost }) {
             <div class="post-title-row">
               <div class="post-title">${post.title}</div>
               <div class="post-chip-row">
-                ${isUpdated(post) ? html`<span class="board-meta-chip">Updated</span>` : null}
+                ${isUpdated(post) ? html`<span class="board-meta-chip">수정됨</span>` : null}
                 ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip">${boardPostKind(post)}</span>` : null}
                 ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
                 ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
               </div>
             </div>
           <div class="post-meta">
-            <span>By ${post.author}</span>
+            <span>작성자 ${post.author}</span>
             <span><${TimeAgo} timestamp=${post.created_at} /></span>
-            ${isUpdated(post) ? html`<span>Updated <${TimeAgo} timestamp=${post.updated_at} /></span>` : null}
-            <span>${post.comment_count} comments</span>
-            <span>${post.votes ?? 0} votes</span>
+            ${isUpdated(post) ? html`<span>수정 <${TimeAgo} timestamp=${post.updated_at} /></span>` : null}
+            <span>댓글 ${post.comment_count}</span>
+            <span>투표 ${post.votes ?? 0}</span>
           </div>
         </div>
         <div class="post-snippet">${previewText(post.body)}</div>
@@ -288,7 +288,7 @@ function PostCard({ post }: { post: BoardPost }) {
 }
 
 function CommentThread({ comments }: { comments: BoardComment[] }) {
-  if (comments.length === 0) return html`<div class="empty-state" style="font-size:13px">No comments yet</div>`
+  if (comments.length === 0) return html`<div class="empty-state" style="font-size:13px">아직 댓글이 없습니다</div>`
 
   return html`
     <div class="comment-thread">
@@ -308,7 +308,7 @@ function CommentForm({ postId }: { postId: string }) {
     <div class="comment-form" style="margin-top:12px; display:flex; gap:8px;">
       <input
         type="text"
-        placeholder="Add a comment..."
+        placeholder="댓글 추가..."
         value=${commentText.value}
         onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
         onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') submitComment(postId) }}
@@ -320,7 +320,7 @@ function CommentForm({ postId }: { postId: string }) {
         disabled=${commentSubmitting.value || commentText.value.trim() === ''}
         style="padding:8px 16px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.3); border-radius:8px; color:#4ade80; cursor:pointer; font-size:13px;"
       >
-        ${commentSubmitting.value ? '...' : 'Post'}
+        ${commentSubmitting.value ? '...' : '등록'}
       </button>
     </div>
   `
@@ -342,7 +342,7 @@ function PostDetail({ post }: { post: BoardPost }) {
 
   return html`
     <div>
-      <button class="back-btn" onClick=${() => navigate('memory')}>← Back to Memory</button>
+      <button class="back-btn" onClick=${() => navigate('memory')}>← 메모리로 돌아가기</button>
       <${Card} title=${post.title} semanticId="memory.feed">
         <div class="board-detail">
           <div class="post-body">
@@ -366,9 +366,9 @@ function PostDetail({ post }: { post: BoardPost }) {
           ${post.meta
             ? html`
                 <details style="margin-top:12px;">
-                  <summary>Operational meta</summary>
+                  <summary>운영 메타</summary>
                   <div class="post-body" style="margin-top:8px;">
-                    ${post.meta.source ? html`<div><strong>source</strong>: ${post.meta.source}</div>` : null}
+                    ${post.meta.source ? html`<div><strong>출처</strong>: ${post.meta.source}</div>` : null}
                     ${post.meta.state_block
                       ? html`<pre style="white-space:pre-wrap; margin-top:8px;">${post.meta.state_block}</pre>`
                       : null}
@@ -377,15 +377,15 @@ function PostDetail({ post }: { post: BoardPost }) {
               `
             : null}
           <div style="margin-top:8px; display:flex; gap:6px;">
-            <button class="vote-btn upvote" onClick=${() => handleVote('up')}>▲ Upvote</button>
-            <button class="vote-btn downvote" onClick=${() => handleVote('down')}>▼ Downvote</button>
+            <button class="vote-btn upvote" onClick=${() => handleVote('up')}>▲ 추천</button>
+            <button class="vote-btn downvote" onClick=${() => handleVote('down')}>▼ 비추천</button>
           </div>
         </div>
       <//>
 
-      <${Card} title="Comments" semanticId="memory.feed">
+      <${Card} title="댓글" semanticId="memory.feed">
         ${detailLoading.value
-          ? html`<div class="loading-indicator">Loading comments...</div>`
+          ? html`<div class="loading-indicator">댓글 불러오는 중...</div>`
           : html`<${CommentThread} comments=${detailComments.value} />`}
         <${CommentForm} postId=${post.id} />
       <//>
@@ -416,10 +416,10 @@ export function Memory() {
           <div>
             <${SurfaceSemanticIntro} surfaceId="memory" />
             <${MemorySummary} />
-            <button class="back-btn" onClick=${() => navigate('memory')}>← Back to Memory</button>
+            <button class="back-btn" onClick=${() => navigate('memory')}>← 메모리로 돌아가기</button>
             ${detailLoading.value
-              ? html`<div class="loading-indicator">Loading post...</div>`
-              : html`<div class="empty-state">Post not found</div>`}
+              ? html`<div class="loading-indicator">글 불러오는 중...</div>`
+              : html`<div class="empty-state">글을 찾지 못했습니다</div>`}
           </div>
         `
   }
@@ -430,11 +430,11 @@ export function Memory() {
       <${MemorySummary} />
       <${SortBar} />
       ${boardLoading.value
-        ? html`<div class="loading-indicator">Loading memory feed...</div>`
+        ? html`<div class="loading-indicator">메모리 피드 불러오는 중...</div>`
         : posts.length === 0
-          ? html`<div class="empty-state">No posts in durable memory right now</div>`
+          ? html`<div class="empty-state">지금은 남아 있는 메모리 글이 없습니다</div>`
           : html`
-              <${Card} title="Human Posts" class="section" semanticId="memory.feed">
+              <${Card} title="사람이 쓴 글" class="section" semanticId="memory.feed">
                 <div class="board-post-list">
                   ${grouped.human.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                 </div>
@@ -444,14 +444,14 @@ export function Memory() {
                       class="control-btn ghost"
                       onClick=${() => { visibleLimit.value = visibleLimit.value + PAGE_SIZE }}
                     >
-                      Show more (${grouped.human.length - visibleLimit.value} remaining)
+                      더 보기 (${grouped.human.length - visibleLimit.value}개 남음)
                     </button>
                   </div>
                 ` : null}
               <//>
               ${grouped.operations.length > 0
                 ? html`
-                    <${Card} title="Automation & System" class="section" semanticId="memory.feed">
+                    <${Card} title="자동화 · 시스템" class="section" semanticId="memory.feed">
                       <div class="board-post-list">
                         ${grouped.operations.map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                       </div>

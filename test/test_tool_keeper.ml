@@ -195,7 +195,7 @@ let test_keeper_model_set_persists_active_model () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -308,7 +308,7 @@ let test_persona_list_and_create_from_persona () =
   let me_root = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir;
       rm_rf me_root)
     (fun () ->
@@ -492,7 +492,7 @@ let test_keeper_policy_tools_roundtrip () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir)
     (fun () ->
       let reward_model_path = Filename.concat base_dir "reward-model.json" in
@@ -675,7 +675,7 @@ let test_keeper_policy_set_rejects_invalid_mode () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -811,7 +811,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -836,7 +836,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
             ])
       in
       check bool "keeper up ok" true ok;
-      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       let meta =
         match Masc_mcp.Keeper_types.read_meta config "sangsu" with
         | Ok (Some meta) -> meta

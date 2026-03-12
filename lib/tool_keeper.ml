@@ -34,7 +34,7 @@ let annotate_keeper_json ~runtime_class ~desired ~resident_registered json =
   | other -> other
 
 let handle_resident_keeper_create_from_persona ctx args : tool_result =
-  match Keeper_execution.resolved_keeper_args_from_persona args with
+  match Keeper_exec_persona.resolved_keeper_args_from_persona args with
   | Error e -> (false, "❌ " ^ e)
   | Ok (persona, resolved_args) ->
       let dry_run = get_bool args "dry_run" false in
@@ -42,7 +42,7 @@ let handle_resident_keeper_create_from_persona ctx args : tool_result =
         let json =
           `Assoc
             [
-              ("persona", Keeper_execution.persona_summary_to_json persona);
+              ("persona", Keeper_exec_persona.persona_summary_to_json persona);
               ("created", `Bool false);
               ("resident", `Bool true);
               ("resolved_args", resolved_args);
@@ -77,7 +77,7 @@ let handle_resident_keeper_create_from_persona ctx args : tool_result =
               let json =
                 `Assoc
                   [
-                    ("persona", Keeper_execution.persona_summary_to_json persona);
+                    ("persona", Keeper_exec_persona.persona_summary_to_json persona);
                     ("created", `Bool true);
                     ("resident", `Bool true);
                     ("result", annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true ~resident_registered:true created_json);

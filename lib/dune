@@ -56,6 +56,8 @@
    server_trpg_rest
    server_dashboard_http
    server_routes_http
+   server_h2_gateway
+   server_runtime_bootstrap
    server_command_plane_http
    server_mcp_transport_http
    web_dashboard
@@ -305,7 +307,11 @@
    keeper_types
    keeper_memory
    keeper_alerting
+   keeper_exec_tools
+   keeper_exec_status
+   keeper_exec_persona
    keeper_execution
+   keeper_keepalive
    keeper_runtime
    keeper_turn
    keeper_status

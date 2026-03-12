@@ -174,21 +174,9 @@ let handle_post ?session_id ~body ?request_handler () =
       (* Touch session if found *)
       Option.iter Session.touch session;
 
-      (* Check if batch or single request *)
+      (* Streamable HTTP transport no longer accepts JSON-RPC batches. *)
       if Jsonrpc.is_batch json then
-        match json with
-        | `List requests ->
-            let responses = List.filter_map (fun req ->
-              if Jsonrpc.is_valid_request req then
-                let response = Jsonrpc.dispatch_request request_handler req in
-                if response <> `Null then Some response else None
-              else
-                let id = Jsonrpc.extract_id req in
-                Some (Jsonrpc.invalid_request id)
-            ) requests in
-            (Json_batch responses, session)
-        | _ ->
-            (Error_response (400, "Invalid batch format"), session)
+        (Error_response (400, "JSON-RPC batch requests are not supported"), session)
       else if Jsonrpc.is_valid_request json then
         (* Single request - delegate to MCP handler *)
         let response = Jsonrpc.dispatch_request request_handler json in

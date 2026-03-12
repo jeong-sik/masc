@@ -4,6 +4,8 @@ open Tool_args
 open Keeper_types
 open Keeper_memory
 open Keeper_alerting
+open Keeper_exec_tools
+open Keeper_keepalive
 open Keeper_execution
 
 type tool_result = Keeper_types.tool_result
@@ -142,58 +144,84 @@ let handle_keeper_up ctx args : tool_result =
                 | [] -> "")
       in
       let policy_mode =
-        first_some policy_mode_opt profile_defaults.policy_mode
+        let default_policy_mode =
+          if default_voice_enabled_for name then "explicit_event_v1" else "heuristic"
+        in
+        policy_mode_opt
+        |> first_some
+             (if default_voice_enabled_for name then None else profile_defaults.policy_mode)
         |> Option.value
-             ~default:
-               (if default_voice_enabled_for name then "explicit_event_v1"
-                else "heuristic")
+             ~default:default_policy_mode
         |> canonical_policy_mode
       in
+      let use_profile_policy_defaults =
+        not (default_voice_enabled_for name && Option.is_none policy_mode_opt)
+      in
       let policy_action_budget =
-        first_some policy_action_budget_opt profile_defaults.policy_action_budget
+        first_some
+          policy_action_budget_opt
+          (if use_profile_policy_defaults then profile_defaults.policy_action_budget else None)
         |> Option.value ~default:"conversation"
         |> canonical_policy_action_budget
       in
       let policy_reward_model_path =
-        first_some policy_reward_model_path_opt profile_defaults.policy_reward_model_path
+        first_some
+          policy_reward_model_path_opt
+          (if use_profile_policy_defaults then profile_defaults.policy_reward_model_path else None)
         |> Option.value ~default:""
         |> resolve_reward_model_path
       in
       let policy_voice_enabled =
-        first_some policy_voice_enabled_opt profile_defaults.policy_voice_enabled
+        first_some
+          policy_voice_enabled_opt
+          (if use_profile_policy_defaults then profile_defaults.policy_voice_enabled else None)
         |> Option.value ~default:false
       in
       let policy_shell_mode =
-        first_some policy_shell_mode_opt profile_defaults.policy_shell_mode
+        first_some
+          policy_shell_mode_opt
+          (if use_profile_policy_defaults then profile_defaults.policy_shell_mode else None)
         |> Option.value ~default:"disabled"
         |> canonical_policy_shell_mode
       in
       let initiative_enabled =
-        first_some initiative_enabled_opt profile_defaults.initiative_enabled
+        first_some
+          initiative_enabled_opt
+          (if use_profile_policy_defaults then profile_defaults.initiative_enabled else None)
         |> Option.value ~default:false
       in
       let initiative_scope =
-        first_some initiative_scope_opt profile_defaults.initiative_scope
+        first_some
+          initiative_scope_opt
+          (if use_profile_policy_defaults then profile_defaults.initiative_scope else None)
         |> Option.value ~default:"board_only"
         |> canonical_initiative_scope
       in
       let initiative_idle_sec =
-        first_some initiative_idle_sec_opt profile_defaults.initiative_idle_sec
+        first_some
+          initiative_idle_sec_opt
+          (if use_profile_policy_defaults then profile_defaults.initiative_idle_sec else None)
         |> Option.value ~default:3600
         |> normalize_initiative_idle_sec
       in
       let initiative_cooldown_sec =
-        first_some initiative_cooldown_sec_opt profile_defaults.initiative_cooldown_sec
+        first_some
+          initiative_cooldown_sec_opt
+          (if use_profile_policy_defaults then profile_defaults.initiative_cooldown_sec else None)
         |> Option.value ~default:3600
         |> normalize_initiative_cooldown_sec
       in
       let initiative_context_mode =
-        first_some initiative_context_mode_opt profile_defaults.initiative_context_mode
+        first_some
+          initiative_context_mode_opt
+          (if use_profile_policy_defaults then profile_defaults.initiative_context_mode else None)
         |> Option.value ~default:"board_snapshot"
         |> canonical_initiative_context_mode
       in
       let initiative_post_ttl_hours =
-        first_some initiative_post_ttl_hours_opt profile_defaults.initiative_post_ttl_hours
+        first_some
+          initiative_post_ttl_hours_opt
+          (if use_profile_policy_defaults then profile_defaults.initiative_post_ttl_hours else None)
         |> Option.value ~default:24
         |> normalize_initiative_post_ttl_hours
       in
@@ -939,55 +967,58 @@ let handle_keeper_msg ctx args : tool_result =
                     | [] -> "")
           in
           let policy_mode =
-            profile_defaults.policy_mode
+            (if default_voice_enabled_for name then None else profile_defaults.policy_mode)
             |> Option.value
                  ~default:
                    (if default_voice_enabled_for name then "explicit_event_v1"
                     else "heuristic")
             |> canonical_policy_mode
           in
+          let use_profile_policy_defaults = not (default_voice_enabled_for name) in
           let policy_action_budget =
-            profile_defaults.policy_action_budget
+            (if use_profile_policy_defaults then profile_defaults.policy_action_budget else None)
             |> Option.value ~default:"conversation"
             |> canonical_policy_action_budget
           in
           let policy_reward_model_path =
-            profile_defaults.policy_reward_model_path
+            (if use_profile_policy_defaults then profile_defaults.policy_reward_model_path else None)
             |> Option.value ~default:""
           in
           let policy_voice_enabled =
-            profile_defaults.policy_voice_enabled |> Option.value ~default:false
+            (if use_profile_policy_defaults then profile_defaults.policy_voice_enabled else None)
+            |> Option.value ~default:false
           in
           let policy_shell_mode =
-            profile_defaults.policy_shell_mode
+            (if use_profile_policy_defaults then profile_defaults.policy_shell_mode else None)
             |> Option.value ~default:"disabled"
             |> canonical_policy_shell_mode
           in
           let initiative_enabled =
-            profile_defaults.initiative_enabled |> Option.value ~default:false
+            (if use_profile_policy_defaults then profile_defaults.initiative_enabled else None)
+            |> Option.value ~default:false
           in
           let initiative_scope =
-            profile_defaults.initiative_scope
+            (if use_profile_policy_defaults then profile_defaults.initiative_scope else None)
             |> Option.value ~default:"board_only"
             |> canonical_initiative_scope
           in
           let initiative_idle_sec =
-            profile_defaults.initiative_idle_sec
+            (if use_profile_policy_defaults then profile_defaults.initiative_idle_sec else None)
             |> Option.value ~default:3600
             |> normalize_initiative_idle_sec
           in
           let initiative_cooldown_sec =
-            profile_defaults.initiative_cooldown_sec
+            (if use_profile_policy_defaults then profile_defaults.initiative_cooldown_sec else None)
             |> Option.value ~default:3600
             |> normalize_initiative_cooldown_sec
           in
           let initiative_context_mode =
-            profile_defaults.initiative_context_mode
+            (if use_profile_policy_defaults then profile_defaults.initiative_context_mode else None)
             |> Option.value ~default:"board_snapshot"
             |> canonical_initiative_context_mode
           in
           let initiative_post_ttl_hours =
-            profile_defaults.initiative_post_ttl_hours
+            (if use_profile_policy_defaults then profile_defaults.initiative_post_ttl_hours else None)
             |> Option.value ~default:24
             |> normalize_initiative_post_ttl_hours
           in
@@ -1732,6 +1763,7 @@ let handle_keeper_msg ctx args : tool_result =
                 match
                   deterministic_recall_fallback
                     ~meta
+                    ~ctx_work
                     ~user_message:message
                     ~eval:eval_after_prompt_fallback
                     ~candidates:recall_candidates

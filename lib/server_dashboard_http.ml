@@ -889,7 +889,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
       | Error _ -> None
       | Ok None -> None
       | Ok (Some (m : Keeper_types.keeper_meta)) ->
-          let agent = Keeper_execution.parse_agent_status config ~agent_name:m.agent_name in
+          let agent = Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name in
 
           let created_ts =
             Resilience.Time.parse_iso8601_opt m.created_at
@@ -907,8 +907,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             if m.last_proactive_ts <= 0.0 then 0.0 else now_ts -. m.last_proactive_ts
           in
           let trace_history_count = List.length m.trace_history in
-          let active_model = Keeper_execution.active_model_of_meta m in
-          let next_model_hint = Keeper_execution.next_model_hint_of_meta m in
+          let active_model = Keeper_exec_status.active_model_of_meta m in
+          let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
           let primary_model =
             match m.models with
             | model :: _ -> model
@@ -1804,7 +1804,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | _ -> 0
           in
           let keepalive_running =
-            Keeper_execution.keeper_keepalive_running m.name
+            Keeper_keepalive.keeper_keepalive_running m.name
           in
 
           let context =
@@ -1870,7 +1870,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 | _ -> []
               in
               let diagnostic =
-                Keeper_execution.keeper_diagnostic_json
+                Keeper_exec_status.keeper_diagnostic_json
                   ~meta:m
                   ~agent_status:agent
                   ~keepalive_running

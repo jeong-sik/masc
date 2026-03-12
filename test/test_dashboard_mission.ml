@@ -21,6 +21,11 @@ let cleanup_dir dir =
   in
   rm dir
 
+let dispatch_keeper_exn ctx ~name ~args =
+  match Lib.Tool_keeper.dispatch ctx ~name ~args with
+  | Some result -> result
+  | None -> failwith ("keeper dispatch missing: " ^ name)
+
 let contains str substr =
   try
     ignore (Str.search_forward (Str.regexp_string substr) str 0);
@@ -416,10 +421,62 @@ let test_dashboard_mission_projection () =
           ((session_detail |> member "operations" |> to_list) <> []);
       ))
 
+let test_dashboard_mission_keeper_tool_audit_fallback () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let keeper_ctx : _ Lib.Tool_keeper.context =
+          { config; sw; clock = Eio.Stdenv.clock env }
+        in
+        let keeper_name = "audit-keeper" in
+        let ok, _ =
+          dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+            ~args:
+              (`Assoc
+                [
+                  ("name", `String keeper_name);
+                  ("goal", `String "Dashboard mission keeper fallback");
+                  ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+                  ("presence_keepalive", `Bool false);
+                  ("proactive_enabled", `Bool false);
+                ])
+        in
+        check bool "keeper up ok" true ok;
+        let json =
+          Lib.Dashboard_mission.json
+            ~actor:"test-dashboard"
+            ~config
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~proc_mgr:None
+            ()
+        in
+        let open Yojson.Safe.Util in
+        let brief =
+          json |> member "keeper_briefs" |> to_list
+          |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
+        in
+        check bool "fallback allowed tools present" true
+          ((brief |> member "allowed_tool_names" |> to_list) <> []);
+        check string "fallback source" "keeper_policy"
+          (brief |> member "tool_audit_source" |> to_string);
+        check bool "no observed tools without evidence" true
+          ((brief |> member "latest_tool_names" |> to_list) = []);
+      ))
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
       ( "read_model",
-        [ Alcotest.test_case "projection groups root-cause lanes" `Quick
-            test_dashboard_mission_projection ] );
+        [
+          Alcotest.test_case "projection groups root-cause lanes" `Quick
+            test_dashboard_mission_projection;
+          Alcotest.test_case "keeper tool audit fallback" `Quick
+            test_dashboard_mission_keeper_tool_audit_fallback;
+        ] );
     ]

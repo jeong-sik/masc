@@ -4,6 +4,7 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_exec_status = Masc_mcp.Keeper_exec_status
 module Keeper_exec_tools = Masc_mcp.Keeper_exec_tools
+module Keeper_execution = Masc_mcp.Keeper_execution
 
 let keeper_meta ?(name = "sangsu") ?(goal = "keep continuity")
     ?(models = [ "custom:model-a"; "custom:model-b" ])
@@ -303,6 +304,162 @@ let test_execute_keeper_tool_call_readonly_branches () =
   check int "memory search match count" 1
     Yojson.Safe.Util.(memory_json |> member "match_count" |> to_int)
 
+let test_keeper_execution_trace_and_model_helpers () =
+  let trace_id = Keeper_execution.generate_trace_id () in
+  check bool "trace id prefix" true (String.starts_with ~prefix:"trace-" trace_id);
+  let meta =
+    keeper_meta ~models:[ "custom:model-a"; "custom:model-a"; "custom:model-b" ]
+      ~allowed_models:[ "custom:model-b"; "custom:model-c" ]
+      ~active_model:"custom:model-c" ()
+  in
+  check (list string) "inline models win"
+    [ "custom:inline" ]
+    (Keeper_execution.effective_model_labels_for_turn meta
+       ~inline_models:[ "custom:inline" ]);
+  check (list string) "active model fallback"
+    [ "custom:model-c" ]
+    (Keeper_execution.effective_model_labels_for_turn meta ~inline_models:[]);
+  let meta_no_active = { meta with active_model = ""; last_model_used = "" } in
+  check (list string) "first available model fallback"
+    [ "custom:model-b" ]
+    (Keeper_execution.effective_model_labels_for_turn meta_no_active
+       ~inline_models:[])
+
+let test_keeper_execution_cursor_and_mention_helpers () =
+  let meta = keeper_meta () in
+  check int "missing cursor defaults to zero" 0
+    (Keeper_execution.room_cursor_for meta "default");
+  let updated = Keeper_execution.set_room_cursor meta "default" 42 in
+  check int "cursor stored" 42
+    (Keeper_execution.room_cursor_for updated "default");
+  let updated =
+    Keeper_execution.set_room_cursor updated "default" 99
+  in
+  check int "cursor replaced" 99
+    (Keeper_execution.room_cursor_for updated "default");
+  check bool "direct mention present" true
+    (Keeper_execution.exact_direct_mention_present ~targets:[ "sangsu" ]
+       "@sangsu are you there?");
+  check bool "ambient mention absent" false
+    (Keeper_execution.exact_direct_mention_present ~targets:[ "sangsu" ]
+       "hello everyone")
+
+let test_keeper_execution_fragmentary_history_detection () =
+  check bool "empty text is fragmentary" true
+    (Keeper_execution.looks_fragmentary_history_text "");
+  check bool "short unterminated is fragmentary" true
+    (Keeper_execution.looks_fragmentary_history_text "thinking");
+  check bool "trailing connector is fragmentary" true
+    (Keeper_execution.looks_fragmentary_history_text "and");
+  check bool "korean sentence ending passes" false
+    (Keeper_execution.looks_fragmentary_history_text "지금 가는 중입니다");
+  check bool "terminated sentence passes" false
+    (Keeper_execution.looks_fragmentary_history_text "All done.")
+
+let test_keeper_execution_compaction_helpers () =
+  let meta =
+    {
+      (keeper_meta ()) with
+      compaction_ratio_gate = 0.1;
+      compaction_message_gate = 2;
+      compaction_token_gate = 10;
+      continuity_compaction_cooldown_sec = 30;
+      last_continuity_update_ts = 1000.0;
+      last_proactive_ts = 900.0;
+    }
+  in
+  check (triple (float 0.0001) int int) "policy tuple" (0.1, 2, 10)
+    (Keeper_execution.compaction_policy_of_keeper meta);
+  let ctx =
+    let ctx = Masc_mcp.Context_manager.create ~system_prompt:"system" ~max_tokens:40 in
+    let ctx =
+      Masc_mcp.Context_manager.append ctx
+        (Masc_mcp.Llm_client.user_msg
+           "This is a deliberately long message that pushes the context ratio upward.")
+    in
+    Masc_mcp.Context_manager.append ctx
+      (Masc_mcp.Llm_client.assistant_msg
+         "This is another verbose response that keeps the working set large.")
+  in
+  let same_ctx, reason_opt, decision =
+    Keeper_execution.compact_if_needed ~meta ~now_ts:1010.0 ctx
+  in
+  check bool "cooldown skip preserves context" true (same_ctx.token_count = ctx.token_count);
+  check (option string) "cooldown reason omitted for skipped path" None reason_opt;
+  check string "cooldown decision echoes reason"
+    "skipped:continuity_reflection(20s<30s)" decision;
+  let ready_meta = { meta with last_continuity_update_ts = 900.0; last_proactive_ts = 800.0 } in
+  let compacted_ctx, applied_reason, applied_decision =
+    Keeper_execution.compact_if_needed ~meta:ready_meta ~now_ts:1000.0 ctx
+  in
+  check bool "compaction can shrink context" true
+    (compacted_ctx.token_count <= ctx.token_count);
+  check bool "applied reason present" true (Option.is_some applied_reason);
+  check bool "applied decision tagged" true
+    (String.starts_with ~prefix:"applied:" applied_decision)
+
+let test_keeper_execution_prompt_and_drift_helpers () =
+  let prompt =
+    Keeper_execution.build_keeper_system_prompt
+      ~goal:"Ship keeper fixes" ~short_goal:"short"
+      ~mid_goal:"mid" ~long_goal:"long"
+      ~soul_profile:"delivery"
+      ~will:"" ~needs:"" ~desires:""
+      ~instructions:"Stay concise."
+  in
+  check bool "system prompt includes goal" true
+    (String.contains prompt 'G');
+  check bool "system prompt includes custom instructions" true
+    (String.contains prompt 'C');
+  check string "append trait clause dedupes duplicate"
+    "base"
+    (Keeper_execution.append_trait_clause ~base:"base" ~clause:"base");
+  let drift_meta =
+    {
+      (keeper_meta ()) with
+      drift_enabled = true;
+      drift_min_turn_gap = 1;
+      total_turns = 5;
+      last_drift_turn = 0;
+      will = "기존";
+      needs = "기존";
+      desires = "기존";
+    }
+  in
+  let drifted, applied, reason =
+    Keeper_execution.apply_self_model_drift ~meta:drift_meta
+      ~user_message:"이 관계에서 신뢰와 감정 리스크가 중요해"
+      ~work_kind:"general_chat"
+  in
+  check bool "drift applied" true applied;
+  check bool "reason present" true (Option.is_some reason);
+  check bool "needs changed" true (drifted.needs <> drift_meta.needs)
+
+let test_keeper_execution_proactive_prompt_helpers () =
+  let meta =
+    {
+      (keeper_meta ~goal:"keep moving" ()) with
+      soul_profile = "research";
+      last_proactive_preview = "old preview";
+    }
+  in
+  let prompt =
+    Keeper_execution.proactive_prompt_for_keeper ~meta ~idle_seconds:120
+      None "fallback continuity"
+  in
+  check bool "proactive prompt includes fallback continuity" true
+    (String.contains prompt 'f');
+  check bool "proactive prompt includes checkin contract" true
+    (String.contains prompt 'C');
+  check string "retry instruction attempt 2"
+    "Retry policy: previous attempt failed (fragmentary). You MUST output now with a clearly different angle."
+    (Keeper_execution.proactive_retry_instruction 2 ~reason:"fragmentary");
+  check (float 0.0001) "retry temperature attempt 3" 0.9
+    (Keeper_execution.proactive_temperature 3);
+  check string "strip state blocks"
+    "hello  world"
+    (Keeper_execution.strip_state_blocks_text "hello [STATE]x[/STATE] world")
+
 let () =
   run "Keeper_exec helpers"
     [
@@ -345,5 +502,17 @@ let () =
             test_keeper_allowed_tool_names_respects_policy_branches;
           test_case "execute keeper tool call readonly branches" `Quick
             test_execute_keeper_tool_call_readonly_branches;
+          test_case "keeper execution trace and model helpers" `Quick
+            test_keeper_execution_trace_and_model_helpers;
+          test_case "keeper execution cursor and mention helpers" `Quick
+            test_keeper_execution_cursor_and_mention_helpers;
+          test_case "keeper execution fragmentary history detection" `Quick
+            test_keeper_execution_fragmentary_history_detection;
+          test_case "keeper execution compaction helpers" `Quick
+            test_keeper_execution_compaction_helpers;
+          test_case "keeper execution prompt and drift helpers" `Quick
+            test_keeper_execution_prompt_and_drift_helpers;
+          test_case "keeper execution proactive prompt helpers" `Quick
+            test_keeper_execution_proactive_prompt_helpers;
         ] );
     ]

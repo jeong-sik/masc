@@ -164,6 +164,14 @@ export function OpsSessionColumn() {
               <span>경과: ${selectedSession.elapsed_sec ?? 0}초</span>
               <span>남은 시간: ${selectedSession.remaining_sec ?? 0}초</span>
             </div>
+            ${selectedSession.linked_autoresearch ? html`
+              <div class="ops-detail-meta">
+                <span>Autoresearch: ${String(selectedSession.linked_autoresearch.status ?? 'unknown')}</span>
+                <span>Loop: ${String(selectedSession.linked_autoresearch.loop_id ?? 'n/a')}</span>
+                <span>Cycle: ${String(selectedSession.linked_autoresearch.current_cycle ?? 0)}</span>
+                <span>Best: ${String(selectedSession.linked_autoresearch.best_score ?? 'n/a')}</span>
+              </div>
+            ` : null}
             ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
               <pre class="ops-code-block compact">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
             ` : null}

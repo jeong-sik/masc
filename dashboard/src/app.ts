@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import type { ComponentChildren } from 'preact'
 import { signal } from '@preact/signals'
 import { route, initRouter, navigate } from './router'
 import { connected, eventCount, connectSSE, disconnectSSE } from './sse'
@@ -148,10 +149,140 @@ function refreshForTab(tab: string) {
   if (tab === 'lab') refreshTrpg()
 }
 
+function renderRuntimeStat(label: string, value: ComponentChildren) {
+  return html`
+    <div class="build-badge-row">
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>
+  `
+}
+
+function renderResidentRuntimeCard(
+  title: string,
+  statusLabel: string,
+  tone: 'ok' | 'warn' | 'bad',
+  rows: ComponentChildren[],
+  hint?: ComponentChildren,
+) {
+  return html`
+    <div style="padding-top:12px; border-top:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; gap:6px;">
+      <div class="rail-card-head" style="margin:0;">
+        <h3 style="font-size:12px;">${title}</h3>
+        <span class="rail-section-chip ${tone}">${statusLabel}</span>
+      </div>
+      ${rows}
+      ${hint ? html`<div class="rail-build-hint">${hint}</div>` : null}
+    </div>
+  `
+}
+
 function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
   const build = serverStatus.value?.build
+  const lodge = serverStatus.value?.lodge
   const gardener = serverStatus.value?.gardener
+  const guardian = serverStatus.value?.guardian
+  const sentinel = serverStatus.value?.sentinel
+  const residentCards: ComponentChildren[] = []
+
+  if (lodge) {
+    residentCards.push(
+      renderResidentRuntimeCard(
+        'Lodge',
+        lodge.enabled ? (lodge.quiet_active ? 'Quiet' : 'Live') : 'Disabled',
+        lodge.enabled ? (lodge.quiet_active ? 'warn' : 'ok') : 'bad',
+        [
+          renderRuntimeStat('Ticks', lodge.total_ticks ?? 0),
+          renderRuntimeStat('Checkins', lodge.total_checkins ?? 0),
+          renderRuntimeStat(
+            'Last result',
+            lodge.last_tick_result?.activity_report
+              ?? lodge.last_skip_reason
+              ?? 'none',
+          ),
+        ],
+      ),
+    )
+  }
+
+  if (gardener) {
+    residentCards.push(
+      renderResidentRuntimeCard(
+        'Gardener',
+        gardener.alive ? 'Live' : gardener.enabled ? 'Starting' : 'Disabled',
+        gardener.alive ? 'ok' : gardener.enabled ? 'warn' : 'bad',
+        [
+          renderRuntimeStat(
+            'Last tick',
+            gardener.last_tick_completed_at
+              ? html`<${TimeAgo} timestamp=${gardener.last_tick_completed_at} />`
+              : 'never',
+          ),
+          renderRuntimeStat(
+            'Decision',
+            `${gardener.last_intervention ?? 'none'} · ${gardener.last_decision_source ?? 'none'}`,
+          ),
+          renderRuntimeStat(
+            'Backlog',
+            `${gardener.health_summary?.todo_count ?? 0} todo · P1/2 ${gardener.health_summary?.high_priority_todo ?? 0}`,
+          ),
+        ],
+        gardener.last_reason ?? gardener.last_error ?? undefined,
+      ),
+    )
+  }
+
+  if (guardian) {
+    const guardianLive = guardian.masc_loops_running || guardian.lodge_loop_started || guardian.lodge_running
+    residentCards.push(
+      renderResidentRuntimeCard(
+        'Guardian',
+        guardianLive ? 'Live' : guardian.enabled ? 'Idle' : 'Disabled',
+        guardianLive ? 'ok' : guardian.enabled ? 'warn' : 'bad',
+        [
+          renderRuntimeStat('Mode', guardian.mode ?? 'unknown'),
+          renderRuntimeStat(
+            'Loops',
+            `zombie ${guardian.zombie_loop_running ? 'on' : 'off'} · gc ${guardian.gc_loop_running ? 'on' : 'off'}`,
+          ),
+          renderRuntimeStat(
+            'Owner',
+            guardian.runtime_owner ?? 'none',
+          ),
+        ],
+        guardian.last_lodge_result?.message
+          ?? guardian.last_gc_result
+          ?? guardian.last_zombie_result
+          ?? undefined,
+      ),
+    )
+  }
+
+  if (sentinel) {
+    residentCards.push(
+      renderResidentRuntimeCard(
+        'Sentinel',
+        sentinel.started ? 'Live' : sentinel.enabled ? 'Starting' : 'Disabled',
+        sentinel.started ? 'ok' : sentinel.enabled ? 'warn' : 'bad',
+        [
+          renderRuntimeStat('Agent', sentinel.agent_name ?? 'sentinel'),
+          renderRuntimeStat(
+            'Consumers',
+            sentinel.consumers?.length ?? 0,
+          ),
+          renderRuntimeStat(
+            'Guardian owner',
+            sentinel.guardian_runtime_owner ?? 'none',
+          ),
+        ],
+        sentinel.llm_enabled === true
+          ? 'LLM-enabled housekeeping resident'
+          : undefined,
+      ),
+    )
+  }
+
   return html`
     <section class="rail-card">
       <div class="rail-card-head">
@@ -195,38 +326,13 @@ function SnapshotCard({ currentTab }: { currentTab: string }) {
       ${build
         ? html`<div class="rail-build-hint">Server Build · v${build.release_version} · ${shortCommit(build.commit)}</div>`
         : null}
-      ${gardener ? html`
-        <div style="margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; gap:6px;">
-          <div class="rail-card-head" style="margin:0;">
-            <h3 style="font-size:12px;">Gardener</h3>
-            <span class="rail-section-chip ${gardener.alive ? 'ok' : gardener.enabled ? 'warn' : 'bad'}">
-              ${gardener.alive ? 'Live' : gardener.enabled ? 'Starting' : 'Disabled'}
-            </span>
-          </div>
-          <div class="build-badge-row">
-            <span>Last tick</span>
-            <strong>${gardener.last_tick_completed_at ? html`<${TimeAgo} timestamp=${gardener.last_tick_completed_at} />` : 'never'}</strong>
-          </div>
-          <div class="build-badge-row">
-            <span>Decision</span>
-            <strong>${gardener.last_intervention ?? 'none'} · ${gardener.last_decision_source ?? 'none'}</strong>
-          </div>
-          <div class="build-badge-row">
-            <span>Action</span>
-            <strong>${gardener.last_action ?? 'none'}</strong>
-          </div>
-          <div class="build-badge-row">
-            <span>Backlog</span>
-            <strong>${gardener.health_summary?.todo_count ?? 0} todo · P1/2 ${gardener.health_summary?.high_priority_todo ?? 0}</strong>
-          </div>
-          ${gardener.last_reason
-            ? html`<div class="rail-build-hint">Reason · ${gardener.last_reason}</div>`
-            : null}
-          ${gardener.last_error
-            ? html`<div class="rail-build-hint" style="color:#fca5a5;">Error · ${gardener.last_error}</div>`
-            : null}
-        </div>
-      ` : null}
+      ${residentCards.length > 0
+        ? html`
+            <div style="margin-top:12px; display:flex; flex-direction:column; gap:10px;">
+              ${residentCards}
+            </div>
+          `
+        : null}
     </section>
   `
 }

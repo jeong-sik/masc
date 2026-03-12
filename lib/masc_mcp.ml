@@ -309,11 +309,7 @@ module Keeper_verifier = Keeper_verifier
 module Keeper_types = Keeper_types
 module Keeper_memory = Keeper_memory
 module Keeper_alerting = Keeper_alerting
-module Keeper_exec_tools = Keeper_exec_tools
-module Keeper_exec_status = Keeper_exec_status
-module Keeper_exec_persona = Keeper_exec_persona
 module Keeper_execution = Keeper_execution
-module Keeper_keepalive = Keeper_keepalive
 module Keeper_runtime = Keeper_runtime
 
 (* Autonomy Adjuster — Feedback Closure (Phase 4) *)

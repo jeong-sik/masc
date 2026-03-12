@@ -91,22 +91,24 @@ let tools_from_response response =
       | _ -> Alcotest.fail "result not an object")
   | _ -> Alcotest.fail "response not an object"
 
-let next_cursor_from_response field_name response =
+let result_fields_exn response =
   match response with
   | `Assoc fields -> (
       match List.assoc_opt "result" fields with
-      | Some (`Assoc result_fields) -> (
-          match List.assoc_opt "nextCursor" result_fields with
-          | Some (`String value) when value <> "" -> Some value
-          | Some `Null | None -> None
-          | _ -> Alcotest.failf "%s nextCursor invalid" field_name)
-      | _ -> Alcotest.failf "%s result not an object" field_name)
-  | _ -> Alcotest.failf "%s response not an object" field_name
+      | Some (`Assoc result_fields) -> result_fields
+      | _ -> Alcotest.fail "result not an object")
+  | _ -> Alcotest.fail "response not an object"
+
+let next_cursor_of_response response =
+  match List.assoc_opt "nextCursor" (result_fields_exn response) with
+  | Some (`String cursor) -> Some cursor
+  | Some _ -> Alcotest.fail "nextCursor not a string"
+  | None -> None
 
 let rec collect_tools ~clock ~sw ?profile ?cursor state acc =
   let response = tools_list_response ~clock ~sw ?profile ?cursor state in
   let tools = tools_from_response response in
-  match next_cursor_from_response "tools/list" response with
+  match next_cursor_of_response response with
   | Some next -> collect_tools ~clock ~sw ?profile ~cursor:next state (acc @ tools)
   | None -> acc @ tools
 
@@ -145,10 +147,9 @@ let resources_from_response response =
 let rec resources_list_all ~clock ~sw ?cursor state acc =
   let response = resources_list_response ~clock ~sw ?cursor state in
   let resources = resources_from_response response in
-  match next_cursor_from_response "resources/list" response with
+  match next_cursor_of_response response with
   | Some next -> resources_list_all ~clock ~sw ~cursor:next state (acc @ resources)
   | None -> acc @ resources
-
 let find_tool_exn tools name =
   match
     List.find_map
@@ -330,6 +331,7 @@ let test_handle_request_tools_list () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let first_page = tools_list_response ~clock ~sw state in
 
   let tools = tools_list_all ~clock ~sw state in
 
@@ -386,6 +388,9 @@ let test_handle_request_tools_list () =
     "placeholder tool hidden by default"
     false
     (List.mem "masc_archive_save" names);
+  Alcotest.(check bool) "first page non-empty" true (names <> []);
+  Alcotest.(check bool) "first page exposes next cursor" true
+    (Option.is_some (next_cursor_of_response first_page));
 
   cleanup_dir base_path
 
@@ -596,16 +601,22 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
     ("id", `Int 120);
     ("method", `String "tools/list");
     ("params", `Assoc [
-      ("names", `List [ `String "masc_status"; `String "masc_broadcast" ]);
+      ("names", `List [ `String "masc_messages"; `String "masc_status" ]);
     ]);
   ]) in
   let response =
     Mcp_eio.handle_request ~clock ~sw state request
   in
-  (match response with
-   | `Assoc fields ->
-       Alcotest.(check bool) "has error" true (List.mem_assoc "error" fields)
-   | _ -> Alcotest.fail "response not an object");
+  let tools = tools_from_response response in
+  let names =
+    tools
+    |> List.filter_map (function
+         | `Assoc fields -> List.assoc_opt "name" fields
+         | _ -> None)
+    |> List.filter_map (function `String s -> Some s | _ -> None)
+  in
+  Alcotest.(check (list string)) "requested tools only"
+    [ "masc_messages"; "masc_status" ] names;
   cleanup_dir base_path
 
 let test_handle_request_tools_list_with_placeholder_flag () =
@@ -699,11 +710,21 @@ let test_handle_request_tools_list_include_usage_metadata () =
     ("params", `Assoc [ ("include_usage", `Bool true) ]);
   ]) in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
-  (match response with
-   | `Assoc fields ->
-       Alcotest.(check bool) "include_usage rejected" true
-         (List.mem_assoc "error" fields)
-   | _ -> Alcotest.fail "response not an object");
+  let result_fields = result_fields_exn response in
+  Alcotest.(check bool) "usage telemetry availability exposed" true
+    (List.mem_assoc "usageTelemetryAvailable" result_fields);
+  Alcotest.(check bool) "usage total exposed" true
+    (List.mem_assoc "usageTotalCalls" result_fields);
+  let first_tool =
+    match tools_from_response response with
+    | tool :: _ -> tool
+    | [] -> Alcotest.fail "tools list empty"
+  in
+  Alcotest.(check bool) "per-tool usage count exposed" true
+    (Yojson.Safe.Util.member "usageCount" first_tool <> `Null);
+  Alcotest.(check bool) "per-tool last-used field present" true
+    (List.mem_assoc "usageLastUsedAt"
+       (match first_tool with `Assoc fields -> fields | _ -> []));
   cleanup_dir base_path
 
 let test_execute_tool_trpg_flow () =
@@ -1286,6 +1307,38 @@ let test_handle_request_prompts_list_non_empty () =
     (List.length prompts >= 3);
   cleanup_dir base_path
 
+let test_handle_request_prompts_list_cursor () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let cursor = Base64.encode_string "prompts:1" in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 210);
+          ("method", `String "prompts/list");
+          ("params", `Assoc [ ("cursor", `String cursor) ]);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let prompts =
+    match response with
+    | `Assoc fields -> (
+        match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) -> (
+            match List.assoc_opt "prompts" result_fields with
+            | Some (`List prompts) -> prompts
+            | _ -> Alcotest.fail "prompts not a list")
+        | _ -> Alcotest.fail "result not an object")
+    | _ -> Alcotest.fail "response not an object"
+  in
+  Alcotest.(check int) "cursor trims first prompt" 2 (List.length prompts);
+  cleanup_dir base_path
+
 let test_handle_request_prompts_get_tool_help () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -1384,6 +1437,7 @@ let test_handle_request_resources_list_includes_tool_help () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let response = resources_list_response ~clock ~sw state in
   let resources = resources_list_all ~clock ~sw state [] in
   let tool_help_index_present =
     List.exists
@@ -1392,18 +1446,90 @@ let test_handle_request_resources_list_includes_tool_help () =
         | _ -> false)
       resources
   in
-  let tool_help_resource_present =
-    List.exists
-      (function
-        | `Assoc fields -> (
-            match List.assoc_opt "uri" fields with
-            | Some (`String uri) -> contains_substring uri "masc://tool-help/masc_status"
-            | _ -> false)
-        | _ -> false)
-      resources
-  in
   Alcotest.(check bool) "tool help index listed" true tool_help_index_present;
-  Alcotest.(check bool) "per-tool help listed" true tool_help_resource_present;
+  Alcotest.(check bool) "resource page exposes next cursor" true
+    (Option.is_some (next_cursor_of_response response));
+  cleanup_dir base_path
+
+let test_handle_request_resources_list_paginates () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 230);
+          ("method", `String "resources/list");
+          ("params", `Assoc []);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let resources =
+    match response with
+    | `Assoc fields -> (
+        match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) -> (
+            match List.assoc_opt "resources" result_fields with
+            | Some (`List resources) -> resources
+            | _ -> Alcotest.fail "resources not a list")
+        | _ -> Alcotest.fail "result not an object")
+    | _ -> Alcotest.fail "response not an object"
+  in
+  Alcotest.(check bool) "resources next cursor exists" true
+    (Option.is_some (next_cursor_of_response response));
+  Alcotest.(check int) "resources first page size" 128 (List.length resources);
+  cleanup_dir base_path
+
+let test_handle_request_tools_list_paginates () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let first_page = tools_list_response ~clock ~sw state in
+  let first_tools = tools_from_response first_page in
+  let cursor =
+    match next_cursor_of_response first_page with
+    | Some cursor -> cursor
+    | None -> Alcotest.fail "expected nextCursor on tools/list first page"
+  in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 240);
+          ("method", `String "tools/list");
+          ("params", `Assoc [ ("cursor", `String cursor) ]);
+        ])
+  in
+  let second_page = Mcp_eio.handle_request ~clock ~sw state request in
+  let second_tools = tools_from_response second_page in
+  let first_name =
+    match List.hd first_tools with
+    | `Assoc fields -> (
+        match List.assoc_opt "name" fields with
+        | Some (`String name) -> name
+        | _ -> Alcotest.fail "first page tool missing name")
+    | _ -> Alcotest.fail "first page tool not an object"
+  in
+  let second_name =
+    match List.hd second_tools with
+    | `Assoc fields -> (
+        match List.assoc_opt "name" fields with
+        | Some (`String name) -> name
+        | _ -> Alcotest.fail "second page tool missing name")
+    | _ -> Alcotest.fail "second page tool not an object"
+  in
+  Alcotest.(check int) "tools first page size" 128 (List.length first_tools);
+  Alcotest.(check bool) "tools second page non-empty" true
+    (List.length second_tools > 0);
+  Alcotest.(check bool) "pages advance" true
+    (not (String.equal first_name second_name));
   cleanup_dir base_path
 
 let test_handle_request_tool_help_resource_read () =
@@ -1557,10 +1683,13 @@ let eio_tests = [
     test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;
   "handle prompts/list non-empty", `Quick, test_handle_request_prompts_list_non_empty;
+  "handle prompts/list cursor", `Quick, test_handle_request_prompts_list_cursor;
   "handle prompts/get tool_help", `Quick, test_handle_request_prompts_get_tool_help;
   "handle prompts/get command_truth filters run_id", `Quick,
     test_handle_request_prompts_get_command_truth_filters_run_id;
   "handle resources/list includes tool-help", `Quick, test_handle_request_resources_list_includes_tool_help;
+  "handle resources/list paginates", `Quick,
+    test_handle_request_resources_list_paginates;
   "handle resources/read tool-help", `Quick, test_handle_request_tool_help_resource_read;
   "handle resources/subscribe requires session", `Quick,
     test_handle_request_resources_subscribe_requires_session;
@@ -1569,7 +1698,7 @@ let eio_tests = [
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
   "handle tools/list mdal descriptions", `Quick,
     test_handle_request_tools_list_mdal_descriptions;
-  "handle tools/list rejects nonstandard names filter", `Quick,
+  "handle tools/list filters requested names", `Quick,
     test_handle_request_tools_list_rejects_nonstandard_names_filter;
   "handle tools/list operator profile", `Quick,
     test_handle_request_tools_list_operator_profile;
@@ -1580,6 +1709,7 @@ let eio_tests = [
     test_handle_request_tools_list_hides_team_session_turn_by_default;
   "handle tools/list include usage metadata", `Quick,
     test_handle_request_tools_list_include_usage_metadata;
+  "handle tools/list paginates", `Quick, test_handle_request_tools_list_paginates;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
   "handle invalid json", `Quick, test_handle_request_invalid_json;

@@ -1593,6 +1593,53 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       Alcotest.(check bool) "summary present" true
         (String.length Yojson.Safe.Util.(diagnostic |> member "summary" |> to_string) > 0))
 
+let test_snapshot_keeper_tool_audit_fallback () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let keeper_name = "audit-keeper" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Expose dashboard fallback keeper audit");
+                ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+                ("presence_keepalive", `Bool false);
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let snapshot =
+        Operator_control.snapshot_json ~include_messages:false ~include_sessions:false
+          ~include_keepers:true (operator_ctx env sw config "operator")
+      in
+      let open Yojson.Safe.Util in
+      let keeper =
+        snapshot
+        |> member "keepers" |> member "items" |> to_list
+        |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
+      in
+      Alcotest.(check string) "offline when no agent runtime" "offline"
+        (keeper |> member "status" |> to_string);
+      Alcotest.(check bool) "allowed tool fallback present" true
+        ((keeper |> member "allowed_tool_names" |> to_list) <> []);
+      Alcotest.(check string) "tool audit source fallback" "keeper_policy"
+        (keeper |> member "tool_audit_source" |> to_string);
+      Alcotest.(check bool) "diagnostic present" true
+        (keeper |> member "diagnostic" <> `Null);
+      Alcotest.(check string) "diagnostic health offline" "offline"
+        (keeper |> member "diagnostic" |> member "health_state" |> to_string))
+
 let test_manual_lodge_tick_updates_observable_state () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1678,6 +1725,8 @@ let () =
             test_select_checkin_agents_manual_override_quiet_hours;
           Alcotest.test_case "keeper status exposes summary and recoverable" `Quick
             test_keeper_status_exposes_summary_and_recoverable;
+          Alcotest.test_case "snapshot keeper tool audit fallback" `Quick
+            test_snapshot_keeper_tool_audit_fallback;
           Alcotest.test_case "manual lodge tick updates observable state" `Quick
             test_manual_lodge_tick_updates_observable_state;
           Alcotest.test_case "expired confirmation rejected" `Quick

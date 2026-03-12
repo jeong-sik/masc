@@ -125,8 +125,9 @@ let file_contains_pattern file_rel pattern =
     str_contains content pattern
   end
 
-let any_file_contains_pattern file_rels pattern =
-  List.exists (fun file_rel -> file_contains_pattern file_rel pattern) file_rels
+<<<<<<< HEAD
+let any_file_contains_pattern files pattern =
+  List.exists (fun file_rel -> file_contains_pattern file_rel pattern) files
 
 let keeper_source_files () =
   let source_root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -140,13 +141,13 @@ let keeper_source_files () =
          Filename.check_suffix name ".ml"
          && String.starts_with ~prefix:"keeper_" name)
   |> List.map (Filename.concat "lib")
-
 (* HIGH priority patterns *)
 
 let test_source_main_keeper_bootstrap () =
-  check bool "bootstrap sources have keeper bootstrap logging"
-    true (any_file_contains_pattern
-      [ "bin/main_eio.ml"; "lib/server_runtime_bootstrap.ml" ]
+  check bool "runtime bootstrap has keeper bootstrap logging"
+    true
+    (any_file_contains_pattern
+       [ "bin/main_eio.ml"; "lib/server_runtime_bootstrap.ml" ]
       {|[main] keeper bootstrap failed:|})
 
 let test_source_metrics_fd_close () =
@@ -165,8 +166,9 @@ let test_source_llm_token_parse () =
       {|[llm] token field missing or wrong type|})
 
 let test_source_keeper_proactive () =
-  check bool "keeper sources have proactive emission logging"
-    true (any_file_contains_pattern (keeper_source_files ())
+  check bool "keeper runtime has proactive emission logging"
+    true
+    (any_file_contains_pattern (keeper_source_files ())
       {|[keeper] proactive emission failed:|})
 
 (* MEDIUM priority patterns *)

@@ -20,5 +20,14 @@ val start :
   Room_utils.config ->
   unit
 
+(** Test helper: clears in-memory sentinel runtime markers. *)
+val reset_runtime_state_for_tests : unit -> unit
+
+(** Test helper: marks sentinel as started without spawning runtime fibers. *)
+val mark_started_for_tests : unit -> unit
+
+(** Ensures the room root/current room state exists before sentinel joins. *)
+val ensure_room_initialized_for_start : Room_utils.config -> unit
+
 (** JSON status for /health and dashboard. *)
 val status_json : unit -> Yojson.Safe.t

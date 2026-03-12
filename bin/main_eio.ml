@@ -8265,6 +8265,7 @@ let run_server ~sw ~env ~host ~port ~base_path =
   (* Initialize server state with Eio context *)
   let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~net ~base_path in
   server_state := Some state;
+  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
   Masc_mcp.Chain_native_eio.configure_storage_paths state.room_config;
   (try Masc_mcp.Tool_command_plane.backfill_chain_overlays state.room_config
    with exn ->
@@ -8298,8 +8299,15 @@ let run_server ~sw ~env ~host ~port ~base_path =
   Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
   (* Gardener — self-organizing agent ecosystem (task-aware, LLM-primary) *)
   Masc_mcp.Gardener.start ~sw ~clock ~room_config:state.room_config;
-  (* Internal guardian loops (no external watchdog dependency) *)
-  Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
+  if Masc_mcp.Env_config.Sentinel.enabled then begin
+    (* Sentinel is the SSOT for housekeeping. It embeds zombie/gc loops itself. *)
+    Masc_mcp.Sentinel.start ~sw ~clock ~net state.room_config;
+    (* Lodge patrol remains a Guardian concern and can still be enabled explicitly. *)
+    if Masc_mcp.Env_config.Guardian.enabled then
+      Masc_mcp.Guardian.start_lodge_loop ~sw ~clock ~net
+  end else
+    (* Fallback runtime when sentinel is disabled. *)
+    Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
   Masc_mcp.Dashboard_governance_judge.start ~sw ~clock
     ~base_path:state.room_config.base_path
     ~build_facts:(fun () ->

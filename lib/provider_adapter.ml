@@ -320,6 +320,70 @@ let voice_endpoint_auth_env_name (endpoint : Voice_config.endpoint) =
   let adapter = voice_adapter_for_endpoint endpoint in
   voice_auth_env_name ?endpoint_api_key_env:endpoint.api_key_env adapter
 
+let ends_with ~suffix s =
+  let slen = String.length s in
+  let plen = String.length suffix in
+  slen >= plen && String.sub s (slen - plen) plen = suffix
+
+let compose_voice_endpoint_url ~base_url ~path =
+  let base_uri = Uri.of_string base_url in
+  let base_path = Uri.path base_uri in
+  let base_path =
+    if base_path = "" then "/"
+    else if ends_with ~suffix:"/" base_path && String.length base_path > 1 then
+      String.sub base_path 0 (String.length base_path - 1)
+    else base_path
+  in
+  let final_path =
+    if path = "/mcp" then
+      if ends_with ~suffix:"/mcp" base_path then base_path
+      else if base_path = "/" then "/mcp"
+      else base_path ^ "/mcp"
+    else if path = "/health" then
+      if ends_with ~suffix:"/health" base_path then base_path
+      else if ends_with ~suffix:"/mcp" base_path then
+        String.sub base_path 0 (String.length base_path - 4) ^ "/health"
+      else if base_path = "/" then "/health"
+      else base_path ^ "/health"
+    else if base_path = "/" then path
+    else base_path ^ path
+  in
+  Uri.with_path base_uri final_path |> Uri.to_string
+
+let voice_session_endpoint_result (config : Voice_config.t) =
+  match Voice_config.select_endpoint config.session.endpoints with
+  | Some endpoint ->
+      let adapter = voice_adapter_for_endpoint endpoint in
+      if adapter.transport = Voice_mcp then Ok endpoint
+      else
+        Error
+          (Printf.sprintf "session endpoint %s must use kind=voice_mcp" endpoint.id)
+  | None -> Error "no configured session endpoint"
+
+let voice_session_mcp_url_of_endpoint (endpoint : Voice_config.endpoint) =
+  let adapter = voice_adapter_for_endpoint endpoint in
+  if adapter.transport <> Voice_mcp then
+    Error (Printf.sprintf "session endpoint %s must use voice_mcp transport" endpoint.id)
+  else
+    match endpoint.mcp_url with
+    | Some url -> Ok url
+    | None -> (
+        match endpoint.base_url with
+        | Some base_url -> Ok (compose_voice_endpoint_url ~base_url ~path:"/mcp")
+        | None -> Ok "http://127.0.0.1:8936/mcp")
+
+let voice_session_health_url_of_endpoint (endpoint : Voice_config.endpoint) =
+  let adapter = voice_adapter_for_endpoint endpoint in
+  if adapter.transport <> Voice_mcp then
+    Error (Printf.sprintf "session endpoint %s must use voice_mcp transport" endpoint.id)
+  else
+    match endpoint.health_url with
+    | Some url -> Ok url
+    | None -> (
+        match endpoint.base_url with
+        | Some base_url -> Ok (compose_voice_endpoint_url ~base_url ~path:"/health")
+        | None -> Ok "http://127.0.0.1:8936/health")
+
 let voice_transport_supports_http_tts (adapter : voice_adapter) =
   match adapter.transport with
   | Voice_openai_compat | Voice_elevenlabs_direct -> true

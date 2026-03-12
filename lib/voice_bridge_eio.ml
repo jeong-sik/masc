@@ -57,67 +57,29 @@ let local_playback_enabled_for_agent agent_id =
   | Ok config -> Voice_config.local_playback_enabled_for_agent config agent_id
   | Error _ -> false
 
-let ends_with ~suffix s =
-  let slen = String.length s in
-  let plen = String.length suffix in
-  slen >= plen && String.sub s (slen - plen) plen = suffix
-
-let compose_endpoint_from_base ~base_url ~path =
-  let base_uri = Uri.of_string base_url in
-  let base_path = Uri.path base_uri in
-  let base_path =
-    if base_path = "" then "/"
-    else if ends_with ~suffix:"/" base_path && String.length base_path > 1 then
-      String.sub base_path 0 (String.length base_path - 1)
-    else base_path
-  in
-  let final_path =
-    if path = "/mcp" then
-      if ends_with ~suffix:"/mcp" base_path then base_path
-      else if base_path = "/" then "/mcp"
-      else base_path ^ "/mcp"
-    else if path = "/health" then
-      if ends_with ~suffix:"/health" base_path then base_path
-      else if ends_with ~suffix:"/mcp" base_path then
-        String.sub base_path 0 (String.length base_path - 4) ^ "/health"
-      else if base_path = "/" then "/health"
-      else base_path ^ "/health"
-    else if base_path = "/" then path
-    else base_path ^ path
-  in
-  Uri.with_path base_uri final_path
-
-let active_session_endpoint () =
-  match load_voice_config () with
-  | Ok config -> Voice_config.select_endpoint config.session.endpoints
-  | Error _ -> None
-
-let session_mcp_uri endpoint =
-  match endpoint.Voice_config.mcp_url with
-  | Some url -> Uri.of_string url
-  | None -> (
-      match endpoint.base_url with
-      | Some base_url -> compose_endpoint_from_base ~base_url ~path:"/mcp"
-      | None -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ())
-
-let session_health_uri endpoint =
-  match endpoint.Voice_config.health_url with
-  | Some url -> Uri.of_string url
-  | None -> (
-      match endpoint.base_url with
-      | Some base_url -> compose_endpoint_from_base ~base_url ~path:"/health"
-      | None ->
-          Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ())
-
 let voice_mcp_uri () =
-  match active_session_endpoint () with
-  | Some endpoint -> session_mcp_uri endpoint
-  | None -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ()
+  match load_voice_config () with
+  | Ok config -> (
+      match Provider_adapter.voice_session_endpoint_result config with
+      | Ok endpoint -> (
+          match Provider_adapter.voice_session_mcp_url_of_endpoint endpoint with
+          | Ok url -> Uri.of_string url
+          | Error _ -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" () )
+      | Error _ -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ())
+  | Error _ -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ()
 
 let voice_health_uri () =
-  match active_session_endpoint () with
-  | Some endpoint -> session_health_uri endpoint
-  | None ->
+  match load_voice_config () with
+  | Ok config -> (
+      match Provider_adapter.voice_session_endpoint_result config with
+      | Ok endpoint -> (
+          match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+          | Ok url -> Uri.of_string url
+          | Error _ ->
+              Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" () )
+      | Error _ ->
+          Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ())
+  | Error _ ->
       Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ()
 
 let voice_mcp_host () =
@@ -737,7 +699,11 @@ let extract_mcp_result json =
     Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))
 
 let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
-  let uri = session_mcp_uri endpoint in
+  let uri =
+    match Provider_adapter.voice_session_mcp_url_of_endpoint endpoint with
+    | Ok url -> Uri.of_string url
+    | Error _ -> voice_mcp_uri ()
+  in
   let request_body =
     `Assoc
       [
@@ -834,16 +800,7 @@ let cache_duration () =
 let session_endpoint_result () =
   match load_voice_config () with
   | Error message -> Error message
-  | Ok config -> (
-      match Voice_config.select_endpoint config.session.endpoints with
-      | Some endpoint -> (
-          match endpoint.Voice_config.kind with
-          | Voice_config.Voice_mcp -> Ok endpoint
-          | _ ->
-              Error
-                (Printf.sprintf
-                   "session endpoint %s must use kind=voice_mcp" endpoint.id) )
-      | None -> Error "no configured session endpoint")
+  | Ok config -> Provider_adapter.voice_session_endpoint_result config
 
 let is_voice_server_available ~sw ~clock ~net =
   match session_endpoint_result () with
@@ -851,7 +808,11 @@ let is_voice_server_available ~sw ~clock ~net =
       voice_server_available := Some false;
       false
   | Ok endpoint ->
-      let health_target = Uri.to_string (session_health_uri endpoint) in
+      let health_target =
+        match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+        | Ok url -> url
+        | Error _ -> Uri.to_string (voice_health_uri ())
+      in
       if !voice_server_health_target <> Some health_target then (
         voice_server_health_target := Some health_target;
         voice_server_available := None;
@@ -863,7 +824,11 @@ let is_voice_server_available ~sw ~clock ~net =
         voice_server_check_time := now;
         let check () =
           try
-            let uri = session_health_uri endpoint in
+            let uri =
+              match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+              | Ok url -> Uri.of_string url
+              | Error _ -> voice_health_uri ()
+            in
             let client = client_for_uri ~net uri in
             let resp, _ = Cohttp_eio.Client.get ~sw client uri in
             let status = Cohttp.Response.status resp in
@@ -1136,7 +1101,11 @@ let health_check ~sw ~clock:_ ~net () =
   match session_endpoint_result () with
   | Error error -> Error error
   | Ok endpoint ->
-      let uri = session_health_uri endpoint in
+      let uri =
+        match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+        | Ok url -> Uri.of_string url
+        | Error _ -> voice_health_uri ()
+      in
       try
         let client = client_for_uri ~net uri in
         let resp, body = Cohttp_eio.Client.get ~sw client uri in

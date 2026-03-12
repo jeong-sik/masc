@@ -128,8 +128,8 @@ let file_contains_pattern file_rel pattern =
 (* HIGH priority patterns *)
 
 let test_source_main_keeper_bootstrap () =
-  check bool "main_eio.ml has keeper bootstrap logging"
-    true (file_contains_pattern "bin/main_eio.ml"
+  check bool "server_runtime_bootstrap.ml has keeper bootstrap logging"
+    true (file_contains_pattern "lib/server_runtime_bootstrap.ml"
       {|[main] keeper bootstrap failed:|})
 
 let test_source_metrics_fd_close () =
@@ -148,8 +148,8 @@ let test_source_llm_token_parse () =
       {|[llm] token field missing or wrong type|})
 
 let test_source_keeper_proactive () =
-  check bool "keeper_execution.ml has proactive emission logging"
-    true (file_contains_pattern "lib/keeper_execution.ml"
+  check bool "keeper_keepalive.ml has proactive emission logging"
+    true (file_contains_pattern "lib/keeper_keepalive.ml"
       {|[keeper] proactive emission failed:|})
 
 (* MEDIUM priority patterns *)

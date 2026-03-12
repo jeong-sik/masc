@@ -130,6 +130,20 @@ let compact_text ?(max_len = 160) raw =
   else if String.length normalized <= max_len then normalized
   else String.sub normalized 0 (max_len - 1) ^ "…"
 
+let current_room_id_of_room_json room_json =
+  trim_to_option (string_field "current_room" room_json)
+  |> Option.value ~default:"default"
+
+let session_in_room current_room (session : session_context) =
+  match session.room with
+  | Some room -> String.equal room current_room
+  | None -> false
+
+let session_visible_in_scope ?selected_session_id current_room session =
+  match selected_session_id with
+  | Some session_id when String.equal session.session_id session_id -> true
+  | _ -> session_in_room current_room session
+
 let string_list_json values =
   `List (List.map (fun value -> `String value) values)
 
@@ -735,11 +749,11 @@ let build_session_briefs sessions attention_queue actions =
            if by_severity <> 0 then by_severity else Float.compare right_ts left_ts)
   |> List.map (fun (_, _, _, json) -> json)
 
-let build_task_lookup config =
+let build_task_lookup config current_room =
   if not (Room.is_initialized config) then
     []
   else
-    Room.get_tasks_raw config
+    Room.get_tasks_raw_in_room config current_room
     |> List.filter_map (fun (task : Types.task) ->
            if String.trim task.id = "" then None
            else Some (task.id, Printf.sprintf "%s · %s" task.id (compact_text task.title)))
@@ -778,16 +792,14 @@ let latest_message_to agent_name messages =
     None messages
 
 let build_agent_briefs config sessions attention_queue room_json =
-  let task_lookup = build_task_lookup config in
+  let current_room = current_room_id_of_room_json room_json in
+  let task_lookup = build_task_lookup config current_room in
   let messages =
     if Room.is_initialized config then
-      Room.get_messages_raw config ~since_seq:0 ~limit:200
+      Room.get_messages_raw_in_room config ~room_id:current_room ~since_seq:0
+        ~limit:200
     else
       []
-  in
-  let current_room =
-    trim_to_option (string_field "current_room" room_json)
-    |> Option.value ~default:"room"
   in
   let task_label task_id =
     match task_id with
@@ -798,7 +810,8 @@ let build_agent_briefs config sessions attention_queue room_json =
         | None -> Some id)
   in
   let room_agents =
-    if Room.is_initialized config then Room.get_agents_raw config else []
+    if Room.is_initialized config then Room.get_agents_raw_in_room config current_room
+    else []
   in
   let room_agent_by_name =
     room_agents
@@ -1296,7 +1309,8 @@ type mission_projection = {
   internal_signals : Yojson.Safe.t list;
 }
 
-let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
+let build_projection ?actor ?selected_session_id ~config ~sw ~clock ~proc_mgr
+    () =
   let actor_name =
     match actor with
     | Some value when String.trim value <> "" -> String.trim value
@@ -1337,6 +1351,7 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
           ]
   in
   let room_json = member_assoc "room" snapshot_json in
+  let current_room = current_room_id_of_room_json room_json in
   let command_json = member_assoc "command_plane" snapshot_json in
   let incidents =
     list_field "attention_items" digest_json
@@ -1352,6 +1367,7 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
     | `List items -> items
     | _ -> [])
     |> List.filter_map (fun json -> build_session_context json session_cards)
+    |> List.filter (session_visible_in_scope ?selected_session_id current_room)
   in
   let attention_queue = build_attention_queue incidents recommended_actions sessions in
   let session_briefs = build_session_briefs sessions attention_queue recommended_actions in
@@ -1447,7 +1463,10 @@ let json ?actor ~config ~sw ~clock ~proc_mgr () =
     ]
 
 let session_json ?actor ~session_id ~config ~sw ~clock ~proc_mgr () =
-  let projection = build_projection ?actor ~config ~sw ~clock ~proc_mgr () in
+  let projection =
+    build_projection ?actor ~selected_session_id:session_id ~config ~sw ~clock
+      ~proc_mgr ()
+  in
   let session_row_json =
     build_sessions projection.sessions projection.attention_queue projection.agent_briefs
       projection.keeper_briefs projection.command_json

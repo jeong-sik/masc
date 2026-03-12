@@ -124,6 +124,11 @@ let compact_text ?(max_len = 160) raw =
   else if String.length normalized <= max_len then normalized
   else String.sub normalized 0 (max_len - 1) ^ "…"
 
+let session_in_room current_room (session : session_seed) =
+  match session.room with
+  | Some room -> String.equal room current_room
+  | None -> false
+
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
 let string_list_of_json = Dashboard_utils.string_list_of_json
 
@@ -1933,6 +1938,7 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
         | `List items ->
             items
             |> List.filter_map (fun json -> build_session_seed json session_cards)
+            |> List.filter (session_in_room (current_room_id config))
         | _ -> []
       in
       let command_plane_json = member_assoc "command_plane" snapshot_json in

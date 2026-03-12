@@ -251,6 +251,56 @@ let seed_room config session_id =
     ~detail:(`Assoc [ ("result", `String "interrupted after spawn failure reproduction") ]);
   write_pending_confirm config session_id
 
+let extra_session ~room_id ~session_id now =
+  let open Lib.Team_session_types in
+  {
+    session_id;
+    goal = Printf.sprintf "session for %s" room_id;
+    created_by = "fixture-root";
+    room_id;
+    operation_id = None;
+    status = Completed;
+    duration_seconds = 600;
+    execution_scope = Observe_only;
+    checkpoint_interval_sec = 60;
+    min_agents = 1;
+    scale_profile = Scale_standard;
+    control_profile = Control_flat;
+    orchestration_mode = Assist;
+    communication_mode = Comm_hybrid;
+    model_cascade = [];
+    fallback_policy = Fallback_none;
+    instruction_profile = Profile_standard;
+    alert_channel = Alert_both;
+    auto_resume = false;
+    report_formats = [ Markdown; Json ];
+    turn_count = 1;
+    agent_names = [ "fixture-root" ];
+    planned_workers = [];
+    broadcast_count = 0;
+    portal_count = 0;
+    cascade_attempted = 0;
+    cascade_success = 0;
+    cascade_failed = 0;
+    fallback_task_created = 0;
+    min_agents_violation_streak = 0;
+    policy_violations = [];
+    baseline_done_counts = [];
+    final_done_delta_total = None;
+    final_done_delta_by_agent = None;
+    started_at = now -. 30.0;
+    planned_end_at = now +. 570.0;
+    stopped_at = Some now;
+    last_checkpoint_at = Some now;
+    last_event_at = Some now;
+    last_turn_at = Some now;
+    stop_reason = None;
+    generated_report = false;
+    artifacts_dir = Filename.concat ".masc/team-sessions" session_id;
+    created_at_iso = Lib.Types.now_iso ();
+    updated_at_iso = Lib.Types.now_iso ();
+  }
+
 let test_dashboard_mission_projection () =
   let dir = test_dir () in
   Fun.protect
@@ -469,6 +519,55 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
           ((brief |> member "latest_tool_names" |> to_list) = []);
       ))
 
+let test_dashboard_mission_filters_sessions_to_current_room () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room_utils.default_config dir in
+      let current_session_id = "ts-mission-current-room" in
+      seed_room config current_session_id;
+      ignore (Lib.Room.room_create config ~name:"Other Room" ~description:None);
+      let now = Unix.gettimeofday () in
+      Lib.Team_session_store.save_session config
+        (extra_session ~room_id:"other-room" ~session_id:"ts-mission-other-room" now);
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Dashboard_mission.json
+            ~actor:"test-dashboard"
+            ~config
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~proc_mgr:None
+            ()
+        in
+        let open Yojson.Safe.Util in
+        let sessions = json |> member "sessions" |> to_list in
+        check bool "current room session shown" true
+          (sessions
+           |> List.exists (fun row ->
+                  row |> member "session_id" |> to_string = current_session_id));
+        check bool "other room session hidden by default" false
+          (sessions
+           |> List.exists (fun row ->
+                  row |> member "session_id" |> to_string = "ts-mission-other-room"));
+        let foreign_detail =
+          Lib.Dashboard_mission.session_json
+            ~actor:"test-dashboard"
+            ~session_id:"ts-mission-other-room"
+            ~config
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~proc_mgr:None
+            ()
+        in
+        check string "explicit foreign session still readable" "ts-mission-other-room"
+          (foreign_detail |> member "session_id" |> to_string);
+        check bool "explicit foreign session resolves" true
+          (foreign_detail |> member "session" <> `Null);
+      ))
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -478,5 +577,7 @@ let () =
             test_dashboard_mission_projection;
           Alcotest.test_case "keeper tool audit fallback" `Quick
             test_dashboard_mission_keeper_tool_audit_fallback;
+          Alcotest.test_case "filters sessions to current room" `Quick
+            test_dashboard_mission_filters_sessions_to_current_room;
         ] );
     ]

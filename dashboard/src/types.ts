@@ -1500,6 +1500,8 @@ export interface DashboardProofResponse {
   session_id?: string | null
   operation_id?: string | null
   proof_verdict?: DashboardProofVerdict
+  collaboration_verdict?: DashboardProofVerdict
+  execution_backing_status?: string | null
   summary?: DashboardProofSummary
   timeline?: DashboardProofTimelineItem[]
   actor_contributions?: DashboardProofActorContribution[]

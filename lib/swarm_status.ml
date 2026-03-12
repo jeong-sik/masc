@@ -366,14 +366,73 @@ let gap_guidance ~lane_ids code =
         "masc_observe_traces",
         "Inspect recent traces before taking an operational action." )
 
+let lane_kind_of_id lane_id =
+  match lane_id with
+  | "managed" -> Managed
+  | "supervised" -> Supervised
+  | _ -> Projected
+
+let lane_has_flag lane code =
+  List.exists (fun (flag : flag) -> String.equal flag.code code) lane.hard_flags
+
+let lane_has_bad_flag lane =
+  List.exists (fun (flag : flag) -> String.equal flag.severity "bad") lane.hard_flags
+
+let lane_timestamp_key lane =
+  match parse_timestamp lane.last_movement_at with
+  | Some ts -> ts
+  | None -> neg_infinity
+
+let fallback_primary_lane present_lanes =
+  present_lanes
+  |> List.sort (fun (left : lane) (right : lane) ->
+         let left_ts = lane_timestamp_key left in
+         let right_ts = lane_timestamp_key right in
+         let by_motion =
+           match
+             String.equal left.motion_state "moving",
+             String.equal right.motion_state "moving"
+           with
+           | true, false -> -1
+           | false, true -> 1
+           | _ -> 0
+         in
+         if by_motion <> 0 then
+           by_motion
+         else
+           let by_time = Float.compare right_ts left_ts in
+           if by_time <> 0 then
+             by_time
+           else
+             Int.compare
+               (lane_kind_order (lane_kind_of_id left.lane_id))
+               (lane_kind_order (lane_kind_of_id right.lane_id)))
+  |> function
+  | lane :: _ -> Some lane
+  | [] -> None
+
+let choose_primary_lane present_lanes recommendation =
+  let find_lane_by pred = List.find_opt pred present_lanes in
+  match
+    Option.bind recommendation.lane_id (fun lane_id ->
+        find_lane_by (fun (lane : lane) -> String.equal lane.lane_id lane_id))
+  with
+  | Some lane -> Some lane
+  | None -> (
+      match find_lane_by (fun lane -> lane_has_flag lane "pending_manual_confirmation") with
+      | Some lane -> Some lane
+      | None -> (
+          match find_lane_by lane_has_bad_flag with
+          | Some lane -> Some lane
+          | None -> (
+              match find_lane_by (fun lane -> lane_has_flag lane "stale_data") with
+              | Some lane -> Some lane
+              | None -> fallback_primary_lane present_lanes)))
+
 let narrative_json (lanes : lane list) (timeline : timeline_event list)
     (recommendation : recommendation) =
   let present_lanes = List.filter (fun (lane : lane) -> lane.present) lanes in
-  let primary_lane =
-    match present_lanes with
-    | lane :: _ -> Some lane
-    | [] -> None
-  in
+  let primary_lane = choose_primary_lane present_lanes recommendation in
   let state =
     if present_lanes = [] then
       "idle"
@@ -386,9 +445,24 @@ let narrative_json (lanes : lane list) (timeline : timeline_event list)
     else
       "waiting"
   in
+  let timeline_for_primary_lane =
+    match primary_lane with
+    | Some lane ->
+        timeline
+        |> List.filter (fun (event : timeline_event) ->
+               String.equal event.lane_id lane.lane_id)
+    | None -> []
+  in
   let started =
-    match List.rev timeline with
-    | event :: _ -> Printf.sprintf "%s. %s" event.title event.detail
+    match
+      timeline_for_primary_lane
+      |> List.filter_map (fun (event : timeline_event) ->
+             match Command_plane_v2.parse_iso_timestamp event.timestamp with
+             | Some ts -> Some (ts, event)
+             | None -> None)
+      |> List.sort (fun (left_ts, _) (right_ts, _) -> Float.compare left_ts right_ts)
+    with
+    | (_, event) :: _ -> Printf.sprintf "%s. %s" event.title event.detail
     | [] -> (
         match primary_lane with
         | Some lane ->

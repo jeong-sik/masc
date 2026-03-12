@@ -104,8 +104,44 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_risc.schemas
     @ Tool_autoresearch.schemas)
 
+(** Validate tool schemas at module initialization time.
+    Logs warnings for: duplicate names, empty names/descriptions,
+    input_schema.type not "object". Does not block startup. *)
+let validate_schemas (schemas : Types.tool_schema list) =
+  let errors = ref [] in
+  let seen = Hashtbl.create (List.length schemas) in
+  List.iter
+    (fun (schema : Types.tool_schema) ->
+      if Hashtbl.mem seen schema.name then
+        errors :=
+          Printf.sprintf "Duplicate tool name: %s" schema.name :: !errors
+      else Hashtbl.replace seen schema.name ();
+      if schema.name = "" then
+        errors := "Empty tool name found" :: !errors;
+      if schema.description = "" then
+        errors :=
+          Printf.sprintf "Empty description for tool: %s" schema.name
+          :: !errors;
+      match Yojson.Safe.Util.member "type" schema.input_schema with
+      | `String "object" -> ()
+      | _ ->
+          errors :=
+            Printf.sprintf "Tool %s: input_schema.type is not 'object'"
+              schema.name
+            :: !errors)
+    schemas;
+  match !errors with
+  | [] -> ()
+  | errs ->
+      List.iter (fun e -> Printf.eprintf "[SCHEMA WARN] %s\n%!" e) errs
+
 let all_tool_schemas : Types.tool_schema list =
-  Tool_help_registry.canonicalize_schemas raw_all_tool_schemas
+  let schemas = Tool_help_registry.canonicalize_schemas raw_all_tool_schemas in
+  validate_schemas schemas;
+  schemas
+
+let all_tool_names () : string list =
+  List.map (fun (s : Types.tool_schema) -> s.name) all_tool_schemas
 
 let is_tool_visible tool_name =
   Tool_catalog.is_visible tool_name

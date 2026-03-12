@@ -254,6 +254,8 @@
    tool_gardener
    tool_library
    tool_catalog
+   tool_dispatch
+   tool_unified
    tool_help_registry
    tool_registry
    library_bridge

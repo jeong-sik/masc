@@ -712,6 +712,29 @@ let read_only_tools =
    "masc_team_session_events"; "masc_team_session_prove";
    "masc_operator_snapshot"; "masc_operator_digest"]
 
+(** Tools that require agent to be joined first.
+    Extracted to module level for Tool_dispatch Hashtbl initialization. *)
+let requires_join_tools = [
+  "masc_claim"; "masc_claim_next"; "masc_done"; "masc_transition";
+  "masc_broadcast"; "masc_add_task"; "masc_batch_add_tasks";
+  "masc_worktree_create"; "masc_worktree_remove";
+  "masc_release"; "masc_cancel_task";
+  "masc_vote_create"; "masc_vote_cast"; "masc_interrupt"; "masc_approve"; "masc_reject";
+  "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
+  "masc_deliver"; "masc_note_add"; "masc_error_add"; "masc_error_resolve";
+  "masc_lock"; "masc_unlock";
+  "masc_goal_upsert"; "masc_goal_snapshot"; "masc_goal_refresh";
+  "masc_goal_dispatch"; "masc_goal_review";
+  "masc_team_session_start"; "masc_team_session_stop";
+  "masc_team_session_turn"; "masc_operator_action";
+  "masc_operator_confirm";
+]
+
+(** Initialize O(1) Hashtbl sets for read_only and requires_join checks.
+    Replaces per-call List.mem O(n) with Hashtbl.mem O(1). *)
+let () = Tool_dispatch.init_read_only_set read_only_tools
+let () = Tool_dispatch.init_requires_join_set requires_join_tools
+
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
@@ -972,27 +995,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
               file (Printexc.to_string e))
   in
 
-  (* Tools that require agent to be joined first *)
-  let requires_join = [
-    "masc_claim"; "masc_claim_next"; "masc_done"; "masc_transition";
-    "masc_broadcast"; "masc_add_task"; "masc_batch_add_tasks";
-    "masc_worktree_create"; "masc_worktree_remove";
-    "masc_release"; "masc_cancel_task";
-    "masc_vote_create"; "masc_vote_cast"; "masc_interrupt"; "masc_approve"; "masc_reject";
-    "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
-    "masc_deliver"; "masc_note_add"; "masc_error_add"; "masc_error_resolve";
-    "masc_lock"; "masc_unlock";
-    "masc_goal_upsert"; "masc_goal_snapshot"; "masc_goal_refresh";
-    "masc_goal_dispatch"; "masc_goal_review";
-    "masc_team_session_start"; "masc_team_session_stop";
-    "masc_team_session_turn"; "masc_operator_action";
-    "masc_operator_confirm";
-  ] in
-
   (* Auto-init/auto-join for better UX.
      - Auto-init only when auth is disabled (avoid side effects in secured rooms).
      - Auto-join when allowed by auth (and safe for token-based auth). *)
-  let join_required = List.mem name requires_join in
+  let join_required = Tool_dispatch.is_join_required name in
 
   let init_error =
     if (not auth_enabled) && join_required && not (Room.is_initialized config) then
@@ -1011,7 +1017,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (false, Printf.sprintf "❌ %s" msg)
   | None ->
 
-  let is_read_only = List.mem name read_only_tools in
+  let is_read_only = Tool_dispatch.is_read_only name in
 
   let can_auto_join =
     if (not join_required) || agent_name = "unknown" then
@@ -1318,6 +1324,48 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       trpg_dm_voice_emit = Some trpg_dm_voice_emit;
     }
   in
+
+  (* === V2 Dispatch: O(1) Hashtbl-based central dispatch ===
+     When MASC_DISPATCH_V2=1, register all schema-exporting modules
+     and try O(1) lookup first.  Falls through to the legacy chain
+     for inline tools and modules without exported schemas. *)
+  let v2_result =
+    if Tool_dispatch.v2_enabled then begin
+      let reg = Tool_dispatch.register_module in
+      reg ~schemas:Tool_operator.schemas
+        ~handler:(fun ~name ~args -> Tool_operator.dispatch simple_ctx_operator ~name ~args);
+      reg ~schemas:Tool_command_plane.schemas
+        ~handler:(fun ~name ~args -> Tool_command_plane.dispatch simple_ctx_command_plane ~name ~args);
+      reg ~schemas:Tool_llama.schemas
+        ~handler:(fun ~name ~args -> Tool_llama.dispatch simple_ctx_llama ~name ~args);
+      reg ~schemas:Tool_team_session.schemas
+        ~handler:(fun ~name ~args -> Tool_team_session.dispatch simple_ctx_team_session ~name ~args);
+      reg ~schemas:Tool_voice.schemas
+        ~handler:(fun ~name ~args -> Tool_voice.dispatch simple_ctx_voice ~name ~args);
+      reg ~schemas:Tool_protocol_game_view.schemas
+        ~handler:(fun ~name ~args -> Tool_protocol_game_view.dispatch simple_ctx_protocol ~name ~args);
+      reg ~schemas:Tool_experiment.schemas
+        ~handler:(fun ~name ~args -> Tool_experiment.dispatch simple_ctx_experiment ~name ~args);
+      reg ~schemas:Tool_goals.schemas
+        ~handler:(fun ~name ~args -> Tool_goals.dispatch simple_ctx_goals ~name ~args);
+      reg ~schemas:Tool_perpetual.schemas
+        ~handler:(fun ~name ~args -> Tool_perpetual.dispatch simple_ctx_perpetual ~name ~args);
+      reg ~schemas:Tool_mdal.schemas
+        ~handler:(fun ~name ~args -> Tool_mdal.dispatch simple_ctx_mdal ~name ~args);
+      reg ~schemas:Tool_keeper.schemas
+        ~handler:(fun ~name ~args -> Tool_keeper.dispatch simple_ctx_keeper ~name ~args);
+      reg ~schemas:Tool_trpg.schemas
+        ~handler:(fun ~name ~args -> Tool_trpg.dispatch simple_ctx_trpg ~name ~args);
+      reg ~schemas:Tool_autoresearch.schemas
+        ~handler:(fun ~name ~args -> Tool_autoresearch.dispatch simple_ctx_autoresearch ~name ~args);
+      reg ~schemas:Tool_risc.schemas
+        ~handler:(fun ~name ~args -> Some (Tool_risc.dispatch name args));
+      Tool_dispatch.dispatch ~name ~args:arguments
+    end else None
+  in
+  match v2_result with
+  | Some result -> result
+  | None ->
 
   (* Chain through all extracted tool modules *)
   match Tool_plan.dispatch simple_ctx_config ~name ~args:arguments with
@@ -2792,7 +2840,7 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
   let module U = Yojson.Safe.Util in
   let name = params |> U.member "name" |> U.to_string in
   let arguments = params |> U.member "arguments" in
-  let is_read_only = List.mem name read_only_tools in
+  let is_read_only = Tool_dispatch.is_read_only name in
 
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in

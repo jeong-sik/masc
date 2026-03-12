@@ -234,6 +234,18 @@ let standard_tools =
     "masc_note_add"; "masc_batch_add_tasks"; "masc_stats";
   ]
 
+(** Pre-built Hashtbl sets for O(1) tier lookups.
+    The lists above are kept for enumeration/documentation. *)
+let essential_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create 32 in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) essential_tools;
+  tbl
+
+let standard_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create 64 in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) standard_tools;
+  tbl
+
 let tier_to_string = function
   | Essential -> "essential"
   | Standard -> "standard"
@@ -246,15 +258,15 @@ let tier_of_string = function
   | _ -> None
 
 let tool_tier name =
-  if List.mem name essential_tools then Essential
-  else if List.mem name standard_tools then Standard
+  if Hashtbl.mem essential_set name then Essential
+  else if Hashtbl.mem standard_set name then Standard
   else Full
 
 let is_in_tier tier name =
   match tier with
   | Full -> true
-  | Standard -> List.mem name standard_tools
-  | Essential -> List.mem name essential_tools
+  | Standard -> Hashtbl.mem standard_set name
+  | Essential -> Hashtbl.mem essential_set name
 
 let tier_tool_count = function
   | Essential -> List.length essential_tools

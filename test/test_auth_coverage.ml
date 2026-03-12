@@ -345,6 +345,36 @@ let test_permission_for_tool_voice_speak () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
+let test_permission_for_tool_autoresearch_status () =
+  match Auth.permission_for_tool "masc_autoresearch_status" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_autoresearch_start () =
+  match Auth.permission_for_tool "masc_autoresearch_start" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
+let test_permission_for_tool_autoresearch_swarm_start () =
+  match Auth.permission_for_tool "masc_autoresearch_swarm_start" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
+let test_permission_for_tool_autoresearch_cycle () =
+  match Auth.permission_for_tool "masc_autoresearch_cycle" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
+let test_permission_for_tool_autoresearch_inject () =
+  match Auth.permission_for_tool "masc_autoresearch_inject" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
+let test_permission_for_tool_autoresearch_stop () =
+  match Auth.permission_for_tool "masc_autoresearch_stop" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
 let test_permission_for_tool_keeper_create_from_persona () =
   match Auth.permission_for_tool "masc_keeper_create_from_persona" with
   | Some Types.CanBroadcast -> ()
@@ -475,6 +505,18 @@ let () =
       test_case "persona_list" `Quick test_permission_for_tool_persona_list;
       test_case "voice_sessions" `Quick test_permission_for_tool_voice_sessions;
       test_case "voice_speak" `Quick test_permission_for_tool_voice_speak;
+      test_case "autoresearch_status" `Quick
+        test_permission_for_tool_autoresearch_status;
+      test_case "autoresearch_start" `Quick
+        test_permission_for_tool_autoresearch_start;
+      test_case "autoresearch_swarm_start" `Quick
+        test_permission_for_tool_autoresearch_swarm_start;
+      test_case "autoresearch_cycle" `Quick
+        test_permission_for_tool_autoresearch_cycle;
+      test_case "autoresearch_inject" `Quick
+        test_permission_for_tool_autoresearch_inject;
+      test_case "autoresearch_stop" `Quick
+        test_permission_for_tool_autoresearch_stop;
       test_case "keeper_create_from_persona" `Quick
         test_permission_for_tool_keeper_create_from_persona;
       test_case "keeper_policy_set" `Quick

@@ -1172,8 +1172,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let recent_output_preview =
     trim_to_option (string_field "recent_output_preview" keeper)
     |> option_or_else (fun () -> trim_to_option (string_field "last_proactive_preview" keeper))
-    |> option_or_else (fun () -> trim_to_option (string_field "continuity_summary" keeper))
-    |> option_or_else (fun () -> trim_to_option (string_field "memory_recent_note" keeper))
   in
   let recent_tool_names =
     let keeper_tools = string_list_of_field "recent_tool_names" keeper in

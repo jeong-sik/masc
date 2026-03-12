@@ -65,6 +65,12 @@ let test_dashboard_execution_fixture () =
         check int "offline worker briefs" 1 (List.length offline_worker_briefs);
         check string "continuity skill route summary" "scene-director · +1 · judgment"
           (continuity_briefs |> List.hd |> member "skill_route_summary" |> to_string);
+        check string "continuity recent output stays concrete"
+          "Prepared the next scene transition and handoff summary"
+          (continuity_briefs |> List.hd |> member "recent_output_preview" |> to_string);
+        check string "continuity summary remains separate"
+          "Continuity pressure is high; handoff prep is underway"
+          (continuity_briefs |> List.hd |> member "continuity_summary" |> to_string);
         check int "continuity allowed tool count" 3
           (continuity_briefs |> List.hd |> member "allowed_tool_names" |> to_list |> List.length);
         check bool "worker focus carried through" true

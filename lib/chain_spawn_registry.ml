@@ -37,8 +37,8 @@ let env_int ~name ~default =
   | Some v -> (match parse_int v with Some n -> n | None -> default)
   | None -> default
 
-let max_inflight = env_int ~name:"LLM_MCP_SPAWN_MAX_INFLIGHT" ~default:16
-let max_age_sec = env_int ~name:"LLM_MCP_SPAWN_MAX_AGE_SEC" ~default:900
+let max_inflight = env_int ~name:"MASC_SPAWN_MAX_INFLIGHT" ~default:16
+let max_age_sec = env_int ~name:"MASC_SPAWN_MAX_AGE_SEC" ~default:900
 
 let next_id = ref 0
 let active : (int, spawn_info) Hashtbl.t = Hashtbl.create 64

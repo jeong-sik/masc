@@ -1,6 +1,7 @@
 open Alcotest
 
 module Mention = Masc_mcp.Mention
+module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_types = Masc_mcp.Keeper_types
 module Types = Masc_mcp.Types
@@ -55,6 +56,30 @@ let test_keeper_policy_observation_non_mention () =
   in
   check bool "keeper observation no longer hardcodes direct mention" false obs.direct_mention
 
+let test_user_visible_reply_strips_state_block () =
+  let raw =
+    "좋아요. 이어서 진행하겠습니다.\n\n[STATE]\nGoal: keep continuity\nProgress: ready\n[/STATE]"
+  in
+  check string "state block hidden from user text"
+    "좋아요. 이어서 진행하겠습니다."
+    (Keeper_execution.user_visible_reply_text raw)
+
+let test_user_visible_reply_strips_skill_and_state_markers () =
+  let raw =
+    "SKILL: scene-director\nSKILL_REASON: continuity\n본문입니다.\n\n[STATE]\nGoal: keep continuity\n[/STATE]"
+  in
+  check string "skill route lines hidden from user text"
+    "본문입니다."
+    (Keeper_execution.user_visible_reply_text raw)
+
+let test_user_visible_reply_falls_back_to_snapshot_progress () =
+  let raw =
+    "[STATE]\nGoal: keep continuity\nProgress: 다음 장면 전환 준비 완료\n[/STATE]"
+  in
+  check string "state-only reply falls back to progress"
+    "다음 장면 전환 준비 완료"
+    (Keeper_execution.user_visible_reply_text raw)
+
 let () =
   run "Keeper_memory"
     [
@@ -66,5 +91,11 @@ let () =
             test_keeper_policy_observation_direct_mention;
           test_case "policy observation ambient message" `Quick
             test_keeper_policy_observation_non_mention;
+          test_case "user visible reply strips state block" `Quick
+            test_user_visible_reply_strips_state_block;
+          test_case "user visible reply strips skill and state markers" `Quick
+            test_user_visible_reply_strips_skill_and_state_markers;
+          test_case "user visible reply falls back to snapshot progress" `Quick
+            test_user_visible_reply_falls_back_to_snapshot_progress;
         ] );
     ]

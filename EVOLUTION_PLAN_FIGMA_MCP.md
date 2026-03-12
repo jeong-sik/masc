@@ -1,4 +1,4 @@
-# Brainstorm Evolution Plan: Figma-MCP + LLM-MCP Integration
+# Brainstorm Evolution Plan: Figma-MCP + Native Chain Integration
 
 **Status:** Draft / Strategic Proposal
 **Target:** `workspace/yousleepwhen/figma-mcp`
@@ -12,7 +12,7 @@
     - **Semantic**: Comparison of Figma's layer hierarchy vs. the generated DOM's accessibility tree.
     - **Structural**: Ensures zero-drift as both design and code evolve.
 3.  **Git-Worktree Isolated Evolution**: Conversion happens in a clean, isolated Git worktree. MASC agents perform "self-healing" cycles (fixing lint, running tests) before a PR is ever created, making it an "Agent-to-Agent" workflow rather than "Designer-to-Developer".
-4.  **Chain-Orchestrated "Thinking"**: Exploits `llm-mcp`'s `chain.orchestrate` to handle complex UI logic (state, transitions, API integrations) that static exporters ignore. It treats a UI component as a "mini-program" to be solved, not just a layout to be exported.
+4.  **Chain-Orchestrated "Thinking"**: Exploits native `chain.orchestrate` to handle complex UI logic (state, transitions, API integrations) that static exporters ignore. It treats a UI component as a "mini-program" to be solved, not just a layout to be exported.
 5.  **Checkpoint-Based Handoff**: For complex designs that exceed context windows, an agent serializes progress into a compact handoff record so a successor can resume without re-scanning the entire screen tree.
 
 ## 2. Top 5 Missing Capabilities (The "Moat")
@@ -32,8 +32,8 @@
     LLMs use standard file tools (`ls`, `cat`) to "explore" the design, drastically reducing prompt bloat and allowing the model to focus only on the current "directory" (frame).
 2.  **"Visual Heartbeat" Unit Testing**:
     Integrate visual regression directly into the `dune runtest` / `npm test` pipeline. A test case takes a Figma Frame ID, renders the component in Playwright, and uses a Multimodal LLM Judge to return a pass/fail with a JSON of visual discrepancies.
-3.  **"LLM-MCP Orchestration Middleware"**:
-    Use `llm-mcp` as a "Design Reasoning Engine" that sits between Figma and MASC. It decomposes a frame into a "UI Execution Plan" (JSON), which MASC then parallelizes across multiple agents/worktrees (e.g., Agent A builds the layout, Agent B handles the data-fetching logic).
+3.  **"Native Chain Orchestration Middleware"**:
+    Use the native chain plane as a "Design Reasoning Engine" that sits between Figma and MASC. It decomposes a frame into a "UI Execution Plan" (JSON), which MASC then parallelizes across multiple agents/worktrees (e.g., Agent A builds the layout, Agent B handles the data-fetching logic).
 
 ## 4. Concrete Next Steps (1-2 Week Scope)
 
@@ -44,5 +44,5 @@
 
 ### Week 2: The Feedback Loop
 - [ ] **Visual Regression Agent**: Build the toolchain for `Figma Export -> Playwright Render -> LLM Judge`.
-- [ ] **`llm-mcp` Chain Integration**: Update `figma-mcp` to use `chain.orchestrate` for multi-step conversion tasks (Planning -> Generation -> Verification -> Fix).
+- [ ] **Native Chain Integration**: Update `figma-mcp` to use `chain.orchestrate` for multi-step conversion tasks (Planning -> Generation -> Verification -> Fix).
 - [ ] **PR Pipeline**: Automate the flow: `Figma Change -> MASC Agent Claim -> Worktree Edit -> Visual Pass -> GitHub PR`.

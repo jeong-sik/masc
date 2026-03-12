@@ -496,9 +496,9 @@ let finalize_runtime_breakdown json =
       in
       `Assoc
         [
-          ("runtime_id", List.assoc "runtime_id" fields);
-          ("success_count", List.assoc "success_count" fields);
-          ("failure_count", List.assoc "failure_count" fields);
+          ("runtime_id", Option.value ~default:`Null (List.assoc_opt "runtime_id" fields));
+          ("success_count", Option.value ~default:`Null (List.assoc_opt "success_count" fields));
+          ("failure_count", Option.value ~default:`Null (List.assoc_opt "failure_count" fields));
           ("p50_latency_ms", int_opt_to_json (pctl 0.50 latencies));
           ("p95_latency_ms", int_opt_to_json (pctl 0.95 latencies));
           ("max_latency_ms", int_opt_to_json (pctl 1.0 latencies));

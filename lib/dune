@@ -194,6 +194,9 @@
    room_git
    room_portal
    room_utils
+   room_utils_backend_setup
+   room_utils_paths_backend
+   room_utils_ops
    room_worktree
    run_eio
    team_session_types
@@ -374,7 +377,10 @@
    ;; SWARM-RISC Phase 4: Speculative Execution + MCTS
    mcts_tree
    speculative_engine)
- (private_modules
+(private_modules
+  room_utils_backend_setup
+  room_utils_paths_backend
+  room_utils_ops
   keeper_exec_tools
   keeper_exec_status
   keeper_exec_persona)

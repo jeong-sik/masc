@@ -234,7 +234,8 @@ let model_runner_of_string raw =
       match Provider_adapter.explicit_llama_model_label_result () with
       | Ok label -> direct label
       | Error msg -> Error msg)
-  | "glm" | "glm-4.7" -> direct "glm:glm-4.7"
+  | "glm" | "glm-4.7" ->
+      direct (Printf.sprintf "glm:%s" Env_config.Llm.default_model)
   | "stub" | "mock" -> Ok Stub
   | "codex" | "gpt-5.2" -> Ok (Spawn "codex")
   | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")
@@ -381,7 +382,7 @@ let call_named_tool_model (runtime : runtime) ~tool_name ~(args : Yojson.Safe.t)
         | Some value -> Ok ("llama:" ^ value)
         | None -> Provider_adapter.explicit_llama_model_label_result ())
     | "glm" ->
-        let default_model = "glm:glm-4.7" in
+        let default_model = Printf.sprintf "glm:%s" Env_config.Llm.default_model in
         Ok (match assoc_get_string_opt args "model" with
         | Some value when starts_with ~prefix:"glm:" (String.lowercase_ascii value) -> value
         | Some value -> "glm:" ^ value

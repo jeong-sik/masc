@@ -35,7 +35,14 @@ let test_handle_post_valid_json () =
   match response with
   | SH.Json_response json ->
       let json_str = Yojson.Safe.to_string json in
-      Alcotest.(check bool) "contains jsonrpc" true (String.sub json_str 0 10 |> fun _ -> true)
+      let has_jsonrpc =
+        try
+          let _ = Yojson.Safe.from_string json_str in
+          let re = Str.regexp_string "jsonrpc" in
+          Str.search_forward re json_str 0 >= 0
+        with _ -> false
+      in
+      Alcotest.(check bool) "contains jsonrpc" true has_jsonrpc
   | _ ->
       Alcotest.fail "expected Json_response"
 

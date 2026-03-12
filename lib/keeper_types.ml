@@ -1136,9 +1136,12 @@ let keeper_fallback_model_labels () =
   in
   let candidates =
     [
-      (env_present "ZAI_API_KEY", "glm:glm-4.7");
-      (gemini_available, "gemini:gemini-2.5-pro");
-      (env_present "ANTHROPIC_API_KEY", "claude:claude-sonnet-4-5-20250929");
+      (env_present "ZAI_API_KEY",
+       Printf.sprintf "glm:%s" Env_config.Llm.default_model);
+      (gemini_available,
+       Printf.sprintf "gemini:%s" Env_config.Gemini.default_model);
+      (env_present "ANTHROPIC_API_KEY",
+       Printf.sprintf "claude:%s" Env_config.Claude.default_model);
     ]
   in
   candidates

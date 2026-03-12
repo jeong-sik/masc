@@ -28,7 +28,7 @@ let test_manifest_respects_provider_override () =
       run_id = "demo-run";
       masc_url = "http://127.0.0.1:9999";
       provider_base_url = "http://127.0.0.1:3034";
-      model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+      model_id = Env_config.Llama.default_model;
       slot_url = "http://127.0.0.1:8085";
       worker_count = 12;
       min_hot_slots = 10;
@@ -43,7 +43,7 @@ let test_manifest_respects_provider_override () =
     (json |> member "masc_url" |> to_string);
   Alcotest.(check string) "provider base url" "http://127.0.0.1:3034"
     (json |> member "provider_base_url" |> to_string);
-  Alcotest.(check string) "model id" "qwen3.5-35b-a3b-ud-q8-xl"
+  Alcotest.(check string) "model id" Env_config.Llama.default_model
     (json |> member "model_id" |> to_string);
   Alcotest.(check string) "slot url" "http://127.0.0.1:8085"
     (json |> member "slot_url" |> to_string);

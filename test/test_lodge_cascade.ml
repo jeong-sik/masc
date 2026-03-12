@@ -61,7 +61,7 @@ let test_missing_config_uses_defaults () =
   | first :: _ ->
       check bool "default starts with llama" true
         (first.provider = Llm_client.Llama);
-      check string "default llama model" "qwen3.5-35b-a3b-ud-q8-xl"
+      check string "default llama model" Masc_mcp.Env_config.Llama.default_model
         first.model_id
   | [] -> fail "expected default fallback models"
 

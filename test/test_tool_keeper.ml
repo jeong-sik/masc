@@ -86,7 +86,8 @@ let test_keeper_fallback_model_labels_prefers_available_remote_models () =
       with_env "ANTHROPIC_API_KEY" "" (fun () ->
           with_env "GEMINI_API_KEY" "" (fun () ->
               let labels = Masc_mcp.Keeper_types.keeper_fallback_model_labels () in
-              check (list string) "glm fallback only" ["glm:glm-4.7"] labels)))
+              check (list string) "glm fallback only"
+                [Printf.sprintf "glm:%s" Masc_mcp.Env_config.Llm.default_model] labels)))
 
 let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
   with_env "ZAI_API_KEY" "zai-test" (fun () ->
@@ -103,7 +104,8 @@ let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
         if llama_listening then
           ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
         else
-          ["llama:qwen3.5-35b-a3b-ud-q8-xl"; "glm:glm-4.7"]
+          ["llama:qwen3.5-35b-a3b-ud-q8-xl";
+           Printf.sprintf "glm:%s" Masc_mcp.Env_config.Llm.default_model]
       in
       check (list string) "append glm fallback only when local runtime unavailable"
         expected labels)

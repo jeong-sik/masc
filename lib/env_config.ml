@@ -354,6 +354,38 @@ module Llm = struct
     get_string ~default:"safe_only" "MASC_SPAWN_CACHE_POLICY"
     |> String.trim
     |> String.lowercase_ascii
+
+  (** Default GLM flash model for lightweight tasks *)
+  let flash_model =
+    get_string ~default:"glm-4.7-flash" "MASC_GLM_FLASH_MODEL"
+end
+
+(** {1 Gemini Configuration} *)
+
+module Gemini = struct
+  (** Default Gemini model *)
+  let default_model =
+    get_string ~default:"gemini-2.5-pro" "MASC_GEMINI_DEFAULT_MODEL"
+
+  (** Gemini flash model for lightweight tasks *)
+  let flash_model =
+    get_string ~default:"gemini-2.5-flash" "MASC_GEMINI_FLASH_MODEL"
+end
+
+(** {1 Claude Configuration} *)
+
+module Claude = struct
+  (** Default Claude model *)
+  let default_model =
+    get_string ~default:"claude-sonnet-4-5-20250929" "MASC_CLAUDE_DEFAULT_MODEL"
+end
+
+(** {1 OpenAI Configuration} *)
+
+module OpenAI = struct
+  (** Default OpenAI model *)
+  let default_model =
+    get_string ~default:"gpt-5" "MASC_OPENAI_DEFAULT_MODEL"
 end
 
 (** {1 Rate Limit Cleanup Configuration} *)

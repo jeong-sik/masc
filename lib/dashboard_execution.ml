@@ -398,7 +398,7 @@ let execution_smoke_fixture_json () =
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("korean_name", `String "llama-local-alpha");
-                ("model", `String "qwen3.5-35b-a3b-ud-q8-xl");
+                ("model", `String Env_config.Llama.default_model);
                 ("recent_output_preview", `String "manager synthesized runtime visibility and handed next checks to beta");
                 ("recent_event", `String "manager handoff");
               ];

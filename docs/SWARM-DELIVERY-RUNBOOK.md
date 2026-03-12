@@ -126,7 +126,7 @@ LOCAL64_POOL_TARGET_SHARDS=6 \
 
 - `local64`는 achieved fact가 아니라 target runtime profile 이름이다.
 - 실제 proof 판단은 `configured_capacity`, `actual_slots`, `peak_hot_slots`를 분리해서 본다.
-- runtime viability는 harness 내부의 direct HTTP probe가 아니라 `masc_llama_runtime_verify` 결과를 기준으로 읽는다.
+- runtime viability는 harness 내부의 direct HTTP probe가 아니라 `masc_runtime_verify` 결과를 기준으로 읽는다.
 
 `scripts/llama-runtime-pool.sh print-env`는 `MASC_LLAMA_RUNTIMES_JSON`에 넣을 JSON을 출력한다.
 

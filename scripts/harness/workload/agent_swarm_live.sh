@@ -144,7 +144,7 @@ runtime_verify_result() {
       | if $expected_ctx_raw != "" then .expected_ctx = ($expected_ctx_raw | tonumber) else . end
       '
   )"
-  call_tool_result_checked $((98000 + RANDOM % 1000)) "masc_llama_runtime_verify" "$args"
+  call_tool_result_checked $((98000 + RANDOM % 1000)) "masc_runtime_verify" "$args"
 }
 
 observe_swarm_result() {

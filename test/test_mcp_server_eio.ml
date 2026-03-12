@@ -331,6 +331,7 @@ let test_handle_request_tools_list () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let first_page = tools_list_response ~clock ~sw state in
 
   let tools = tools_list_all ~clock ~sw state in
 
@@ -389,7 +390,7 @@ let test_handle_request_tools_list () =
     (List.mem "masc_archive_save" names);
   Alcotest.(check bool) "first page non-empty" true (names <> []);
   Alcotest.(check bool) "first page exposes next cursor" true
-    (Option.is_some (next_cursor_of_response response));
+    (Option.is_some (next_cursor_of_response first_page));
 
   cleanup_dir base_path
 
@@ -1436,6 +1437,7 @@ let test_handle_request_resources_list_includes_tool_help () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let response = resources_list_response ~clock ~sw state in
   let resources = resources_list_all ~clock ~sw state [] in
   let tool_help_index_present =
     List.exists

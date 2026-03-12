@@ -825,6 +825,39 @@ export interface GardenerRuntimeStatus {
   }
 }
 
+export interface GuardianRuntimeStatus {
+  enabled: boolean
+  mode?: string
+  masc_enabled?: boolean
+  masc_loops_running?: boolean
+  runtime_owner?: string | null
+  zombie_loop_running?: boolean
+  gc_loop_running?: boolean
+  lodge_enabled?: boolean
+  lodge_loop_started?: boolean
+  lodge_running?: boolean
+  last_zombie_cleanup?: string | null
+  last_gc?: string | null
+  last_lodge?: string | null
+  last_zombie_result?: string | null
+  last_gc_result?: string | null
+  last_lodge_result?: {
+    ok?: boolean
+    message?: string
+  } | null
+}
+
+export interface SentinelRuntimeStatus {
+  enabled: boolean
+  started: boolean
+  agent_name?: string | null
+  llm_enabled?: boolean
+  uptime_s?: number
+  embedded_guardian_loops_running?: boolean
+  guardian_runtime_owner?: string | null
+  consumers?: string[]
+}
+
 // --- Dashboard projection responses ---
 
 export interface DashboardShellResponse {
@@ -1367,6 +1400,7 @@ export interface OperatorSessionSnapshot {
   orchestration_state?: Record<string, unknown>
   cascade_metrics?: Record<string, unknown>
   report_paths?: Record<string, string>
+  linked_autoresearch?: Record<string, unknown>
   session?: Record<string, unknown>
   recent_events?: Record<string, unknown>[]
 }
@@ -2518,6 +2552,8 @@ export interface ServerStatus {
   }
   lodge?: LodgeRuntimeStatus
   gardener?: GardenerRuntimeStatus
+  guardian?: GuardianRuntimeStatus
+  sentinel?: SentinelRuntimeStatus
   data_quality?: {
     board_contract_ok?: boolean
     council_feed_ok?: boolean

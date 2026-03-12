@@ -148,6 +148,7 @@ let tool_category tool_name =
   | "masc_team_session_list" | "masc_team_session_compare"
   | "masc_team_session_turn" | "masc_team_session_events"
   | "masc_team_session_prove"
+  | "masc_autoresearch_swarm_start"
   (* LLM runtime *)
   | "masc_llama_models" | "masc_llama_runtime_status"
   | "masc_llama_runtime_bench"

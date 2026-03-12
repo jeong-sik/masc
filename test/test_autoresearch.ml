@@ -520,13 +520,17 @@ let test_build_code_change_prompt_with_history () =
 (* Tool dispatch                                *)
 (* ============================================ *)
 
+let make_tool_ctx ?(base_path = "/tmp") ?agent_name ?start_operation
+    ?start_team_session () : Tool.context =
+  { base_path; agent_name; start_operation; start_team_session }
+
 let test_dispatch_unknown_returns_none () =
-  let ctx : Tool.context = { base_path = "/tmp" } in
+  let ctx = make_tool_ctx () in
   let result = Tool.dispatch ctx ~name:"masc_unknown_tool" ~args:(`Assoc []) in
   check (option reject) "unknown tool" None result
 
 let test_dispatch_start_missing_goal () =
-  let ctx : Tool.context = { base_path = "/tmp" } in
+  let ctx = make_tool_ctx () in
   let args = `Assoc [("metric_fn", `String "echo 1.0")] in
   match Tool.dispatch ctx ~name:"masc_autoresearch_start" ~args with
   | Some (false, json_str) ->
@@ -538,7 +542,7 @@ let test_dispatch_start_missing_goal () =
   | None -> fail "expected Some for start tool"
 
 let test_dispatch_start_missing_metric () =
-  let ctx : Tool.context = { base_path = "/tmp" } in
+  let ctx = make_tool_ctx () in
   let args = `Assoc [("goal", `String "optimize"); ("target_file", `String "t.py")] in
   match Tool.dispatch ctx ~name:"masc_autoresearch_start" ~args with
   | Some (false, json_str) ->
@@ -549,8 +553,87 @@ let test_dispatch_start_missing_metric () =
   | Some (true, _) -> fail "expected error for missing metric_fn"
   | None -> fail "expected Some for start tool"
 
+let test_dispatch_swarm_start_requires_runtime () =
+  let ctx = make_tool_ctx () in
+  let args =
+    `Assoc
+      [
+        ("goal", `String "optimize");
+        ("metric_fn", `String "echo 1.0");
+        ("target_file", `String "target.py");
+      ]
+  in
+  match Tool.dispatch ctx ~name:"masc_autoresearch_swarm_start" ~args with
+  | Some (false, json_str) ->
+      let json = Yojson.Safe.from_string json_str in
+      let open Yojson.Safe.Util in
+      check bool "runtime error" true
+        (AR.contains_substring (json |> member "error" |> to_string)
+           "team-session runtime")
+  | _ -> fail "expected runtime error for wrapper without callbacks"
+
+let test_dispatch_swarm_start_success () =
+  with_tmpdir (fun base_path ->
+      let target_path = Filename.concat base_path "target.py" in
+      let oc = open_out target_path in
+      output_string oc "print('hello')\n";
+      close_out oc;
+      let start_operation ~goal:_ ~target_file:_ =
+        Ok (`Assoc [ ("operation_id", `String "op-autoresearch") ])
+      in
+      let start_team_session ~goal:_ ~operation_id ~loop_id:_ ~target_file:_
+          ~program_note:_ =
+        Ok
+          (`Assoc
+            [
+              ("session_id", `String "ts-1234567890-abcdef123456789");
+              ( "artifacts_dir",
+                `String
+                  (Filename.concat base_path
+                     ".masc/team-sessions/ts-1234567890-abcdef123456789") );
+              ( "operation_id",
+                match operation_id with
+                | Some value -> `String value
+                | None -> `Null );
+            ])
+      in
+      let ctx =
+        make_tool_ctx ~base_path ~agent_name:"tester"
+          ~start_operation ~start_team_session ()
+      in
+      let args =
+        `Assoc
+          [
+            ("goal", `String "improve throughput");
+            ("metric_fn", `String "echo 1.0");
+            ("target_file", `String "target.py");
+            ("program_note", `String "Prefer simple edits");
+          ]
+      in
+      match Tool.dispatch ctx ~name:"masc_autoresearch_swarm_start" ~args with
+      | Some (true, json_str) ->
+          let json = Yojson.Safe.from_string json_str in
+          let open Yojson.Safe.Util in
+          check string "session id" "ts-1234567890-abcdef123456789"
+            (json |> member "session_id" |> to_string);
+          check string "operation id" "op-autoresearch"
+            (json |> member "operation_id" |> to_string);
+          check string "linked loop status" "running"
+            (json |> member "linked_status" |> member "status" |> to_string);
+          check bool "session link persisted" true
+            (Option.is_some
+               (AR.load_swarm_link_by_session ~base_path
+                  "ts-1234567890-abcdef123456789"));
+          check bool "loop link persisted" true
+            (Option.is_some
+               (match json |> member "loop_id" with
+               | `String loop_id -> AR.load_swarm_link_by_loop ~base_path loop_id
+               | _ -> None))
+      | Some (false, s) -> fail ("unexpected error: " ^ s)
+      | None -> fail "expected Some for swarm wrapper")
+
 let test_dispatch_status_no_loop () =
-  let ctx : Tool.context = { base_path = "/tmp" } in
+  let ctx = make_tool_ctx () in
   (* Clear global state *)
   Tool.latest_loop_id := None;
   Hashtbl.clear Tool.active_loops;
@@ -563,7 +646,7 @@ let test_dispatch_status_no_loop () =
   | _ -> fail "expected error for no running loop"
 
 let test_dispatch_inject_missing_hypothesis () =
-  let ctx : Tool.context = { base_path = "/tmp" } in
+  let ctx = make_tool_ctx () in
   Tool.latest_loop_id := Some "ar-test";
   let state = make_state ~loop_id:"ar-test" () in
   Hashtbl.replace Tool.active_loops "ar-test" state;
@@ -577,7 +660,7 @@ let test_dispatch_inject_missing_hypothesis () =
   | _ -> fail "expected error for missing hypothesis"
 
 let test_dispatch_inject_success () =
-  let ctx : Tool.context = { base_path = "/tmp" } in
+  let ctx = make_tool_ctx () in
   let state = make_state ~loop_id:"ar-inject" () in
   Hashtbl.replace Tool.active_loops "ar-inject" state;
   Tool.latest_loop_id := Some "ar-inject";
@@ -596,7 +679,7 @@ let test_dispatch_inject_success () =
 
 let test_dispatch_stop_success () =
   with_tmpdir (fun base_path ->
-    let ctx : Tool.context = { base_path } in
+    let ctx = make_tool_ctx ~base_path () in
     let state = make_state ~loop_id:"ar-stop-test" () in
     Hashtbl.replace Tool.active_loops "ar-stop-test" state;
     Tool.latest_loop_id := Some "ar-stop-test";
@@ -619,7 +702,7 @@ let test_dispatch_stop_success () =
 (* ============================================ *)
 
 let test_dispatch_cycle_no_loop () =
-  let ctx : Tool.context = { base_path = "/tmp" } in
+  let ctx = make_tool_ctx () in
   Tool.latest_loop_id := None;
   Hashtbl.clear Tool.active_loops;
   match Tool.dispatch ctx ~name:"masc_autoresearch_cycle" ~args:(`Assoc []) with
@@ -631,7 +714,7 @@ let test_dispatch_cycle_no_loop () =
   | _ -> fail "expected error for no loop"
 
 let test_dispatch_cycle_stopped_loop () =
-  let ctx : Tool.context = { base_path = "/tmp" } in
+  let ctx = make_tool_ctx () in
   let state = make_state ~loop_id:"ar-stopped" ~status:AR.Stopped () in
   Hashtbl.replace Tool.active_loops "ar-stopped" state;
   Tool.latest_loop_id := Some "ar-stopped";
@@ -645,7 +728,7 @@ let test_dispatch_cycle_stopped_loop () =
 
 let test_dispatch_cycle_at_max () =
   with_tmpdir (fun base_path ->
-    let ctx : Tool.context = { base_path } in
+    let ctx = make_tool_ctx ~base_path () in
     let state = make_state ~loop_id:"ar-maxed" ~current_cycle:10 ~max_cycles:10 () in
     Hashtbl.replace Tool.active_loops "ar-maxed" state;
     Tool.latest_loop_id := Some "ar-maxed";
@@ -664,7 +747,7 @@ let test_dispatch_cycle_at_max () =
 (* ============================================ *)
 
 let test_schemas_count () =
-  check int "5 tool schemas" 5 (List.length Tool.schemas)
+  check int "6 tool schemas" 6 (List.length Tool.schemas)
 
 let test_schemas_names () =
   let names = List.map (fun (s : Masc_mcp.Types.tool_schema) -> s.name) Tool.schemas in
@@ -672,7 +755,9 @@ let test_schemas_names () =
   check bool "status" true (List.mem "masc_autoresearch_status" names);
   check bool "stop" true (List.mem "masc_autoresearch_stop" names);
   check bool "inject" true (List.mem "masc_autoresearch_inject" names);
-  check bool "cycle" true (List.mem "masc_autoresearch_cycle" names)
+  check bool "cycle" true (List.mem "masc_autoresearch_cycle" names);
+  check bool "swarm wrapper" true
+    (List.mem "masc_autoresearch_swarm_start" names)
 
 let test_schemas_cycle_present () =
   let names = List.map (fun (s : Masc_mcp.Types.tool_schema) -> s.name) Tool.schemas in
@@ -893,7 +978,7 @@ let test_full_cycle_keep () =
       (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_
            ~target_file:_ ~file_content ~llm_model:_ ->
         Ok ("Add a line", file_content ^ "line4\n"));
-    let ctx : Tool.context = { base_path = workdir } in
+    let ctx = make_tool_ctx ~base_path:workdir () in
     match Tool.dispatch ctx ~name:"masc_autoresearch_cycle" ~args:(`Assoc []) with
     | Some (true, json_str) ->
       let json = Yojson.Safe.from_string json_str in
@@ -933,7 +1018,7 @@ let test_full_cycle_discard () =
       (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_
            ~target_file:_ ~file_content:_ ~llm_model:_ ->
         Ok ("Remove a line", "line1\nline2\n"));
-    let ctx : Tool.context = { base_path = workdir } in
+    let ctx = make_tool_ctx ~base_path:workdir () in
     match Tool.dispatch ctx ~name:"masc_autoresearch_cycle" ~args:(`Assoc []) with
     | Some (true, json_str) ->
       let json = Yojson.Safe.from_string json_str in
@@ -1033,6 +1118,8 @@ let () =
       test_case "unknown tool" `Quick test_dispatch_unknown_returns_none;
       test_case "start missing goal" `Quick test_dispatch_start_missing_goal;
       test_case "start missing metric" `Quick test_dispatch_start_missing_metric;
+      test_case "swarm start requires runtime" `Quick test_dispatch_swarm_start_requires_runtime;
+      test_case "swarm start success" `Quick test_dispatch_swarm_start_success;
       test_case "status no loop" `Quick test_dispatch_status_no_loop;
       test_case "inject missing hypothesis" `Quick test_dispatch_inject_missing_hypothesis;
       test_case "inject success" `Quick test_dispatch_inject_success;

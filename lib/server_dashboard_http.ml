@@ -2470,6 +2470,8 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let tempo = Tempo.get_tempo config in
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let gardener_json = Gardener.status_json () in
+  let guardian_json = Guardian.status_json () in
+  let sentinel_json = Sentinel.status_json () in
   let build = Build_identity.current () in
   `Assoc
     [
@@ -2483,6 +2485,8 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("paused", `Bool room_state.paused);
       ("lodge", lodge_json);
       ("gardener", gardener_json);
+      ("guardian", guardian_json);
+      ("sentinel", sentinel_json);
       ("version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
     ]
@@ -2696,4 +2700,3 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
 
 let operator_error_json message =
   `Assoc [ ("status", `String "error"); ("message", `String message) ]
-

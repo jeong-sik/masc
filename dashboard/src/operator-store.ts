@@ -279,6 +279,12 @@ function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
     orchestration_state: isRecord(raw.orchestration_state) ? raw.orchestration_state : isRecord(statusBlock?.orchestration_state) ? statusBlock.orchestration_state : undefined,
     cascade_metrics: isRecord(raw.cascade_metrics) ? raw.cascade_metrics : isRecord(statusBlock?.cascade_metrics) ? statusBlock.cascade_metrics : undefined,
     report_paths: reportPaths,
+    linked_autoresearch:
+      isRecord(raw.linked_autoresearch)
+        ? raw.linked_autoresearch
+        : (isRecord(statusBlock?.linked_autoresearch)
+            ? statusBlock.linked_autoresearch
+            : undefined),
     session,
     recent_events: recentEvents,
   }

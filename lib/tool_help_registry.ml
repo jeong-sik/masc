@@ -156,6 +156,31 @@ let manual_help_entry name =
             ];
           prompt_hints = [ "Use prompt 'team_session_proof' to read the resulting collaboration evidence." ];
         }
+  | "masc_autoresearch_swarm_start" ->
+      Some
+        {
+          name;
+          short_description =
+            "Start an autoresearch loop through the swarm-facing team-session and command-plane surfaces.";
+          when_to_use =
+            "Use when you want Karpathy-style autoresearch to show up in the normal supervised swarm workflow instead of living as a standalone ecosystem loop.";
+          key_constraints =
+            [
+              "Requires goal, metric_fn, and target_file.";
+              "Needs local team-session runtime context; CPv2 operation launch is best-effort and may degrade to session-only with warnings.";
+            ];
+          details_markdown =
+            "Creates the raw autoresearch loop first, then links it to a supervised team session and, when possible, a research_pipeline command-plane operation. Team-session status will expose a linked_autoresearch block and team-session stop will stop the linked loop.";
+          doc_refs =
+            [
+              "docs/SWARM-DELIVERY-RUNBOOK.md";
+              "docs/TEAM-SESSION.md";
+            ];
+          prompt_hints =
+            [
+              "Use when you want raw masc_autoresearch_* behavior but need operator-visible session/proof surfaces.";
+            ];
+        }
   | "masc_operation_start" ->
       Some
         {

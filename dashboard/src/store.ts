@@ -775,6 +775,50 @@ function normalizeGardenerRuntimeStatus(raw: unknown): ServerStatus['gardener'] 
   }
 }
 
+function normalizeGuardianRuntimeStatus(raw: unknown): ServerStatus['guardian'] | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    enabled: raw.enabled === true,
+    mode: asString(raw.mode) ?? undefined,
+    masc_enabled: typeof raw.masc_enabled === 'boolean' ? raw.masc_enabled : undefined,
+    masc_loops_running: typeof raw.masc_loops_running === 'boolean' ? raw.masc_loops_running : undefined,
+    runtime_owner: asString(raw.runtime_owner) ?? null,
+    zombie_loop_running: typeof raw.zombie_loop_running === 'boolean' ? raw.zombie_loop_running : undefined,
+    gc_loop_running: typeof raw.gc_loop_running === 'boolean' ? raw.gc_loop_running : undefined,
+    lodge_enabled: typeof raw.lodge_enabled === 'boolean' ? raw.lodge_enabled : undefined,
+    lodge_loop_started: typeof raw.lodge_loop_started === 'boolean' ? raw.lodge_loop_started : undefined,
+    lodge_running: typeof raw.lodge_running === 'boolean' ? raw.lodge_running : undefined,
+    last_zombie_cleanup: toIsoTimestamp(raw.last_zombie_cleanup) ?? asString(raw.last_zombie_cleanup) ?? null,
+    last_gc: toIsoTimestamp(raw.last_gc) ?? asString(raw.last_gc) ?? null,
+    last_lodge: toIsoTimestamp(raw.last_lodge) ?? asString(raw.last_lodge) ?? null,
+    last_zombie_result: asString(raw.last_zombie_result) ?? null,
+    last_gc_result: asString(raw.last_gc_result) ?? null,
+    last_lodge_result: isRecord(raw.last_lodge_result)
+      ? {
+          ok: typeof raw.last_lodge_result.ok === 'boolean' ? raw.last_lodge_result.ok : undefined,
+          message: asString(raw.last_lodge_result.message) ?? undefined,
+        }
+      : null,
+  }
+}
+
+function normalizeSentinelRuntimeStatus(raw: unknown): ServerStatus['sentinel'] | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    enabled: raw.enabled === true,
+    started: raw.started === true,
+    agent_name: asString(raw.agent_name) ?? null,
+    llm_enabled: typeof raw.llm_enabled === 'boolean' ? raw.llm_enabled : undefined,
+    uptime_s: asNumber(raw.uptime_s) ?? undefined,
+    embedded_guardian_loops_running:
+      typeof raw.embedded_guardian_loops_running === 'boolean'
+        ? raw.embedded_guardian_loops_running
+        : undefined,
+    guardian_runtime_owner: asString(raw.guardian_runtime_owner) ?? null,
+    consumers: asStringArray(raw.consumers),
+  }
+}
+
 function normalizeServerStatus(raw: unknown, generatedAt?: string): ServerStatus | null {
   if (!isRecord(raw)) return null
   return {
@@ -783,6 +827,8 @@ function normalizeServerStatus(raw: unknown, generatedAt?: string): ServerStatus
     build: normalizeBuildIdentity(raw.build),
     lodge: normalizeLodgeRuntimeStatus(raw.lodge) ?? undefined,
     gardener: normalizeGardenerRuntimeStatus(raw.gardener) ?? undefined,
+    guardian: normalizeGuardianRuntimeStatus(raw.guardian) ?? undefined,
+    sentinel: normalizeSentinelRuntimeStatus(raw.sentinel) ?? undefined,
   }
 }
 

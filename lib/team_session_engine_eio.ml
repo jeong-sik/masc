@@ -545,6 +545,15 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
       cascade_metrics =
     status_sections config session
   in
+  let linked_autoresearch =
+    match
+      Autoresearch.load_swarm_link_by_session ~base_path:config.base_path
+        session.session_id
+    with
+    | Some link ->
+        Autoresearch.linked_status_json ~base_path:config.base_path link
+    | None -> `Null
+  in
   `Assoc
     [
       ("session", Team_session_types.session_to_yojson session);
@@ -583,6 +592,7 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
                 (Team_session_store.proof_md_path config session.session_id) );
             ("proof_json", `String (Team_session_store.proof_json_path config session.session_id));
           ] );
+      ("linked_autoresearch", linked_autoresearch);
     ]
 
 let write_checkpoint (config : Room.config) (session : Team_session_types.session) =

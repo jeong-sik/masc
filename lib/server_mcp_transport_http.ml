@@ -548,22 +548,7 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
       in
       let response = Httpun.Response.create ~headers `Conflict in
       Httpun.Reqd.respond_with_string reqd response body
-  | Ok () -> (
-      match validate_protocol_version_continuity ~session_id request with
-      | Error msg ->
-          let body =
-            Printf.sprintf
-              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-              (Yojson.Safe.to_string (`String msg))
-          in
-          let headers =
-            Httpun.Headers.of_list
-              (("content-length", string_of_int (String.length body))
-              :: json_headers ~deps session_id protocol_version origin)
-          in
-          let response = Httpun.Response.create ~headers `Bad_request in
-          Httpun.Reqd.respond_with_string reqd response body
-      | Ok () ->
+  | Ok () ->
       remember_mcp_profile session_id profile;
       (match auth_result with
       | Error msg ->
@@ -731,22 +716,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
       in
       let response = Httpun.Response.create ~headers `Conflict in
       Httpun.Reqd.respond_with_string reqd response msg
-  | Ok () -> (
-      match validate_protocol_version_continuity ~session_id request with
-      | Error msg ->
-          let body =
-            Printf.sprintf
-              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-              (Yojson.Safe.to_string (`String msg))
-          in
-          let headers =
-            Httpun.Headers.of_list
-              (("content-length", string_of_int (String.length body))
-              :: json_headers ~deps session_id protocol_version origin)
-          in
-          let response = Httpun.Response.create ~headers `Bad_request in
-          Httpun.Reqd.respond_with_string reqd response body
-      | Ok () ->
+  | Ok () ->
       remember_mcp_profile session_id profile;
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
@@ -838,7 +808,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
             Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
-              session_id client_count Sse.max_clients))
+              session_id client_count Sse.max_clients)
 
 let sse_simple_handler ~deps request reqd =
   let origin = deps.get_origin request in

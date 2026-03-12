@@ -963,12 +963,17 @@ let parse_keeper_chat_stream_request body_str =
         match json |> member "models" with
         | `Null -> Ok []
         | `List items ->
-            Ok
-              (List.filter_map
-                 (function
-                   | `String model when String.trim model <> "" -> Some (String.trim model)
-                   | _ -> None)
-                 items)
+            let rec collect acc = function
+              | [] -> Ok (List.rev acc)
+              | `String model :: rest ->
+                  let trimmed = String.trim model in
+                  if trimmed = "" then
+                    Error "models must be an array of non-empty strings"
+                  else
+                    collect (trimmed :: acc) rest
+              | _ -> Error "models must be an array of non-empty strings"
+            in
+            collect [] items
         | _ -> Error "models must be an array of strings"
       in
       if name = "" then
@@ -1106,16 +1111,12 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
               if payload.models = [] then []
               else [ ("models", `List (List.map (fun model -> `String model) payload.models)) ])
           in
-          match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
-          | None ->
-              ignore
-                (keeper_stream_send_event writer mutex closed
-                   Ag_ui.(
-                     make_event ~thread_id ~run_id:(Some run_id)
-                       ~custom_name:(Some "KEEPER_CHAT_ERROR")
-                       ~custom_value:(Some (`Assoc [ ("message", `String "keeper dispatch unavailable") ]))
-                       Run_error))
-          | Some (false, err) ->
+          let dispatch_result =
+            try Ok (Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args)
+            with exn -> Error (Printexc.to_string exn)
+          in
+          match dispatch_result with
+          | Error err ->
               ignore
                 (keeper_stream_send_event writer mutex closed
                    Ag_ui.(
@@ -1123,23 +1124,49 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                        ~custom_name:(Some "KEEPER_CHAT_ERROR")
                        ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
                        Run_error))
-          | Some (true, body) -> (
+          | Ok None ->
+              ignore
+                (keeper_stream_send_event writer mutex closed
+                   Ag_ui.(
+                     make_event ~thread_id ~run_id:(Some run_id)
+                       ~custom_name:(Some "KEEPER_CHAT_ERROR")
+                       ~custom_value:(Some (`Assoc [ ("message", `String "keeper dispatch unavailable") ]))
+                       Run_error))
+          | Ok (Some (false, err)) ->
+              ignore
+                (keeper_stream_send_event writer mutex closed
+                   Ag_ui.(
+                     make_event ~thread_id ~run_id:(Some run_id)
+                       ~custom_name:(Some "KEEPER_CHAT_ERROR")
+                       ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
+                       Run_error))
+          | Ok (Some (true, body)) -> (
               try
-                let payload_json = Yojson.Safe.from_string body in
-                let reply_raw =
-                  payload_json |> Yojson.Safe.Util.member "reply"
-                  |> Yojson.Safe.Util.to_string_option
-                  |> Option.value ~default:""
+                let payload_json_opt =
+                  try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
                 in
                 let visible_reply =
-                  if String.trim reply_raw = "" then
-                    String.trim body
-                  else
-                    strip_keeper_visible_reply reply_raw
-                in
-                let visible_reply =
-                  if visible_reply = "" then Option.value ~default:"(empty reply)" (Yojson.Safe.Util.to_string_option payload_json)
-                  else visible_reply
+                  match payload_json_opt with
+                  | Some payload_json ->
+                      let reply_raw =
+                        payload_json |> Yojson.Safe.Util.member "reply"
+                        |> Yojson.Safe.Util.to_string_option
+                        |> Option.value ~default:""
+                      in
+                      let visible_reply =
+                        if String.trim reply_raw = "" then
+                          String.trim body
+                        else
+                          strip_keeper_visible_reply reply_raw
+                      in
+                      if visible_reply = "" then
+                        Option.value ~default:"(empty reply)"
+                          (Yojson.Safe.Util.to_string_option payload_json)
+                      else
+                        visible_reply
+                  | None ->
+                      let visible_reply = strip_keeper_visible_reply body in
+                      if visible_reply = "" then "(empty reply)" else visible_reply
                 in
                 split_keeper_reply_chunks visible_reply
                 |> List.iter (fun chunk ->
@@ -1150,13 +1177,16 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                                 ~message_id:(Some message_id)
                                 ~delta:(Some chunk)
                                 Text_message_content)));
-                ignore
-                  (keeper_stream_send_event writer mutex closed
-                     Ag_ui.(
-                       make_event ~thread_id ~run_id:(Some run_id)
-                         ~custom_name:(Some "KEEPER_REPLY_DETAILS")
-                         ~custom_value:(Some payload_json)
-                         Custom));
+                (match payload_json_opt with
+                 | Some payload_json ->
+                     ignore
+                       (keeper_stream_send_event writer mutex closed
+                          Ag_ui.(
+                            make_event ~thread_id ~run_id:(Some run_id)
+                              ~custom_name:(Some "KEEPER_REPLY_DETAILS")
+                              ~custom_value:(Some payload_json)
+                              Custom))
+                 | None -> ());
                 ignore
                   (keeper_stream_send_event writer mutex closed
                      Ag_ui.(
@@ -1892,7 +1922,7 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+       with_permission_auth ~permission:Types.CanReadState (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match parse_keeper_chat_stream_request body_str with
            | Ok payload ->

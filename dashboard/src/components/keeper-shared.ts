@@ -146,6 +146,7 @@ export function KeeperConversationPanel({
     try {
       await sendKeeperThreadMessage(keeperName, prompt)
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
       const message = err instanceof Error ? err.message : `Failed to message ${keeperName}`
       showToast(message, 'error')
     }

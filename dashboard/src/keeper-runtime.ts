@@ -6,7 +6,7 @@ import {
   streamKeeperMessage,
   type KeeperChatStreamEvent,
 } from './api'
-import { normalizeKeeperConversationDetails } from './keeper-message'
+import { formatKeeperVisibleReply, normalizeKeeperConversationDetails } from './keeper-message'
 import type {
   Keeper,
   KeeperConversationDelivery,
@@ -299,7 +299,9 @@ export function deriveKeeperDiagnostic(
 function normalizeHistoryEntry(raw: unknown, index: number): KeeperConversationEntry | null {
   if (!isRecord(raw)) return null
   const role = normalizeRole(raw.role)
-  const text = asString(raw.content) ?? asString(raw.preview)
+  const rawText = asString(raw.content) ?? asString(raw.preview)
+  if (!rawText) return null
+  const text = formatKeeperVisibleReply(rawText)
   if (!text) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   return {

@@ -302,6 +302,18 @@ let metadata_to_fields name =
   | Some reason -> ("reason", `String reason) :: with_replacement
   | None -> with_replacement
 
+let public_contract_fields name =
+  let meta = metadata name in
+  let base =
+    [
+      ( "implementationStatus",
+        `String (implementation_status_to_string meta.implementation_status) );
+    ]
+  in
+  match meta.canonical_name with
+  | Some canonical_name -> ("canonicalName", `String canonical_name) :: base
+  | None -> base
+
 let allow_direct_call name =
   let meta = metadata name in
   match meta.visibility with

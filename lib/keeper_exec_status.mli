@@ -17,3 +17,17 @@ val keeper_diagnostic_json :
   history_items:Yojson.Safe.t list ->
   now_ts:float ->
   Yojson.Safe.t
+
+val augment_keeper_diagnostic_json :
+  desired:bool ->
+  meta:keeper_meta ->
+  keepalive_running:bool ->
+  keepalive_started_at:float option ->
+  now_ts:float ->
+  Yojson.Safe.t ->
+  Yojson.Safe.t
+
+val keeper_surface_status :
+  agent_status:Yojson.Safe.t ->
+  diagnostic:Yojson.Safe.t ->
+  string

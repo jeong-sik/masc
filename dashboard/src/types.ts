@@ -214,12 +214,6 @@ export type KeeperReplyStatus =
   | 'error'
   | 'unknown'
 
-export type KeeperContinuityState =
-  | 'desired_offline'
-  | 'recovering'
-  | 'healthy'
-  | 'offline'
-
 export interface KeeperDiagnostic {
   health_state: KeeperHealthState
   quiet_reason?: KeeperQuietReason | null
@@ -232,8 +226,6 @@ export interface KeeperDiagnostic {
   recoverable?: boolean
   summary?: string
   keepalive_running?: boolean
-  continuity_state?: KeeperContinuityState | null
-  continuity_summary?: string | null
 }
 
 export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
@@ -962,11 +954,6 @@ export interface DashboardExecutionSummary {
   worker_alerts?: number
   continuity_alerts?: number
   priority_items?: number
-  todo_tasks?: number
-  claimed_tasks?: number
-  running_tasks?: number
-  done_tasks?: number
-  cancelled_tasks?: number
   keepers?: number
 }
 
@@ -1118,7 +1105,6 @@ export interface DashboardExecutionContinuityBrief {
 export interface DashboardExecutionResponse {
   generated_at?: string
   status?: ServerStatus
-  summary?: DashboardExecutionSummary
   lodge_tick?: DashboardExecutionLodgeTick | null
   lodge_checkins?: unknown[]
   execution_queue?: unknown[]
@@ -1193,16 +1179,6 @@ export interface DashboardMissionSummary {
   cluster?: string
   project?: string
   current_room?: string | null
-  paused?: boolean
-  tempo_interval_s?: number
-  active_agents?: number
-  keeper_pressure?: number
-  active_operations?: number
-  pending_approvals?: number
-  incident_count?: number
-  recommended_action_count?: number
-  top_attention?: OperatorAttentionItem | null
-  top_action?: OperatorRecommendedAction | null
 }
 
 export interface DashboardMissionCommandFocus {
@@ -1259,11 +1235,11 @@ export interface DashboardMissionSessionBrief {
 
 export interface DashboardMissionParticipantPreview {
   agent_name: string
-  status?: string
+  display_name?: string | null
+  is_live?: boolean
   current_work?: string | null
   recent_input_preview?: string | null
   recent_output_preview?: string | null
-  recent_tool_names: string[]
   last_activity_at?: string | null
 }
 
@@ -1294,22 +1270,15 @@ export interface DashboardMissionSessionCard extends DashboardMissionSessionBrie
 
 export interface DashboardMissionAgentBrief {
   agent_name: string
+  display_name?: string | null
+  is_live?: boolean
+  archived_reason?: string | null
   status?: string
-  where?: string | null
-  with_whom: string[]
   current_work?: string | null
   related_session_id?: string | null
-  related_attention_count: number
   last_activity_at?: string | null
   recent_output_preview?: string | null
   recent_input_preview?: string | null
-  recent_event?: string | null
-  recent_tool_names: string[]
-  allowed_tool_names?: string[]
-  latest_tool_names?: string[]
-  latest_tool_call_count?: number | null
-  tool_audit_source?: string | null
-  tool_audit_at?: string | null
 }
 
 export interface DashboardMissionKeeperBrief {

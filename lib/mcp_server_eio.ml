@@ -1565,6 +1565,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match Tool_room.dispatch simple_ctx_room ~name ~args:arguments with
   | Some result -> result
   | None ->
+  let shard_ok, shard_json = Tool_shard.execute name arguments in
+  if shard_ok then
+    (true, Yojson.Safe.pretty_to_string shard_json)
+  else
   match Tool_control.dispatch simple_ctx_control ~name ~args:arguments with
   | Some result -> result
   | None ->
@@ -3289,10 +3293,6 @@ let maybe_assoc_field name = function
 let tool_output_schema_field _name = None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
-  let implementation_status =
-    Tool_catalog.implementation_status schema.name
-    |> Tool_catalog.implementation_status_to_string
-  in
   let base =
     [
       ("name", `String schema.name);
@@ -3302,10 +3302,10 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
         `List
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
-      ("implementationStatus", `String implementation_status);
     ]
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
+    @ Tool_catalog.metadata_to_fields schema.name
     @
     match usage_summary with
     | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name

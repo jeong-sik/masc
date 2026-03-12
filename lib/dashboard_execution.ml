@@ -382,24 +382,6 @@ let execution_smoke_fixture_json () =
             ("lodge", `Assoc []);
             ("version", `String Version.version);
           ] );
-      ( "summary",
-        `Assoc
-          [
-            ("active_sessions", `Int 2);
-            ("blocked_sessions", `Int 1);
-            ("active_operations", `Int 2);
-            ("blocked_operations", `Int 2);
-            ("runtime_pressure", `Int 3);
-            ("worker_alerts", `Int 2);
-            ("continuity_alerts", `Int 1);
-            ("priority_items", `Int 2);
-            ("todo_tasks", `Int 1);
-            ("claimed_tasks", `Int 1);
-            ("running_tasks", `Int 1);
-            ("done_tasks", `Int 0);
-            ("cancelled_tasks", `Int 0);
-            ("keepers", `Int 1);
-          ] );
       ( "lodge_tick",
         `Assoc
           [
@@ -1963,76 +1945,10 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
       let lodge_tick_summary, lodge_checkins =
         build_lodge_checkins (Lodge_heartbeat.lodge_status ())
       in
-      let blocked_sessions =
-        session_contexts
-        |> List.fold_left
-             (fun acc (session : session_context) ->
-               if session.severity <> "ok" then acc + 1 else acc)
-             0
-      in
-      let active_operations =
-        operation_contexts
-        |> List.fold_left
-             (fun acc (operation : operation_context) ->
-               let status = string_field "status" operation.json in
-               if List.mem status [ "active"; "paused" ] then acc + 1 else acc)
-             0
-      in
-      let blocked_operations =
-        operation_contexts
-        |> List.fold_left
-             (fun acc (operation : operation_context) ->
-               if operation.severity <> "ok" then acc + 1 else acc)
-             0
-      in
-      let worker_alerts =
-        worker_rows
-        |> List.fold_left
-             (fun acc (row : worker_context) ->
-               if string_field "tone" row.json <> "ok" then acc + 1 else acc)
-             0
-      in
-      let continuity_alerts =
-        continuity_rows
-        |> List.fold_left
-             (fun acc (row : continuity_context) ->
-               if string_field "tone" row.json <> "ok" then acc + 1 else acc)
-             0
-      in
-      let (todo_count, claimed_count, running_count, done_count, cancelled_count) =
-        List.fold_left
-          (fun (todo, claimed, running, done_items, cancelled) (task : Types.task) ->
-            match task.task_status with
-            | Todo -> (todo + 1, claimed, running, done_items, cancelled)
-            | Claimed _ -> (todo, claimed + 1, running, done_items, cancelled)
-            | InProgress _ -> (todo, claimed, running + 1, done_items, cancelled)
-            | Done _ -> (todo, claimed, running, done_items + 1, cancelled)
-            | Cancelled _ -> (todo, claimed, running, done_items, cancelled + 1))
-          (0, 0, 0, 0, 0)
-          tasks
-      in
       `Assoc
         [
           ("generated_at", `String (Types.now_iso ()));
           ("status", room_status_json config);
-          ( "summary",
-            `Assoc
-              [
-                ("active_sessions", `Int (List.length session_contexts));
-                ("blocked_sessions", `Int blocked_sessions);
-                ("active_operations", `Int active_operations);
-                ("blocked_operations", `Int blocked_operations);
-                ("runtime_pressure", `Int (List.length execution_queue));
-                ("worker_alerts", `Int worker_alerts);
-                ("continuity_alerts", `Int continuity_alerts);
-                ("priority_items", `Int (List.length execution_queue));
-                ("todo_tasks", `Int todo_count);
-                ("claimed_tasks", `Int claimed_count);
-                ("running_tasks", `Int running_count);
-                ("done_tasks", `Int done_count);
-                ("cancelled_tasks", `Int cancelled_count);
-                ("keepers", `Int (List.length continuity_rows));
-              ] );
           ("lodge_tick", option_to_json (fun value -> value) lodge_tick_summary);
           ("lodge_checkins", `List (List.map (fun (row : lodge_checkin_context) -> row.json) lodge_checkins));
           ("execution_queue", `List (List.map (fun (row : queue_context) -> row.json) execution_queue));

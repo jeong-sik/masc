@@ -12,7 +12,6 @@ import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
 import { navigate } from '../router'
 import {
-  executionSummary,
   executionQueue,
   executionSessionBriefs,
   executionOperationBriefs,
@@ -138,13 +137,6 @@ function lodgeActionKindLabel(value?: DashboardExecutionLodgeCheckin['action_kin
     default:
       return value
   }
-}
-
-function renderToolSummary(tools: string[] | undefined, empty = '없음') {
-  const rows = tools ?? []
-  if (rows.length === 0) return empty
-  if (rows.length <= 3) return rows.join(', ')
-  return `${rows.slice(0, 3).join(', ')} +${rows.length - 3}`
 }
 
 function openHandoff(handoff: DashboardExecutionHandoff | null | undefined): void {
@@ -361,15 +353,10 @@ function LodgeCheckinRow({ row }: { row: DashboardExecutionLodgeCheckin }) {
         <span>trigger · ${row.trigger ?? 'unknown'}</span>
         ${row.checked_at ? html`<span><${TimeAgo} timestamp=${row.checked_at} /></span>` : null}
         <span>action · ${lodgeActionKindLabel(row.action_kind)}</span>
-        <span>allow ${row.allowed_tool_names.length}</span>
-        <span>used ${row.used_tool_names.length}</span>
       </div>
       ${row.summary && row.summary !== row.reason
         ? html`<div class="monitor-focus">${row.summary}</div>`
         : null}
-      <div class="monitor-footnote">
-        허용 도구: ${renderToolSummary(row.allowed_tool_names)} · 사용 도구: ${renderToolSummary(row.used_tool_names)}
-      </div>
       ${row.failure_reason || row.decision_reason
         ? html`<div class="monitor-footnote">
             ${row.failure_reason ? `실패 이유: ${row.failure_reason}` : `판단 이유: ${row.decision_reason}`}
@@ -450,24 +437,11 @@ function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
       ${row.recent_output_preview || row.continuity_summary
         ? html`<div class="monitor-footnote">${row.recent_output_preview ?? row.continuity_summary}</div>`
         : null}
-      ${row.skill_route_summary || row.tool_audit_source
-        ? html`<div class="monitor-footnote">
-            ${row.skill_route_summary ? `route · ${row.skill_route_summary}` : ''}
-            ${row.tool_audit_source ? `${row.skill_route_summary ? ' · ' : ''}audit · ${row.tool_audit_source}` : ''}
-            ${row.tool_audit_at ? html` · <${TimeAgo} timestamp=${row.tool_audit_at} />` : null}
-          </div>`
-        : null}
-      ${(row.recent_tool_names?.length ?? 0) > 0 || (row.allowed_tool_names?.length ?? 0) > 0
-        ? html`<div class="monitor-footnote">
-            recent tools: ${renderToolSummary(row.recent_tool_names)} · allowed: ${renderToolSummary(row.allowed_tool_names)}
-          </div>`
-        : null}
     </button>
   `
 }
 
 export function Execution() {
-  const summary = executionSummary.value
   const queueRows = executionQueue.value
   const sessionRowsAll = executionSessionBriefs.value
   const operationRowsAll = executionOperationBriefs.value
@@ -549,15 +523,6 @@ export function Execution() {
     <div class="agents-monitor">
       <${SurfaceSemanticIntro} surfaceId="execution" />
       <${RoomTruthStrip} />
-      <div class="stats-grid">
-        <${MonitorStat} label="활성 세션" value=${summary?.active_sessions ?? sessionRowsAll.length} color="#4ade80" caption="실행 관점 세션 수" />
-        <${MonitorStat} label="막힌 세션" value=${summary?.blocked_sessions ?? sessionRowsAll.filter(item => toneClass(item.health ?? item.status) !== 'ok').length} color="#fbbf24" caption="개입이 필요한 세션 수" />
-        <${MonitorStat} label="활성 작전" value=${summary?.active_operations ?? operationRowsAll.length} color="#22d3ee" caption="지휘 평면 작전 수" />
-        <${MonitorStat} label="막힌 작전" value=${summary?.blocked_operations ?? operationRowsAll.filter(item => item.blocker_summary).length} color="#fb7185" caption="원인 확인이 필요한 작전 수" />
-        <${MonitorStat} label="인력 경고" value=${summary?.worker_alerts ?? workerSupportAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="지원 인력 압박" />
-        <${MonitorStat} label="연속성 경고" value=${summary?.continuity_alerts ?? continuityAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="키퍼 연속성 압박" />
-      </div>
-
       <${Card}
         title="실행 대기열"
         class="section"

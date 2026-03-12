@@ -332,7 +332,7 @@ export function commandSurfaceForContext(context: DashboardWorkflowContext): str
     return 'swarm'
   }
   if (context.focus_kind === 'operation' || context.target_type === 'operation') return 'operations'
-  return context.target_type === 'room' ? 'summary' : 'swarm'
+  return context.target_type === 'room' ? 'orchestra' : 'swarm'
 }
 
 export function workflowCommandParams(context: DashboardWorkflowContext): Record<string, string> {
@@ -404,6 +404,8 @@ export function workflowCommandSurfaceLabel(surface?: string | null): string {
       return '워룸'
     case 'summary':
       return '요약'
+    case 'orchestra':
+      return '오케스트라'
     case 'swarm':
       return '스웜'
     case 'chains':

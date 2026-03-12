@@ -618,35 +618,43 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
 
   (* Parse LLM response *)
   try
-    let start = String.index response '{' in
-    let end_pos = String.rindex response '}' in
-    let json_str = String.sub response start (end_pos - start + 1) in
-    let json = Yojson.Safe.from_string json_str in
-    let module U = Yojson.Safe.Util in
-    let decision = json |> U.member "decision" |> U.to_string in
-    let reason = json |> U.member "reason" |> U.to_string in
+    let start_opt = String.index_opt response '{' in
+    let end_opt = String.rindex_opt response '}' in
+    match start_opt, end_opt with
+    | Some start, Some end_pos when start <= end_pos ->
+        let json_str = String.sub response start (end_pos - start + 1) in
+        let json = Yojson.Safe.from_string json_str in
+        let module U = Yojson.Safe.Util in
+        let decision = json |> U.member "decision" |> U.to_string in
+        let reason = json |> U.member "reason" |> U.to_string in
 
-    match decision with
-    | "approve" ->
-        let traits = json |> U.member "traits" |> U.to_list |> List.map U.to_string in
-        let hours = json |> U.member "hours" |> U.to_list |> List.map U.to_int in
-        SpawnApproved {
-          topic = gap.topic;
-          urgency = if gap.urgency_score > 0.7 then High else Medium;
-          proposed_traits = traits;
-          proposed_hours = hours;
-          reason;
-        }
-    | "defer" ->
+        (match decision with
+        | "approve" ->
+            let traits = json |> U.member "traits" |> U.to_list |> List.map U.to_string in
+            let hours = json |> U.member "hours" |> U.to_list |> List.map U.to_int in
+            SpawnApproved {
+              topic = gap.topic;
+              urgency = if gap.urgency_score > 0.7 then High else Medium;
+              proposed_traits = traits;
+              proposed_hours = hours;
+              reason;
+            }
+        | "defer" ->
+            SpawnDeferred {
+              topic = gap.topic;
+              retry_after_sec = config.spawn_cooldown_sec;
+              reason;
+            }
+        | _ ->
+            SpawnRejected {
+              topic = gap.topic;
+              reason;
+            })
+    | _ ->
         SpawnDeferred {
           topic = gap.topic;
           retry_after_sec = config.spawn_cooldown_sec;
-          reason;
-        }
-    | _ ->
-        SpawnRejected {
-          topic = gap.topic;
-          reason;
+          reason = "No JSON found in LLM response";
         }
   with
   | Yojson.Json_error msg ->
@@ -973,18 +981,21 @@ let decide_intervention_with_llm ~config ~health : decision_snapshot =
     | Error err -> Error err
     | Ok body ->
         try
-          let start = String.index body '{' in
-          let end_pos = String.rindex body '}' in
-          let json_str = String.sub body start (end_pos - start + 1) in
-          let json = Yojson.Safe.from_string json_str in
-          let module U = Yojson.Safe.Util in
-          let action = json |> U.member "action" |> U.to_string in
-          let reason =
-            match json |> U.member "reason" with
-            | `String value -> String.trim value
-            | _ -> ""
-          in
-          Ok (action, reason)
+          let start_opt = String.index_opt body '{' in
+          let end_opt = String.rindex_opt body '}' in
+          match start_opt, end_opt with
+          | Some start, Some end_pos when start <= end_pos ->
+              let json_str = String.sub body start (end_pos - start + 1) in
+              let json = Yojson.Safe.from_string json_str in
+              let module U = Yojson.Safe.Util in
+              let action = json |> U.member "action" |> U.to_string in
+              let reason =
+                match json |> U.member "reason" with
+                | `String value -> String.trim value
+                | _ -> ""
+              in
+              Ok (action, reason)
+          | _ -> Error "No JSON brackets found in LLM response"
         with exn ->
           let message =
             Printf.sprintf "llm intervention JSON parse failed: %s"

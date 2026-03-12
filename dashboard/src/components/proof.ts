@@ -7,7 +7,9 @@ import { proofError, proofLoading, proofSnapshot, refreshProofSnapshot } from '.
 import type {
   DashboardProofActorContribution,
   DashboardProofArtifactRef,
+  DashboardProofSelection,
   DashboardProofTimelineItem,
+  DashboardProofToolEvidence,
   DashboardProofVerdict,
 } from '../types'
 import { prettyJson, relativeTime } from './command/helpers'
@@ -60,12 +62,14 @@ function verdictLabel(verdict: DashboardProofVerdict): string {
 function verdictReasonLines(
   verdict: DashboardProofVerdict,
   actorCount: number,
+  plannedActorCount: number,
+  unansweredActorCount: number,
   interactionCount: number,
   evidenceCount: number,
   cpTraceCount: number,
 ): string[] {
   const lines = [
-    `${actorCount}명의 actor 흔적이 기록돼 있습니다.`,
+    `${actorCount}명이 실제 흔적을 남겼고, 계획된 참여자는 ${plannedActorCount}명입니다.`,
     interactionCount > 0
       ? `서로를 참조한 상호작용 증거가 ${interactionCount}건 있습니다.`
       : '서로를 참조한 명시적 상호작용 증거가 아직 없습니다.',
@@ -79,11 +83,13 @@ function verdictReasonLines(
   if (verdict === 'partial') {
     return [
       lines[0] ?? '',
-      interactionCount === 0
-        ? 'partial인 이유: 참여 흔적은 있지만 actor 간 상호작용이 직접 보이지 않습니다.'
-        : 'partial인 이유: 일부 증거는 있으나 proven 기준을 모두 채우지 못했습니다.',
+      unansweredActorCount > 0
+        ? `partial인 이유: 호출되었지만 응답하지 않은 참여자가 ${unansweredActorCount}명 있습니다.`
+        : interactionCount === 0
+          ? 'partial인 이유: 여러 흔적은 있지만 actor 간 상호작용이 직접 보이지 않습니다.'
+          : 'partial인 이유: 일부 증거는 있으나 proven 기준을 모두 채우지 못했습니다.',
       cpTraceCount > 0
-        ? '다음 보강 포인트: 대화/상호참조 event를 남기면 proof가 더 강해집니다.'
+        ? '다음 보강 포인트: 응답 턴이나 도구 호출을 남기면 proof가 협업 수준으로 올라갑니다.'
         : '다음 보강 포인트: 관리형 trace 또는 산출물 연결을 더 남기면 근거가 강해집니다.',
     ]
   }
@@ -91,14 +97,101 @@ function verdictReasonLines(
     return [
       lines[0] ?? '',
       '결론: 참여, 상호작용, 산출물, backing evidence가 모두 연결돼 있습니다.',
-      '다음 행동: raw evidence는 접어두고 세션 결과와 산출물만 확인하면 됩니다.',
+      '다음 행동: raw evidence는 접어두고 결과 산출물과 다음 실행 결정만 확인하면 됩니다.',
     ]
   }
   return [
     lines[0] ?? '',
-    '결론: 기록은 있으나 협업을 증명할 만큼의 연결 증거가 부족합니다.',
-    '다음 보강 포인트: 참여자 간 턴, 도구 근거, 산출물 연결을 더 남겨야 합니다.',
+    unansweredActorCount > 0
+      ? `결론: 협업 시도는 있었지만 무응답 참여자가 ${unansweredActorCount}명 있어 협업 증거로 인정하기 어렵습니다.`
+      : '결론: 기록은 있으나 협업을 증명할 만큼의 연결 증거가 부족합니다.',
+    evidenceCount > 0
+      ? '다음 보강 포인트: 응답 턴과 도구 근거를 서로 연결해 남겨야 합니다.'
+      : '다음 보강 포인트: 참여자 간 턴, 도구 근거, 산출물 연결을 더 남겨야 합니다.',
   ]
+}
+
+function selectionTone(selection?: DashboardProofSelection | null): string {
+  if (selection?.mode === 'requested_not_found') return 'bad'
+  if (selection?.mode === 'latest_auto_selected') return 'warn'
+  return 'ok'
+}
+
+function selectionLabel(selection?: DashboardProofSelection | null): string {
+  if (selection?.mode === 'requested_not_found') return '선택 실패'
+  if (selection?.mode === 'latest_auto_selected') return '자동 선택'
+  if (selection?.mode === 'explicit') return '명시 선택'
+  return '선택 없음'
+}
+
+function actorActivityTone(item: DashboardProofActorContribution): string {
+  if (item.activity_state === 'acted') {
+    return (item.interaction_count ?? 0) > 0 || (item.tool_evidence_count ?? 0) > 0 ? 'ok' : 'warn'
+  }
+  if (item.activity_state === 'mentioned_only') return 'warn'
+  return 'bad'
+}
+
+function actorActivityLabel(item: DashboardProofActorContribution): string {
+  if (item.activity_state === 'acted') return '실제 흔적'
+  if (item.activity_state === 'mentioned_only') return '호출만 됨'
+  return '계획만 됨'
+}
+
+function actorActivityMeta(item: DashboardProofActorContribution): string {
+  if (item.activity_state === 'acted') {
+    return `턴 ${item.turn_count ?? 0} · spawn ${item.spawn_count ?? 0} · 도구 근거 ${item.tool_evidence_count ?? 0}`
+  }
+  if (item.activity_state === 'mentioned_only') {
+    const caller = item.requested_by ? `호출자 ${item.requested_by}` : '호출자 미상'
+    return `호출 ${item.mention_count ?? 0}회 · ${caller}`
+  }
+  return '계획된 참여자이지만 아직 이벤트가 없습니다.'
+}
+
+function toolEvidenceTags(item: DashboardProofToolEvidence): string[] {
+  return Array.isArray(item.tool_names) ? item.tool_names : []
+}
+
+function SelectionCard({ selection }: { selection?: DashboardProofSelection | null }) {
+  if (!selection || selection.mode === 'explicit') return null
+  return html`
+    <div class="command-guide-card ${selectionTone(selection)}">
+      <div class="command-guide-head">
+        <strong>${selectionLabel(selection)}</strong>
+        <span class="command-chip ${selectionTone(selection)}">${selection.mode ?? 'none'}</span>
+      </div>
+      <p>${selection.reason ?? '근거 컨텍스트 선택 정보가 없습니다.'}</p>
+      <div class="command-card-grid">
+        <span>선택된 세션</span><span>${selection.selected_session_id ?? '없음'}</span>
+        <span>작성자</span><span>${selection.selected_created_by ?? '없음'}</span>
+        <span>선택된 목표</span><span>${selection.selected_goal ?? '없음'}</span>
+        <span>가용 세션 수</span><span>${selection.available_session_count ?? 0}</span>
+      </div>
+    </div>
+  `
+}
+
+function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) {
+  return html`
+    <article class="command-card proof-artifact-row">
+      <div class="command-card-head">
+        <div>
+          <strong>${item.summary ?? item.event_type ?? '도구 근거'}</strong>
+          <div class="command-meta-line">
+            <span>${item.actor ?? '시스템'}</span>
+            <span>${item.event_type ?? 'event'}</span>
+          </div>
+        </div>
+        <span class="command-chip">${relativeTime(item.timestamp ?? null)}</span>
+      </div>
+      ${toolEvidenceTags(item).length > 0
+        ? html`<div class="semantic-tag-row">
+            ${toolEvidenceTags(item).map(name => html`<span class="semantic-tag">${name}</span>`)}
+          </div>`
+        : null}
+    </article>
+  `
 }
 
 function dedupeTimeline(items: DashboardProofTimelineItem[]): DedupedTimelineItem[] {
@@ -198,7 +291,8 @@ function ActorContributionRow({ item }: { item: DashboardProofActorContribution 
   const output = item.recent_output_preview ?? null
   const input = item.recent_input_preview ?? null
   const eventSummary = item.recent_event_summary ?? null
-  const interactionTone = (item.interaction_count ?? 0) > 0 ? 'ok' : 'warn'
+  const requestPreview = item.recent_request_preview ?? null
+  const lastSeen = item.last_active_at ?? item.recent_request_at ?? null
   return html`
     <article class="mission-activity-row proof-actor-row">
       <div class="mission-activity-head">
@@ -206,22 +300,32 @@ function ActorContributionRow({ item }: { item: DashboardProofActorContribution 
           <strong>${item.actor}</strong>
           <div class="mission-activity-meta">
             <span>${item.role ?? '참여자'}</span>
-            <span>${item.last_active_at ? relativeTime(item.last_active_at) : '기록 없음'}</span>
+            <span>${lastSeen ? relativeTime(lastSeen) : '기록 없음'}</span>
           </div>
         </div>
-        <span class="command-chip ${interactionTone}">
-          ${(item.interaction_count ?? 0) > 0 ? `상호작용 ${item.interaction_count}` : '상호작용 없음'}
+        <span class="command-chip ${actorActivityTone(item)}">
+          ${actorActivityLabel(item)}
         </span>
       </div>
       <div class="mission-activity-copy">
-        <span>턴 ${item.turn_count ?? 0}</span>
-        <span>spawn ${item.spawn_count ?? 0}</span>
-        <span>도구 근거 ${item.tool_evidence_count ?? 0}</span>
+        <span>${actorActivityMeta(item)}</span>
       </div>
+      ${item.activity_detail
+        ? html`<div class="proof-summary-block">
+            <strong>현재 해석</strong>
+            <span>${item.activity_detail}</span>
+          </div>`
+        : null}
       ${eventSummary
         ? html`<div class="proof-summary-block">
             <strong>최근 흔적</strong>
             <span>${eventSummary}</span>
+          </div>`
+        : null}
+      ${requestPreview && item.activity_state !== 'acted'
+        ? html`<div class="proof-summary-block">
+            <strong>최근 요청</strong>
+            <span>${requestPreview}</span>
           </div>`
         : null}
       ${(input || output)
@@ -302,22 +406,39 @@ export function Proof() {
   }
 
   const summary = snapshot?.summary
-  const contributions = safeArray(snapshot?.actor_contributions)
-  const artifacts = safeArray(snapshot?.artifacts)
+  const selection = snapshot?.selection ?? null
+  const contributions = safeArray<DashboardProofActorContribution>(snapshot?.actor_contributions)
+  const artifacts = safeArray<DashboardProofArtifactRef>(snapshot?.artifacts)
+  const toolEvidence = safeArray<DashboardProofToolEvidence>(snapshot?.tool_evidence)
   const verdict = snapshot?.proof_verdict ?? 'insufficient'
   const cpEvidence = snapshot?.cp_backing_evidence ?? null
   const traceCount = Array.isArray((cpEvidence as { traces?: { events?: unknown[] } } | null)?.traces?.events)
     ? ((cpEvidence as { traces?: { events?: unknown[] } }).traces?.events?.length ?? 0)
     : 0
   const actorCount = summary?.actors_count ?? contributions.length
+  const plannedActorCount = summary?.planned_actor_count ?? contributions.length
+  const unansweredActorCount =
+    summary?.unanswered_actor_count
+    ?? contributions.filter(item => item.activity_state !== 'acted' && (item.mention_count ?? 0) > 0).length
+  const mentionedActorCount =
+    summary?.mentioned_actor_count
+    ?? contributions.filter(item => (item.mention_count ?? 0) > 0).length
   const interactionCount = summary?.interaction_count ?? 0
   const evidenceCount = summary?.evidence_count ?? 0
-  const dedupedTimeline = dedupeTimeline(safeArray(snapshot?.timeline))
+  const dedupedTimeline = dedupeTimeline(safeArray<DashboardProofTimelineItem>(snapshot?.timeline))
   const goalBindingRows = keyValueRows(asRecord(snapshot?.goal_binding))
   const backingSummaryRows = extractBackingSummary(cpEvidence)
   const presentArtifacts = artifacts.filter(item => item.exists).length
   const missingArtifacts = artifacts.length - presentArtifacts
-  const reasonLines = verdictReasonLines(verdict, actorCount, interactionCount, evidenceCount, traceCount)
+  const reasonLines = verdictReasonLines(
+    verdict,
+    actorCount,
+    plannedActorCount,
+    unansweredActorCount,
+    interactionCount,
+    evidenceCount,
+    traceCount,
+  )
 
   return html`
     <section class="dashboard-panel mission-view">
@@ -338,6 +459,8 @@ export function Proof() {
         ? html`<div class="error-card">${proofError.value}</div>`
         : null}
 
+      <${SelectionCard} selection=${selection} />
+
       <div class="mission-stat-grid">
         <div class="summary-stat-card ${verdictTone(verdict)}">
           <span>판정</span>
@@ -345,14 +468,24 @@ export function Proof() {
           <small>${summary?.detail ?? '협업 증거를 verdict로 요약합니다.'}</small>
         </div>
         <div class="summary-stat-card">
-          <span>참여자</span>
+          <span>실제 흔적</span>
           <strong>${actorCount}</strong>
-          <small>기록된 참여자 수</small>
+          <small>이벤트를 남긴 actor 수</small>
+        </div>
+        <div class="summary-stat-card ${plannedActorCount > actorCount ? 'warn' : 'ok'}">
+          <span>계획된 참여자</span>
+          <strong>${plannedActorCount}</strong>
+          <small>${mentionedActorCount > 0 ? `${mentionedActorCount}명 호출됨` : '호출 기록 없음'}</small>
+        </div>
+        <div class="summary-stat-card ${unansweredActorCount > 0 ? 'warn' : 'ok'}">
+          <span>무응답</span>
+          <strong>${unansweredActorCount}</strong>
+          <small>${unansweredActorCount > 0 ? '호출됐지만 응답 근거 없음' : '무응답 참여자 없음'}</small>
         </div>
         <div class="summary-stat-card ${interactionCount > 0 ? 'ok' : 'warn'}">
-          <span>상호작용</span>
+          <span>직접 상호작용</span>
           <strong>${interactionCount}</strong>
-          <small>참여자 간 직접 상호작용 근거</small>
+          <small>참여자 간 직접 연결 근거</small>
         </div>
         <div class="summary-stat-card ${evidenceCount > 0 ? 'ok' : 'warn'}">
           <span>근거</span>
@@ -375,7 +508,7 @@ export function Proof() {
         <${Card} title="3줄 근거 요약" class="mission-list-card" semanticId="proof.summary">
           <div class="mission-section-head">
             <h3>핵심 증명</h3>
-            <p>결론, partial 이유, 다음 보강 포인트만 먼저 봅니다.</p>
+            <p>결론, 왜 아직 부족한지, 다음에 무엇을 남겨야 하는지만 먼저 봅니다.</p>
           </div>
           <div class="proof-summary-stack">
             ${reasonLines.map((line, idx) => html`
@@ -390,7 +523,7 @@ export function Proof() {
         <${Card} title="목표 연결" class="mission-list-card" semanticId="proof.goal_binding">
           <div class="mission-section-head">
             <h3>무엇을 증명하려는가</h3>
-            <p>이 근거가 어느 세션, 목표, 작전에 묶였는지 읽습니다.</p>
+            <p>이 화면이 어떤 세션과 목표를 기준으로 그려졌는지 먼저 고정합니다.</p>
           </div>
           <${KeyValueGrid} rows=${goalBindingRows} />
           <details class="mission-card-disclosure compact">
@@ -416,7 +549,7 @@ export function Proof() {
         <${Card} title="참여 흔적" class="mission-list-card" semanticId="proof.contributions">
           <div class="mission-section-head">
             <h3>누가 무엇을 남겼는가</h3>
-            <p>턴 수보다 최근 흔적, 입출력, 도구, 상호작용 유무를 우선 봅니다.</p>
+            <p>실제 흔적, 호출만 된 참여자, 계획만 된 참여자를 구분해서 봅니다.</p>
           </div>
           <div class="mission-activity-list">
             ${contributions.length > 0
@@ -427,6 +560,18 @@ export function Proof() {
       </div>
 
       <div class="mission-human-grid">
+        <${Card} title="도구 근거" class="mission-list-card" semanticId="proof.tool_evidence">
+          <div class="mission-section-head">
+            <h3>어떤 도구를 언제 썼는가</h3>
+            <p>숫자만 보여주지 말고, 최근 도구 호출 근거를 직접 확인합니다.</p>
+          </div>
+          <div class="mission-list-stack">
+            ${toolEvidence.length > 0
+              ? toolEvidence.map((item, idx) => html`<${ToolEvidenceRow} key=${`${item.actor ?? 'system'}-${idx}`} item=${item} />`)
+              : html`<div class="empty-state">기록된 tool evidence가 없습니다.</div>`}
+          </div>
+        <//>
+
         <${Card} title="실행 근거" class="mission-list-card" semanticId="proof.backing">
           <div class="mission-section-head">
             <h3>실행 backing은 얼마나 남아 있나</h3>
@@ -438,7 +583,9 @@ export function Proof() {
             <pre class="command-json-block">${prettyJson(cpEvidence ?? {})}</pre>
           </details>
         <//>
+      </div>
 
+      <div class="mission-human-grid">
         <${Card} title="산출물" class="mission-list-card" semanticId="proof.artifacts">
           <div class="mission-section-head">
             <h3>어떤 파일 산출물이 남았나</h3>

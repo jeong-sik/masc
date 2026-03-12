@@ -182,10 +182,14 @@ let test_dashboard_proof_projection () =
         (json |> U.member "proof_verdict" |> U.to_string);
       check string "session id" session_id
         (json |> U.member "session_id" |> U.to_string);
+      check string "selection mode" "latest_auto_selected"
+        (json |> U.member "selection" |> U.member "mode" |> U.to_string);
       check bool "timeline present" true
         ((json |> U.member "timeline" |> U.to_list) <> []);
       check bool "actor contributions present" true
         ((json |> U.member "actor_contributions" |> U.to_list) <> []);
+      check bool "tool evidence present" true
+        ((json |> U.member "tool_evidence" |> U.to_list) <> []);
       check bool "artifacts present" true
         ((json |> U.member "artifacts" |> U.to_list) <> []);
       check bool "cp backing present" true
@@ -225,7 +229,8 @@ let test_timeline_json_orders_command_plane_events_by_timestamp () =
       check string "first item timestamp" "2026-03-11T09:00:01Z"
         (first |> U.member "timestamp" |> U.to_string))
 
-let test_dashboard_proof_uses_persisted_verdict_when_available () =
+let test_dashboard_proof_prefers_actual_activity_over_stronger_persisted_verdict ()
+    =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -261,10 +266,64 @@ let test_dashboard_proof_uses_persisted_verdict_when_available () =
         config session_id;
       write_manual_proof config session_id "proved";
       let json = Lib.Dashboard_proof.json ~config ~session_id () in
-      check string "top-level verdict follows persisted proof" "proven"
+      check string "top-level verdict follows actual activity" "partial"
         (json |> U.member "proof_verdict" |> U.to_string);
+      check int "only one active actor counted" 1
+        (json |> U.member "summary" |> U.member "actors_count" |> U.to_int);
+      check int "planned actors kept separate" 6
+        (json |> U.member "summary" |> U.member "planned_actor_count" |> U.to_int);
       check string "raw proof still exposes original verdict spelling" "proved"
         (json |> U.member "raw_proof" |> U.member "verdict" |> U.to_string))
+
+let test_dashboard_proof_marks_mentioned_only_actor_as_unanswered () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-mentioned-only" in
+      let session =
+        sample_session ~agent_names:[ "worker-a"; "worker-b" ]
+          (Unix.gettimeofday ()) session_id
+      in
+      seed_session_artifacts ~session:(Some session)
+        ~events:
+          [
+            ( "team_turn",
+              `Assoc
+                [
+                  ("actor", `String "supervisor");
+                  ("kind", `String "broadcast");
+                  ("message", `String "@worker-b review the proof output and reply here.");
+                ] );
+            ( "team_turn",
+              `Assoc
+                [
+                  ("actor", `String "worker-a");
+                  ("kind", `String "note");
+                  ("message", `String "Updated the proof dashboard copy.");
+                  ("tool_names", `List [ `String "masc_tool_help" ]);
+                ] );
+          ]
+        config session_id;
+      let json = Lib.Dashboard_proof.json ~config ~session_id () in
+      check string "selection mode" "explicit"
+        (json |> U.member "selection" |> U.member "mode" |> U.to_string);
+      check int "active actors" 2
+        (json |> U.member "summary" |> U.member "actors_count" |> U.to_int);
+      check int "unanswered actors" 1
+        (json |> U.member "summary" |> U.member "unanswered_actor_count"
+       |> U.to_int);
+      let worker_b =
+        json |> U.member "actor_contributions" |> U.to_list
+        |> List.find (fun row ->
+               String.equal "worker-b" (row |> U.member "actor" |> U.to_string))
+      in
+      check string "mentioned-only state" "mentioned_only"
+        (worker_b |> U.member "activity_state" |> U.to_string);
+      check string "request source" "supervisor"
+        (worker_b |> U.member "requested_by" |> U.to_string))
 
 let () =
   Alcotest.run "dashboard_proof"
@@ -274,7 +333,9 @@ let () =
           test_case "builds collaboration proof projection" `Quick test_dashboard_proof_projection;
           test_case "orders merged timeline chronologically" `Quick
             test_timeline_json_orders_command_plane_events_by_timestamp;
-          test_case "uses persisted proof verdict when available" `Quick
-            test_dashboard_proof_uses_persisted_verdict_when_available;
+          test_case "prefers actual activity over stronger persisted proof" `Quick
+            test_dashboard_proof_prefers_actual_activity_over_stronger_persisted_verdict;
+          test_case "marks mentioned-only actor as unanswered" `Quick
+            test_dashboard_proof_marks_mentioned_only_actor_as_unanswered;
         ] );
     ]

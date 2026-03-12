@@ -5,15 +5,20 @@ module U = Yojson.Safe.Util
 type actor_acc = {
   actor : string;
   role : string option;
+  mutable observed_event_count : int;
   mutable turn_count : int;
   mutable spawn_count : int;
   mutable tool_evidence_count : int;
   mutable interaction_count : int;
+  mutable mention_count : int;
   mutable recent_input_preview : string option;
   mutable recent_output_preview : string option;
   mutable recent_event_summary : string option;
   mutable recent_tool_names : string list;
   mutable last_active_at : string option;
+  mutable requested_by : string option;
+  mutable recent_request_preview : string option;
+  mutable recent_request_at : string option;
 }
 
 let option_or_else fallback opt =
@@ -21,6 +26,9 @@ let option_or_else fallback opt =
 
 let option_first_some left right =
   match left with Some _ -> left | None -> right
+
+let option_prefer_new current newer =
+  match newer with Some _ -> newer | None -> current
 
 let option_non_empty_trimmed = function
   | Some value ->
@@ -55,6 +63,19 @@ let list_of_strings key json =
                if trimmed = "" then None else Some trimmed
            | _ -> None)
   | _ -> []
+
+let unique_non_empty_strings values =
+  let table = Hashtbl.create 16 in
+  values
+  |> List.filter (fun value ->
+         let trimmed = String.trim value in
+         if trimmed = "" then
+           false
+         else if Hashtbl.mem table trimmed then
+           false
+         else (
+           Hashtbl.add table trimmed ();
+           true))
 
 let detail_of_event json =
   match U.member "detail" json with
@@ -132,6 +153,46 @@ let event_tool_names json =
     | Some value -> [ value ]
     | None -> []
 
+let is_mention_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> true
+  | _ -> false
+
+let mention_names_of_text text =
+  let len = String.length text in
+  let rec scan idx acc =
+    if idx >= len then
+      List.rev acc
+    else if Char.equal text.[idx] '@' then
+      let start = idx + 1 in
+      let rec advance j =
+        if j < len && is_mention_char text.[j] then advance (j + 1) else j
+      in
+      let stop = advance start in
+      if stop > start then
+        scan stop (String.sub text start (stop - start) :: acc)
+      else
+        scan (idx + 1) acc
+    else
+      scan (idx + 1) acc
+  in
+  scan 0 [] |> unique_non_empty_strings
+
+let mentioned_actors_of_event json =
+  let detail = detail_of_event json in
+  let texts =
+    [
+      string_field "message" detail;
+      string_field "summary" detail;
+      string_field "content" detail;
+      string_field "title" detail;
+      string_field "task_description" detail;
+    ]
+  in
+  texts
+  |> List.filter_map Fun.id
+  |> List.concat_map mention_names_of_text
+  |> unique_non_empty_strings
+
 let actor_role_lookup (session : Team_session_types.session option) actor =
   match session with
   | None -> None
@@ -158,15 +219,20 @@ let get_or_create_actor table session actor =
         {
           actor;
           role = actor_role_lookup session actor;
+          observed_event_count = 0;
           turn_count = 0;
           spawn_count = 0;
           tool_evidence_count = 0;
           interaction_count = 0;
+          mention_count = 0;
           recent_input_preview = None;
           recent_output_preview = None;
           recent_event_summary = None;
           recent_tool_names = [];
           last_active_at = None;
+          requested_by = None;
+          recent_request_preview = None;
+          recent_request_at = None;
         }
       in
       Hashtbl.replace table actor acc;
@@ -175,14 +241,43 @@ let get_or_create_actor table session actor =
 let tool_name_union xs ys =
   Team_session_types.dedup_strings (xs @ ys)
 
-let actor_contributions_json session events =
+let actor_activity_state (acc : actor_acc) =
+  if acc.observed_event_count > 0 then
+    "acted"
+  else if acc.mention_count > 0 then
+    "mentioned_only"
+  else
+    "planned_only"
+
+let actor_status_detail (acc : actor_acc) =
+  match actor_activity_state acc with
+  | "acted" ->
+      if acc.interaction_count > 0 then
+        "실제 이벤트와 상호작용 흔적이 있습니다."
+      else
+        "실제 이벤트는 있으나 직접 응답/호출 연결은 약합니다."
+  | "mentioned_only" ->
+      if acc.mention_count = 1 then
+        "호출되었지만 응답, 도구, 산출물 근거는 아직 없습니다."
+      else
+        Printf.sprintf "%d번 호출되었지만 응답, 도구, 산출물 근거는 아직 없습니다."
+          acc.mention_count
+  | _ -> "계획된 참여자로 보이지만 아직 남겨진 흔적이 없습니다."
+
+let build_actor_contributions session events =
   let table = Hashtbl.create 16 in
+  (match session with
+  | Some current ->
+      Team_session_types.planned_participant_names current
+      |> List.iter (fun actor -> ignore (get_or_create_actor table session actor))
+  | None -> ());
   List.iter
     (fun json ->
       match event_actor json with
       | None -> ()
       | Some actor ->
           let acc = get_or_create_actor table session actor in
+          acc.observed_event_count <- acc.observed_event_count + 1;
           let event_type = string_field "event_type" json |> Option.value ~default:"event" in
           if String.equal event_type "team_turn" then acc.turn_count <- acc.turn_count + 1;
           if String.equal event_type "team_step_spawn" then acc.spawn_count <- acc.spawn_count + 1;
@@ -192,29 +287,64 @@ let actor_contributions_json session events =
             acc.interaction_count <- acc.interaction_count + 1;
           acc.recent_tool_names <- tool_name_union acc.recent_tool_names tool_names;
           acc.recent_input_preview <-
-            option_first_some (event_input_preview json) acc.recent_input_preview;
+            option_prefer_new acc.recent_input_preview (event_input_preview json);
           acc.recent_output_preview <-
-            option_first_some (event_output_preview json) acc.recent_output_preview;
+            option_prefer_new acc.recent_output_preview (event_output_preview json);
           acc.recent_event_summary <- Some (event_summary json);
-          acc.last_active_at <- option_first_some (string_field "ts_iso" json) acc.last_active_at)
+          acc.last_active_at <- option_prefer_new acc.last_active_at (string_field "ts_iso" json);
+          let request_preview =
+            option_first_some (event_output_preview json) (Some (event_summary json))
+          in
+          let request_at = string_field "ts_iso" json in
+          mentioned_actors_of_event json
+          |> List.iter (fun target ->
+                 if not (String.equal target actor) then
+                   let target_acc = get_or_create_actor table session target in
+                   target_acc.mention_count <- target_acc.mention_count + 1;
+                   target_acc.requested_by <-
+                     option_prefer_new target_acc.requested_by (Some actor);
+                   target_acc.recent_request_preview <-
+                     option_prefer_new target_acc.recent_request_preview request_preview;
+                   target_acc.recent_request_at <-
+                     option_prefer_new target_acc.recent_request_at request_at))
     events;
   Hashtbl.to_seq_values table
   |> List.of_seq
   |> List.sort (fun a b ->
-         match a.last_active_at, b.last_active_at with
-         | Some x, Some y -> String.compare y x
-         | Some _, None -> -1
-         | None, Some _ -> 1
-         | None, None -> String.compare a.actor b.actor)
+         let activity_rank acc =
+           match actor_activity_state acc with
+           | "acted" -> 0
+           | "mentioned_only" -> 1
+           | _ -> 2
+         in
+         let by_rank = Int.compare (activity_rank a) (activity_rank b) in
+         if by_rank <> 0 then
+           by_rank
+         else
+           match
+             option_first_some a.last_active_at a.recent_request_at,
+             option_first_some b.last_active_at b.recent_request_at
+           with
+           | Some x, Some y -> String.compare y x
+           | Some _, None -> -1
+           | None, Some _ -> 1
+           | None, None -> String.compare a.actor b.actor)
+
+let actor_contributions_json contributions =
+  contributions
   |> List.map (fun acc ->
          `Assoc
            [
              ("actor", `String acc.actor);
              ("role", match acc.role with Some value -> `String value | None -> `Null);
+             ("activity_state", `String (actor_activity_state acc));
+             ("activity_detail", `String (actor_status_detail acc));
+             ("observed_event_count", `Int acc.observed_event_count);
              ("turn_count", `Int acc.turn_count);
              ("spawn_count", `Int acc.spawn_count);
              ("tool_evidence_count", `Int acc.tool_evidence_count);
              ("interaction_count", `Int acc.interaction_count);
+             ("mention_count", `Int acc.mention_count);
              ( "recent_input_preview",
                match acc.recent_input_preview with
                | Some value -> `String value
@@ -225,6 +355,18 @@ let actor_contributions_json session events =
                | None -> `Null );
              ( "recent_event_summary",
                match acc.recent_event_summary with
+               | Some value -> `String value
+               | None -> `Null );
+             ( "requested_by",
+               match acc.requested_by with
+               | Some value -> `String value
+               | None -> `Null );
+             ( "recent_request_preview",
+               match acc.recent_request_preview with
+               | Some value -> `String value
+               | None -> `Null );
+             ( "recent_request_at",
+               match acc.recent_request_at with
                | Some value -> `String value
                | None -> `Null );
              ("recent_tool_names", `List (List.map (fun value -> `String value) acc.recent_tool_names));
@@ -313,18 +455,18 @@ let artifact_ref_json kind path =
       ("exists", `Bool (Sys.file_exists path));
     ]
 
-let proof_verdict ~actor_count ~interaction_present ~evidence_present ~artifact_present =
-  if actor_count >= 2 && interaction_present && evidence_present && artifact_present then
+let proof_verdict ~active_actor_count ~interaction_present ~evidence_present
+    ~artifact_present =
+  if active_actor_count >= 2 && interaction_present && evidence_present
+     && artifact_present
+  then
     "proven"
-  else if actor_count >= 2 || interaction_present || evidence_present || artifact_present then
+  else if active_actor_count >= 1
+          && (interaction_present || evidence_present || artifact_present)
+  then
     "partial"
   else
     "insufficient"
-
-let canonical_verdict_of_proof_doc proof_doc =
-  match string_field "verdict" proof_doc with
-  | Some ("proved" | "proved_strong") -> Some "proven"
-  | _ -> None
 
 let cp_backing_json config operation_id =
   let traces = Cp_snapshot.list_traces_json config ~operation_id ~limit:20 () in
@@ -340,7 +482,9 @@ let cp_backing_json config operation_id =
       ("swarm_proof", U.member "swarm_proof" summary);
     ]
 
-let session_summary_json session verdict actor_count interaction_count evidence_count cp_trace_count =
+let session_summary_json session verdict ~planned_actor_count ~active_actor_count
+    ~mentioned_actor_count ~unanswered_actor_count ~interaction_count
+    ~evidence_count ~cp_trace_count =
   match session with
   | None ->
       `Assoc
@@ -348,30 +492,90 @@ let session_summary_json session verdict actor_count interaction_count evidence_
           ("headline", `String "No collaboration session evidence is currently selected.");
           ("detail", `String "Provide session_id or start a team session to build proof.");
           ("verdict", `String verdict);
-          ("actors_count", `Int actor_count);
+          ("actors_count", `Int active_actor_count);
+          ("planned_actor_count", `Int planned_actor_count);
+          ("mentioned_actor_count", `Int mentioned_actor_count);
+          ("unanswered_actor_count", `Int unanswered_actor_count);
           ("interaction_count", `Int interaction_count);
           ("evidence_count", `Int evidence_count);
           ("cp_trace_count", `Int cp_trace_count);
         ]
   | Some session ->
+      let headline =
+        Printf.sprintf "%d actors left real traces in '%s'."
+          active_actor_count
+          (truncate_preview ~max_len:100 session.Team_session_types.goal)
+      in
+      let detail =
+        if unanswered_actor_count > 0 then
+          Printf.sprintf
+            "%d actors were invited or mentioned but still have no reply/tool evidence. Interaction=%d, backing traces=%d."
+            unanswered_actor_count interaction_count cp_trace_count
+        else if active_actor_count >= 2 && interaction_count = 0 then
+          Printf.sprintf
+            "Multiple actors were active, but direct cross-actor interaction is still missing. Backing traces=%d."
+            cp_trace_count
+        else
+          Printf.sprintf "Interaction=%d, evidence=%d, backing traces=%d."
+            interaction_count evidence_count cp_trace_count
+      in
       `Assoc
         [
-          ( "headline",
-            `String
-              (Printf.sprintf "%d actors contributed to '%s'."
-                 actor_count (truncate_preview ~max_len:100 session.Team_session_types.goal)) );
-          ( "detail",
-            `String
-              (Printf.sprintf "Interaction evidence=%d, backing traces=%d, verdict=%s."
-                 interaction_count cp_trace_count verdict) );
+          ("headline", `String headline);
+          ("detail", `String detail);
           ("session_id", `String session.session_id);
           ("goal", `String session.goal);
           ("verdict", `String verdict);
-          ("actors_count", `Int actor_count);
+          ("actors_count", `Int active_actor_count);
+          ("planned_actor_count", `Int planned_actor_count);
+          ("mentioned_actor_count", `Int mentioned_actor_count);
+          ("unanswered_actor_count", `Int unanswered_actor_count);
           ("interaction_count", `Int interaction_count);
           ("evidence_count", `Int evidence_count);
           ("cp_trace_count", `Int cp_trace_count);
         ]
+
+let selection_json ~requested_session_id ~requested_operation_id ~session ~operation_id
+    ~session_count =
+  let mode, reason =
+    match requested_session_id, session with
+    | Some requested, Some current when String.equal requested current.Team_session_types.session_id ->
+        ("explicit", "Requested session_id matched a recorded collaboration session.")
+    | Some requested, None ->
+        ( "requested_not_found",
+          Printf.sprintf
+            "Requested session_id '%s' was not found. No proof context is selected."
+            requested )
+    | None, Some _ ->
+        ("latest_auto_selected", "No session_id was supplied, so the most recent session was selected automatically.")
+    | None, None ->
+        ("none", "No recorded collaboration session is available yet.")
+    | Some _, Some _ ->
+        ("explicit", "Requested session_id matched a recorded collaboration session.")
+  in
+  `Assoc
+    [
+      ("mode", `String mode);
+      ("reason", `String reason);
+      ( "requested_session_id",
+        match requested_session_id with Some value -> `String value | None -> `Null );
+      ( "requested_operation_id",
+        match requested_operation_id with Some value -> `String value | None -> `Null );
+      ( "selected_session_id",
+        match session with
+        | Some current -> `String current.Team_session_types.session_id
+        | None -> `Null );
+      ( "selected_goal",
+        match session with
+        | Some current -> `String current.goal
+        | None -> `Null );
+      ( "selected_created_by",
+        match session with
+        | Some current -> `String current.created_by
+        | None -> `Null );
+      ("selected_operation_id", match operation_id with Some value -> `String value | None -> `Null);
+      ("available_session_count", `Int session_count);
+    ]
 
 let room_json config =
   let state = Room.read_state config in
@@ -384,6 +588,8 @@ let room_json config =
     ]
 
 let json ?actor:_ ?session_id ?operation_id ~config () =
+  let requested_session_id = session_id in
+  let requested_operation_id = operation_id in
   let sessions =
     Team_session_store.list_sessions config
     |> List.sort (fun (a : Team_session_types.session) (b : Team_session_types.session) ->
@@ -413,22 +619,31 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
     | Some current -> Team_session_store.read_events ~max_events:200 config current
     | None -> []
   in
-  let actor_names =
-    let from_session =
-      match session with
-      | Some s -> Team_session_types.planned_participant_names s
-      | None -> []
-    in
-    let from_events =
-      events |> List.filter_map event_actor |> Team_session_types.dedup_strings
-    in
-    Team_session_types.dedup_strings (from_session @ from_events)
+  let contributions = build_actor_contributions session events in
+  let planned_actor_count =
+    match session with
+    | Some current -> List.length (Team_session_types.planned_participant_names current)
+    | None -> 0
+  in
+  let active_actor_count =
+    contributions
+    |> List.filter (fun acc -> acc.observed_event_count > 0)
+    |> List.length
+  in
+  let mentioned_actor_count =
+    contributions
+    |> List.filter (fun acc -> acc.mention_count > 0)
+    |> List.length
+  in
+  let unanswered_actor_count =
+    contributions
+    |> List.filter (fun acc ->
+           acc.observed_event_count = 0 && acc.mention_count > 0)
+    |> List.length
   in
   let interaction_count =
-    events
-    |> List.fold_left (fun acc json ->
-           if Option.is_some (event_related_actor json) then acc + 1 else acc)
-         0
+    contributions
+    |> List.fold_left (fun acc item -> acc + item.interaction_count) 0
   in
   let checkpoints_count =
     match session_id with
@@ -495,18 +710,9 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
     tool_evidence_count > 0 || deliverable_count > 0 || checkpoints_count > 0
     || Option.is_some proof_doc
   in
-  let fallback_verdict () =
-    proof_verdict ~actor_count:(List.length actor_names)
-      ~interaction_present:(interaction_count > 0)
-      ~evidence_present ~artifact_present
-  in
   let verdict =
-    match proof_doc with
-    | Some doc -> (
-        match canonical_verdict_of_proof_doc doc with
-        | Some canonical -> canonical
-        | None -> fallback_verdict ())
-    | None -> fallback_verdict ()
+    proof_verdict ~active_actor_count ~interaction_present:(interaction_count > 0)
+      ~evidence_present ~artifact_present
   in
   let goal_binding =
     match session with
@@ -554,16 +760,21 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
       ("schema_version", `String "1.0.0");
       ("generated_at", `String (Types.now_iso ()));
       ("room", room_json config);
+      ( "selection",
+        selection_json ~requested_session_id
+          ~requested_operation_id ~session
+          ~operation_id ~session_count:(List.length sessions) );
       ("session_id", match session_id with Some value -> `String value | None -> `Null);
       ("operation_id", match operation_id with Some value -> `String value | None -> `Null);
       ("proof_verdict", `String verdict);
       ( "summary",
-        session_summary_json session verdict (List.length actor_names)
-          interaction_count
-          (tool_evidence_count + deliverable_count + checkpoints_count)
-          cp_trace_count );
+        session_summary_json session verdict ~planned_actor_count
+          ~active_actor_count ~mentioned_actor_count ~unanswered_actor_count
+          ~interaction_count
+          ~evidence_count:(tool_evidence_count + deliverable_count + checkpoints_count)
+          ~cp_trace_count );
       ("timeline", timeline_json ?session_id ?operation_id events cp_traces);
-      ("actor_contributions", `List (actor_contributions_json session events));
+      ("actor_contributions", `List (actor_contributions_json contributions));
       ("goal_binding", goal_binding);
       ("tool_evidence", tool_evidence);
       ("cp_backing_evidence", match cp_backing with Some value -> value | None -> `Null);

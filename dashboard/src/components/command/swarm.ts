@@ -9,6 +9,7 @@ import type {
   CommandPlaneSwarmLane,
   CommandPlaneSwarmProof,
   CommandPlaneSwarmResponse,
+  CommandPlaneSwarmStatus,
   CommandPlaneSwarmTimelineEvent,
   CommandPlaneSwarmWorker,
 } from '../../types'
@@ -354,10 +355,54 @@ function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEvent }) {
 
 function SwarmGapDot({ gap }: { gap: CommandPlaneSwarmGap }) {
   return html`
-    <div class="swarm-gap-inline">
-      <span class="swarm-gap-dot"></span>
-      <span class="command-chip ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
-      <span class="command-card-sub">${gap.summary}</span>
+    <article class="command-card compact">
+      <div class="command-card-head">
+        <div>
+          <strong>${gap.summary}</strong>
+          <div class="command-card-sub">${gap.code} · lane ${gap.lane_ids.join(', ') || 'n/a'}</div>
+        </div>
+        <span class="command-chip ${toneClass(gap.severity)}">${gap.count}</span>
+      </div>
+      ${gap.why_it_matters ? html`<p>${gap.why_it_matters}</p>` : null}
+      ${gap.next_tool || gap.next_step
+        ? html`
+            <div class="command-card-grid">
+              <span>다음 도구</span><span>${gap.next_tool ?? 'masc_observe_traces'}</span>
+              <span>다음 확인</span><span>${gap.next_step ?? '최근 trace를 확인합니다.'}</span>
+            </div>
+          `
+        : null}
+    </article>
+  `
+}
+
+function SwarmNarrativeCard({
+  swarm,
+}: {
+  swarm?: CommandPlaneSwarmStatus
+}) {
+  const narrative = swarm?.narrative
+  if (!narrative) return null
+  return html`
+    <div class="command-guide-card highlight">
+      <div class="command-guide-head">
+        <strong>읽는 순서</strong>
+        <span class="command-chip">${narrative.state ?? 'idle'}</span>
+      </div>
+      <div class="proof-summary-stack">
+        <article class="proof-summary-block">
+          <strong>무엇으로 시작됐나</strong>
+          <span>${narrative.started ?? '시작 근거가 없습니다.'}</span>
+        </article>
+        <article class="proof-summary-block">
+          <strong>지금 무엇을 하고 있나</strong>
+          <span>${narrative.active_work ?? '현재 작업 설명이 없습니다.'}</span>
+        </article>
+        <article class="proof-summary-block">
+          <strong>끝났는가</strong>
+          <span>${narrative.completion ?? '종료 근거가 없습니다.'}</span>
+        </article>
+      </div>
     </div>
   `
 }
@@ -379,8 +424,10 @@ function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
         </div>
       ${proof
         ? html`
+            <p>${proof.status_summary ?? proof.missing_reason ?? '아직 스웜 증거가 수집되지 않았습니다.'}</p>
             <div class="command-card-grid">
               <span>소스</span><span>${proof.source}</span>
+              <span>상태 코드</span><span>${proof.reason_code ?? 'n/a'}</span>
               <span>런</span><span>${proof.run_id ?? 'n/a'}</span>
               <span>수집 시각</span><span>${relativeTime(proof.captured_at)}</span>
               <span>통과</span><span>${proof.pass == null ? 'n/a' : proof.pass ? '예' : '아니오'}</span>
@@ -388,6 +435,9 @@ function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
               <span>Ctx / Slot</span><span>${proof.ctx_per_slot ?? 'n/a'}</span>
               <span>워커 증거</span><span>${proof.workers.expected ?? 'n/a'} 예상 · ${proof.workers.done ?? 'n/a'} 완료 · ${proof.workers.final ?? 'n/a'} 최종</span>
             </div>
+            ${proof.expected_artifact_dir
+              ? html`<div class="command-card-foot">expected ${proof.expected_artifact_dir}</div>`
+              : null}
             ${proof.artifact_ref
               ? html`<div class="command-card-foot">${proof.artifact_ref}</div>`
               : null}
@@ -439,6 +489,8 @@ function SwarmPanel() {
               </div>
 
               <div class="command-card-stack">
+                <${SwarmNarrativeCard} swarm=${swarm} />
+
                 <div class="command-guide-card highlight ${focusKey === 'recommendation' ? 'focus' : ''}">
                   <div class="command-guide-head">
                     <strong>${recommendation?.label ?? '운영자 상태 확인'}</strong>
@@ -456,7 +508,7 @@ function SwarmPanel() {
                     <span class="command-chip ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
                   </div>
                   ${gaps.length > 0
-                    ? html`<div class="swarm-event-rail">${gaps.slice(0, 4).map(gap => html`<${SwarmGapDot} gap=${gap} />`)}</div>`
+                    ? html`<div class="command-card-stack">${gaps.slice(0, 4).map(gap => html`<${SwarmGapDot} gap=${gap} />`)}</div>`
                     : html`<p>지금 보이는 핵심 공백은 없습니다.</p>`}
                 </div>
 

@@ -386,8 +386,13 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     let (stdin_read, stdin_write) = Unix.pipe () in
     
     (* Spawn process directly without shell *)
-    let pid = Unix.create_process 
-      (List.hd cmd_args) cmd_array
+    let executable =
+      match cmd_args with
+      | executable :: _ -> executable
+      | [] -> invalid_arg "spawn_with_direct_exec: empty command args"
+    in
+    let pid = Unix.create_process
+      executable cmd_array
       stdin_read stdout_write Unix.stderr in
     
     (* Close unused ends *)

@@ -50,7 +50,7 @@ end
 (** Response modes for /mcp endpoint *)
 type response_mode =
   | Json_response of Yojson.Safe.t       (** Single JSON-RPC response *)
-  | Json_batch of Yojson.Safe.t list     (** Batch JSON-RPC responses *)
+  | Json_batch of Yojson.Safe.t list     (** Deprecated compatibility constructor; new requests should not use batch *)
   | Sse_upgrade                          (** Upgrade to SSE stream *)
   | Error_response of int * string       (** HTTP error (status, message) *)
 
@@ -61,7 +61,9 @@ type request_handler =
     @param session_id Optional session ID from mcp-session-id header
     @param body Request body (JSON-RPC)
     @param request_handler Handler for each JSON-RPC request
-    @return (response_mode, session option) *)
+    @return (response_mode, session option)
+
+    Batch JSON-RPC payloads are rejected with [Error_response (400, ...)]. *)
 val handle_post :
   ?session_id:string ->
   body:string ->

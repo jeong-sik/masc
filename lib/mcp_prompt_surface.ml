@@ -11,6 +11,7 @@ type prompt_def = {
   title : string;
   description : string;
   arguments : prompt_argument list;
+  icons : Mcp_server.mcp_icon list;
 }
 
 let prompt_defs =
@@ -19,6 +20,7 @@ let prompt_defs =
       name = "tool_help";
       title = "Tool Help";
       description = "Compose a grounded explanation for a specific MASC MCP tool.";
+      icons = [ Mcp_server.themed_icon ~label:"TH" ~bg:"#1D4ED8" ~fg:"#EFF6FF" ];
       arguments =
         [
           { name = "tool_name"; description = "Exact MCP tool name"; required = true };
@@ -29,6 +31,7 @@ let prompt_defs =
       name = "team_session_proof";
       title = "Team Session Proof";
       description = "Summarize auditable collaboration evidence for a team session.";
+      icons = [ Mcp_server.themed_icon ~label:"TP" ~bg:"#7C3AED" ~fg:"#F5F3FF" ];
       arguments =
         [
           { name = "session_id"; description = "Team session identifier"; required = true };
@@ -39,6 +42,7 @@ let prompt_defs =
       name = "command_truth";
       title = "Command Truth";
       description = "Summarize managed command-plane evidence for an operation or run.";
+      icons = [ Mcp_server.themed_icon ~label:"CT" ~bg:"#9A3412" ~fg:"#FFF7ED" ];
       arguments =
         [
           { name = "operation_id"; description = "Managed operation or trace identifier"; required = false };
@@ -53,6 +57,7 @@ let prompt_json (prompt : prompt_def) =
       ("name", `String prompt.name);
       ("title", `String prompt.title);
       ("description", `String prompt.description);
+      ("icons", `List (List.map Mcp_server.icon_to_json prompt.icons));
       ( "arguments",
         `List
           (List.map

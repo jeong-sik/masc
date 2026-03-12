@@ -900,6 +900,7 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
           | Ok () ->
               stop_sse_session session_id;
               Sse.unregister session_id;
+              Mcp_eio.clear_resource_subscriptions_for_session session_id;
               forget_mcp_session session_id;
               Printf.printf "🔚 Session terminated: %s\n%!" session_id;
               let headers =

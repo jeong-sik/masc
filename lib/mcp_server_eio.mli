@@ -133,6 +133,10 @@ val execute_tool_eio :
   arguments:Yojson.Safe.t ->
   bool * string
 
+(** Clear MCP resource subscriptions associated with a session.
+    Called by streamable HTTP transport when a session is deleted. *)
+val clear_resource_subscriptions_for_session : string -> unit
+
 (** {1 Stdio Transport - Eio Native} *)
 
 (** Run MCP server in stdio mode with Eio

@@ -329,6 +329,13 @@ let json () =
                       ~bad_smell:"The system explains failure but leaves the operator directionless."
                       ~next_action:"Follow the recommended tool unless a stronger blocker is visible."
                   ];
+                panel ~id:"command.orchestra" ~title:"Orchestra Map"
+                  ~purpose:"Shows the full room as a single tactical map across sessions, lanes, workers, keepers, and hot signals."
+                  ~problem_solved:"Prevents operators from having to mentally merge swarm, war-room, intervene, and continuity views."
+                  ~when_active:"Orchestra surface."
+                  ~agent_role:"Agents should start here for room-wide orientation, then drill down into swarm, war-room, or intervene."
+                  ~ecosystem_function:"Creates a room-scale visual control room over orchestration state."
+                  [];
                 panel ~id:"command.operations" ~title:"Operations / Detachments"
                   ~purpose:"Shows managed intent and materialized execution bodies together."
                   ~problem_solved:"Prevents confusion between assigned work and instantiated runtime work."

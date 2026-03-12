@@ -45,6 +45,7 @@ import type {
   CommandPlaneChainSummary,
   CommandPlaneSnapshot,
   CommandPlaneSwarmResponse,
+  CommandPlaneOrchestraResponse,
   CommandPlaneSummarySnapshot,
 } from './types'
 
@@ -531,6 +532,17 @@ export function fetchCommandPlaneSwarm(
   if (operationId) params.set('operation_id', operationId)
   const query = params.toString()
   return get(`/api/v1/command-plane/swarm${query ? `?${query}` : ''}`)
+}
+
+export function fetchCommandPlaneOrchestra(
+  runId?: string,
+  operationId?: string,
+): Promise<CommandPlaneOrchestraResponse> {
+  const params = new URLSearchParams()
+  if (runId) params.set('run_id', runId)
+  if (operationId) params.set('operation_id', operationId)
+  const query = params.toString()
+  return get(`/api/v1/command-plane/orchestra${query ? `?${query}` : ''}`)
 }
 
 export function runCommandPlaneAction(

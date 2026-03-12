@@ -174,6 +174,7 @@ export const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: strin
   { id: 'warroom', label: '워룸', group: 'status' },
   { id: 'summary', label: '요약', group: 'status' },
   { id: 'topology', label: '토폴로지', group: 'status' },
+  { id: 'orchestra', label: '오케스트라', group: 'status' },
   { id: 'swarm', label: '스웜', group: 'status' },
   { id: 'operations', label: '작전', group: 'history' },
   { id: 'trace', label: '트레이스', group: 'history' },
@@ -192,6 +193,10 @@ export const COMMAND_SURFACE_GUIDE: Record<CommandPlaneSurface, { title: string;
   operations: {
     title: '현재 작전 상세',
     description: '활성 operation, detachment, dependency를 먼저 읽는 기본 진입 표면입니다.',
+  },
+  orchestra: {
+    title: '룸 오케스트라 맵',
+    description: 'room, session, lane, worker, keeper를 한 장의 작전판으로 읽는 시각화 표면입니다.',
   },
   swarm: {
     title: '스웜 실행 흐름',
@@ -244,10 +249,20 @@ function inheritedWorkflowRouteParams(): Record<string, string> {
 
 export function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
   const inherited = inheritedWorkflowRouteParams()
+  const swarmRunId = dashboardSwarmRunId()
+  const swarmOperationId = dashboardSwarmOperationId()
   if (surface === 'operations') return inherited
   if (surface === 'chains') {
     const operationId = commandPlaneChainFocusOperationId.value
     return operationId ? { ...inherited, surface, operation: operationId } : { ...inherited, surface }
+  }
+  if (surface === 'swarm' || surface === 'warroom' || surface === 'orchestra') {
+    return {
+      ...inherited,
+      surface,
+      ...(swarmRunId ? { run_id: swarmRunId } : {}),
+      ...(swarmOperationId ? { operation_id: swarmOperationId } : {}),
+    }
   }
   return { ...inherited, surface }
 }
@@ -308,6 +323,11 @@ export function currentSurfaceRecommendation(surface: CommandPlaneSurface): {
       return {
         tool: swarm?.recommended_next_tool ?? summary?.swarm_status?.recommended_next_action?.tool ?? 'masc_observe_traces',
         reason: summary?.swarm_status?.recommended_next_action?.reason ?? 'lane 이동과 blocker를 보고 다음 probe 도구를 고릅니다.',
+      }
+    case 'orchestra':
+      return {
+        tool: 'masc_operator_snapshot',
+        reason: 'room, session, lane, worker, keeper를 한 장에서 훑은 뒤 drill-down 대상을 고릅니다.',
       }
     case 'chains':
       return {

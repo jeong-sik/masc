@@ -2278,9 +2278,99 @@ export interface CommandPlaneSwarmResponse {
   truth_notes: string[]
 }
 
+export interface CommandPlaneOrchestraFact {
+  label: string
+  value: string
+}
+
+export interface CommandPlaneOrchestraNode {
+  id: string
+  kind: 'room' | 'session' | 'operation' | 'detachment' | 'lane' | 'worker' | 'keeper' | string
+  label: string
+  subtitle?: string | null
+  status?: string | null
+  tone: 'ok' | 'warn' | 'bad' | string
+  pulse?: string | null
+  provenance: 'truth' | 'derived' | 'fallback' | string
+  visual_class?: string
+  glyph?: string
+  parent_id?: string | null
+  lane_id?: string | null
+  link_tab?: 'command' | 'intervene' | string | null
+  link_surface?: CommandPlaneSurface | string | null
+  link_params?: Record<string, string>
+  facts: CommandPlaneOrchestraFact[]
+}
+
+export interface CommandPlaneOrchestraEdge {
+  id: string
+  source: string
+  target: string
+  kind: string
+  label?: string | null
+  tone: 'ok' | 'warn' | 'bad' | string
+  provenance: 'truth' | 'derived' | 'fallback' | string
+  animated?: boolean
+}
+
+export interface CommandPlaneOrchestraSignal {
+  id: string
+  kind: string
+  label: string
+  detail?: string | null
+  tone: 'ok' | 'warn' | 'bad' | string
+  provenance: 'truth' | 'derived' | 'fallback' | string
+  source_id?: string | null
+  target_id?: string | null
+  suggested_surface?: CommandPlaneSurface | string | null
+  suggested_params?: Record<string, string>
+}
+
+export interface CommandPlaneOrchestraFocus {
+  target_kind: 'node' | 'signal' | string
+  target_id: string
+  label: string
+  reason: string
+  suggested_surface?: CommandPlaneSurface | string | null
+  suggested_params?: Record<string, string>
+}
+
+export interface CommandPlaneOrchestraResponse {
+  version?: string
+  generated_at?: string
+  room: {
+    room_id?: string
+    project?: string
+    cluster?: string
+    paused?: boolean
+    pause_reason?: string | null
+    agent_count?: number
+    task_count?: number
+    message_count?: number
+  }
+  summary?: {
+    session_count?: number
+    operation_count?: number
+    detachment_count?: number
+    lane_count?: number
+    worker_count?: number
+    keeper_count?: number
+    signal_count?: number
+    alert_count?: number
+  }
+  nodes: CommandPlaneOrchestraNode[]
+  edges: CommandPlaneOrchestraEdge[]
+  signals: CommandPlaneOrchestraSignal[]
+  focus?: CommandPlaneOrchestraFocus | null
+  swarm_status?: CommandPlaneSwarmStatus
+  swarm_proof?: CommandPlaneSwarmProof
+  truth_notes?: string[]
+}
+
 export type CommandPlaneSurface =
   | 'warroom'
   | 'summary'
+  | 'orchestra'
   | 'swarm'
   | 'operations'
   | 'topology'

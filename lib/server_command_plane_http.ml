@@ -124,6 +124,22 @@ let command_plane_swarm_http_json ~deps ~state request =
   Command_plane_v2.swarm_live_json state.Mcp_server.room_config ?run_id
     ?operation_id ()
 
+let command_plane_orchestra_http_json ~deps ~state request =
+  let actor = command_plane_actor deps request in
+  let run_id = deps.query_param request "run_id" in
+  let operation_id = deps.query_param request "operation_id" in
+  let ctx : _ Operator_control.context =
+    {
+      config = state.Mcp_server.room_config;
+      agent_name = actor;
+      sw = deps.get_switch ();
+      clock = deps.get_clock ();
+      proc_mgr = state.Mcp_server.proc_mgr;
+      mcp_session_id = deps.get_session_id_any request;
+    }
+  in
+  Command_plane_orchestra.json ?run_id ?operation_id ctx
+
 let command_plane_unit_define_http_json ~deps ~state request ~args =
   Command_plane_v2.unit_update_json state.Mcp_server.room_config
     ~actor:(command_plane_actor deps request) args

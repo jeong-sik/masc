@@ -44,6 +44,7 @@ import {
   commandPlaneSurface,
   refreshCommandPlaneChainSummary,
   refreshCommandPlaneCurrentSurface,
+  refreshCommandPlaneOrchestra,
   refreshCommandPlaneSwarm,
 } from './command-store'
 
@@ -120,8 +121,11 @@ function refreshForTab(tab: string) {
   if (tab === 'command') {
     refreshCommandPlaneCurrentSurface()
     refreshCommandPlaneChainSummary()
-    if (commandPlaneSurface.value === 'swarm' || commandPlaneSurface.value === 'warroom') {
+    if (commandPlaneSurface.value === 'swarm' || commandPlaneSurface.value === 'warroom' || commandPlaneSurface.value === 'orchestra') {
       refreshCommandPlaneSwarm()
+    }
+    if (commandPlaneSurface.value === 'orchestra') {
+      refreshCommandPlaneOrchestra()
     }
     if (commandPlaneSurface.value === 'warroom') {
       refreshOperatorSnapshot()

@@ -67,6 +67,23 @@ call_tool() {
   jsonrpc_call "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
 }
 
+runtime_verify_result() {
+  local runtime_pool="${1:-}"
+  local args
+  args="$(
+    jq -cn \
+      --arg runtime_pool "$runtime_pool" \
+      '
+      {}
+      | if $runtime_pool != "" then .runtime_pool = $runtime_pool else . end
+      '
+  )"
+  local payload
+  payload="$(call_tool 92898 "masc_llama_runtime_verify" "$args")"
+  require_tool_success "$payload"
+  printf '%s' "$payload" | extract_result
+}
+
 extract_text() {
   jq -r 'try (.result.content[0].text) catch empty'
 }
@@ -199,10 +216,13 @@ run_spawn_wave() {
 }
 
 wait_for_runtime_down() {
-  local port="$1"
+  local runtime_id="$1"
   local deadline=$((SECONDS + 20))
   while [ "$SECONDS" -lt "$deadline" ]; do
-    if ! curl -fsS --max-time 3 "http://127.0.0.1:${port}/v1/models" >/dev/null 2>&1; then
+    local runtime_json
+    runtime_json="$(runtime_verify_result "$runtime_id")"
+    if printf '%s' "$runtime_json" \
+      | jq -e '.provider_reachable != true or .slot_reachable != true or (.runtime_blocker // "") == "provider_unreachable"' >/dev/null; then
       return 0
     fi
     sleep 1
@@ -265,8 +285,8 @@ if [ -z "$victim_pid" ]; then
   exit 1
 fi
 kill "$victim_pid"
-if ! wait_for_runtime_down "$VICTIM_PORT"; then
-  echo "FAIL: victim runtime on port $VICTIM_PORT did not go down"
+if ! wait_for_runtime_down "$VICTIM_RUNTIME_ID"; then
+  echo "FAIL: victim runtime ${VICTIM_RUNTIME_ID} did not go down"
   exit 1
 fi
 

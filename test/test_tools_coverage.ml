@@ -83,6 +83,7 @@ let test_find_tool_existing () =
                "masc_team_session_list"; "masc_team_session_compare";
                "masc_team_session_turn"; "masc_team_session_events";
                "masc_team_session_prove"; "masc_llama_models";
+               "masc_llama_runtime_verify"; "masc_observe_swarm";
                "masc_operator_snapshot"; "masc_operator_digest";
                "masc_operator_action"; "masc_operator_confirm";
                "masc_voice_speak"; "masc_voice_agent";
@@ -640,6 +641,33 @@ let test_masc_llama_models_schema () =
           Alcotest.(check int) "no required params" 0 (List.length props)
       | None -> Alcotest.fail "masc_llama_models missing properties"
 
+let test_masc_llama_runtime_verify_schema () =
+  match find_tool "masc_llama_runtime_verify" with
+  | None -> Alcotest.fail "masc_llama_runtime_verify not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has runtime_pool" true
+            (List.mem_assoc "runtime_pool" props);
+          Alcotest.(check bool) "has expected_model" true
+            (List.mem_assoc "expected_model" props);
+          Alcotest.(check bool) "has expected_slots" true
+            (List.mem_assoc "expected_slots" props);
+          Alcotest.(check bool) "has expected_ctx" true
+            (List.mem_assoc "expected_ctx" props)
+      | None -> Alcotest.fail "masc_llama_runtime_verify missing properties"
+
+let test_masc_observe_swarm_schema () =
+  match find_tool "masc_observe_swarm" with
+  | None -> Alcotest.fail "masc_observe_swarm not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has run_id" true (List.mem_assoc "run_id" props);
+          Alcotest.(check bool) "has operation_id" true
+            (List.mem_assoc "operation_id" props)
+      | None -> Alcotest.fail "masc_observe_swarm missing properties"
+
 let test_masc_team_session_step_spawn_selection_note_schema () =
   match find_tool "masc_team_session_step" with
   | None -> Alcotest.fail "masc_team_session_step not found"
@@ -1193,6 +1221,8 @@ let () =
       Alcotest.test_case "tool-admin-update" `Quick
         test_masc_tool_admin_update_schema;
       Alcotest.test_case "llama-models" `Quick test_masc_llama_models_schema;
+      Alcotest.test_case "llama-runtime-verify" `Quick
+        test_masc_llama_runtime_verify_schema;
       Alcotest.test_case "team-session-step-spawn-selection-note" `Quick
         test_masc_team_session_step_spawn_selection_note_schema;
       Alcotest.test_case "team-session-step-spawn-batch" `Quick
@@ -1220,6 +1250,7 @@ let () =
       Alcotest.test_case "dispatch_tick" `Quick test_masc_dispatch_tick_schema;
       Alcotest.test_case "detachment_list" `Quick test_masc_detachment_list_schema;
       Alcotest.test_case "detachment_status" `Quick test_masc_detachment_status_schema;
+      Alcotest.test_case "observe_swarm" `Quick test_masc_observe_swarm_schema;
     ];
     "walph_tools", [
       Alcotest.test_case "walph_loop" `Quick test_masc_walph_loop_schema;

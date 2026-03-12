@@ -88,7 +88,7 @@ merged 기준 아키텍처 한 장 요약은 [MERGED-ARCHITECTURE-SSOT.md](./doc
 - canonical implementation path: `Team Session + Supervisor`
 - merged substrate:
   - native chain plane
-  - local64 runtime pool
+  - local64 runtime pool target profile
   - default `best_first_v1` search fabric for `coding_task`
 - merged but not canonical public path:
   - `SWARM-RISC` research modules
@@ -99,8 +99,13 @@ merged 기준 benchmark 진입점은 [INTEGRATED-BENCHMARK-RUNBOOK.md](./docs/IN
 
 - direct swarm proof: `./scripts/harness_agent_swarm_live.sh`
 - search policy proof: `./scripts/harness_cp_search_fabric.sh`
-- local64 runtime proof: `./scripts/harness_team_session_local64_smoke.sh`
+- local64 target-profile smoke: `./scripts/harness_team_session_local64_smoke.sh`
 - one-shot wrapper: `./scripts/harness_integrated_benchmark.sh`
+
+proof/read path notes:
+
+- benchmark harness truth comes from MCP tools first: `masc_observe_swarm`, `masc_llama_runtime_verify`
+- provider HTTP endpoints remain backend/runtime substrate, not canonical operator/harness read paths
 
 ## 기본 사용 흐름
 

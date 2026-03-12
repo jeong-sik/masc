@@ -66,10 +66,8 @@ export MASC_LOCAL64_BASE_PATH="$BASE_PATH"
 need_pool_start="false"
 if [ "$POOL_SHARDS" -gt 1 ] || [ "$POOL_FORCE_START" = "true" ]; then
   need_pool_start="true"
-elif [ -n "${LLAMA_MODEL_PATH:-}" ]; then
-  if ! curl -fsS --max-time 3 "http://127.0.0.1:${SEED_PORT}/v1/models" >/dev/null 2>&1; then
-    need_pool_start="true"
-  fi
+elif [ -n "${LLAMA_MODEL_PATH:-}" ] && [ -z "${MASC_LLAMA_RUNTIMES_JSON:-}" ]; then
+  need_pool_start="true"
 fi
 
 if [ "$need_pool_start" = "true" ]; then

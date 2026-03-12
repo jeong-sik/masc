@@ -56,6 +56,17 @@
    server_trpg_rest
    server_dashboard_http
    server_routes_http
+   server_routes_http_common
+   server_routes_http_pages
+   server_routes_http_runtime
+   server_routes_http_keeper_stream
+   server_routes_http_routes_frontend
+   server_routes_http_routes_room
+   server_routes_http_routes_trpg
+   server_routes_http_routes_dashboard
+   server_routes_http_routes_command_plane_read
+   server_routes_http_routes_command_plane_write
+   server_routes_http_routes_social
    server_h2_gateway
    server_runtime_bootstrap
    server_command_plane_http
@@ -385,6 +396,17 @@
  room_utils_backend_setup
  room_utils_paths_backend
  room_utils_ops
+ server_routes_http_common
+ server_routes_http_pages
+ server_routes_http_runtime
+ server_routes_http_keeper_stream
+ server_routes_http_routes_frontend
+ server_routes_http_routes_room
+ server_routes_http_routes_trpg
+ server_routes_http_routes_dashboard
+ server_routes_http_routes_command_plane_read
+ server_routes_http_routes_command_plane_write
+ server_routes_http_routes_social
   env_config_core
   env_config_runtime
   env_config_governance

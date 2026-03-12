@@ -1,0 +1,246 @@
+[@@@warning "-32-33-69"]
+
+open Types
+open Server_utils
+open Server_auth
+open Server_tts_proxy
+open Server_trpg_rest
+open Server_dashboard_http
+open Server_routes_http_common
+open Server_routes_http_pages
+open Server_routes_http_runtime
+open Server_routes_http_keeper_stream
+
+module Http = Http_server_eio
+module Mcp_eio = Mcp_server_eio
+module Common = Server_routes_http_common
+module Pages = Server_routes_http_pages
+module Runtime = Server_routes_http_runtime
+module Keeper_stream = Server_routes_http_keeper_stream
+
+let add_routes router =
+  router
+  |> Http.Router.get "/api/v1/council/debates" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json = council_debates_json req ~base_path in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/council/sessions" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = council_sessions_json req in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/board" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let hearth = query_param req "hearth" in
+         let sort_by = board_sort_order_of_request req in
+         let exclude_system = bool_query_param req "exclude_system" ~default:false in
+         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+         let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+         let fetch_limit = board_fetch_limit ~exclude_system ~limit ~offset in
+         let posts = Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit () in
+         let posts = filter_board_posts ~exclude_system posts in
+         let karma_map = Board_dispatch.get_all_karma () in
+         let get_karma author =
+           try List.assoc author karma_map with Not_found -> 0
+         in
+         let paged = posts |> drop offset |> take limit in
+         let posts_json =
+           List.map
+             (fun (p : Board.post) ->
+               let author = Board.Agent_id.to_string p.author in
+               board_post_dashboard_json ~author_karma:(get_karma author) p)
+             paged
+         in
+         let json = `Assoc [
+           ("posts", `List posts_json);
+           ("count", `Int (List.length posts_json));
+           ("limit", `Int limit);
+           ("offset", `Int offset);
+           ("sort_by", `String (board_sort_label sort_by));
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let hearths = Board_dispatch.list_hearths () in
+         let json = `Assoc [
+           ("hearths", `List (List.map (fun (name, count) ->
+             `Assoc [("name", `String name); ("count", `Int count)]
+           ) hearths));
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/board/flairs" (fun _request reqd ->
+       let flairs = List.map Board.flair_to_yojson Board.available_flairs in
+       let json = `Assoc [("flairs", `List flairs)] in
+       Http.Response.json (Yojson.Safe.to_string json) reqd)
+
+
+  (* Board write APIs — used by Bevy Viewer *)
+  |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let (ok, msg) = Tool_board.handle_tool "masc_board_vote" args in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_with_cors ~status request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool ok); ("message", `String msg)
+               ]))
+           with exn ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool false);
+                 ("message", `String (Printexc.to_string exn))
+               ]))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let (ok, msg) = Tool_board.handle_tool "masc_board_comment" args in
+             let status = if ok then `Created else `Bad_request in
+             respond_json_with_cors ~status request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool ok); ("message", `String msg)
+               ]))
+           with exn ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool false);
+                 ("message", `String (Printexc.to_string exn))
+               ]))
+         )
+       ) request reqd)
+  |> Http.Router.get "/api/v1/karma" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let karma_list = Board_dispatch.get_all_karma () in
+         let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+         let json = `Assoc [
+           ("karma", `List (List.map (fun (agent, k) ->
+             `Assoc [("agent", `String agent); ("karma", `Int k)]
+           ) sorted));
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  (* Lodge Agents REST API — GET public, POST admin *)
+  |> Http.Router.add ~path:"/api/v1/lodge/agents" ~methods:[`GET; `POST]
+       ~handler:(fun request reqd ->
+         match request.Httpun.Request.meth with
+         | `GET ->
+           with_public_read (fun _state _req reqd ->
+             match Lodge_heartbeat.load_lodge_agents_full () with
+             | Ok json ->
+                 Http.Response.json (Yojson.Safe.to_string json) reqd
+             | Error msg ->
+                 Http.Response.json ~status:`Internal_server_error
+                   (Printf.sprintf {|{"error":"%s"}|} msg) reqd
+           ) request reqd
+         | `POST ->
+           with_admin_auth (fun _state _req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               try
+                 let json = Yojson.Safe.from_string body_str in
+                 let open Yojson.Safe.Util in
+                 let name = json |> member "name" |> to_string in
+                 let emoji = json |> member "emoji" |> to_string in
+                 let korean_name =
+                   match json |> member "koreanName" with
+                   | `String s -> Some s | _ -> None
+                 in
+                 let traits =
+                   json |> member "traits" |> to_list |> List.map to_string
+                 in
+                 let interests =
+                   try json |> member "interests" |> to_list
+                       |> List.map to_string
+                   with Yojson.Safe.Util.Type_error _ | Not_found -> []
+                 in
+                 let activity_level =
+                   match json |> member "activityLevel" with
+                   | `Float f -> f | `Int i -> float_of_int i | _ -> 0.7
+                 in
+                 let preferred_hours =
+                   json |> member "preferredHours" |> to_list
+                   |> List.map to_int
+                 in
+                 let peak_hour =
+                   match json |> member "peakHour" with
+                   | `Int i -> Some i | _ -> None
+                 in
+                 let model =
+                   match json |> member "model" with
+                   | `String s -> s | _ -> "glm-4.7-flash:latest"
+                 in
+                 let personality_hint =
+                   match json |> member "personalityHint" with
+                   | `String s -> Some s | _ -> None
+                 in
+                 let primary_value =
+                   match json |> member "primaryValue" with
+                   | `String s -> Some s | _ -> None
+                 in
+                 let name_re = Str.regexp "^[a-z][a-z0-9-]*$" in
+                 let name_len = String.length name in
+                 if name_len < 2 || name_len > 20
+                    || not (Str.string_match name_re name 0) then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"name: 2-20 lowercase + hyphens"}|} reqd
+                 else if String.length emoji = 0 then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"emoji is required"}|} reqd
+                 else if traits = [] then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"at least one trait required"}|} reqd
+                 else if preferred_hours = [] then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"at least one preferredHour"}|} reqd
+                 else if activity_level < 0.1 || activity_level > 1.0 then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"activityLevel: 0.1-1.0"}|} reqd
+                 else if List.exists (fun h -> h < 0 || h > 23)
+                           preferred_hours then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"hours: 0-23"}|} reqd
+                 else begin
+                   match Lodge_heartbeat.create_agent_graphql
+                           ~name ~emoji ~korean_name ~traits ~interests
+                           ~activity_level ~preferred_hours ~peak_hour
+                           ~model ~personality_hint ~primary_value () with
+                   | Ok agent_json ->
+                       Http.Response.json ~status:`Created
+                         (Yojson.Safe.to_string (`Assoc [
+                           ("ok", `Bool true);
+                           ("agent", agent_json);
+                         ])) reqd
+                   | Error msg ->
+                       Http.Response.json ~status:`Internal_server_error
+                         (Printf.sprintf {|{"error":"%s"}|} msg) reqd
+                 end
+               with
+               | Yojson.Safe.Util.Type_error (msg, _) ->
+                   Http.Response.json ~status:`Bad_request
+                     (Printf.sprintf {|{"error":"Invalid: %s"}|} msg)
+                     reqd
+               | Yojson.Json_error msg ->
+                   Http.Response.json ~status:`Bad_request
+                     (Printf.sprintf {|{"error":"Bad JSON: %s"}|} msg)
+                     reqd
+               | e ->
+                   Http.Response.json ~status:`Internal_server_error
+                     (Printf.sprintf {|{"error":"%s"}|}
+                       (Printexc.to_string e)) reqd
+             )
+           ) request reqd
+         | _ -> Http.Response.method_not_allowed reqd)

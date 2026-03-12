@@ -173,6 +173,11 @@ module Dashboard_execution = Dashboard_execution
 module Dashboard_mission = Dashboard_mission
 module Dashboard_proof = Dashboard_proof
 module Dashboard_mission_briefing = Dashboard_mission_briefing
+module Server_utils = Server_utils
+module Server_auth = Server_auth
+module Server_tts_proxy = Server_tts_proxy
+module Server_trpg_rest = Server_trpg_rest
+module Server_dashboard_http = Server_dashboard_http
 module Server_command_plane_http = Server_command_plane_http
 module Server_mcp_transport_http = Server_mcp_transport_http
 module Swarm_status = Swarm_status
@@ -293,6 +298,7 @@ module Anti_fake = Anti_fake
 (* Keeper Autonomy Engine (Phase 2: autonomy slider + verifier) *)
 module Keeper_autonomy = Keeper_autonomy
 module Keeper_verifier = Keeper_verifier
+module Keeper_engine = Keeper_engine
 
 (* Autonomy Adjuster — Feedback Closure (Phase 4) *)
 module Autonomy_adjuster = Autonomy_adjuster

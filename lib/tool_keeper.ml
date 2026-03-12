@@ -20,127 +20,9 @@
 open Types
 open Tool_args
 
-let keeper_debug =
-  try Sys.getenv "MASC_KEEPER_DEBUG" = "1" with Not_found -> false
-
-type 'a context = {
-  config: Room.config;
-  sw: Eio.Switch.t;
-  clock: 'a Eio.Time.clock;
-}
-
-type tool_result = bool * string
-
-let schemas = Keeper_schema.schemas
-
-(* Configuration: see Keeper_config *)
-include Keeper_config
-
-let short_preview ?(max_len = 220) (s : string) : string =
-  let s = String.trim s in
-  if String.length s <= max_len then s
-  else utf8_safe_prefix_bytes s ~max_bytes:max_len ^ "..."
-
-let normalize_similarity_text (s : string) : string =
-  let len = String.length s in
-  let buf = Bytes.create len in
-  for i = 0 to len - 1 do
-    let c = Char.lowercase_ascii s.[i] in
-    let keep =
-      (c >= 'a' && c <= 'z')
-      || (c >= '0' && c <= '9')
-      || c = ' '
-    in
-    Bytes.set buf i (if keep then c else ' ')
-  done;
-  Bytes.to_string buf
-
-let similarity_tokens (s : string) : string list =
-  s
-  |> normalize_similarity_text
-  |> Str.split (Str.regexp "[ \t\r\n]+")
-  |> List.filter (fun t -> String.length t >= 2)
-
-let jaccard_similarity (a : string list) (b : string list) : float =
-  let to_set xs =
-    List.fold_left (fun acc x ->
-      if List.mem x acc then acc else x :: acc
-    ) [] xs
-  in
-  let sa = to_set a in
-  let sb = to_set b in
-  if sa = [] && sb = [] then 1.0
-  else
-    let inter =
-      List.fold_left (fun n x -> if List.mem x sb then n + 1 else n) 0 sa
-    in
-    let union = List.length sa + List.length sb - inter in
-    if union <= 0 then 0.0 else float_of_int inter /. float_of_int union
-
-let proactive_similarity_score ~(candidate : string) ~(previous : string) : float =
-  let a = similarity_tokens candidate in
-  let b = similarity_tokens previous in
-  jaccard_similarity a b
-
-let soul_profile_policy profile =
-  match profile with
-  | "safety" ->
-      "SOUL profile: safety-first.\n\
-       Preserve first: user safety boundaries, explicit consent constraints, unresolved risks, and trust continuity.\n\
-       Keep policy/guardrail decisions before optimization details."
-  | "delivery" ->
-      "SOUL profile: delivery.\n\
-       Preserve first: concrete goal progress, accepted decisions, blockers, and next executable steps.\n\
-       Keep implementation tradeoffs and done/not-done boundaries."
-  | "research" ->
-      "SOUL profile: research.\n\
-       Preserve first: hypotheses, evidence, source-backed findings, and confidence/uncertainty.\n\
-       Keep why conclusions changed, not just final statements."
-  | "relationship" ->
-      "SOUL profile: relationship.\n\
-       Preserve first: user preferences, tone cues, collaboration style, and long-lived context about expectations.\n\
-       Keep agreements and communication constraints."
-  | "minimal" ->
-      "SOUL profile: minimal.\n\
-       Preserve only high-signal continuity: current goal, single most important decision, top blocker, and next action.\n\
-       Aggressively drop low-value historical detail."
-  | _ ->
-      "SOUL profile: balanced.\n\
-       Preserve in this order: safety/trust continuity, goal progress & decisions, unresolved risks, tool outcomes, style preferences."
-
-let proactive_seed_for_soul_profile (profile : string) : string =
-  match canonical_soul_profile profile |> Option.value ~default:default_soul_profile with
-  | "safety" ->
-      "Safety hint: prioritize current risk signals and mitigations."
-  | "delivery" ->
-      "Delivery hint: prioritize concrete next actions and execution momentum."
-  | "research" ->
-      "Research hint: prioritize hypotheses, evidence, and validation steps."
-  | "relationship" ->
-      "Relationship hint: prioritize user intent alignment and collaboration continuity."
-  | "minimal" ->
-      "Minimal hint: keep only high-signal continuity and next move."
-  | _ ->
-      "Balanced hint: keep a practical mix of risk, progress, and next step."
-
-let take n xs =
-  let rec go i acc = function
-    | [] -> List.rev acc
-    | _ when i <= 0 -> List.rev acc
-    | x :: rest -> go (i - 1) (x :: acc) rest
-  in
-  go n [] xs
-
-let mkdir_p path =
-  let rec go p =
-    if p = "" || p = "/" then ()
-    else if Sys.file_exists p then ()
-    else begin
-      go (Filename.dirname p);
-      (try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  go path
+(* Full keeper chain: Keeper_config → Keeper_types → Keeper_memory →
+   Keeper_alerting → Keeper_execution → Keeper_engine *)
+include Keeper_engine
 
 let dedupe_keep_order items =
   let seen = Hashtbl.create (List.length items) in
@@ -348,24 +230,6 @@ let list_persona_summaries () : persona_summary list =
       |> List.filter validate_name
       |> List.filter_map load_persona_summary
       |> List.sort (fun a b -> String.compare a.persona_name b.persona_name)
-
-let keeper_dir (config : Room.config) =
-  (* Keepers are global — never scoped to cluster/room.
-     Use base_path directly, consistent with perpetual_loop.ml. *)
-  let d = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in
-  mkdir_p d;
-  d
-
-let keeper_meta_path config name =
-  Filename.concat (keeper_dir config) (name ^ ".json")
-
-let session_base_dir (config : Room.config) =
-  (* Cluster-independent, consistent with Perpetual_loop.default_config. *)
-  Filename.concat (Filename.concat config.base_path ".masc") "perpetual"
-
-let keeper_agent_name name =
-  (* Make it look like a generated nickname so Room.join uses it as-is. *)
-  Printf.sprintf "keeper-%s-agent" name
 
 type keeper_meta = {
   name: string;

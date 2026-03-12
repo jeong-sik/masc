@@ -48,6 +48,11 @@
    dashboard_proof
    dashboard_mission_briefing
    drift_guard
+   server_utils
+   server_auth
+   server_tts_proxy
+   server_trpg_rest
+   server_dashboard_http
    server_command_plane_http
    server_mcp_transport_http
    web_dashboard
@@ -292,6 +297,7 @@
    keeper_memory
    keeper_alerting
    keeper_execution
+   keeper_engine
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)

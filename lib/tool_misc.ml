@@ -383,13 +383,10 @@ let apply_keeper_policy_update config ~runtime_class args =
         in
         let autonomy_level =
           match autonomy_level_opt with
-          | None ->
-              Ok
-                (Keeper_contract.parse_autonomy_level meta.autonomy_level
-                 |> Option.value ~default:Keeper_autonomy.L1_Reactive)
+          | None -> Ok meta.autonomy_level
           | Some raw -> (
               match Keeper_autonomy.autonomy_level_of_string raw with
-              | Some level -> Ok level
+              | Some level -> Ok (Keeper_contract.autonomy_level_to_storage_string level)
               | None -> Error (Printf.sprintf "invalid autonomy_level: %s" raw))
         in
         (match policy_mode, action_budget, autonomy_level with
@@ -425,8 +422,7 @@ let apply_keeper_policy_update config ~runtime_class args =
                     policy_action_budget =
                       Keeper_contract.policy_action_budget_to_string action_budget;
                     policy_reward_model_path = effective_reward_path;
-                    autonomy_level =
-                      Keeper_contract.autonomy_level_to_storage_string autonomy_level;
+                    autonomy_level;
                     updated_at = Types.now_iso ();
                   }
                 in

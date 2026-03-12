@@ -147,13 +147,6 @@ let log_error msg =
 let log_debug msg =
   Log.debug "%s %s" log_prefix msg
 
-let local_playback_enabled config ~agent_id =
-  config.Voice_config.local_playback.enabled
-  &&
-  (match config.local_playback.agents with
-  | [] -> true
-  | agents -> List.mem agent_id agents)
-
 let split_path_env value =
   String.split_on_char ':' value
   |> List.filter (fun entry -> String.trim entry <> "")
@@ -192,7 +185,7 @@ let start_local_playback ~sw ~agent_id ~audio_file =
   match load_voice_config () with
   | Error _ -> ()
   | Ok config ->
-      if not (local_playback_enabled config ~agent_id) then
+      if not (Voice_config.local_playback_enabled_for_agent config agent_id) then
         ()
       else
         match local_playback_argv ~audio_file () with
@@ -411,11 +404,7 @@ let play_audio_locally ~agent_id ~audio_file =
 
 let resolve_api_key endpoint =
   let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
-  match
-    Provider_adapter.voice_auth_env_name
-      ?endpoint_api_key_env:endpoint.Voice_config.api_key_env
-      adapter
-  with
+  match Provider_adapter.voice_endpoint_auth_env_name endpoint with
   | Some env_name -> (
       match Sys.getenv_opt env_name with
       | Some value when String.trim value <> "" -> Ok (String.trim value)
@@ -556,27 +545,9 @@ let speak_via_elevenlabs_to_file endpoint ~agent_id ~message ~voice ~model ~outp
     ~headers ~body_json ~output_file
 
 let available_tts_endpoints ?provider () =
-  let normalize value = String.lowercase_ascii (String.trim value) in
-  let endpoint_matches_provider label endpoint =
-    let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
-    let labels =
-      endpoint.id
-      :: Voice_config.string_of_endpoint_kind endpoint.kind
-      :: Provider_adapter.string_of_voice_transport adapter.transport
-      :: adapter.canonical_name
-      :: adapter.aliases
-    in
-    let target = normalize label in
-    List.exists (fun candidate -> String.equal (normalize candidate) target) labels
-  in
   match load_voice_config () with
   | Error _ -> []
-  | Ok config ->
-      let endpoints = Voice_config.enabled_endpoints config.tts.endpoints in
-      (match provider with
-      | Some label when String.trim label <> "" ->
-          List.filter (endpoint_matches_provider label) endpoints
-      | _ -> endpoints)
+  | Ok config -> Provider_adapter.select_voice_endpoints ?provider config.tts.endpoints
 
 let provider_error_json endpoint message =
   append_provider_metadata

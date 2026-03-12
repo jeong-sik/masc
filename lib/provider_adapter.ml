@@ -262,6 +262,11 @@ let resolve_voice_adapter label =
       List.exists (fun alias -> normalize_label alias = normalized) adapter.aliases)
     voice_adapters
 
+let voice_adapter_labels (adapter : voice_adapter) =
+  adapter.canonical_name
+  :: string_of_voice_transport adapter.transport
+  :: adapter.aliases
+
 let voice_adapter_for_endpoint_kind = function
   | Voice_config.Openai_compat -> voice_openai_compat_adapter
   | Voice_config.Elevenlabs_direct -> voice_elevenlabs_direct_adapter
@@ -271,6 +276,25 @@ let voice_adapter_for_endpoint (endpoint : Voice_config.endpoint) =
   match resolve_voice_adapter endpoint.id with
   | Some adapter -> adapter
   | None -> voice_adapter_for_endpoint_kind endpoint.kind
+
+let voice_endpoint_matches_provider_label label (endpoint : Voice_config.endpoint) =
+  let normalized = normalize_label label in
+  let adapter = voice_adapter_for_endpoint endpoint in
+  let candidates =
+    endpoint.id
+    :: Voice_config.string_of_endpoint_kind endpoint.kind
+    :: voice_adapter_labels adapter
+  in
+  List.exists (fun candidate -> String.equal (normalize_label candidate) normalized) candidates
+
+let select_voice_endpoints ?provider (endpoints : Voice_config.endpoint list) =
+  let endpoints =
+    List.filter (fun (endpoint : Voice_config.endpoint) -> endpoint.enabled) endpoints
+  in
+  match provider with
+  | Some label when String.trim label <> "" ->
+      List.filter (voice_endpoint_matches_provider_label label) endpoints
+  | _ -> endpoints
 
 let voice_auth_env_name ?endpoint_api_key_env (adapter : voice_adapter) =
   match endpoint_api_key_env with
@@ -285,6 +309,10 @@ let voice_auth_env_name ?endpoint_api_key_env (adapter : voice_adapter) =
       match adapter.auth_mode with
       | Api_key env_name -> Some env_name
       | _ -> None)
+
+let voice_endpoint_auth_env_name (endpoint : Voice_config.endpoint) =
+  let adapter = voice_adapter_for_endpoint endpoint in
+  voice_auth_env_name ?endpoint_api_key_env:endpoint.api_key_env adapter
 
 let default_cli_agent_name () = "claude"
 

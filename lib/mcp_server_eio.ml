@@ -3010,14 +3010,69 @@ let send_resource_updated_notification ~session_id ~uri =
 let broadcast_tools_list_changed () =
   Sse.broadcast (jsonrpc_notification "notifications/tools/list_changed")
 
+let dedup_strings items =
+  items |> List.sort_uniq String.compare
+
+let core_status_resource_ids =
+  [ "status"; "status.json"; "events"; "events.json" ]
+
+let task_resource_ids =
+  dedup_strings (core_status_resource_ids @ [ "tasks"; "tasks.json" ])
+
+let agent_resource_ids =
+  dedup_strings
+    (core_status_resource_ids
+    @ [ "who"; "who.json"; "agents"; "agents.json" ])
+
+let message_resource_ids =
+  dedup_strings
+    (core_status_resource_ids @ [ "messages"; "messages.json" ])
+
+let worktree_resource_ids =
+  dedup_strings
+    (core_status_resource_ids @ [ "worktrees"; "worktrees.json" ])
+
+let resource_id_of_uri uri =
+  let resource_id, _uri = Mcp_server.parse_masc_resource_uri uri in
+  resource_id
+
+let affected_resource_ids_for_tool = function
+  | "masc_add_task"
+  | "masc_claim_next"
+  | "masc_transition"
+  | "masc_update_priority"
+  | "masc_plan_set_task"
+  | "masc_plan_clear_task" ->
+      task_resource_ids
+  | "masc_init"
+  | "masc_join"
+  | "masc_leave"
+  | "masc_register_capabilities"
+  | "masc_heartbeat"
+  | "masc_suspend" ->
+      agent_resource_ids
+  | "masc_broadcast"
+  | "masc_portal_open"
+  | "masc_portal_send"
+  | "masc_portal_close" ->
+      message_resource_ids
+  | "masc_worktree_create"
+  | "masc_worktree_remove" ->
+      worktree_resource_ids
+  | _ -> core_status_resource_ids
+
 let maybe_emit_resource_notifications ~success ~tool_name =
   if success && not (Tool_dispatch.is_read_only tool_name) then
+    let affected_ids = affected_resource_ids_for_tool tool_name in
     with_resource_subscription_lock (fun () ->
         Hashtbl.iter
           (fun session_id uris ->
             Hashtbl.iter
               (fun uri () ->
-                if resource_is_dynamic uri then
+                if
+                  resource_is_dynamic uri
+                  && List.mem (resource_id_of_uri uri) affected_ids
+                then
                   send_resource_updated_notification ~session_id ~uri)
               uris)
           resource_subscriptions)

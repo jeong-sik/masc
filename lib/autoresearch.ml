@@ -57,6 +57,39 @@ type loop_state = {
   workdir : string;
 }
 
+type swarm_link = {
+  loop_id : string;
+  session_id : string;
+  operation_id : string option;
+  target_file : string;
+  program_note : string option;
+  created_by : string option;
+  linked_at : float;
+}
+
+type persisted_summary = {
+  loop_id : string;
+  status : status;
+  current_cycle : int;
+  baseline : float;
+  best_score : float;
+  best_cycle : int;
+  total_keeps : int;
+  total_discards : int;
+  goal : string;
+  metric_fn : string;
+  llm_model : string;
+  target_file : string;
+  workdir : string;
+  cycle_timeout_s : float;
+  max_cycles : int;
+  error_message : string option;
+  elapsed_s : float;
+}
+
+let active_loops : (string, loop_state) Hashtbl.t = Hashtbl.create 4
+let latest_loop_id : string option ref = ref None
+
 (* ================================================================ *)
 (* ID Generation                                                    *)
 (* ================================================================ *)
@@ -148,6 +181,57 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
       | Some e -> `String e | None -> `Null);
   ]
 
+let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
+  let open Yojson.Safe.Util in
+  {
+    loop_id = json |> member "loop_id" |> to_string;
+    status =
+      (json |> member "status" |> to_string |> status_of_string)
+      |> Option.value ~default:Error;
+    current_cycle = json |> member "current_cycle" |> to_int;
+    baseline = json |> member "baseline" |> to_float;
+    best_score = json |> member "best_score" |> to_float;
+    best_cycle = json |> member "best_cycle" |> to_int;
+    total_keeps = json |> member "total_keeps" |> to_int;
+    total_discards = json |> member "total_discards" |> to_int;
+    goal = json |> member "goal" |> to_string;
+    metric_fn = json |> member "metric_fn" |> to_string;
+    llm_model = json |> member "llm_model" |> to_string;
+    target_file = json |> member "target_file" |> to_string;
+    workdir = json |> member "workdir" |> to_string;
+    cycle_timeout_s = json |> member "cycle_timeout_s" |> to_float;
+    max_cycles = json |> member "max_cycles" |> to_int;
+    error_message = json |> member "error" |> to_string_option;
+    elapsed_s = json |> member "elapsed_s" |> to_float;
+  }
+
+let swarm_link_to_yojson (link : swarm_link) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("loop_id", `String link.loop_id);
+      ("session_id", `String link.session_id);
+      ( "operation_id",
+        match link.operation_id with Some value -> `String value | None -> `Null );
+      ("target_file", `String link.target_file);
+      ( "program_note",
+        match link.program_note with Some value -> `String value | None -> `Null );
+      ( "created_by",
+        match link.created_by with Some value -> `String value | None -> `Null );
+      ("linked_at", `Float link.linked_at);
+    ]
+
+let swarm_link_of_yojson (json : Yojson.Safe.t) : swarm_link =
+  let open Yojson.Safe.Util in
+  {
+    loop_id = json |> member "loop_id" |> to_string;
+    session_id = json |> member "session_id" |> to_string;
+    operation_id = json |> member "operation_id" |> to_string_option;
+    target_file = json |> member "target_file" |> to_string;
+    program_note = json |> member "program_note" |> to_string_option;
+    created_by = json |> member "created_by" |> to_string_option;
+    linked_at = json |> member "linked_at" |> to_float;
+  }
+
 (* ================================================================ *)
 (* Storage                                                          *)
 (* ================================================================ *)
@@ -163,6 +247,15 @@ let results_file ~base_path loop_id =
 
 let state_file ~base_path loop_id =
   Filename.concat (results_dir ~base_path loop_id) "state.json"
+
+let loop_link_file ~base_path loop_id =
+  Filename.concat (results_dir ~base_path loop_id) "swarm.json"
+
+let session_link_file ~base_path session_id =
+  Filename.concat base_path
+    (Filename.concat ".masc"
+       (Filename.concat "team-sessions"
+          (Filename.concat session_id "autoresearch.json")))
 
 let ensure_dir path =
   let rec mkdir_p dir =
@@ -183,7 +276,7 @@ let append_cycle ~base_path loop_id record =
     output_string oc line
   )
 
-let save_state ~base_path state =
+let save_state ~base_path (state : loop_state) =
   let dir = results_dir ~base_path state.loop_id in
   ensure_dir dir;
   let path = state_file ~base_path state.loop_id in
@@ -192,6 +285,141 @@ let save_state ~base_path state =
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
     output_string oc json
   )
+
+let save_swarm_link ~base_path (link : swarm_link) =
+  let loop_path = loop_link_file ~base_path link.loop_id in
+  let session_path = session_link_file ~base_path link.session_id in
+  let json = swarm_link_to_yojson link in
+  let write path =
+    let dir = Filename.dirname path in
+    ensure_dir dir;
+    let oc = open_out path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc (Yojson.Safe.pretty_to_string json))
+  in
+  write loop_path;
+  write session_path
+
+let load_json_file path =
+  if not (Sys.file_exists path) then
+    None
+  else
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      try Some (Yojson.Safe.from_channel ic) with _ -> None)
+
+let load_swarm_link_by_loop ~base_path loop_id =
+  load_json_file (loop_link_file ~base_path loop_id)
+  |> Option.map swarm_link_of_yojson
+
+let load_swarm_link_by_session ~base_path session_id =
+  load_json_file (session_link_file ~base_path session_id)
+  |> Option.map swarm_link_of_yojson
+
+let load_state ~base_path loop_id =
+  load_json_file (state_file ~base_path loop_id) |> Option.map state_of_yojson
+
+let latest_cycle_record ~base_path loop_id =
+  let path = results_file ~base_path loop_id in
+  if not (Sys.file_exists path) then
+    None
+  else
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let rec loop last =
+        match input_line ic with
+        | line ->
+            let trimmed = String.trim line in
+            if trimmed = "" then loop last
+            else
+              let next =
+                try Some (cycle_of_yojson (Yojson.Safe.from_string trimmed))
+                with _ -> last
+              in
+              loop next
+        | exception End_of_file -> last
+      in
+      loop None)
+
+let stop_loop ~base_path ?reason loop_id =
+  let stop_state (state : loop_state) =
+    state.status <- Stopped;
+    state.error_message <- reason;
+    state.updated_at <- Time_compat.now ();
+    save_state ~base_path state;
+    state
+  in
+  match Hashtbl.find_opt active_loops loop_id with
+  | Some state -> Some (stop_state state)
+  | None -> (
+      match load_state ~base_path loop_id with
+      | None -> None
+      | Some persisted ->
+          let now = Time_compat.now () in
+          let state =
+            {
+              loop_id = persisted.loop_id;
+              goal = persisted.goal;
+              metric_fn = persisted.metric_fn;
+              llm_model = persisted.llm_model;
+              target_file = persisted.target_file;
+              status = persisted.status;
+              error_message = persisted.error_message;
+              current_cycle = persisted.current_cycle;
+              baseline = persisted.baseline;
+              best_score = persisted.best_score;
+              best_cycle = persisted.best_cycle;
+              history = [];
+              total_keeps = persisted.total_keeps;
+              total_discards = persisted.total_discards;
+              insights = [];
+              start_time = now -. max 0.0 persisted.elapsed_s;
+              updated_at = now;
+              cycle_timeout_s = persisted.cycle_timeout_s;
+              max_cycles = persisted.max_cycles;
+              workdir = persisted.workdir;
+            }
+          in
+          Some (stop_state state))
+
+let linked_status_json ~base_path (link : swarm_link) =
+  let current_cycle, status, best_score, error_message =
+    match Hashtbl.find_opt active_loops link.loop_id with
+    | Some state ->
+        ( state.current_cycle,
+          status_to_string state.status,
+          state.best_score,
+          state.error_message )
+    | None -> (
+        match load_state ~base_path link.loop_id with
+        | Some persisted ->
+            ( persisted.current_cycle,
+              status_to_string persisted.status,
+              persisted.best_score,
+              persisted.error_message )
+        | None -> (0, "missing", 0.0, Some "state file missing"))
+  in
+  let last_decision =
+    match latest_cycle_record ~base_path link.loop_id with
+    | Some record -> Some (decision_to_string record.decision)
+    | None -> None
+  in
+  `Assoc
+    [
+      ("loop_id", `String link.loop_id);
+      ("session_id", `String link.session_id);
+      ("status", `String status);
+      ("current_cycle", `Int current_cycle);
+      ("best_score", `Float best_score);
+      ( "last_decision",
+        match last_decision with Some value -> `String value | None -> `Null );
+      ("target_file", `String link.target_file);
+      ( "program_note",
+        match link.program_note with Some value -> `String value | None -> `Null );
+      ( "operation_id",
+        match link.operation_id with Some value -> `String value | None -> `Null );
+      ("error", match error_message with Some value -> `String value | None -> `Null);
+    ]
 
 (* ================================================================ *)
 (* Metric Measurement                                               *)
@@ -536,14 +764,14 @@ let create_state ~goal ~metric_fn ?(llm_model = "glm") ~target_file ~cycle_timeo
   }
 
 (** Append an insight, maintaining FIFO max 10 entries. *)
-let add_insight state msg =
+let add_insight (state : loop_state) msg =
   let max_insights = 10 in
   state.insights <- msg :: state.insights;
   if List.length state.insights > max_insights then
     state.insights <- List.filteri (fun i _ -> i < max_insights) state.insights
 
 (** Record one completed experiment cycle. *)
-let record_cycle state ~hypothesis ~score_before ~score_after
+let record_cycle (state : loop_state) ~hypothesis ~score_before ~score_after
     ~commit_hash ~elapsed_ms ~model_used =
   let delta = score_after -. score_before in
   let decision = if score_after > score_before then Keep else Discard in
@@ -578,11 +806,11 @@ let record_cycle state ~hypothesis ~score_before ~score_after
   record
 
 (** Check if the loop should continue. *)
-let should_continue state =
+let should_continue (state : loop_state) =
   state.status = Running && state.current_cycle < state.max_cycles
 
 (** Summary for status reporting. *)
-let summary state =
+let summary (state : loop_state) =
   let recent = List.filteri (fun i _ -> i < 5) state.history in
   let recent_json = `List (List.map cycle_to_yojson recent) in
   let base = state_to_yojson state in

@@ -221,6 +221,7 @@ let standard_tools =
     "masc_team_session_start"; "masc_team_session_step";
     "masc_team_session_status"; "masc_team_session_stop";
     "masc_team_session_list"; "masc_team_session_events";
+    "masc_autoresearch_swarm_start";
     (* Consensus *)
     "masc_consensus_start"; "masc_consensus_vote";
     "masc_consensus_result"; "masc_consensus_close";

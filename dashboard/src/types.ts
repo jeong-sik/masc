@@ -1330,6 +1330,7 @@ export interface OperatorSessionSnapshot {
   orchestration_state?: Record<string, unknown>
   cascade_metrics?: Record<string, unknown>
   report_paths?: Record<string, string>
+  linked_autoresearch?: Record<string, unknown>
   session?: Record<string, unknown>
   recent_events?: Record<string, unknown>[]
 }

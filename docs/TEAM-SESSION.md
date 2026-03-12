@@ -57,6 +57,7 @@
 - LLM 캐시 메트릭(`llm_cache_metrics`): hits/misses/writes/bypass/errors/hit_rate
 - command-plane 링크(`command_plane`): attached operation id/path
 - 보고서 경로(`report_paths`)
+- linked autoresearch 상태(`linked_autoresearch`, optional): loop_id/status/current_cycle/best_score/last_decision/target_file
 
 ### Attached Session Mode
 
@@ -78,6 +79,8 @@
 출력:
 
 - stop 요청 수락 상태 또는 최종 상태 JSON
+
+linked autoresearch가 연결된 session이면 stop 응답에 `linked_autoresearch` 요약이 추가되고, raw loop 상태도 함께 `stopped`로 저장됩니다.
 
 ### `masc_team_session_report`
 

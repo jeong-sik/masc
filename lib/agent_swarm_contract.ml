@@ -55,6 +55,35 @@ let sdk_bindings : sdk_tool_binding list =
       arg_bindings = [];
     };
     {
+      sdk_name = "masc_autoresearch_swarm_start";
+      canonical_operation = "masc_autoresearch_swarm_start";
+      description =
+        "Start a Karpathy-style autoresearch loop through the team-session and command-plane surfaces.";
+      input_schema =
+        object_schema ~required:[ "goal"; "metric_fn"; "target_file" ]
+          [
+            assoc_field "goal" (string_prop "Optimization goal");
+            assoc_field "metric_fn"
+              (string_prop
+                 "Shell command that prints a single float on the last line");
+            assoc_field "target_file"
+              (string_prop "Relative path to the mutable target file");
+            assoc_field "workdir"
+              (string_prop "Optional working directory for git and metric_fn");
+            assoc_field "program_note"
+              (string_prop
+                 "Optional human-owned instruction note, analogous to program.md");
+          ];
+      arg_bindings =
+        [
+          ("goal", Input_field "goal");
+          ("metric_fn", Input_field "metric_fn");
+          ("target_file", Input_field "target_file");
+          ("workdir", Input_field "workdir");
+          ("program_note", Input_field "program_note");
+        ];
+    };
+    {
       sdk_name = "masc_add_task";
       canonical_operation = "masc_add_task";
       description = "Create a single new task in the MASC room.";
@@ -285,6 +314,7 @@ let core_remote_operation_names =
         "masc_observe_capacity";
         "masc_observe_alerts";
         "masc_observe_traces";
+        "masc_autoresearch_swarm_start";
         "masc_team_session_start";
         "masc_team_session_step";
         "masc_team_session_status";

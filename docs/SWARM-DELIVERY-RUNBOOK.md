@@ -80,6 +80,29 @@
 13. `masc_team_session_prove`
 14. draft PR + cross-model review evidence
 
+## Autoresearch Wrapper
+
+Karpathy-style raw `masc_autoresearch_*` loop는 그대로 유지하되, swarm canonical path로 진입할 때는 `masc_autoresearch_swarm_start`를 우선 사용한다.
+
+- raw loop 생성
+- best-effort `research_pipeline/normalize` CPv2 operation 생성
+- linked `team session` 시작
+- `research-driver` / `research-auditor` planned worker seed 기록
+- 이후 operator/digest/session status에서 `linked_autoresearch` block으로 상태 확인
+
+기본 호출 shape:
+
+```json
+{
+  "goal": "Improve retrieval answer quality",
+  "metric_fn": "./scripts/eval_retrieval.sh",
+  "target_file": "lib/retrieval_ranker.ml",
+  "program_note": "Prefer small, measurable edits. Keep latency neutral."
+}
+```
+
+이 경로는 raw git ratchet을 없애지 않는다. 대신 operator-visible session/proof surface를 얹어서 연구 루프가 “있는데 안 보이는” 상태를 줄이는 것이 목적이다.
+
 ## Harness
 
 기본 bootstrap harness:

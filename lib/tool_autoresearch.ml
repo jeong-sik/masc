@@ -3,8 +3,9 @@
     Inspired by Karpathy's autoresearch pattern: autonomous experiment cycles
     that generate hypotheses, measure metrics, and keep/discard changes via git.
 
-    Provides 5 MCP tools:
+    Provides 6 MCP tools:
     - masc_autoresearch_start  — Start an autoresearch loop with goal + metric_fn
+    - masc_autoresearch_swarm_start — Start a supervised team-session wrapper
     - masc_autoresearch_status — Get current loop state (cycle, baseline, history)
     - masc_autoresearch_stop   — Stop a running loop
     - masc_autoresearch_inject — Inject a hypothesis into a running loop
@@ -62,6 +63,55 @@ Requires: goal (what to optimize), metric_fn (shell command that outputs a float
           ("type", `String "string");
           ("description", `String "File that the LLM will read and modify (relative to workdir). \
 The LLM receives the full file, generates a modified version, and writes it back.");
+        ]);
+      ]);
+      ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);
+    ];
+  };
+
+  {
+    name = "masc_autoresearch_swarm_start";
+    description = "Start an autoresearch loop and immediately wrap it in the canonical swarm-facing surfaces. \
+Creates the raw loop, attempts a managed CPv2 research operation, starts a linked team session, seeds planned worker roles, \
+and persists cross-links so team-session status/stop can surface the linked loop.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "What to optimize.");
+        ]);
+        ("metric_fn", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Shell command that outputs a single float on its last line. Higher is better.");
+        ]);
+        ("target_file", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Relative file path that the loop edits.");
+        ]);
+        ("workdir", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Working directory for git operations and metric_fn (default: MASC base path)");
+        ]);
+        ("program_note", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional human-owned instruction note, analogous to program.md.");
+        ]);
+        ("max_cycles", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum number of experiment cycles (default: 100)");
+        ]);
+        ("cycle_timeout_s", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Timeout per cycle in seconds (default: 300)");
+        ]);
+        ("baseline", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Initial baseline score. If omitted, measured by running metric_fn once.");
+        ]);
+        ("llm_model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "LLM model for code change generation (default: 'glm')");
         ]);
       ]);
       ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);
@@ -151,19 +201,30 @@ Call this repeatedly to drive the autonomous loop.";
 
 type result = bool * string
 
+type operation_launcher =
+  goal:string -> target_file:string -> (Yojson.Safe.t, string) Stdlib.result
+
+type team_session_launcher =
+  goal:string ->
+  operation_id:string option ->
+  loop_id:string ->
+  target_file:string ->
+  program_note:string option ->
+  (Yojson.Safe.t, string) Stdlib.result
+
 type context = {
   base_path : string;
+  agent_name : string option;
+  start_operation : operation_launcher option;
+  start_team_session : team_session_launcher option;
 }
 
 (* ================================================================ *)
 (* Loop Registry                                                    *)
 (* ================================================================ *)
 
-(** Global registry of autoresearch loops. *)
-let active_loops : (string, Autoresearch.loop_state) Hashtbl.t =
-  Hashtbl.create 4
-
-let latest_loop_id : string option ref = ref None
+let active_loops = Autoresearch.active_loops
+let latest_loop_id = Autoresearch.latest_loop_id
 
 (** Pending hypothesis injections. *)
 let pending_hypotheses : (string, string) Hashtbl.t =
@@ -215,7 +276,52 @@ let broadcast_cycle_result (state : Autoresearch.loop_state) (record : Autoresea
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_start ctx args =
+type start_params = {
+  goal : string;
+  metric_fn : string;
+  target_file : string;
+  workdir : string;
+  max_cycles : int;
+  cycle_timeout_s : float;
+  llm_model : string;
+  baseline : float;
+}
+
+let normalize_string_opt = function
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let persisted_summary_json (summary : Autoresearch.persisted_summary) =
+  `Assoc
+    [
+      ("loop_id", `String summary.loop_id);
+      ("goal", `String summary.goal);
+      ("metric_fn", `String summary.metric_fn);
+      ("llm_model", `String summary.llm_model);
+      ("target_file", `String summary.target_file);
+      ("status", `String (Autoresearch.status_to_string summary.status));
+      ("current_cycle", `Int summary.current_cycle);
+      ("baseline", `Float summary.baseline);
+      ("best_score", `Float summary.best_score);
+      ("best_cycle", `Int summary.best_cycle);
+      ("total_keeps", `Int summary.total_keeps);
+      ("total_discards", `Int summary.total_discards);
+      ("max_cycles", `Int summary.max_cycles);
+      ("cycle_timeout_s", `Float summary.cycle_timeout_s);
+      ("workdir", `String summary.workdir);
+      ("elapsed_s", `Float summary.elapsed_s);
+      ("recent_cycles", `List []);
+      ("error", match summary.error_message with Some e -> `String e | None -> `Null);
+    ]
+
+let resolve_loop_id args =
+  match get_string_opt args "loop_id" with
+  | Some id -> Some id
+  | None -> !latest_loop_id
+
+let prepare_start_params ctx args =
   let goal = get_string args "goal" "" in
   let metric_fn = get_string args "metric_fn" "" in
   let target_file = get_string args "target_file" "" in
@@ -224,84 +330,236 @@ let handle_start ctx args =
   let cycle_timeout_s = get_float args "cycle_timeout_s" 300.0 in
   let llm_model = get_string args "llm_model" "glm" in
   if goal = "" then
-    `Assoc [("error", `String "goal is required")]
+    Error "goal is required"
   else if metric_fn = "" then
-    `Assoc [("error", `String "metric_fn is required")]
+    Error "metric_fn is required"
   else if target_file = "" then
-    `Assoc [("error", `String "target_file is required")]
-  else begin
-    (* Validate target_file exists *)
+    Error "target_file is required"
+  else
     match Autoresearch.validate_target_file ~workdir target_file with
     | Error e ->
-      `Assoc [("error", `String (Printf.sprintf "Invalid target_file: %s" e))]
-    | Ok _abs_path ->
-    (* Measure initial baseline if not provided *)
-    let baseline = match get_float_opt args "baseline" with
-      | Some b -> Ok b
-      | None ->
-        match Autoresearch.measure_metric ~workdir ~timeout_s:cycle_timeout_s metric_fn with
-        | Ok (v, _ms) -> Ok v
-        | Error e -> Error e
-    in
-    match baseline with
-    | Error e ->
-      `Assoc [("error", `String (Printf.sprintf "Failed to measure baseline: %s" e))]
-    | Ok baseline_val ->
-      let state = Autoresearch.create_state
-        ~goal ~metric_fn ~llm_model ~target_file ~cycle_timeout_s ~max_cycles ~workdir () in
-      state.baseline <- baseline_val;
-      state.best_score <- baseline_val;
-      Autoresearch.save_state ~base_path:ctx.base_path state;
-      Hashtbl.replace active_loops state.loop_id state;
-      latest_loop_id := Some state.loop_id;
+        Error (Printf.sprintf "Invalid target_file: %s" e)
+    | Ok _abs_path -> (
+        match get_float_opt args "baseline" with
+        | Some baseline ->
+            Ok
+              {
+                goal;
+                metric_fn;
+                target_file;
+                workdir;
+                max_cycles;
+                cycle_timeout_s;
+                llm_model;
+                baseline;
+              }
+        | None -> (
+            match
+              Autoresearch.measure_metric ~workdir ~timeout_s:cycle_timeout_s
+                metric_fn
+            with
+            | Ok (baseline, _ms) ->
+                Ok
+                  {
+                    goal;
+                    metric_fn;
+                    target_file;
+                    workdir;
+                    max_cycles;
+                    cycle_timeout_s;
+                    llm_model;
+                    baseline;
+                  }
+            | Error e ->
+                Error
+                  (Printf.sprintf "Failed to measure baseline: %s" e)))
+
+let register_loop ctx (params : start_params) =
+  let state =
+    Autoresearch.create_state ~goal:params.goal ~metric_fn:params.metric_fn
+      ~llm_model:params.llm_model ~target_file:params.target_file
+      ~cycle_timeout_s:params.cycle_timeout_s ~max_cycles:params.max_cycles
+      ~workdir:params.workdir ()
+  in
+  state.baseline <- params.baseline;
+  state.best_score <- params.baseline;
+  Autoresearch.save_state ~base_path:ctx.base_path state;
+  Hashtbl.replace active_loops state.loop_id state;
+  latest_loop_id := Some state.loop_id;
+  state
+
+let build_swarm_goal ~goal ~target_file ~program_note =
+  match program_note with
+  | Some note ->
+      Printf.sprintf
+        "Autoresearch swarm goal: %s\nTarget file: %s\nProgram note:\n%s"
+        goal target_file note
+  | None ->
+      Printf.sprintf "Autoresearch swarm goal: %s\nTarget file: %s" goal
+        target_file
+
+let parse_operation_id json =
+  match Yojson.Safe.Util.member "operation_id" json with
+  | `String value when String.trim value <> "" -> Some (String.trim value)
+  | _ -> None
+
+let parse_session_launch ctx json =
+  let open Yojson.Safe.Util in
+  let session_id = json |> member "session_id" |> to_string_option in
+  match normalize_string_opt session_id with
+  | None -> Error "team session launcher returned no session_id"
+  | Some session_id ->
+      let artifacts_dir =
+        json |> member "artifacts_dir" |> to_string_option
+        |> normalize_string_opt
+        |> Option.value
+             ~default:
+               (Filename.concat ctx.base_path
+                  (Filename.concat ".masc/team-sessions" session_id))
+      in
+      Ok (session_id, artifacts_dir)
+
+let handle_start ctx args =
+  match prepare_start_params ctx args with
+  | Error message -> `Assoc [ ("error", `String message) ]
+  | Ok params ->
+      let state = register_loop ctx params in
       `Assoc [
         ("loop_id", `String state.loop_id);
         ("status", `String "running");
-        ("goal", `String goal);
-        ("metric_fn", `String metric_fn);
-        ("target_file", `String target_file);
-        ("llm_model", `String llm_model);
-        ("baseline", `Float baseline_val);
-        ("max_cycles", `Int max_cycles);
-        ("cycle_timeout_s", `Float cycle_timeout_s);
-        ("workdir", `String workdir);
+        ("goal", `String params.goal);
+        ("metric_fn", `String params.metric_fn);
+        ("target_file", `String params.target_file);
+        ("llm_model", `String params.llm_model);
+        ("baseline", `Float params.baseline);
+        ("max_cycles", `Int params.max_cycles);
+        ("cycle_timeout_s", `Float params.cycle_timeout_s);
+        ("workdir", `String params.workdir);
       ]
-  end
 
-let resolve_loop_id args =
-  match get_string_opt args "loop_id" with
-  | Some id -> Some id
-  | None -> !latest_loop_id
+let handle_swarm_start ctx args =
+  match ctx.start_team_session, ctx.agent_name with
+  | None, _ ->
+      `Assoc
+        [
+          ( "error",
+            `String
+              "masc_autoresearch_swarm_start requires local team-session runtime context" );
+        ]
+  | _, None ->
+      `Assoc
+        [
+          ("error", `String "masc_autoresearch_swarm_start requires agent identity");
+        ]
+  | Some start_team_session, Some _agent_name -> (
+      match prepare_start_params ctx args with
+      | Error message -> `Assoc [ ("error", `String message) ]
+      | Ok params ->
+          let program_note = normalize_string_opt (get_string_opt args "program_note") in
+          let state = register_loop ctx params in
+          let warnings = ref [] in
+          let operation_id =
+            match ctx.start_operation with
+            | None -> None
+            | Some start_operation -> (
+                match
+                  start_operation ~goal:params.goal ~target_file:params.target_file
+                with
+                | Ok json -> parse_operation_id json
+                | Error message ->
+                    warnings := message :: !warnings;
+                    None)
+          in
+          let session_goal =
+            build_swarm_goal ~goal:params.goal ~target_file:params.target_file
+              ~program_note
+          in
+          match
+            start_team_session ~goal:session_goal ~operation_id
+              ~loop_id:state.loop_id ~target_file:params.target_file ~program_note
+          with
+          | Error message ->
+              state.status <- Autoresearch.Error;
+              state.error_message <- Some message;
+              Autoresearch.save_state ~base_path:ctx.base_path state;
+              `Assoc
+                [
+                  ("error", `String message);
+                  ("loop_id", `String state.loop_id);
+                ]
+          | Ok session_json -> (
+              match parse_session_launch ctx session_json with
+              | Error message ->
+                  state.status <- Autoresearch.Error;
+                  state.error_message <- Some message;
+                  Autoresearch.save_state ~base_path:ctx.base_path state;
+                  `Assoc
+                    [
+                      ("error", `String message);
+                      ("loop_id", `String state.loop_id);
+                    ]
+              | Ok (session_id, artifacts_dir) ->
+                  let link : Autoresearch.swarm_link =
+                    {
+                      loop_id = state.loop_id;
+                      session_id;
+                      operation_id;
+                      target_file = params.target_file;
+                      program_note;
+                      created_by = ctx.agent_name;
+                      linked_at = Time_compat.now ();
+                    }
+                  in
+                  Autoresearch.save_swarm_link ~base_path:ctx.base_path link;
+                  `Assoc
+                    [
+                      ("loop_id", `String state.loop_id);
+                      ("session_id", `String session_id);
+                      ( "operation_id",
+                        match operation_id with
+                        | Some value -> `String value
+                        | None -> `Null );
+                      ("artifacts_dir", `String artifacts_dir);
+                      ("linked_status", Autoresearch.linked_status_json ~base_path:ctx.base_path link);
+                      ( "warnings",
+                        `List (List.rev_map (fun message -> `String message) !warnings) );
+                      ("goal", `String params.goal);
+                      ( "program_note",
+                        match program_note with
+                        | Some value -> `String value
+                        | None -> `Null );
+                    ]))
 
-let handle_status _ctx args =
+let handle_status ctx args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
   | Some id ->
     match Hashtbl.find_opt active_loops id with
-    | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state -> Autoresearch.summary state
+    | None -> (
+        match Autoresearch.load_state ~base_path:ctx.base_path id with
+        | Some summary -> persisted_summary_json summary
+        | None ->
+            `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))])
 
 let handle_stop ctx args =
   let reason = get_string args "reason" "manual stop" in
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
   | Some id ->
-    match Hashtbl.find_opt active_loops id with
+    match Autoresearch.stop_loop ~base_path:ctx.base_path ~reason id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->
-      state.status <- Autoresearch.Stopped;
-      state.updated_at <- Time_compat.now ();
-      Autoresearch.save_state ~base_path:ctx.base_path state;
-      `Assoc [
-        ("loop_id", `String id);
-        ("status", `String "stopped");
-        ("reason", `String reason);
-        ("final_cycle", `Int state.current_cycle);
-        ("best_score", `Float state.best_score);
-        ("best_cycle", `Int state.best_cycle);
-        ("total_keeps", `Int state.total_keeps);
-        ("total_discards", `Int state.total_discards);
-      ]
+        `Assoc [
+          ("loop_id", `String id);
+          ("status", `String "stopped");
+          ("reason", `String reason);
+          ("final_cycle", `Int state.current_cycle);
+          ("best_score", `Float state.best_score);
+          ("best_cycle", `Int state.best_cycle);
+          ("total_keeps", `Int state.total_keeps);
+          ("total_discards", `Int state.total_discards);
+        ]
 
 let handle_inject _ctx args =
   let hypothesis = get_string args "hypothesis" "" in
@@ -524,6 +782,8 @@ let wrap_result json =
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_autoresearch_start" -> Some (wrap_result (handle_start ctx args))
+  | "masc_autoresearch_swarm_start" ->
+      Some (wrap_result (handle_swarm_start ctx args))
   | "masc_autoresearch_status" -> Some (wrap_result (handle_status ctx args))
   | "masc_autoresearch_stop" -> Some (wrap_result (handle_stop ctx args))
   | "masc_autoresearch_inject" -> Some (wrap_result (handle_inject ctx args))

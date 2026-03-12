@@ -67,6 +67,92 @@ let get_state () =
       gardener_state_ref := Some s;
       s
 
+let iso_of_unix ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let json_string_of_float_ts ts =
+  if ts > 0.0 then `String (iso_of_unix ts) else `Null
+
+let json_string_of_opt_ts = function
+  | Some ts when ts > 0.0 -> `String (iso_of_unix ts)
+  | _ -> `Null
+
+let json_string_of_nonempty value =
+  let trimmed = String.trim value in
+  if trimmed = "" then `Null else `String trimmed
+
+type decision_snapshot = {
+  intervention : intervention;
+  source : string;
+  reason : string;
+  target : string;
+  error : string;
+}
+
+let intervention_name = function
+  | NeedSpawn _ -> "need_spawn"
+  | NeedWorker _ -> "need_worker"
+  | NeedRetirement _ -> "need_retirement"
+  | Balanced -> "balanced"
+
+let intervention_target = function
+  | NeedSpawn gap -> gap.topic
+  | NeedRetirement stats -> stats.name
+  | NeedWorker _ | Balanced -> ""
+
+let mark_tick_start () =
+  let now = Time_compat.now () in
+  with_lock (fun () ->
+      let state = get_state () in
+      state.tick_count <- state.tick_count + 1;
+      state.last_tick_started_at <- now;
+      state.last_error <- "";
+      state.last_action <- "none";
+      state.last_target <- "";
+      state.last_reason <- "";
+      state.last_intervention <- "none";
+      state.last_decision_source <- "none");
+  now
+
+let record_health_summary ~(at : float) (health : ecosystem_health) =
+  with_lock (fun () ->
+      let state = get_state () in
+      state.last_health_check <- at;
+      state.last_total_agents <- health.total_agents;
+      state.last_active_agents <- health.active_agents;
+      state.last_idle_agents <- health.idle_agents;
+      state.last_todo_count <- health.task_backlog.todo_count;
+      state.last_high_priority_todo <- health.task_backlog.high_priority_todo;
+      state.last_orphan_count <- health.task_backlog.orphan_count;
+      state.last_homeostatic_score <- health.homeostatic_score;
+      state.last_needs_workers <- health.needs_workers)
+
+let record_decision (decision : decision_snapshot) =
+  with_lock (fun () ->
+      let state = get_state () in
+      state.last_intervention <- intervention_name decision.intervention;
+      state.last_decision_source <- decision.source;
+      state.last_reason <- decision.reason;
+      state.last_target <- decision.target;
+      if String.trim decision.error <> "" then state.last_error <- decision.error)
+
+let record_action ?target ?reason ?error action =
+  with_lock (fun () ->
+      let state = get_state () in
+      state.last_action <- action;
+      (match target with Some value when String.trim value <> "" -> state.last_target <- value | _ -> ());
+      (match reason with Some value when String.trim value <> "" -> state.last_reason <- value | _ -> ());
+      (match error with Some value when String.trim value <> "" -> state.last_error <- value | _ -> ()))
+
+let record_tick_complete () =
+  let now = Time_compat.now () in
+  with_lock (fun () ->
+      let state = get_state () in
+      state.last_tick_completed_at <- now)
+
 (** {1 Circuit Breaker} *)
 
 let is_circuit_open () =
@@ -754,14 +840,26 @@ let execute_retire ~(decision : retirement_decision) : (string, string) result =
 (** {1 Intervention Detection} *)
 
 (** Rule-based intervention detection (task-aware fallback) *)
-let detect_intervention_rule_based ~config ~health : intervention =
+let detect_intervention_rule_based ~config ~health : decision_snapshot =
   let backlog = health.task_backlog in
 
   (* Task pressure takes priority over Board gaps *)
   if backlog.todo_count > 0 && backlog.high_priority_todo > 0 && health.active_agents < 2 then
-    NeedWorker backlog
+    {
+      intervention = NeedWorker backlog;
+      source = "fallback";
+      reason = "high-priority backlog exceeds active worker capacity";
+      target = "";
+      error = "";
+    }
   else if backlog.orphan_count > 0 then
-    NeedWorker backlog
+    {
+      intervention = NeedWorker backlog;
+      source = "fallback";
+      reason = "orphan tasks detected in backlog";
+      target = "";
+      error = "";
+    }
   else begin
     (* Board gap detection — existing logic *)
     let mature_gaps = Lodge_heartbeat.check_gap_threshold () in
@@ -772,9 +870,25 @@ let detect_intervention_rule_based ~config ~health : intervention =
         let signals = Lodge_heartbeat.get_signals_for_topic ~topic in
         let gap = enrich_gap ~topic ~signals ~agents in
         if gap.maturity_hours >= config.gap_maturity_hours then
-          NeedSpawn gap
+          {
+            intervention = NeedSpawn gap;
+            source = "fallback";
+            reason =
+              Printf.sprintf "mature gap '%s' reached %.1fh with %d signals"
+                gap.topic gap.maturity_hours gap.signal_count;
+            target = gap.topic;
+            error = "";
+          }
         else
-          Balanced
+          {
+            intervention = Balanced;
+            source = "fallback";
+            reason =
+              Printf.sprintf "gap '%s' not mature enough yet (%.1fh < %.1fh)"
+                gap.topic gap.maturity_hours config.gap_maturity_hours;
+            target = gap.topic;
+            error = "";
+          }
     | _ ->
         (* Check for retirement candidates — inline condition, no pre-computed boolean *)
         if health.total_agents > config.target_agents && health.idle_agents > 0 then begin
@@ -786,14 +900,37 @@ let detect_intervention_rule_based ~config ~health : intervention =
             |> List.sort (fun a b ->
                 compare b.Lodge_selection.last_selected_at a.Lodge_selection.last_selected_at) in
           match idle_candidates with
-          | candidate :: _ -> NeedRetirement (convert_stats candidate)
-          | [] -> Balanced
+          | candidate :: _ ->
+              let stats = convert_stats candidate in
+              {
+                intervention = NeedRetirement stats;
+                source = "fallback";
+                reason =
+                  Printf.sprintf "agent '%s' idle for %.1fh over threshold"
+                    stats.name stats.idle_hours;
+                target = stats.name;
+                error = "";
+              }
+          | [] ->
+              {
+                intervention = Balanced;
+                source = "fallback";
+                reason = "no retirement candidate exceeded idle threshold";
+                target = "";
+                error = "";
+              }
         end else
-          Balanced
+          {
+            intervention = Balanced;
+            source = "fallback";
+            reason = "no worker pressure, no mature gap, no retirement candidate";
+            target = "";
+            error = "";
+          }
   end
 
 (** Use LLM to decide ecosystem intervention (primary decision path) *)
-let decide_intervention_with_llm ~config ~health : intervention =
+let decide_intervention_with_llm ~config ~health : decision_snapshot =
   let backlog = health.task_backlog in
   let prompt = Printf.sprintf
     {|에이전트 생태계 관리자로서 모든 시그널을 종합 분석하고 개입 여부를 판단해줘.
@@ -826,56 +963,196 @@ let decide_intervention_with_llm ~config ~health : intervention =
   let response =
     match Llm_client.run_prompt_cascade ~temperature:0.3 ~timeout_sec:20
         ~model_specs ~max_tokens:300 ~prompt () with
-    | Ok resp -> resp.content
-    | Error _ -> ""
+    | Ok resp -> Ok resp.content
+    | Error err -> Error ("llm intervention failed: " ^ err)
   in
 
   (* Parse LLM response *)
-  let action =
-    try
-      let start = String.index response '{' in
-      let end_pos = String.rindex response '}' in
-      let json_str = String.sub response start (end_pos - start + 1) in
-      let json = Yojson.Safe.from_string json_str in
-      let module U = Yojson.Safe.Util in
-      json |> U.member "action" |> U.to_string
-    with exn ->
-      Eio.traceln "[Gardener] LLM intervention JSON parse failed: %s" (Printexc.to_string exn);
-      "none"
+  let parsed_response =
+    match response with
+    | Error err -> Error err
+    | Ok body ->
+        try
+          let start = String.index body '{' in
+          let end_pos = String.rindex body '}' in
+          let json_str = String.sub body start (end_pos - start + 1) in
+          let json = Yojson.Safe.from_string json_str in
+          let module U = Yojson.Safe.Util in
+          let action = json |> U.member "action" |> U.to_string in
+          let reason =
+            match json |> U.member "reason" with
+            | `String value -> String.trim value
+            | _ -> ""
+          in
+          Ok (action, reason)
+        with exn ->
+          let message =
+            Printf.sprintf "llm intervention JSON parse failed: %s"
+              (Printexc.to_string exn)
+          in
+          Eio.traceln "[Gardener] %s" message;
+          Error message
   in
+  match parsed_response with
+  | Error err ->
+      let fallback = detect_intervention_rule_based ~config ~health in
+      { fallback with source = "fallback"; error = err }
+  | Ok (action, llm_reason) ->
+      (match action with
+       | "spawn_worker" when backlog.todo_count > 0 ->
+           {
+             intervention = NeedWorker backlog;
+             source = "llm";
+             reason =
+               if llm_reason <> "" then llm_reason
+               else "llm requested worker allocation";
+             target = "";
+             error = "";
+           }
+       | "spawn_worker" | "spawn_agent" ->
+           let mature_gaps = Lodge_heartbeat.check_gap_threshold () in
+           let agents = Lodge_heartbeat.get_agents () in
+           (match mature_gaps with
+            | (topic, _) :: _ ->
+                let signals = Lodge_heartbeat.get_signals_for_topic ~topic in
+                let gap = enrich_gap ~topic ~signals ~agents in
+                {
+                  intervention = NeedSpawn gap;
+                  source = "llm";
+                  reason =
+                    if llm_reason <> "" then llm_reason
+                    else Printf.sprintf "llm selected spawn for gap '%s'" gap.topic;
+                  target = gap.topic;
+                  error = "";
+                }
+            | [] ->
+                {
+                  intervention = Balanced;
+                  source = "llm";
+                  reason =
+                    if llm_reason <> "" then llm_reason
+                    else "llm requested spawn but no mature gap was available";
+                  target = "";
+                  error = "";
+                })
+       | "retire" ->
+           let all_stats = Lodge_selection.get_all_stats () in
+           let idle_candidates =
+             all_stats
+             |> List.filter (fun s ->
+                    let idle_hours =
+                      (Time_compat.now () -. s.Lodge_selection.last_selected_at) /. 3600.0
+                    in
+                    idle_hours > config.idle_threshold_hours)
+             |> List.sort (fun a b ->
+                    compare b.Lodge_selection.last_selected_at
+                      a.Lodge_selection.last_selected_at)
+           in
+           (match idle_candidates with
+            | candidate :: _ ->
+                let stats = convert_stats candidate in
+                {
+                  intervention = NeedRetirement stats;
+                  source = "llm";
+                  reason =
+                    if llm_reason <> "" then llm_reason
+                    else Printf.sprintf "llm selected retirement for '%s'" stats.name;
+                  target = stats.name;
+                  error = "";
+                }
+            | [] ->
+                {
+                  intervention = Balanced;
+                  source = "llm";
+                  reason =
+                    if llm_reason <> "" then llm_reason
+                    else "llm requested retirement but no idle candidate was available";
+                  target = "";
+                  error = "";
+                })
+       | _ ->
+           {
+             intervention = Balanced;
+             source = "llm";
+             reason = if llm_reason <> "" then llm_reason else "llm returned no intervention";
+             target = "";
+             error = "";
+           })
 
-  match action with
-  | "spawn_worker" when backlog.todo_count > 0 -> NeedWorker backlog
-  | "spawn_worker" | "spawn_agent" ->
-      (* LLM decided to spawn — find appropriate gap signal *)
-      let mature_gaps = Lodge_heartbeat.check_gap_threshold () in
-      let agents = Lodge_heartbeat.get_agents () in
-      (match mature_gaps with
-       | (topic, _) :: _ ->
-           let signals = Lodge_heartbeat.get_signals_for_topic ~topic in
-           let gap = enrich_gap ~topic ~signals ~agents in
-           NeedSpawn gap
-       | [] -> Balanced)
-  | "retire" ->
-      (* LLM decided to retire — find most idle agent *)
-      let all_stats = Lodge_selection.get_all_stats () in
-      let idle_candidates = all_stats
-        |> List.filter (fun s ->
-            let idle_hours = (Time_compat.now () -. s.Lodge_selection.last_selected_at) /. 3600.0 in
-            idle_hours > config.idle_threshold_hours)
-        |> List.sort (fun a b ->
-            compare b.Lodge_selection.last_selected_at a.Lodge_selection.last_selected_at) in
-      (match idle_candidates with
-       | candidate :: _ -> NeedRetirement (convert_stats candidate)
-       | [] -> Balanced)
-  | _ -> Balanced
-
-(** Detect what intervention is needed *)
-let detect_intervention ~config ~health : intervention =
+(** Detect what intervention is needed with internal decision metadata. *)
+let detect_intervention_detail ~config ~health : decision_snapshot =
   if config.use_llm_decision then
     decide_intervention_with_llm ~config ~health
   else
     detect_intervention_rule_based ~config ~health
+
+(** Detect what intervention is needed *)
+let detect_intervention ~config ~health : intervention =
+  (detect_intervention_detail ~config ~health).intervention
+
+let status_json () : Yojson.Safe.t =
+  let config = load_config () in
+  with_lock (fun () ->
+      let state = get_state () in
+      let tick_in_progress =
+        state.last_tick_started_at > 0.0
+        && state.last_tick_started_at > state.last_tick_completed_at
+      in
+      let alive =
+        config.enabled
+        && (state.last_tick_started_at > 0.0 || state.last_tick_completed_at > 0.0)
+      in
+      let next_tick_due_at =
+        if state.last_tick_completed_at > 0.0 && config.check_interval_sec > 0.0 then
+          `String (iso_of_unix (state.last_tick_completed_at +. config.check_interval_sec))
+        else
+          `Null
+      in
+      let status =
+        if not config.enabled then "disabled"
+        else if tick_in_progress then "running"
+        else if alive then "idle"
+        else "starting"
+      in
+      `Assoc
+        [
+          ("enabled", `Bool config.enabled);
+          ("alive", `Bool alive);
+          ("status", `String status);
+          ("tick_in_progress", `Bool tick_in_progress);
+          ("tick_count", `Int state.tick_count);
+          ("check_interval_sec", `Float config.check_interval_sec);
+          ("last_tick_started_at", json_string_of_float_ts state.last_tick_started_at);
+          ("last_tick_completed_at", json_string_of_float_ts state.last_tick_completed_at);
+          ("next_tick_due_at", next_tick_due_at);
+          ("last_health_check_at", json_string_of_float_ts state.last_health_check);
+          ("last_intervention", `String state.last_intervention);
+          ("last_decision_source", `String state.last_decision_source);
+          ("last_action", `String state.last_action);
+          ("last_target", json_string_of_nonempty state.last_target);
+          ("last_reason", json_string_of_nonempty state.last_reason);
+          ("last_error", json_string_of_nonempty state.last_error);
+          ("circuit_open", `Bool (is_circuit_open ()));
+          ("circuit_open_until", json_string_of_opt_ts state.circuit_open_until);
+          ("can_spawn", `Bool (can_spawn ~config));
+          ("can_retire", `Bool (can_retire ~config));
+          ("last_spawn_attempt_at", json_string_of_float_ts state.last_spawn_attempt);
+          ("last_retirement_attempt_at", json_string_of_float_ts state.last_retirement_attempt);
+          ("spawns_today", `Int state.spawns_today);
+          ("retirements_today", `Int state.retirements_today);
+          ( "health_summary",
+            `Assoc
+              [
+                ("total_agents", `Int state.last_total_agents);
+                ("active_agents", `Int state.last_active_agents);
+                ("idle_agents", `Int state.last_idle_agents);
+                ("todo_count", `Int state.last_todo_count);
+                ("high_priority_todo", `Int state.last_high_priority_todo);
+                ("orphan_count", `Int state.last_orphan_count);
+                ("homeostatic_score", `Float state.last_homeostatic_score);
+                ("needs_workers", `Bool state.last_needs_workers);
+              ] );
+        ])
 
 let backlog_goal_prefix = "[Gardener] Backlog triage"
 
@@ -1062,10 +1339,21 @@ let start_backlog_triage_session ~sw ~clock ~(room_config : Room_utils.config)
 
 (** Main gardener loop iteration *)
 let tick ~sw ~clock ~config ~room_config : unit =
-  if is_circuit_open () then
+  let tick_started_at = mark_tick_start () in
+  if is_circuit_open () then begin
+    record_decision
+      {
+        intervention = Balanced;
+        source = "none";
+        reason = "circuit open; tick skipped";
+        target = "";
+        error = "";
+      };
+    record_tick_complete ();
     Eio.traceln "[Gardener] Circuit open, skipping tick"
-  else begin
+  end else begin
     let health = calculate_health ~config ~room_config:(Some room_config) in
+    record_health_summary ~at:tick_started_at health;
     let backlog = health.task_backlog in
     Eio.traceln
       "[Gardener] Health: agents=%d/%d active=%d idle=%d score=%.2f task_backlog: todo=%d high_pri=%d orphans=%d"
@@ -1073,18 +1361,29 @@ let tick ~sw ~clock ~config ~room_config : unit =
       health.idle_agents health.homeostatic_score backlog.todo_count
       backlog.high_priority_todo backlog.orphan_count;
 
-    match detect_intervention ~config ~health with
+    let decision = detect_intervention_detail ~config ~health in
+    record_decision decision;
+    match decision.intervention with
     | NeedSpawn gap ->
         Eio.traceln "[Gardener] Intervention needed: spawn %s" gap.topic;
-        let decision = decide_spawn ~config ~health ~gap in
-        (match execute_spawn ~decision with
-         | Ok name -> Eio.traceln "[Gardener] Spawned: %s" name
-         | Error e -> Eio.traceln "[Gardener] Spawn failed: %s" e)
+        let spawn_decision = decide_spawn ~config ~health ~gap in
+        (match execute_spawn ~decision:spawn_decision with
+         | Ok name ->
+             record_action "spawned" ~target:name
+               ~reason:(Printf.sprintf "spawned from gap '%s'" gap.topic);
+             Eio.traceln "[Gardener] Spawned: %s" name
+         | Error e ->
+             record_action "none" ~target:gap.topic
+               ~reason:"spawn decision did not execute"
+               ~error:e;
+             Eio.traceln "[Gardener] Spawn failed: %s" e)
     | NeedWorker backlog ->
         Eio.traceln "[Gardener] Task pressure: %d TODO, %d high-pri, %d orphans"
           backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
         (match start_backlog_triage_session ~sw ~clock ~room_config ~backlog with
          | Ok session_id ->
+             record_action "worker_session_started" ~target:session_id
+               ~reason:"started backlog triage session";
              Eio.traceln "[Gardener] Started backlog triage session: %s" session_id;
              Sse.broadcast
                (`Assoc
@@ -1096,6 +1395,9 @@ let tick ~sw ~clock ~config ~room_config : unit =
                    ("orphan_count", `Int backlog.orphan_count);
                  ])
          | Error err ->
+             record_action "worker_request_posted"
+               ~reason:"backlog triage session failed; posted worker request"
+               ~error:err;
              Eio.traceln "[Gardener] Backlog triage start failed: %s" err;
              let store = Board.global () in
              let msg =
@@ -1122,11 +1424,21 @@ let tick ~sw ~clock ~config ~room_config : unit =
                  ]))
     | NeedRetirement stats ->
         Eio.traceln "[Gardener] Intervention needed: retire %s" stats.name;
-        let decision = decide_retire ~config ~health ~agent_stats:stats in
-        (match execute_retire ~decision with
-         | Ok name -> Eio.traceln "[Gardener] Retirement initiated: %s" name
-         | Error e -> Eio.traceln "[Gardener] Retirement failed: %s" e)
-    | Balanced -> Eio.traceln "[Gardener] Ecosystem balanced"
+        let retirement_decision = decide_retire ~config ~health ~agent_stats:stats in
+        (match execute_retire ~decision:retirement_decision with
+         | Ok name ->
+             record_action "retirement_initiated" ~target:name
+               ~reason:"retirement grace period initiated";
+             Eio.traceln "[Gardener] Retirement initiated: %s" name
+         | Error e ->
+             record_action "none" ~target:stats.name
+               ~reason:"retirement decision did not execute"
+               ~error:e;
+             Eio.traceln "[Gardener] Retirement failed: %s" e)
+    | Balanced ->
+        record_action "none" ~reason:decision.reason;
+        Eio.traceln "[Gardener] Ecosystem balanced";
+    record_tick_complete ()
   end
 
 (** Run the gardener background loop (no switch needed — loop is self-contained) *)

@@ -783,6 +783,43 @@ export interface LodgeRuntimeStatus {
   active_self_heartbeats?: string[]
 }
 
+export interface GardenerRuntimeStatus {
+  enabled: boolean
+  alive: boolean
+  status?: string
+  tick_in_progress?: boolean
+  tick_count?: number
+  check_interval_sec?: number
+  last_tick_started_at?: string | null
+  last_tick_completed_at?: string | null
+  next_tick_due_at?: string | null
+  last_health_check_at?: string | null
+  last_intervention?: string
+  last_decision_source?: string
+  last_action?: string
+  last_target?: string | null
+  last_reason?: string | null
+  last_error?: string | null
+  circuit_open?: boolean
+  circuit_open_until?: string | null
+  can_spawn?: boolean
+  can_retire?: boolean
+  last_spawn_attempt_at?: string | null
+  last_retirement_attempt_at?: string | null
+  spawns_today?: number
+  retirements_today?: number
+  health_summary?: {
+    total_agents?: number
+    active_agents?: number
+    idle_agents?: number
+    todo_count?: number
+    high_priority_todo?: number
+    orphan_count?: number
+    homeostatic_score?: number
+    needs_workers?: boolean
+  }
+}
+
 // --- Dashboard projection responses ---
 
 export interface DashboardShellResponse {
@@ -2385,6 +2422,7 @@ export interface ServerStatus {
     council?: CouncilMonitoring
   }
   lodge?: LodgeRuntimeStatus
+  gardener?: GardenerRuntimeStatus
   data_quality?: {
     board_contract_ok?: boolean
     council_feed_ok?: boolean

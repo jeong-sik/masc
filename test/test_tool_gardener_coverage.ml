@@ -36,6 +36,7 @@ let test_dispatch_unknown_tool () =
 let test_dispatch_safe_tools () =
   let safe_tools = [
     "masc_gardener_config";
+    "masc_gardener_status";
     "masc_gardener_reset_circuit";
   ] in
   List.iter (fun name ->
@@ -50,6 +51,7 @@ let test_dispatch_safe_tools () =
 let test_dispatch_recognizes_validatable_tools () =
   let tools_with_validation = [
     "masc_gardener_config";
+    "masc_gardener_status";
     "masc_gardener_propose_spawn";
     "masc_gardener_retire_agent";
     "masc_gardener_execute_spawn";
@@ -80,6 +82,23 @@ let test_config_returns_json () =
   Alcotest.(check bool) "can_spawn is bool" true (can_spawn || not can_spawn);
   let can_retire = json |> Yojson.Safe.Util.member "can_retire" |> Yojson.Safe.Util.to_bool in
   Alcotest.(check bool) "can_retire is bool" true (can_retire || not can_retire)
+
+let test_status_returns_truth_runtime_json () =
+  let (ok, msg) = Tool_gardener.dispatch () "masc_gardener_status" (`Assoc []) in
+  Alcotest.(check bool) "status ok" true ok;
+  let json = Yojson.Safe.from_string msg in
+  let provenance = json |> Yojson.Safe.Util.member "provenance" |> Yojson.Safe.Util.to_string in
+  Alcotest.(check string) "status provenance truth" "truth" provenance;
+  let authoritative = json |> Yojson.Safe.Util.member "authoritative" |> Yojson.Safe.Util.to_bool in
+  Alcotest.(check bool) "status authoritative" true authoritative;
+  let runtime = json |> Yojson.Safe.Util.member "runtime" in
+  Alcotest.(check bool) "runtime present" true (runtime <> `Null);
+  let tick_count = runtime |> Yojson.Safe.Util.member "tick_count" |> Yojson.Safe.Util.to_int in
+  Alcotest.(check bool) "tick_count nonnegative" true (tick_count >= 0);
+  let alive = runtime |> Yojson.Safe.Util.member "alive" |> Yojson.Safe.Util.to_bool in
+  Alcotest.(check bool) "alive is bool" true (alive || not alive);
+  let health_summary = runtime |> Yojson.Safe.Util.member "health_summary" in
+  Alcotest.(check bool) "health_summary present" true (health_summary <> `Null)
 
 let test_spawn_decision_provenance_uses_decision_path () =
   let approved =
@@ -187,6 +206,7 @@ let () =
     ]);
     ("config", [
       Alcotest.test_case "returns json" `Quick test_config_returns_json;
+      Alcotest.test_case "status returns runtime json" `Quick test_status_returns_truth_runtime_json;
       Alcotest.test_case "spawn provenance path" `Quick test_spawn_decision_provenance_uses_decision_path;
       Alcotest.test_case "retirement provenance path" `Quick test_retirement_decision_provenance_always_fallback;
     ]);

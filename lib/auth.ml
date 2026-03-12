@@ -243,6 +243,9 @@ let permission_for_tool = function
   | "masc_observe_traces"
   | "masc_voice_sessions" | "masc_voice_agent" | "masc_voice_transcript" ->
       Some CanReadState
+  | "masc_gardener_health" | "masc_gardener_config" | "masc_gardener_status"
+  | "masc_gardener_propose_spawn" | "masc_gardener_retire_agent" ->
+      Some CanReadState
   | "masc_add_task" -> Some CanAddTask
   | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
   | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" -> Some CanCompleteTask
@@ -280,6 +283,9 @@ let permission_for_tool = function
       Some CanBroadcast
   (* Command-plane write operations require Admin *)
   | "masc_policy_freeze_unit" | "masc_policy_kill_switch" ->
+      Some CanAdmin
+  | "masc_gardener_execute_spawn" | "masc_gardener_execute_retire"
+  | "masc_gardener_reset_circuit" ->
       Some CanAdmin
   | "masc_portal_open" | "masc_portal_close" -> Some CanOpenPortal
   | "masc_portal_send" -> Some CanSendPortal

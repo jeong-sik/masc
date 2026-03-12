@@ -39,6 +39,8 @@ let handle_health _ctx _args : result =
       ("status", `String "ok");
       ("provenance", `String "derived");
       ("authoritative", `Bool false);
+      ("health_kind", `String "derived_snapshot");
+      ("informational_only_fields", `List [`String "needs_spawn"; `String "needs_retirement"]);
       ("health", ecosystem_health_to_yojson health);
       ("config_summary", `Assoc [
         ("enabled", `Bool config.enabled);
@@ -58,6 +60,21 @@ let handle_health _ctx _args : result =
     (true, Yojson.Safe.to_string json)
   with exn ->
     (false, Printf.sprintf "Error getting health: %s" (Printexc.to_string exn))
+
+(** Handle masc_gardener_status tool call.
+
+    Returns truth-only runtime state for the current gardener loop. *)
+let handle_status _ctx _args : result =
+  try
+    let json = `Assoc [
+      ("status", `String "ok");
+      ("provenance", `String "truth");
+      ("authoritative", `Bool true);
+      ("runtime", Gardener.status_json ());
+    ] in
+    (true, Yojson.Safe.to_string json)
+  with exn ->
+    (false, Printf.sprintf "Error getting gardener status: %s" (Printexc.to_string exn))
 
 (** Handle masc_gardener_propose_spawn tool call.
 
@@ -262,6 +279,7 @@ let handle_reset_circuit _ctx _args : result =
 let dispatch ctx tool_name args : result =
   match tool_name with
   | "masc_gardener_health" -> handle_health ctx args
+  | "masc_gardener_status" -> handle_status ctx args
   | "masc_gardener_propose_spawn" -> handle_propose_spawn ctx args
   | "masc_gardener_retire_agent" -> handle_retire_agent ctx args
   | "masc_gardener_config" -> handle_config ctx args

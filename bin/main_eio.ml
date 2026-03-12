@@ -5492,6 +5492,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let gardener_json = Masc_mcp.Gardener.status_json () in
   let build = Build_identity.current () in
   `Assoc
     [
@@ -5504,6 +5505,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
       ("lodge", lodge_json);
+      ("gardener", gardener_json);
       ("version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
     ]
@@ -6300,6 +6302,7 @@ let health_handler _request reqd =
   in
   let build = Build_identity.current () in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let gardener_json = Masc_mcp.Gardener.status_json () in
   let guardian_json = Masc_mcp.Guardian.status_json () in
   let sentinel_json = Masc_mcp.Sentinel.status_json () in
   let health_json = `Assoc [
@@ -6325,6 +6328,7 @@ let health_handler _request reqd =
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Masc_mcp.Sse.client_count ()));
     ("lodge", lodge_json);
+    ("gardener", gardener_json);
     ("guardian", guardian_json);
     ("sentinel", sentinel_json);
   ] in
@@ -8576,6 +8580,7 @@ let run_server ~sw ~env ~host ~port ~base_path =
           in
           let build = Build_identity.current () in
           let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+          let gardener_json = Masc_mcp.Gardener.status_json () in
           let guardian_json = Masc_mcp.Guardian.status_json () in
           let sentinel_json = Masc_mcp.Sentinel.status_json () in
           let health_json = `Assoc [
@@ -8588,6 +8593,7 @@ let run_server ~sw ~env ~host ~port ~base_path =
             ("uptime", `String uptime_str);
             ("sse_clients", `Int (Sse.client_count ()));
             ("lodge", lodge_json);
+            ("gardener", gardener_json);
             ("guardian", guardian_json);
             ("sentinel", sentinel_json);
           ] in

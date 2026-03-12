@@ -8225,8 +8225,15 @@ let run_server ~sw ~env ~port ~base_path =
   Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
   (* Gardener — self-organizing agent ecosystem (task-aware, LLM-primary) *)
   Masc_mcp.Gardener.start ~sw ~clock ~room_config:state.room_config;
-  (* Internal guardian loops (no external watchdog dependency) *)
-  Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
+  if Masc_mcp.Env_config.Sentinel.enabled then begin
+    (* Sentinel is the SSOT for housekeeping. It embeds zombie/gc loops itself. *)
+    Masc_mcp.Sentinel.start ~sw ~clock ~net state.room_config;
+    (* Lodge patrol remains a Guardian concern and can still be enabled explicitly. *)
+    if Masc_mcp.Env_config.Guardian.enabled then
+      Masc_mcp.Guardian.start_lodge_loop ~sw ~clock ~net
+  end else
+    (* Fallback runtime when sentinel is disabled. *)
+    Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
   Masc_mcp.Dashboard_governance_judge.start ~sw ~clock
     ~base_path:state.room_config.base_path
     ~build_facts:(fun () ->

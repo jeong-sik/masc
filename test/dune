@@ -193,6 +193,11 @@
  (modules test_gardener)
  (libraries masc_mcp alcotest eio eio_main str yojson))
 
+(test
+ (name test_guardian_sentinel)
+ (modules test_guardian_sentinel)
+ (libraries masc_mcp alcotest yojson unix))
+
 ; Lodge_reaction module tests (Emergent Identity System)
 (test
  (name test_lodge_reaction)

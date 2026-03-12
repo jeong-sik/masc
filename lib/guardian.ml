@@ -46,6 +46,15 @@ let last_zombie_result : string option ref = ref None
 let last_gc_result : string option ref = ref None
 let last_lodge_result : (bool * string) option ref = ref None
 let lodge_running = ref false
+let zombie_loop_started = ref false
+let gc_loop_started = ref false
+let lodge_loop_started = ref false
+
+type masc_runtime_owner =
+  | Guardian_runtime
+  | Sentinel_runtime
+
+let masc_loops_owner : masc_runtime_owner option ref = ref None
 
 (* Pulse instances — stored for nudge/shutdown/stats access. *)
 let zombie_pulse : Pulse.t option ref = ref None
@@ -72,6 +81,39 @@ let is_quiet_hours () =
 (** Fixed-interval rhythm with no quiet hours. *)
 let fixed_rhythm base_s =
   { Pulse.base_s; min_s = base_s; max_s = base_s; quiet = (0, 0) }
+
+let runtime_owner_to_string = function
+  | Guardian_runtime -> "guardian"
+  | Sentinel_runtime -> "sentinel"
+
+let masc_runtime_owner_label () =
+  match !masc_loops_owner with
+  | None -> "none"
+  | Some owner -> runtime_owner_to_string owner
+
+let masc_loops_running () =
+  !zombie_loop_started || !gc_loop_started
+
+let note_embedded_masc_loops_started_for_tests () =
+  zombie_loop_started := true;
+  gc_loop_started := true;
+  masc_loops_owner := Some Sentinel_runtime
+
+let reset_runtime_state_for_tests () =
+  masc_loops_owner := None;
+  zombie_pulse := None;
+  gc_pulse := None;
+  lodge_pulse_inst := None;
+  lodge_running := false;
+  zombie_loop_started := false;
+  gc_loop_started := false;
+  lodge_loop_started := false;
+  last_zombie_cleanup := None;
+  last_gc := None;
+  last_lodge := None;
+  last_zombie_result := None;
+  last_gc_result := None;
+  last_lodge_result := None
 
 (* ── Pulse Consumer Factories ──────────────────────────────── *)
 
@@ -147,7 +189,12 @@ let status_json () : Yojson.Safe.t =
     ("enabled", `Bool enabled);
     ("mode", `String (Mode.to_string mode));
     ("masc_enabled", `Bool masc_enabled);
+    ("masc_loops_running", `Bool (masc_loops_running ()));
+    ("runtime_owner", `String (masc_runtime_owner_label ()));
+    ("zombie_loop_running", `Bool !zombie_loop_started);
+    ("gc_loop_running", `Bool !gc_loop_started);
     ("lodge_enabled", `Bool lodge_enabled);
+    ("lodge_loop_started", `Bool !lodge_loop_started);
     ("zombie_interval_s", `Float zombie_interval_s);
     ("gc_interval_s", `Float gc_interval_s);
     ("gc_days", `Int gc_days);
@@ -182,11 +229,17 @@ let status_json () : Yojson.Safe.t =
 
 (* ── Start ─────────────────────────────────────────────────── *)
 
-let start_masc_loops ~sw ~clock config =
-  if not masc_enabled then begin
+let start_masc_loops_internal ~owner ~respect_guardian_toggle ~sw ~clock config =
+  let can_start = if respect_guardian_toggle then masc_enabled else true in
+  if not can_start then begin
     log "masc guardian disabled";
     ()
+  end else if masc_loops_running () then begin
+    log
+      (sprintf "masc guardian loops already running (owner=%s)"
+         (masc_runtime_owner_label ()))
   end else begin
+    let started_any = ref false in
     if zombie_interval_s > 0.0 then begin
       let p = Pulse.create
         ~clock
@@ -195,7 +248,9 @@ let start_masc_loops ~sw ~clock config =
         ~consumers:[make_zombie_consumer config]
       in
       zombie_pulse := Some p;
-      Pulse.run ~sw p
+      Pulse.run ~sw p;
+      zombie_loop_started := true;
+      started_any := true
     end;
     if gc_interval_s > 0.0 then begin
       let p = Pulse.create
@@ -205,13 +260,30 @@ let start_masc_loops ~sw ~clock config =
         ~consumers:[make_gc_consumer config]
       in
       gc_pulse := Some p;
-      Pulse.run ~sw p
-    end
+      Pulse.run ~sw p;
+      gc_loop_started := true;
+      started_any := true
+    end;
+    if !started_any then
+      masc_loops_owner := Some owner
+    else
+      log "masc guardian loops disabled by interval configuration"
   end
+
+let start_masc_loops ~sw ~clock config =
+  start_masc_loops_internal ~owner:Guardian_runtime ~respect_guardian_toggle:true
+    ~sw ~clock config
+
+let start_embedded_masc_loops ~sw ~clock config =
+  start_masc_loops_internal ~owner:Sentinel_runtime ~respect_guardian_toggle:false
+    ~sw ~clock config
 
 let start_lodge_loop ~sw ~clock ~net =
   if not lodge_enabled then begin
     log "lodge guardian disabled";
+    ()
+  end else if Option.is_some !lodge_pulse_inst then begin
+    log "guardian lodge loop already running";
     ()
   end else if lodge_interval_s <= 0.0 || lodge_iterations <= 0 then begin
     log "lodge guardian disabled by interval/iterations";
@@ -224,6 +296,7 @@ let start_lodge_loop ~sw ~clock ~net =
       ~consumers:[make_lodge_consumer ~net]
     in
     lodge_pulse_inst := Some p;
+    lodge_loop_started := true;
     Pulse.run ~sw p
   end
 

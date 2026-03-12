@@ -32,7 +32,7 @@ jobs:
       - name: Pin external dependencies
         run: |
           chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh
+          scripts/opam-pin-external-deps.sh --with-bisect
 
       - name: Refresh system package index
         run: sudo apt-get update -qq

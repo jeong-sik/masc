@@ -1414,6 +1414,9 @@ export interface DashboardProofSummary {
   session_id?: string
   goal?: string
   verdict?: DashboardProofVerdict
+  live_verdict?: DashboardProofVerdict
+  historical_verdict?: DashboardProofVerdict | null
+  verdict_basis?: 'live' | 'live_and_historical' | 'historical_only' | string
   actors_count?: number
   planned_actor_count?: number
   mentioned_actor_count?: number

@@ -205,12 +205,14 @@ let manual_help_entry name =
       Some
         {
           name;
-          short_description = "Run the swarm-live harness and persist proof artifacts for inspection.";
-          when_to_use = "Use when you need auditable same-box swarm execution proof rather than only planned topology.";
+          short_description = "Preflight the swarm-live harness and persist runtime/proof artifacts for inspection.";
+          when_to_use = "Use when you need auditable same-box swarm readiness or proof artifacts rather than only planned topology.";
           key_constraints =
             [
               "Requires a prepared runtime pool and agent configuration.";
               "Produces proof artifacts under control-plane swarm-live storage.";
+              "Synchronous self-execution is disabled by default to avoid MCP server reentrancy hangs.";
+              "A successful preflight can still return a structured runtime blocker instead of a full inline run.";
             ];
           details_markdown =
             "Runs the official swarm-live harness and emits proof artifacts that can be read later from command-plane and proof surfaces.";

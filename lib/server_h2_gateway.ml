@@ -239,54 +239,61 @@ let make_request_handler ~sw ~clock ~server_start_time =
                let body = json_rpc_error (-32600) msg in
                h2_respond_json h2_reqd body ~status:`Conflict ~extra_headers:cors
            | Ok () ->
-               remember_mcp_profile session_id profile;
-               (match auth_result with
+               (match Server_mcp_transport_http.validate_protocol_version_continuity
+                        ~session_id httpun_request with
                 | Error msg ->
-                    let body = Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg in
-                    h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
-                | Ok _cred_opt -> (
-                    match classify_mcp_accept httpun_request with
-                    | Http_negotiation.Rejected ->
-                        let body =
-                          json_rpc_error (-32600)
-                            "Invalid Accept header: must include application/json and text/event-stream. \
-                             Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility."
-                        in
-                        h2_respond_json h2_reqd body ~status:`Bad_request
-                          ~extra_headers:(cors @ mcp_headers session_id protocol_version)
-                    | accept_mode ->
-                        let accept_warn_headers =
-                          legacy_accept_warning_headers accept_mode
-                        in
-                        h2_read_body h2_reqd (fun body_str ->
-                            let state = get_server_state ()
-                            in
-                            let response_json =
-                              Mcp_eio.handle_request ~clock ~sw ~profile
-                                ~mcp_session_id:session_id ?auth_token state body_str
-                            in
-                            (match protocol_version_from_body body_str with
-                            | Some v -> remember_protocol_version session_id v
-                            | None -> ());
-                            let protocol_version =
-                              get_protocol_version_for_session ~session_id
-                                httpun_request
-                            in
-                            let mcp_hdrs =
-                              accept_warn_headers @ mcp_headers session_id protocol_version
-                              @ cors
-                            in
-                            match response_json with
-                            | `Null ->
-                                h2_respond_empty h2_reqd ~status:`Accepted
-                                  ~extra_headers:mcp_hdrs
-                            | json when is_http_error_response json ->
-                                let body = Yojson.Safe.to_string json in
-                                h2_respond_json h2_reqd body ~status:`Bad_request
-                                  ~extra_headers:mcp_hdrs
-                            | json ->
-                                let body = Yojson.Safe.to_string json in
-                                h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs))))
+                    let body = json_rpc_error (-32600) msg in
+                    h2_respond_json h2_reqd body ~status:`Bad_request
+                      ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                | Ok () ->
+                    remember_mcp_profile session_id profile;
+                    (match auth_result with
+                     | Error msg ->
+                         let body = Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg in
+                         h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
+                     | Ok _cred_opt -> (
+                         match classify_mcp_accept httpun_request with
+                         | Http_negotiation.Rejected ->
+                             let body =
+                               json_rpc_error (-32600)
+                                 "Invalid Accept header: must include application/json and text/event-stream. \
+                                  Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility."
+                             in
+                             h2_respond_json h2_reqd body ~status:`Bad_request
+                               ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                         | accept_mode ->
+                             let accept_warn_headers =
+                               legacy_accept_warning_headers accept_mode
+                             in
+                             h2_read_body h2_reqd (fun body_str ->
+                                 let state = get_server_state ()
+                                 in
+                                 let response_json =
+                                   Mcp_eio.handle_request ~clock ~sw ~profile
+                                     ~mcp_session_id:session_id ?auth_token state body_str
+                                 in
+                                 (match protocol_version_from_body body_str with
+                                 | Some v -> remember_protocol_version session_id v
+                                 | None -> ());
+                                 let protocol_version =
+                                   get_protocol_version_for_session ~session_id
+                                     httpun_request
+                                 in
+                                 let mcp_hdrs =
+                                   accept_warn_headers @ mcp_headers session_id protocol_version
+                                   @ cors
+                                 in
+                                 match response_json with
+                                 | `Null ->
+                                     h2_respond_empty h2_reqd ~status:`Accepted
+                                       ~extra_headers:mcp_hdrs
+                                 | json when is_http_error_response json ->
+                                     let body = Yojson.Safe.to_string json in
+                                     h2_respond_json h2_reqd body ~status:`Bad_request
+                                       ~extra_headers:mcp_hdrs
+                                 | json ->
+                                     let body = Yojson.Safe.to_string json in
+                                     h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs)))))
 
       | `DELETE, "/mcp" | `DELETE, "/mcp/operator" ->
           let profile =
@@ -321,12 +328,21 @@ let make_request_handler ~sw ~clock ~server_start_time =
                         h2_respond_json h2_reqd body ~status:`Conflict
                           ~extra_headers:cors
                     | Ok () ->
-                        stop_sse_session session_id;
-                        Sse.unregister session_id;
-                        forget_mcp_session session_id;
-                        Printf.printf "🔚 Session terminated: %s\n%!" session_id;
-                        let mcp_hdrs = mcp_headers session_id (get_protocol_version httpun_request) in
-                        h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs)
+                        (match Server_mcp_transport_http.validate_protocol_version_continuity
+                                 ~session_id httpun_request with
+                         | Error msg ->
+                             let body =
+                               Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32600,"message":"%s"}}|} msg
+                             in
+                             h2_respond_json h2_reqd body ~status:`Bad_request
+                               ~extra_headers:(cors @ mcp_headers session_id (get_protocol_version httpun_request))
+                         | Ok () ->
+                             stop_sse_session session_id;
+                             Sse.unregister session_id;
+                             forget_mcp_session session_id;
+                             Printf.printf "🔚 Session terminated: %s\n%!" session_id;
+                             let mcp_hdrs = mcp_headers session_id (get_protocol_version httpun_request) in
+                             h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs))
                 | None ->
                     h2_respond_text h2_reqd "Mcp-Session-Id required" ~status:`Bad_request ~extra_headers:cors))
 

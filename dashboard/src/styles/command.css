@@ -70,6 +70,17 @@
   gap: 18px;
 }
 
+.command-plane-view.wallboard {
+  min-height: calc(100vh - 48px);
+  padding: 24px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(34,211,238,0.12), transparent 22%),
+    radial-gradient(circle at top right, rgba(74,222,128,0.1), transparent 24%),
+    linear-gradient(180deg, rgba(3,7,18,0.98), rgba(8,14,28,0.96));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
 .command-focus-banner {
   border-radius: 14px;
   border: 1px solid rgba(34,211,238,0.26);
@@ -443,29 +454,11 @@
   overflow: hidden;
 }
 
-.orchestra-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-}
-
-.orchestra-toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .orchestra-shell {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
   gap: 16px;
   margin-top: 16px;
-  align-items: start;
-  min-width: 0;
 }
 
 .orchestra-canvas-wrap {
@@ -473,8 +466,6 @@
   border-radius: 18px;
   overflow: hidden;
   border: 1px solid rgba(125,211,252,0.12);
-  min-width: 0;
-  height: clamp(580px, 68vh, 920px);
   background:
     radial-gradient(circle at top, rgba(34,211,238,0.12), transparent 42%),
     radial-gradient(circle at 20% 80%, rgba(96,165,250,0.08), transparent 35%),
@@ -492,14 +483,8 @@
 .orchestra-canvas {
   display: block;
   width: 100%;
-  height: 100%;
-  min-height: 0;
-  touch-action: none;
-  cursor: grab;
-}
-
-.orchestra-canvas.is-dragging {
-  cursor: grabbing;
+  height: auto;
+  min-height: 720px;
 }
 
 .orchestra-grid {
@@ -517,7 +502,6 @@
   stroke-width: 2;
   transition: stroke-width 0.2s ease, opacity 0.2s ease;
   opacity: 0.62;
-  pointer-events: none;
 }
 
 .orchestra-edge.ok { stroke: rgba(74,222,128,0.35); }
@@ -584,19 +568,6 @@
 .orchestra-node-status {
   fill: rgba(226,232,240,0.62);
   font-size: 10px;
-}
-
-.orchestra-node.worker .orchestra-node-label,
-.orchestra-node.worker-ghost .orchestra-node-label,
-.orchestra-node.keeper .orchestra-node-label {
-  font-size: 11px;
-}
-
-.orchestra-node.worker .orchestra-node-subtitle,
-.orchestra-node.worker-ghost .orchestra-node-subtitle,
-.orchestra-node.worker .orchestra-node-status,
-.orchestra-node.worker-ghost .orchestra-node-status {
-  display: none;
 }
 
 .orchestra-node-glyph {
@@ -672,9 +643,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-height: 0;
-  max-height: none;
-  overflow: visible;
+  min-height: 720px;
 }
 
 .orchestra-fact-list {
@@ -713,49 +682,6 @@
 @keyframes orchestraPulse {
   0%, 100% { transform: scale(1); opacity: 0.92; }
   50% { transform: scale(1.06); opacity: 1; }
-}
-
-@media (min-width: 1780px) {
-  .orchestra-shell {
-    grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.7fr);
-  }
-
-  .orchestra-drawer {
-    max-height: clamp(580px, 68vh, 920px);
-    overflow-y: auto;
-  }
-}
-
-@media (max-width: 1220px) {
-  .orchestra-canvas-wrap {
-    height: clamp(500px, 60vh, 760px);
-  }
-}
-
-@media (max-width: 900px) {
-  .orchestra-toolbar {
-    align-items: flex-start;
-  }
-
-  .orchestra-toolbar-group {
-    width: 100%;
-  }
-
-  .orchestra-canvas-wrap {
-    height: clamp(440px, 52vh, 680px);
-  }
-
-  .orchestra-summary-strip {
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
-  }
-}
-
-@media (max-width: 700px) {
-  .orchestra-canvas-wrap {
-    height: clamp(380px, 48vh, 560px);
-  }
 }
 
 /* ── SwarmHealthBar ────────────────────────────── */
@@ -1238,7 +1164,7 @@
 
 .command-warroom-strip-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px;
 }
 
@@ -1249,11 +1175,19 @@
   align-items: start;
 }
 
+.command-warroom-grid.wallboard {
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.12fr) minmax(320px, 0.9fr);
+}
+
 .command-warroom-column {
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+}
+
+.command-section-stack.wallboard {
+  gap: 20px;
 }
 
 .command-warroom-empty {
@@ -1275,12 +1209,89 @@
   font-size: 26px;
 }
 
+.command-warroom-empty.wallboard {
+  min-height: calc(100vh - 180px);
+  justify-content: center;
+}
+
+.command-warroom-summary {
+  margin-top: 12px;
+  color: rgba(226,232,240,0.86);
+  line-height: 1.55;
+  max-width: 82ch;
+}
+
+.command-warroom-hero-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.command-warroom-strip.wallboard {
+  padding: 22px;
+  border-radius: 22px;
+}
+
+.warroom-orchestration-grid,
+.warroom-presence-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.command-plane-view.wallboard .warroom-orchestration-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.warroom-orchestration-card,
+.warroom-presence-card,
+.warroom-feed-card {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.035));
+  border-color: rgba(148,163,184,0.18);
+}
+
+.warroom-orchestration-card {
+  min-height: 220px;
+}
+
+.warroom-presence-card.ok,
+.warroom-feed-card.ok {
+  border-color: rgba(74,222,128,0.24);
+}
+
+.warroom-presence-card.warn,
+.warroom-feed-card.warn {
+  border-color: rgba(251,191,36,0.22);
+}
+
+.warroom-presence-card.bad,
+.warroom-feed-card.bad {
+  border-color: rgba(248,113,113,0.26);
+}
+
+.warroom-feed-card {
+  display: grid;
+  gap: 10px;
+}
+
+.warroom-feed-detail {
+  color: rgba(226,232,240,0.86);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .warroom-worker-card .command-tag-row {
   margin-top: 10px;
 }
 
 @media (max-width: 1450px) {
   .command-warroom-grid,
+  .command-warroom-grid.wallboard,
   .command-warroom-strip-stats,
   .command-hero-summary,
   .command-guided-layout,
@@ -1293,6 +1304,7 @@
 
 @media (max-width: 1100px) {
   .command-warroom-grid,
+  .command-warroom-grid.wallboard,
   .command-primary-layout,
   .command-hero-summary,
   .command-guided-layout,
@@ -1309,6 +1321,12 @@
 
   .command-warroom-strip {
     position: static;
+  }
+
+  .command-plane-view.wallboard {
+    min-height: auto;
+    padding: 16px;
+    border-radius: 18px;
   }
 }
 

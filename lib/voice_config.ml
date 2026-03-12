@@ -15,10 +15,18 @@ type endpoint = {
   max_retries : int option;
 }
 
+type voice_tuning = {
+  stability : float;
+  similarity_boost : float;
+  style : float;
+}
+
 type tts_config = {
   default_model : string;
   default_voice : string;
+  default_voice_settings : voice_tuning;
   agent_voices : (string * string) list;
+  agent_voice_settings : (string * voice_tuning) list;
   endpoints : endpoint list;
 }
 
@@ -81,6 +89,11 @@ let float_opt = function
   | `Float value -> Some value
   | `Int value -> Some (float_of_int value)
   | _ -> None
+
+let float_or_default default = function
+  | `Float value -> value
+  | `Int value -> float_of_int value
+  | _ -> default
 
 let require_string ~ctx ~field json =
   match Yojson.Safe.Util.member field json |> trim_nonempty with
@@ -188,15 +201,60 @@ let parse_agent_voices json =
   | `Null -> Ok []
   | _ -> Error "tts.agent_voices must be an object"
 
+let parse_voice_tuning ~ctx json =
+  match json with
+  | `Assoc _ ->
+      Ok
+        {
+          stability =
+            Yojson.Safe.Util.member "stability" json |> float_or_default 0.5;
+          similarity_boost =
+            Yojson.Safe.Util.member "similarity_boost" json
+            |> float_or_default 0.75;
+          style = Yojson.Safe.Util.member "style" json |> float_or_default 0.0;
+        }
+  | `Null ->
+      Ok { stability = 0.5; similarity_boost = 0.75; style = 0.0 }
+  | _ -> Error (Printf.sprintf "%s must be an object" ctx)
+
+let parse_agent_voice_settings json =
+  match Yojson.Safe.Util.member "agent_voice_settings" json with
+  | `Assoc pairs ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | (agent_id, tuning_json) :: rest -> (
+            match parse_voice_tuning ~ctx:("tts.agent_voice_settings." ^ agent_id) tuning_json with
+            | Ok tuning -> loop ((String.trim agent_id, tuning) :: acc) rest
+            | Error _ as err -> err)
+      in
+      loop [] pairs
+  | `Null -> Ok []
+  | _ -> Error "tts.agent_voice_settings must be an object"
+
 let parse_tts json =
   let open Result in
   let* tts_json = require_object ~ctx:"root" ~field:"tts" json in
   let* default_model = require_string ~ctx:"tts" ~field:"default_model" tts_json in
   let* default_voice = require_string ~ctx:"tts" ~field:"default_voice" tts_json in
+  let* default_voice_settings =
+    parse_voice_tuning ~ctx:"tts.default_voice_settings"
+      (Yojson.Safe.Util.member "default_voice_settings" tts_json)
+  in
   let* agent_voices = parse_agent_voices tts_json in
+  let* agent_voice_settings =
+    parse_agent_voice_settings tts_json
+  in
   let* endpoints_json = require_list ~ctx:"tts" ~field:"endpoints" tts_json in
   let* endpoints = parse_endpoints ~ctx:"tts.endpoints" [] endpoints_json in
-  Ok { default_model; default_voice; agent_voices; endpoints }
+  Ok
+    {
+      default_model;
+      default_voice;
+      default_voice_settings;
+      agent_voices;
+      agent_voice_settings;
+      endpoints;
+    }
 
 let parse_stt json =
   let open Result in
@@ -217,18 +275,19 @@ let parse_session json =
 
 let parse_local_playback json =
   match Yojson.Safe.Util.member "local_playback" json with
-  | `Null -> Ok { enabled = false; agents = [] }
   | `Assoc local_json ->
+      let local_json = `Assoc local_json in
       let enabled =
-        Yojson.Safe.Util.member "enabled" (`Assoc local_json) |> bool_or_default false
+        Yojson.Safe.Util.member "enabled" local_json |> bool_or_default false
       in
       let agents =
-        match Yojson.Safe.Util.member "agents" (`Assoc local_json) |> string_list_opt with
-        | Some values -> values
-        | None -> []
+        match Yojson.Safe.Util.member "agents" local_json with
+        | `List values -> List.filter_map trim_nonempty values
+        | _ -> []
       in
       Ok { enabled; agents }
-  | _ -> Error "root.local_playback must be object"
+  | `Null -> Ok { enabled = false; agents = [] }
+  | _ -> Error "root.local_playback must be an object"
 
 let load () =
   let path = config_path () in
@@ -258,7 +317,7 @@ let select_endpoint ?endpoint_id (endpoints : endpoint list) =
   | Some id when String.trim id <> "" -> (
       let id = String.trim id in
       List.find_opt
-        (fun endpoint ->
+        (fun (endpoint : endpoint) ->
           endpoint.id = id || string_of_endpoint_kind endpoint.kind = id)
         endpoints )
   | _ -> (
@@ -270,6 +329,18 @@ let voice_for_agent config agent_id =
   match List.assoc_opt agent_id config.tts.agent_voices with
   | Some voice -> voice
   | None -> config.tts.default_voice
+
+let tuning_for_agent config agent_id =
+  match List.assoc_opt agent_id config.tts.agent_voice_settings with
+  | Some tuning -> tuning
+  | None -> config.tts.default_voice_settings
+
+let local_playback_enabled_for_agent config agent_id =
+  config.local_playback.enabled
+  &&
+  match config.local_playback.agents with
+  | [] -> true
+  | agents -> List.mem agent_id agents
 
 let unique_strings values =
   let rec loop seen acc = function
@@ -346,6 +417,6 @@ let public_json config =
             ("enabled", `Bool config.local_playback.enabled);
             ( "agents",
               `List
-                (List.map (fun agent -> `String agent) config.local_playback.agents) );
+                (List.map (fun agent_id -> `String agent_id) config.local_playback.agents) );
           ] );
     ]

@@ -713,6 +713,167 @@ let test_keeper_policy_set_rejects_invalid_mode () =
            true
          with Not_found -> false))
 
+let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Maintain Sangsu persona");
+              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let json = Yojson.Safe.from_string body in
+      check string "policy mode" "explicit_event_v1"
+        Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
+      check bool "voice enabled" true
+        Yojson.Safe.Util.(json |> member "voice_enabled" |> to_bool);
+      check string "voice channel" "voice_text"
+        Yojson.Safe.Util.(json |> member "voice_channel" |> to_string);
+      check string "voice agent id" "sangsu"
+        Yojson.Safe.Util.(json |> member "voice_agent_id" |> to_string);
+      let resident_path =
+        Filename.concat base_dir ".masc/resident-keepers/sangsu.json"
+      in
+      check bool "resident spec exists" true (Sys.file_exists resident_path);
+      let resident_json = Yojson.Safe.from_file resident_path in
+      check bool "resident voice enabled" true
+        Yojson.Safe.Util.(resident_json |> member "voice_enabled" |> to_bool);
+      check string "resident voice channel" "voice_text"
+        Yojson.Safe.Util.(resident_json |> member "voice_channel" |> to_string))
+
+let test_keeper_policy_set_accepts_explicit_event_v1 () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "buddy");
+              ("goal", `String "Stay resident");
+              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let ok, body =
+        dispatch "masc_keeper_policy_set"
+          (`Assoc
+            [
+              ("name", `String "buddy");
+              ("policy_mode", `String "explicit_event_v1");
+            ])
+      in
+      check bool "policy set ok" true ok;
+      let json = Yojson.Safe.from_string body in
+      check string "policy mode updated" "explicit_event_v1"
+        Yojson.Safe.Util.(json |> member "policy_mode" |> to_string))
+
+let test_resident_bootstrap_marks_stale_explicit_keeper () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("goal", `String "Stay resident");
+              ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
+              ("presence_keepalive", `Bool true);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      Masc_mcp.Keeper_execution.stop_keepalive "sangsu";
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "sangsu" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta"
+        | Error e -> fail e
+      in
+      let stale_meta =
+        {
+          meta with
+          policy_mode = "explicit_event_v1";
+          presence_keepalive = true;
+          proactive_enabled = false;
+          last_turn_ts = 0.0;
+        }
+      in
+      (match Masc_mcp.Keeper_types.write_meta config stale_meta with
+      | Ok () -> ()
+      | Error e -> fail e);
+      let stats = Masc_mcp.Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
+      check bool "bootstrap enabled" true stats.enabled;
+      check int "started stale resident" 0 stats.started;
+      check int "stale resident counted" 1 stats.stale;
+      let ok, status_body =
+        dispatch "masc_keeper_status"
+          (`Assoc
+            [
+              ("name", `String "sangsu");
+              ("include_history_tail", `Bool false);
+              ("include_compaction_history", `Bool false);
+              ("include_context", `Bool false);
+              ("include_metrics_overview", `Bool false);
+              ("include_memory_bank", `Bool false);
+            ])
+      in
+      check bool "status ok" true ok;
+      let status_json = Yojson.Safe.from_string status_body in
+      check bool "keepalive running" false
+        Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -740,5 +901,11 @@ let () =
            test_keeper_policy_tools_roundtrip;
          test_case "policy set rejects invalid mode" `Quick
            test_keeper_policy_set_rejects_invalid_mode;
+         test_case "sangsu defaults explicit voice policy" `Quick
+           test_keeper_up_defaults_sangsu_to_explicit_voice_policy;
+         test_case "policy set accepts explicit_event_v1" `Quick
+           test_keeper_policy_set_accepts_explicit_event_v1;
+         test_case "resident bootstrap marks stale explicit keeper" `Quick
+           test_resident_bootstrap_marks_stale_explicit_keeper;
        ]);
   ]

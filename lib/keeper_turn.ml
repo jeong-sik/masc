@@ -41,6 +41,9 @@ let handle_keeper_up ctx args : tool_result =
     let room_scope_opt = get_string_opt args "room_scope" in
     let scope_kind_opt = get_string_opt args "scope_kind" in
     let trigger_mode_opt = get_string_opt args "trigger_mode" in
+    let voice_enabled_opt = get_bool_opt args "voice_enabled" in
+    let voice_channel_opt = get_string_opt args "voice_channel" in
+    let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
     let mention_targets_in = get_string_list args "mention_targets" in
     let verify_opt = get_bool_opt args "verify" in
     let presence_keepalive_opt = get_bool_opt args "presence_keepalive" in
@@ -135,12 +138,14 @@ let handle_keeper_up ctx args : tool_result =
         |> Option.value
              ~default:
                (match requested_models with
-                | model :: _ -> model
+               | model :: _ -> model
                 | [] -> "")
       in
       let policy_mode =
         first_some policy_mode_opt profile_defaults.policy_mode
-        |> Option.value ~default:"heuristic"
+        |> Option.value
+             ~default:
+               (if default_voice_enabled_for name then "explicit_event_v1" else "heuristic")
         |> canonical_policy_mode
       in
       let policy_action_budget =
@@ -190,6 +195,17 @@ let handle_keeper_up ctx args : tool_result =
         first_some initiative_post_ttl_hours_opt profile_defaults.initiative_post_ttl_hours
         |> Option.value ~default:24
         |> normalize_initiative_post_ttl_hours
+      in
+      let voice_enabled =
+        Option.value ~default:(default_voice_enabled_for name) voice_enabled_opt
+      in
+      let voice_channel =
+        voice_channel_opt
+        |> Option.map canonical_voice_channel
+        |> Option.value ~default:(default_voice_channel_for name)
+      in
+      let voice_agent_id =
+        Option.value ~default:(default_voice_agent_id_for name) voice_agent_id_opt
       in
       let mention_targets =
         let raw =
@@ -375,6 +391,9 @@ let handle_keeper_up ctx args : tool_result =
                scope_kind;
                room_scope;
                trigger_mode;
+               voice_enabled;
+               voice_channel;
+               voice_agent_id;
                mention_targets;
                joined_room_ids = [];
                last_seen_seq_by_room = [];
@@ -450,6 +469,10 @@ let handle_keeper_up ctx args : tool_result =
                  ("desires", `String meta.desires);
                  ("instructions", `String meta.instructions);
                  ("models", `List (List.map (fun s -> `String s) meta.models));
+                 ("policy_mode", `String meta.policy_mode);
+                 ("voice_enabled", `Bool meta.voice_enabled);
+                 ("voice_channel", `String meta.voice_channel);
+                 ("voice_agent_id", `String meta.voice_agent_id);
                  ("presence_keepalive", `Bool meta.presence_keepalive);
                  ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
                  ("proactive_enabled", `Bool meta.proactive_enabled);
@@ -715,6 +738,14 @@ let handle_keeper_up ctx args : tool_result =
         scope_kind;
         room_scope;
         trigger_mode;
+        voice_enabled =
+          Option.value ~default:old.voice_enabled voice_enabled_opt;
+        voice_channel =
+          (voice_channel_opt
+          |> Option.map canonical_voice_channel
+          |> Option.value ~default:old.voice_channel);
+        voice_agent_id =
+          Option.value ~default:old.voice_agent_id voice_agent_id_opt;
         mention_targets;
         persona_profile_path =
           if String.trim old.persona_profile_path <> "" then old.persona_profile_path
@@ -908,7 +939,10 @@ let handle_keeper_msg ctx args : tool_result =
           in
           let policy_mode =
             profile_defaults.policy_mode
-            |> Option.value ~default:"heuristic"
+            |> Option.value
+                 ~default:
+                   (if default_voice_enabled_for name then "explicit_event_v1"
+                    else "heuristic")
             |> canonical_policy_mode
           in
           let policy_action_budget =
@@ -1008,6 +1042,9 @@ let handle_keeper_msg ctx args : tool_result =
             scope_kind;
             room_scope;
             trigger_mode;
+            voice_enabled = default_voice_enabled_for name;
+            voice_channel = default_voice_channel_for name;
+            voice_agent_id = default_voice_agent_id_for name;
             mention_targets;
             joined_room_ids = [];
             last_seen_seq_by_room = [];

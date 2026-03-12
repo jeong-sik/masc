@@ -46,6 +46,17 @@ let agent_voices () =
   | Ok config -> config.tts.agent_voices
   | Error _ -> default_agent_voices
 
+let tuning_for_agent agent_id =
+  match load_voice_config () with
+  | Ok config -> Voice_config.tuning_for_agent config agent_id
+  | Error _ ->
+      { Voice_config.stability = 0.5; similarity_boost = 0.75; style = 0.0 }
+
+let local_playback_enabled_for_agent agent_id =
+  match load_voice_config () with
+  | Ok config -> Voice_config.local_playback_enabled_for_agent config agent_id
+  | Error _ -> false
+
 let ends_with ~suffix s =
   let slen = String.length s in
   let plen = String.length suffix in
@@ -240,12 +251,17 @@ let voice_name_to_id name =
       if trimmed = "" then "21m00Tcm4TlvDq8ikWAM" else trimmed
 
 (** Ensure .masc/audio/ directory exists *)
+let masc_base_dir () =
+  match Sys.getenv_opt "ME_ROOT" with
+  | Some root when String.trim root <> "" -> Filename.concat root ".masc"
+  | _ -> ".masc"
+
 let ensure_audio_dir () =
-  let dir = ".masc/audio" in
+  let dir = Filename.concat (masc_base_dir ()) "audio" in
   if not (Sys.file_exists dir) then
     Sys.mkdir dir 0o755
   else if not (Sys.is_directory dir) then
-    log_error ".masc/audio exists but is not a directory"
+    log_error "voice audio path exists but is not a directory"
 
 let normalize_base_url value =
   let trimmed = String.trim value in
@@ -269,14 +285,18 @@ let endpoint_url_json endpoint =
   | None -> `Null
 
 let append_provider_metadata json endpoint =
+  let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
   match json with
   | `Assoc fields ->
       `Assoc
         (fields
         @ [
+            ("provider_name", `String adapter.canonical_name);
             ( "provider_kind",
-              `String
-                (Voice_config.string_of_endpoint_kind endpoint.Voice_config.kind) );
+              `String (Provider_adapter.string_of_voice_transport adapter.transport) );
+            ( "provider_family",
+              `String (Provider_adapter.string_of_provider_family adapter.provider_family) );
+            ("provider_auth", `String (Provider_adapter.string_of_auth_mode adapter.auth_mode));
             ("endpoint_id", `String endpoint.id);
             ("endpoint_url", endpoint_url_json endpoint);
           ])
@@ -298,7 +318,9 @@ let safe_agent_id value =
 let make_audio_file ~agent_id =
   ensure_audio_dir ();
   let timestamp = int_of_float (Time_compat.now ()) in
-  Printf.sprintf ".masc/audio/%d_%s.mp3" timestamp (safe_agent_id agent_id)
+  Filename.concat
+    (Filename.concat (masc_base_dir ()) "audio")
+    (Printf.sprintf "%d_%s.mp3" timestamp (safe_agent_id agent_id))
 
 let write_text path content =
   let oc = open_out path in
@@ -314,16 +336,94 @@ let read_file path =
       let len = in_channel_length ic in
       really_input_string ic len)
 
+let show_process_status = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+
+let playback_success_json ~attempted ~succeeded ~method_name ?detail () =
+  `Assoc
+    [
+      ("enabled", `Bool attempted);
+      ("attempted", `Bool attempted);
+      ("succeeded", `Bool succeeded);
+      ("method", `String method_name);
+      ("detail", match detail with Some value -> `String value | None -> `Null);
+    ]
+
+let playback_skipped_json reason =
+  `Assoc
+    [
+      ("enabled", `Bool false);
+      ("attempted", `Bool false);
+      ("succeeded", `Bool false);
+      ("method", `Null);
+      ("detail", `String reason);
+    ]
+
+let play_audio_locally ~agent_id ~audio_file =
+  if not (local_playback_enabled_for_agent agent_id) then
+    Ok (playback_skipped_json "local playback disabled")
+  else
+    let run argv =
+      Process_eio.run_argv_with_status ~timeout_sec:120.0 argv
+    in
+    let run_afplay path =
+      let argv =
+        if Sys.file_exists "/usr/bin/afplay" then [ "/usr/bin/afplay"; path ]
+        else [ "afplay"; path ]
+      in
+      run argv
+    in
+    match run_afplay audio_file with
+    | Unix.WEXITED 0, _ ->
+        Ok (playback_success_json ~attempted:true ~succeeded:true ~method_name:"afplay" ())
+    | status, output ->
+        let wav_file = Filename.temp_file "masc_voice_playback" ".wav" in
+        Fun.protect
+          ~finally:(fun () -> try Sys.remove wav_file with Sys_error _ -> ())
+          (fun () ->
+            let ffmpeg_argv =
+              [ "ffmpeg"; "-y"; "-loglevel"; "error"; "-i"; audio_file; wav_file ]
+            in
+            match run ffmpeg_argv with
+            | Unix.WEXITED 0, _ -> (
+                match run_afplay wav_file with
+                | Unix.WEXITED 0, _ ->
+                    Ok
+                      (playback_success_json ~attempted:true ~succeeded:true
+                         ~method_name:"ffmpeg+afplay"
+                         ~detail:"converted to wav for playback" ())
+                | status2, output2 ->
+                    Error
+                      (Printf.sprintf
+                         "local playback failed after wav conversion: afplay=%s output=%s"
+                         (show_process_status status2)
+                         (String.trim output2)) )
+            | status_ffmpeg, output_ffmpeg ->
+                Error
+                  (Printf.sprintf
+                     "local playback failed: afplay=%s output=%s; ffmpeg=%s output=%s"
+                     (show_process_status status)
+                     (String.trim output)
+                     (show_process_status status_ffmpeg)
+                     (String.trim output_ffmpeg)) )
+
 let resolve_api_key endpoint =
-  match endpoint.Voice_config.api_key_env with
+  let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
+  match
+    Provider_adapter.voice_auth_env_name
+      ?endpoint_api_key_env:endpoint.Voice_config.api_key_env
+      adapter
+  with
   | Some env_name -> (
       match Sys.getenv_opt env_name with
       | Some value when String.trim value <> "" -> Ok (String.trim value)
       | _ ->
           Error
             (Printf.sprintf
-               "voice config endpoint %s expects %s to be set"
-               endpoint.id env_name) )
+               "voice provider %s (endpoint %s) expects %s to be set"
+               adapter.canonical_name endpoint.id env_name) )
   | None -> Ok ""
 
 let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
@@ -380,7 +480,7 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
       | Unix.WEXITED code -> Error (Printf.sprintf "curl exit %d" code)
       | _ -> Error "curl process failed")
 
-let speak_via_openai_compat_to_file endpoint ~message ~voice ~model ~output_file =
+let speak_via_openai_compat_to_file endpoint ~agent_id ~message ~voice ~model ~output_file =
   let open Result in
   let* api_key = resolve_api_key endpoint in
   let base_url =
@@ -396,6 +496,7 @@ let speak_via_openai_compat_to_file endpoint ~message ~voice ~model ~output_file
     @
     if api_key = "" then [] else [ ("Authorization", "Bearer " ^ api_key) ]
   in
+  let tuning = tuning_for_agent agent_id in
   let body_json =
     `Assoc
       [
@@ -403,13 +504,20 @@ let speak_via_openai_compat_to_file endpoint ~message ~voice ~model ~output_file
         ("voice", `String voice);
         ("model", `String model);
         ("response_format", `String "mp3");
+        ( "voice_settings",
+          `Assoc
+            [
+              ("stability", `Float tuning.stability);
+              ("similarity_boost", `Float tuning.similarity_boost);
+              ("style", `Float tuning.style);
+            ] );
       ]
   in
   run_audio_http_request_to_file
     ~url:(base_url ^ "/audio/speech")
     ~headers ~body_json ~output_file
 
-let speak_via_elevenlabs_to_file endpoint ~message ~voice ~model ~output_file =
+let speak_via_elevenlabs_to_file endpoint ~agent_id ~message ~voice ~model ~output_file =
   let open Result in
   let* api_key = resolve_api_key endpoint in
   let base_url =
@@ -428,6 +536,7 @@ let speak_via_elevenlabs_to_file endpoint ~message ~voice ~model ~output_file =
       ("Accept", "audio/mpeg");
     ]
   in
+  let tuning = tuning_for_agent agent_id in
   let body_json =
     `Assoc
       [
@@ -436,9 +545,9 @@ let speak_via_elevenlabs_to_file endpoint ~message ~voice ~model ~output_file =
         ( "voice_settings",
           `Assoc
             [
-              ("stability", `Float 0.5);
-              ("similarity_boost", `Float 0.75);
-              ("style", `Float 0.0);
+              ("stability", `Float tuning.stability);
+              ("similarity_boost", `Float tuning.similarity_boost);
+              ("style", `Float tuning.style);
             ] );
       ]
   in
@@ -447,21 +556,32 @@ let speak_via_elevenlabs_to_file endpoint ~message ~voice ~model ~output_file =
     ~headers ~body_json ~output_file
 
 let available_tts_endpoints ?provider () =
+  let normalize value = String.lowercase_ascii (String.trim value) in
+  let endpoint_matches_provider label endpoint =
+    let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
+    let labels =
+      endpoint.id
+      :: Voice_config.string_of_endpoint_kind endpoint.kind
+      :: Provider_adapter.string_of_voice_transport adapter.transport
+      :: adapter.canonical_name
+      :: adapter.aliases
+    in
+    let target = normalize label in
+    List.exists (fun candidate -> String.equal (normalize candidate) target) labels
+  in
   match load_voice_config () with
   | Error _ -> []
-  | Ok config -> (
-      match Voice_config.select_endpoint ?endpoint_id:provider config.tts.endpoints with
-      | Some endpoint when Option.is_some provider -> [ endpoint ]
-      | _ -> Voice_config.enabled_endpoints config.tts.endpoints)
+  | Ok config ->
+      let endpoints = Voice_config.enabled_endpoints config.tts.endpoints in
+      (match provider with
+      | Some label when String.trim label <> "" ->
+          List.filter (endpoint_matches_provider label) endpoints
+      | _ -> endpoints)
 
 let provider_error_json endpoint message =
-  `Assoc
-    [ ("status", `String "error");
-      ("message", `String message);
-      ( "provider_kind",
-        `String (Voice_config.string_of_endpoint_kind endpoint.Voice_config.kind) );
-      ("endpoint_id", `String endpoint.id);
-      ("endpoint_url", endpoint_url_json endpoint) ]
+  append_provider_metadata
+    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
+    endpoint
 
 let public_config_json () =
   match load_voice_config () with
@@ -530,10 +650,12 @@ let tts_preview_bytes_from_request_json json =
             let result =
               match endpoint.Voice_config.kind with
               | Voice_config.Openai_compat ->
-                  speak_via_openai_compat_to_file endpoint ~message:text ~voice ~model
+                  speak_via_openai_compat_to_file endpoint ~agent_id:"preview"
+                    ~message:text ~voice ~model
                     ~output_file
               | Voice_config.Elevenlabs_direct ->
-                  speak_via_elevenlabs_to_file endpoint ~message:text ~voice ~model
+                  speak_via_elevenlabs_to_file endpoint ~agent_id:"preview"
+                    ~message:text ~voice ~model
                     ~output_file
               | Voice_config.Voice_mcp -> assert false
             in
@@ -550,7 +672,7 @@ let tts_preview_bytes_from_request_json json =
 
 (** Clean up old audio files (>1 hour). Call from heartbeat. *)
 let cleanup_old_audio_files () =
-  let dir = ".masc/audio" in
+  let dir = Filename.concat (masc_base_dir ()) "audio" in
   if Sys.file_exists dir && Sys.is_directory dir then begin
     let now = Time_compat.now () in
     let cutoff = now -. 3600.0 in
@@ -762,7 +884,7 @@ let attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
       let audio_file = make_audio_file ~agent_id in
       (match
          speak_via_openai_compat_to_file endpoint ~message ~voice ~model
-           ~output_file:audio_file
+           ~agent_id ~output_file:audio_file
        with
       | Ok file_size ->
           start_local_playback ~sw ~agent_id ~audio_file;
@@ -787,7 +909,7 @@ let attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
       let audio_file = make_audio_file ~agent_id in
       (match
          speak_via_elevenlabs_to_file endpoint ~message ~voice ~model
-           ~output_file:audio_file
+           ~agent_id ~output_file:audio_file
        with
       | Ok file_size ->
           start_local_playback ~sw ~agent_id ~audio_file;
@@ -980,15 +1102,14 @@ let start_voice_session ~sw ~clock ~net ~agent_id ?session_name () =
 (** End a voice session *)
 let end_voice_session ~sw ~clock ~net ~agent_id =
   if not (is_voice_server_available ~sw ~clock ~net) then
-    Ok
-      (`Assoc
-        [ ("status", `String "skipped"); ("reason", `String "Voice server unavailable") ])
+    Error "Voice server unavailable"
   else
     let args = `Assoc [ ("agent_id", `String agent_id) ] in
     call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_end" ~arguments:args
 
 (** Request speaking turn.
-    Ordered endpoint chain from voice_config.json → text_fallback *)
+    Ordered endpoint chain from voice_config.json. Fails explicitly when no
+    real backend accepts the request. *)
 let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority=1) () =
   let voice = get_voice_for_agent agent_id in
   let provider =
@@ -1004,9 +1125,9 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority=1) () =
   in
   let rec try_endpoints attempted = function
     | [] ->
-        text_fallback ~agent_id ~message
-          ~reason:"all configured TTS endpoints failed"
-          ~attempted_endpoints:(List.rev attempted) ()
+        Error
+          (Printf.sprintf "all configured TTS endpoints failed: %s"
+             (String.concat " | " (List.rev attempted)))
     | endpoint :: rest -> (
         match
           attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
@@ -1018,14 +1139,14 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority=1) () =
             try_endpoints (attempt :: attempted) rest)
   in
   if endpoints = [] then
-    text_fallback ~agent_id ~message ~reason:"no configured TTS endpoint" ()
+    Error "no configured TTS endpoint"
   else
     try_endpoints [] endpoints
 
 (** List active voice sessions *)
 let list_voice_sessions ~sw ~clock ~net =
   if not (is_voice_server_available ~sw ~clock ~net) then
-    Ok (`Assoc [ ("sessions", `List []); ("status", `String "voice_server_unavailable") ])
+    Error "Voice server unavailable"
   else
     let args = `Assoc [] in
     call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_list" ~arguments:args
@@ -1102,11 +1223,13 @@ let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
 
 (** End a multi-agent voice conference *)
 let end_conference ~sw ~clock ~net ~agent_ids () =
+  if not (is_voice_server_available ~sw ~clock ~net) then
+    Error "Voice server unavailable - cannot end conference"
+  else
   let classify_result = function
     | Ok (`Assoc fields) -> (
         match List.assoc_opt "status" fields with
         | Some (`String "ended") -> `Ended
-        | Some (`String "skipped") -> `Skipped
         | Some (`String _) | Some _ -> `Failed
         | None -> `Failed)
     | Ok _ -> `Failed
@@ -1117,7 +1240,6 @@ let end_conference ~sw ~clock ~net ~agent_ids () =
       (fun (ended, skipped, failed) agent_id ->
         match classify_result (end_voice_session ~sw ~clock ~net ~agent_id) with
         | `Ended -> (ended + 1, skipped, failed)
-        | `Skipped -> (ended, skipped + 1, failed)
         | `Failed -> (ended, skipped, failed + 1))
       (0, 0, 0) agent_ids
   in
@@ -1131,7 +1253,7 @@ let end_conference ~sw ~clock ~net ~agent_ids () =
 (** Get transcript of voice conversation *)
 let get_transcript ~sw ~clock ~net () =
   if not (is_voice_server_available ~sw ~clock ~net) then
-    Ok (`Assoc [ ("transcript", `List []); ("turn_count", `Int 0) ])
+    Error "Voice server unavailable"
   else
     let args = `Assoc [] in
     match
@@ -1139,7 +1261,7 @@ let get_transcript ~sw ~clock ~net () =
         ~arguments:args
     with
     | Ok data -> Ok data
-    | Error _ -> Ok (`Assoc [ ("transcript", `List []); ("turn_count", `Int 0) ])
+    | Error error -> Error error
 
 (** ============================================
     Health Check (Eio-native)

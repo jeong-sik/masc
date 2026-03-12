@@ -6,6 +6,7 @@ import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
+import { keeperIdentityHint } from './common/keeper-identity'
 import {
   agents,
   executionContinuityBriefs,
@@ -189,6 +190,7 @@ export function AgentDetailOverlay() {
     compactCopy(continuityBrief?.continuity_summary)
     ?? compactCopy(continuityBrief?.skill_route_summary)
     ?? null
+  const keeperIdentity = keeperIdentityHint(keeper?.name, keeper?.agent_name)
 
   return html`
     <div
@@ -228,7 +230,9 @@ export function AgentDetailOverlay() {
             ${keeper || continuitySummary || missionBrief?.related_session_id
               ? html`
                   <div class="agent-detail-sub">
-                    ${keeper ? html`<span>Linked keeper: ${keeper.name}</span>` : null}
+                    ${keeper
+                      ? html`<span>Linked keeper: ${keeper.name}${keeperIdentity ? ` · ${keeperIdentity}` : ''}</span>`
+                      : null}
                     ${missionBrief?.related_session_id ? html`<span>Session: ${missionBrief.related_session_id}</span>` : null}
                     ${continuitySummary ? html`<span>${continuitySummary}</span>` : null}
                   </div>
@@ -258,7 +262,6 @@ export function AgentDetailOverlay() {
               : html`<div class="agent-activity-list">${lines.map((line, idx) => html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
           <//>
         </div>
-
         <${Card} title="Task History">
           ${taskHistories.value.length === 0
             ? html`<div class="empty-state">No task history loaded</div>`

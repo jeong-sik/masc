@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { RoomTruthStrip } from './common/room-truth-strip'
+import { keeperRuntimeLabel } from './common/keeper-identity'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { StatusBadge } from './common/status-badge'
 import { MitosisRing } from './common/mitosis-ring'
@@ -408,6 +409,7 @@ function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
     const keeper = findKeeper(row.name)
     if (keeper) openKeeperDetail(keeper)
   }
+  const runtimeLabel = keeperRuntimeLabel(row.name, row.agent_name)
 
   return html`
     <button class="monitor-row ${row.tone} state-${row.state}" data-testid="execution.continuity-card" onClick=${onClick}>
@@ -418,6 +420,7 @@ function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
             <span class="monitor-title">${row.name}</span>
             ${row.korean_name ? html`<span class="monitor-sub">${row.korean_name}</span>` : null}
           </div>
+          ${runtimeLabel ? html`<div class="monitor-sub">${runtimeLabel}</div>` : null}
           <div class="monitor-note">${row.note}</div>
         </div>
         <${MitosisRing} ratio=${row.context_ratio ?? 0} size=${34} stroke=${4} />
@@ -617,8 +620,8 @@ export function Execution() {
           testId="execution.continuity"
         >
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">연속성 보조 면</h2>
-            <p class="monitor-subheadline">키퍼 연속성은 보조 면으로만 두고, 상태가 좋지 않은 키퍼 위주로 보여줍니다.</p>
+            <h2 class="monitor-headline">키퍼 연속성 요약</h2>
+            <p class="monitor-subheadline">카드 제목은 keeper 이름이고, keeper-*-agent 형태의 runtime agent는 보조 라벨로만 표시합니다.</p>
           </div>
           <div class="monitor-list">
             ${continuityRows.length === 0

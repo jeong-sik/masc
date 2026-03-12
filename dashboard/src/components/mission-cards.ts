@@ -1,5 +1,8 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { extractAgentInfo } from './common/agent-info'
+import { keeperRuntimeLabel } from './common/keeper-identity'
+import { linkedRecentToolsEmptyState, observedToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import {
@@ -511,6 +514,10 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
   ]
     .filter((value): value is string => value !== null)
     .join(' · ')
+  const runtimeLabel = keeperRuntimeLabel(
+    row.brief.name,
+    row.brief.agent_name ?? row.keeper?.agent_name,
+  )
 
   return html`
     <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)}">
@@ -521,6 +528,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
             <div>
               <strong>${row.brief.name}</strong>
               ${row.keeper?.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
+              ${runtimeLabel ? html`<span>${runtimeLabel}</span>` : null}
             </div>
           </div>
           <span class="command-chip ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
@@ -541,7 +549,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
       <details class="mission-card-disclosure">
         <summary>연속성 상세</summary>
         <div class="mission-activity-foot">
-          <span>에이전트 · ${row.brief.agent_name ?? row.keeper?.agent_name ?? '기록 없음'}</span>
+          <span>runtime agent · ${row.brief.agent_name ?? row.keeper?.agent_name ?? '기록 없음'}</span>
           ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : null}
         </div>
         <details class="mission-card-disclosure compact">

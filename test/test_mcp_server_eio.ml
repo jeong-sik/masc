@@ -302,21 +302,20 @@ let test_handle_request_tools_list () =
                         | _ -> None)
                    |> List.filter_map (function `String s -> Some s | _ -> None)
                  in
-                 (* TRPG tools are in TRPG category, not in Standard mode *)
+                 (* Full is now the room default, so TRPG tools are available immediately. *)
                  Alcotest.(check bool)
-                   "trpg.dice.roll excluded from standard"
-                   false
+                   "contains trpg.dice.roll in full default"
+                   true
                    (List.mem "trpg.dice.roll" names);
                  Alcotest.(check bool)
-                   "trpg.turn.advance excluded from standard"
-                   false
+                   "contains trpg.turn.advance in full default"
+                   true
                    (List.mem "trpg.turn.advance" names);
-                 (* Plan category IS in Standard mode *)
+                 (* Plan and Board categories remain available. *)
                  Alcotest.(check bool)
                    "contains masc_goal_upsert (Plan category)"
                    true
                    (List.mem "masc_goal_upsert" names);
-                 (* Board category IS in Standard mode *)
                  Alcotest.(check bool)
                    "contains masc_board_post (Board category)"
                    true

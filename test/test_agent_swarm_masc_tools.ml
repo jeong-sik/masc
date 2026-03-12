@@ -22,7 +22,7 @@ let test_tool_count () =
     Agent_swarm_client.create ~net ~base_url:"http://127.0.0.1:9999" ~agent_name:"test"
   in
   let tools = Agent_swarm_tools.make_tools client ~sw in
-  Alcotest.(check int) "13 MASC tools" 13 (List.length tools)
+  Alcotest.(check int) "14 MASC tools" 14 (List.length tools)
 
 let test_tool_names () =
   Eio_main.run @@ fun env ->
@@ -35,6 +35,7 @@ let test_tool_names () =
   let names = List.map (fun (t : Tool.t) -> t.schema.name) tools in
   let expected = [
     "masc_list_tasks"; "masc_room_status";
+    "masc_autoresearch_swarm_start";
     "masc_add_task"; "masc_batch_add_tasks";
     "masc_claim_task"; "masc_claim_next";
     "masc_set_current_task"; "masc_complete_task";

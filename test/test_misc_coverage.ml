@@ -160,7 +160,7 @@ let test_log_timestamp () =
 
 let test_config_default () =
   let c = Config.default in
-  check bool "mode is Standard" true (c.mode = Mode.Standard)
+  check bool "mode is Full" true (c.mode = Mode.Full)
 
 let test_config_to_json () =
   let c = Config.default in
@@ -190,7 +190,7 @@ let test_config_of_json_invalid () =
   let json = `String "invalid" in
   let c = Config.of_json json in
   (* Should return default on invalid input *)
-  check bool "mode is Standard" true (c.mode = Mode.Standard)
+  check bool "mode is Full" true (c.mode = Mode.Full)
 
 let test_config_filename () =
   check string "config filename" "config.json" Config.config_filename

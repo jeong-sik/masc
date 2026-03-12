@@ -6,6 +6,8 @@
 
 MASC MCP provides 140+ tools across 12 categories. Most agents don't need all of them. The **Mode System** lets you enable only the categories you use, reducing token consumption by narrowing the enabled tool surface.
 
+Default room mode is `full`. Start there for maximum tool visibility, then reduce the surface with `masc_switch_mode` when you want lower token overhead.
+
 ## Why Mode System?
 
 | Problem | Solution |
@@ -201,8 +203,8 @@ Mode configuration is saved to `.masc/config.json`:
 
 ```json
 {
-  "mode": "standard",
-  "enabled_categories": ["core", "comm", "worktree", "health"]
+  "mode": "full",
+  "enabled_categories": ["core", "comm", "portal", "worktree", "code", "health", "discovery", "voting", "interrupt", "cost", "auth", "ratelimit", "encryption", "board", "plan", "consensus", "ecosystem", "trpg", "risc"]
 }
 ```
 
@@ -210,16 +212,16 @@ The configuration persists across server restarts.
 
 ## Best Practices
 
-### 1. Start Minimal, Add as Needed
+### 1. Start Full, Reduce as Needed
 
 ```bash
-# Start with minimal
-masc_switch_mode(mode: "minimal")
+# Default starts at full
+masc_get_config()
 
-# Need worktree? Switch to solo
+# Want a narrower coding surface? Switch to solo or coding
 masc_switch_mode(mode: "solo")
 
-# Need multi-agent? Switch to standard or parallel
+# Need multi-agent but not the whole surface? Switch to standard or parallel
 masc_switch_mode(mode: "standard")
 
 # Heavy parallel work? Switch to parallel

@@ -1,4 +1,4 @@
-// Ops — Main entry component (header, priority grid, column composition)
+// 개입 표면 — 헤더, 우선순위 카드, 열 구성
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
@@ -96,7 +96,7 @@ export function Ops() {
   const priorityCards: OpsPriorityCardData[] = [
     {
       key: 'room',
-      label: 'Room 게이트',
+      label: '방 게이트',
       value: room.paused ? '일시정지' : '열림',
       detail: room.paused
         ? `재개 전환 대기 중${room.pause_reason ? ` · ${room.pause_reason}` : ''}`
@@ -110,7 +110,7 @@ export function Ops() {
       detail: visiblePendingCount > 0
         ? '미리보기만 된 개입이 아직 사람 확인을 기다리고 있습니다'
         : hiddenPendingCount > 0 && pendingActorFilter
-          ? `현재 actor(${pendingActorFilter}) 기준으로는 비어 있고, 다른 actor 대기 ${hiddenPendingCount}건이 있습니다`
+          ? `현재 개입 ID(${pendingActorFilter}) 기준으로는 비어 있고, 다른 개입 ID 대기 ${hiddenPendingCount}건이 있습니다`
           : '지금 막혀 있는 확인 대기는 없습니다',
       tone: totalPendingCount > 0 ? 'warn' : 'ok',
     },
@@ -121,8 +121,8 @@ export function Ops() {
       detail: sessionAttention.length > 0
         ? sessionAttention[0]?.summary ?? '세션 중 하나가 방향 수정이나 중지 판단을 기다리고 있습니다'
         : sessions.length === 0
-          ? '지금 관리 중인 team session이 없습니다'
-          : '세션 쪽 긴급 attention은 현재 없습니다',
+          ? '지금 관리 중인 팀 세션이 없습니다'
+          : '세션 쪽 긴급 주의 신호는 현재 없습니다',
       tone: sessionAttention.length > 0
         ? attentionTone(sessionAttention)
         : sessions.length === 0
@@ -135,13 +135,13 @@ export function Ops() {
     },
     {
       key: 'keeper',
-      label: 'Keeper 압력',
+      label: '키퍼 압력',
       value: keeperAttention.length > 0 ? keeperAttention.length : flaggedKeepers.length,
       detail: keeperAttention.length > 0
-        ? keeperAttention[0]?.summary ?? '직접 메시지나 상태 점검이 필요한 keeper가 있습니다'
+        ? keeperAttention[0]?.summary ?? '직접 메시지나 상태 점검이 필요한 키퍼가 있습니다'
         : flaggedKeepers.length > 0
-          ? 'stale, offline, telemetry 누락 keeper가 보입니다'
-          : '지금은 keeper 쪽이 비교적 안정적입니다',
+          ? '오래됐거나 오프라인이거나 텔레메트리가 비는 키퍼가 보입니다'
+          : '지금은 키퍼 쪽이 비교적 안정적입니다',
       tone: keeperAttention.length > 0
         ? attentionTone(keeperAttention)
         : flaggedKeepers.some(keeper => keeperPriorityTone(keeper) === 'bad')
@@ -158,12 +158,12 @@ export function Ops() {
       <div class="ops-header card">
         <div>
           <div class="card-title-row">
-            <div class="card-title">Intervene</div>
+            <div class="card-title">개입</div>
             <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
           </div>
-          <h2 class="ops-heading">room, session, keeper에 바로 손대는 개입 화면</h2>
+          <h2 class="ops-heading">방, 세션, 키퍼를 바로 조정하는 화면</h2>
           <p class="ops-subheading">
-            읽는 화면이 아니라 행동하는 화면입니다. room, session, keeper를 나눠서 보고 바로 개입합니다.
+            읽는 화면이 아니라 행동하는 화면입니다. 방, 세션, 키퍼를 나눠 보고 바로 개입합니다.
           </p>
         </div>
         <div class="ops-toolbar">
@@ -216,7 +216,7 @@ export function Ops() {
               ? `확인 대기 ${visiblePendingCount}/${totalPendingCount}건 확인`
               : `확인 대기 ${visiblePendingCount}건 처리`,
             desc: hiddenPendingCount > 0 && pendingActorFilter
-              ? `현재 actor(${pendingActorFilter}) 기준으로 보이는 queue를 먼저 확인합니다`
+              ? `현재 개입 ID(${pendingActorFilter}) 기준으로 보이는 대기열을 먼저 확인합니다`
               : '승인 또는 거부가 필요한 개입이 대기 중입니다',
             tone: visiblePendingCount > 0 ? 'bad' : 'warn',
             onClick: () => {
@@ -227,7 +227,7 @@ export function Ops() {
         }
         if (room.paused) {
           actions.push({
-            label: 'Room 재개',
+            label: '방 재개',
             desc: `현재 일시정지 상태${room.pause_reason ? ` (${room.pause_reason})` : ''}`,
             tone: 'warn',
             onClick: () => void submitResume(),
@@ -236,8 +236,8 @@ export function Ops() {
         if (flaggedKeepers.length > 0) {
           const badKeepers = flaggedKeepers.filter(k => keeperPriorityTone(k) === 'bad')
           actions.push({
-            label: badKeepers.length > 0 ? `Keeper ${badKeepers.length}개 오프라인` : `Keeper ${flaggedKeepers.length}개 점검 필요`,
-            desc: badKeepers.length > 0 ? '메시지를 보내거나 상태를 확인하세요' : 'stale 또는 telemetry 누락',
+            label: badKeepers.length > 0 ? `오프라인 키퍼 ${badKeepers.length}개` : `점검이 필요한 키퍼 ${flaggedKeepers.length}개`,
+            desc: badKeepers.length > 0 ? '메시지를 보내거나 상태를 확인하세요' : '오래됐거나 텔레메트리가 비어 있습니다',
             tone: badKeepers.length > 0 ? 'bad' : 'warn',
             onClick: () => {
               const el = document.querySelector('.ops-keeper-section')
@@ -265,7 +265,7 @@ export function Ops() {
         <div class="monitor-section-head">
           <h2 class="monitor-headline">개입 우선순위</h2>
           <${PanelSemanticDetails} panelId="intervene.priority_cards" compact=${true} />
-          <p class="monitor-subheadline">지금 가장 먼저 손댈 대상이 room인지, session인지, keeper인지 먼저 좁힙니다.</p>
+          <p class="monitor-subheadline">지금 가장 먼저 손댈 대상이 방인지, 세션인지, 키퍼인지 먼저 좁힙니다.</p>
         </div>
         <div class="ops-priority-grid">
           ${priorityCards.map(card => html`

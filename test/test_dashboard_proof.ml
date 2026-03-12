@@ -22,7 +22,7 @@ let cleanup_dir dir =
   in
   rm dir
 
-let sample_session now session_id =
+let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ]) now session_id =
   let open Lib.Team_session_types in
   {
     session_id;
@@ -34,7 +34,7 @@ let sample_session now session_id =
     duration_seconds = 600;
     execution_scope = Limited_code_change;
     checkpoint_interval_sec = 60;
-    min_agents = 2;
+    min_agents;
     scale_profile = Scale_local64;
     control_profile = Control_hierarchical_quality_v1;
     orchestration_mode = Assist;
@@ -46,7 +46,7 @@ let sample_session now session_id =
     auto_resume = false;
     report_formats = [ Markdown; Json ];
     turn_count = 2;
-    agent_names = [ "worker-a"; "worker-b" ];
+    agent_names;
     planned_workers =
       [
         {
@@ -94,38 +94,44 @@ let sample_session now session_id =
     updated_at_iso = Lib.Types.now_iso ();
   }
 
-let seed_session_artifacts config session_id =
+let seed_session_artifacts ?(session = None) ?events config session_id =
   let now = Unix.gettimeofday () in
-  let session = sample_session now session_id in
+  let session = Option.value session ~default:(sample_session now session_id) in
   Lib.Team_session_store.save_session config session;
-  Lib.Team_session_store.append_event config session_id ~event_type:"team_step_spawn"
-    ~detail:
-      (`Assoc
-        [
-          ("actor", `String "supervisor");
-          ("runtime_actor", `String "worker-a");
-          ("spawn_agent", `String "llama");
-          ("success", `Bool true);
-          ("tool_names", `List [ `String "masc_team_session_step" ]);
-          ("title", `String "Spawn proof worker");
-        ]);
-  Lib.Team_session_store.append_event config session_id ~event_type:"team_turn"
-    ~detail:
-      (`Assoc
-        [
-          ("actor", `String "worker-a");
-          ("kind", `String "note");
-          ("message", `String "Implemented the tool-help projection and validated prompts.");
-          ("tool_names", `List [ `String "masc_tool_help"; `String "masc_team_session_prove" ]);
-        ]);
-  Lib.Team_session_store.append_event config session_id ~event_type:"team_turn"
-    ~detail:
-      (`Assoc
-        [
-          ("actor", `String "worker-b");
-          ("kind", `String "note");
-          ("message", `String "Reviewed the proof evidence and confirmed the actor linkage.");
-        ]);
+  let default_events =
+    [
+      ( "team_step_spawn",
+        `Assoc
+          [
+            ("actor", `String "supervisor");
+            ("runtime_actor", `String "worker-a");
+            ("spawn_agent", `String "llama");
+            ("success", `Bool true);
+            ("tool_names", `List [ `String "masc_team_session_step" ]);
+            ("title", `String "Spawn proof worker");
+          ] );
+      ( "team_turn",
+        `Assoc
+          [
+            ("actor", `String "worker-a");
+            ("kind", `String "note");
+            ("message", `String "Implemented the tool-help projection and validated prompts.");
+            ("tool_names", `List [ `String "masc_tool_help"; `String "masc_team_session_prove" ]);
+          ] );
+      ( "team_turn",
+        `Assoc
+          [
+            ("actor", `String "worker-b");
+            ("kind", `String "note");
+            ("message", `String "Reviewed the proof evidence and confirmed the actor linkage.");
+          ] );
+    ]
+  in
+  let events = Option.value events ~default:default_events in
+  List.iter
+    (fun (event_type, detail) ->
+      Lib.Team_session_store.append_event config session_id ~event_type ~detail)
+    events;
   Lib.Team_session_store.write_checkpoint config session_id
     {
       Lib.Team_session_types.ts = now -. 25.0;
@@ -153,6 +159,14 @@ let seed_session_artifacts config session_id =
       Lib.Team_session_store.write_text_file
         (Lib.Team_session_store.proof_md_path config session_id)
         proof_md
+
+let write_manual_proof config session_id verdict =
+  Lib.Room_utils.write_json config
+    (Lib.Team_session_store.proof_json_path config session_id)
+    (`Assoc [ ("verdict", `String verdict) ]);
+  Lib.Team_session_store.write_text_file
+    (Lib.Team_session_store.proof_md_path config session_id)
+    ("# proof\n\nverdict: " ^ verdict)
 
 let test_dashboard_proof_projection () =
   let dir = test_dir () in
@@ -211,6 +225,47 @@ let test_timeline_json_orders_command_plane_events_by_timestamp () =
       check string "first item timestamp" "2026-03-11T09:00:01Z"
         (first |> U.member "timestamp" |> U.to_string))
 
+let test_dashboard_proof_uses_persisted_verdict_when_available () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-persisted-verdict" in
+      let session =
+        sample_session ~min_agents:1
+          ~agent_names:[ "opus-leader-witty-heron"; "codex-warm-heron"; "keeper-a"; "keeper-b" ]
+          (Unix.gettimeofday ()) session_id
+      in
+      seed_session_artifacts ~session:(Some session)
+        ~events:
+          [
+            ( "team_turn",
+              `Assoc
+                [
+                  ("actor", `String "opus-leader-witty-heron");
+                  ("kind", `String "note");
+                  ( "message",
+                    `String
+                      "Task decomposition: schema first, then tests and docs in parallel." );
+                ] );
+            ( "team_turn",
+              `Assoc
+                [
+                  ("actor", `String "opus-leader-witty-heron");
+                  ("kind", `String "task");
+                  ("result", `String "Added task-016: API schema design complete");
+                ] );
+          ]
+        config session_id;
+      write_manual_proof config session_id "proved";
+      let json = Lib.Dashboard_proof.json ~config ~session_id () in
+      check string "top-level verdict follows persisted proof" "proven"
+        (json |> U.member "proof_verdict" |> U.to_string);
+      check string "raw proof still exposes original verdict spelling" "proved"
+        (json |> U.member "raw_proof" |> U.member "verdict" |> U.to_string))
+
 let () =
   Alcotest.run "dashboard_proof"
     [
@@ -219,5 +274,7 @@ let () =
           test_case "builds collaboration proof projection" `Quick test_dashboard_proof_projection;
           test_case "orders merged timeline chronologically" `Quick
             test_timeline_json_orders_command_plane_events_by_timestamp;
+          test_case "uses persisted proof verdict when available" `Quick
+            test_dashboard_proof_uses_persisted_verdict_when_available;
         ] );
     ]

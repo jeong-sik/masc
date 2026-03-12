@@ -55,6 +55,8 @@
    server_tts_proxy
    server_trpg_rest
    server_dashboard_http
+   server_routes_http
+   server_h2_gateway
    server_command_plane_http
    server_mcp_transport_http
    web_dashboard

@@ -102,6 +102,7 @@ let test_voice_auth_env_resolution () =
   check (option string) "endpoint override auth env"
     (Some "VOICE_PROXY_KEY")
     (Adapter.voice_auth_env_name ~endpoint_api_key_env:"VOICE_PROXY_KEY" openai_compat)
+
 let () =
   run "Provider Adapter"
     [

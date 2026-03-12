@@ -362,11 +362,73 @@ let local_worker_extra_schemas : Types.tool_schema list =
     };
   ]
 
+let local_worker_lodge_read_schemas : Types.tool_schema list =
+  [
+    {
+      Types.name = "lodge_research";
+      description = "Research a topic using LLM and share findings with the lodge.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("topic", `Assoc [ ("type", `String "string") ]);
+                  ("agent_name", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "topic" ]);
+          ];
+    };
+    {
+      Types.name = "lodge_profile";
+      description = "Get an agent profile with recent lodge activity and stats.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("agent_name", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "agent_name" ]);
+          ];
+    };
+    {
+      Types.name = "lodge_search";
+      description = "Search lodge content and agents by keyword.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("query", `Assoc [ ("type", `String "string") ]);
+                  ("limit", `Assoc [ ("type", `String "integer") ]);
+                ] );
+            ("required", `List [ `String "query" ]);
+          ];
+    };
+  ]
+
+let local_worker_tool_schemas : Types.tool_schema list =
+  let seen = Hashtbl.create 64 in
+  List.filter
+    (fun (schema : Types.tool_schema) ->
+      if Hashtbl.mem seen schema.name then
+        false
+      else (
+        Hashtbl.add seen schema.name ();
+        true))
+    (local_worker_extra_schemas @ Tool_board.tools @ local_worker_lodge_read_schemas)
+
 let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
     ?(names : string list option = None) () :
     (Types.tool_schema list, string) result =
   ignore (_sw, auth_token, session_id);
-  let all_schemas = local_worker_extra_schemas in
+  let all_schemas = local_worker_tool_schemas in
   match names with
   | None -> Ok all_schemas
   | Some values ->

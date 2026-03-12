@@ -67,18 +67,101 @@ export function relativeTime(iso?: string | null): string {
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return iso
   const deltaSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (deltaSec < 60) return `${deltaSec}s 전`
-  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}m 전`
-  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}h 전`
-  return `${Math.round(deltaSec / 86400)}d 전`
+  if (deltaSec < 60) return `${deltaSec}초 전`
+  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 전`
+  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 전`
+  return `${Math.round(deltaSec / 86400)}일 전`
 }
 
 export function formatDuration(seconds?: number | null): string {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return 'n/a'
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`
-  return `${Math.round(seconds / 86400)}d`
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '확인 필요'
+  if (seconds < 60) return `${Math.round(seconds)}초`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}분`
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}시간`
+  return `${Math.round(seconds / 86400)}일`
+}
+
+export function statusLabel(value?: string | null): string {
+  const normalized = (value ?? '').trim().toLowerCase()
+  switch (normalized) {
+    case 'ok':
+    case 'healthy':
+    case 'green':
+      return '안정'
+    case 'active':
+    case 'running':
+      return '진행 중'
+    case 'pending':
+      return '대기 중'
+    case 'paused':
+      return '일시정지'
+    case 'blocked':
+      return '막힘'
+    case 'interrupted':
+      return '중단됨'
+    case 'warn':
+    case 'watch':
+      return '주의'
+    case 'bad':
+    case 'critical':
+    case 'risk':
+      return '위험'
+    case 'degraded':
+      return '저하'
+    case 'offline':
+      return '오프라인'
+    case 'idle':
+    case 'quiet':
+      return '대기'
+    case 'loading':
+      return '불러오는 중'
+    case 'error':
+      return '오류'
+    case 'unavailable':
+      return '사용 불가'
+    case 'stale':
+      return '오래됨'
+    case 'refreshing':
+      return '갱신 중'
+    case 'cached':
+      return '캐시'
+    case 'unknown':
+    case '':
+      return '확인 필요'
+    default:
+      return value?.trim() || '확인 필요'
+  }
+}
+
+export function missionTargetTypeLabel(value?: string | null): string {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'room':
+      return '방'
+    case 'team_session':
+    case 'session':
+      return '세션'
+    case 'operation':
+      return '작전'
+    case 'keeper':
+      return '키퍼'
+    case 'agent':
+      return '에이전트'
+    default:
+      return value?.trim() || '대상'
+  }
+}
+
+export function signalClassLabel(value?: string | null): string | null {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'metadata_gap':
+      return '메타데이터 부족'
+    case 'mixed':
+      return '신호 혼재'
+    case '':
+      return null
+    default:
+      return value?.trim() || null
+  }
 }
 
 export function actionModeLabel(action?: OperatorRecommendedAction | null): string {
@@ -213,7 +296,7 @@ export function enrichedAgentRow(brief: DashboardMissionAgentBrief): EnrichedAge
     brief,
     agent,
     keeper,
-    where: brief.where ?? 'room',
+    where: brief.where ?? '방 정보 없음',
     withWhom: brief.with_whom,
     currentWork:
       brief.current_work
@@ -252,7 +335,7 @@ export function enrichedKeeperRow(brief: DashboardMissionKeeperBrief): EnrichedK
       trimText(brief.current_work, 110)
       ?? trimText(keeper?.skill_primary, 110)
       ?? trimText(keeper?.last_proactive_reason, 110)
-      ?? '명시된 keeper focus 없음',
+      ?? '명시된 키퍼 초점 없음',
     recentInput:
       trimText(keeper?.recent_input_preview, 120) ?? null,
     recentOutput:

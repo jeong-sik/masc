@@ -20,6 +20,7 @@ import {
   clearMissionSelection,
   toneClass,
   relativeTime,
+  statusLabel,
 } from './mission-utils'
 import {
   MissionContextBar,
@@ -88,9 +89,9 @@ export function Mission() {
           <p>지금 어떤 세션이 돌고 있고, 누가 참여하며, 어디가 막혔는지를 한 시점에서 읽는 기본 관찰면입니다.</p>
         </div>
         <div class="mission-header-meta">
-          <span class="command-chip ${toneClass(mission.summary.room_health)}">${mission.summary.room_health ?? 'ok'}</span>
-          <span class="command-chip">${mission.summary.project ?? 'room'}${mission.summary.current_room ? ` · ${mission.summary.current_room}` : ''}</span>
-          <span class="command-chip">${mission.generated_at ? relativeTime(mission.generated_at) : 'fresh'}</span>
+          <span class="command-chip ${toneClass(mission.summary.room_health)}">${statusLabel(mission.summary.room_health)}</span>
+          <span class="command-chip">${mission.summary.project ?? '프로젝트 미지정'}${mission.summary.current_room ? ` · ${mission.summary.current_room}` : ''}</span>
+          <span class="command-chip">${mission.generated_at ? relativeTime(mission.generated_at) : '기록 없음'}</span>
         </div>
       </div>
 
@@ -106,10 +107,10 @@ export function Mission() {
       <div class="mission-stat-grid">
         <${SummaryStat} label="활성 세션" value=${sessionRows.length} detail="지금 진행중인 협업 단위" tone=${focusSession?.top_attention?.severity ?? focusSession?.health ?? 'ok'} />
         <${SummaryStat} label="막힌 세션" value=${blockedSessions} detail="주의가 필요한 흐름" tone=${blockedSessions > 0 ? 'warn' : 'ok'} />
-        <${SummaryStat} label="참여자" value=${activeParticipants} detail="현재 세션에 연결된 actor" tone=${activeParticipants > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="Keeper watch" value=${keeperRows.length} detail="continuity lane 관찰 대상" tone=${keeperRows[0]?.brief.status ?? 'ok'} />
-        <${SummaryStat} label="최근 output" value=${liveOutputs} detail="메인에서 바로 읽을 수 있는 출력 수" tone=${liveOutputs > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="내부 신호" value=${internalSignals.length} detail="시스템 진단은 보조 lane" tone=${internalSignals[0]?.severity ?? 'ok'} />
+        <${SummaryStat} label="참여자" value=${activeParticipants} detail="현재 세션에 연결된 주체" tone=${activeParticipants > 0 ? 'ok' : 'warn'} />
+        <${SummaryStat} label="키퍼 관찰" value=${keeperRows.length} detail="연속성 확인 대상" tone=${keeperRows[0]?.brief.status ?? 'ok'} />
+        <${SummaryStat} label="최근 응답" value=${liveOutputs} detail="메인에서 바로 읽을 수 있는 응답 수" tone=${liveOutputs > 0 ? 'ok' : 'warn'} />
+        <${SummaryStat} label="내부 신호" value=${internalSignals.length} detail="시스템 진단은 보조 면에만 유지" tone=${internalSignals[0]?.severity ?? 'ok'} />
       </div>
 
       ${activeSessionId
@@ -124,7 +125,7 @@ export function Mission() {
       <${Card} title="진행중인 세션" class="mission-list-card" semanticId="mission.session_briefs">
         <div class="mission-section-head">
           <h3>지금 진행중인 일</h3>
-          <p>세션을 기준으로 목표, 최근 흐름, 막힘, 연결된 operation을 먼저 봅니다.</p>
+          <p>세션을 기준으로 목표, 최근 흐름, 막힘, 연결된 작전을 먼저 봅니다.</p>
         </div>
         <div class="mission-list-stack">
           ${sessionRows.length > 0
@@ -140,7 +141,7 @@ export function Mission() {
       />
 
       <div class="mission-human-grid">
-        <${Card} title="Attention Queue" class="mission-list-card" semanticId="mission.attention_queue">
+        <${Card} title="주의 대기열" class="mission-list-card" semanticId="mission.attention_queue">
           <div class="mission-section-head">
             <h3>어느 세션을 먼저 봐야 하나</h3>
             <p>문제와 경고는 세션에 연결된 것만 먼저 보여주고, 원인 분석은 선택된 세션에서 이어서 봅니다.</p>
@@ -148,14 +149,14 @@ export function Mission() {
           <div class="mission-lane-stack">
             ${attentionQueue.length > 0
               ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${selectedAttentionId.value === item.id} sessionLookup=${sessionLookup} />`)
-              : html`<div class="empty-state">지금 session-level attention queue가 비어 있습니다.</div>`}
+              : html`<div class="empty-state">지금 세션 단위 주의 대기열은 비어 있습니다.</div>`}
           </div>
         <//>
 
-        <${Card} title="Internal Signals" class="mission-list-card" semanticId="mission.internal_signals">
+        <${Card} title="내부 신호" class="mission-list-card" semanticId="mission.internal_signals">
           <div class="mission-section-head">
             <h3>시스템 진단</h3>
-            <p>artifact scope drift 같은 내부 신호는 메인 판단을 방해하지 않도록 접어둔 보조 lane으로만 유지합니다.</p>
+            <p>artifact scope drift 같은 내부 신호는 메인 판단을 방해하지 않도록 접어 둔 보조 면에만 둡니다.</p>
           </div>
           <details class="mission-card-disclosure">
             <summary>내부 신호 ${internalSignals.length}</summary>
@@ -168,15 +169,15 @@ export function Mission() {
         <//>
       </div>
 
-      <${Card} title="Keeper Continuity" class="mission-list-card" semanticId="mission.keeper_activity">
+      <${Card} title="키퍼 연속성" class="mission-list-card" semanticId="mission.keeper_activity">
         <div class="mission-section-head">
-          <h3>continuity lane</h3>
-          <p>keeper는 세션과 별개로 보고, continuity 판단에 필요한 정보만 먼저 보여줍니다.</p>
+          <h3>연속성 보조 면</h3>
+          <p>키퍼는 세션과 별개로 보고, 연속성 판단에 필요한 정보만 먼저 보여줍니다.</p>
         </div>
         <div class="mission-activity-list">
           ${keeperRows.length > 0
             ? keeperRows.map(row => html`<${KeeperBriefCard} key=${row.brief.name} row=${row} />`)
-            : html`<div class="empty-state">지금 보이는 keeper가 없습니다.</div>`}
+            : html`<div class="empty-state">지금 보이는 키퍼가 없습니다.</div>`}
         </div>
         <div class="mission-card-actions">
           <button class="control-btn ghost" onClick=${() => navigate('execution')}>실행 관찰면 보기</button>

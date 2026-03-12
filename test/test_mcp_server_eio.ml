@@ -302,21 +302,20 @@ let test_handle_request_tools_list () =
                         | _ -> None)
                    |> List.filter_map (function `String s -> Some s | _ -> None)
                  in
-                 (* TRPG tools are in TRPG category, not in Standard mode *)
+                 (* Full is now the room default, so TRPG tools are available immediately. *)
                  Alcotest.(check bool)
-                   "trpg.dice.roll excluded from standard"
-                   false
+                   "contains trpg.dice.roll in full default"
+                   true
                    (List.mem "trpg.dice.roll" names);
                  Alcotest.(check bool)
-                   "trpg.turn.advance excluded from standard"
-                   false
+                   "contains trpg.turn.advance in full default"
+                   true
                    (List.mem "trpg.turn.advance" names);
-                 (* Plan category IS in Standard mode *)
+                 (* Plan and Board categories remain available. *)
                  Alcotest.(check bool)
                    "contains masc_goal_upsert (Plan category)"
                    true
                    (List.mem "masc_goal_upsert" names);
-                 (* Board category IS in Standard mode *)
                  Alcotest.(check bool)
                    "contains masc_board_post (Board category)"
                    true
@@ -1223,10 +1222,11 @@ let test_convo_start_uses_current_room () =
   in
   Alcotest.(check bool) "room enter success" true ok_enter;
 
-  (* After entering a new room, its mode defaults to Standard.
-     Convo tools are Consensus category — switch the new room to Full. *)
+  (* After entering a new room, its mode defaults to Full, so convo tools are
+     immediately available. *)
   let new_room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode new_room_path Mode.Full in
+  let mode_config = Config.load new_room_path in
+  Alcotest.(check bool) "new room defaults to full" true (mode_config.mode = Mode.Full);
 
   let (ok_start, start_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state

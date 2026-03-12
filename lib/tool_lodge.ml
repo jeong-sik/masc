@@ -182,7 +182,7 @@ let with_auth_header_file api_key f =
          let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
          let oc = Unix.out_channel_of_descr fd in
          output_string oc ("Authorization: Bearer " ^ api_key ^ "\n");
-         close_out oc;
+         close_out_noerr oc;
          f (Some path))
 
 let with_body_file body f =

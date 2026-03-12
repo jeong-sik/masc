@@ -207,7 +207,7 @@ let calculate_chain_stats (metrics: chain_metrics) : chain_metrics =
     let with_estimates = List.filter (fun n ->
       n.estimated_duration_ms <> None && n.duration_ms > 0
     ) nodes in
-    if List.length with_estimates = 0 then 1.0
+    if with_estimates = [] then 1.0
     else
       let total_accuracy = List.fold_left (fun acc n ->
         match n.estimated_duration_ms with

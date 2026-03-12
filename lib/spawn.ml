@@ -385,11 +385,14 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     let (stdout_read, stdout_write) = Unix.pipe () in
     let (stdin_read, stdin_write) = Unix.pipe () in
     
+    let exec_cmd = match cmd_args with
+                   | hd :: _ -> hd
+                   | [] -> failwith "Empty command arguments" in
+
     (* Spawn process directly without shell *)
-    let pid = Unix.create_process 
-      (List.hd cmd_args) cmd_array
-      stdin_read stdout_write Unix.stderr in
-    
+    let pid = Unix.create_process
+      exec_cmd cmd_array
+      stdin_read stdout_write Unix.stderr in    
     (* Close unused ends *)
     Unix.close stdout_write;
     Unix.close stdin_read;

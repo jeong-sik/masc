@@ -68,7 +68,7 @@ let should_orchestrate room_config =
 
   (* Need orchestration if: important tasks exist AND no active agents *)
   let needs_orchestration =
-    List.length unclaimed_important > 0 && List.length active_agents = 0
+    unclaimed_important <> [] && active_agents = []
   in
 
   if needs_orchestration then

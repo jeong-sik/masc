@@ -192,7 +192,7 @@ let keyword_relevance ~query (entry : memory_entry) =
   in
   let query_words = tokenize query in
   let content_words = tokenize entry.content in
-  if List.length query_words = 0 then 0.5  (* neutral if no query *)
+  if query_words = [] then 0.5  (* neutral if no query *)
   else begin
     let matches = List.filter (fun qw ->
       List.exists (fun cw -> String.equal qw cw) content_words
@@ -260,7 +260,7 @@ let memory_type_label = function
   | Plan _ -> "계획"
 
 let format_memories entries =
-  if List.length entries = 0 then "(기억 없음)"
+  if entries = [] then "(기억 없음)"
   else
     entries
     |> List.map (fun e ->

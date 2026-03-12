@@ -306,12 +306,12 @@ let run ~sw ~net ~clock config request_handler =
         bump_backoff ());
       accept_loop ()
     with exn ->
-      if is_cancelled exn then ()
+      if is_cancelled exn then raise exn
       else begin
         let delay = !backoff_s in
         Printf.eprintf "[H2] Accept loop error: %s (backoff %.2fs)\n%!"
           (Printexc.to_string exn) delay;
-        Eio.Time.sleep clock delay;
+        (try Eio.Time.sleep clock delay with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         bump_backoff ();
         accept_loop ()
       end

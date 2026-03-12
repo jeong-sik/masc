@@ -38,5 +38,5 @@ let broadcast event =
   let log_path = "logs/game_events.jsonl" in
   let oc = open_out_gen [Open_append; Open_creat] 0o666 log_path in
   output_string oc (json ^ "\n");
-  close_out oc;
+  close_out_noerr oc;
   print_endline ("📡 Event Broadcasted: " ^ json)

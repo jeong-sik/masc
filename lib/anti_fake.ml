@@ -166,7 +166,7 @@ let score_content ~(file_path : string) (content : string) : score_result =
 (** Score a test file by reading it from disk. *)
 let score_file (file_path : string) : score_result =
   let ic = open_in file_path in
-  Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
     let content = In_channel.input_all ic in
     score_content ~file_path content)
 

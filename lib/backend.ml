@@ -185,9 +185,7 @@ module MemoryBackend : BACKEND = struct
 
   let with_lock t f =
     Mutex.lock t.mutex;
-    let result = try f () with e -> Mutex.unlock t.mutex; raise e in
-    Mutex.unlock t.mutex;
-    result
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) f
 
   let create (_cfg : config) : (t, error) result =
     Ok {
@@ -317,9 +315,7 @@ module FileSystemBackend : BACKEND = struct
 
   let with_lock t f =
     Mutex.lock t.mutex;
-    let result = try f () with e -> Mutex.unlock t.mutex; raise e in
-    Mutex.unlock t.mutex;
-    result
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) f
 
   (* Security: validate key with strict allowlist (parse, don't sanitize) *)
   let validate_key key =

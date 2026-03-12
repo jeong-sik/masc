@@ -163,7 +163,7 @@ let load_graph config : synapse_graph =
     try
       let ic = open_in file in
       let content = really_input_string ic (in_channel_length ic) in
-      close_in ic;
+      close_in_noerr ic;
       let json = Yojson.Safe.from_string content in
       graph_of_json json
     with exn ->
@@ -179,7 +179,7 @@ let save_graph config (graph : synapse_graph) : unit =
   (* Security: 0o600 - only owner can read/write synapse data *)
   let oc = open_out_gen [Open_wronly; Open_creat; Open_trunc] 0o600 file in
   output_string oc content;
-  close_out oc
+  close_out_noerr oc
 
 (** Find synapse between two agents - pure *)
 let find_synapse graph ~from_agent ~to_agent : synapse option =

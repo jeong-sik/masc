@@ -71,7 +71,7 @@ let save room_path config =
   let content = Yojson.Safe.pretty_to_string json in
   let oc = open_out path in
   output_string oc content;
-  close_out oc
+  close_out_noerr oc
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
   let seen = Hashtbl.create (List.length schemas) in

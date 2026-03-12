@@ -235,7 +235,7 @@ let serve ~sw ~clock ~socket ~request_handler =
       if is_cancelled exn then ()
       else begin
         Printf.eprintf "Accept error: %s\n%!" (Printexc.to_string exn);
-        (try Eio.Time.sleep clock backoff_s with _ -> ());
+        (try Eio.Time.sleep clock backoff_s with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         accept_loop (Float.min 2.0 (backoff_s *. 1.5))
       end
   in

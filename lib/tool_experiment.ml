@@ -154,12 +154,12 @@ let write_json path json =
   let closed = ref false in
   Fun.protect
     ~finally:(fun () ->
-      if not !closed then (try close_out oc with exn -> let _ = exn in ());
+      if not !closed then (try close_out_noerr oc with exn -> let _ = exn in ());
       if Sys.file_exists tmp then (try Sys.remove tmp with Sys_error _ -> ()))
     (fun () ->
       output_string oc content;
       flush oc;
-      close_out oc;
+      close_out_noerr oc;
       closed := true;
       Sys.rename tmp path)
 

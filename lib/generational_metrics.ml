@@ -119,7 +119,7 @@ let summarize_generation generation =
     
     let retention_tests_gen = List.filter (fun (r : retention_test) -> r.generation = generation) !retention_tests in
     let retention = 
-      if List.length retention_tests_gen = 0 then None
+      if retention_tests_gen = [] then None
       else
         let correct_count = List.filter (fun r -> r.correct) retention_tests_gen |> List.length in
         Some (float_of_int correct_count /. float_of_int (List.length retention_tests_gen))

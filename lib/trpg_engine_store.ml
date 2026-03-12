@@ -49,9 +49,9 @@ let append_event ~base_dir ~(event : Trpg_engine_event.t) =
           let line = Yojson.Safe.to_string (Trpg_engine_event.to_yojson event) ^ "\n" in
           try
             let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
-            output_string oc line;
-            close_out oc;
-            Ok ()
+            Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+              output_string oc line;
+              Ok ())
           with e -> Error (Printf.sprintf "append_event failed: %s" (Printexc.to_string e)))
 
 let read_event_lines (path : string) : (string list, string) result =
@@ -59,14 +59,14 @@ let read_event_lines (path : string) : (string list, string) result =
   else
     try
       let ic = open_in path in
-      let rec loop acc =
-        match input_line ic with
-        | line -> loop (line :: acc)
-        | exception End_of_file ->
-            close_in ic;
-            Ok (List.rev acc)
-      in
-      loop []
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        let rec loop acc =
+          match input_line ic with
+          | line -> loop (line :: acc)
+          | exception End_of_file ->
+              List.rev acc
+        in
+        Ok (loop []))
     with e -> Error (Printf.sprintf "read_event_lines failed: %s" (Printexc.to_string e))
 
 let parse_events_from_lines (lines : string list) : (Trpg_engine_event.t list, string) result =
@@ -122,9 +122,9 @@ let write_snapshot ~base_dir ~room_id ~last_seq ~ts ~state =
           in
           try
             let oc = open_out path in
-            Yojson.Safe.pretty_to_channel oc json;
-            close_out oc;
-            Ok ()
+            Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+              Yojson.Safe.pretty_to_channel oc json;
+              Ok ())
           with e -> Error (Printf.sprintf "write_snapshot failed: %s" (Printexc.to_string e)))
 
 let read_snapshot ~base_dir ~room_id =

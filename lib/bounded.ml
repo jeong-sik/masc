@@ -265,7 +265,7 @@ let update_state state result =
 (** Main bounded execution loop *)
 let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
   (* Pre-check: empty agents *)
-  if List.length agents = 0 then
+  if agents = [] then
     {
       status = `Error;
       reason = "No agents available";

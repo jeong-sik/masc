@@ -130,7 +130,7 @@ let ensure_dir path =
 let read_file_content path =
   if Sys.file_exists path then
     let ic = open_in path in
-    Common.protect ~module_name:"planning_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_in ic) (fun () ->
+    Common.protect ~module_name:"planning_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
       really_input_string ic (in_channel_length ic))
   else ""
 
@@ -138,7 +138,7 @@ let read_file_content path =
 let write_file_content path content =
   ensure_dir (Filename.dirname path);
   let oc = open_out path in
-  Common.protect ~module_name:"planning_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out oc) (fun () ->
+  Common.protect ~module_name:"planning_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
     (* Use exclusive lock for concurrent writes *)
     let fd = Unix.descr_of_out_channel oc in
     Unix.lockf fd Unix.F_LOCK 0;

@@ -2952,7 +2952,7 @@ let write_current_room config room_id =
     let oc = open_out path in
     output_string oc room_id;
     output_char oc '\n';
-    close_out oc
+    close_out_noerr oc
   in
   (* Canonical location inside .masc/ *)
   write_to (current_room_path config);

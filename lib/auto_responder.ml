@@ -27,10 +27,10 @@ let is_enabled () = get_mode () <> Disabled
 let activity_log_file () =
   match Env_config.me_root_opt () with
   | Some root -> root ^ "/logs/auto-responder.log"
-  | None -> "/tmp/auto-responder.log"
+  | None -> Filename.concat (Filename.get_temp_dir_name ()) "auto-responder.log"
 
 let debug_log msg =
-  let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 "/tmp/auto_debug.log" in
+  let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 (Filename.concat (Filename.get_temp_dir_name ()) "auto_debug.log") in
   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer"
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> Printf.fprintf oc "[%f] %s\n%!" (Time_compat.now ()) msg)

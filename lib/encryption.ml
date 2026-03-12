@@ -71,12 +71,12 @@ let load_key config : (GCM.key, encryption_error) result =
           let content = Common.protect ~module_name:"encryption" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
             really_input_string ic 64) in (* hex-encoded 32 bytes *)
           (* Decode hex to bytes *)
-          let bytes = ref "" in
+          let buf = Buffer.create 32 in
           for i = 0 to 31 do
             let hex = String.sub content (i * 2) 2 in
-            bytes := !bytes ^ String.make 1 (Char.chr (int_of_string ("0x" ^ hex)))
+            Buffer.add_char buf (Char.chr (int_of_string ("0x" ^ hex)))
           done;
-          Some !bytes
+          Some (Buffer.contents buf)
         else None
     | `Direct key -> Some key
   in

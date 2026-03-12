@@ -50,7 +50,7 @@ let append_history (json : Yojson.Safe.t) =
     Common.protect
       ~module_name:"chain_telemetry"
       ~finally_label:"close_out"
-      ~finally:(fun () -> close_out oc)
+      ~finally:(fun () -> close_out_noerr oc)
       (fun () ->
         output_string oc (Yojson.Safe.to_string json);
         output_char oc '\n';

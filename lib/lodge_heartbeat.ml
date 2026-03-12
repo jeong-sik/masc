@@ -253,7 +253,7 @@ let save_trace (entry : trace_entry) =
   let line = Yojson.Safe.to_string json ^ "\n" in
   let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 trace_file in
   output_string oc line;
-  close_out oc;
+  close_out_noerr oc;
   Printf.printf "   📝 [%s] Trace saved: %s (%dms, %s)\n%!" entry.agent_name trace_file entry.duration_ms entry.llm_used
 
 (** Start agent's own heartbeat loop *)
@@ -473,7 +473,7 @@ let with_auth_header_file api_key f =
          let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
          let oc = Unix.out_channel_of_descr fd in
          output_string oc ("Authorization: Bearer " ^ api_key ^ "\n");
-         close_out oc;
+         close_out_noerr oc;
          f (Some path))
 
 let with_body_file body f =
@@ -1438,7 +1438,7 @@ let select_checkin_agents ~ignore_quiet_hours ~(config : config)
     && current_hour >= quiet_start
     && current_hour < quiet_end
   in
-  if is_quiet || List.length agents = 0 then []
+  if is_quiet || agents = [] then []
   else begin
     let max_n = config.agents_per_tick in
     let selected = ref [] in
@@ -2007,7 +2007,7 @@ let content_similarity s1 s2 =
     let words1 = String.split_on_char ' ' s1l |> List.filter (fun w -> String.length w > 1) in
     let words2 = String.split_on_char ' ' s2l |> List.filter (fun w -> String.length w > 1) in
     let common = List.filter (fun w -> List.mem w words2) words1 in
-    if List.length words1 = 0 then 0.0
+    if words1 = [] then 0.0
     else float_of_int (List.length common) /. float_of_int (List.length words1)
   end
 
@@ -2620,7 +2620,7 @@ let select_agents_with_thompson ~ignore_quiet_hours
     && current_hour >= quiet_start
     && current_hour < quiet_end
   in
-  if is_quiet || List.length agents = 0 then begin
+  if is_quiet || agents = [] then begin
     if is_quiet then
       Eio.traceln "   😴 [thompson] Quiet hours (%d-%d), skipping selection" quiet_start quiet_end;
     []
@@ -2672,7 +2672,7 @@ let select_agents_by_plan ~ignore_quiet_hours
     && current_hour >= quiet_start
     && current_hour < quiet_end
   in
-  if is_quiet || List.length agents = 0 then begin
+  if is_quiet || agents = [] then begin
     if is_quiet then
       Eio.traceln "   😴 [plan] Quiet hours (%d-%d), skipping selection" quiet_start quiet_end;
     []
@@ -3150,7 +3150,7 @@ let find_relevant_agents ~content ~threshold =
     |> List.map fst
   in
   (* If keyword matching found agents, use that *)
-  if List.length high_keyword_matches > 0 then begin
+  if high_keyword_matches <> [] then begin
     Eio.traceln "   🔍 Keyword match found: [%s]" (String.concat ", " high_keyword_matches);
     high_keyword_matches
   end else begin
@@ -3168,7 +3168,7 @@ let handle_broadcast ~sender ~content =
   let relevant = find_relevant_agents ~content ~threshold:0.2 in
   let relevant = List.filter (fun name -> name <> sender) relevant in
 
-  if List.length relevant = 0 then begin
+  if relevant = [] then begin
     Eio.traceln "   ⏭️ No relevant agents for this broadcast";
     []
   end else begin

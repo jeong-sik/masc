@@ -238,7 +238,7 @@ let convert_stats (ls : Lodge_selection.agent_stats) : agent_stats =
 
 (** Calculate Shannon entropy of selection distribution *)
 let calculate_entropy (stats_list : Lodge_selection.agent_stats list) : float =
-  if List.length stats_list = 0 then 0.0
+  if stats_list = [] then 0.0
   else begin
     let total_selections = List.fold_left (fun acc s -> acc + s.Lodge_selection.selections) 0 stats_list in
     if total_selections = 0 then 0.0
@@ -335,7 +335,7 @@ let extract_topics_from_text text =
 
 (** Calculate topic coverage from Board posts *)
 let calculate_topic_coverage ~posts : (string * float) list =
-  if List.length posts = 0 then []
+  if posts = [] then []
   else begin
     (* Aggregate all post content *)
     let all_text = posts

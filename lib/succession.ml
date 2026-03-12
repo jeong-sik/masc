@@ -73,7 +73,7 @@ let build_progress_summary (msgs : Llm_client.message list) : string =
   in
   let last_opt = function
     | [] -> None
-    | xs -> Some (List.nth xs (List.length xs - 1))
+    | xs -> match List.rev xs with | h :: _ -> Some h | [] -> None
   in
   let latest_state_block () =
     let rec loop = function
@@ -138,7 +138,7 @@ let extract_pending_actions (msgs : Llm_client.message list) : string list =
   in
   let last_opt = function
     | [] -> None
-    | xs -> Some (List.nth xs (List.length xs - 1))
+    | xs -> match List.rev xs with | h :: _ -> Some h | [] -> None
   in
   let latest_state_block () =
     let rec loop = function
@@ -197,7 +197,7 @@ let extract_key_decisions (msgs : Llm_client.message list) : string list =
   in
   let last_opt = function
     | [] -> None
-    | xs -> Some (List.nth xs (List.length xs - 1))
+    | xs -> match List.rev xs with | h :: _ -> Some h | [] -> None
   in
   let latest_state_block () =
     let rec loop = function

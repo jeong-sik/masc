@@ -344,7 +344,18 @@ let share_belief ~fs (config : config) ~content ~mind_id : shared_belief =
   let n = get_or_create ~fs config ~name:"MASC Noosphere" in
   let n' = Pure.share_belief n ~content ~mind_id in
   save_noosphere ~fs config n';
-  List.find (fun (b : shared_belief) -> String.lowercase_ascii b.content = String.lowercase_ascii content) n'.beliefs
+  match List.find_opt (fun (b : shared_belief) -> String.lowercase_ascii b.content = String.lowercase_ascii content) n'.beliefs with
+  | Some b -> b
+  | None ->
+      let now = Time_compat.now () in
+      {
+        id = generate_id "belief";
+        content;
+        confidence = 0.5;
+        supporters = [mind_id];
+        created_at = now;
+        last_reinforced = now;
+      }
 
 let synthesize ~fs (config : config) ~topic ~contributions : collective_insight option =
   let n = get_or_create ~fs config ~name:"MASC Noosphere" in

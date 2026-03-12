@@ -39,7 +39,7 @@ let load_file (path : string) : string =
   | None ->
     (* Fallback: blocking Unix I/O *)
     let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
       let len = in_channel_length ic in
       really_input_string ic len
     )
@@ -54,7 +54,7 @@ let save_file (path : string) (content : string) : unit =
   | None ->
     (* Fallback: blocking Unix I/O *)
     let oc = open_out path in
-    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc content
     )
 
@@ -68,7 +68,7 @@ let append_file (path : string) (content : string) : unit =
   | None ->
     (* Fallback: blocking Unix I/O *)
     let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc content
     )
 

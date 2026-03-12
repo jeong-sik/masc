@@ -276,7 +276,7 @@ let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
   if not (Sys.file_exists path) then []
   else
     let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
       let entries = ref [] in
       (try while true do
          let line = input_line ic in

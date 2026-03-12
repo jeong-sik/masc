@@ -90,7 +90,7 @@ let remove_file_logged ?(context = "cleanup") path =
 
 (** Close channel with logging on failure *)
 let close_in_logged ic =
-  try close_in ic
+  try close_in_noerr ic
   with e ->
     Printf.eprintf "[WARN] Failed to close input channel: %s\n%!" (Printexc.to_string e)
 

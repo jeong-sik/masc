@@ -263,7 +263,7 @@ let branch (engine : t)
            ~goal ~original_query
            ~(candidates : candidate list)
     : (spec_session, string) result =
-  if List.length candidates = 0 then
+  if candidates = [] then
     Error "no candidates provided"
   else if List.length candidates > engine.config.max_candidates then
     Error (sprintf "too many candidates: %d > %d"

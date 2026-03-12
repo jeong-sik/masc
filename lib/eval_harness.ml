@@ -434,7 +434,7 @@ let load_scenarios_from_file (path : string) : (scenario list, string) result =
   else
     try
       let ic = open_in path in
-      let content = Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+      let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
         let n = in_channel_length ic in
         let buf = Bytes.create n in
         really_input ic buf 0 n;

@@ -608,14 +608,15 @@ let mcp_session_to_json (s : mcp_session_record) : Yojson.Safe.t =
   ]
 
 let mcp_session_of_json (json : Yojson.Safe.t) : mcp_session_record option =
-  let module U = Yojson.Safe.Util in
   try
-    let id = match Json_util.get_string json "id" with Some v -> v | None -> raise Not_found in
-    let agent_name = Json_util.get_string json "agent_name" in
-    let created_at = match Json_util.get_float json "created_at" with Some v -> v | None -> raise Not_found in
-    let last_seen = match Json_util.get_float json "last_seen" with Some v -> v | None -> raise Not_found in
-    Some { id; agent_name; created_at; last_seen }
-  with Not_found | Yojson.Safe.Util.Type_error _ -> None
+    match Json_util.get_string json "id",
+          Json_util.get_float json "created_at",
+          Json_util.get_float json "last_seen" with
+    | Some id, Some created_at, Some last_seen ->
+        let agent_name = Json_util.get_string json "agent_name" in
+        Some { id; agent_name; created_at; last_seen }
+    | _ -> None
+  with Yojson.Safe.Util.Type_error _ -> None
 
 let load_mcp_sessions (config : Room.config) : mcp_session_record list =
   let path = mcp_sessions_path config in
@@ -702,7 +703,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     match mcp_session_id with
     | None -> None
     | Some sid ->
-        let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
+        let file = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf ".masc_agent_mcp_%s" sid) in
         try
           let ic = open_in file in
           let name =
@@ -719,7 +720,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     match mcp_session_id with
     | None -> ()
     | Some sid ->
-        let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
+        let file = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf ".masc_agent_mcp_%s" sid) in
         try
           let oc = open_out file in
           Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
@@ -783,8 +784,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           if Option.is_some mcp_session_id then
             generated_fallback_agent_name
           else
-            let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "" in
-            let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
+            let term_session_id = Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID") in
+            let term_file = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf ".masc_agent_%s" term_session_id) in
             (try
               let ic = open_in term_file in
               let name =
@@ -792,8 +793,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
                   ~finally:(fun () -> close_in_noerr ic)
                   (fun () -> input_line ic)
               in
-              if name <> "" then name else raise Not_found
-            with Sys_error _ | End_of_file | Not_found ->
+              if name <> "" then name else generated_fallback_agent_name
+            with Sys_error _ | End_of_file ->
               generated_fallback_agent_name)
   in
 
@@ -828,7 +829,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       match Sys.getenv_opt "TERM_SESSION_ID" with
       | None -> None
       | Some sid ->
-          let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
+          let file = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf ".masc_agent_%s" sid) in
           try
             let ic = open_in file in
             let name =
@@ -933,7 +934,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       match Sys.getenv_opt "TERM_SESSION_ID" with
       | None -> ()
       | Some sid ->
-          let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
+          let file = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf ".masc_agent_%s" sid) in
           (try
             let oc = open_out file in
             Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
@@ -1683,9 +1684,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       let path = arg_get_string "path" "" in
       let expanded =
         if String.length path > 0 && path.[0] = '~' then
-          Filename.concat (Sys.getenv "HOME") (String.sub path 1 (String.length path - 1))
-        else if Filename.is_relative path then
-          Filename.concat (Sys.getcwd ()) path
+          let home = Option.value ~default:"/tmp" (Sys.getenv_opt "HOME") in
+          Filename.concat home (String.sub path 1 (String.length path - 1))
+        else if Filename.is_relative path then          Filename.concat (Sys.getcwd ()) path
         else
           path
       in
@@ -1723,8 +1724,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       Printf.eprintf "[DEBUG] masc_join: saved nickname=%s to MCP session (original=%s)\n%!" nickname agent_name;
       (* Also save to TERM_SESSION_ID file (terminal persistence) *)
       if Option.is_none mcp_session_id then begin
-        let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
-        let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
+        let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
+        let agent_file = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf ".masc_agent_%s" term_session_id) in
         (try
           let oc = open_out agent_file in
           Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
@@ -1769,8 +1770,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       unregister_sync registry ~agent_name;
       (* Clean up self-echo filter file *)
       if Option.is_none mcp_session_id then begin
-        let session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
-        let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
+        let session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
+        let agent_file = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf ".masc_agent_%s" session_id) in
         Safe_ops.remove_file_logged ~context:"masc_leave" agent_file
       end;
       (* Audit: log leave event *)
@@ -1890,9 +1891,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       let msg_opt = wait_for_message_eio ~clock registry ~agent_name ~timeout in
       (match msg_opt with
        | Some msg ->
-           let from = match Json_util.get_string msg "from" with Some v -> v | None -> raise Not_found in
-           let content = match Json_util.get_string msg "content" with Some v -> v | None -> raise Not_found in
-           let timestamp = match Json_util.get_string msg "timestamp" with Some v -> v | None -> raise Not_found in
+           let from = match Json_util.get_string msg "from" with Some v -> v | None -> "unknown" in
+           let content = match Json_util.get_string msg "content" with Some v -> v | None -> "empty message" in
+           let timestamp = match Json_util.get_string msg "timestamp" with Some v -> v | None -> "unknown time" in
            (true, Printf.sprintf {|
 🔔 **MESSAGE RECEIVED!**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2360,7 +2361,7 @@ Time: %s
             (* Parse and validate *)
             let json = Yojson.Safe.from_string content in
             let module U = Yojson.Safe.Util in
-            let ep_id = match Json_util.get_string json "ep_id" with Some v -> v | None -> raise Not_found in
+            let ep_id = match Json_util.get_string json "ep_id" with Some v -> v | None -> "unknown_ep_id" in
 
             (* Build Episode record from JSON *)
             let episode : Jiphyeon.Archive.episode = {
@@ -2552,7 +2553,16 @@ Time: %s
   | "masc_recall_search" ->
       (* Agent Being Protocol: Semantic memory recall from local sources *)
       let module U = Yojson.Safe.Util in
-      let query = match Json_util.get_string arguments "query" with Some v -> v | None -> raise Not_found in
+      let query = match Json_util.get_string arguments "query" with
+        | Some v -> v
+        | None -> ""
+      in
+      if query = "" then
+        (true, Yojson.Safe.pretty_to_string (`Assoc [
+          ("success", `Bool false);
+          ("error", `String "Missing 'query' parameter");
+        ]))
+      else
       let limit = arguments |> U.member "limit" |> U.to_int_option |> Option.value ~default:5 in
 
       (match state.Mcp_server.env with

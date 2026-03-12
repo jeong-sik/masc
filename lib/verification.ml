@@ -283,7 +283,7 @@ let save_request base_path req =
   let path = request_path base_path req.id in
   let oc = open_out path in
   output_string oc (Yojson.Safe.pretty_to_string json);
-  close_out oc;
+  close_out_noerr oc;
   Ok req.id
 
 let load_request base_path req_id =

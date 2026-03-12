@@ -889,4 +889,4 @@ let log_event config event_json =
 
   let oc = open_out_gen [Open_append; Open_creat] 0o644 log_file in
   output_string oc (event_json ^ "\n");
-  close_out oc
+  close_out_noerr oc

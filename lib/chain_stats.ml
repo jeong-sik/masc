@@ -186,7 +186,7 @@ let compute ?(since=0.0) () =
       else
         List.filter_map (fun (d, ts) -> if ts >= since then Some d else None)
           (List.combine stats_data.chain_durations stats_data.chain_timestamps
-           |> fun pairs -> if List.length pairs = 0 then [] else pairs)
+           |> fun pairs -> if pairs = [] then [] else pairs)
     in
 
     (* Calculate duration percentiles *)

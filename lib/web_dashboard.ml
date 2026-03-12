@@ -36,7 +36,7 @@ let html () =
     let n = in_channel_length ic in
     let s = Bytes.create n in
     really_input ic s 0 n;
-    close_in ic;
+    close_in_noerr ic;
     Bytes.to_string s
   with Sys_error _ ->
     "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>"

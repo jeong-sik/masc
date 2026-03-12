@@ -63,7 +63,7 @@ module ZeroZombie = struct
       Returns list of cleaned agent names. *)
   let cleanup ~cleanup_fn =
     let cleaned = cleanup_fn () in
-    if List.length cleaned > 0 then begin
+    if cleaned <> [] then begin
       global_stats.total_cleanups <- global_stats.total_cleanups + 1;
       global_stats.last_cleanup_ts <- Time.now ();
       global_stats.last_cleaned_agents <- cleaned
@@ -87,8 +87,7 @@ module ZeroZombie = struct
       | _ -> false
     in
     let rec loop () =
-      (try
-         Eio.Time.sleep clock interval
+      (try Eio.Time.sleep clock interval
        with exn ->
          if is_cancelled exn then raise exn;
          Printf.eprintf "[ZeroZombie] sleep error: %s\n%!" (Printexc.to_string exn));
@@ -102,7 +101,7 @@ module ZeroZombie = struct
       loop ()
     in
     try loop () with exn ->
-      if is_cancelled exn then ()
-      else if not (is_benign_error exn) then 
+      if is_cancelled exn then raise exn
+      else if not (is_benign_error exn) then
         Printf.eprintf "[ZeroZombie] loop error: %s\n%!" (Printexc.to_string exn)
 end

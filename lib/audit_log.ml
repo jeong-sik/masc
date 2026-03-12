@@ -170,7 +170,7 @@ let read_entries (config : Room.config) : audit_entry list =
           | None -> ()
       done
     with End_of_file -> ());
-    close_in ic;
+    close_in_noerr ic;
     List.rev !entries
 
 (** Recursively create directory (no shell, safe) *)
@@ -199,7 +199,7 @@ let append_entry (config : Room.config) (entry : audit_entry) =
       ensure_dir path;  (* Now safe: EEXIST handled, inside mutex *)
       let json_line = Yojson.Safe.to_string (entry_to_json entry) ^ "\n" in
       let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-      Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
         output_string oc json_line
       )
     )
@@ -356,7 +356,7 @@ let get_stats (config : Room.config) =
         end
       done
     with End_of_file -> ());
-    close_in ic;
+    close_in_noerr ic;
     {
       total_entries = !count;
       file_size_bytes = size;

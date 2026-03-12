@@ -75,7 +75,7 @@ let link_worktree_to_task config ~task_id ~worktree_info =
           let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
           let oc = open_out backlog_file in
           output_string oc (Yojson.Safe.pretty_to_string (backlog_to_yojson new_backlog));
-          close_out oc;
+          close_out_noerr oc;
           Ok ()
         end
   end
@@ -118,7 +118,7 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
                   let updated_agent = { agent with current_task = Some worktree_name } in
                   let oc = open_out agent_file in
                   output_string oc (Yojson.Safe.pretty_to_string (agent_to_yojson updated_agent));
-                  close_out oc
+                  close_out_noerr oc
               | Error msg -> Printf.eprintf "[worktree] agent state read: %s\n%!" msg
             end
           in

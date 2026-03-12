@@ -150,7 +150,7 @@ let fallback_plan ~agent_name =
 (** Build the prompt that asks the LLM to create a daily plan. *)
 let build_plan_prompt ~agent_name ~identity ~memories =
   let memory_str =
-    if List.length memories = 0 then "(기억 없음)"
+    if memories = [] then "(기억 없음)"
     else Memory_stream.format_memories memories
   in
   let date = today_kst () in

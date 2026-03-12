@@ -3134,7 +3134,7 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?input ?checkpoint (p
               let nodes_to_execute = List.filter (fun (n : node) ->
                 not (node_completed_in_checkpoint ctx n.id)
               ) nodes in
-              if List.length nodes_to_execute = 0 then begin
+              if nodes_to_execute = [] then begin
                 List.iter (fun (n : node) -> set_node_status ctx n.id Skipped) nodes;
                 Ok ""  (* All nodes already completed *)
               end
@@ -3159,7 +3159,7 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?input ?checkpoint (p
                 let errors = List.filter_map (fun (id, r) ->
                   match r with Error e -> Some (id ^ ": " ^ e) | Ok _ -> None
                 ) !results in
-                if List.length errors = 0 then Ok ""
+                if errors = [] then Ok ""
                 else Error (String.concat "; " errors)
               end
         in

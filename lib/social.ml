@@ -187,14 +187,14 @@ let write_json path json =
   let closed = ref false in
   Common.protect ~module_name:"social" ~finally_label:"finalizer" ~finally:(fun () ->
     (* Only close if not already closed in protected block *)
-    if not !closed then (try close_out oc with Sys_error _ -> ());
+    if not !closed then (try close_out_noerr oc with Sys_error _ -> ());
     (* Clean up temp file on error (won't exist after successful rename) *)
     if Sys.file_exists tmp_path then
       try Sys.remove tmp_path with Sys_error _ -> ()
   ) (fun () ->
     output_string oc content;
     flush oc;
-    close_out oc;
+    close_out_noerr oc;
     closed := true;
     (* Atomic rename *)
     Sys.rename tmp_path path

@@ -3406,10 +3406,6 @@ let tool_output_schema_field = function
   | _ -> None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
-  let implementation_status =
-    Tool_catalog.implementation_status schema.name
-    |> Tool_catalog.implementation_status_to_string
-  in
   let base =
     [
       ("name", `String schema.name);
@@ -3419,8 +3415,8 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
         `List
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
-      ("implementationStatus", `String implementation_status);
     ]
+    @ Tool_catalog.public_contract_fields schema.name
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
     @

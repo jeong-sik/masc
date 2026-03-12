@@ -38,7 +38,7 @@ let test_shard_shell_exists () =
   match Tool_shard.get_shard "shell" with
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    Alcotest.(check bool) "has 2 tools" true (List.length s.Tool_shard.tools = 2)
+    Alcotest.(check bool) "has 3 tools" true (List.length s.Tool_shard.tools = 3)
   | None -> Alcotest.fail "shell shard not found"
 
 let test_shard_weather_exists () =
@@ -48,13 +48,20 @@ let test_shard_weather_exists () =
     Alcotest.(check bool) "has 1 tool" true (List.length s.Tool_shard.tools = 1)
   | None -> Alcotest.fail "weather shard not found"
 
+let test_shard_voice_exists () =
+  match Tool_shard.get_shard "voice" with
+  | Some s ->
+    Alcotest.(check bool) "removable" true s.Tool_shard.removable;
+    Alcotest.(check bool) "has 1 tool" true (List.length s.Tool_shard.tools = 1)
+  | None -> Alcotest.fail "voice shard not found"
+
 let test_shard_unknown () =
   Alcotest.(check bool) "unknown returns None" true
     (Tool_shard.get_shard "nonexistent" = None)
 
 let test_all_shards_count () =
   let all = Tool_shard.list_all_shards () in
-  Alcotest.(check int) "6 predefined shards" 6 (List.length all)
+  Alcotest.(check int) "7 predefined shards" 7 (List.length all)
 
 (* ============================================================
    default_shard_names tests
@@ -62,11 +69,11 @@ let test_all_shards_count () =
 
 let test_default_shard_names () =
   let defaults = Tool_shard.default_shard_names in
-  Alcotest.(check int) "5 defaults" 5 (List.length defaults);
+  Alcotest.(check int) "6 defaults" 6 (List.length defaults);
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " in defaults") true
       (List.mem name defaults)
-  ) ["base"; "board"; "filesystem"; "shell"; "weather"]
+  ) ["base"; "board"; "filesystem"; "shell"; "weather"; "voice"]
 
 (* ============================================================
    tools_of_shards tests
@@ -91,8 +98,8 @@ let test_tools_of_shards_unknown_ignored () =
 
 let test_keeper_llm_tools_count () =
   let tools = Tool_shard.keeper_llm_tools in
-  (* base=3 + board=3 + filesystem=2 + shell=2 + weather=1 = 11 *)
-  Alcotest.(check int) "11 total tools" 11 (List.length tools)
+  (* base=3 + board=3 + filesystem=2 + shell=3 + weather=1 + voice=1 = 13 *)
+  Alcotest.(check int) "13 total tools" 13 (List.length tools)
 
 (* ============================================================
    grant_shard tests
@@ -170,7 +177,7 @@ let test_revoke_unknown () =
 let test_get_agent_shards_default () =
   (* Unknown agent gets default shards *)
   let shards = Tool_shard.get_agent_shards "new-agent-never-seen" in
-  Alcotest.(check int) "defaults" 5 (List.length shards)
+  Alcotest.(check int) "defaults" 6 (List.length shards)
 
 let test_set_get_agent_shards () =
   Hashtbl.remove Tool_shard.agent_shards "test-agent-x";
@@ -193,7 +200,7 @@ let test_execute_tool_list () =
   let (ok, json) = Tool_shard.execute "masc_tool_list" (`Assoc []) in
   Alcotest.(check bool) "succeeds" true ok;
   let shards = Yojson.Safe.Util.(member "shards" json |> to_list) in
-  Alcotest.(check int) "6 shards in list" 6 (List.length shards)
+  Alcotest.(check int) "7 shards in list" 7 (List.length shards)
 
 let test_execute_tool_list_with_agent () =
   Hashtbl.remove Tool_shard.agent_shards "test-ex";
@@ -286,6 +293,7 @@ let () =
       Alcotest.test_case "filesystem" `Quick test_shard_filesystem_exists;
       Alcotest.test_case "shell" `Quick test_shard_shell_exists;
       Alcotest.test_case "weather" `Quick test_shard_weather_exists;
+      Alcotest.test_case "voice" `Quick test_shard_voice_exists;
       Alcotest.test_case "unknown" `Quick test_shard_unknown;
       Alcotest.test_case "all count" `Quick test_all_shards_count;
     ]);

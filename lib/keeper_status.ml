@@ -361,7 +361,15 @@ let handle_keeper_status ctx args : tool_result =
              let start = max 0 (total - tail_compactions) in
              let tail = List.filteri (fun i _ -> i >= start) events in
              (`List tail, total)
-         in
+        in
+        let all_internal_tools =
+          keeper_llm_tools |> List.map (fun tool -> tool.Llm_client.tool_name)
+        in
+        let allowed_tools = keeper_allowed_tool_names m in
+        let blocked_internal_tools =
+          all_internal_tools
+          |> List.filter (fun name -> not (List.mem name allowed_tools))
+        in
 
          let json = `Assoc [
            ("meta", meta_to_json m);
@@ -434,6 +442,19 @@ let handle_keeper_status ctx args : tool_result =
                if String.trim m.policy_reward_model_path = ""
                then `Null
                else `String m.policy_reward_model_path);
+             ("voice_enabled", `Bool m.policy_voice_enabled);
+             ("shell_mode", `String m.policy_shell_mode);
+             ("allowed_tools", string_list_to_json allowed_tools);
+             ("available_internal_tools", string_list_to_json all_internal_tools);
+             ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
+           ]);
+           ("initiative", `Assoc [
+             ("enabled", `Bool m.initiative_enabled);
+             ("scope", `String m.initiative_scope);
+             ("idle_sec", `Int m.initiative_idle_sec);
+             ("cooldown_sec", `Int m.initiative_cooldown_sec);
+             ("context_mode", `String m.initiative_context_mode);
+             ("post_ttl_hours", `Int m.initiative_post_ttl_hours);
            ]);
            ("compaction_policy", `Assoc [
              ("profile", `String m.compaction_profile);

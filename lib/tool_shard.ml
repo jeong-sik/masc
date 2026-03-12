@@ -119,6 +119,21 @@ let filesystem_tools : Llm_client.tool_def list = [
 
 let shell_tools : Llm_client.tool_def list = [
   {
+    tool_name = "keeper_shell_readonly";
+    tool_description = "Run a structured read-only project command. Supported ops: pwd, ls, cat, rg, git_status.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("op", `Assoc [("type", `String "string"); ("description", `String "One of: pwd, ls, cat, rg, git_status")]);
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Optional target path for ls/cat/rg")]);
+        ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg")]);
+        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Optional result limit for ls/rg")]);
+        ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Optional max bytes for cat")]);
+      ]);
+      ("required", `List [`String "op"]);
+    ];
+  };
+  {
     tool_name = "keeper_bash";
     tool_description = "Run a shell command from project root. Use for build/test/check commands.";
     parameters = `Assoc [
@@ -140,6 +155,22 @@ let shell_tools : Llm_client.tool_def list = [
         ("args", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Optional argv list for gh (without leading gh)")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
       ]);
+    ];
+  };
+]
+
+let voice_tools : Llm_client.tool_def list = [
+  {
+    tool_name = "keeper_voice_speak";
+    tool_description = "Speak a short utterance as this keeper via the voice bridge, falling back to text when voice is unavailable.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("message", `Assoc [("type", `String "string"); ("description", `String "Text to speak")]);
+        ("provider", `Assoc [("type", `String "string"); ("description", `String "Optional voice provider override")]);
+        ("priority", `Assoc [("type", `String "integer"); ("description", `String "Optional queue priority")]);
+      ]);
+      ("required", `List [`String "message"]);
     ];
   };
 ]
@@ -251,6 +282,13 @@ let shard_weather : shard = {
   description = "Weather queries";
 }
 
+let shard_voice : shard = {
+  name = "voice";
+  tools = voice_tools;
+  removable = true;
+  description = "Voice bridge speak output";
+}
+
 let shard_taskboard : shard = {
   name = "taskboard";
   tools = taskboard_tools;
@@ -271,6 +309,7 @@ let default_shard_names : string list = [
   "filesystem";
   "shell";
   "weather";
+  "voice";
 ]
 
 let get_agent_shards (agent_name : string) : string list =
@@ -289,6 +328,7 @@ let all_shards : (string, shard) Hashtbl.t =
     shard_filesystem;
     shard_shell;
     shard_weather;
+    shard_voice;
     shard_taskboard;
   ];
   tbl
@@ -347,7 +387,7 @@ let schemas : Types.tool_schema list = [
   {
     name = "masc_tool_grant";
     description = "Grant a tool shard to an agent. \
-Shards: base (core), board, filesystem, shell, weather, taskboard.";
+Shards: base (core), board, filesystem, shell, weather, voice, taskboard.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -357,7 +397,7 @@ Shards: base (core), board, filesystem, shell, weather, taskboard.";
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to grant: base, board, filesystem, shell, weather, taskboard");
+          ("description", `String "Shard to grant: base, board, filesystem, shell, weather, voice, taskboard");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
@@ -376,7 +416,7 @@ Cannot revoke 'base' shard (always present).";
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to revoke (must be removable)");
+          ("description", `String "Shard to revoke (must be removable). One of: board, filesystem, shell, weather, voice, taskboard");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);

@@ -22,6 +22,79 @@ let ensure_keeper_board_post_args ~author ~source = function
         @ fields)
   | other -> other
 
+let keeper_read_tool_names =
+  [
+    "keeper_read";
+    "keeper_fs_read";
+    "keeper_memory_search";
+    "keeper_time_now";
+    "keeper_context_status";
+  ]
+
+let keeper_board_tool_names =
+  [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_list" ]
+
+let keeper_voice_tool_names =
+  [ "keeper_voice_speak" ]
+
+let keeper_shell_readonly_tool_names =
+  [ "keeper_shell_readonly" ]
+
+let dedupe_tool_names names =
+  dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
+
+let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) : string list =
+  if write_done then
+    []
+  else if keeper_policy_mode_is_learned meta then
+    let base = keeper_read_tool_names in
+    let with_voice =
+      if meta.policy_voice_enabled then keeper_voice_tool_names @ base else base
+    in
+    let with_shell =
+      if canonical_policy_shell_mode meta.policy_shell_mode = "readonly" then
+        keeper_shell_readonly_tool_names @ with_voice
+      else
+        with_voice
+    in
+    match canonical_policy_action_budget meta.policy_action_budget with
+    | "board" -> dedupe_tool_names (keeper_board_tool_names @ with_shell)
+    | _ -> dedupe_tool_names with_shell
+  else
+    keeper_llm_tools |> List.map (fun tool -> tool.Llm_client.tool_name)
+
+let keeper_allowed_llm_tools ?(write_done = false) (meta : keeper_meta) :
+    Llm_client.tool_def list =
+  let allowed = keeper_allowed_tool_names ~write_done meta in
+  if allowed = [] then
+    []
+  else
+    keeper_llm_tools
+    |> List.filter (fun tool -> List.mem tool.Llm_client.tool_name allowed)
+
+let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
+  let voice = Voice_bridge.get_voice_for_agent agent_id in
+  `Assoc
+    [
+      ("status", `String "text_fallback");
+      ("agent_id", `String agent_id);
+      ("voice", `String voice);
+      ("message_preview", `String (short_preview ~max_len:50 message));
+    ]
+
+let shell_readonly_limit args =
+  max 1 (min 200 (Safe_ops.json_int ~default:40 "limit" args))
+
+let shell_readonly_cat_max_bytes args =
+  max 256 (min 100000 (Safe_ops.json_int ~default:4000 "max_bytes" args))
+
+let lines_to_json ?(limit = max_int) (text : string) : Yojson.Safe.t =
+  let lines =
+    String.split_on_char '\n' text
+    |> List.filter (fun line -> line <> "")
+    |> fun rows -> if List.length rows > limit then take limit rows else rows
+  in
+  `List (List.map (fun line -> `String line) lines)
 let execute_keeper_tool_call
     ~(config : Room.config)
     ~(meta : keeper_meta)
@@ -229,6 +302,150 @@ let execute_keeper_tool_call
             ("status", process_status_to_json st);
             ("output", `String (truncate_tool_output out));
           ])
+  | "keeper_shell_readonly" ->
+      let op =
+        Safe_ops.json_string ~default:"" "op" args
+        |> String.trim |> String.lowercase_ascii
+      in
+      let root = project_root_of_config config in
+      let read_target () =
+        let raw_path = Safe_ops.json_string ~default:"." "path" args in
+        resolve_keeper_target_path ~config ~raw_path
+      in
+      let render_process_result ~cmd argv =
+        let (st, out) = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
+        Yojson.Safe.to_string
+          (`Assoc
+            [
+              ("ok", `Bool (st = Unix.WEXITED 0));
+              ("op", `String op);
+              ("cmd", `String cmd);
+              ("status", process_status_to_json st);
+              ("output", `String (truncate_tool_output out));
+            ])
+      in
+      (match op with
+      | "pwd" ->
+          render_process_result ~cmd:"pwd" [ "/bin/pwd" ]
+      | "git_status" ->
+          render_process_result
+            ~cmd:"git -C <root> status --short --branch"
+            [ "git"; "-C"; root; "status"; "--short"; "--branch" ]
+      | "ls" -> (
+          match read_target () with
+          | Error e -> Yojson.Safe.to_string (`Assoc [ ("error", `String e); ("op", `String op) ])
+          | Ok target ->
+              let (st, out) =
+                Process_eio.run_argv_with_status ~timeout_sec:15.0
+                  [ "/bin/ls"; "-la"; target ]
+              in
+              let limit = shell_readonly_limit args in
+              Yojson.Safe.to_string
+                (`Assoc
+                  [
+                    ("ok", `Bool (st = Unix.WEXITED 0));
+                    ("op", `String op);
+                    ("path", `String target);
+                    ("status", process_status_to_json st);
+                    ("entries", lines_to_json ~limit out);
+                  ]))
+      | "cat" -> (
+          match read_target () with
+          | Error e -> Yojson.Safe.to_string (`Assoc [ ("error", `String e); ("op", `String op) ])
+          | Ok target ->
+              let max_bytes = shell_readonly_cat_max_bytes args in
+              let (st, out) =
+                Process_eio.run_argv_with_status ~timeout_sec:15.0
+                  [ "/bin/cat"; target ]
+              in
+              let body =
+                if String.length out > max_bytes then String.sub out 0 max_bytes else out
+              in
+              Yojson.Safe.to_string
+                (`Assoc
+                  [
+                    ("ok", `Bool (st = Unix.WEXITED 0));
+                    ("op", `String op);
+                    ("path", `String target);
+                    ("status", process_status_to_json st);
+                    ("truncated", `Bool (String.length out > max_bytes));
+                    ("content", `String body);
+                  ]))
+      | "rg" -> (
+          let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
+          if pattern = "" then
+            Yojson.Safe.to_string (`Assoc [ ("error", `String "pattern_required"); ("op", `String op) ])
+          else
+            match read_target () with
+            | Error e -> Yojson.Safe.to_string (`Assoc [ ("error", `String e); ("op", `String op) ])
+            | Ok target ->
+                let limit = shell_readonly_limit args in
+                let (st, out) =
+                  Process_eio.run_argv_with_status ~timeout_sec:15.0
+                    [ "rg"; "-n"; "-m"; string_of_int limit; pattern; target ]
+                in
+                Yojson.Safe.to_string
+                  (`Assoc
+                    [
+                      ("ok", `Bool (st = Unix.WEXITED 0));
+                      ("op", `String op);
+                      ("path", `String target);
+                      ("pattern", `String pattern);
+                      ("status", process_status_to_json st);
+                      ("matches", lines_to_json ~limit out);
+                    ]))
+      | _ ->
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                ("error", `String "unsupported_op");
+                ("op", `String op);
+                ("supported_ops",
+                  `List
+                    (List.map
+                       (fun name -> `String name)
+                       [ "pwd"; "ls"; "cat"; "rg"; "git_status" ]));
+              ]))
+  | "keeper_voice_speak" ->
+      let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
+      let provider =
+        Safe_ops.json_string_opt "provider" args
+        |> Option.map String.trim
+        |> function
+        | Some p when p <> "" -> Some p
+        | _ -> None
+      in
+      let priority = max 1 (Safe_ops.json_int ~default:1 "priority" args) in
+      if message = "" then
+        Yojson.Safe.to_string (`Assoc [ ("error", `String "message_required") ])
+      else
+        (match
+           (Eio_context.get_switch_opt (), Eio_context.get_clock_opt (), Eio_context.get_net_opt ())
+         with
+        | Some sw, Some clock, Some net -> (
+            match
+              Voice_bridge.agent_speak
+                ~sw
+                ~clock
+                ~net
+                ~agent_id:meta.name
+                ~message
+                ?provider
+                ~priority
+                ()
+            with
+            | Ok json -> Yojson.Safe.to_string json
+            | Error err ->
+                Yojson.Safe.to_string
+                  (`Assoc
+                    [
+                      ("status", `String "error");
+                      ("agent_id", `String meta.name);
+                      ("message", `String err);
+                    ]))
+        | _ ->
+            Yojson.Safe.to_string
+              (keeper_text_fallback_json ~agent_id:meta.name ~message))
   | "keeper_github" ->
       let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
       let gh_args = Safe_ops.json_string_list "args" args in
@@ -1152,7 +1369,10 @@ let upsert_assoc key value fields =
 let resolved_keeper_args_to_json
     ~name ~persona_name ~persona_profile_path ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~soul_profile ~will ~needs ~desires ~models ~allowed_models
-    ~active_model ~room_scope ~scope_kind ~trigger_mode ~mention_targets
+    ~active_model ~policy_mode ~policy_action_budget ~policy_reward_model_path
+    ~policy_voice_enabled ~policy_shell_mode ~initiative_enabled ~initiative_scope
+    ~initiative_idle_sec ~initiative_cooldown_sec ~initiative_context_mode
+    ~initiative_post_ttl_hours ~room_scope ~scope_kind ~trigger_mode ~mention_targets
     ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled ~verify
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec ~context_budget =
   `Assoc
@@ -1172,6 +1392,17 @@ let resolved_keeper_args_to_json
       ("models", string_list_to_json models);
       ("allowed_models", string_list_to_json allowed_models);
       ("active_model", `String active_model);
+      ("policy_mode", `String policy_mode);
+      ("policy_action_budget", `String policy_action_budget);
+      ("policy_reward_model_path", `String policy_reward_model_path);
+      ("policy_voice_enabled", `Bool policy_voice_enabled);
+      ("policy_shell_mode", `String policy_shell_mode);
+      ("initiative_enabled", `Bool initiative_enabled);
+      ("initiative_scope", `String initiative_scope);
+      ("initiative_idle_sec", `Int initiative_idle_sec);
+      ("initiative_cooldown_sec", `Int initiative_cooldown_sec);
+      ("initiative_context_mode", `String initiative_context_mode);
+      ("initiative_post_ttl_hours", `Int initiative_post_ttl_hours);
       ("room_scope", `String room_scope);
       ("scope_kind", `String scope_kind);
       ("trigger_mode", `String trigger_mode);
@@ -1193,12 +1424,44 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let models = Safe_ops.json_string_list "models" json in
   let allowed_models = Safe_ops.json_string_list "allowed_models" json in
   let active_model = Safe_ops.json_string ~default:"" "active_model" json |> String.trim in
+  let policy_mode =
+    Safe_ops.json_string ~default:"heuristic" "policy_mode" json
+    |> canonical_policy_mode
+  in
+  let policy_action_budget =
+    Safe_ops.json_string ~default:"conversation" "policy_action_budget" json
+    |> canonical_policy_action_budget
+  in
+  let policy_reward_model_path =
+    Safe_ops.json_string ~default:"" "policy_reward_model_path" json |> String.trim
+  in
+  let policy_voice_enabled =
+    Safe_ops.json_bool ~default:false "policy_voice_enabled" json
+  in
+  let policy_shell_mode =
+    Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json
+    |> canonical_policy_shell_mode
+  in
+  let initiative_enabled =
+    Safe_ops.json_bool ~default:false "initiative_enabled" json
+  in
   let mention_targets = Safe_ops.json_string_list "mention_targets" json in
   if not (validate_name name) then errors := "invalid keeper name" :: !errors;
   if goal = "" then errors := "goal is required" :: !errors;
   if models = [] then errors := "models is required" :: !errors;
   if active_model <> "" && not (List.mem active_model (allowed_models @ models)) then
     errors := "active_model must be included in models or allowed_models" :: !errors;
+  if policy_mode = "learned_offline_v1" && policy_reward_model_path = "" then
+    errors := "policy_reward_model_path is required for learned_offline_v1" :: !errors;
+  if policy_mode = "heuristic" && policy_action_budget <> "conversation" then
+    errors := "policy_action_budget=board requires learned_offline_v1" :: !errors;
+  if policy_voice_enabled && policy_mode <> "learned_offline_v1" then
+    errors := "policy_voice_enabled=true requires learned_offline_v1" :: !errors;
+  if policy_shell_mode = "readonly" && policy_mode <> "learned_offline_v1" then
+    errors := "policy_shell_mode=readonly requires learned_offline_v1" :: !errors;
+  if initiative_enabled && (policy_mode <> "learned_offline_v1" || policy_action_budget <> "board")
+  then
+    errors := "initiative_enabled=true requires learned_offline_v1 with policy_action_budget=board" :: !errors;
   if
     (Safe_ops.json_string ~default:"legacy" "trigger_mode" json
      |> Keeper_contract.trigger_mode_of_string
@@ -1285,8 +1548,10 @@ let resolved_keeper_args_from_persona args :
             | None -> [])
         in
         let allowed_models =
-          dedupe_keep_order
-            (explicit_allowed_models @ defaults.allowed_models @ base_models)
+          resolve_allowed_models
+            ~explicit_allowed_models
+            ~seed_allowed_models:defaults.allowed_models
+            ~models:base_models
         in
         let active_model =
           active_model_opt
@@ -1294,8 +1559,68 @@ let resolved_keeper_args_from_persona args :
           |> Option.value
                ~default:
                  (match base_models with
-                  | model :: _ -> model
+                 | model :: _ -> model
                   | [] -> "")
+        in
+        let policy_mode =
+          first_some (get_string_opt args "policy_mode") defaults.policy_mode
+          |> Option.value ~default:"heuristic"
+          |> canonical_policy_mode
+        in
+        let policy_action_budget =
+          first_some (get_string_opt args "policy_action_budget") defaults.policy_action_budget
+          |> Option.value ~default:"conversation"
+          |> canonical_policy_action_budget
+        in
+        let policy_reward_model_path =
+          first_some
+            (get_string_opt args "policy_reward_model_path")
+            defaults.policy_reward_model_path
+          |> Option.value ~default:""
+        in
+        let policy_voice_enabled =
+          first_some (get_bool_opt args "policy_voice_enabled") defaults.policy_voice_enabled
+          |> Option.value ~default:false
+        in
+        let policy_shell_mode =
+          first_some (get_string_opt args "policy_shell_mode") defaults.policy_shell_mode
+          |> Option.value ~default:"disabled"
+          |> canonical_policy_shell_mode
+        in
+        let initiative_enabled =
+          first_some (get_bool_opt args "initiative_enabled") defaults.initiative_enabled
+          |> Option.value ~default:false
+        in
+        let initiative_scope =
+          first_some (get_string_opt args "initiative_scope") defaults.initiative_scope
+          |> Option.value ~default:"board_only"
+          |> canonical_initiative_scope
+        in
+        let initiative_idle_sec =
+          first_some (Safe_ops.json_int_opt "initiative_idle_sec" args) defaults.initiative_idle_sec
+          |> Option.value ~default:3600
+          |> normalize_initiative_idle_sec
+        in
+        let initiative_cooldown_sec =
+          first_some
+            (Safe_ops.json_int_opt "initiative_cooldown_sec" args)
+            defaults.initiative_cooldown_sec
+          |> Option.value ~default:3600
+          |> normalize_initiative_cooldown_sec
+        in
+        let initiative_context_mode =
+          first_some
+            (get_string_opt args "initiative_context_mode")
+            defaults.initiative_context_mode
+          |> Option.value ~default:"board_snapshot"
+          |> canonical_initiative_context_mode
+        in
+        let initiative_post_ttl_hours =
+          first_some
+            (Safe_ops.json_int_opt "initiative_post_ttl_hours" args)
+            defaults.initiative_post_ttl_hours
+          |> Option.value ~default:24
+          |> normalize_initiative_post_ttl_hours
         in
         let room_scope =
           get_string_opt args "room_scope"
@@ -1359,6 +1684,10 @@ let resolved_keeper_args_from_persona args :
             ~goal ~short_goal ~mid_goal ~long_goal
             ~instructions ~soul_profile ~will ~needs ~desires
             ~models:base_models ~allowed_models ~active_model
+            ~policy_mode ~policy_action_budget ~policy_reward_model_path
+            ~policy_voice_enabled ~policy_shell_mode ~initiative_enabled
+            ~initiative_scope ~initiative_idle_sec ~initiative_cooldown_sec
+            ~initiative_context_mode ~initiative_post_ttl_hours
             ~room_scope ~scope_kind ~trigger_mode ~mention_targets
             ~presence_keepalive ~presence_keepalive_sec ~proactive_enabled
             ~verify ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec
@@ -2256,7 +2585,7 @@ let run_proactive_generation
                  :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
                temperature = proactive_temperature attempt;
                max_tokens = 1024; (* increased from 220 to allow tool calls *)
-               tools = keeper_llm_tools;
+               tools = keeper_allowed_llm_tools meta;
                response_format = `Text;
              }
               : Llm_client.completion_request))
@@ -2316,7 +2645,7 @@ let run_proactive_generation
                   all_tools_so_far
               in
               let next_tools =
-                if write_done then [] else keeper_llm_tools
+                keeper_allowed_llm_tools ~write_done meta
               in
               let followup_requests =
                 List.map
@@ -2594,7 +2923,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
       ];
       temperature = 0.3;
       max_tokens = 1024;
-      tools = keeper_llm_tools;
+      tools = keeper_allowed_llm_tools meta;
       response_format = `Text;
     }
   in
@@ -2635,7 +2964,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
               List.mem n ["keeper_board_post"; "keeper_board_comment"])
               all_tools
           in
-          let next_tools = if write_done then [] else keeper_llm_tools in
+          let next_tools = keeper_allowed_llm_tools ~write_done meta in
           let followup_requests = List.map (fun (spec : Llm_client.model_spec) ->
             { Llm_client.model = spec;
               messages = [

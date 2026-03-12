@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.85.0] - 2026-03-12
+
+### Added
+- **Safe Keeper Tooling** — resident keepers now expose keeper-safe voice and readonly shell tooling plus an internal tool catalog surface (#826)
+- **Audit Telemetry Phase 1** — core collaboration events now emit audit logging for traceability (#833)
+- **Room-wide Orchestra Map** — dashboard adds an orchestra overview surface and backing command-plane read model (#834)
+- **Tool Registry P4** — tool-registry metadata and dispatch surfaces are expanded through the phase-4 enhancement set (#830)
+- **Truth-only Gardener Status** — gardener runtime now exposes a truth-only status surface for downstream consumers (#829)
+
+### Changed
+- **Keeper Facade Follow-up** — keeper split follow-up shrinks the facade and tightens module boundaries after the core runtime split (#827)
+- **Direct Mention Detection** — keeper mention observation now uses shared exact-mention handling instead of hardcoded direct-mention assumptions (#835)
+
+### Fixed
+- Gardener structured-post tests now guard empty content with a non-empty generated title fixture (#836)
+
 ## [2.84.0] - 2026-03-12
 
 ### Added

@@ -822,7 +822,10 @@ let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
                       worker_name e;
                 loop ()))
           in
-          try loop () with exn ->
+          try loop ()
+          with
+          | Eio.Cancel.Cancelled _ as ex -> raise ex
+          | exn ->
             eprintf "[local-worker] heartbeat loop error for %s: %s\n%!"
               worker_name (Printexc.to_string exn));
       fun () -> active := false

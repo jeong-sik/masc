@@ -662,7 +662,9 @@ let buffer_event sub_id event =
   (* Keep only last (max - 1) events + new one *)
   let trimmed =
     if List.length current >= max_buffered_events then
-      List.tl (List.rev current) |> List.rev
+      match current with
+      | _ :: rest -> rest
+      | [] -> []
     else current
   in
   Hashtbl.replace event_buffers sub_id (trimmed @ [event])

@@ -1645,7 +1645,8 @@ let make_request_handler ~sw ~clock ~server_start_time =
                            H2.Body.Writer.close writer
                        in
                        try loop () with exn ->
-                         if not (is_cancelled exn) then
+                         if is_cancelled exn then raise exn
+                         else
                            Printf.eprintf "[TRPG-SSE/H2] poll error for room %s: %s\n%!"
                              room_id_trimmed (Printexc.to_string exn))
                  | _ ->

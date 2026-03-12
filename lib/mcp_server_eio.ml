@@ -3204,16 +3204,35 @@ in
       ("quality", quality);
     ]
   in
-  let result = make_response ~id (`Assoc [
-    ("resultEnvelope", envelope);
-    ("content", `List [
-      `Assoc [
-        ("type", `String "text");
-        ("text", `String message);
-      ]
-    ]);
-    ("isError", `Bool (not success));
-  ]) in
+  let content_items =
+    [
+      `Assoc
+        [
+          ("type", `String "text");
+          ("text", `String message);
+        ]
+    ]
+  in
+  let structured_content =
+    match name with
+    | "masc_swarm_live_run"
+    | "masc_team_session_status"
+    | "masc_operator_digest" -> (
+        try Some (Yojson.Safe.from_string message) with _ -> None)
+    | _ -> None
+  in
+  let result_fields =
+    [
+      ("resultEnvelope", envelope);
+      ("content", `List content_items);
+      ("isError", `Bool (not success));
+    ]
+    @
+    match structured_content with
+    | Some value -> [ ("structuredContent", value) ]
+    | None -> []
+  in
+  let result = make_response ~id (`Assoc result_fields) in
 
   maybe_emit_resource_notifications ~success ~tool_name:name;
   if success
@@ -3350,7 +3369,45 @@ let maybe_assoc_field name = function
   | Some value -> [ (name, value) ]
   | None -> []
 
-let tool_output_schema_field _name = None
+let permissive_object_schema properties =
+  `Assoc
+    [
+      ("type", `String "object");
+      ("properties", `Assoc properties);
+      ("additionalProperties", `Bool true);
+    ]
+
+let tool_output_schema_field = function
+  | "masc_swarm_live_run" ->
+      Some
+        (permissive_object_schema
+           [
+             ("status", `Assoc [ ("type", `String "string") ]);
+             ("message", `Assoc [ ("type", `String "string") ]);
+             ("run_id", `Assoc [ ("type", `String "string") ]);
+             ("runtime_blocker", `Assoc [ ("type", `String "string") ]);
+             ("runtime_doctor_path", `Assoc [ ("type", `String "string") ]);
+             ("summary_path", `Assoc [ ("type", `String "string") ]);
+             ("swarm", `Assoc [ ("type", `String "object") ]);
+           ])
+  | "masc_team_session_status" ->
+      Some
+        (permissive_object_schema
+           [
+             ("status", `Assoc [ ("type", `String "string") ]);
+             ("result", `Assoc [ ("type", `String "object") ]);
+           ])
+  | "masc_operator_digest" ->
+      Some
+        (permissive_object_schema
+           [
+             ("target_type", `Assoc [ ("type", `String "string") ]);
+             ("target_id", `Assoc [ ("type", `String "string") ]);
+             ("health", `Assoc [ ("type", `String "string") ]);
+             ("attention_items", `Assoc [ ("type", `String "array") ]);
+             ("recommended_actions", `Assoc [ ("type", `String "array") ]);
+           ])
+  | _ -> None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
   let implementation_status =

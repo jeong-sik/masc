@@ -61,12 +61,20 @@ let extract_json_from_text text =
   with Not_found ->
     Alcotest.failf "expected JSON payload in text: %s" text
 
-let tools_list_response ~clock ~sw ?profile ?cursor state =
-  let params =
-    match cursor with
-    | Some cursor -> `Assoc [ ("cursor", `String cursor) ]
-    | None -> `Assoc []
+let tools_list_response ~clock ~sw ?profile ?names ?cursor state =
+  let fields =
+    []
+    |> (fun acc ->
+         match names with
+         | Some items ->
+             ("names", `List (List.map (fun name -> `String name) items)) :: acc
+         | None -> acc)
+    |> (fun acc ->
+         match cursor with
+         | Some cursor -> ("cursor", `String cursor) :: acc
+         | None -> acc)
   in
+  let params = `Assoc (List.rev fields) in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -1975,6 +1983,110 @@ let test_execute_tool_help_tool () =
     Yojson.Safe.Util.(json |> member "name" |> to_string);
   cleanup_dir base_path
 
+let test_handle_request_tools_list_structured_output_schema_present () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 262);
+          ("method", `String "tools/list");
+          ( "params",
+            `Assoc
+              [
+                ( "names",
+                  `List
+                    [
+                      `String "masc_swarm_live_run";
+                      `String "masc_team_session_status";
+                      `String "masc_operator_digest";
+                    ] );
+              ] );
+        ])
+  in
+  let tools =
+    Mcp_eio.handle_request ~clock ~sw state request
+    |> tools_from_response
+  in
+  List.iter
+    (fun name ->
+      let tool = find_tool_exn tools name in
+      match tool with
+      | `Assoc fields ->
+          Alcotest.(check bool) (name ^ " outputSchema present") true
+            (List.mem_assoc "outputSchema" fields)
+      | _ -> Alcotest.fail "tool is not an object")
+    [ "masc_swarm_live_run"; "masc_team_session_status"; "masc_operator_digest" ];
+  cleanup_dir base_path
+
+let test_handle_request_tools_call_operator_digest_includes_structured_content () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 260);
+          ("method", `String "tools/call");
+          ( "params",
+            `Assoc
+              [
+                ("name", `String "masc_operator_digest");
+                ( "arguments",
+                  `Assoc
+                    [
+                      ("actor", `String "digest-check");
+                      ("target_type", `String "room");
+                    ] );
+              ] );
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let structured_content =
+    Yojson.Safe.Util.(response |> member "result" |> member "structuredContent")
+  in
+  Alcotest.(check bool) "operator digest structuredContent present" true
+    (structured_content <> `Null);
+  cleanup_dir base_path
+
+let test_handle_request_tools_call_swarm_live_invalid_run_id_includes_structured_content () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 261);
+          ("method", `String "tools/call");
+          ( "params",
+            `Assoc
+              [
+                ("name", `String "masc_swarm_live_run");
+                ("arguments", `Assoc [ ("run_id", `String "bad run id") ]);
+              ] );
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let result = Yojson.Safe.Util.(response |> member "result") in
+  Alcotest.(check bool) "error path flagged" true
+    Yojson.Safe.Util.(result |> member "isError" |> to_bool);
+  Alcotest.(check bool) "swarm live structuredContent present" true
+    (Yojson.Safe.Util.(result |> member "structuredContent") <> `Null);
+  cleanup_dir base_path
+
 (* ===== Test Suites ===== *)
 
 let state_tests = [
@@ -2024,6 +2136,12 @@ let eio_tests = [
   "resource notifications precise for task write", `Quick,
     test_resource_notifications_precise_for_task_write;
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
+  "structured output schema present", `Quick,
+    test_handle_request_tools_list_structured_output_schema_present;
+  "operator digest structuredContent", `Quick,
+    test_handle_request_tools_call_operator_digest_includes_structured_content;
+  "swarm live invalid run structuredContent", `Quick,
+    test_handle_request_tools_call_swarm_live_invalid_run_id_includes_structured_content;
   "handle tools/list mdal descriptions", `Quick,
     test_handle_request_tools_list_mdal_descriptions;
   "handle tools/list filters requested names", `Quick,

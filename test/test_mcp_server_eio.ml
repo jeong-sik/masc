@@ -248,6 +248,49 @@ let tool_string_field tool field =
       | _ -> Alcotest.failf "tool field missing: %s" field)
   | _ -> Alcotest.fail "tool is not an object"
 
+let error_code_exn response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "error" fields with
+      | Some (`Assoc error_fields) -> (
+          match List.assoc_opt "code" error_fields with
+          | Some (`Int value) -> value
+          | _ -> Alcotest.fail "error code missing")
+      | _ -> Alcotest.fail "error object missing")
+  | _ -> Alcotest.fail "response not an object"
+
+let error_message_exn response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "error" fields with
+      | Some (`Assoc error_fields) -> (
+          match List.assoc_opt "message" error_fields with
+          | Some (`String value) -> value
+          | _ -> Alcotest.fail "error message missing")
+      | _ -> Alcotest.fail "error object missing")
+  | _ -> Alcotest.fail "response not an object"
+
+let resource_content_exn response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "result" fields with
+      | Some (`Assoc result_fields) -> (
+          match List.assoc_opt "contents" result_fields with
+          | Some (`List (`Assoc content_fields :: _)) -> content_fields
+          | _ -> Alcotest.fail "resource contents missing")
+      | _ -> Alcotest.fail "result not an object")
+  | _ -> Alcotest.fail "response not an object"
+
+let resource_text_exn response =
+  match List.assoc_opt "text" (resource_content_exn response) with
+  | Some (`String value) -> value
+  | _ -> Alcotest.fail "resource text missing"
+
+let resource_mime_type_exn response =
+  match List.assoc_opt "mimeType" (resource_content_exn response) with
+  | Some (`String value) -> value
+  | _ -> Alcotest.fail "resource mime type missing"
+
 (* ===== Unit Tests for Type Re-exports ===== *)
 
 let test_create_state () =
@@ -1411,6 +1454,50 @@ let test_handle_request_invalid_json () =
 
   cleanup_dir base_path
 
+let test_handle_request_batch_rejected () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`List
+        [
+          `Assoc
+            [
+              ("jsonrpc", `String "2.0");
+              ("id", `Int 1);
+              ("method", `String "tools/list");
+              ("params", `Assoc []);
+            ];
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check int) "batch rejected" (-32600) (error_code_exn response);
+  Alcotest.(check bool) "mentions batch unsupported" true
+    (contains_substring (error_message_exn response) "batch requests are not supported");
+  cleanup_dir base_path
+
+let test_handle_request_jsonrpc_response_returns_null () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 1);
+          ("result", `String "already a response");
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check bool) "response ignored" true (response = `Null);
+  cleanup_dir base_path
+
 let test_handle_request_method_not_found () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -1438,6 +1525,119 @@ let test_handle_request_method_not_found () =
         | _ -> Alcotest.fail "error not an object")
    | _ -> Alcotest.fail "response not an object");
 
+  cleanup_dir base_path
+
+let test_handle_request_tools_list_rejects_empty_cursor () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 2300);
+          ("method", `String "tools/list");
+          ("params", `Assoc [ ("cursor", `String "   ") ]);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
+  Alcotest.(check string) "empty cursor error"
+    "Invalid params: cursor must not be empty"
+    (error_message_exn response);
+  cleanup_dir base_path
+
+let test_handle_request_tools_list_rejects_invalid_tier () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 2301);
+          ("method", `String "tools/list");
+          ("params", `Assoc [ ("tier", `String "impossible") ]);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
+  Alcotest.(check bool) "invalid tier error" true
+    (contains_substring (error_message_exn response) "tier must be one of");
+  cleanup_dir base_path
+
+let test_handle_request_resources_list_rejects_unknown_field () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 2302);
+          ("method", `String "resources/list");
+          ("params", `Assoc [ ("page", `Int 2) ]);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
+  Alcotest.(check bool) "unknown field rejected" true
+    (contains_substring (error_message_exn response) "unsupported field");
+  cleanup_dir base_path
+
+let test_handle_request_resources_templates_rejects_invalid_cursor () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 2303);
+          ("method", `String "resources/templates/list");
+          ("params", `Assoc [ ("cursor", `String "not-base64") ]);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
+  Alcotest.(check string) "invalid cursor error"
+    "Invalid params: cursor is invalid"
+    (error_message_exn response);
+  cleanup_dir base_path
+
+let test_handle_request_prompts_list_rejects_invalid_cursor () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 2304);
+          ("method", `String "prompts/list");
+          ("params", `Assoc [ ("cursor", `String "bad-cursor") ]);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
+  Alcotest.(check string) "invalid cursor error"
+    "Invalid params: cursor is invalid"
+    (error_message_exn response);
   cleanup_dir base_path
 
 let test_handle_request_prompts_list_non_empty () =
@@ -1757,7 +1957,6 @@ let test_handle_request_resource_not_found_error_code () =
   Alcotest.(check string) "resource miss message" "Resource not found"
     (error_message_exn response);
   cleanup_dir base_path
-
 let test_handle_request_resources_subscribe_requires_session () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -2165,14 +2364,22 @@ let eio_tests = [
   "handle initialize operator profile", `Quick,
     test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;
+  "handle tools/list rejects empty cursor", `Quick,
+    test_handle_request_tools_list_rejects_empty_cursor;
+  "handle tools/list rejects invalid tier", `Quick,
+    test_handle_request_tools_list_rejects_invalid_tier;
   "handle prompts/list non-empty", `Quick, test_handle_request_prompts_list_non_empty;
   "handle prompts/list cursor", `Quick, test_handle_request_prompts_list_cursor;
+  "handle prompts/list rejects invalid cursor", `Quick,
+    test_handle_request_prompts_list_rejects_invalid_cursor;
   "handle prompts/get tool_help", `Quick, test_handle_request_prompts_get_tool_help;
   "handle prompts/get command_truth filters run_id", `Quick,
     test_handle_request_prompts_get_command_truth_filters_run_id;
   "handle resources/list includes tool-help", `Quick, test_handle_request_resources_list_includes_tool_help;
   "handle resources/list hides hidden tool-help", `Quick,
     test_handle_request_resources_list_hides_hidden_tool_help;
+  "handle resources/list rejects unknown field", `Quick,
+    test_handle_request_resources_list_rejects_unknown_field;
   "handle resources/list paginates", `Quick,
     test_handle_request_resources_list_paginates;
   "handle resources/read tool-help", `Quick, test_handle_request_tool_help_resource_read;
@@ -2180,6 +2387,9 @@ let eio_tests = [
     test_handle_request_tool_help_index_hides_hidden_tools;
   "handle resources/read not found code", `Quick,
     test_handle_request_resource_not_found_error_code;
+  "handle resources/read matrix", `Quick, test_handle_request_resources_read_matrix;
+  "handle resources/templates/list rejects invalid cursor", `Quick,
+    test_handle_request_resources_templates_rejects_invalid_cursor;
   "handle resources/subscribe requires session", `Quick,
     test_handle_request_resources_subscribe_requires_session;
   "handle resources/subscribe roundtrip", `Quick,
@@ -2217,6 +2427,9 @@ let eio_tests = [
     test_handle_request_resource_templates_list_accepts_meta;
   "handle prompts/list accepts _meta", `Quick,
     test_handle_request_prompts_list_accepts_meta;
+  "handle batch request rejected", `Quick, test_handle_request_batch_rejected;
+  "handle jsonrpc response returns null", `Quick,
+    test_handle_request_jsonrpc_response_returns_null;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
   "handle invalid json", `Quick, test_handle_request_invalid_json;

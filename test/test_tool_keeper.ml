@@ -250,12 +250,16 @@ let test_keeper_model_set_persists_active_model () =
       in
       check bool "model set ok" true ok;
       let json = Yojson.Safe.from_string body in
+      let allowed_models =
+        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> List.map to_string)
+      in
       check string "active model updated" provider_model
         Yojson.Safe.Util.(json |> member "active_model" |> to_string);
       check bool "allowed models include active model" true
-        Yojson.Safe.Util.(
-          json |> member "allowed_models" |> to_list
-          |> List.exists (fun item -> item = `String provider_model));
+        (List.mem provider_model allowed_models);
+      check int "allowed models stay deduped"
+        (List.length (List.sort_uniq String.compare allowed_models))
+        (List.length allowed_models);
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -821,6 +825,8 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
         dispatch "masc_persistent_agent_status"
           (`Assoc
             [
+              (* The persistent-agent alias should still surface resident registration
+                 when querying an always-on keeper through the persistent wrapper. *)
               ("name", `String "resident-demo");
               ("fast", `Bool true);
               ("include_context", `Bool false);

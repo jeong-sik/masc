@@ -857,11 +857,9 @@ let recall_fallback_reply
 
 let deterministic_recall_fallback
     ~(meta : keeper_meta)
-    ~(ctx_work : Context_manager.working_context)
     ~(user_message : string)
     ~(eval : memory_recall_eval)
     ~(candidates : string list) : (string * memory_recall_eval) option =
-  let _ = ctx_work in
   if (not eval.performed) || eval.passed || eval.candidate_count <= 0 then
     None
   else

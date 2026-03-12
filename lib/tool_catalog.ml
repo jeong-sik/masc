@@ -101,6 +101,10 @@ let explicit_metadata : (string * metadata) list =
       deprecated ~canonical_name:"masc_dispatch_plan"
         ~replacement:"masc_dispatch_plan"
         "Alias retained for compatibility; use masc_dispatch_plan." );
+    ( "masc_llama_runtime_verify",
+      deprecated ~canonical_name:"masc_runtime_verify"
+        ~replacement:"masc_runtime_verify" ~allow_direct_call_when_hidden:true
+        "Deprecated llama-specific alias retained for compatibility; use masc_runtime_verify." );
     ( "masc_unit_update",
       deprecated ~canonical_name:"masc_unit_define"
         ~replacement:"masc_unit_define"

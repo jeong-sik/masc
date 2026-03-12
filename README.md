@@ -104,7 +104,7 @@ merged 기준 benchmark 진입점은 [INTEGRATED-BENCHMARK-RUNBOOK.md](./docs/IN
 
 proof/read path notes:
 
-- benchmark harness truth comes from MCP tools first: `masc_observe_swarm`, `masc_llama_runtime_verify`
+- benchmark harness truth comes from MCP tools first: `masc_observe_swarm`, `masc_runtime_verify`
 - provider HTTP endpoints remain backend/runtime substrate, not canonical operator/harness read paths
 
 ## 기본 사용 흐름

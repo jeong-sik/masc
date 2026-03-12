@@ -966,7 +966,8 @@ let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_llama_models" -> Some (handle_models ctx)
   | "masc_llama_runtime_status" -> Some (handle_runtime_status ctx args)
-  | "masc_llama_runtime_verify" -> Some (handle_runtime_verify ctx args)
+  | "masc_runtime_verify" | "masc_llama_runtime_verify" ->
+      Some (handle_runtime_verify ctx args)
   | "masc_llama_runtime_bench" -> Some (handle_runtime_bench ctx args)
   | _ -> None
 
@@ -999,9 +1000,27 @@ let schemas : tool_schema list =
           ];
     };
     {
+      name = "masc_runtime_verify";
+      description =
+        "Strictly verify the active provider/runtime contract used for swarm and benchmark runs. Returns reachability, model match, slots, ctx, configured capacity, active slots, and blocker codes such as provider_unreachable, provider_model_mismatch, slot_count_insufficient, or ctx_mismatch.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("runtime_pool", `Assoc [ ("type", `String "string") ]);
+                  ("expected_model", `Assoc [ ("type", `String "string") ]);
+                  ("expected_slots", `Assoc [ ("type", `String "integer") ]);
+                  ("expected_ctx", `Assoc [ ("type", `String "integer") ]);
+                ] );
+          ];
+    };
+    {
       name = "masc_llama_runtime_verify";
       description =
-        "Strictly verify the live llama.cpp runtime contract for MCP-first swarm runs. Returns reachability, slots, ctx, model match, active slots, and blocker codes such as provider_unreachable, provider_model_mismatch, slot_count_insufficient, or ctx_mismatch.";
+        "Deprecated llama-specific alias for masc_runtime_verify. Retained for compatibility; prefer masc_runtime_verify.";
       input_schema =
         `Assoc
           [

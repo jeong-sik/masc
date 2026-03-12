@@ -135,7 +135,7 @@ LLAMA_PRESET=qwen35-hot ~/me/scripts/llama-server.sh restart
 hot runtime contract:
 
 - `qwen35-hot`는 `ctx=262144`를 유지한다.
-- bootstrap 단계의 외부 health check는 `/health`를 볼 수 있지만, proof/artifact 판단은 `masc_llama_runtime_verify`만 사용한다.
+- bootstrap 단계의 외부 health check는 `/health`를 볼 수 있지만, proof/artifact 판단은 `masc_runtime_verify`만 사용한다.
 - slot 수나 ctx가 기대치보다 낮으면 자동 downgrade 없이 바로 실패한다.
 
 기본 프로파일:
@@ -167,7 +167,7 @@ hot runtime contract:
 
 runtime contract 확인:
 
-- `masc_llama_runtime_verify(expected_model=<MODEL>, expected_slots=12, expected_ctx=262144)`
+- `masc_runtime_verify(expected_model=<MODEL>, expected_slots=12, expected_ctx=262144)`
 - blocker code는 `provider_unreachable`, `provider_model_mismatch`, `slot_count_insufficient`, `ctx_mismatch` 중 하나로 고정된다.
 
 runtime blocker 예시:

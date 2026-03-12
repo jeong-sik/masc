@@ -677,16 +677,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let policy_reward_model_path =
       Safe_ops.json_string ~default:"" "policy_reward_model_path" json
     in
-    let voice_enabled =
-      Safe_ops.json_bool ~default:(default_voice_enabled_for name) "voice_enabled" json
-    in
-    let voice_channel =
-      Safe_ops.json_string ~default:(default_voice_channel_for name) "voice_channel" json
-      |> canonical_voice_channel
-    in
-    let voice_agent_id =
-      Safe_ops.json_string ~default:(default_voice_agent_id_for name) "voice_agent_id" json
-    in
     let policy_voice_enabled =
       Safe_ops.json_bool ~default:false "policy_voice_enabled" json
     in
@@ -716,6 +706,16 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let initiative_post_ttl_hours =
       Safe_ops.json_int ~default:24 "initiative_post_ttl_hours" json
       |> normalize_initiative_post_ttl_hours
+    in
+    let voice_enabled =
+      Safe_ops.json_bool ~default:(default_voice_enabled_for name) "voice_enabled" json
+    in
+    let voice_channel =
+      Safe_ops.json_string ~default:(default_voice_channel_for name) "voice_channel" json
+      |> canonical_voice_channel
+    in
+    let voice_agent_id =
+      Safe_ops.json_string ~default:(default_voice_agent_id_for name) "voice_agent_id" json
     in
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind

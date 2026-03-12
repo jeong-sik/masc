@@ -44,10 +44,14 @@ let test_dashboard_execution_fixture () =
         let session_briefs = json |> member "session_briefs" |> to_list in
         let operation_briefs = json |> member "operation_briefs" |> to_list in
         let worker_briefs = json |> member "worker_support_briefs" |> to_list in
+        let lodge_tick = json |> member "lodge_tick" in
+        let lodge_checkins = json |> member "lodge_checkins" |> to_list in
         let continuity_briefs = json |> member "continuity_briefs" |> to_list in
         let offline_worker_briefs = json |> member "offline_worker_briefs" |> to_list in
         check int "fixture blocked sessions" 1 (summary |> member "blocked_sessions" |> to_int);
         check int "fixture blocked operations" 2 (summary |> member "blocked_operations" |> to_int);
+        check int "lodge checked count" 3 (lodge_tick |> member "checked" |> to_int);
+        check int "lodge checkins" 3 (List.length lodge_checkins);
         check string "top queue kind" "session"
           (execution_queue |> List.hd |> member "kind" |> to_string);
         check string "top queue target" "ts-execution-fixture-001"
@@ -59,6 +63,10 @@ let test_dashboard_execution_fixture () =
         check int "worker briefs" 3 (List.length worker_briefs);
         check int "continuity briefs" 1 (List.length continuity_briefs);
         check int "offline worker briefs" 1 (List.length offline_worker_briefs);
+        check string "continuity skill route summary" "scene-director · +1 · judgment"
+          (continuity_briefs |> List.hd |> member "skill_route_summary" |> to_string);
+        check int "continuity allowed tool count" 3
+          (continuity_briefs |> List.hd |> member "allowed_tool_names" |> to_list |> List.length);
         check bool "worker focus carried through" true
           (worker_briefs
            |> List.exists (fun row ->

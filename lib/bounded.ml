@@ -498,8 +498,9 @@ let goal_of_json json =
     else if member "gte" cond <> `Null then
       Gte (member "gte" cond |> to_float)
     else if member "between" cond <> `Null then
-      let arr = member "between" cond |> to_list in
-      Between (List.nth arr 0 |> to_float, List.nth arr 1 |> to_float)
+      match member "between" cond |> to_list with
+      | low :: high :: _ -> Between (low |> to_float, high |> to_float)
+      | _ -> invalid_arg "Bounded.rule_of_yojson: 'between' array must have at least 2 elements"
     else if member "in" cond <> `Null then
       In (member "in" cond |> to_list)
     else

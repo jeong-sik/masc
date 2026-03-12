@@ -14,10 +14,24 @@ import {
   openToolsInventory,
   toolAuditStateLabel,
 } from './common/tool-audit'
-import { agents, keepers, serverStatus, tasks } from '../store'
+import {
+  agents,
+  executionContinuityBriefs,
+  executionLodgeCheckins,
+  keepers,
+  serverStatus,
+  tasks,
+} from '../store'
 import { fetchRoomMessages, fetchTaskHistory, sendBroadcast } from '../api'
 import { missionSnapshot } from '../mission-store'
-import type { Agent, DashboardMissionAgentBrief, Keeper, Task } from '../types'
+import type {
+  Agent,
+  DashboardExecutionContinuityBrief,
+  DashboardExecutionLodgeCheckin,
+  DashboardMissionAgentBrief,
+  Keeper,
+  Task,
+} from '../types'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
@@ -83,6 +97,27 @@ function recentToolsForAgent(agentName: string | null): string[] {
   const keeper = keeperForAgent(agentName)
   if (!keeper) return []
   return keeper.recent_tool_names && keeper.recent_tool_names.length > 0 ? keeper.recent_tool_names : []
+}
+
+function firstNonEmptyToolList(...candidates: Array<string[] | null | undefined>): string[] {
+  for (const candidate of candidates) {
+    if (candidate && candidate.length > 0) return candidate
+  }
+  return []
+}
+
+function continuityBriefForAgent(agentName: string | null): DashboardExecutionContinuityBrief | null {
+  if (!agentName) return null
+  return executionContinuityBriefs.value.find(
+    brief => brief.agent_name === agentName || brief.name === agentName,
+  ) ?? null
+}
+
+function latestLodgeCheckinForAgent(agentName: string | null): DashboardExecutionLodgeCheckin | null {
+  if (!agentName) return null
+  return executionLodgeCheckins.value.find(
+    row => row.agent_name === agentName || row.worker_name === agentName,
+  ) ?? null
 }
 
 async function refreshAgentDetail(): Promise<void> {
@@ -170,22 +205,42 @@ export function AgentDetailOverlay() {
 
   const agent = selectedAgent()
   const keeper = keeperForAgent(agentName)
+  const continuityBrief = continuityBriefForAgent(agentName)
+  const lodgeCheckin = latestLodgeCheckinForAgent(agentName)
   const missionBrief = missionAgentBrief(agentName)
   const ownedTasks = assignedTasks(agentName)
   const lines = roomActivity.value
   const recentTools = recentToolsForAgent(agentName)
   const topTools = windowTopTools(keeper)
   const allowedTools =
-    missionBrief?.allowed_tool_names && missionBrief.allowed_tool_names.length > 0
-      ? missionBrief.allowed_tool_names
-      : keeper?.allowed_tool_names ?? []
+    firstNonEmptyToolList(
+      continuityBrief?.allowed_tool_names,
+      missionBrief?.allowed_tool_names,
+      lodgeCheckin?.allowed_tool_names,
+      keeper?.allowed_tool_names,
+    )
   const observedTools =
-    missionBrief?.latest_tool_names && missionBrief.latest_tool_names.length > 0
-      ? missionBrief.latest_tool_names
-      : keeper?.latest_tool_names ?? []
-  const toolCallCount = missionBrief?.latest_tool_call_count ?? keeper?.latest_tool_call_count
-  const auditSource = missionBrief?.tool_audit_source ?? keeper?.tool_audit_source
-  const auditAt = missionBrief?.tool_audit_at ?? keeper?.tool_audit_at
+    firstNonEmptyToolList(
+      continuityBrief?.latest_tool_names,
+      missionBrief?.latest_tool_names,
+      lodgeCheckin?.used_tool_names,
+      keeper?.latest_tool_names,
+    )
+  const toolCallCount =
+    continuityBrief?.latest_tool_call_count
+    ?? missionBrief?.latest_tool_call_count
+    ?? lodgeCheckin?.used_tool_call_count
+    ?? keeper?.latest_tool_call_count
+  const auditSource =
+    continuityBrief?.tool_audit_source
+    ?? missionBrief?.tool_audit_source
+    ?? lodgeCheckin?.tool_audit_source
+    ?? keeper?.tool_audit_source
+  const auditAt =
+    continuityBrief?.tool_audit_at
+    ?? missionBrief?.tool_audit_at
+    ?? lodgeCheckin?.tool_audit_at
+    ?? keeper?.tool_audit_at
   const capabilities = agent?.capabilities ?? []
   const room = serverStatus.value?.room ?? 'default'
   const project = serverStatus.value?.project ?? '확인 없음'
@@ -352,8 +407,38 @@ export function AgentDetailOverlay() {
                   </div>
                 `
               : null}
+            ${continuityBrief?.continuity_summary || continuityBrief?.skill_route_summary
+              ? html`
+                  <div class="agent-detail-sub">
+                    ${continuityBrief?.continuity_summary ? html`<span>${continuityBrief.continuity_summary}</span>` : null}
+                    ${continuityBrief?.skill_route_summary ? html`<span>Route: ${continuityBrief.skill_route_summary}</span>` : null}
+                  </div>
+                `
+              : null}
           </div>
         <//>
+
+        ${lodgeCheckin
+          ? html`
+              <${Card} title="Latest Lodge Check-in">
+                <div class="agent-detail-sub">
+                  <span>Outcome: ${lodgeCheckin.outcome}</span>
+                  <span>Trigger: ${lodgeCheckin.trigger ?? 'unknown'}</span>
+                  <span>Action: ${lodgeCheckin.action_kind ?? 'none'}</span>
+                  ${lodgeCheckin.checked_at ? html`<span>Checked: <${TimeAgo} timestamp=${lodgeCheckin.checked_at} /></span>` : null}
+                </div>
+                ${lodgeCheckin.reason ? html`<div class="monitor-footnote">${lodgeCheckin.reason}</div>` : null}
+                ${lodgeCheckin.summary && lodgeCheckin.summary !== lodgeCheckin.reason
+                  ? html`<div class="monitor-footnote">${lodgeCheckin.summary}</div>`
+                  : null}
+                ${lodgeCheckin.failure_reason
+                  ? html`<div class="monitor-footnote">Failure: ${lodgeCheckin.failure_reason}</div>`
+                  : lodgeCheckin.decision_reason
+                    ? html`<div class="monitor-footnote">Decision: ${lodgeCheckin.decision_reason}</div>`
+                    : null}
+              <//>
+            `
+          : null}
 
         <${Card} title="Task History">
           ${taskHistories.value.length === 0

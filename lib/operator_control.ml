@@ -564,7 +564,7 @@ let latest_keeper_tools_from_metrics config keeper_name =
   |> Option.value ~default:[]
 
 let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
-  let fallback_allowed = Keeper_execution.keeper_allowed_tool_names meta in
+  let fallback_allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let fallback_latest = latest_keeper_tools_from_metrics config meta.name in
   let fallback_count =
     if fallback_latest = [] then None else Some (List.length fallback_latest)
@@ -608,10 +608,10 @@ let keepers_json config =
         | Error _ | Ok None -> None
         | Ok (Some meta) ->
             let agent_json =
-              Keeper_execution.parse_agent_status config ~agent_name:meta.agent_name
+              Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
             in
             let keepalive_running =
-              Keeper_execution.keeper_keepalive_running meta.name
+              Keeper_keepalive.keeper_keepalive_running meta.name
             in
             let agent_exists =
               match agent_json |> U.member "exists" with
@@ -619,7 +619,7 @@ let keepers_json config =
               | _ -> false
             in
             let diagnostic =
-              Keeper_execution.keeper_diagnostic_json ~meta
+              Keeper_exec_status.keeper_diagnostic_json ~meta
                 ~agent_status:agent_json ~keepalive_running ~history_items:[]
                 ~now_ts:(Time_compat.now ())
             in
@@ -655,10 +655,10 @@ let keepers_json config =
                   ("context_ratio", `Null);
                   ("context_tokens", `Int meta.last_total_tokens);
                   ("last_model_used", `String meta.last_model_used);
-                  ("active_model", `String (Keeper_execution.active_model_of_meta meta));
+                  ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                   ("keepalive_running", `Bool keepalive_running);
                   ( "next_model_hint",
-                    string_option_to_json (Keeper_execution.next_model_hint_of_meta meta)
+                    string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta)
                   );
                   ("autonomy_level", `String meta.autonomy_level);
                   ( "active_goal_ids",
@@ -690,7 +690,7 @@ let persistent_agents_json config =
         | Error _ | Ok None -> None
         | Ok (Some meta) ->
             let agent_json =
-              Keeper_execution.parse_agent_status config ~agent_name:meta.agent_name
+              Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
             in
             let agent_status =
               match agent_json |> U.member "status" with
@@ -716,8 +716,8 @@ let persistent_agents_json config =
                   ("context_ratio", `Null);
                   ("context_tokens", `Int meta.last_total_tokens);
                   ("last_model_used", `String meta.last_model_used);
-                  ("active_model", `String (Keeper_execution.active_model_of_meta meta));
-                  ("next_model_hint", string_option_to_json (Keeper_execution.next_model_hint_of_meta meta));
+                  ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
+                  ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
                   ("autonomy_level", `String meta.autonomy_level);
                   ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
                   ("last_autonomous_action_at",

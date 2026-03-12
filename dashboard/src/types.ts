@@ -987,6 +987,35 @@ export interface DashboardExecutionWorkerSupportBrief {
   recent_event?: string | null
 }
 
+export interface DashboardExecutionLodgeTick {
+  checked?: number
+  acted?: number
+  passed?: number
+  skipped?: number
+  failed?: number
+  last_tick_at?: string | null
+  last_skip_reason?: string | null
+  activity_report?: string | null
+}
+
+export interface DashboardExecutionLodgeCheckin {
+  agent_name: string
+  trigger?: string | null
+  outcome: 'acted' | 'passed' | 'skipped' | 'failed' | string
+  summary?: string | null
+  reason?: string | null
+  allowed_tool_names: string[]
+  used_tool_names: string[]
+  used_tool_call_count?: number | null
+  action_kind?: 'post' | 'comment' | 'vote' | 'none' | string
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
+  checked_at?: string | null
+  decision_reason?: string | null
+  worker_name?: string | null
+  failure_reason?: string | null
+}
+
 export interface DashboardExecutionContinuityBrief {
   name: string
   agent_name?: string | null
@@ -1007,12 +1036,25 @@ export interface DashboardExecutionContinuityBrief {
   emoji?: string
   korean_name?: string | null
   skill_reason?: string | null
+  recent_input_preview?: string | null
+  recent_output_preview?: string | null
+  recent_tool_names?: string[]
+  allowed_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
+  last_proactive_preview?: string | null
+  continuity_summary?: string | null
+  skill_route_summary?: string | null
 }
 
 export interface DashboardExecutionResponse {
   generated_at?: string
   status?: ServerStatus
   summary?: DashboardExecutionSummary
+  lodge_tick?: DashboardExecutionLodgeTick | null
+  lodge_checkins?: unknown[]
   execution_queue?: unknown[]
   session_briefs?: unknown[]
   operation_briefs?: unknown[]

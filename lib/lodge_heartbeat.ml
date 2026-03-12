@@ -3041,21 +3041,24 @@ let load_agent_specialties_from_neo4j () =
     List.filter_map (fun record ->
       try
         let arr = Yojson.Safe.Util.to_list record in
-        let inner = Yojson.Safe.Util.to_list (List.hd arr) in
-        let name = Yojson.Safe.Util.to_string (List.nth inner 0) in
-        let traits = Yojson.Safe.Util.(List.nth inner 1 |> to_list |> List.map to_string) in
-        let description =
-          match List.nth inner 2 with
-          | `Null -> ""
-          | `String s -> s
-          | _ -> ""
-        in
-        (* Combine traits + words from description as keywords *)
-        let desc_words = description
-          |> String.split_on_char ' '
-          |> List.filter (fun w -> String.length w > 3)
-        in
-        Some (name, traits @ desc_words)
+        match arr with
+        | inner_node :: _ ->
+          let inner = Yojson.Safe.Util.to_list inner_node in
+          let name = Yojson.Safe.Util.to_string (List.nth inner 0) in
+          let traits = Yojson.Safe.Util.(List.nth inner 1 |> to_list |> List.map to_string) in
+          let description =
+            match List.nth inner 2 with
+            | `Null -> ""
+            | `String s -> s
+            | _ -> ""
+          in
+          (* Combine traits + words from description as keywords *)
+          let desc_words = description
+            |> String.split_on_char ' '
+            |> List.filter (fun w -> String.length w > 3)
+          in
+          Some (name, traits @ desc_words)
+        | [] -> None
       with Yojson.Safe.Util.Type_error _ | Failure _ -> None
     ) records
   with

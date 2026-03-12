@@ -148,6 +148,34 @@ let test_masc_mcp_tools_contains_run_deliverable () =
   check bool "contains run_deliverable" true
     (List.mem "mcp__masc__masc_run_deliverable" Spawn_eio.masc_mcp_tools)
 
+let test_masc_mcp_tools_contains_tool_help () =
+  check bool "contains tool_help" true
+    (List.mem "mcp__masc__masc_tool_help" Spawn_eio.masc_mcp_tools)
+
+let test_masc_mcp_tools_contains_tool_stats () =
+  check bool "contains tool_stats" true
+    (List.mem "mcp__masc__masc_tool_stats" Spawn_eio.masc_mcp_tools)
+
+let test_masc_mcp_tools_contains_tool_admin_snapshot () =
+  check bool "contains tool_admin_snapshot" true
+    (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn_eio.masc_mcp_tools)
+
+let test_masc_mcp_tools_contains_keeper_tool_catalog () =
+  check bool "contains keeper_tool_catalog" true
+    (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn_eio.masc_mcp_tools)
+
+let test_masc_mcp_tools_contains_tool_list () =
+  check bool "contains tool_list" true
+    (List.mem "mcp__masc__masc_tool_list" Spawn_eio.masc_mcp_tools)
+
+let test_masc_mcp_tools_contains_tool_grant () =
+  check bool "contains tool_grant" true
+    (List.mem "mcp__masc__masc_tool_grant" Spawn_eio.masc_mcp_tools)
+
+let test_masc_mcp_tools_contains_tool_revoke () =
+  check bool "contains tool_revoke" true
+    (List.mem "mcp__masc__masc_tool_revoke" Spawn_eio.masc_mcp_tools)
+
 let test_llama_mcp_tools_curated () =
   check (list string) "llama tools"
     [
@@ -439,6 +467,20 @@ let () =
         test_masc_mcp_tools_contains_vote_create;
       test_case "contains run_deliverable" `Quick
         test_masc_mcp_tools_contains_run_deliverable;
+      test_case "contains tool_stats" `Quick
+        test_masc_mcp_tools_contains_tool_stats;
+      test_case "contains tool_help" `Quick
+        test_masc_mcp_tools_contains_tool_help;
+      test_case "contains tool_admin_snapshot" `Quick
+        test_masc_mcp_tools_contains_tool_admin_snapshot;
+      test_case "contains keeper_tool_catalog" `Quick
+        test_masc_mcp_tools_contains_keeper_tool_catalog;
+      test_case "contains tool_list" `Quick
+        test_masc_mcp_tools_contains_tool_list;
+      test_case "contains tool_grant" `Quick
+        test_masc_mcp_tools_contains_tool_grant;
+      test_case "contains tool_revoke" `Quick
+        test_masc_mcp_tools_contains_tool_revoke;
       test_case "llama curated subset" `Quick test_llama_mcp_tools_curated;
     ];
     "masc_lifecycle_suffix", [

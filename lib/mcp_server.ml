@@ -121,228 +121,279 @@ let protocol_version_from_params params =
   | _ -> default_protocol_version
 
 (** Server info *)
-let server_info = `Assoc [
-  ("name", `String "masc-mcp");
-  ("version", `String Version.version);
-]
+type mcp_icon = {
+  src : string;
+  mime_type : string option;
+  sizes : string list;
+}
 
-let capabilities = `Assoc [
-  ("tools", `Assoc [
-    ("listChanged", `Bool false);
-  ]);
-  ("resources", `Assoc [
-    ("listChanged", `Bool false);
-  ]);
-  ("prompts", `Assoc [
-    ("listChanged", `Bool false);
-  ]);
-]
+let svg_icon_data_uri ~bg ~fg ~label =
+  let text =
+    if String.length label <= 2 then label else String.sub label 0 2
+  in
+  let svg =
+    Printf.sprintf
+      "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%s'/><text x='32' y='38' font-family='Arial, sans-serif' font-size='22' font-weight='700' text-anchor='middle' fill='%s'>%s</text></svg>"
+      bg fg text
+  in
+  "data:image/svg+xml;utf8," ^ Uri.pct_encode svg
+
+let icon_to_json (icon : mcp_icon) =
+  let base =
+    [ ("src", `String icon.src) ]
+    @
+    match icon.mime_type with
+    | Some mime_type -> [ ("mimeType", `String mime_type) ]
+    | None -> []
+  in
+  let base =
+    if icon.sizes = [] then base
+    else base @ [ ("sizes", `List (List.map (fun size -> `String size) icon.sizes)) ]
+  in
+  `Assoc base
+
+let themed_icon ~label ~bg ~fg =
+  {
+    src = svg_icon_data_uri ~bg ~fg ~label;
+    mime_type = Some "image/svg+xml";
+    sizes = [ "64x64" ];
+  }
+
+let text_icon = themed_icon ~label:"TXT" ~bg:"#0F766E" ~fg:"#F0FDFA"
+let json_icon = themed_icon ~label:"JS" ~bg:"#1D4ED8" ~fg:"#EFF6FF"
+let doc_icon = themed_icon ~label:"MC" ~bg:"#111827" ~fg:"#F9FAFB"
+
+let icons_for_mime mime_type =
+  match String.lowercase_ascii mime_type with
+  | "application/json" -> [ json_icon ]
+  | "text/markdown"
+  | "text/plain; charset=utf-8"
+  | "text/plain" -> [ text_icon ]
+  | _ -> [ doc_icon ]
+
+let server_icons = [ themed_icon ~label:"MM" ~bg:"#7C3AED" ~fg:"#F5F3FF" ]
+
+let server_info =
+  `Assoc
+    [
+      ("name", `String "masc-mcp");
+      ("title", `String "MASC MCP Server");
+      ("version", `String Version.version);
+      ( "description",
+        `String
+          "Multi-agent MCP server exposing MASC room coordination, tools, prompts, and resources." );
+      ("websiteUrl", `String "https://github.com/yousleepwhen/masc-mcp");
+      ("icons", `List (List.map icon_to_json server_icons));
+    ]
+
+let capabilities =
+  `Assoc
+    [
+      ("tools", `Assoc [ ("listChanged", `Bool true) ]);
+      ("resources", `Assoc [ ("subscribe", `Bool true); ("listChanged", `Bool false) ]);
+      ("prompts", `Assoc [ ("listChanged", `Bool false) ]);
+    ]
 
 (** MCP Resources (read-only context) *)
 type mcp_resource = {
   uri : string;
   name : string;
+  title : string option;
   description : string;
   mime_type : string;
+  icons : mcp_icon list;
+  annotations : Yojson.Safe.t option;
+  size : int option;
 }
 
 type mcp_resource_template = {
   uri_template : string;
   name : string;
+  title : string option;
   description : string;
   mime_type : string;
+  icons : mcp_icon list;
+  annotations : Yojson.Safe.t option;
 }
 
 let resource_to_json (r : mcp_resource) =
-  `Assoc [
-    ("uri", `String r.uri);
-    ("name", `String r.name);
-    ("description", `String r.description);
-    ("mimeType", `String r.mime_type);
-  ]
+  let base =
+    [
+      ("uri", `String r.uri);
+      ("name", `String r.name);
+      ("description", `String r.description);
+      ("mimeType", `String r.mime_type);
+    ]
+    @
+    match r.title with
+    | Some title -> [ ("title", `String title) ]
+    | None -> []
+  in
+  let base =
+    if r.icons = [] then base
+    else base @ [ ("icons", `List (List.map icon_to_json r.icons)) ]
+  in
+  let base =
+    match r.annotations with
+    | Some annotations -> base @ [ ("annotations", annotations) ]
+    | None -> base
+  in
+  let base =
+    match r.size with
+    | Some size -> base @ [ ("size", `Int size) ]
+    | None -> base
+  in
+  `Assoc base
 
 let resource_template_to_json (t : mcp_resource_template) =
-  `Assoc [
-    ("uriTemplate", `String t.uri_template);
-    ("name", `String t.name);
-    ("description", `String t.description);
-    ("mimeType", `String t.mime_type);
-  ]
+  let base =
+    [
+      ("uriTemplate", `String t.uri_template);
+      ("name", `String t.name);
+      ("description", `String t.description);
+      ("mimeType", `String t.mime_type);
+    ]
+    @
+    match t.title with
+    | Some title -> [ ("title", `String title) ]
+    | None -> []
+  in
+  let base =
+    if t.icons = [] then base
+    else base @ [ ("icons", `List (List.map icon_to_json t.icons)) ]
+  in
+  let base =
+    match t.annotations with
+    | Some annotations -> base @ [ ("annotations", annotations) ]
+    | None -> base
+  in
+  `Assoc base
+
+let make_resource ?title ?annotations ?size ~uri ~name ~description ~mime_type () =
+  {
+    uri;
+    name;
+    title = (match title with Some _ as value -> value | None -> Some name);
+    description;
+    mime_type;
+    icons = icons_for_mime mime_type;
+    annotations;
+    size;
+  }
+
+let make_resource_template ?title ?annotations ~uri_template ~name ~description
+    ~mime_type () =
+  {
+    uri_template;
+    name;
+    title = (match title with Some _ as value -> value | None -> Some name);
+    description;
+    mime_type;
+    icons = icons_for_mime mime_type;
+    annotations;
+  }
 
 let resources : mcp_resource list = [
-  {
-    uri = "masc://status";
-    name = "MASC Status";
-    description = "Current room status snapshot (same as masc_status)";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://status.json";
-    name = "MASC Status (JSON)";
-    description = "Current room status snapshot as JSON (for data collection)";
-    mime_type = "application/json";
-  };
-  {
-    uri = "masc://tasks";
-    name = "Quest Board";
-    description = "Task board snapshot (defaults to active tasks; same as masc_tasks)";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://tasks.json";
-    name = "Quest Board (JSON)";
-    description = "Task board snapshot as JSON (backlog.json; all statuses)";
-    mime_type = "application/json";
-  };
-  {
-    uri = "masc://who";
-    name = "Active Agents";
-    description = "In-memory agent/session status (same as masc_who)";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://who.json";
-    name = "Active Agents (JSON)";
-    description = "In-memory agent/session status as JSON";
-    mime_type = "application/json";
-  };
-  {
-    uri = "masc://agents";
-    name = "Agents (Metadata)";
-    description = "Agent registry snapshot (capabilities, tasks, last_seen)";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://agents.json";
-    name = "Agents (Metadata, JSON)";
-    description = "Agent registry snapshot as JSON";
-    mime_type = "application/json";
-  };
-  {
-    uri = "masc://messages?since_seq=0&limit=10";
-    name = "Recent Messages";
-    description = "Recent messages snapshot (same as masc_messages)";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://messages.json?since_seq=0&limit=10";
-    name = "Recent Messages (JSON)";
-    description = "Recent messages snapshot as JSON (for data collection)";
-    mime_type = "application/json";
-  };
-  {
-    uri = "masc://events?limit=50";
-    name = "Recent Events";
-    description = "Recent event log snapshot (task/agent/worktree transitions)";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://events.json?limit=50";
-    name = "Recent Events (JSON)";
-    description = "Recent event log snapshot as JSON";
-    mime_type = "application/json";
-  };
-  {
-    uri = "masc://worktrees";
-    name = "Worktrees";
-    description = "Git worktree snapshot for the current repo";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://worktrees.json";
-    name = "Worktrees (JSON)";
-    description = "Git worktree snapshot as JSON";
-    mime_type = "application/json";
-  };
-  {
-    uri = "masc://schema";
-    name = "Task FSM Schema";
-    description = "Task state machine rules (markdown)";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://schema.json";
-    name = "Task FSM Schema (JSON)";
-    description = "Task state machine rules as JSON";
-    mime_type = "application/json";
-  };
+  make_resource ~uri:"masc://status" ~name:"MASC Status"
+    ~description:"Current room status snapshot (same as masc_status)"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://status.json" ~name:"MASC Status (JSON)"
+    ~description:"Current room status snapshot as JSON (for data collection)"
+    ~mime_type:"application/json" ();
+  make_resource ~uri:"masc://tasks" ~name:"Quest Board"
+    ~description:"Task board snapshot (defaults to active tasks; same as masc_tasks)"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://tasks.json" ~name:"Quest Board (JSON)"
+    ~description:"Task board snapshot as JSON (backlog.json; all statuses)"
+    ~mime_type:"application/json" ();
+  make_resource ~uri:"masc://who" ~name:"Active Agents"
+    ~description:"In-memory agent/session status (same as masc_who)"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://who.json" ~name:"Active Agents (JSON)"
+    ~description:"In-memory agent/session status as JSON"
+    ~mime_type:"application/json" ();
+  make_resource ~uri:"masc://agents" ~name:"Agents (Metadata)"
+    ~description:"Agent registry snapshot (capabilities, tasks, last_seen)"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://agents.json" ~name:"Agents (Metadata, JSON)"
+    ~description:"Agent registry snapshot as JSON"
+    ~mime_type:"application/json" ();
+  make_resource ~uri:"masc://messages?since_seq=0&limit=10"
+    ~name:"Recent Messages"
+    ~description:"Recent messages snapshot (same as masc_messages)"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://messages.json?since_seq=0&limit=10"
+    ~name:"Recent Messages (JSON)"
+    ~description:"Recent messages snapshot as JSON (for data collection)"
+    ~mime_type:"application/json" ();
+  make_resource ~uri:"masc://events?limit=50" ~name:"Recent Events"
+    ~description:"Recent event log snapshot (task/agent/worktree transitions)"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://events.json?limit=50"
+    ~name:"Recent Events (JSON)"
+    ~description:"Recent event log snapshot as JSON"
+    ~mime_type:"application/json" ();
+  make_resource ~uri:"masc://worktrees" ~name:"Worktrees"
+    ~description:"Git worktree snapshot for the current repo"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://worktrees.json" ~name:"Worktrees (JSON)"
+    ~description:"Git worktree snapshot as JSON"
+    ~mime_type:"application/json" ();
+  make_resource ~uri:"masc://schema" ~name:"Task FSM Schema"
+    ~description:"Task state machine rules (markdown)"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://schema.json" ~name:"Task FSM Schema (JSON)"
+    ~description:"Task state machine rules as JSON"
+    ~mime_type:"application/json" ();
   (* Agent Being Protocol - Institution Memory *)
-  {
-    uri = "masc://institution";
-    name = "Institution Memory";
-    description = "Institutional knowledge: mission, values, procedural memory, succession policy";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://institution.json";
-    name = "Institution Memory (JSON)";
-    description = "Institutional knowledge as JSON for agent onboarding";
-    mime_type = "application/json";
-  };
+  make_resource ~uri:"masc://institution" ~name:"Institution Memory"
+    ~description:"Institutional knowledge: mission, values, procedural memory, succession policy"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://institution.json"
+    ~name:"Institution Memory (JSON)"
+    ~description:"Institutional knowledge as JSON for agent onboarding"
+    ~mime_type:"application/json" ();
   (* Library - curated knowledge from direct research *)
-  {
-    uri = "masc://library";
-    name = "Library Index";
-    description = "List of curated library documents (direct research only)";
-    mime_type = "text/markdown";
-  };
-  {
-    uri = "masc://library.json";
-    name = "Library Index (JSON)";
-    description = "List of curated library documents as JSON with full metadata";
-    mime_type = "application/json";
-  };
-  {
-    uri = "masc://tool-help-index";
-    name = "Tool Help Index";
-    description = "Canonical help index for MCP-exposed MASC tools";
-    mime_type = "text/markdown";
-  };
+  make_resource ~uri:"masc://library" ~name:"Library Index"
+    ~description:"List of curated library documents (direct research only)"
+    ~mime_type:"text/markdown" ();
+  make_resource ~uri:"masc://library.json" ~name:"Library Index (JSON)"
+    ~description:"List of curated library documents as JSON with full metadata"
+    ~mime_type:"application/json" ();
+  make_resource ~uri:"masc://tool-help-index" ~name:"Tool Help Index"
+    ~description:"Canonical help index for MCP-exposed MASC tools"
+    ~mime_type:"text/markdown" ();
 ]
 
 let resource_templates : mcp_resource_template list = [
-  {
-    uri_template = "masc://messages{?since_seq,limit}";
-    name = "Messages (range)";
-    description = "Read messages with optional since_seq and limit";
-    mime_type = "text/markdown";
-  };
-  {
-    uri_template = "masc://messages.json{?since_seq,limit}";
-    name = "Messages (range, JSON)";
-    description = "Read messages as JSON with optional since_seq and limit";
-    mime_type = "application/json";
-  };
-  {
-    uri_template = "masc://events{?limit}";
-    name = "Events (range)";
-    description = "Read recent event log entries with optional limit";
-    mime_type = "text/markdown";
-  };
-  {
-    uri_template = "masc://events.json{?limit}";
-    name = "Events (range, JSON)";
-    description = "Read recent event log entries as JSON with optional limit";
-    mime_type = "application/json";
-  };
-  {
-    uri_template = "masc://library/{topic}";
-    name = "Library Document";
-    description = "Read a specific library document by topic name";
-    mime_type = "text/markdown";
-  };
-  {
-    uri_template = "masc://library/{topic}.json";
-    name = "Library Document (JSON)";
-    description = "Read a specific library document as JSON with metadata";
-    mime_type = "application/json";
-  };
-  {
-    uri_template = "masc://tool-help/{tool_name}";
-    name = "Tool Help";
-    description = "Read canonical help for a specific MCP tool";
-    mime_type = "text/markdown";
-  };
+  make_resource_template ~uri_template:"masc://messages{?since_seq,limit}"
+    ~name:"Messages (range)"
+    ~description:"Read messages with optional since_seq and limit"
+    ~mime_type:"text/markdown" ();
+  make_resource_template ~uri_template:"masc://messages.json{?since_seq,limit}"
+    ~name:"Messages (range, JSON)"
+    ~description:"Read messages as JSON with optional since_seq and limit"
+    ~mime_type:"application/json" ();
+  make_resource_template ~uri_template:"masc://events{?limit}"
+    ~name:"Events (range)"
+    ~description:"Read recent event log entries with optional limit"
+    ~mime_type:"text/markdown" ();
+  make_resource_template ~uri_template:"masc://events.json{?limit}"
+    ~name:"Events (range, JSON)"
+    ~description:"Read recent event log entries as JSON with optional limit"
+    ~mime_type:"application/json" ();
+  make_resource_template ~uri_template:"masc://library/{topic}"
+    ~name:"Library Document"
+    ~description:"Read a specific library document by topic name"
+    ~mime_type:"text/markdown" ();
+  make_resource_template ~uri_template:"masc://library/{topic}.json"
+    ~name:"Library Document (JSON)"
+    ~description:"Read a specific library document as JSON with metadata"
+    ~mime_type:"application/json" ();
+  make_resource_template ~uri_template:"masc://tool-help/{tool_name}"
+    ~name:"Tool Help"
+    ~description:"Read canonical help for a specific MCP tool"
+    ~mime_type:"text/markdown" ();
 ]
 
 (** Parse a masc:// resource URI into (resource_id, Uri.t) *)

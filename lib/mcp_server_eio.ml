@@ -783,7 +783,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           if Option.is_some mcp_session_id then
             generated_fallback_agent_name
           else
-            let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "" in
+            let term_session_id = Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID") in
             let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
             (try
               let ic = open_in term_file in
@@ -1681,9 +1681,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       let path = arg_get_string "path" "" in
       let expanded =
         if String.length path > 0 && path.[0] = '~' then
-          Filename.concat (Sys.getenv "HOME") (String.sub path 1 (String.length path - 1))
-        else if Filename.is_relative path then
-          Filename.concat (Sys.getcwd ()) path
+          let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in
+          Filename.concat home (String.sub path 1 (String.length path - 1))
+        else if Filename.is_relative path then          Filename.concat (Sys.getcwd ()) path
         else
           path
       in
@@ -1721,7 +1721,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       Printf.eprintf "[DEBUG] masc_join: saved nickname=%s to MCP session (original=%s)\n%!" nickname agent_name;
       (* Also save to TERM_SESSION_ID file (terminal persistence) *)
       if Option.is_none mcp_session_id then begin
-        let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
+        let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
         let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
         (try
           let oc = open_out agent_file in
@@ -1767,7 +1767,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       unregister_sync registry ~agent_name;
       (* Clean up self-echo filter file *)
       if Option.is_none mcp_session_id then begin
-        let session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
+        let session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
         let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
         Safe_ops.remove_file_logged ~context:"masc_leave" agent_file
       end;
@@ -2943,6 +2943,82 @@ let tool_timeout_sec_opt ~(tool_name : string) ~(arguments : Yojson.Safe.t) : fl
       Some (Option.value requested_timeout_sec ~default:default_timeout_sec)
   | _ -> None
 
+let resource_subscription_mutex = Eio.Mutex.create ()
+
+let with_resource_subscription_lock f =
+  try Eio.Mutex.use_rw ~protect:true resource_subscription_mutex f
+  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+
+let resource_subscriptions : (string, (string, unit) Hashtbl.t) Hashtbl.t =
+  Hashtbl.create 64
+
+let resource_is_dynamic uri =
+  let lower = String.lowercase_ascii uri in
+  not
+    (String.contains lower '{'
+     || String.starts_with ~prefix:"masc://schema" lower
+     || String.starts_with ~prefix:"masc://institution" lower
+     || String.starts_with ~prefix:"masc://tool-help" lower)
+
+let subscribe_resource_for_session ~session_id ~uri =
+  with_resource_subscription_lock (fun () ->
+      let uris =
+        match Hashtbl.find_opt resource_subscriptions session_id with
+        | Some uris -> uris
+        | None ->
+            let uris = Hashtbl.create 8 in
+            Hashtbl.replace resource_subscriptions session_id uris;
+            uris
+      in
+      Hashtbl.replace uris uri ())
+
+let unsubscribe_resource_for_session ~session_id ~uri =
+  with_resource_subscription_lock (fun () ->
+      match Hashtbl.find_opt resource_subscriptions session_id with
+      | Some uris ->
+          Hashtbl.remove uris uri;
+          if Hashtbl.length uris = 0 then
+            Hashtbl.remove resource_subscriptions session_id
+      | None -> ())
+
+let clear_resource_subscriptions_for_session session_id =
+  with_resource_subscription_lock (fun () ->
+      Hashtbl.remove resource_subscriptions session_id)
+
+let jsonrpc_notification ?params method_name =
+  let base =
+    [
+      ("jsonrpc", `String "2.0");
+      ("method", `String method_name);
+    ]
+  in
+  `Assoc
+    (base
+    @
+    match params with
+    | Some params -> [ ("params", params) ]
+    | None -> [])
+
+let send_resource_updated_notification ~session_id ~uri =
+  Sse.send_to session_id
+    (jsonrpc_notification "notifications/resources/updated"
+       ~params:(`Assoc [ ("uri", `String uri) ]))
+
+let broadcast_tools_list_changed () =
+  Sse.broadcast (jsonrpc_notification "notifications/tools/list_changed")
+
+let maybe_emit_resource_notifications ~success ~tool_name =
+  if success && not (Tool_dispatch.is_read_only tool_name) then
+    with_resource_subscription_lock (fun () ->
+        Hashtbl.iter
+          (fun session_id uris ->
+            Hashtbl.iter
+              (fun uri () ->
+                if resource_is_dynamic uri then
+                  send_resource_updated_notification ~session_id ~uri)
+              uris)
+          resource_subscriptions)
+
 let () = Chain_native_eio.set_tool_executor execute_tool_eio
 
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
@@ -3072,6 +3148,12 @@ in
     ("isError", `Bool (not success));
   ]) in
 
+  maybe_emit_resource_notifications ~success ~tool_name:name;
+  if success
+     && List.mem name [ "masc_switch_mode"; "masc_tool_admin_update" ]
+  then
+    broadcast_tools_list_changed ();
+
   (* Log result *)
   let preview =
     if String.length message > 80
@@ -3128,120 +3210,179 @@ let tool_allowed_in_profile profile tool_name =
   | Full -> true
   | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
 
-let tool_annotations_for_profile profile tool_name =
-  match profile with
-  | Operator_remote when String.equal tool_name "masc_operator_snapshot" ->
-      Some (`Assoc [ ("readOnlyHint", `Bool true) ])
-  | Operator_remote when String.equal tool_name "masc_operator_digest" ->
-      Some (`Assoc [ ("readOnlyHint", `Bool true) ])
-  | Operator_remote when List.mem tool_name [ "masc_operator_action"; "masc_operator_confirm" ] ->
-      Some (`Assoc [ ("readOnlyHint", `Bool false) ])
-  | _ -> None
+let is_destructive_tool_name name =
+  let lowered = String.lowercase_ascii name in
+  List.exists
+    (fun fragment ->
+      let len = String.length fragment in
+      let lowered_len = String.length lowered in
+      let rec loop idx =
+        if idx + len > lowered_len then false
+        else if String.sub lowered idx len = fragment then true
+        else loop (idx + 1)
+      in
+      loop 0)
+    [ "delete"; "remove"; "reset"; "revoke"; "disable"; "kill_switch"; "retire" ]
+
+let is_idempotent_tool_name name =
+  let lowered = String.lowercase_ascii name in
+  List.exists
+    (fun prefix ->
+      let prefix_len = String.length prefix in
+      String.length lowered >= prefix_len
+      && String.sub lowered 0 prefix_len = prefix)
+    [ "masc_status"; "masc_get_"; "masc_list"; "masc_tool_"; "masc_keeper_tool_catalog" ]
+
+let tool_annotations_for_profile _profile tool_name =
+  let read_only = Tool_dispatch.is_read_only tool_name in
+  let fields =
+    [ ("readOnlyHint", `Bool read_only) ]
+    @
+    if is_destructive_tool_name tool_name then
+      [ ("destructiveHint", `Bool true) ]
+    else
+      []
+    @
+    if is_idempotent_tool_name tool_name || read_only then
+      [ ("idempotentHint", `Bool true) ]
+    else
+      []
+  in
+  if fields = [] then None else Some (`Assoc fields)
+
+let label_words_from_identifier ident =
+  ident
+  |> String.split_on_char '_'
+  |> List.filter (fun chunk -> chunk <> "")
+  |> List.map (fun word ->
+         if String.length word = 0 then word
+         else
+           String.uppercase_ascii (String.sub word 0 1)
+           ^ String.lowercase_ascii
+               (String.sub word 1 (String.length word - 1)))
+
+let tool_title_of_name name =
+  let trimmed =
+    if String.length name > 5 && String.sub name 0 5 = "masc_" then
+      String.sub name 5 (String.length name - 5)
+    else
+      name
+  in
+  String.concat " " (label_words_from_identifier trimmed)
+
+let tool_icons_for_name name =
+  let icon =
+    if Tool_dispatch.is_read_only name then
+      Mcp_server.themed_icon ~label:"RD" ~bg:"#0F766E" ~fg:"#F0FDFA"
+    else
+      Mcp_server.themed_icon ~label:"WR" ~bg:"#9A3412" ~fg:"#FFF7ED"
+  in
+  [ icon ]
+
+let maybe_assoc_field name = function
+  | Some value -> [ (name, value) ]
+  | None -> []
+
+let tool_output_schema_field _name = None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
   let base =
     [
       ("name", `String schema.name);
+      ("title", `String (tool_title_of_name schema.name));
       ("description", `String schema.description);
+      ( "icons",
+        `List
+          (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
     ]
+    @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
+    @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
     @
-    (match usage_summary with
+    match usage_summary with
     | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
-    | None -> [])
-    @ Tool_catalog.metadata_to_fields schema.name
+    | None -> []
   in
-  match tool_annotations_for_profile profile schema.name with
-  | Some annotations -> `Assoc (base @ [ ("annotations", annotations) ])
-  | None -> `Assoc base
+  `Assoc base
 
-type tools_list_params = {
-  names : string list option;
-  include_hidden : bool;
-  include_deprecated : bool;
-  include_usage : bool;
-  mode : string option;
-  tier : string option;
-}
+type cursor_params = { cursor : string option }
 
-let bool_param payload key =
-  let open Yojson.Safe.Util in
-  match payload |> member key with
-  | `Null -> Ok false
-  | `Bool value -> Ok value
-  | _ -> Error (Printf.sprintf "Invalid params: %s must be a boolean" key)
+let ( let* ) = Result.bind
 
-let requested_tool_list_params params =
-  let open Yojson.Safe.Util in
+let strict_assoc_params params =
   match params with
-  | None ->
-      Ok {
-        names = None;
-        include_hidden = false;
-        include_deprecated = false;
-        include_usage = false;
-        mode = None;
-        tier = None;
-      }
-  | Some (`Assoc _ as payload) -> (
-      let names_result =
-        match payload |> member "names" with
-        | `Null -> Ok None
-        | `List items ->
-            items
-            |> List.fold_left
-                 (fun acc item ->
-                   match (acc, item) with
-                   | Error _ as err, _ -> err
-                   | Ok names, `String value -> Ok (value :: names)
-                   | Ok _, _ ->
-                       Error "Invalid params: names must be an array of strings")
-                 (Ok [])
-            |> Result.map (fun names -> Some (List.rev names))
-        | _ -> Error "Invalid params: names must be an array of strings"
-      in
-      let mode_result =
-        match payload |> member "mode" with
-        | `Null -> Ok None
-        | `String s -> Ok (Some s)
-        | _ -> Error "Invalid params: mode must be a string"
-      in
-      let tier_result =
-        match payload |> member "tier" with
-        | `Null -> Ok None
-        | `String s -> (
-            match Tool_catalog.tier_of_string (String.lowercase_ascii s) with
-            | Some _ -> Ok (Some s)
-            | None -> Error "Invalid params: tier must be one of: essential, standard, full")
-        | _ -> Error "Invalid params: tier must be a string"
-      in
-      match names_result with
-      | Error _ as err -> err
-      | Ok names -> (
-          match mode_result with
-          | Error _ as err -> err
-          | Ok mode -> (
-          match tier_result with
-          | Error _ as err -> err
-          | Ok tier -> (
-          match bool_param payload "include_hidden" with
-          | Error _ as err -> err
-          | Ok include_hidden -> (
-              match bool_param payload "include_deprecated" with
-              | Error _ as err -> err
-              | Ok include_deprecated -> (
-                  match bool_param payload "include_usage" with
-                  | Error _ as err -> err
-                  | Ok include_usage ->
-                      Ok {
-                        names;
-                        include_hidden;
-                        include_deprecated;
-                        include_usage;
-                        mode;
-                        tier;
-                      }))))))
+  | None -> Ok []
+  | Some (`Assoc fields) -> Ok fields
   | Some _ -> Error "Invalid params: expected object"
+
+let parse_cursor_only_params params =
+  let open Yojson.Safe.Util in
+  let* fields = strict_assoc_params params in
+  let allowed = [ "cursor" ] in
+  let unknown =
+    fields
+    |> List.filter_map (fun (key, _value) ->
+           if List.mem key allowed then None else Some key)
+  in
+  if unknown <> [] then
+    Error
+      (Printf.sprintf "Invalid params: unsupported field(s): %s"
+         (String.concat ", " unknown))
+  else
+    let payload = `Assoc fields in
+    match payload |> member "cursor" with
+    | `Null -> Ok { cursor = None }
+    | `String cursor -> Ok { cursor = Some cursor }
+    | _ -> Error "Invalid params: cursor must be a string"
+
+let list_page_size = 128
+
+let encode_cursor ~kind offset =
+  Base64.encode_string (Printf.sprintf "%s:%d" kind offset)
+
+let decode_cursor ~kind cursor =
+  match Base64.decode cursor with
+  | Ok decoded ->
+      let prefix = kind ^ ":" in
+      let prefix_len = String.length prefix in
+      if String.length decoded >= prefix_len
+         && String.sub decoded 0 prefix_len = prefix
+      then
+        int_of_string_opt
+          (String.sub decoded prefix_len (String.length decoded - prefix_len))
+      else
+        None
+  | Error _ -> None
+
+let page_items_with_cursor ~kind items cursor =
+  let offset =
+    match cursor with
+    | None -> Ok 0
+    | Some encoded -> (
+        match decode_cursor ~kind encoded with
+        | Some value when value >= 0 -> Ok value
+        | _ -> Error "Invalid params: cursor is invalid")
+  in
+  let rec drop n xs =
+    match (n, xs) with
+    | 0, rest -> rest
+    | _, [] -> []
+    | n, _ :: rest -> drop (n - 1) rest
+  in
+  let rec take n xs =
+    match (n, xs) with
+    | 0, _ | _, [] -> []
+    | n, x :: rest -> x :: take (n - 1) rest
+  in
+  let count = List.length items in
+  let* offset = offset in
+  let offset = min offset count in
+  let page = items |> drop offset |> take list_page_size in
+  let next_offset = offset + List.length page in
+  let next_cursor =
+    if next_offset < count then Some (encode_cursor ~kind next_offset) else None
+  in
+  Ok (page, next_cursor)
 
 let handle_initialize_eio ?(profile = Full) id params =
   match validate_initialize_params params with
@@ -3257,73 +3398,86 @@ let handle_initialize_eio ?(profile = Full) id params =
         ("instructions", `String (match profile with Full -> default_instructions | Operator_remote -> operator_remote_instructions));
       ])
 
-let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_usage = false) ?mode ?tier state id =
-  let usage_summary =
-    if include_usage then
-      Some (Telemetry_eio.summarize_tool_usage ?fs:state.Mcp_server.fs state.Mcp_server.room_config)
-    else
-      None
+let handle_list_tools_eio ?(profile = Full) state id cursor =
+  let schemas =
+    tool_schemas_for_profile state profile
+    |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
+           String.compare a.name b.name)
   in
-  let tier_filter =
-    match tier with
-    | None -> None
-    | Some s -> Tool_catalog.tier_of_string (String.lowercase_ascii s)
-  in
-  let tools =
-    tool_schemas_for_profile ~include_hidden ~include_deprecated
-      ?mode_override:mode state profile
-    |> (match names with
-       | None -> Fun.id
-       | Some wanted ->
-           List.filter (fun (schema : Types.tool_schema) ->
-             List.mem schema.name wanted))
-    |> (match tier_filter with
-       | None -> Fun.id
-       | Some t ->
-           List.filter (fun (schema : Types.tool_schema) ->
-             Tool_catalog.is_in_tier t schema.name))
-    |> List.map (tool_json_for_profile ?usage_summary profile)
-  in
-  let result_fields =
-    [ ("tools", `List tools) ]
-    @
-    match usage_summary with
-    | Some summary ->
-        [
-          ("usageTelemetryAvailable", `Bool summary.telemetry_available);
-          ("usageTelemetryPath", `String summary.telemetry_path);
-          ("usageTotalCalls", `Int summary.total_calls);
-        ]
-    | None -> []
-  in
-  make_response ~id (`Assoc result_fields)
+  match page_items_with_cursor ~kind:"tools" schemas cursor with
+  | Error msg -> make_error ~id (-32602) msg
+  | Ok (schemas, next_cursor) ->
+      let tools = List.map (tool_json_for_profile profile) schemas in
+      let result_fields =
+        [ ("tools", `List tools) ]
+        @ maybe_assoc_field "nextCursor"
+            (Option.map (fun value -> `String value) next_cursor)
+      in
+      make_response ~id (`Assoc result_fields)
 
-let handle_list_resources_eio id =
+let handle_list_resources_eio id cursor =
   let tool_help_resources =
     Config.raw_all_tool_schemas
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
            String.compare a.name b.name)
     |> List.map (fun (schema : Types.tool_schema) ->
            let entry = Tool_help_registry.entry_of_schema schema in
-           {
-             Mcp_server.uri = "masc://tool-help/" ^ schema.name;
-             name = schema.name ^ " Help";
-             description = entry.short_description;
-             mime_type = "text/markdown";
-           })
+           Mcp_server.make_resource ~uri:("masc://tool-help/" ^ schema.name)
+             ~name:(schema.name ^ " Help") ~description:entry.short_description
+             ~mime_type:"text/markdown" ())
   in
-  let resources_json =
-    List.map Mcp_server.resource_to_json (Mcp_server.resources @ tool_help_resources)
+  let resources =
+    Mcp_server.resources @ tool_help_resources
+    |> List.sort (fun (a : Mcp_server.mcp_resource) b ->
+           String.compare a.uri b.uri)
   in
-  make_response ~id (`Assoc [("resources", `List resources_json)])
+  match page_items_with_cursor ~kind:"resources" resources cursor with
+  | Error msg -> make_error ~id (-32602) msg
+  | Ok (page, next_cursor) ->
+      let resources_json = List.map Mcp_server.resource_to_json page in
+      let result_fields =
+        [ ("resources", `List resources_json) ]
+        @ maybe_assoc_field "nextCursor"
+            (Option.map (fun value -> `String value) next_cursor)
+      in
+      make_response ~id (`Assoc result_fields)
 
-let handle_list_resource_templates_eio id =
-  let templates_json = List.map Mcp_server.resource_template_to_json Mcp_server.resource_templates in
-  make_response ~id (`Assoc [("resourceTemplates", `List templates_json)])
+let handle_list_resource_templates_eio id cursor =
+  let templates =
+    Mcp_server.resource_templates
+    |> List.sort (fun (a : Mcp_server.mcp_resource_template) b ->
+           String.compare a.uri_template b.uri_template)
+  in
+  match page_items_with_cursor ~kind:"resourceTemplates" templates cursor with
+  | Error msg -> make_error ~id (-32602) msg
+  | Ok (page, next_cursor) ->
+      let templates_json =
+        List.map Mcp_server.resource_template_to_json page
+      in
+      let result_fields =
+        [ ("resourceTemplates", `List templates_json) ]
+        @ maybe_assoc_field "nextCursor"
+            (Option.map (fun value -> `String value) next_cursor)
+      in
+      make_response ~id (`Assoc result_fields)
 
-let handle_list_prompts_eio id =
-  make_response ~id (Mcp_prompt_surface.list_json ())
+let handle_list_prompts_eio id cursor =
+  let prompts =
+    Mcp_prompt_surface.prompt_defs
+    |> List.sort (fun (a : Mcp_prompt_surface.prompt_def)
+                       (b : Mcp_prompt_surface.prompt_def) ->
+           String.compare a.name b.name)
+  in
+  match page_items_with_cursor ~kind:"prompts" prompts cursor with
+  | Error msg -> make_error ~id (-32602) msg
+  | Ok (page, next_cursor) ->
+      let prompts_json = List.map Mcp_prompt_surface.prompt_json page in
+      let result_fields =
+        [ ("prompts", `List prompts_json) ]
+        @ maybe_assoc_field "nextCursor"
+            (Option.map (fun value -> `String value) next_cursor)
+      in
+      make_response ~id (`Assoc result_fields)
 
 let handle_get_prompt_eio state id params =
   match params with
@@ -3346,6 +3500,33 @@ let handle_get_prompt_eio state id params =
           | Error msg -> make_error ~id (-32602) msg)
       | _ -> make_error ~id (-32602) "Invalid params: name must be a string")
   | Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+
+let handle_resources_subscribe_eio id ?mcp_session_id params =
+  let open Yojson.Safe.Util in
+  match (mcp_session_id, params) with
+  | None, _ -> make_error ~id (-32600) "resources/subscribe requires an MCP session"
+  | Some session_id, Some (`Assoc _ as payload) -> (
+      match payload |> member "uri" with
+      | `String uri ->
+          subscribe_resource_for_session ~session_id ~uri;
+          make_response ~id (`Assoc [])
+      | _ -> make_error ~id (-32602) "Invalid params: uri must be a string")
+  | Some _, None -> make_error ~id (-32602) "Missing params"
+  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+
+let handle_resources_unsubscribe_eio id ?mcp_session_id params =
+  let open Yojson.Safe.Util in
+  match (mcp_session_id, params) with
+  | None, _ ->
+      make_error ~id (-32600) "resources/unsubscribe requires an MCP session"
+  | Some session_id, Some (`Assoc _ as payload) -> (
+      match payload |> member "uri" with
+      | `String uri ->
+          unsubscribe_resource_for_session ~session_id ~uri;
+          make_response ~id (`Assoc [])
+      | _ -> make_error ~id (-32602) "Invalid params: uri must be a string")
+  | Some _, None -> make_error ~id (-32602) "Missing params"
+  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
 
 (** Handle incoming JSON-RPC request - Pure Eio Native
 
@@ -3370,7 +3551,14 @@ let handle_request
     | Error msg ->
         make_error ~id:`Null ~data:(`String msg) (-32700) "Parse error"
     | Ok json ->
-        if is_jsonrpc_response json then
+        if
+          match json with
+          | `List _ -> true
+          | _ -> false
+        then
+          make_error ~id:`Null (-32600)
+            "JSON-RPC batch requests are not supported on this MCP endpoint"
+        else if is_jsonrpc_response json then
           `Null
         else if not (is_jsonrpc_v2 json) then
           make_error ~id:`Null (-32600) "Invalid Request: jsonrpc must be 2.0"
@@ -3389,19 +3577,32 @@ let handle_request
                    | "initialize" -> handle_initialize_eio ~profile id req.params
                    | "initialized"
                    | "notifications/initialized" -> make_response ~id `Null
-                   | "resources/list" -> handle_list_resources_eio id
+                   | "resources/list" -> (
+                       match parse_cursor_only_params req.params with
+                       | Error msg -> make_error ~id (-32602) msg
+                       | Ok { cursor } -> handle_list_resources_eio id cursor)
                    | "resources/read" ->
                        (* Eio native - pure sync resource reading *)
                        handle_read_resource_eio state id req.params
-                   | "resources/templates/list" -> handle_list_resource_templates_eio id
-                   | "prompts/list" -> handle_list_prompts_eio id
+                   | "resources/templates/list" -> (
+                       match parse_cursor_only_params req.params with
+                       | Error msg -> make_error ~id (-32602) msg
+                       | Ok { cursor } ->
+                           handle_list_resource_templates_eio id cursor)
+                   | "resources/subscribe" ->
+                       handle_resources_subscribe_eio id ?mcp_session_id req.params
+                   | "resources/unsubscribe" ->
+                       handle_resources_unsubscribe_eio id ?mcp_session_id req.params
+                   | "prompts/list" -> (
+                       match parse_cursor_only_params req.params with
+                       | Error msg -> make_error ~id (-32602) msg
+                       | Ok { cursor } -> handle_list_prompts_eio id cursor)
                    | "prompts/get" -> handle_get_prompt_eio state id req.params
                    | "tools/list" -> (
-                       match requested_tool_list_params req.params with
+                       match parse_cursor_only_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier } ->
-                           handle_list_tools_eio ~profile ?names ~include_hidden
-                             ~include_deprecated ~include_usage ?mode ?tier state id)
+                       | Ok { cursor } ->
+                           handle_list_tools_eio ~profile state id cursor)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

@@ -29,6 +29,8 @@ import type {
   DashboardExecutionSessionBrief,
   DashboardExecutionOperationBrief,
   DashboardExecutionWorkerSupportBrief,
+  DashboardExecutionLodgeTick,
+  DashboardExecutionLodgeCheckin,
   DashboardExecutionContinuityBrief,
 } from './types'
 import {
@@ -58,6 +60,8 @@ export const executionQueue = signal<DashboardExecutionQueueItem[]>([])
 export const executionSessionBriefs = signal<DashboardExecutionSessionBrief[]>([])
 export const executionOperationBriefs = signal<DashboardExecutionOperationBrief[]>([])
 export const executionWorkerSupportBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
+export const executionLodgeTick = signal<DashboardExecutionLodgeTick | null>(null)
+export const executionLodgeCheckins = signal<DashboardExecutionLodgeCheckin[]>([])
 export const executionContinuityBriefs = signal<DashboardExecutionContinuityBrief[]>([])
 export const executionOfflineWorkerBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
 
@@ -465,6 +469,44 @@ function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionW
   }
 }
 
+function normalizeExecutionLodgeTick(raw: unknown): DashboardExecutionLodgeTick | null {
+  if (!isRecord(raw)) return null
+  return {
+    checked: asNumber(raw.checked),
+    acted: asNumber(raw.acted),
+    passed: asNumber(raw.passed),
+    skipped: asNumber(raw.skipped),
+    failed: asNumber(raw.failed),
+    last_tick_at: asString(raw.last_tick_at) ?? null,
+    last_skip_reason: asString(raw.last_skip_reason) ?? null,
+    activity_report: asString(raw.activity_report) ?? null,
+  }
+}
+
+function normalizeExecutionLodgeCheckin(raw: unknown): DashboardExecutionLodgeCheckin | null {
+  if (!isRecord(raw)) return null
+  const agentName = asString(raw.agent_name)
+  const outcome = asString(raw.outcome)
+  if (!agentName || !outcome) return null
+  return {
+    agent_name: agentName,
+    trigger: asString(raw.trigger) ?? null,
+    outcome,
+    summary: asString(raw.summary) ?? null,
+    reason: asString(raw.reason) ?? null,
+    allowed_tool_names: asStringArray(raw.allowed_tool_names) ?? [],
+    used_tool_names: asStringArray(raw.used_tool_names) ?? [],
+    used_tool_call_count: asNumber(raw.used_tool_call_count) ?? null,
+    action_kind: asString(raw.action_kind) ?? 'none',
+    tool_audit_source: asString(raw.tool_audit_source) ?? null,
+    tool_audit_at: asString(raw.tool_audit_at) ?? null,
+    checked_at: asString(raw.checked_at) ?? null,
+    decision_reason: asString(raw.decision_reason) ?? null,
+    worker_name: asString(raw.worker_name) ?? null,
+    failure_reason: asString(raw.failure_reason) ?? null,
+  }
+}
+
 function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecutionContinuityBrief | null {
   if (!isRecord(raw)) return null
   const name = asString(raw.name)
@@ -494,6 +536,17 @@ function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecutionCont
     emoji: asString(raw.emoji),
     korean_name: asString(raw.korean_name),
     skill_reason: asString(raw.skill_reason) ?? null,
+    recent_input_preview: asString(raw.recent_input_preview) ?? null,
+    recent_output_preview: asString(raw.recent_output_preview) ?? null,
+    recent_tool_names: asStringArray(raw.recent_tool_names) ?? [],
+    allowed_tool_names: asStringArray(raw.allowed_tool_names) ?? [],
+    latest_tool_names: asStringArray(raw.latest_tool_names) ?? [],
+    latest_tool_call_count: asNumber(raw.latest_tool_call_count) ?? null,
+    tool_audit_source: asString(raw.tool_audit_source) ?? null,
+    tool_audit_at: asString(raw.tool_audit_at) ?? null,
+    last_proactive_preview: asString(raw.last_proactive_preview) ?? null,
+    continuity_summary: asString(raw.continuity_summary) ?? null,
+    skill_route_summary: asString(raw.skill_route_summary) ?? null,
   }
 }
 
@@ -1074,6 +1127,10 @@ export async function refreshExecution(): Promise<void> {
     messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
     keepers.value = normalizeKeepers(data.keepers, normalizedStatus ?? serverStatus.value)
     executionSummary.value = normalizeExecutionSummary(data.summary)
+    executionLodgeTick.value = normalizeExecutionLodgeTick(data.lodge_tick)
+    executionLodgeCheckins.value = (Array.isArray(data.lodge_checkins) ? data.lodge_checkins : [])
+      .map(normalizeExecutionLodgeCheckin)
+      .filter((row): row is DashboardExecutionLodgeCheckin => row !== null)
     executionQueue.value = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])
       .map(normalizeExecutionQueueItem)
       .filter((row): row is DashboardExecutionQueueItem => row !== null)

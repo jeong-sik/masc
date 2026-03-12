@@ -4,7 +4,11 @@ open Tool_args
 open Keeper_types
 open Keeper_memory
 open Keeper_alerting
+open Keeper_exec_persona
+open Keeper_exec_tools
+open Keeper_keepalive
 open Keeper_execution
+open Keeper_exec_status
 
 type tool_result = Keeper_types.tool_result
 
@@ -664,7 +668,7 @@ let handle_keeper_list ctx args : tool_result =
               ("will", if String.trim m.will = "" then `Null else `String m.will);
               ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
               ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
-              ("keepalive_running", `Bool (Hashtbl.mem keepalives m.name));
+              ("keepalive_running", `Bool (keeper_keepalive_running m.name));
               ("active_model", `String active_model);
               ("next_model_hint", match next_model_hint with Some s -> `String s | None -> `Null);
               ("keeper_age_s", `Float keeper_age_s);

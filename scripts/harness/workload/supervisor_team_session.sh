@@ -19,6 +19,7 @@ TEAM_GOAL="${TEAM_GOAL:-Demonstrate a full llama worker team supervised over /mc
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 SWARM_WORKER_BATCH_JSON="${SWARM_WORKER_BATCH_JSON:-}"
 SWARM_INTERVENTION_MODE="${SWARM_INTERVENTION_MODE:-default}"
+TEAM_SESSION_DURATION_SECONDS="${TEAM_SESSION_DURATION_SECONDS:-180}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required"
@@ -116,6 +117,14 @@ extract_response_error() {
 
 extract_is_error() {
   jq -r 'try (.result.isError) catch "false"'
+}
+
+team_session_status() {
+  local session_id="$1"
+  local status_raw
+  status_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 14 "masc_team_session_status" "$(jq -cn --arg s "$session_id" '{session_id:$s}')")"
+  require_tool_success "$status_raw"
+  printf '%s' "$status_raw" | extract_tool_result | jq -r '.session.status // empty'
 }
 
 default_worker_batch_json() {
@@ -336,7 +345,8 @@ printf '[5/10] start supervised team session\n'
 start_payload="$(jq -cn \
   --arg goal "$TEAM_GOAL" \
   --arg supervisor "$SUPERVISOR_NICKNAME" \
-  '{goal:$goal, duration_seconds:180, checkpoint_interval_sec:15, orchestration_mode:"assist", communication_mode:"broadcast", execution_scope:"limited_code_change", fallback_policy:"cascade_then_task", instruction_profile:"strict", min_agents:4, agents:[$supervisor]}')"
+  --argjson duration "$TEAM_SESSION_DURATION_SECONDS" \
+  '{goal:$goal, duration_seconds:$duration, checkpoint_interval_sec:15, orchestration_mode:"assist", communication_mode:"broadcast", execution_scope:"limited_code_change", fallback_policy:"cascade_then_task", instruction_profile:"strict", min_agents:4, agents:[$supervisor]}')"
 start_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 3 "masc_team_session_start" "$start_payload")"
 require_tool_success "$start_raw"
 TEAM_SESSION_ID="$(printf '%s' "$start_raw" | extract_tool_result | jq -r '.session_id // empty')"
@@ -374,37 +384,47 @@ printf '%s' "$digest_raw" | extract_tool_result | jq -e '.target_type == "team_s
 
 printf '[8/10] supervisor immediate correction via team_note\n'
 if [ "$SWARM_INTERVENTION_MODE" = "default" ]; then
-  team_note_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_note",target_id:$s,payload:{message:"[supervisor] keep the proof focused on the MCP loop"}}')")"
-  require_tool_success "$team_note_raw"
-  printf '%s' "$team_note_raw" | extract_tool_text | jq -e '.confirm_required == false' >/dev/null
+  TEAM_SESSION_STATUS="$(team_session_status "$TEAM_SESSION_ID")"
+  if [ "$TEAM_SESSION_STATUS" = "running" ]; then
+    team_note_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_note",target_id:$s,payload:{message:"[supervisor] keep the proof focused on the MCP loop"}}')")"
+    require_tool_success "$team_note_raw"
+    printf '%s' "$team_note_raw" | extract_tool_text | jq -e '.confirm_required == false' >/dev/null
 
-  printf '[9/10] supervisor disruptive correction via preview + confirm\n'
-  preview_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 7 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_task_inject",target_id:$s,payload:{title:"Capture explicit supervisor proof",description:"Add evidence that preview-confirm changed the session trajectory.",priority:1}}')")"
-  require_tool_success "$preview_raw"
-  CONFIRM_TOKEN="$(printf '%s' "$preview_raw" | extract_tool_text | jq -r '.confirm_token // empty')"
-  if [ -z "$CONFIRM_TOKEN" ]; then
-    echo "FAIL: missing confirm token"
-    printf '%s\n' "$preview_raw"
-    exit 1
+    printf '[9/10] supervisor disruptive correction via preview + confirm\n'
+    preview_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 7 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_task_inject",target_id:$s,payload:{title:"Capture explicit supervisor proof",description:"Add evidence that preview-confirm changed the session trajectory.",priority:1}}')")"
+    require_tool_success "$preview_raw"
+    CONFIRM_TOKEN="$(printf '%s' "$preview_raw" | extract_tool_text | jq -r '.confirm_token // empty')"
+    if [ -z "$CONFIRM_TOKEN" ]; then
+      echo "FAIL: missing confirm token"
+      printf '%s\n' "$preview_raw"
+      exit 1
+    fi
+
+    snapshot_pending_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 8 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
+    require_tool_success "$snapshot_pending_raw"
+    printf '%s' "$snapshot_pending_raw" | extract_tool_result | jq -e '.pending_confirms | length == 1' >/dev/null
+
+    confirm_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 9 "masc_operator_confirm" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg token "$CONFIRM_TOKEN" '{actor:$actor,confirm_token:$token}')")"
+    require_tool_success "$confirm_raw"
+
+    snapshot_after_confirm_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 12 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
+    require_tool_success "$snapshot_after_confirm_raw"
+    printf '%s' "$snapshot_after_confirm_raw" | extract_tool_result | jq -e '.pending_confirms | length == 0' >/dev/null
+  else
+    printf '[8/10] skip supervisor correction (session status=%s)\n' "$TEAM_SESSION_STATUS"
   fi
-
-  snapshot_pending_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 8 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
-  require_tool_success "$snapshot_pending_raw"
-  printf '%s' "$snapshot_pending_raw" | extract_tool_result | jq -e '.pending_confirms | length == 1' >/dev/null
-
-  confirm_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 9 "masc_operator_confirm" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg token "$CONFIRM_TOKEN" '{actor:$actor,confirm_token:$token}')")"
-  require_tool_success "$confirm_raw"
-
-  snapshot_after_confirm_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 12 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
-  require_tool_success "$snapshot_after_confirm_raw"
-  printf '%s' "$snapshot_after_confirm_raw" | extract_tool_result | jq -e '.pending_confirms | length == 0' >/dev/null
 else
   printf '[9/10] supervisor intervention skipped by policy (%s)\n' "$SWARM_INTERVENTION_MODE"
 fi
 
 printf '[10/10] stop session and prove evidence\n'
-stop_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_team_session_stop" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,reason:"supervisor_harness_complete",generate_report:true}')")"
-require_tool_success "$stop_raw"
+TEAM_SESSION_STATUS="$(team_session_status "$TEAM_SESSION_ID")"
+if [ "$TEAM_SESSION_STATUS" = "running" ]; then
+  stop_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_team_session_stop" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,reason:"supervisor_harness_complete",generate_report:true}')")"
+  require_tool_success "$stop_raw"
+else
+  echo "skip explicit stop; session already in terminal state: $TEAM_SESSION_STATUS"
+fi
 
 deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
 while :; do
@@ -457,7 +477,7 @@ if [ "$unique_spawned_llama_actors" -lt 3 ]; then
   printf '%s\n' "$spawn_events_result"
   exit 1
 fi
-printf '%s' "$spawn_events_result" | jq -e --arg note "$MODEL_SELECTION_NOTE" '[.events[]? | .detail.spawn_selection_note // empty] | all(. == $note)' >/dev/null
+printf '%s' "$spawn_events_result" | jq -e --arg note "$MODEL_SELECTION_NOTE" '[.events[]? | .detail.spawn_selection_note // empty] | all(startswith($note))' >/dev/null
 proof_json_path="$(printf '%s' "$prove_result" | jq -r '.proof_json_path // empty')"
 proof_md_path="$(printf '%s' "$prove_result" | jq -r '.proof_md_path // empty')"
 

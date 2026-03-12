@@ -2,7 +2,8 @@
     Runtime-only mutable state stays behind keeper runtime/execution modules. *)
 
 open Keeper_types
-open Keeper_execution
+open Keeper_keepalive
+open Keeper_exec_status
 
 let maybe_promote_live_legacy_keeper config name =
   match read_meta config name with
@@ -96,7 +97,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 && (m.last_turn_ts <= 0.0
                     || now_ts -. m.last_turn_ts >= stale_turn_sec)
               in
-              let already_running = Hashtbl.mem keepalives m.name in
+              let already_running = keeper_keepalive_running m.name in
               let started_here =
                 if stale_now then false
                 else if already_running then false

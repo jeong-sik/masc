@@ -38,7 +38,10 @@ export function toolAuditStateLabel(state: ToolAuditEmptyState): string {
 }
 
 export function allowlistEmptyState(keeper: Keeper | null | undefined): ToolAuditEmptyState {
-  return linkedRuntimeState(keeper) === 'unlinked' ? 'unlinked' : 'not_collected'
+  const runtime = linkedRuntimeState(keeper)
+  if (runtime === 'unlinked') return 'unlinked'
+  if (runtime === 'offline') return 'offline'
+  return 'not_collected'
 }
 
 export function observedToolsEmptyState(

@@ -651,6 +651,9 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state_opt =
     if Room.is_initialized config then Some (Room.read_state config) else None
   in
+  let current_room =
+    if Room.is_initialized config then Room.current_room_id config else "default"
+  in
   let project =
     match room_state_opt with
     | Some room_state -> room_state.project
@@ -665,10 +668,11 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   `Assoc
     [
-      ("room", `String project);
+      ("room", `String current_room);
       ("room_base_path", `String config.base_path);
       ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
       ("project", `String project);
+      ("current_room", `String current_room);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool paused);
       ("lodge", lodge_json);

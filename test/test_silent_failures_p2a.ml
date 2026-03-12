@@ -125,11 +125,16 @@ let file_contains_pattern file_rel pattern =
     str_contains content pattern
   end
 
+let any_file_contains_pattern files pattern =
+  List.exists (fun file_rel -> file_contains_pattern file_rel pattern) files
+
 (* HIGH priority patterns *)
 
 let test_source_main_keeper_bootstrap () =
-  check bool "main_eio.ml has keeper bootstrap logging"
-    true (file_contains_pattern "bin/main_eio.ml"
+  check bool "runtime bootstrap has keeper bootstrap logging"
+    true
+    (any_file_contains_pattern
+       [ "bin/main_eio.ml"; "lib/server_runtime_bootstrap.ml" ]
       {|[main] keeper bootstrap failed:|})
 
 let test_source_metrics_fd_close () =
@@ -148,8 +153,10 @@ let test_source_llm_token_parse () =
       {|[llm] token field missing or wrong type|})
 
 let test_source_keeper_proactive () =
-  check bool "keeper_execution.ml has proactive emission logging"
-    true (file_contains_pattern "lib/keeper_execution.ml"
+  check bool "keeper runtime has proactive emission logging"
+    true
+    (any_file_contains_pattern
+       [ "lib/keeper_execution.ml"; "lib/keeper_keepalive.ml" ]
       {|[keeper] proactive emission failed:|})
 
 (* MEDIUM priority patterns *)

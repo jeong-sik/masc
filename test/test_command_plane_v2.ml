@@ -36,6 +36,16 @@ let write_text_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 let unwrap_ok = function
   | Ok value -> value
   | Error message -> failwith message
@@ -1992,6 +2002,50 @@ let test_swarm_live_run_rejects_invalid_run_id () =
         "invalid chain run_id: only [A-Za-z0-9_-] are allowed"
         Yojson.Safe.Util.(json |> member "message" |> to_string))
 
+let test_swarm_live_run_reports_sync_self_unsupported_after_preflight () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "tester"));
+      let script_path = Filename.concat base_dir "fake_swarm_live.sh" in
+      write_text_file script_path
+        "#!/usr/bin/env bash\nset -euo pipefail\nif [ \"${PREFLIGHT_ONLY:-0}\" = \"1\" ]; then\n  exit 0\nfi\nexit 99\n";
+      Unix.chmod script_path 0o755;
+      let ctx : _ Tool_command_plane.context =
+        {
+          config;
+          agent_name = "tester";
+          sw = None;
+          clock = None;
+          net = None;
+          mcp_state = None;
+          mcp_session_id = None;
+          auth_token = None;
+        }
+      in
+      with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" (fun () ->
+        with_env "MASC_SWARM_LIVE_SCRIPT" script_path (fun () ->
+          with_env "MASC_SWARM_LIVE_ALLOW_SYNC_SELF" "0" (fun () ->
+            let ok, body =
+              Tool_command_plane.handle_swarm_live_run ctx
+                (`Assoc
+                  [
+                    ("run_id", `String "sync-self-blocked");
+                    ("worker_count", `Int 1);
+                  ])
+            in
+            Alcotest.(check bool) "sync self blocked" false ok;
+            let json = Yojson.Safe.from_string body in
+            Alcotest.(check string) "status error" "error"
+              Yojson.Safe.Util.(json |> member "status" |> to_string);
+            Alcotest.(check string) "runtime blocker"
+              "sync_self_unsupported"
+              Yojson.Safe.Util.(json |> member "runtime_blocker" |> to_string);
+            Alcotest.(check bool) "doctor path included" true
+              Yojson.Safe.Util.(json |> member "runtime_doctor_path" <> `Null)))))
+
 let () =
   Alcotest.run "Command_plane_v2"
     [
@@ -2074,6 +2128,8 @@ let () =
             test_swarm_live_run_with_runner_returns_error_on_exception;
           Alcotest.test_case "swarm live wrapper rejects invalid run_id" `Quick
             test_swarm_live_run_rejects_invalid_run_id;
+          Alcotest.test_case "swarm live reports sync self unsupported" `Quick
+            test_swarm_live_run_reports_sync_self_unsupported_after_preflight;
           Alcotest.test_case "summary json omits heavy arrays" `Quick
             test_summary_json_omits_heavy_arrays_and_keeps_summaries;
           Alcotest.test_case "summary swarm proof prefers artifact" `Quick

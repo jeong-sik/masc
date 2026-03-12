@@ -5,6 +5,9 @@ harness_find_server_exe() {
   local repo_root="$1"
   local explicit="${2:-}"
   local common_root=""
+  local dune_build_dir="${DUNE_BUILD_DIR:-_build}"
+  local repo_build_dir="$repo_root/$dune_build_dir"
+  local common_build_dir=""
   if [[ -n "$explicit" && -x "$explicit" ]]; then
     printf '%s\n' "$explicit"
     return 0
@@ -18,15 +21,25 @@ harness_find_server_exe() {
         common_dir="$repo_root/$common_dir"
       fi
       common_root="$(cd "$(dirname "$common_dir")" && pwd)"
+      common_build_dir="$common_root/$dune_build_dir"
+    fi
+  fi
+
+  if [[ "$dune_build_dir" = /* ]]; then
+    repo_build_dir="$dune_build_dir"
+    if [[ -n "$common_root" ]]; then
+      common_build_dir="$dune_build_dir"
     fi
   fi
 
   local -a candidates=(
+    "${repo_build_dir}/default/bin/main_eio.exe"
     "${repo_root}/_build/default/bin/main_eio.exe"
     "${repo_root}/bin/main_eio.exe"
   )
   if [[ -n "$common_root" && "$common_root" != "$repo_root" ]]; then
     candidates+=(
+      "${common_build_dir}/default/bin/main_eio.exe"
       "${common_root}/_build/default/bin/main_eio.exe"
       "${common_root}/bin/main_eio.exe"
     )
@@ -78,7 +91,9 @@ harness_start_server() {
     export MASC_STORAGE_TYPE="filesystem"
     export MASC_LODGE_ENABLED="0"
     export MASC_LODGE_DAEMON_ENABLED="0"
+    export MASC_SENTINEL_ENABLED="0"
     export MASC_GUARDIAN_ENABLED="0"
+    export MASC_GARDENER_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"

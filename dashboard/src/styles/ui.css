@@ -262,6 +262,14 @@ button.agent-card:hover {
   gap: 10px;
 }
 
+.monitor-nested-card {
+  border: 1px solid rgba(138, 163, 211, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
 button.monitor-alert,
 button.monitor-row {
   width: 100%;
@@ -431,4 +439,3 @@ button.monitor-row.bad {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
-

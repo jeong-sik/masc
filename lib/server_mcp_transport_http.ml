@@ -161,9 +161,43 @@ let legacy_messages_endpoint_url (request : Httpun.Request.t) session_id =
   | None -> Printf.sprintf "/messages?session_id=%s" session_id
 
 let get_protocol_version (request : Httpun.Request.t) =
-  match Httpun.Headers.get request.headers "mcp-protocol-version" with
+  match get_header_any_case request.headers "mcp-protocol-version" with
   | Some v -> v
   | None -> mcp_protocol_version_default
+
+let get_protocol_version_header_opt (request : Httpun.Request.t) =
+  get_header_any_case request.headers "mcp-protocol-version"
+
+let validate_protocol_version_continuity ~session_id request =
+  let validate_supported version =
+    if is_valid_protocol_version version then
+      Ok ()
+    else
+      Error (Printf.sprintf "Unsupported MCP-Protocol-Version: %s" version)
+  in
+  let provided = get_protocol_version_header_opt request in
+  match Hashtbl.find_opt protocol_version_by_session session_id with
+  | Some expected -> (
+      let ( let* ) = Result.bind in
+      match provided with
+      | None ->
+          Error
+            (Printf.sprintf
+               "MCP-Protocol-Version header required for existing session %s (expected %s)."
+               session_id expected)
+      | Some version ->
+          let* () = validate_supported version in
+          if String.equal version expected then
+            Ok ()
+          else
+            Error
+              (Printf.sprintf
+                 "MCP-Protocol-Version mismatch for session %s: expected %s, got %s."
+                 session_id expected version))
+  | None -> (
+      match provided with
+      | Some version -> validate_supported version
+      | None -> Ok ())
 
 let get_protocol_version_for_session ?session_id request =
   match session_id with
@@ -514,7 +548,22 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
       in
       let response = Httpun.Response.create ~headers `Conflict in
       Httpun.Reqd.respond_with_string reqd response body
-  | Ok () ->
+  | Ok () -> (
+      match validate_protocol_version_continuity ~session_id request with
+      | Error msg ->
+          let body =
+            Printf.sprintf
+              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
+              (Yojson.Safe.to_string (`String msg))
+          in
+          let headers =
+            Httpun.Headers.of_list
+              (("content-length", string_of_int (String.length body))
+              :: json_headers ~deps session_id protocol_version origin)
+          in
+          let response = Httpun.Response.create ~headers `Bad_request in
+          Httpun.Reqd.respond_with_string reqd response body
+      | Ok () ->
       remember_mcp_profile session_id profile;
       (match auth_result with
       | Error msg ->
@@ -682,7 +731,22 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
       in
       let response = Httpun.Response.create ~headers `Conflict in
       Httpun.Reqd.respond_with_string reqd response msg
-  | Ok () ->
+  | Ok () -> (
+      match validate_protocol_version_continuity ~session_id request with
+      | Error msg ->
+          let body =
+            Printf.sprintf
+              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
+              (Yojson.Safe.to_string (`String msg))
+          in
+          let headers =
+            Httpun.Headers.of_list
+              (("content-length", string_of_int (String.length body))
+              :: json_headers ~deps session_id protocol_version origin)
+          in
+          let response = Httpun.Response.create ~headers `Bad_request in
+          Httpun.Reqd.respond_with_string reqd response body
+      | Ok () ->
       remember_mcp_profile session_id profile;
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
@@ -774,7 +838,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
             Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
-              session_id client_count Sse.max_clients)
+              session_id client_count Sse.max_clients))
 
 let sse_simple_handler ~deps request reqd =
   let origin = deps.get_origin request in
@@ -894,7 +958,28 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
               in
               let response = Httpun.Response.create ~headers `Conflict in
               Httpun.Reqd.respond_with_string reqd response msg
-          | Ok () ->
+          | Ok () -> (
+              match validate_protocol_version_continuity ~session_id request with
+              | Error msg ->
+                  let body =
+                    Printf.sprintf
+                      {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
+                      (Yojson.Safe.to_string (`String msg))
+                  in
+                  let protocol_version =
+                    get_protocol_version_for_session ~session_id request
+                  in
+                  let headers =
+                    Httpun.Headers.of_list
+                      (("content-length", string_of_int (String.length body))
+                      :: json_headers ~deps session_id protocol_version
+                           (deps.get_origin request))
+                  in
+                  let response =
+                    Httpun.Response.create ~headers `Bad_request
+                  in
+                  Httpun.Reqd.respond_with_string reqd response body
+              | Ok () ->
               stop_sse_session session_id;
               Sse.unregister session_id;
               Mcp_eio.clear_resource_subscriptions_for_session session_id;
@@ -906,7 +991,7 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                   :: mcp_headers session_id (get_protocol_version request))
               in
               let response = Httpun.Response.create ~headers `No_content in
-              Httpun.Reqd.respond_with_string reqd response "")
+              Httpun.Reqd.respond_with_string reqd response ""))
       | None ->
           let body = "Mcp-Session-Id required" in
           let headers =

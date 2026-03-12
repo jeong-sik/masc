@@ -8,6 +8,7 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Mcp = Masc_mcp.Mcp_server
 module Config = Masc_mcp.Config
 module Mode = Masc_mcp.Mode
+module Sse = Masc_mcp.Sse
 
 (* ===== Test Helpers ===== *)
 
@@ -1766,6 +1767,194 @@ let test_handle_request_resources_subscribe_roundtrip () =
    | _ -> Alcotest.fail "unsubscribe response not an object");
   cleanup_dir base_path
 
+let test_resource_notifications_precise_for_broadcast () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Full in
+  let actor_sid = "resource-broadcast-actor" in
+  let tasks_sid = "resource-broadcast-tasks" in
+  let messages_sid = "resource-broadcast-messages" in
+  let events_sid = "resource-broadcast-events" in
+  let tasks_notifications = ref [] in
+  let messages_notifications = ref [] in
+  let events_notifications = ref [] in
+  let register sid bucket =
+    let push msg = bucket := msg :: !bucket in
+    ignore (Sse.register sid ~push ~last_event_id:0)
+  in
+  let call_tool sid id name arguments =
+    let request =
+      Yojson.Safe.to_string
+        (`Assoc
+          [
+            ("jsonrpc", `String "2.0");
+            ("id", `Int id);
+            ("method", `String "tools/call");
+            ( "params",
+              `Assoc
+                [
+                  ("name", `String name);
+                  ("arguments", arguments);
+                ] );
+          ])
+    in
+    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
+  in
+  let subscribe sid uri =
+    let request =
+      Yojson.Safe.to_string
+        (`Assoc
+          [
+            ("jsonrpc", `String "2.0");
+            ("id", `Int 250);
+            ("method", `String "resources/subscribe");
+            ("params", `Assoc [ ("uri", `String uri) ]);
+          ])
+    in
+    ignore
+      (Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request)
+  in
+  register tasks_sid tasks_notifications;
+  register messages_sid messages_notifications;
+  register events_sid events_notifications;
+  subscribe tasks_sid "masc://tasks";
+  subscribe messages_sid "masc://messages?since_seq=0&limit=10";
+  subscribe events_sid "masc://events?limit=50";
+  let init_response =
+    call_tool actor_sid 252 "masc_init" (`Assoc [])
+  in
+  (match init_response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "init success" true (List.mem_assoc "result" fields)
+   | _ -> Alcotest.fail "init response not object");
+  let join_response =
+    call_tool actor_sid 253 "masc_join"
+      (`Assoc [ ("agent_name", `String "resource-broadcast-actor") ])
+  in
+  (match join_response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "join success" true (List.mem_assoc "result" fields)
+   | _ -> Alcotest.fail "join response not object");
+  let broadcast_response =
+    call_tool actor_sid 254 "masc_broadcast"
+      (`Assoc [ ("message", `String "resource notification precision") ])
+  in
+  (match broadcast_response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "broadcast success" true
+         (List.mem_assoc "result" fields)
+   | _ -> Alcotest.fail "broadcast response not object");
+  Alcotest.(check int) "tasks untouched" 0 (List.length !tasks_notifications);
+  Alcotest.(check bool) "messages notified" true
+    (List.length !messages_notifications > 0);
+  Alcotest.(check bool) "events notified" true
+    (List.length !events_notifications > 0);
+  List.iter Mcp_eio.clear_resource_subscriptions_for_session
+    [ tasks_sid; messages_sid; events_sid ];
+  List.iter Sse.unregister [ tasks_sid; messages_sid; events_sid ];
+  cleanup_dir base_path
+
+let test_resource_notifications_precise_for_task_write () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Full in
+  let actor_sid = "resource-task-actor" in
+  let tasks_sid = "resource-task-tasks" in
+  let messages_sid = "resource-task-messages" in
+  let events_sid = "resource-task-events" in
+  let tasks_notifications = ref [] in
+  let messages_notifications = ref [] in
+  let events_notifications = ref [] in
+  let register sid bucket =
+    let push msg = bucket := msg :: !bucket in
+    ignore (Sse.register sid ~push ~last_event_id:0)
+  in
+  let call_tool sid id name arguments =
+    let request =
+      Yojson.Safe.to_string
+        (`Assoc
+          [
+            ("jsonrpc", `String "2.0");
+            ("id", `Int id);
+            ("method", `String "tools/call");
+            ( "params",
+              `Assoc
+                [
+                  ("name", `String name);
+                  ("arguments", arguments);
+                ] );
+          ])
+    in
+    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
+  in
+  let subscribe sid uri =
+    let request =
+      Yojson.Safe.to_string
+        (`Assoc
+          [
+            ("jsonrpc", `String "2.0");
+            ("id", `Int 251);
+            ("method", `String "resources/subscribe");
+            ("params", `Assoc [ ("uri", `String uri) ]);
+          ])
+    in
+    ignore
+      (Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request)
+  in
+  register tasks_sid tasks_notifications;
+  register messages_sid messages_notifications;
+  register events_sid events_notifications;
+  subscribe tasks_sid "masc://tasks";
+  subscribe messages_sid "masc://messages?since_seq=0&limit=10";
+  subscribe events_sid "masc://events?limit=50";
+  let init_response =
+    call_tool actor_sid 255 "masc_init" (`Assoc [])
+  in
+  (match init_response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "init success" true (List.mem_assoc "result" fields)
+   | _ -> Alcotest.fail "init response not object");
+  let join_response =
+    call_tool actor_sid 256 "masc_join"
+      (`Assoc [ ("agent_name", `String "resource-task-actor") ])
+  in
+  (match join_response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "join success" true (List.mem_assoc "result" fields)
+   | _ -> Alcotest.fail "join response not object");
+  let add_response =
+    call_tool actor_sid 257 "masc_add_task"
+      (`Assoc
+        [
+          ("title", `String "resource notification task");
+          ("priority", `Int 2);
+          ("description", `String "task write should not ping messages");
+        ])
+  in
+  (match add_response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "task add success" true
+         (List.mem_assoc "result" fields)
+   | _ -> Alcotest.fail "task add response not object");
+  Alcotest.(check bool) "tasks notified" true
+    (List.length !tasks_notifications > 0);
+  Alcotest.(check int) "messages untouched" 0
+    (List.length !messages_notifications);
+  Alcotest.(check bool) "events notified" true
+    (List.length !events_notifications > 0);
+  List.iter Mcp_eio.clear_resource_subscriptions_for_session
+    [ tasks_sid; messages_sid; events_sid ];
+  List.iter Sse.unregister [ tasks_sid; messages_sid; events_sid ];
+  cleanup_dir base_path
+
 let test_execute_tool_help_tool () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1830,6 +2019,10 @@ let eio_tests = [
     test_handle_request_resources_subscribe_requires_session;
   "handle resources/subscribe roundtrip", `Quick,
     test_handle_request_resources_subscribe_roundtrip;
+  "resource notifications precise for broadcast", `Quick,
+    test_resource_notifications_precise_for_broadcast;
+  "resource notifications precise for task write", `Quick,
+    test_resource_notifications_precise_for_task_write;
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
   "handle tools/list mdal descriptions", `Quick,
     test_handle_request_tools_list_mdal_descriptions;

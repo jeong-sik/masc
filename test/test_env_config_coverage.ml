@@ -258,6 +258,31 @@ let test_llama_server_url_httpish () =
     (String.starts_with ~prefix:"http://" Env_config.Llama.server_url
      || String.starts_with ~prefix:"https://" Env_config.Llama.server_url)
 
+let test_llama_max_tokens_positive () =
+  check bool "max tokens positive" true (Env_config.Llama.max_tokens > 0)
+
+(* ============================================================
+   LLM Timeout Config Tests
+   ============================================================ *)
+
+let test_llm_timeout_positive () =
+  check bool "timeout positive" true (Env_config.Llm.timeout_seconds > 0.0)
+
+let test_llm_timeout_int_positive () =
+  check bool "timeout int positive" true (Env_config.Llm.timeout_seconds_int > 0)
+
+let test_operator_judge_timeout_reasonable () =
+  check bool "operator judge timeout >= 5" true
+    (Env_config.Llm.operator_judge_timeout_seconds >= 5)
+
+let test_governance_judge_timeout_reasonable () =
+  check bool "governance judge timeout >= 5" true
+    (Env_config.Llm.dashboard_governance_judge_timeout_seconds >= 5)
+
+let test_gardener_spawn_timeout_reasonable () =
+  check bool "gardener spawn timeout >= 5" true
+    (Env_config.Llm.gardener_spawn_timeout_seconds >= 5)
+
 (* ============================================================
    LLM Cache Config Tests
    ============================================================ *)
@@ -392,6 +417,17 @@ let () =
     "llama", [
       test_case "server url nonempty" `Quick test_llama_server_url_nonempty;
       test_case "server url httpish" `Quick test_llama_server_url_httpish;
+      test_case "max tokens positive" `Quick test_llama_max_tokens_positive;
+    ];
+    "llm_timeout", [
+      test_case "timeout positive" `Quick test_llm_timeout_positive;
+      test_case "timeout int positive" `Quick test_llm_timeout_int_positive;
+      test_case "operator judge timeout reasonable" `Quick
+        test_operator_judge_timeout_reasonable;
+      test_case "governance judge timeout reasonable" `Quick
+        test_governance_judge_timeout_reasonable;
+      test_case "gardener spawn timeout reasonable" `Quick
+        test_gardener_spawn_timeout_reasonable;
     ];
     "llm_cache", [
       test_case "cache enabled bool" `Quick test_llm_cache_enabled_bool;

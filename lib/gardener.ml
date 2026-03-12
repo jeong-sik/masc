@@ -961,7 +961,9 @@ let decide_intervention_with_llm ~config ~health : decision_snapshot =
 
   let model_specs = Lodge_cascade.get_cascade ~cascade_name:"gardener_spawn" () in
   let response =
-    match Llm_client.run_prompt_cascade ~temperature:0.3 ~timeout_sec:20
+    match
+      Llm_client.run_prompt_cascade ~temperature:0.3
+        ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~model_specs ~max_tokens:300 ~prompt () with
     | Ok resp -> Ok resp.content
     | Error err -> Error ("llm intervention failed: " ^ err)

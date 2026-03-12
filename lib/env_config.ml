@@ -274,7 +274,8 @@ module Llama = struct
   let default_model =
     get_string ~default:"explicit-model-required" "LLAMA_DEFAULT_MODEL"
 
-  (** Global output budget for all local llama-provider requests. *)
+  (** Upper bound for local llama-provider requests.
+      Callers may request less, but never more than this cap. *)
   let max_tokens =
     get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
 end
@@ -345,6 +346,30 @@ module Llm = struct
   (** Timeout for LLM API calls (seconds) *)
   let timeout_seconds =
     get_float ~default:30.0 "MASC_LLM_TIMEOUT_SEC"
+
+  (** Integer fallback for call sites that use second granularity only. *)
+  let timeout_seconds_int =
+    max 1 (int_of_float timeout_seconds)
+
+  (** Background operator judge timeout.
+      Falls back to the global LLM timeout unless explicitly overridden. *)
+  let operator_judge_timeout_seconds =
+    max 5
+      (get_int ~default:timeout_seconds_int "MASC_OPERATOR_JUDGE_TIMEOUT_SEC")
+
+  (** Dashboard governance judge timeout.
+      Falls back to the global LLM timeout unless explicitly overridden. *)
+  let dashboard_governance_judge_timeout_seconds =
+    max 5
+      (get_int ~default:timeout_seconds_int
+         "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC")
+
+  (** Gardener LLM decision timeout.
+      Falls back to the global LLM timeout unless explicitly overridden. *)
+  let gardener_spawn_timeout_seconds =
+    max 5
+      (get_int ~default:timeout_seconds_int
+         "MASC_GARDENER_SPAWN_LLM_TIMEOUT_SEC")
 
   (** Default GLM model for Z.ai API calls *)
   let default_model =

@@ -13,7 +13,7 @@
     - **Structural**: Ensures zero-drift as both design and code evolve.
 3.  **Git-Worktree Isolated Evolution**: Conversion happens in a clean, isolated Git worktree. MASC agents perform "self-healing" cycles (fixing lint, running tests) before a PR is ever created, making it an "Agent-to-Agent" workflow rather than "Designer-to-Developer".
 4.  **Chain-Orchestrated "Thinking"**: Exploits `llm-mcp`'s `chain.orchestrate` to handle complex UI logic (state, transitions, API integrations) that static exporters ignore. It treats a UI component as a "mini-program" to be solved, not just a layout to be exported.
-5.  **Cellular DNA Handoff**: For complex designs that exceed context windows, we use the MASC "Cellular Agent" pattern. An agent serializes its progress (DNA), and a successor picks up exactly where it left off, ensuring high-fidelity conversion of large-scale screens.
+5.  **Checkpoint-Based Handoff**: For complex designs that exceed context windows, an agent serializes progress into a compact handoff record so a successor can resume without re-scanning the entire screen tree.
 
 ## 2. Top 5 Missing Capabilities (The "Moat")
 
@@ -38,7 +38,7 @@
 ## 4. Concrete Next Steps (1-2 Week Scope)
 
 ### Week 1: Foundation & Cleanup
-- [ ] **Consolidate DB Clients**: Execute the `figma_mcp_audit_report.md` recommendations. Merge triplicated Neo4j/Postgres logic into a unified `lib/core/database`.
+- [ ] **Audit Storage Boundaries**: Before consolidating any DB clients, identify which figma-mcp modules still own connection setup and which ones are compatibility wrappers.
 - [ ] **MCP Resource Bridge**: Implement the "Virtual Canvas" (Figma-as-Resources) allowing `mcp://figma/...` URI access.
 - [ ] **SSE Live Sync**: Connect Figma webhooks to MASC's task board via SSE, so design changes automatically trigger "Update" tasks.
 

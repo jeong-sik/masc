@@ -19,7 +19,11 @@ MIN_HOT_SLOTS="${MIN_HOT_SLOTS:-10}"
 REQUIRED_FINAL_MARKERS="${REQUIRED_FINAL_MARKERS:-$WORKER_COUNT}"
 MAX_TURNS="${MAX_TURNS:-8}"
 START_SERVER="${START_SERVER:-1}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
+HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-10}"
+PROVIDER_SMOKE_TIMEOUT_SEC="${PROVIDER_SMOKE_TIMEOUT_SEC:-15}"
+HARNESS_TIMEOUT_SEC="${HARNESS_TIMEOUT_SEC:-180}"
 SLOT_SAMPLE_INTERVAL_SEC="${SLOT_SAMPLE_INTERVAL_SEC:-0.25}"
 EXPECTED_SLOTS="${EXPECTED_SLOTS:-$WORKER_COUNT}"
 EXPECTED_CTX="${EXPECTED_CTX:-262144}"
@@ -54,7 +58,7 @@ jsonrpc_call() {
   local method="$2"
   local params="$3"
   local raw
-  raw="$(curl -sS -X POST "$MCP_URL" \
+  raw="$(curl -sS --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H "mcp-session-id: $MCP_SESSION_ID" \
@@ -181,7 +185,7 @@ wait_for_http() {
   local delay="${3:-1}"
   local i=0
   while [ "$i" -lt "$attempts" ]; do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if curl -fsS --max-time "$HTTP_TIMEOUT_SEC" "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$delay"
@@ -529,7 +533,9 @@ HARNESS_ARTIFACT_FILE=""
 RUNTIME_DOCTOR_FILE=""
 
 CURRENT_STAGE="build"
-if [ "$SKIP_BUILD" = "1" ]; then
+if [ "$PREFLIGHT_ONLY" = "1" ]; then
+  echo "[1/11] preflight-only: skip build"
+elif [ "$SKIP_BUILD" = "1" ]; then
   echo "[1/11] reuse existing harness binaries"
   [ -x "$REPO_ROOT/_build/default/bin/main_eio.exe" ] || fail_stage "build_missing" "main_eio.exe missing while SKIP_BUILD=1"
   [ -x "$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" ] || fail_stage "build_missing" "agent_swarm_harness_cli.exe missing while SKIP_BUILD=1"
@@ -576,6 +582,23 @@ if [ -n "$RUNTIME_BLOCKER_FROM_DOCTOR" ]; then
   fail_stage "$RUNTIME_BLOCKER_FROM_DOCTOR" "$(jq -r '.detail // "runtime contract verification failed"' "$RUNTIME_DOCTOR_FILE")"
 fi
 
+if [ "$PREFLIGHT_ONLY" = "1" ]; then
+  CURRENT_STAGE="preflight-only"
+  jq -cn --arg run_id "$RUN_ID" '{status:"ok",preflight_only:true,run_id:$run_id}'
+  exit 0
+fi
+
+if [ "$START_SERVER" = "1" ]; then
+  CURRENT_STAGE="start-masc"
+  echo "[3/11] start isolated masc-mcp on :$PORT"
+  nohup "$REPO_ROOT/start-masc-mcp.sh" --http --port "$PORT" --base-path "$BASE_PATH" >/tmp/agent-swarm-live-${RUN_ID}.log 2>&1 &
+  SERVER_PID="$!"
+  wait_for_http "${MASC_URL}/health"
+else
+  CURRENT_STAGE="reuse-masc"
+  echo "[3/11] reusing existing masc-mcp ${MASC_URL}"
+  wait_for_http "${MASC_URL}/health"
+fi
 CURRENT_STAGE="manifest"
 echo "[5/12] describe deterministic swarm manifest"
 MANIFEST_JSON="$("$REPO_ROOT/_build/default/bin/agent_swarm_harness_cli.exe" \
@@ -667,7 +690,27 @@ fi
 call_tool_checked 90121 "masc_dispatch_tick" "$(jq -cn --arg operation_id "$OPERATION_ID" '{operation_id:$operation_id}')" >/dev/null
 OPERATION_ID_QUERY="$(urlencode "$OPERATION_ID")"
 
+HARNESS_STARTED_AT="$(date +%s)"
+while kill -0 "$HARNESS_PID" >/dev/null 2>&1; do
+  NOW_TS="$(date +%s)"
+  if [ $((NOW_TS - HARNESS_STARTED_AT)) -ge "$HARNESS_TIMEOUT_SEC" ]; then
+    kill "$HARNESS_PID" >/dev/null 2>&1 || true
+    sleep 1
+    kill -9 "$HARNESS_PID" >/dev/null 2>&1 || true
+    wait "$HARNESS_PID" >/dev/null 2>&1 || true
+    HARNESS_PID=""
+    fail_stage "harness_timeout" "agent swarm live harness exceeded ${HARNESS_TIMEOUT_SEC}s"
+  fi
+  sleep 1
+done
+set +e
 wait "$HARNESS_PID"
+HARNESS_EXIT="$?"
+set -e
+HARNESS_PID=""
+if [ "$HARNESS_EXIT" -ne 0 ]; then
+  fail_stage "harness_failed" "agent swarm live harness exited with ${HARNESS_EXIT}"
+fi
 HARNESS_PID=""
 HARNESS_RESULT="$(cat "$HARNESS_RESULT_FILE")"
 require_json "$HARNESS_RESULT"

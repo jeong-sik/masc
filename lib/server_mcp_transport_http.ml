@@ -900,6 +900,7 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
           | Ok () ->
               stop_sse_session session_id;
               Sse.unregister session_id;
+              Mcp_eio.clear_resource_subscriptions_for_session session_id;
               forget_mcp_session session_id;
               Printf.printf "🔚 Session terminated: %s\n%!" session_id;
               let headers =
@@ -997,14 +998,16 @@ let handle_ag_ui_events ~deps request reqd =
           Eio.Fiber.fork ~sw (fun () ->
               let rec loop () =
                 if not !(info.stop) then (
-                  (try Eio.Time.sleep clock sse_ping_interval_s with _ -> ());
+                  (try Eio.Time.sleep clock sse_ping_interval_s
+                   with Eio.Cancel.Cancelled _ as exn -> raise exn | _ -> ());
                   (try
                      if info.closed then
                        stop_sse_session info.session_id
                      else if not !(info.stop) then
                        ignore (send_raw info ": ping\n\n")
-                   with _ -> stop_sse_session info.session_id);
+                   with Eio.Cancel.Cancelled _ as exn -> raise exn
+                      | _ -> stop_sse_session info.session_id);
                   loop ())
               in
-              try loop () with _ -> ())
+              try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn | _ -> ())
       | _ -> ())

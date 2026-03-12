@@ -62,6 +62,13 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     description: '워커, 태스크, 키퍼 연속성을 분리해서 보는 실행 표면',
   },
   {
+    id: 'tools',
+    label: '도구',
+    icon: '\uD83E\uDDF0',
+    group: 'observe',
+    description: '시스템 전체 도구 inventory와 사용 통계를 함께 읽는 표면',
+  },
+  {
     id: 'live',
     label: '라이브',
     icon: '\uD83D\uDCE1',

@@ -3308,12 +3308,161 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
 
 type cursor_params = { cursor : string option }
 
+type tools_list_params = {
+  names : string list option;
+  include_hidden : bool;
+  include_deprecated : bool;
+  include_usage : bool;
+  mode : string option;
+  tier : string option;
+  cursor : string option;
+}
+
 let ( let* ) = Result.bind
 
 let strict_assoc_params params =
   match params with
   | None -> Ok []
   | Some (`Assoc fields) -> Ok fields
+  | Some _ -> Error "Invalid params: expected object"
+
+let cursor_param payload =
+  let open Yojson.Safe.Util in
+  match payload |> member "cursor" with
+  | `Null -> Ok None
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then
+        Error "Invalid params: cursor must not be empty"
+      else
+        Ok (Some trimmed)
+  | _ -> Error "Invalid params: cursor must be a string"
+
+let bool_param payload key =
+  let open Yojson.Safe.Util in
+  match payload |> member key with
+  | `Null -> Ok false
+  | `Bool value -> Ok value
+  | _ -> Error (Printf.sprintf "Invalid params: %s must be a boolean" key)
+
+let decode_cursor_offset = function
+  | None -> Ok 0
+  | Some raw -> (
+      match int_of_string_opt raw with
+      | Some offset when offset >= 0 -> Ok offset
+      | _ -> Error "Invalid params: cursor must be a non-negative integer string")
+
+let rec drop_list n = function
+  | xs when n <= 0 -> xs
+  | [] -> []
+  | _ :: rest -> drop_list (n - 1) rest
+
+let rec take_list n xs =
+  if n <= 0 then
+    []
+  else
+    match xs with
+    | [] -> []
+    | x :: rest -> x :: take_list (n - 1) rest
+
+let paginate_json_items ?(page_size = 128) ~field_name items cursor =
+  match decode_cursor_offset cursor with
+  | Error msg -> Error msg
+  | Ok offset ->
+      let total = List.length items in
+      let page = items |> drop_list offset |> take_list page_size in
+      let next_offset = offset + List.length page in
+      let fields =
+        [ (field_name, `List page) ]
+        @
+        if next_offset < total then
+          [ ("nextCursor", `String (string_of_int next_offset)) ]
+        else
+          []
+      in
+      Ok (`Assoc fields)
+
+let cursor_only_params params =
+  match params with
+  | None -> Ok None
+  | Some (`Assoc _ as payload) -> cursor_param payload
+  | Some _ -> Error "Invalid params: expected object"
+
+let requested_tool_list_params params =
+  let open Yojson.Safe.Util in
+  match params with
+  | None ->
+      Ok {
+        names = None;
+        include_hidden = false;
+        include_deprecated = false;
+        include_usage = false;
+        mode = None;
+        tier = None;
+        cursor = None;
+      }
+  | Some (`Assoc _ as payload) -> (
+      let names_result =
+        match payload |> member "names" with
+        | `Null -> Ok None
+        | `List items ->
+            items
+            |> List.fold_left
+                 (fun acc item ->
+                   match (acc, item) with
+                   | Error _ as err, _ -> err
+                   | Ok names, `String value -> Ok (value :: names)
+                   | Ok _, _ ->
+                       Error "Invalid params: names must be an array of strings")
+                 (Ok [])
+            |> Result.map (fun names -> Some (List.rev names))
+        | _ -> Error "Invalid params: names must be an array of strings"
+      in
+      let mode_result =
+        match payload |> member "mode" with
+        | `Null -> Ok None
+        | `String s -> Ok (Some s)
+        | _ -> Error "Invalid params: mode must be a string"
+      in
+      let tier_result =
+        match payload |> member "tier" with
+        | `Null -> Ok None
+        | `String s -> (
+            match Tool_catalog.tier_of_string (String.lowercase_ascii s) with
+            | Some _ -> Ok (Some s)
+            | None -> Error "Invalid params: tier must be one of: essential, standard, full")
+        | _ -> Error "Invalid params: tier must be a string"
+      in
+      match names_result with
+      | Error _ as err -> err
+      | Ok names -> (
+          match cursor_param payload with
+          | Error _ as err -> err
+          | Ok cursor -> (
+          match mode_result with
+          | Error _ as err -> err
+          | Ok mode -> (
+          match tier_result with
+          | Error _ as err -> err
+          | Ok tier -> (
+          match bool_param payload "include_hidden" with
+          | Error _ as err -> err
+          | Ok include_hidden -> (
+              match bool_param payload "include_deprecated" with
+              | Error _ as err -> err
+              | Ok include_deprecated -> (
+                  match bool_param payload "include_usage" with
+                  | Error _ as err -> err
+                  | Ok include_usage ->
+                      Ok {
+                        names;
+                        include_hidden;
+                        include_deprecated;
+                        include_usage;
+                        mode;
+                        tier;
+                        cursor;
+                      })))))))
   | Some _ -> Error "Invalid params: expected object"
 
 let parse_cursor_only_params params =
@@ -3399,20 +3548,59 @@ let handle_initialize_eio ?(profile = Full) id params =
         ("instructions", `String (match profile with Full -> default_instructions | Operator_remote -> operator_remote_instructions));
       ])
 
-let handle_list_tools_eio ?(profile = Full) state id cursor =
-  let schemas =
-    tool_schemas_for_profile state profile
+let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
+    ?(include_deprecated = false) ?(include_usage = false) ?mode ?tier ?cursor
+    state id =
+  let usage_summary =
+    if include_usage then
+      Some (Telemetry_eio.summarize_tool_usage ?fs:state.Mcp_server.fs state.Mcp_server.room_config)
+    else
+      None
+  in
+  let tier_filter =
+    match tier with
+    | None -> None
+    | Some s -> Tool_catalog.tier_of_string (String.lowercase_ascii s)
+  in
+  let tools =
+    tool_schemas_for_profile ~include_hidden ~include_deprecated
+      ?mode_override:mode state profile
+    |> (match names with
+       | None -> Fun.id
+       | Some wanted ->
+           List.filter (fun (schema : Types.tool_schema) ->
+             List.mem schema.name wanted))
+    |> (match tier_filter with
+       | None -> Fun.id
+       | Some t ->
+           List.filter (fun (schema : Types.tool_schema) ->
+             Tool_catalog.is_in_tier t schema.name))
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
            String.compare a.name b.name)
   in
-  match page_items_with_cursor ~kind:"tools" schemas cursor with
+  match page_items_with_cursor ~kind:"tools" tools cursor with
   | Error msg -> make_error ~id (-32602) msg
-  | Ok (schemas, next_cursor) ->
-      let tools = List.map (tool_json_for_profile profile) schemas in
+  | Ok (page, next_cursor) ->
       let result_fields =
-        [ ("tools", `List tools) ]
+        [
+          ( "tools",
+            `List
+              (List.map (tool_json_for_profile ?usage_summary profile) page) );
+        ]
         @ maybe_assoc_field "nextCursor"
             (Option.map (fun value -> `String value) next_cursor)
+      in
+      let result_fields =
+        result_fields
+        @
+        match usage_summary with
+        | Some summary ->
+            [
+              ("usageTelemetryAvailable", `Bool summary.telemetry_available);
+              ("usageTelemetryPath", `String summary.telemetry_path);
+              ("usageTotalCalls", `Int summary.total_calls);
+            ]
+        | None -> []
       in
       make_response ~id (`Assoc result_fields)
 
@@ -3600,10 +3788,12 @@ let handle_request
                        | Ok { cursor } -> handle_list_prompts_eio id cursor)
                    | "prompts/get" -> handle_get_prompt_eio state id req.params
                    | "tools/list" -> (
-                       match parse_cursor_only_params req.params with
+                       match requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { cursor } ->
-                           handle_list_tools_eio ~profile state id cursor)
+                       | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier; cursor } ->
+                           handle_list_tools_eio ~profile ?names ~include_hidden
+                             ~include_deprecated ~include_usage ?mode ?tier ?cursor
+                             state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

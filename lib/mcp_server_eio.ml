@@ -61,6 +61,9 @@ let validate_initialize_params = Mcp_server.validate_initialize_params
 let has_field = Mcp_server.has_field
 let get_field = Mcp_server.get_field
 
+let public_tool_help_schemas () =
+  Config.visible_tool_schemas ()
+
 (* Heartbeat module extracted to lib/heartbeat.ml for testability *)
 
 (** Unregister agent synchronously - adapter for Session.registry
@@ -186,21 +189,20 @@ let handle_read_resource_eio state id params =
           | "tool-help-index" ->
               ( "text/markdown",
                 Some
-                  (Tool_help_registry.index_markdown Config.raw_all_tool_schemas) )
+                  (Tool_help_registry.index_markdown (public_tool_help_schemas ())) )
           | s when String.starts_with ~prefix:"tool-help/" s ->
               let tool_name =
                 String.sub s (String.length "tool-help/")
                   (String.length s - String.length "tool-help/")
               in
-              let text =
+              let text_opt =
                 match
-                  Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name
+                  Tool_help_registry.find_entry (public_tool_help_schemas ()) tool_name
                 with
-                | Some entry -> Tool_help_registry.entry_markdown entry
-                | None ->
-                    Printf.sprintf "# %s\n\nUnknown tool." tool_name
+                | Some entry -> Some (Tool_help_registry.entry_markdown entry)
+                | None -> None
               in
-              ("text/markdown", Some text)
+              ("text/markdown", text_opt)
           | "status" -> ("text/markdown", Some (Room.status config))
           | "status.json" ->
               let state_json = Types.room_state_to_yojson (Room.read_state config) in
@@ -441,7 +443,10 @@ let handle_read_resource_eio state id params =
         in
 
         match text_opt with
-        | None -> make_error ~id (-32602) ("Unknown resource: " ^ uri_str)
+        | None ->
+            make_error ~id
+              ~data:(`Assoc [ ("uri", `String uri_str) ])
+              (-32002) "Resource not found"
         | Some text ->
             let contents = `List [
               `Assoc [
@@ -1565,10 +1570,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match Tool_room.dispatch simple_ctx_room ~name ~args:arguments with
   | Some result -> result
   | None ->
-  let shard_ok, shard_json = Tool_shard.execute name arguments in
-  if shard_ok then
-    (true, Yojson.Safe.pretty_to_string shard_json)
-  else
   match Tool_control.dispatch simple_ctx_control ~name ~args:arguments with
   | Some result -> result
   | None ->
@@ -2691,7 +2692,7 @@ Time: %s
       let initial_content = arg_get_string "initial_content" "" in
       let max_turns = arg_get_int "max_turns" 50 in
       let source_post_id = arg_get_string_opt "post_id" in
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if topic = "" then (false, "❌ topic required")
       else begin
         let convo_config : Council.Conversation.config = {
@@ -2723,7 +2724,7 @@ Time: %s
       let confidence = arg_get_float_opt "confidence" in
       let reply_to = arg_get_string_opt "reply_to" in
       let mentions = arg_get_string_list "mentions" in
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" || content = "" then
         (false, "❌ thread_id and content required")
       else begin
@@ -2756,7 +2757,7 @@ Time: %s
       let thread_id = arg_get_string "thread_id" "" in
       let concluder = arg_get_string "concluder" agent_name in
       let conclusion = arg_get_string "conclusion" "" in
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" || conclusion = "" then
         (false, "❌ thread_id and conclusion required")
       else begin
@@ -2775,7 +2776,7 @@ Time: %s
 
   | "masc_convo_get" ->
       let thread_id = arg_get_string "thread_id" "" in
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" then (false, "❌ thread_id required")
       else begin
         let convo_config : Council.Conversation.config = {
@@ -2790,7 +2791,7 @@ Time: %s
       end
 
   | "masc_convo_list" ->
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       let convo_config : Council.Conversation.config = {
         base_path = config.base_path;
         room = current_room;
@@ -3014,14 +3015,69 @@ let send_resource_updated_notification ~session_id ~uri =
 let broadcast_tools_list_changed () =
   Sse.broadcast (jsonrpc_notification "notifications/tools/list_changed")
 
+let dedup_strings items =
+  items |> List.sort_uniq String.compare
+
+let core_status_resource_ids =
+  [ "status"; "status.json"; "events"; "events.json" ]
+
+let task_resource_ids =
+  dedup_strings (core_status_resource_ids @ [ "tasks"; "tasks.json" ])
+
+let agent_resource_ids =
+  dedup_strings
+    (core_status_resource_ids
+    @ [ "who"; "who.json"; "agents"; "agents.json" ])
+
+let message_resource_ids =
+  dedup_strings
+    (core_status_resource_ids @ [ "messages"; "messages.json" ])
+
+let worktree_resource_ids =
+  dedup_strings
+    (core_status_resource_ids @ [ "worktrees"; "worktrees.json" ])
+
+let resource_id_of_uri uri =
+  let resource_id, _uri = Mcp_server.parse_masc_resource_uri uri in
+  resource_id
+
+let affected_resource_ids_for_tool = function
+  | "masc_add_task"
+  | "masc_claim_next"
+  | "masc_transition"
+  | "masc_update_priority"
+  | "masc_plan_set_task"
+  | "masc_plan_clear_task" ->
+      task_resource_ids
+  | "masc_init"
+  | "masc_join"
+  | "masc_leave"
+  | "masc_register_capabilities"
+  | "masc_heartbeat"
+  | "masc_suspend" ->
+      agent_resource_ids
+  | "masc_broadcast"
+  | "masc_portal_open"
+  | "masc_portal_send"
+  | "masc_portal_close" ->
+      message_resource_ids
+  | "masc_worktree_create"
+  | "masc_worktree_remove" ->
+      worktree_resource_ids
+  | _ -> core_status_resource_ids
+
 let maybe_emit_resource_notifications ~success ~tool_name =
   if success && not (Tool_dispatch.is_read_only tool_name) then
+    let affected_ids = affected_resource_ids_for_tool tool_name in
     with_resource_subscription_lock (fun () ->
         Hashtbl.iter
           (fun session_id uris ->
             Hashtbl.iter
               (fun uri () ->
-                if resource_is_dynamic uri then
+                if
+                  resource_is_dynamic uri
+                  && List.mem (resource_id_of_uri uri) affected_ids
+                then
                   send_resource_updated_notification ~session_id ~uri)
               uris)
           resource_subscriptions)
@@ -3144,16 +3200,35 @@ in
       ("quality", quality);
     ]
   in
-  let result = make_response ~id (`Assoc [
-    ("resultEnvelope", envelope);
-    ("content", `List [
-      `Assoc [
-        ("type", `String "text");
-        ("text", `String message);
-      ]
-    ]);
-    ("isError", `Bool (not success));
-  ]) in
+  let content_items =
+    [
+      `Assoc
+        [
+          ("type", `String "text");
+          ("text", `String message);
+        ]
+    ]
+  in
+  let structured_content =
+    match name with
+    | "masc_swarm_live_run"
+    | "masc_team_session_status"
+    | "masc_operator_digest" -> (
+        try Some (Yojson.Safe.from_string message) with _ -> None)
+    | _ -> None
+  in
+  let result_fields =
+    [
+      ("resultEnvelope", envelope);
+      ("content", `List content_items);
+      ("isError", `Bool (not success));
+    ]
+    @
+    match structured_content with
+    | Some value -> [ ("structuredContent", value) ]
+    | None -> []
+  in
+  let result = make_response ~id (`Assoc result_fields) in
 
   maybe_emit_resource_notifications ~success ~tool_name:name;
   if success
@@ -3290,9 +3365,51 @@ let maybe_assoc_field name = function
   | Some value -> [ (name, value) ]
   | None -> []
 
-let tool_output_schema_field _name = None
+let permissive_object_schema properties =
+  `Assoc
+    [
+      ("type", `String "object");
+      ("properties", `Assoc properties);
+      ("additionalProperties", `Bool true);
+    ]
+
+let tool_output_schema_field = function
+  | "masc_swarm_live_run" ->
+      Some
+        (permissive_object_schema
+           [
+             ("status", `Assoc [ ("type", `String "string") ]);
+             ("message", `Assoc [ ("type", `String "string") ]);
+             ("run_id", `Assoc [ ("type", `String "string") ]);
+             ("runtime_blocker", `Assoc [ ("type", `String "string") ]);
+             ("runtime_doctor_path", `Assoc [ ("type", `String "string") ]);
+             ("summary_path", `Assoc [ ("type", `String "string") ]);
+             ("swarm", `Assoc [ ("type", `String "object") ]);
+           ])
+  | "masc_team_session_status" ->
+      Some
+        (permissive_object_schema
+           [
+             ("status", `Assoc [ ("type", `String "string") ]);
+             ("result", `Assoc [ ("type", `String "object") ]);
+           ])
+  | "masc_operator_digest" ->
+      Some
+        (permissive_object_schema
+           [
+             ("target_type", `Assoc [ ("type", `String "string") ]);
+             ("target_id", `Assoc [ ("type", `String "string") ]);
+             ("health", `Assoc [ ("type", `String "string") ]);
+             ("attention_items", `Assoc [ ("type", `String "array") ]);
+             ("recommended_actions", `Assoc [ ("type", `String "array") ]);
+           ])
+  | _ -> None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
+  let implementation_status =
+    Tool_catalog.implementation_status schema.name
+    |> Tool_catalog.implementation_status_to_string
+  in
   let base =
     [
       ("name", `String schema.name);
@@ -3302,10 +3419,10 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
         `List
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
+      ("implementationStatus", `String implementation_status);
     ]
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
-    @ Tool_catalog.metadata_to_fields schema.name
     @
     match usage_summary with
     | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
@@ -3472,10 +3589,15 @@ let requested_tool_list_params params =
                       })))))))
   | Some _ -> Error "Invalid params: expected object"
 
+let validate_optional_meta payload =
+  match Yojson.Safe.Util.member "_meta" payload with
+  | `Null
+  | `Assoc _ -> Ok ()
+  | _ -> Error "Invalid params: _meta must be an object"
 let parse_cursor_only_params params =
   let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
-  let allowed = [ "cursor" ] in
+  let allowed = [ "_meta"; "cursor" ] in
   let unknown =
     fields
     |> List.filter_map (fun (key, _value) ->
@@ -3487,6 +3609,7 @@ let parse_cursor_only_params params =
          (String.concat ", " unknown))
   else
     let payload = `Assoc fields in
+    let* () = validate_optional_meta payload in
     match payload |> member "cursor" with
     | `Null -> Ok { cursor = None }
     | `String cursor -> Ok { cursor = Some cursor }
@@ -3613,7 +3736,7 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
 
 let handle_list_resources_eio id cursor =
   let tool_help_resources =
-    Config.raw_all_tool_schemas
+    public_tool_help_schemas ()
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
            String.compare a.name b.name)
     |> List.map (fun (schema : Types.tool_schema) ->

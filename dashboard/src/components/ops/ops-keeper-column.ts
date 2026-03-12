@@ -2,8 +2,8 @@
 
 import { html } from 'htm/preact'
 import { PanelSemanticDetails } from '../common/semantic-layer'
+import { KeeperConversationPanel } from '../keeper-shared'
 import {
-  operatorActionBusy,
   operatorActionLog,
   operatorSnapshot,
 } from '../../operator-store'
@@ -11,10 +11,8 @@ import {
   actionTypeLabel,
   deliveryModeLabel,
   displayStatus,
-  keeperMessage,
   relativeAge,
   selectedKeeperName,
-  submitKeeperMessage,
   targetTypeLabel,
 } from './helpers'
 
@@ -89,23 +87,11 @@ export function OpsKeeperColumn() {
               <span>활성 목표: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
             </div>
           </div>
+          <${KeeperConversationPanel}
+            keeperName=${selectedKeeper.name}
+            placeholder="구조화된 probe, 방향 수정, 재지시 내용을 적으세요"
+          />
         ` : html`<div class="ops-empty">먼저 keeper를 하나 고르세요.</div>`}
-
-        <label class="control-label" for="ops-keeper-message">Keeper 메시지</label>
-        <textarea
-          id="ops-keeper-message"
-          class="control-textarea"
-          rows=${6}
-          placeholder="구조화된 probe, 방향 수정, 재지시 내용을 적으세요"
-          value=${keeperMessage.value}
-          onInput=${(event: Event) => { keeperMessage.value = (event.target as HTMLTextAreaElement).value }}
-          disabled=${operatorActionBusy.value || !selectedKeeper}
-        ></textarea>
-        <div class="control-row">
-          <button class="control-btn" onClick=${() => { void submitKeeperMessage() }} disabled=${operatorActionBusy.value || !selectedKeeper || keeperMessage.value.trim() === ''}>
-            keeper에 보내기
-          </button>
-        </div>
       </section>
 
       <section class="card ops-panel">

@@ -1,10 +1,15 @@
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import type {
+  Agent,
+  CommandPlaneChainOverlay,
+  CommandPlaneSurface,
   CommandPlaneSwarmLane,
   CommandPlaneSwarmWorker,
-  CommandPlaneSurface,
+  Keeper,
+  OperatorLinkedAutoresearch,
   OperatorRecommendedAction,
+  OperatorResidentJudgeRuntime,
   OperatorWorkerCard,
   PendingConfirmation,
 } from '../../types'
@@ -12,6 +17,8 @@ import {
   commandPlaneChainSummary,
   commandPlaneSwarm,
   commandPlaneSwarmLoading,
+  refreshCommandPlaneChainSummary,
+  refreshCommandPlaneSwarm,
   setCommandPlaneSurface,
 } from '../../command-store'
 import {
@@ -22,6 +29,7 @@ import {
   refreshOperatorSnapshot,
 } from '../../operator-store'
 import { navigate } from '../../router'
+import { agents, keepers } from '../../store'
 import { PanelSemanticDetails } from '../common/semantic-layer'
 import {
   currentCommandPlaneSummary,
@@ -30,6 +38,7 @@ import {
   formatElapsed,
   formatPercent,
   hasSwarmActivity,
+  historySummary,
   pickWarRoomSession,
   prettyJson,
   relativeTime,
@@ -43,6 +52,7 @@ import {
   guidanceLayerLabel,
   guidanceLayerTone,
   runtimeJudgeLabel,
+  runtimeJudgeTone,
 } from '../ops/helpers'
 import { SwarmBlockerCard, SwarmHealthBar, SwarmRunResolutionCard, SwarmStoryboard } from './swarm'
 import { TraceRow } from './topology'
@@ -59,6 +69,83 @@ type WarRoomWorkerView = {
   detail: string
   markers: string[]
   note?: string | null
+}
+
+type WarRoomPresenceView = {
+  key: string
+  name: string
+  role: string
+  source: 'agent' | 'keeper' | 'resident'
+  status: string
+  tone: 'ok' | 'warn' | 'bad'
+  task: string
+  signal: string
+  detail: string
+  chips: string[]
+  note?: string | null
+}
+
+type WarRoomFeedItem = {
+  key: string
+  title: string
+  detail: string
+  meta: string
+  source: string
+  tone: 'ok' | 'warn' | 'bad'
+  timestamp?: string | null
+  sortTs: number
+}
+
+function truncate(value: string, limit = 260): string {
+  if (value.length <= limit) return value
+  return `${value.slice(0, limit - 1)}…`
+}
+
+function timestampSortValue(iso?: string | null): number {
+  if (!iso) return 0
+  const parsed = Date.parse(iso)
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+function secondsAgoLabel(seconds?: number | null): string {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return '정보 없음'
+  if (seconds < 60) return `${Math.round(seconds)}초 전`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}분 전`
+  return `${Math.round(seconds / 3600)}시간 전`
+}
+
+function summarizeSessionEvent(event: Record<string, unknown>): {
+  timestamp?: string | null
+  title: string
+  detail: string
+} {
+  const timestamp =
+    typeof event.timestamp === 'string'
+      ? event.timestamp
+      : typeof event.created_at === 'string'
+        ? event.created_at
+        : typeof event.at === 'string'
+          ? event.at
+          : null
+  const title =
+    typeof event.title === 'string'
+      ? event.title
+      : typeof event.kind === 'string'
+        ? event.kind
+        : typeof event.event === 'string'
+          ? event.event
+          : '세션 이벤트'
+  const detail =
+    typeof event.detail === 'string'
+      ? event.detail
+      : typeof event.summary === 'string'
+        ? event.summary
+        : prettyJson(event)
+  return {
+    timestamp,
+    title,
+    detail: truncate(detail, 220),
+  }
 }
 
 function warRoomSourceLabel(source: WarRoomWorkerView['source']): string {
@@ -155,8 +242,210 @@ function operatorWorkerView(worker: OperatorWorkerCard, index: number): WarRoomW
   }
 }
 
-function warRoomRecommendationTone(item: OperatorRecommendedAction): string {
-  return toneClass(item.severity)
+function agentPresenceView(agent: Agent): WarRoomPresenceView {
+  return {
+    key: `agent:${agent.name}`,
+    name: agent.name,
+    role: agent.agent_type ?? 'agent',
+    source: 'agent',
+    status: displayStatus(agent.status),
+    tone: toneClass(sessionStatusTone(agent.status)) as 'ok' | 'warn' | 'bad',
+    task: agent.current_task ?? '대기 중',
+    signal: relativeTime(agent.last_seen),
+    detail: [
+      agent.model ?? null,
+      agent.capabilities?.slice(0, 2).join(', ') || null,
+    ].filter(Boolean).join(' · ') || '글로벌 agent roster',
+    chips: [
+      agent.context_ratio != null ? `ctx ${Math.round(agent.context_ratio * 100)}%` : 'ctx n/a',
+      agent.status,
+    ],
+    note: agent.personalityHint ?? null,
+  }
+}
+
+function keeperPresenceView(keeper: Keeper): WarRoomPresenceView {
+  const tone =
+    keeper.status === 'offline' || keeper.status === 'inactive'
+      ? 'bad'
+      : keeper.status === 'active' || keeper.status === 'healthy'
+        ? 'ok'
+        : 'warn'
+  return {
+    key: `keeper:${keeper.name}`,
+    name: keeper.name,
+    role: keeper.runtime_class ?? 'keeper',
+    source: 'keeper',
+    status: displayStatus(keeper.status),
+    tone,
+    task:
+      keeper.active_goal_ids?.[0]
+      ?? keeper.last_proactive_reason
+      ?? keeper.agent?.current_task
+      ?? 'standby',
+    signal: keeper.last_heartbeat ? relativeTime(keeper.last_heartbeat) : secondsAgoLabel(keeper.last_turn_ago_s),
+    detail: [
+      keeper.autonomy_level ?? null,
+      keeper.active_model ?? keeper.primary_model ?? keeper.model ?? null,
+      keeper.keepalive_running ? 'keepalive on' : null,
+    ].filter(Boolean).join(' · ') || '글로벌 keeper roster',
+    chips: [
+      keeper.context_ratio != null ? `ctx ${Math.round(keeper.context_ratio * 100)}%` : 'ctx n/a',
+      keeper.latest_tool_call_count != null ? `tools ${keeper.latest_tool_call_count}` : 'tools n/a',
+    ],
+    note: keeper.diagnostic?.summary ?? keeper.last_proactive_preview ?? keeper.recent_output_preview ?? null,
+  }
+}
+
+function residentPresenceView(runtime: OperatorResidentJudgeRuntime): WarRoomPresenceView {
+  return {
+    key: `resident:${runtime.keeper_name ?? 'judge'}`,
+    name: runtime.keeper_name ?? 'resident-judge',
+    role: 'resident judge',
+    source: 'resident',
+    status: runtimeJudgeLabel(runtime),
+    tone: runtimeJudgeTone(runtime),
+    task: runtime.judge_online ? 'live guidance' : 'standby',
+    signal: runtime.generated_at ? relativeTime(runtime.generated_at) : '정보 없음',
+    detail: [
+      runtime.model_used ?? null,
+      runtime.last_error ? 'error' : null,
+    ].filter(Boolean).join(' · ') || 'resident runtime',
+    chips: [
+      runtime.enabled ? 'enabled' : 'disabled',
+      runtime.judge_online ? 'online' : 'offline',
+    ],
+    note: runtime.last_error ?? null,
+  }
+}
+
+function recommendationTone(item: OperatorRecommendedAction): 'ok' | 'warn' | 'bad' {
+  return toneClass(item.severity) as 'ok' | 'warn' | 'bad'
+}
+
+function buildFeedItems({
+  swarmMessages,
+  traceEvents,
+  chainOverlay,
+  linkedAutoresearch,
+  selectedSession,
+  activeRecommendedActions,
+  attentionItems,
+}: {
+  swarmMessages: Array<{ seq: number; from: string; content: string; timestamp: string }>
+  traceEvents: Array<{ event_id: string; event_type: string; actor?: string | null; source?: string; timestamp?: string; detail?: unknown }>
+  chainOverlay: CommandPlaneChainOverlay | null
+  linkedAutoresearch?: OperatorLinkedAutoresearch | null
+  selectedSession?: { session_id: string; recent_events?: Record<string, unknown>[] } | null
+  activeRecommendedActions: OperatorRecommendedAction[]
+  attentionItems: Array<{ kind: string; severity: string; summary: string; target_type: string; target_id?: string | null }>
+}): WarRoomFeedItem[] {
+  const feed: WarRoomFeedItem[] = []
+
+  for (const message of swarmMessages.slice(0, 8)) {
+    feed.push({
+      key: `message:${message.seq}`,
+      title: message.from,
+      detail: truncate(message.content, 280),
+      meta: `메시지 · seq ${message.seq}`,
+      source: 'swarm',
+      tone: 'ok',
+      timestamp: message.timestamp,
+      sortTs: timestampSortValue(message.timestamp),
+    })
+  }
+
+  for (const event of traceEvents.slice(0, 8)) {
+    feed.push({
+      key: `trace:${event.event_id}`,
+      title: event.event_type,
+      detail: truncate(prettyJson(event.detail), 280),
+      meta: [event.actor ?? null, event.source ?? null].filter(Boolean).join(' · ') || 'trace',
+      source: 'trace',
+      tone: event.event_type.includes('error') || event.event_type.includes('fail') ? 'bad' : 'warn',
+      timestamp: event.timestamp,
+      sortTs: timestampSortValue(event.timestamp),
+    })
+  }
+
+  if (chainOverlay?.history) {
+    feed.push({
+      key: `chain:${chainOverlay.operation.operation_id}:${chainOverlay.history.event}`,
+      title: `Chain · ${chainOverlay.history.event}`,
+      detail: truncate(historySummary(chainOverlay.history), 260),
+      meta: chainOverlay.history.chain_id ?? chainOverlay.operation.operation_id,
+      source: 'chain',
+      tone: chainOverlay.history.event.includes('error') || chainOverlay.history.event.includes('fail') ? 'bad' : 'warn',
+      timestamp: chainOverlay.history.timestamp,
+      sortTs: timestampSortValue(chainOverlay.history.timestamp),
+    })
+  }
+
+  if (linkedAutoresearch) {
+    const detailParts = [
+      linkedAutoresearch.last_decision ?? null,
+      linkedAutoresearch.target_file ? `target ${linkedAutoresearch.target_file}` : null,
+      linkedAutoresearch.error ?? null,
+    ].filter(Boolean)
+    feed.push({
+      key: `autoresearch:${linkedAutoresearch.loop_id ?? selectedSession?.session_id ?? 'session'}`,
+      title: `Autoresearch · ${linkedAutoresearch.status ?? 'unknown'}`,
+      detail: truncate(detailParts.join(' · ') || 'linked autoresearch context', 260),
+      meta: [
+        linkedAutoresearch.loop_id ? `loop ${linkedAutoresearch.loop_id}` : null,
+        linkedAutoresearch.current_cycle != null ? `cycle ${linkedAutoresearch.current_cycle}` : null,
+        linkedAutoresearch.best_score != null ? `best ${linkedAutoresearch.best_score}` : null,
+      ].filter(Boolean).join(' · ') || 'linked autoresearch',
+      source: 'autoresearch',
+      tone: linkedAutoresearch.error ? 'bad' : linkedAutoresearch.status === 'running' ? 'warn' : 'ok',
+      timestamp: null,
+      sortTs: 0,
+    })
+  }
+
+  for (const item of activeRecommendedActions.slice(0, 4)) {
+    feed.push({
+      key: `recommendation:${item.action_type}:${item.target_type}:${item.target_id ?? 'session'}`,
+      title: `${item.action_type} · ${item.target_type}`,
+      detail: truncate(item.reason, 240),
+      meta: item.target_id ?? 'operator recommendation',
+      source: 'recommendation',
+      tone: recommendationTone(item),
+      timestamp: null,
+      sortTs: 0,
+    })
+  }
+
+  for (const item of attentionItems.slice(0, 4)) {
+    feed.push({
+      key: `attention:${item.kind}:${item.target_id ?? 'session'}`,
+      title: `${item.kind} · ${item.target_type}`,
+      detail: truncate(item.summary, 240),
+      meta: item.target_id ?? 'attention',
+      source: 'attention',
+      tone: toneClass(item.severity) as 'ok' | 'warn' | 'bad',
+      timestamp: null,
+      sortTs: 0,
+    })
+  }
+
+  for (const [index, rawEvent] of (selectedSession?.recent_events ?? []).slice(0, 4).entries()) {
+    const event = summarizeSessionEvent(rawEvent)
+    feed.push({
+      key: `session:${selectedSession?.session_id ?? 'unknown'}:${index}`,
+      title: event.title,
+      detail: event.detail,
+      meta: selectedSession?.session_id ?? 'session',
+      source: 'session',
+      tone: 'warn',
+      timestamp: event.timestamp,
+      sortTs: timestampSortValue(event.timestamp),
+    })
+  }
+
+  return feed
+    .sort((a, b) => b.sortTs - a.sortTs || a.title.localeCompare(b.title))
+    .slice(0, 14)
 }
 
 function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
@@ -179,8 +468,46 @@ function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
         ${worker.markers.map(marker => html`<span class="command-tag">${warRoomMarkerLabel(marker)}</span>`)}
       </div>
       ${worker.note
-        ? html`<div class="command-card-foot">${worker.note}</div>`
+        ? html`<div class="command-card-foot">${truncate(worker.note, 220)}</div>`
         : null}
+    </article>
+  `
+}
+
+function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
+  return html`
+    <article class="command-card compact warroom-presence-card ${item.tone}">
+      <div class="command-card-head">
+        <div>
+          <strong>${item.name}</strong>
+          <div class="command-card-sub">${item.role} · ${item.source}</div>
+        </div>
+        <span class="command-chip ${item.tone}">${item.status}</span>
+      </div>
+      <div class="command-card-grid">
+        <span>현재 과업</span><span>${item.task}</span>
+        <span>최근 신호</span><span>${item.signal}</span>
+        <span>근거</span><span>${item.detail}</span>
+      </div>
+      <div class="command-tag-row">
+        ${item.chips.map(chip => html`<span class="command-tag">${chip}</span>`)}
+      </div>
+      ${item.note ? html`<div class="command-card-foot">${truncate(item.note, 200)}</div>` : null}
+    </article>
+  `
+}
+
+function WarRoomFeedCard({ item }: { item: WarRoomFeedItem }) {
+  return html`
+    <article class="command-trace-row warroom-feed-card ${item.tone}">
+      <div class="command-trace-main">
+        <div class="command-trace-head">
+          <strong>${item.title}</strong>
+          <span class="command-chip ${item.tone}">${item.timestamp ? relativeTime(item.timestamp) : item.source}</span>
+        </div>
+        <div class="command-card-sub">${item.meta}</div>
+      </div>
+      <div class="warroom-feed-detail">${item.detail}</div>
     </article>
   `
 }
@@ -211,7 +538,79 @@ function WarRoomJumpButton({
   `
 }
 
-export function WarRoomSurface() {
+function WarRoomOrchestrationRail({
+  chainOverlay,
+  linkedAutoresearch,
+}: {
+  chainOverlay: CommandPlaneChainOverlay | null
+  linkedAutoresearch?: OperatorLinkedAutoresearch | null
+}) {
+  if (!chainOverlay && !linkedAutoresearch) {
+    return html`<div class="command-guide-card"><p>이 세션에 붙은 chain/autoresearch 오버레이가 아직 없습니다.</p></div>`
+  }
+
+  return html`
+    <div class="warroom-orchestration-grid">
+      ${chainOverlay
+        ? html`
+            <article class="command-card warroom-orchestration-card">
+              <div class="command-card-head">
+                <div>
+                  <strong>Chain Orchestration</strong>
+                  <div class="command-card-sub">${chainOverlay.operation.operation_id}</div>
+                </div>
+                <span class="command-chip ${toneClass(sessionStatusTone(chainOverlay.operation.status))}">${displayStatus(chainOverlay.operation.status)}</span>
+              </div>
+              <div class="command-card-grid">
+                <span>Chain</span><span>${chainOverlay.runtime?.chain_id ?? chainOverlay.preview_run?.chain_id ?? 'n/a'}</span>
+                <span>Progress</span><span>${formatPercent(chainOverlay.runtime?.progress)}</span>
+                <span>Elapsed</span><span>${formatElapsed(chainOverlay.runtime?.elapsed_sec)}</span>
+                <span>최근 이벤트</span><span>${historySummary(chainOverlay.history)}</span>
+              </div>
+              <div class="command-action-row">
+                <${WarRoomJumpButton}
+                  label="체인 상세"
+                  surface="chains"
+                  params=${{ operation: chainOverlay.operation.operation_id }}
+                />
+              </div>
+            </article>
+          `
+        : null}
+      ${linkedAutoresearch
+        ? html`
+            <article class="command-card warroom-orchestration-card">
+              <div class="command-card-head">
+                <div>
+                  <strong>Autoresearch Loop</strong>
+                  <div class="command-card-sub">${linkedAutoresearch.loop_id ?? linkedAutoresearch.session_id ?? 'linked session'}</div>
+                </div>
+                <span class="command-chip ${linkedAutoresearch.error ? 'bad' : linkedAutoresearch.status === 'running' ? 'warn' : 'ok'}">${linkedAutoresearch.status ?? 'unknown'}</span>
+              </div>
+              <div class="command-card-grid">
+                <span>Cycle</span><span>${linkedAutoresearch.current_cycle ?? 0}</span>
+                <span>Best score</span><span>${linkedAutoresearch.best_score ?? 'n/a'}</span>
+                <span>Target</span><span>${linkedAutoresearch.target_file ?? 'n/a'}</span>
+                <span>Last decision</span><span>${linkedAutoresearch.last_decision ?? linkedAutoresearch.error ?? '기록 없음'}</span>
+              </div>
+              <div class="command-action-row">
+                <${WarRoomJumpButton} label="세션 개입" />
+                ${linkedAutoresearch.operation_id
+                  ? html`<${WarRoomJumpButton}
+                      label="작전 상세"
+                      surface="operations"
+                      params=${{ operation_id: linkedAutoresearch.operation_id }}
+                    />`
+                  : null}
+              </div>
+            </article>
+          `
+        : null}
+    </div>
+  `
+}
+
+export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
   const summary = currentCommandPlaneSummary()
   const swarm = commandPlaneSwarm.value
   const snapshot = operatorSnapshot.value
@@ -222,6 +621,7 @@ export function WarRoomSurface() {
         overlay => overlay.operation.operation_id === swarm.operation?.operation_id,
       ) ?? null
     : null
+  const linkedAutoresearch = selectedSession?.linked_autoresearch ?? null
   const swarmHasEvidence = hasSwarmActivity()
   const swarmWorkers = swarm?.workers ?? []
   const sessionWorkers = sessionDigest?.worker_cards ?? []
@@ -229,6 +629,15 @@ export function WarRoomSurface() {
     swarmHasEvidence && swarmWorkers.length > 0
       ? swarmWorkers.map(swarmWorkerView)
       : sessionWorkers.map(operatorWorkerView)
+  const liveAgents = agents.value.filter(agent =>
+    agent.status === 'active'
+    || agent.status === 'busy'
+    || agent.status === 'listening'
+    || agent.status === 'idle',
+  )
+  const liveKeepers = keepers.value
+    .filter(keeper => keeper.status !== 'offline' || keeper.keepalive_running || keeper.last_heartbeat)
+    .sort((left, right) => timestampSortValue(right.last_heartbeat) - timestampSortValue(left.last_heartbeat))
   const hasLiveRun = swarmHasEvidence
   const pendingApprovals = summary?.decisions.summary?.pending ?? 0
   const pendingState = selectPendingConfirmState(snapshot)
@@ -269,6 +678,47 @@ export function WarRoomSurface() {
     swarmHasEvidence
       ? (summary?.swarm_status?.lanes.filter((lane: CommandPlaneSwarmLane) => lane.present) ?? [])
       : []
+  const activeLaneId =
+    summary?.swarm_status?.narrative?.lane_id
+    ?? summary?.swarm_status?.recommended_next_action?.lane_id
+    ?? liveLanes[0]?.lane_id
+    ?? null
+  const activeLane = activeLaneId
+    ? liveLanes.find(lane => lane.lane_id === activeLaneId) ?? null
+    : liveLanes[0] ?? null
+  const presenceViews: WarRoomPresenceView[] = [
+    ...(residentRuntime ? [residentPresenceView(residentRuntime)] : []),
+    ...liveAgents.slice(0, wallboard ? 8 : 5).map(agentPresenceView),
+    ...liveKeepers.slice(0, wallboard ? 8 : 5).map(keeperPresenceView),
+  ]
+  const agentViews = presenceViews.filter(item => item.source === 'agent')
+  const keeperViews = presenceViews.filter(item => item.source === 'keeper' || item.source === 'resident')
+  const feedItems = buildFeedItems({
+    swarmMessages: swarm?.recent_messages ?? [],
+    traceEvents: swarm?.recent_trace_events ?? [],
+    chainOverlay,
+    linkedAutoresearch,
+    selectedSession,
+    activeRecommendedActions,
+    attentionItems,
+  })
+  const heroTitle =
+    swarm?.operation?.objective
+    ?? summary?.swarm_status?.narrative?.active_work
+    ?? selectedSession?.session_id
+    ?? '가동 중인 워룸'
+  const heroSummary =
+    [
+      activeSummary?.summary ?? null,
+      summary?.swarm_status?.narrative?.state ?? null,
+      summary?.swarm_status?.narrative?.active_work ?? null,
+      activeLane ? `${activeLane.label} · ${activeLane.current_step}` : null,
+    ].filter(Boolean).join(' · ')
+    || '실제 실행, 메시지, 트레이스, 상주 판단을 한 장에서 읽는 wallboard입니다.'
+
+  const [fullscreenActive, setFullscreenActive] = useState(
+    typeof document !== 'undefined' && !!document.fullscreenElement,
+  )
 
   useEffect(() => {
     void refreshOperatorSnapshot()
@@ -279,42 +729,75 @@ export function WarRoomSurface() {
     void refreshOperatorSessionDigest(selectedSession.session_id)
   }, [selectedSession?.session_id, snapshot, swarm?.detachment?.session_id])
 
+  useEffect(() => {
+    if (!wallboard) return
+    const sync = () => {
+      setFullscreenActive(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', sync)
+    sync()
+    return () => {
+      document.removeEventListener('fullscreenchange', sync)
+    }
+  }, [wallboard])
+
+  const toggleFullscreen = () => {
+    if (typeof document === 'undefined') return
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.()
+      return
+    }
+    void document.documentElement.requestFullscreen?.()
+  }
+
+  const refreshWallboard = () => {
+    void refreshOperatorSnapshot()
+    void refreshCommandPlaneSwarm()
+    void refreshCommandPlaneChainSummary()
+    if (selectedSession?.session_id) {
+      void refreshOperatorSessionDigest(selectedSession.session_id)
+    }
+  }
+
   if (!hasLiveRun && !selectedSession) {
     if (commandPlaneSwarmLoading.value || operatorLoading.value) {
       return html`<div class="empty-state">실시간 워룸 불러오는 중…</div>`
     }
     return html`
-      <section class="card command-section command-warroom-empty">
+      <section class="card command-section command-warroom-empty ${wallboard ? 'wallboard' : ''}">
         <div class="card-title-row">
           <div class="card-title">실시간 워룸</div>
           <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
         </div>
         <div class="command-warroom-empty-copy">
-          <strong>지금 보이는 실시간 실행이 없습니다</strong>
-          <p>활성 작전이나 팀 세션이 시작되면 이 화면이 자동으로 붙잡습니다.</p>
+          <span class="command-hero-kicker">Narrative Playback</span>
+          <strong>지금 붙잡을 live swarm 또는 team session이 없습니다</strong>
+          <p>chain, autoresearch, worker wallboard는 활성 작전 또는 세션이 생기면 자동으로 붙습니다. 지금은 drill-down surface로 이동하는 편이 맞습니다.</p>
         </div>
         <div class="command-action-row">
           <${WarRoomJumpButton} label="작전 보기" surface="operations" />
           <${WarRoomJumpButton} label="스웜 보기" surface="swarm" />
+          <${WarRoomJumpButton} label="체인 보기" surface="chains" />
           <${WarRoomJumpButton} label="개입 열기" />
-          <${WarRoomJumpButton} label="제어 보기" surface="control" />
         </div>
       </section>
     `
   }
 
   return html`
-    <div class="command-section-stack">
-      <section class="command-warroom-strip ${toneClass(stickyTone)}">
+    <div class="command-section-stack ${wallboard ? 'wallboard' : ''}">
+      <section class="command-warroom-strip ${toneClass(stickyTone)} ${wallboard ? 'wallboard' : ''}">
         <div class="command-warroom-strip-head">
           <div>
-            <span class="command-hero-kicker">실시간 워룸</span>
-            <strong>${swarmHasEvidence ? (swarm?.operation?.objective ?? selectedSession?.session_id ?? '가동 중인 실행') : (selectedSession?.session_id ?? '가동 중인 실행')}</strong>
+            <span class="command-hero-kicker">${wallboard ? 'War Room Wallboard' : '실시간 워룸'}</span>
+            <strong>${heroTitle}</strong>
             <div class="command-card-sub">
               ${swarmHasEvidence ? (swarm?.operation?.operation_id ?? '작전 정보 없음') : '세션 기준값'}
               ${selectedSession?.session_id ? ` · 세션 ${selectedSession.session_id}` : ''}
               ${swarmHasEvidence && swarm?.detachment?.detachment_id ? ` · 분견대 ${swarm.detachment.detachment_id}` : ''}
+              ${activeLane ? ` · 대표 레인 ${activeLane.label}` : ''}
             </div>
+            <div class="command-warroom-summary">${heroSummary}</div>
             ${activeSummary?.summary
               ? html`<div class="command-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
                   <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
@@ -322,7 +805,27 @@ export function WarRoomSurface() {
                 </div>`
               : null}
           </div>
-          <div class="command-action-row">
+          <div class="command-warroom-hero-actions">
+            <button class="control-btn ghost" onClick=${refreshWallboard}>새로고침</button>
+            ${wallboard
+              ? html`
+                  <button class="control-btn ghost" onClick=${toggleFullscreen}>
+                    ${fullscreenActive ? '전체 화면 해제' : '전체 화면'}
+                  </button>
+                  <button
+                    class="control-btn ghost"
+                    onClick=${() => {
+                      if (document.fullscreenElement) {
+                        void document.exitFullscreen?.()
+                      }
+                      setCommandPlaneSurface('warroom')
+                      navigate('command', surfaceRouteParams('warroom'))
+                    }}
+                  >
+                    표준 보기
+                  </button>
+                `
+              : null}
             <${WarRoomJumpButton}
               label="스웜 상세"
               surface="swarm"
@@ -331,8 +834,7 @@ export function WarRoomSurface() {
                 ...(swarmHasEvidence && swarm?.run_id ? { run_id: swarm.run_id } : {}),
               }}
             />
-            <${WarRoomJumpButton} label="트레이스" surface="trace" />
-            ${swarmHasEvidence && chainOverlay
+            ${chainOverlay
               ? html`<${WarRoomJumpButton}
                   label="체인"
                   surface="chains"
@@ -371,7 +873,7 @@ export function WarRoomSurface() {
         </div>
       </section>
 
-      <div class="command-warroom-grid">
+      <div class="command-warroom-grid ${wallboard ? 'wallboard' : ''}">
         <div class="command-warroom-column">
           <section class="card command-section">
             <div class="card-title-row">
@@ -403,6 +905,14 @@ export function WarRoomSurface() {
 
           <section class="card command-section">
             <div class="card-title-row">
+              <div class="card-title">오케스트레이션</div>
+              <${PanelSemanticDetails} panelId="command.chains" compact=${true} />
+            </div>
+            <${WarRoomOrchestrationRail} chainOverlay=${chainOverlay} linkedAutoresearch=${linkedAutoresearch} />
+          </section>
+
+          <section class="card command-section">
+            <div class="card-title-row">
               <div class="card-title">워커 현황</div>
               <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
             </div>
@@ -420,58 +930,11 @@ export function WarRoomSurface() {
               <div class="card-title">상황 피드</div>
               <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
             </div>
-            ${swarm && swarm.recent_messages.length > 0
-              && swarmHasEvidence
+            ${feedItems.length > 0
               ? html`<div class="command-trace-stack">
-                  ${swarm.recent_messages.map(message => html`
-                    <article class="command-trace-row">
-                      <div class="command-trace-main">
-                        <div class="command-trace-head">
-                          <strong>${message.from}</strong>
-                          <span class="command-chip">${relativeTime(message.timestamp)}</span>
-                        </div>
-                        <div class="command-card-sub">seq ${message.seq}</div>
-                      </div>
-                      <pre class="command-trace-detail">${message.content}</pre>
-                    </article>
-                  `)}
+                  ${feedItems.map(item => html`<${WarRoomFeedCard} item=${item} />`)}
                 </div>`
-              : activeRecommendedActions.length > 0 || attentionItems.length > 0
-                ? html`<div class="command-card-stack">
-                    ${activeRecommendedActions.slice(0, 4).map(item => html`
-                      <article class="command-guide-card ${warRoomRecommendationTone(item)}">
-                        <div class="command-guide-head">
-                          <strong>${item.action_type}</strong>
-                          <span class="command-chip ${warRoomRecommendationTone(item)}">${item.target_type}</span>
-                        </div>
-                        <p>${item.reason}</p>
-                      </article>
-                    `)}
-                    ${attentionItems.slice(0, 3).map(item => html`
-                      <article class="command-alert ${toneClass(item.severity)}">
-                        <div class="command-card-head">
-                          <strong>${item.kind}</strong>
-                          <span class="command-chip ${toneClass(item.severity)}">${item.severity}</span>
-                        </div>
-                        <p>${item.summary}</p>
-                      </article>
-                    `)}
-                  </div>`
-                : selectedSession?.recent_events && selectedSession.recent_events.length > 0
-                  ? html`<div class="command-trace-stack">
-                      ${selectedSession.recent_events.slice(0, 6).map((event, index) => html`
-                        <article class="command-trace-row">
-                          <div class="command-trace-main">
-                            <div class="command-trace-head">
-                              <strong>세션 이벤트 ${index + 1}</strong>
-                              <span class="command-chip">${selectedSession.session_id}</span>
-                            </div>
-                          </div>
-                          <pre class="command-trace-detail">${prettyJson(event)}</pre>
-                        </article>
-                      `)}
-                    </div>`
-                  : html`<div class="empty-state">메시지나 주의 항목이 아직 없습니다.</div>`}
+              : html`<div class="empty-state">메시지, chain, autoresearch, attention feed가 아직 없습니다.</div>`}
           </section>
 
           <section class="card command-section">
@@ -488,6 +951,30 @@ export function WarRoomSurface() {
         </div>
 
         <div class="command-warroom-column">
+          <section class="card command-section">
+            <div class="card-title-row">
+              <div class="card-title">Agents</div>
+              <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
+            </div>
+            ${agentViews.length > 0
+              ? html`<div class="warroom-presence-grid">
+                  ${agentViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
+                </div>`
+              : html`<div class="empty-state">가시적인 active agent가 아직 없습니다.</div>`}
+          </section>
+
+          <section class="card command-section">
+            <div class="card-title-row">
+              <div class="card-title">Keepers</div>
+              <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
+            </div>
+            ${keeperViews.length > 0
+              ? html`<div class="warroom-presence-grid">
+                  ${keeperViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
+                </div>`
+              : html`<div class="empty-state">가시적인 keeper/runtime 카드가 아직 없습니다.</div>`}
+          </section>
+
           <section class="card command-section">
             <div class="card-title-row">
               <div class="card-title">압력</div>
@@ -526,30 +1013,21 @@ export function WarRoomSurface() {
                     </article>
                   `
                 : null}
-            </div>
-          </section>
-
-          <section class="card command-section">
-            <div class="card-title-row">
-              <div class="card-title">현재 초점</div>
-              <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
-            </div>
-            <div class="command-card-stack">
-              ${swarmHasEvidence && swarm?.operation
+              ${activeLane
                 ? html`
                     <article class="command-card compact">
                       <div class="command-card-head">
                         <div>
-                          <strong>${swarm.operation.objective}</strong>
-                          <div class="command-card-sub">${swarm.operation.operation_id}</div>
+                          <strong>${activeLane.label}</strong>
+                          <div class="command-card-sub">${activeLane.kind} · ${activeLane.phase}</div>
                         </div>
-                        <span class="command-chip ${toneClass(sessionStatusTone(swarm.operation.status))}">${displayStatus(swarm.operation.status)}</span>
+                        <span class="command-chip ${toneClass(sessionStatusTone(activeLane.motion_state))}">${displayStatus(activeLane.motion_state)}</span>
                       </div>
                       <div class="command-card-grid">
-                        <span>유닛</span><span>${swarm.operation.assigned_unit_id}</span>
-                        <span>트레이스</span><span>${swarm.operation.trace_id}</span>
-                        <span>자율성</span><span>${swarm.operation.autonomy_level ?? '정보 없음'}</span>
-                        <span>최근 갱신</span><span>${relativeTime(swarm.operation.updated_at)}</span>
+                        <span>현재 단계</span><span>${activeLane.current_step}</span>
+                        <span>이동 사유</span><span>${activeLane.movement_reason}</span>
+                        <span>막힘 수</span><span>${activeLane.blockers.length}</span>
+                        <span>최근 이동</span><span>${relativeTime(activeLane.last_movement_at)}</span>
                       </div>
                     </article>
                   `
@@ -572,26 +1050,25 @@ export function WarRoomSurface() {
                       </div>
                     </article>
                   `
-                : null}
-              ${selectedSession
-                ? html`
-                    <article class="command-card compact">
-                      <div class="command-card-head">
-                        <div>
-                          <strong>${selectedSession.session_id}</strong>
-                          <div class="command-card-sub">현재 세션 기준</div>
+                : selectedSession
+                  ? html`
+                      <article class="command-card compact">
+                        <div class="command-card-head">
+                          <div>
+                            <strong>${selectedSession.session_id}</strong>
+                            <div class="command-card-sub">현재 세션 기준</div>
+                          </div>
+                          <span class="command-chip ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
                         </div>
-                        <span class="command-chip ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
-                      </div>
-                      <div class="command-card-grid">
-                        <span>진행률</span><span>${selectedSession.progress_pct != null ? `${selectedSession.progress_pct}%` : '정보 없음'}</span>
-                        <span>경과</span><span>${formatElapsed(selectedSession.elapsed_sec)}</span>
-                        <span>남은 시간</span><span>${formatElapsed(selectedSession.remaining_sec)}</span>
-                        <span>완료 변화량</span><span>${selectedSession.done_delta_total ?? 0}</span>
-                      </div>
-                    </article>
-                  `
-                : null}
+                        <div class="command-card-grid">
+                          <span>진행률</span><span>${selectedSession.progress_pct != null ? `${selectedSession.progress_pct}%` : '정보 없음'}</span>
+                          <span>경과</span><span>${formatElapsed(selectedSession.elapsed_sec)}</span>
+                          <span>남은 시간</span><span>${formatElapsed(selectedSession.remaining_sec)}</span>
+                          <span>완료 변화량</span><span>${selectedSession.done_delta_total ?? 0}</span>
+                        </div>
+                      </article>
+                    `
+                  : null}
             </div>
           </section>
         </div>

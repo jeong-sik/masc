@@ -2,6 +2,9 @@
 // All fetch calls go through this module for consistent auth and typing
 
 import { isRecord } from './components/common/normalize'
+import {
+  normalizeKeeperToolResponse,
+} from './keeper-message'
 import type {
   DashboardExecutionResponse,
   DashboardGovernanceResponse,
@@ -40,6 +43,7 @@ import type {
   OperatorActionResult,
   OperatorDigest,
   OperatorSnapshot,
+  KeeperConversationDetails,
   DashboardSemanticsResponse,
   CommandPlaneHelpResponse,
   CommandPlaneChainRunResponse,
@@ -287,6 +291,23 @@ interface McpCallResponse {
   error?: { message?: string }
 }
 
+export interface KeeperToolReply {
+  text: string
+  details: KeeperConversationDetails | null
+}
+
+export interface KeeperChatStreamEvent {
+  type: string
+  threadId?: string
+  runId?: string
+  messageId?: string
+  role?: string
+  delta?: string
+  name?: string
+  value?: unknown
+  timestamp?: number
+}
+
 function parseMcpHttpResponse(raw: string): McpCallResponse {
   // Streamable HTTP may return SSE-formatted payload; extract first "data:" line
   const line = raw.split('\n').find(l => l.startsWith('data: '))
@@ -317,6 +338,127 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   }, DEFAULT_MCP_TIMEOUT_MS)
   const parsed = parseMcpHttpResponse(text)
   return extractMcpText(parsed)
+}
+
+async function callKeeperMessageRaw(
+  name: string,
+  message: string,
+  models?: string[],
+): Promise<string> {
+  const args: Record<string, unknown> = { name, message }
+  if (models && models.length > 0) args.models = models
+  return callMcpTool('masc_keeper_msg', args)
+}
+
+export async function sendKeeperMessageDetailed(
+  name: string,
+  message: string,
+  models?: string[],
+): Promise<KeeperToolReply> {
+  const raw = await callKeeperMessageRaw(name, message, models)
+  return normalizeKeeperToolResponse(raw)
+}
+
+export function sendKeeperMessage(name: string, message: string, models?: string[]): Promise<string> {
+  return sendKeeperMessageDetailed(name, message, models).then(reply => reply.text)
+}
+
+function parseSseFrames(chunk: string): { frames: string[]; rest: string } {
+  const normalized = chunk.replace(/\r\n/g, '\n')
+  const frames: string[] = []
+  let start = 0
+  for (;;) {
+    const split = normalized.indexOf('\n\n', start)
+    if (split < 0) {
+      return {
+        frames,
+        rest: normalized.slice(start),
+      }
+    }
+    frames.push(normalized.slice(start, split))
+    start = split + 2
+  }
+}
+
+function parseSseEvent(frame: string): KeeperChatStreamEvent | null {
+  const dataLines = frame
+    .split('\n')
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trimStart())
+  if (dataLines.length === 0) return null
+  try {
+    return JSON.parse(dataLines.join('\n')) as KeeperChatStreamEvent
+  } catch {
+    return null
+  }
+}
+
+export async function streamKeeperMessage(
+  name: string,
+  message: string,
+  models: string[] | undefined,
+  {
+    signal,
+    onEvent,
+  }: {
+    signal?: AbortSignal
+    onEvent: (event: KeeperChatStreamEvent) => void
+  },
+): Promise<void> {
+  const res = await fetch('/api/v1/keepers/chat/stream', {
+    method: 'POST',
+    headers: {
+      ...jsonHeaders(),
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify({
+      name,
+      message,
+      ...(models && models.length > 0 ? { models } : {}),
+    }),
+    signal,
+  })
+
+  if (!res.ok) {
+    const raw = await res.text()
+    let message = raw || `Streaming request failed (${res.status})`
+    try {
+      const parsed = JSON.parse(raw) as { error?: { message?: string }; message?: string }
+      message = parsed.error?.message ?? parsed.message ?? message
+    } catch {
+      // Keep raw text fallback.
+    }
+    throw new Error(message)
+  }
+
+  if (!res.body) {
+    throw new Error('Streaming response body is unavailable')
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+      const { frames, rest } = parseSseFrames(buffer)
+      buffer = rest
+      for (const frame of frames) {
+        const event = parseSseEvent(frame)
+        if (event) onEvent(event)
+      }
+      if (done) break
+    }
+    const tail = buffer.trim()
+    if (tail) {
+      const event = parseSseEvent(tail)
+      if (event) onEvent(event)
+    }
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 // --- Dashboard projections ---
@@ -2159,12 +2301,6 @@ export async function fetchConsensusSessionSummary(sessionId: string): Promise<C
       judgment: normalizeGovernanceJudgment(raw.judgment),
     }
   })
-}
-
-export function sendKeeperMessage(name: string, message: string, models?: string[]): Promise<string> {
-  const args: Record<string, unknown> = { name, message }
-  if (models && models.length > 0) args.models = models
-  return callMcpTool("masc_keeper_msg", args)
 }
 
 function normalizeMdalStatus(raw: unknown): MdalLoop['status'] {

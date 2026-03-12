@@ -10,17 +10,115 @@ cleanup() {
 }
 trap cleanup EXIT
 
+curl_with_retry() {
+  local attempt=1
+  local max_attempts="${CURL_RETRY_COUNT:-1}"
+  local retry_delay="${CURL_RETRY_DELAY_SEC:-1}"
+  local timeout_sec="${CURL_TIMEOUT_SEC:-25}"
+
+  while true; do
+    if curl --max-time "$timeout_sec" "$@"; then
+      return 0
+    fi
+    local status=$?
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      return "$status"
+    fi
+    case "$status" in
+      7|28)
+        sleep "$retry_delay"
+        attempt=$((attempt + 1))
+        ;;
+      *)
+        return "$status"
+        ;;
+    esac
+  done
+}
+
+wait_for_mcp_ready() {
+  local timeout_sec="${MCP_READY_TIMEOUT_SEC:-20}"
+  local deadline=$(( $(date +%s) + timeout_sec ))
+  while [[ "$(date +%s)" -lt "$deadline" ]]; do
+    if curl -fsS --max-time 2 "$BASE_URL/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "FAIL: MCP server did not become ready at $BASE_URL" >&2
+  return 1
+}
+
 post_with_accept() {
   local accept_header="$1"
   local body="$2"
   local header_file="$3"
   local body_file="$4"
 
-  curl -sS -D "$header_file" -o "$body_file" \
+  curl_with_retry -sS -D "$header_file" -o "$body_file" \
     -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H "Accept: $accept_header" \
     -d "$body"
+}
+
+post_with_session() {
+  local session_id="$1"
+  local protocol_version="$2"
+  local body="$3"
+  local header_file="$4"
+  local body_file="$5"
+
+  local -a extra_headers=(
+    -H 'Content-Type: application/json'
+    -H 'Accept: application/json, text/event-stream'
+    -H "Mcp-Session-Id: $session_id"
+  )
+  if [ -n "$protocol_version" ]; then
+    extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
+  fi
+
+  curl_with_retry -sS -D "$header_file" -o "$body_file" \
+    -X POST "$MCP_URL" \
+    "${extra_headers[@]}" \
+    -d "$body"
+}
+
+get_with_session() {
+  local session_id="$1"
+  local protocol_version="$2"
+  local header_file="$3"
+  local body_file="$4"
+
+  local -a extra_headers=(
+    -H 'Accept: text/event-stream'
+    -H "Mcp-Session-Id: $session_id"
+  )
+  if [ -n "$protocol_version" ]; then
+    extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
+  fi
+
+  curl_with_retry -sS -D "$header_file" -o "$body_file" --max-time 2 \
+    "$MCP_URL" \
+    "${extra_headers[@]}" || true
+}
+
+delete_with_session() {
+  local session_id="$1"
+  local protocol_version="$2"
+  local header_file="$3"
+  local body_file="$4"
+
+  local -a extra_headers=(
+    -H "Mcp-Session-Id: $session_id"
+  )
+  if [ -n "$protocol_version" ]; then
+    extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
+  fi
+
+  curl_with_retry -sS -D "$header_file" -o "$body_file" \
+    -X DELETE "$MCP_URL" \
+    "${extra_headers[@]}"
 }
 
 status_code() {
@@ -45,7 +143,21 @@ require_header_contains() {
   fi
 }
 
-echo "[1/4] strict Accept rejection"
+header_value() {
+  local header_file="$1"
+  local key="$2"
+  awk -v k="$key" '
+    tolower($0) ~ "^" tolower(k) ":" {
+      sub(/^[^:]+:[[:space:]]*/, "", $0)
+      sub(/\r$/, "", $0)
+      print $0
+      exit
+    }
+  ' "$header_file"
+}
+
+echo "[1/8] strict Accept rejection"
+wait_for_mcp_ready
 h1="$tmpdir/reject.headers"
 b1="$tmpdir/reject.body"
 post_with_accept "application/json" \
@@ -64,7 +176,7 @@ if ! grep -qi "Invalid Accept header" "$b1"; then
   exit 1
 fi
 
-echo "[2/4] streamable Accept success"
+echo "[2/8] streamable Accept success"
 h2="$tmpdir/ok.headers"
 b2="$tmpdir/ok.body"
 post_with_accept "application/json, text/event-stream" \
@@ -77,29 +189,112 @@ if [ "$code2" != "200" ]; then
   cat "$b2"
   exit 1
 fi
+SESSION_ID="$(header_value "$h2" "Mcp-Session-Id")"
+PROTOCOL_VERSION="$(header_value "$h2" "Mcp-Protocol-Version")"
+if [ -z "$SESSION_ID" ] || [ -z "$PROTOCOL_VERSION" ]; then
+  echo "FAIL: initialize response missing session/protocol headers"
+  cat "$h2"
+  exit 1
+fi
 
-echo "[3/4] /sse deprecation headers"
-h3="$tmpdir/sse.headers"
-curl -sS -D "$h3" -o /dev/null --max-time 1 \
-  -H 'Accept: text/event-stream' \
-  "$BASE_URL/sse" || true
-require_header_contains "$h3" "Deprecation" "true"
-require_header_contains "$h3" "Link" "</mcp>; rel=\"successor-version\""
+echo "[3/8] follow-up POST rejects missing protocol header"
+h3="$tmpdir/missing-protocol.headers"
+b3="$tmpdir/missing-protocol.body"
+post_with_session "$SESSION_ID" "" \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}' \
+  "$h3" "$b3"
+code3="$(status_code "$h3")"
+if [ "$code3" != "400" ]; then
+  echo "FAIL: expected 400 for missing protocol header, got $code3"
+  cat "$h3"
+  cat "$b3"
+  exit 1
+fi
+if ! grep -qi "MCP-Protocol-Version header required" "$b3"; then
+  echo "FAIL: expected missing protocol error body"
+  cat "$b3"
+  exit 1
+fi
 
-echo "[4/4] /messages deprecation headers"
-h4="$tmpdir/messages.headers"
-b4="$tmpdir/messages.body"
-curl -sS -D "$h4" -o "$b4" \
-  -X POST "$BASE_URL/messages" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":3,"method":"ping"}'
+echo "[4/8] follow-up POST rejects mismatched protocol header"
+h4="$tmpdir/mismatch-protocol.headers"
+b4="$tmpdir/mismatch-protocol.body"
+post_with_session "$SESSION_ID" "2025-03-26" \
+  '{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}' \
+  "$h4" "$b4"
 code4="$(status_code "$h4")"
 if [ "$code4" != "400" ]; then
-  echo "FAIL: expected 400 for missing session_id on /messages, got $code4"
+  echo "FAIL: expected 400 for mismatched protocol header, got $code4"
   cat "$h4"
   cat "$b4"
   exit 1
 fi
-require_header_contains "$h4" "Deprecation" "true"
+if ! grep -qi "mismatch" "$b4"; then
+  echo "FAIL: expected protocol mismatch body"
+  cat "$b4"
+  exit 1
+fi
+
+echo "[5/8] follow-up POST succeeds with matching protocol header"
+h5="$tmpdir/match-protocol.headers"
+b5="$tmpdir/match-protocol.body"
+post_with_session "$SESSION_ID" "$PROTOCOL_VERSION" \
+  '{"jsonrpc":"2.0","id":5,"method":"tools/list","params":{}}' \
+  "$h5" "$b5"
+code5="$(status_code "$h5")"
+if [ "$code5" != "200" ]; then
+  echo "FAIL: expected 200 for matching protocol header, got $code5"
+  cat "$h5"
+  cat "$b5"
+  exit 1
+fi
+
+echo "[6/8] follow-up GET rejects missing protocol header"
+h6="$tmpdir/get-missing-protocol.headers"
+b6="$tmpdir/get-missing-protocol.body"
+get_with_session "$SESSION_ID" "" "$h6" "$b6"
+code6="$(status_code "$h6")"
+if [ "$code6" != "400" ]; then
+  echo "FAIL: expected 400 for GET missing protocol header, got $code6"
+  cat "$h6"
+  cat "$b6"
+  exit 1
+fi
+
+echo "[7/8] follow-up DELETE rejects missing protocol header"
+h7="$tmpdir/delete-missing-protocol.headers"
+b7="$tmpdir/delete-missing-protocol.body"
+delete_with_session "$SESSION_ID" "" "$h7" "$b7"
+code7="$(status_code "$h7")"
+if [ "$code7" != "400" ]; then
+  echo "FAIL: expected 400 for DELETE missing protocol header, got $code7"
+  cat "$h7"
+  cat "$b7"
+  exit 1
+fi
+
+echo "[8/8] /sse deprecation headers"
+h8="$tmpdir/sse.headers"
+curl -sS -D "$h8" -o /dev/null --max-time 1 \
+  -H 'Accept: text/event-stream' \
+  "$BASE_URL/sse" || true
+require_header_contains "$h8" "Deprecation" "true"
+require_header_contains "$h8" "Link" "</mcp>; rel=\"successor-version\""
+
+echo "[legacy] /messages deprecation headers"
+h9="$tmpdir/messages.headers"
+b9="$tmpdir/messages.body"
+curl -sS -D "$h9" -o "$b9" \
+  -X POST "$BASE_URL/messages" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":9,"method":"ping"}'
+code9="$(status_code "$h9")"
+if [ "$code9" != "400" ]; then
+  echo "FAIL: expected 400 for missing session_id on /messages, got $code9"
+  cat "$h9"
+  cat "$b9"
+  exit 1
+fi
+require_header_contains "$h9" "Deprecation" "true"
 
 echo "PASS: streamable_http contract harness"

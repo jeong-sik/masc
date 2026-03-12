@@ -205,6 +205,29 @@ let test_switch_mode_persists () =
   cleanup_temp_dir dir;
   check bool "persisted Parallel" true (loaded.mode = Mode.Parallel)
 
+let test_switch_mode_writes_audit_event () =
+  let dir = setup_temp_dir () in
+  let _ =
+    Config.switch_mode ~actor:"tester" ~source:"masc_switch_mode" dir
+      Mode.Minimal
+  in
+  let audit_path = Filename.concat dir "audit.jsonl" in
+  let json =
+    match Fs_compat.load_jsonl audit_path with
+    | first :: _ -> first
+    | [] -> fail "expected audit event"
+  in
+  let open Yojson.Safe.Util in
+  check string "event_type" "mode_change"
+    (json |> member "event_type" |> to_string);
+  check string "agent" "tester" (json |> member "agent" |> to_string);
+  check string "source" "masc_switch_mode"
+    (json |> member "source" |> to_string);
+  check string "previous_mode" "full"
+    (json |> member "previous_mode" |> to_string);
+  check string "mode" "minimal" (json |> member "mode" |> to_string);
+  cleanup_temp_dir dir
+
 (* ============================================================
    set_categories Tests
    ============================================================ *)
@@ -372,6 +395,7 @@ let () =
       test_case "minimal" `Quick test_switch_mode_minimal;
       test_case "full" `Quick test_switch_mode_full;
       test_case "persists" `Quick test_switch_mode_persists;
+      test_case "writes audit event" `Quick test_switch_mode_writes_audit_event;
     ];
     "set_categories", [
       test_case "basic" `Quick test_set_categories;

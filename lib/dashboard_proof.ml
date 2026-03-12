@@ -193,6 +193,10 @@ let mentioned_actors_of_event json =
   |> List.concat_map mention_names_of_text
   |> unique_non_empty_strings
 
+let known_session_actor_names = function
+  | Some session -> Team_session_types.planned_participant_names session
+  | None -> []
+
 let actor_role_lookup (session : Team_session_types.session option) actor =
   match session with
   | None -> None
@@ -266,6 +270,10 @@ let actor_status_detail (acc : actor_acc) =
 
 let build_actor_contributions session events =
   let table = Hashtbl.create 16 in
+  let known_names = known_session_actor_names session in
+  let is_known_name actor =
+    List.exists (String.equal actor) known_names
+  in
   (match session with
   | Some current ->
       Team_session_types.planned_participant_names current
@@ -298,7 +306,7 @@ let build_actor_contributions session events =
           let request_at = string_field "ts_iso" json in
           mentioned_actors_of_event json
           |> List.iter (fun target ->
-                 if not (String.equal target actor) then
+                 if not (String.equal target actor) && is_known_name target then
                    let target_acc = get_or_create_actor table session target in
                    target_acc.mention_count <- target_acc.mention_count + 1;
                    target_acc.requested_by <-
@@ -468,6 +476,26 @@ let proof_verdict ~active_actor_count ~interaction_present ~evidence_present
   else
     "insufficient"
 
+let canonicalize_historical_verdict = function
+  | "proved" | "proved_strong" -> Some "proven"
+  | "insufficient_evidence" | "insufficient_evidence_strong" -> Some "insufficient"
+  | "partial" -> Some "partial"
+  | _ -> None
+
+let historical_verdict_of_proof_doc proof_doc =
+  match string_field "verdict" proof_doc with
+  | Some value -> canonicalize_historical_verdict value
+  | None -> None
+
+let combine_verdicts ~live_verdict ~historical_verdict =
+  match live_verdict, historical_verdict with
+  | "proven", Some "proven" -> ("proven", "live_and_historical")
+  | "proven", _ -> ("proven", "live")
+  | "partial", _ -> ("partial", "live")
+  | "insufficient", Some "proven" -> ("partial", "historical_only")
+  | "insufficient", _ -> ("insufficient", "live")
+  | other, _ -> (other, "live")
+
 let cp_backing_json config operation_id =
   let traces = Cp_snapshot.list_traces_json config ~operation_id ~limit:20 () in
   let detachments = Cp_snapshot.list_detachments_json ~operation_id config in
@@ -484,7 +512,22 @@ let cp_backing_json config operation_id =
 
 let session_summary_json session verdict ~planned_actor_count ~active_actor_count
     ~mentioned_actor_count ~unanswered_actor_count ~interaction_count
-    ~evidence_count ~cp_trace_count =
+    ~evidence_count ~cp_trace_count ~live_verdict ~historical_verdict
+    ~verdict_basis =
+  let detail_with_history base_detail =
+    match historical_verdict, live_verdict, verdict_basis with
+    | Some "proven", "insufficient", "historical_only" ->
+        base_detail
+        ^ " Historical proof says this session was proved, but current live evidence is missing or stale."
+    | Some "proven", "partial", _ ->
+        base_detail
+        ^ " Historical proof is stronger than the current live evidence, so the dashboard keeps this as partial."
+    | Some historical, _, _ when not (String.equal historical live_verdict) ->
+        base_detail
+        ^ Printf.sprintf " Historical proof=%s, live verdict=%s." historical
+          live_verdict
+    | _ -> base_detail
+  in
   match session with
   | None ->
       `Assoc
@@ -492,6 +535,10 @@ let session_summary_json session verdict ~planned_actor_count ~active_actor_coun
           ("headline", `String "No collaboration session evidence is currently selected.");
           ("detail", `String "Provide session_id or start a team session to build proof.");
           ("verdict", `String verdict);
+          ("live_verdict", `String live_verdict);
+          ( "historical_verdict",
+            match historical_verdict with Some value -> `String value | None -> `Null );
+          ("verdict_basis", `String verdict_basis);
           ("actors_count", `Int active_actor_count);
           ("planned_actor_count", `Int planned_actor_count);
           ("mentioned_actor_count", `Int mentioned_actor_count);
@@ -522,10 +569,14 @@ let session_summary_json session verdict ~planned_actor_count ~active_actor_coun
       `Assoc
         [
           ("headline", `String headline);
-          ("detail", `String detail);
+          ("detail", `String (detail_with_history detail));
           ("session_id", `String session.session_id);
           ("goal", `String session.goal);
           ("verdict", `String verdict);
+          ("live_verdict", `String live_verdict);
+          ( "historical_verdict",
+            match historical_verdict with Some value -> `String value | None -> `Null );
+          ("verdict_basis", `String verdict_basis);
           ("actors_count", `Int active_actor_count);
           ("planned_actor_count", `Int planned_actor_count);
           ("mentioned_actor_count", `Int mentioned_actor_count);
@@ -710,9 +761,15 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
     tool_evidence_count > 0 || deliverable_count > 0 || checkpoints_count > 0
     || Option.is_some proof_doc
   in
-  let verdict =
+  let live_verdict =
     proof_verdict ~active_actor_count ~interaction_present:(interaction_count > 0)
       ~evidence_present ~artifact_present
+  in
+  let historical_verdict =
+    Option.bind proof_doc historical_verdict_of_proof_doc
+  in
+  let verdict, verdict_basis =
+    combine_verdicts ~live_verdict ~historical_verdict
   in
   let goal_binding =
     match session with
@@ -772,7 +829,7 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
           ~active_actor_count ~mentioned_actor_count ~unanswered_actor_count
           ~interaction_count
           ~evidence_count:(tool_evidence_count + deliverable_count + checkpoints_count)
-          ~cp_trace_count );
+          ~cp_trace_count ~live_verdict ~historical_verdict ~verdict_basis );
       ("timeline", timeline_json ?session_id ?operation_id events cp_traces);
       ("actor_contributions", `List (actor_contributions_json contributions));
       ("goal_binding", goal_binding);

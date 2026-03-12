@@ -375,6 +375,9 @@ function normalizeParticipantPreview(raw: unknown): DashboardMissionParticipantP
     current_work: asString(raw.current_work) ?? null,
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
+    recent_tool_names: extractArray(raw.recent_tool_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
     last_activity_at: asString(raw.last_activity_at) ?? null,
   }
 }
@@ -435,11 +438,19 @@ function normalizeAgentBrief(raw: unknown): DashboardMissionAgentBrief | null {
     is_live: typeof raw.is_live === 'boolean' ? raw.is_live : undefined,
     archived_reason: asString(raw.archived_reason) ?? null,
     status: asString(raw.status),
+    where: asString(raw.where) ?? null,
+    with_whom: extractArray(raw.with_whom)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
     current_work: asString(raw.current_work) ?? null,
     related_session_id: asString(raw.related_session_id) ?? null,
+    related_attention_count: asNumber(raw.related_attention_count) ?? 0,
     last_activity_at: asString(raw.last_activity_at) ?? null,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
+    recent_tool_names: extractArray(raw.recent_tool_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
   }
 }
 

@@ -850,32 +850,6 @@ let is_voice_server_available ~sw ~clock ~net =
             false
       end
 
-(** Text-only fallback for when voice is unavailable *)
-let text_fallback ?reason ?(attempted_endpoints = []) ~agent_id ~message () =
-  let voice = get_voice_for_agent agent_id in
-  log_info (Printf.sprintf "[Text fallback] %s (%s): %s"
-    agent_id voice
-    (String.sub message 0 (min 50 (String.length message))));
-  let fields =
-    [
-      ("status", `String "text_fallback");
-      ("agent_id", `String agent_id);
-      ("voice", `String voice);
-      ( "message_preview",
-        `String (String.sub message 0 (min 50 (String.length message))) );
-    ]
-    @
-    (match reason with Some value -> [ ("reason", `String value) ] | None -> [])
-    @
-    if attempted_endpoints = [] then []
-    else
-      [
-        ( "attempted_endpoints",
-          `List (List.map (fun value -> `String value) attempted_endpoints) );
-      ]
-  in
-  Ok (`Assoc fields)
-
 let call_session_tool ~sw ~clock ~net ~tool_name ~arguments =
   match session_endpoint_result () with
   | Error message -> Error message

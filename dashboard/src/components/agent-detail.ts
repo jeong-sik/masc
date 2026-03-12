@@ -6,20 +6,11 @@ import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
-import {
-  allowlistEmptyState,
-  auditMetadataState,
-  linkedRecentToolsEmptyState,
-  observedToolsEmptyState,
-  openToolsInventory,
-  toolAuditStateLabel,
-} from './common/tool-audit'
+import { keeperIdentityHint } from './common/keeper-identity'
 import {
   agents,
   executionContinuityBriefs,
-  executionLodgeCheckins,
   keepers,
-  serverStatus,
   tasks,
 } from '../store'
 import { fetchRoomMessages, fetchTaskHistory, sendBroadcast } from '../api'
@@ -27,7 +18,6 @@ import { missionSnapshot } from '../mission-store'
 import type {
   Agent,
   DashboardExecutionContinuityBrief,
-  DashboardExecutionLodgeCheckin,
   DashboardMissionAgentBrief,
   Keeper,
   Task,
@@ -84,39 +74,10 @@ function missionAgentBrief(agentName: string | null): DashboardMissionAgentBrief
   return mission.agent_briefs.find(brief => brief.agent_name === agentName) ?? null
 }
 
-function windowTopTools(keeper: Keeper | null): string[] {
-  if (!keeper) return []
-  const metrics = keeper.metrics_window
-  const topTools = Array.isArray(metrics?.top_tools) ? metrics.top_tools : []
-  return topTools
-    .map(item => (typeof item === 'object' && item !== null && 'tool' in item && typeof item.tool === 'string' ? item.tool : null))
-    .filter((item): item is string => item !== null)
-}
-
-function recentToolsForAgent(agentName: string | null): string[] {
-  const keeper = keeperForAgent(agentName)
-  if (!keeper) return []
-  return keeper.recent_tool_names && keeper.recent_tool_names.length > 0 ? keeper.recent_tool_names : []
-}
-
-function firstNonEmptyToolList(...candidates: Array<string[] | null | undefined>): string[] {
-  for (const candidate of candidates) {
-    if (candidate && candidate.length > 0) return candidate
-  }
-  return []
-}
-
 function continuityBriefForAgent(agentName: string | null): DashboardExecutionContinuityBrief | null {
   if (!agentName) return null
   return executionContinuityBriefs.value.find(
     brief => brief.agent_name === agentName || brief.name === agentName,
-  ) ?? null
-}
-
-function latestLodgeCheckinForAgent(agentName: string | null): DashboardExecutionLodgeCheckin | null {
-  if (!agentName) return null
-  return executionLodgeCheckins.value.find(
-    row => row.agent_name === agentName || row.worker_name === agentName,
   ) ?? null
 }
 
@@ -199,6 +160,12 @@ function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   `
 }
 
+function compactCopy(value: string | null | undefined, max = 160): string | null {
+  const text = (value ?? '').replace(/\s+/g, ' ').trim()
+  if (!text) return null
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
 export function AgentDetailOverlay() {
   const agentName = selectedAgentName.value
   if (!agentName) return null
@@ -206,50 +173,24 @@ export function AgentDetailOverlay() {
   const agent = selectedAgent()
   const keeper = keeperForAgent(agentName)
   const continuityBrief = continuityBriefForAgent(agentName)
-  const lodgeCheckin = latestLodgeCheckinForAgent(agentName)
   const missionBrief = missionAgentBrief(agentName)
   const ownedTasks = assignedTasks(agentName)
   const lines = roomActivity.value
-  const recentTools = recentToolsForAgent(agentName)
-  const topTools = windowTopTools(keeper)
-  const allowedTools =
-    firstNonEmptyToolList(
-      continuityBrief?.allowed_tool_names,
-      missionBrief?.allowed_tool_names,
-      lodgeCheckin?.allowed_tool_names,
-      keeper?.allowed_tool_names,
-    )
-  const observedTools =
-    firstNonEmptyToolList(
-      continuityBrief?.latest_tool_names,
-      missionBrief?.latest_tool_names,
-      lodgeCheckin?.used_tool_names,
-      keeper?.latest_tool_names,
-    )
-  const toolCallCount =
-    continuityBrief?.latest_tool_call_count
-    ?? missionBrief?.latest_tool_call_count
-    ?? lodgeCheckin?.used_tool_call_count
-    ?? keeper?.latest_tool_call_count
-  const auditSource =
-    continuityBrief?.tool_audit_source
-    ?? missionBrief?.tool_audit_source
-    ?? lodgeCheckin?.tool_audit_source
-    ?? keeper?.tool_audit_source
-  const auditAt =
-    continuityBrief?.tool_audit_at
-    ?? missionBrief?.tool_audit_at
-    ?? lodgeCheckin?.tool_audit_at
-    ?? keeper?.tool_audit_at
-  const capabilities = agent?.capabilities ?? []
-  const room = serverStatus.value?.room ?? 'default'
-  const project = serverStatus.value?.project ?? '확인 없음'
-  const cluster = serverStatus.value?.cluster ?? '확인 없음'
-  const allowlistFallback = toolAuditStateLabel(allowlistEmptyState(keeper))
-  const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
-  const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
-  const linkedRecentFallback = toolAuditStateLabel(linkedRecentToolsEmptyState(keeper))
-  const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? recentTools[0] ?? null
+  const displayName = missionBrief?.display_name ?? keeper?.name ?? agentName
+  const secondaryLabel = displayName !== agentName ? agentName : null
+  const headerStatus = agent?.status ?? missionBrief?.status ?? 'unknown'
+  const isArchivedParticipant = !agent && missionBrief?.is_live === false
+  const lastSeenAt =
+    agent?.last_seen
+    ?? missionBrief?.last_activity_at
+    ?? null
+  const agentEmoji = agent?.emoji ?? keeper?.emoji
+  const koreanName = agent?.koreanName ?? keeper?.koreanName
+  const continuitySummary =
+    compactCopy(continuityBrief?.continuity_summary)
+    ?? compactCopy(continuityBrief?.skill_route_summary)
+    ?? null
+  const keeperIdentity = keeperIdentityHint(keeper?.name, keeper?.agent_name)
 
   return html`
     <div
@@ -263,58 +204,40 @@ export function AgentDetailOverlay() {
         <div class="agent-detail-header">
           <div style="display:flex;flex-direction:column;gap:8px;flex:1">
             <div style="display:flex;align-items:center;gap:12px">
-              ${agent?.emoji ? html`<span style="font-size:2rem">${agent.emoji}</span>` : ''}
+              ${agentEmoji ? html`<span style="font-size:2rem">${agentEmoji}</span>` : ''}
               <div>
                 <h2 style="margin:0;display:flex;align-items:baseline;gap:8px">
-                  ${agentName}
-                  ${agent?.koreanName ? html`<span style="font-size:0.75em;color:#888">(${agent.koreanName})</span>` : ''}
+                  ${displayName}
+                  ${koreanName ? html`<span style="font-size:0.75em;color:#888">(${koreanName})</span>` : ''}
+                  ${secondaryLabel ? html`<span class="mono" style="font-size:0.75em;color:#888">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
-                  ${agent
-                    ? html`
-                        <${StatusBadge} status=${agent.status} />
-                        ${agent.model ? html`<span class="mono" style="font-size:0.75rem;background:#2a2a4a;padding:2px 6px;border-radius:4px">${agent.model}</span>` : ''}
-                        ${agent.primaryValue ? html`<span style="font-size:0.75rem;color:#a78bfa">${agent.primaryValue}</span>` : ''}
-                      `
-                    : html`<span>Agent snapshot not found in current state</span>`}
+                  <${StatusBadge} status=${headerStatus} />
+                  ${isArchivedParticipant ? html`<span class="pill">archived session participant</span>` : null}
+                  ${agent?.model ? html`<span class="mono" style="font-size:0.75rem;background:#2a2a4a;padding:2px 6px;border-radius:4px">${agent.model}</span>` : ''}
+                  ${!agent && missionBrief?.archived_reason
+                    ? html`<span style="font-size:0.75rem;color:#888">${missionBrief.archived_reason}</span>`
+                    : null}
                 </div>
               </div>
             </div>
-            ${agent?.activityLevel != null ? html`
-              <div style="display:flex;align-items:center;gap:8px;font-size:0.8rem">
-                <span style="color:#888">Activity</span>
-                <div style="flex:1;max-width:120px;height:6px;background:#1a1a2e;border-radius:3px;overflow:hidden">
-                  <div style="width:${Math.min(agent.activityLevel * 10, 100)}%;height:100%;background:${agent.activityLevel >= 8 ? '#22c55e' : agent.activityLevel >= 5 ? '#f59e0b' : '#666'};border-radius:3px"></div>
-                </div>
-                <span style="color:#888">${agent.activityLevel}/10</span>
-              </div>
-            ` : ''}
-            ${(agent?.traits?.length ?? 0) > 0 ? html`
-              <div style="display:flex;flex-wrap:wrap;gap:4px">
-                ${agent?.traits?.map((t: string) => html`<span style="font-size:0.7rem;background:#1e3a5f;color:#60a5fa;padding:2px 8px;border-radius:10px">${t}</span>`)}
-              </div>
-            ` : ''}
-            ${(agent?.interests?.length ?? 0) > 0 ? html`
-              <div style="display:flex;flex-wrap:wrap;gap:4px">
-                ${agent?.interests?.map((t: string) => html`<span style="font-size:0.7rem;background:#3b1f4e;color:#c084fc;padding:2px 8px;border-radius:10px">${t}</span>`)}
-              </div>
-            ` : ''}
-            ${capabilities.length > 0 ? html`
-              <div style="display:flex;flex-wrap:wrap;gap:4px">
-                ${capabilities.map((capability: string) => html`<span style="font-size:0.7rem;background:#183153;color:#7dd3fc;padding:2px 8px;border-radius:10px">${capability}</span>`)}
-              </div>
-            ` : ''}
             <div class="agent-detail-sub">
-              ${agent
-                ? html`
-                    ${agent.current_task ? html`<span>Task: ${agent.current_task}</span>` : null}
-                    ${agent.last_seen ? html`<span>Last seen: <${TimeAgo} timestamp=${agent.last_seen} /></span>` : null}
-                    <span>Room: ${room}</span>
-                    <span>Project: ${project}</span>
-                    <span>Cluster: ${cluster}</span>
-                  `
+              ${agent?.current_task || missionBrief?.current_work
+                ? html`<span>Task: ${agent?.current_task ?? missionBrief?.current_work}</span>`
                 : null}
+              ${lastSeenAt ? html`<span>Last seen: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
             </div>
+            ${keeper || continuitySummary || missionBrief?.related_session_id
+              ? html`
+                  <div class="agent-detail-sub">
+                    ${keeper
+                      ? html`<span>Linked keeper: ${keeper.name}${keeperIdentity ? ` · ${keeperIdentity}` : ''}</span>`
+                      : null}
+                    ${missionBrief?.related_session_id ? html`<span>Session: ${missionBrief.related_session_id}</span>` : null}
+                    ${continuitySummary ? html`<span>${continuitySummary}</span>` : null}
+                  </div>
+                `
+              : null}
           </div>
           <div class="agent-detail-actions">
             <button class="control-btn ghost" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
@@ -339,107 +262,6 @@ export function AgentDetailOverlay() {
               : html`<div class="agent-activity-list">${lines.map((line, idx) => html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
           <//>
         </div>
-
-        <${Card} title="Capabilities & Tool Audit">
-          <div style="display:flex; flex-direction:column; gap:12px;">
-            <div>
-              <div style="font-size:12px; color:#888; margin-bottom:6px;">Capabilities</div>
-              <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                ${capabilities.length > 0
-                  ? capabilities.map((capability: string) => html`<span class="pill">${capability}</span>`)
-                  : html`<span class="empty-state" style="font-size:12px;">No capability metadata</span>`}
-              </div>
-            </div>
-            <div style="display:flex; justify-content:flex-end;">
-              <button class="control-btn ghost" onClick=${() => { openToolsInventory(openToolsQuery) }}>
-                Open tools panel
-              </button>
-            </div>
-            <div>
-              <div style="font-size:12px; color:#888; margin-bottom:6px;">Allowed tools</div>
-              <div style="font-size:11px; color:#64748b; margin-bottom:6px;">Currently permitted tools for this runtime, not the full system inventory.</div>
-              <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                ${allowedTools.length > 0
-                  ? allowedTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
-                  : html`<span class="empty-state" style="font-size:12px;">${allowlistFallback}</span>`}
-              </div>
-            </div>
-            <div>
-              <div style="font-size:12px; color:#888; margin-bottom:6px;">Observed tools</div>
-              <div style="font-size:11px; color:#64748b; margin-bottom:6px;">Recent execution evidence, not policy allowlist.</div>
-              <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                ${observedTools.length > 0
-                  ? observedTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
-                  : html`<span class="empty-state" style="font-size:12px;">${observedFallback}</span>`}
-              </div>
-            </div>
-            <div class="agent-detail-sub">
-              <span>Tool calls: ${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback}</span>
-              <span>Evidence source: ${auditSource ?? metadataFallback}</span>
-              <span>
-                Observed at:
-                ${auditAt ? html` <${TimeAgo} timestamp=${auditAt} />` : ` ${metadataFallback}`}
-              </span>
-            </div>
-            <div>
-              <div style="font-size:12px; color:#888; margin-bottom:6px;">Linked keeper recent tools</div>
-              <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                ${recentTools.length > 0
-                  ? recentTools.map((tool: string) => html`<span class="pill">${tool}</span>`)
-                  : html`<span class="empty-state" style="font-size:12px;">${linkedRecentFallback}</span>`}
-              </div>
-            </div>
-            ${topTools.length > 0
-              ? html`
-                  <div>
-                    <div style="font-size:12px; color:#888; margin-bottom:6px;">Keeper window top tools</div>
-                    <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                      ${topTools.map((tool: string) => html`<span class="pill">${tool}</span>`)}
-                    </div>
-                  </div>
-                `
-              : null}
-            ${keeper
-              ? html`
-                  <div style="font-size:12px; color:#888;">
-                    Linked keeper: <span style="color:#4ade80;">${keeper.name}</span>
-                    ${keeper.skill_primary ? html` · route <span style="color:#22d3ee;">${keeper.skill_primary}</span>` : null}
-                  </div>
-                `
-              : null}
-            ${continuityBrief?.continuity_summary || continuityBrief?.skill_route_summary
-              ? html`
-                  <div class="agent-detail-sub">
-                    ${continuityBrief?.continuity_summary ? html`<span>${continuityBrief.continuity_summary}</span>` : null}
-                    ${continuityBrief?.skill_route_summary ? html`<span>Route: ${continuityBrief.skill_route_summary}</span>` : null}
-                  </div>
-                `
-              : null}
-          </div>
-        <//>
-
-        ${lodgeCheckin
-          ? html`
-              <${Card} title="Latest Lodge Check-in">
-                <div class="agent-detail-sub">
-                  <span>Outcome: ${lodgeCheckin.outcome}</span>
-                  <span>Trigger: ${lodgeCheckin.trigger ?? 'unknown'}</span>
-                  <span>Action: ${lodgeCheckin.action_kind ?? 'none'}</span>
-                  ${lodgeCheckin.checked_at ? html`<span>Checked: <${TimeAgo} timestamp=${lodgeCheckin.checked_at} /></span>` : null}
-                </div>
-                ${lodgeCheckin.reason ? html`<div class="monitor-footnote">${lodgeCheckin.reason}</div>` : null}
-                ${lodgeCheckin.summary && lodgeCheckin.summary !== lodgeCheckin.reason
-                  ? html`<div class="monitor-footnote">${lodgeCheckin.summary}</div>`
-                  : null}
-                ${lodgeCheckin.failure_reason
-                  ? html`<div class="monitor-footnote">Failure: ${lodgeCheckin.failure_reason}</div>`
-                  : lodgeCheckin.decision_reason
-                    ? html`<div class="monitor-footnote">Decision: ${lodgeCheckin.decision_reason}</div>`
-                    : null}
-              <//>
-            `
-          : null}
-
         <${Card} title="Task History">
           ${taskHistories.value.length === 0
             ? html`<div class="empty-state">No task history loaded</div>`

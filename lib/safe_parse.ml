@@ -8,13 +8,13 @@
     with centralized, debuggable alternatives that log warnings
     when falling back to defaults. Enable logging with:
     {[
-      LLM_MCP_PARSE_WARN=1
+      MASC_PARSE_WARN=1
     ]}
 *)
 
 (** Whether to log parse warnings. Default: false to avoid noise. *)
 let warn_enabled () =
-  match Sys.getenv_opt "LLM_MCP_PARSE_WARN" with
+  match Sys.getenv_opt "MASC_PARSE_WARN" with
   | Some "1" | Some "true" | Some "yes" -> true
   | _ -> false
 

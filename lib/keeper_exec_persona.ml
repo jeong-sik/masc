@@ -33,9 +33,6 @@ let find_jsonl_row_by_action_id rows action_id =
          | Some candidate when candidate = action_id -> Some json
          | _ -> None)
 
-let upsert_assoc key value fields =
-  (key, value) :: List.remove_assoc key fields
-
 let resolved_keeper_args_to_json
     ~name ~persona_name ~persona_profile_path ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~soul_profile ~will ~needs ~desires ~models ~allowed_models

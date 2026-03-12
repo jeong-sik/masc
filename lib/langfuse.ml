@@ -12,7 +12,7 @@
     - LANGFUSE_PUBLIC_KEY: API 퍼블릭 키
     - LANGFUSE_HOST: Langfuse 서버 URL (기본값: http://localhost:3100)
 
-    @author llm-mcp
+    @author MASC
     @since 2026-01
 *)
 

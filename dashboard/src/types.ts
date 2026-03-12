@@ -875,6 +875,64 @@ export interface DashboardShellResponse {
   }
 }
 
+export interface DashboardRoomTruthAttentionSummary {
+  count: number
+  bad_count: number
+  warn_count: number
+  provenance?: string | null
+  top_item?: OperatorAttentionItem | null
+}
+
+export interface DashboardRoomTruthRecommendationSummary {
+  count: number
+  provenance?: string | null
+  top_action?: OperatorRecommendedAction | null
+}
+
+export interface DashboardRoomTruthFocus {
+  label: string
+  reason: string
+  source: string
+  provenance: string
+  target_kind?: string | null
+  target_id?: string | null
+  suggested_tab?: 'command' | 'intervene' | string | null
+  suggested_surface?: CommandPlaneSurface | string | null
+  suggested_params?: Record<string, string>
+}
+
+export interface DashboardRoomTruthResponse {
+  generated_at?: string
+  room: {
+    status?: ServerStatus | null
+    counts?: DashboardShellResponse['counts']
+    provenance?: string | null
+  }
+  execution?: {
+    summary?: DashboardExecutionSummary | null
+    top_queue?: DashboardExecutionQueueItem | null
+    provenance?: string | null
+  }
+  command?: {
+    active_operations?: number
+    active_detachments?: number
+    pending_approvals?: number
+    bad_alerts?: number
+    warn_alerts?: number
+    moving_lanes?: number
+    active_lanes?: number
+    provenance?: string | null
+  }
+  operator?: {
+    health?: string | null
+    attention_summary?: DashboardRoomTruthAttentionSummary | null
+    recommendation_summary?: DashboardRoomTruthRecommendationSummary | null
+    pending_confirm_summary?: PendingConfirmSummary | null
+    provenance?: string | null
+  }
+  focus?: DashboardRoomTruthFocus | null
+}
+
 export interface ServerBuildIdentity {
   release_version: string
   commit?: string | null
@@ -896,11 +954,6 @@ export interface DashboardExecutionSummary {
   worker_alerts?: number
   continuity_alerts?: number
   priority_items?: number
-  todo_tasks?: number
-  claimed_tasks?: number
-  running_tasks?: number
-  done_tasks?: number
-  cancelled_tasks?: number
   keepers?: number
 }
 
@@ -1052,7 +1105,6 @@ export interface DashboardExecutionContinuityBrief {
 export interface DashboardExecutionResponse {
   generated_at?: string
   status?: ServerStatus
-  summary?: DashboardExecutionSummary
   lodge_tick?: DashboardExecutionLodgeTick | null
   lodge_checkins?: unknown[]
   execution_queue?: unknown[]
@@ -1127,16 +1179,6 @@ export interface DashboardMissionSummary {
   cluster?: string
   project?: string
   current_room?: string | null
-  paused?: boolean
-  tempo_interval_s?: number
-  active_agents?: number
-  keeper_pressure?: number
-  active_operations?: number
-  pending_approvals?: number
-  incident_count?: number
-  recommended_action_count?: number
-  top_attention?: OperatorAttentionItem | null
-  top_action?: OperatorRecommendedAction | null
 }
 
 export interface DashboardMissionCommandFocus {
@@ -1193,11 +1235,11 @@ export interface DashboardMissionSessionBrief {
 
 export interface DashboardMissionParticipantPreview {
   agent_name: string
-  status?: string
+  display_name?: string | null
+  is_live?: boolean
   current_work?: string | null
   recent_input_preview?: string | null
   recent_output_preview?: string | null
-  recent_tool_names: string[]
   last_activity_at?: string | null
 }
 
@@ -1228,22 +1270,15 @@ export interface DashboardMissionSessionCard extends DashboardMissionSessionBrie
 
 export interface DashboardMissionAgentBrief {
   agent_name: string
+  display_name?: string | null
+  is_live?: boolean
+  archived_reason?: string | null
   status?: string
-  where?: string | null
-  with_whom: string[]
   current_work?: string | null
   related_session_id?: string | null
-  related_attention_count: number
   last_activity_at?: string | null
   recent_output_preview?: string | null
   recent_input_preview?: string | null
-  recent_event?: string | null
-  recent_tool_names: string[]
-  allowed_tool_names?: string[]
-  latest_tool_names?: string[]
-  latest_tool_call_count?: number | null
-  tool_audit_source?: string | null
-  tool_audit_at?: string | null
 }
 
 export interface DashboardMissionKeeperBrief {
@@ -1357,9 +1392,24 @@ export interface DashboardProofSummary {
   goal?: string
   verdict?: DashboardProofVerdict
   actors_count?: number
+  planned_actor_count?: number
+  mentioned_actor_count?: number
+  unanswered_actor_count?: number
   interaction_count?: number
   evidence_count?: number
   cp_trace_count?: number
+}
+
+export interface DashboardProofSelection {
+  mode?: 'explicit' | 'latest_auto_selected' | 'requested_not_found' | 'none' | string
+  reason?: string
+  requested_session_id?: string | null
+  requested_operation_id?: string | null
+  selected_session_id?: string | null
+  selected_goal?: string | null
+  selected_created_by?: string | null
+  selected_operation_id?: string | null
+  available_session_count?: number
 }
 
 export interface DashboardProofTimelineItem {
@@ -1378,15 +1428,30 @@ export interface DashboardProofTimelineItem {
 export interface DashboardProofActorContribution {
   actor: string
   role?: string | null
+  activity_state?: 'acted' | 'mentioned_only' | 'planned_only' | string
+  activity_detail?: string | null
+  observed_event_count?: number
   turn_count?: number
   spawn_count?: number
   tool_evidence_count?: number
   interaction_count?: number
+  mention_count?: number
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_event_summary?: string | null
+  requested_by?: string | null
+  recent_request_preview?: string | null
+  recent_request_at?: string | null
   recent_tool_names?: string[]
   last_active_at?: string | null
+}
+
+export interface DashboardProofToolEvidence {
+  actor?: string | null
+  event_type?: string | null
+  tool_names?: string[]
+  summary?: string | null
+  timestamp?: string | null
 }
 
 export interface DashboardProofArtifactRef {
@@ -1408,6 +1473,7 @@ export interface DashboardProofResponse {
   schema_version?: string
   generated_at?: string
   room?: Record<string, unknown>
+  selection?: DashboardProofSelection
   session_id?: string | null
   operation_id?: string | null
   proof_verdict?: DashboardProofVerdict
@@ -1415,7 +1481,7 @@ export interface DashboardProofResponse {
   timeline?: DashboardProofTimelineItem[]
   actor_contributions?: DashboardProofActorContribution[]
   goal_binding?: Record<string, unknown>
-  tool_evidence?: Record<string, unknown>[]
+  tool_evidence?: DashboardProofToolEvidence[]
   cp_backing_evidence?: DashboardProofBackingEvidence | null
   artifacts?: DashboardProofArtifactRef[]
   raw_proof?: Record<string, unknown> | null
@@ -2072,6 +2138,9 @@ export interface CommandPlaneSwarmGap {
   code: string
   severity: string
   summary: string
+  why_it_matters?: string
+  next_tool?: string
+  next_step?: string
   lane_ids: string[]
   count: number
 }
@@ -2085,6 +2154,13 @@ export interface CommandPlaneSwarmRecommendation {
 
 export interface CommandPlaneSwarmStatus {
   generated_at?: string
+  narrative?: {
+    state?: string
+    started?: string
+    active_work?: string
+    completion?: string
+    lane_id?: string | null
+  }
   overview: {
     active_lanes?: number
     moving_lanes?: number
@@ -2104,6 +2180,8 @@ export interface CommandPlaneSwarmStatus {
 export interface CommandPlaneSwarmProof {
   status: 'present' | 'fallback' | 'missing' | string
   source: 'artifact' | 'slot_samples' | 'none' | string
+  reason_code?: string | null
+  status_summary?: string | null
   run_id?: string | null
   captured_at?: string | null
   pass?: boolean
@@ -2117,6 +2195,7 @@ export interface CommandPlaneSwarmProof {
     done?: number
     final?: number
   }
+  expected_artifact_dir?: string | null
   artifact_ref?: string | null
   missing_reason?: string | null
 }
@@ -2370,6 +2449,7 @@ export interface CommandPlaneSwarmProvider {
   actual_slots?: number
   expected_ctx?: number
   actual_ctx?: number
+  configured_capacity?: number
   slot_reachable?: boolean | null
   slot_status_code?: number | null
   runtime_blocker?: string | null

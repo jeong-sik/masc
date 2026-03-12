@@ -39,7 +39,6 @@ let test_dashboard_execution_fixture () =
             ()
         in
         let open Yojson.Safe.Util in
-        let summary = json |> member "summary" in
         let execution_queue = json |> member "execution_queue" |> to_list in
         let session_briefs = json |> member "session_briefs" |> to_list in
         let operation_briefs = json |> member "operation_briefs" |> to_list in
@@ -48,8 +47,8 @@ let test_dashboard_execution_fixture () =
         let lodge_checkins = json |> member "lodge_checkins" |> to_list in
         let continuity_briefs = json |> member "continuity_briefs" |> to_list in
         let offline_worker_briefs = json |> member "offline_worker_briefs" |> to_list in
-        check int "fixture blocked sessions" 1 (summary |> member "blocked_sessions" |> to_int);
-        check int "fixture blocked operations" 2 (summary |> member "blocked_operations" |> to_int);
+        check bool "summary removed from execution payload" true
+          (json |> member "summary" = `Null);
         check int "lodge checked count" 3 (lodge_tick |> member "checked" |> to_int);
         check int "lodge checkins" 3 (List.length lodge_checkins);
         check string "top queue kind" "session"
@@ -65,6 +64,12 @@ let test_dashboard_execution_fixture () =
         check int "offline worker briefs" 1 (List.length offline_worker_briefs);
         check string "continuity skill route summary" "scene-director · +1 · judgment"
           (continuity_briefs |> List.hd |> member "skill_route_summary" |> to_string);
+        check string "continuity recent output stays concrete"
+          "Prepared the next scene transition and handoff summary"
+          (continuity_briefs |> List.hd |> member "recent_output_preview" |> to_string);
+        check string "continuity summary remains separate"
+          "Continuity pressure is high; handoff prep is underway"
+          (continuity_briefs |> List.hd |> member "continuity_summary" |> to_string);
         check int "continuity allowed tool count" 3
           (continuity_briefs |> List.hd |> member "allowed_tool_names" |> to_list |> List.length);
         check bool "worker focus carried through" true
@@ -138,6 +143,23 @@ let test_dashboard_execution_current_room_status () =
           (status |> member "current_room" |> to_string);
       ))
 
+let test_dashboard_shell_current_room_status () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Room.room_create config ~name:"Focus Room" ~description:None);
+      ignore (Lib.Room.room_enter config ~room_id:"focus-room" ~agent_type:"claude" ());
+      let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+      let open Yojson.Safe.Util in
+      let status = json |> member "status" in
+      check string "shell room follows current room" "focus-room"
+        (status |> member "room" |> to_string);
+      check string "shell current_room exposed" "focus-room"
+        (status |> member "current_room" |> to_string))
+
 let () =
   Alcotest.run "Dashboard Execution"
     [
@@ -147,5 +169,7 @@ let () =
           Alcotest.test_case "live empty room is safe" `Quick test_dashboard_execution_live_empty_room;
           Alcotest.test_case "current room drives status" `Quick
             test_dashboard_execution_current_room_status;
+          Alcotest.test_case "shell follows current room" `Quick
+            test_dashboard_shell_current_room_status;
         ] );
     ]

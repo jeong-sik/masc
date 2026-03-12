@@ -716,8 +716,10 @@ let test_handle_request_tools_list_include_hidden_metadata () =
     (Yojson.Safe.Util.member "icons" status_tool <> `Null);
   Alcotest.(check bool) "standard tools expose annotations" true
     (Yojson.Safe.Util.member "annotations" status_tool <> `Null);
-  Alcotest.(check bool) "hidden metadata not leaked" false
+  Alcotest.(check bool) "visibility metadata exposed" true
     (Yojson.Safe.Util.member "visibility" status_tool <> `Null);
+  Alcotest.(check bool) "implementation status exposed" true
+    (Yojson.Safe.Util.member "implementationStatus" status_tool <> `Null);
   Alcotest.(check bool) "hidden utility omitted" false
     (List.exists
        (function
@@ -1288,6 +1290,48 @@ let test_handle_request_tools_call_trpg () =
 
   cleanup_dir base_path
 
+let test_handle_request_tools_call_tool_shard () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 10);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "masc_tool_list");
+      ("arguments", `Assoc []);
+    ]);
+  ]) in
+
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  (match response with
+  | `Assoc fields ->
+      (match List.assoc_opt "result" fields with
+      | Some (`Assoc result_fields) ->
+          Alcotest.(check bool) "tool call succeeded" false
+            (match List.assoc_opt "isError" result_fields with
+             | Some (`Bool is_error) -> is_error
+             | _ -> true);
+          let text =
+            match List.assoc_opt "content" result_fields with
+            | Some (`List (`Assoc content_fields :: _)) -> (
+                match List.assoc_opt "text" content_fields with
+                | Some (`String value) -> value
+                | _ -> "")
+            | _ -> ""
+          in
+          Alcotest.(check bool) "tool shard result present" true
+            (contains_substring text "\"shards\"")
+      | _ -> Alcotest.fail "result missing")
+  | _ -> Alcotest.fail "response not an object");
+
+  cleanup_dir base_path
+
 let test_handle_request_invalid_json () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -1806,6 +1850,7 @@ let eio_tests = [
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   "handle tools/call trpg", `Quick, test_handle_request_tools_call_trpg;
+  "handle tools/call tool_shard", `Quick, test_handle_request_tools_call_tool_shard;
   "mode gate", `Quick, test_execute_tool_mode_gate;
   "hidden active utility direct call", `Quick,
     test_execute_tool_hidden_active_utility_direct_call;

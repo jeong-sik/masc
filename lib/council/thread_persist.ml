@@ -459,8 +459,11 @@ let search_by_topic ~(query : string) ?(room : string option) ?(limit = 10) ()
           | first :: _ ->
               first |> member "data" |> to_list
               |> List.filter_map (fun row ->
-                  try Some (row |> member "row" |> to_list |> List.hd |> to_string)
-                  with Yojson.Safe.Util.Type_error _ | Failure _ -> None)
+                  try
+                    match row |> member "row" |> to_list with
+                    | h :: _ -> Some (h |> to_string)
+                    | [] -> None
+                  with Yojson.Safe.Util.Type_error _ -> None)
         in
         Ok ids
       with e ->

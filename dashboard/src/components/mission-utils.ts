@@ -1,19 +1,14 @@
 import { signal } from '@preact/signals'
-import { extractAgentInfo } from './common/agent-info'
 import { navigate } from '../router'
 import { missionSnapshot } from '../mission-store'
-import { agents, keepers, messages, tasks } from '../store'
+import { keepers } from '../store'
 import type {
-  Agent,
-  DashboardMissionAgentBrief,
   DashboardMissionAttentionQueueItem,
   DashboardMissionKeeperBrief,
   DashboardMissionSessionBrief,
   Keeper,
-  Message,
   OperatorAttentionItem,
   OperatorRecommendedAction,
-  Task,
 } from '../types'
 import {
   createMissionWorkflowContext,
@@ -22,20 +17,6 @@ import {
   persistWorkflowContext,
   workflowTargetLabel,
 } from '../workflow-context'
-
-export type EnrichedAgentRow = {
-  brief: DashboardMissionAgentBrief
-  agent: Agent | null
-  keeper: Keeper | null
-  where: string
-  withWhom: string[]
-  currentWork: string
-  how: string | null
-  recentInput: string | null
-  recentOutput: string | null
-  recentEvent: string | null
-  recentTools: string[]
-}
 
 export type EnrichedKeeperRow = {
   brief: DashboardMissionKeeperBrief
@@ -229,102 +210,6 @@ export function attentionAsIncident(item: DashboardMissionAttentionQueueItem): O
   }
 }
 
-function latestMessageFrom(agentName: string, rows: Message[]): Message | null {
-  const key = agentName.trim().toLowerCase()
-  return [...rows]
-    .filter(item => (item.from ?? '').trim().toLowerCase() === key)
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] ?? null
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function containsDirectMention(content: string, agentName: string): boolean {
-  if (!agentName) return false
-  const escaped = escapeRegex(agentName)
-  const pattern = new RegExp(`(?:^|[^a-z0-9_])@${escaped}(?![a-z0-9_-])`, 'i')
-  return pattern.test(content)
-}
-
-function latestMessageTo(agentName: string, rows: Message[]): Message | null {
-  const key = agentName.trim().toLowerCase()
-  return [...rows]
-    .filter(item => {
-      const from = (item.from ?? '').trim().toLowerCase()
-      if (from === key) return false
-      const content = (item.content ?? '').trim().toLowerCase()
-      return containsDirectMention(content, key)
-    })
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] ?? null
-}
-
-function keeperForAgent(agentName: string): Keeper | null {
-  return keepers.value.find(keeper =>
-    keeper.agent_name === agentName || keeper.name === agentName,
-  ) ?? null
-}
-
-function agentByName(name: string): Agent | null {
-  return agents.value.find(agent => agent.name === name) ?? null
-}
-
-function taskLabel(taskId: string | null | undefined, taskList: Task[]): string | null {
-  const current = trimText(taskId, 100)
-  if (!current) return null
-  const byId = taskList.find(task => task.id === current)
-  if (byId) return `${byId.id} · ${trimText(byId.title, 92)}`
-  const byTitle = taskList.find(task => task.title === current)
-  if (byTitle) return `${byTitle.id} · ${trimText(byTitle.title, 92)}`
-  return current
-}
-
-export function enrichedAgentRow(brief: DashboardMissionAgentBrief): EnrichedAgentRow {
-  const agent = agentByName(brief.agent_name)
-  const keeper = keeperForAgent(brief.agent_name)
-  const latestOut = latestMessageFrom(brief.agent_name, messages.value)
-  const latestIn = latestMessageTo(brief.agent_name, messages.value)
-  const info = extractAgentInfo(brief.agent_name)
-  const how =
-    keeper?.skill_primary
-    ?? (agent?.capabilities && agent.capabilities.length > 0 ? agent.capabilities.slice(0, 3).join(', ') : null)
-    ?? info.model
-    ?? agent?.agent_type
-    ?? null
-
-  return {
-    brief,
-    agent,
-    keeper,
-    where: brief.where ?? '방 정보 없음',
-    withWhom: brief.with_whom,
-    currentWork:
-      brief.current_work
-      ?? taskLabel(agent?.current_task ?? null, tasks.value)
-      ?? '명시된 current task 없음',
-    how,
-    recentInput:
-      trimText(brief.recent_input_preview, 120)
-      ?? trimText(latestIn?.content, 120)
-      ?? trimText(keeper?.recent_input_preview, 120)
-      ?? null,
-    recentOutput:
-      trimText(brief.recent_output_preview, 120)
-      ?? trimText(latestOut?.content, 120)
-      ?? trimText(keeper?.recent_output_preview, 120)
-      ?? trimText(keeper?.diagnostic?.last_reply_preview, 120)
-      ?? null,
-    recentEvent:
-      trimText(brief.recent_event, 120)
-      ?? trimText(keeper?.diagnostic?.summary, 120)
-      ?? null,
-    recentTools:
-      brief.recent_tool_names.length > 0
-        ? brief.recent_tool_names
-        : keeper?.recent_tool_names ?? [],
-  }
-}
-
 export function enrichedKeeperRow(brief: DashboardMissionKeeperBrief): EnrichedKeeperRow {
   const keeper =
     keepers.value.find(item => item.name === brief.name || item.agent_name === brief.agent_name) ?? null
@@ -356,19 +241,6 @@ export function sessionLookupById() {
   if (!mission) return new Map<string, DashboardMissionSessionBrief>()
   const rows = mission.sessions.length > 0 ? mission.sessions : mission.session_briefs
   return new Map(rows.map(item => [item.session_id, item]))
-}
-
-export function memberPreview(name: string) {
-  const agent = agentByName(name)
-  const latestOut = latestMessageFrom(name, messages.value)
-  const info = extractAgentInfo(name)
-  return {
-    name,
-    model: info.model,
-    nickname: info.nickname,
-    currentTask: taskLabel(agent?.current_task ?? null, tasks.value) ?? 'agent snapshot 없음',
-    output: trimText(latestOut?.content, 96),
-  }
 }
 
 export function toggleAttention(id: string): void {

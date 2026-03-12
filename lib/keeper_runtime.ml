@@ -51,11 +51,12 @@ type keeper_bootstrap_stats = {
   scanned: int;
   started: int;
   stale: int;
+  recovering: int;
 }
 
 let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
   if not Env_config.KeeperBootstrap.enabled then
-    { enabled = false; scanned = 0; started = 0; stale = 0 }
+    { enabled = false; scanned = 0; started = 0; stale = 0; recovering = 0 }
   else
     let dir = keeper_dir ctx.config in
     (match Safe_ops.list_dir_safe dir with
@@ -86,11 +87,11 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
       list_resident_keepers ctx.config
       |> take max_scan
     in
-    let (scanned, started, stale) =
+    let (scanned, started, stale, recovering) =
       List.fold_left
-        (fun (scanned_acc, started_acc, stale_acc) spec ->
+        (fun (scanned_acc, started_acc, stale_acc, recovering_acc) spec ->
           match ensure_resident_meta ctx.config spec with
-          | Error _ -> (scanned_acc + 1, started_acc, stale_acc)
+          | Error _ -> (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
           | Ok m ->
               let stale_now =
                 stale_turn_sec > 0.0
@@ -99,8 +100,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
               in
               let already_running = keeper_keepalive_running m.name in
               let started_here =
-                if stale_now then false
-                else if already_running then false
+                if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (
                   start_keepalive ~proactive_warmup_sec ctx m;
@@ -110,11 +110,12 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
               in
               ( scanned_acc + 1,
                 started_acc + (if started_here then 1 else 0),
-                stale_acc + (if stale_now then 1 else 0) ))
-        (0, 0, 0)
+                stale_acc + (if stale_now then 1 else 0),
+                recovering_acc + (if stale_now && started_here then 1 else 0) ))
+        (0, 0, 0, 0)
         specs
     in
-    { enabled = true; scanned; started; stale }
+    { enabled = true; scanned; started; stale; recovering }
 
 let existing_keepalive_bootstrap_done = ref false
 
@@ -126,8 +127,9 @@ let start_existing_keepalives ctx =
       let stats = bootstrap_existing_keepers ctx in
       if keeper_debug then
         Printf.eprintf
-          "[KEEPER-DEBUG] bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d\n%!"
+          "[KEEPER-DEBUG] bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d recovering=%d\n%!"
           stats.enabled stats.scanned stats.started stats.stale
+          stats.recovering
     with exn ->
       (* Retry bootstrap on next keeper tool call if this attempt failed. *)
       existing_keepalive_bootstrap_done := false;

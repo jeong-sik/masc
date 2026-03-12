@@ -252,7 +252,7 @@ let walph_should_continue config ~agent_name =
 (** {1 Preset Mapping} *)
 
 (** Map Walph preset to task type description.
-    Previously mapped to llm-mcp chain IDs, now used for direct LLM prompting.
+    Previously mapped to legacy chain IDs, now used for direct LLM prompting.
     @param preset The loop preset (coverage, refactor, docs, drain)
     @return Some chain_id for presets with corresponding prompts, None for drain *)
 let get_chain_id_for_preset = function
@@ -286,7 +286,7 @@ let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec ~max_chars (
 (** Walph (Walph Wiggum variant) pattern: Keep claiming tasks until stop condition
     Eio-native implementation with fiber-safe concurrency.
 
-    @param net Eio network capability (unused after llm-mcp removal)
+    @param net Eio network capability (unused after legacy chain removal)
     @param clock Eio clock capability (for hard timeouts)
     @param preset Loop preset (drain, coverage, refactor, docs)
     @param max_iterations Maximum iterations before forced stop
@@ -486,7 +486,7 @@ let walph_loop config ~net:_net ~clock ~agent_name
 	                        in
 	                        let _ = Room.broadcast config ~from_agent:agent_name
 	                          ~content:(Printf.sprintf "🔗 @walph executing '%s' for '%s'..." cid task_title) in
-	                        (* Direct LLM call — no llm-mcp dependency *)
+	                        (* Direct LLM call — no legacy compat dependency *)
 	                        try
 	                          let response = llm_dispatch
 	                            ~tool_name:"glm"

@@ -10,8 +10,20 @@ cd "$REPO_ROOT"
 echo "=== Anti-Fake Test Audit ==="
 echo ""
 
-# Collect test files
-mapfile -t TEST_FILES < <(find test -name "test_*.ml" -type f | sort)
+if ! command -v rg >/dev/null 2>&1; then
+  echo "ERROR: ripgrep (rg) is required"
+  exit 2
+fi
+
+if ! command -v bc >/dev/null 2>&1; then
+  echo "ERROR: bc is required"
+  exit 2
+fi
+
+TEST_FILES=()
+while IFS= read -r file; do
+  TEST_FILES+=("$file")
+done < <(find test -name "test_*.ml" -type f | sort)
 FILE_COUNT=${#TEST_FILES[@]}
 
 echo "Found $FILE_COUNT test files"
@@ -22,25 +34,19 @@ SUSPECT=0
 GOOD=0
 
 for f in "${TEST_FILES[@]}"; do
-  # Count penalty patterns
   ASSERT_TRUE=$(rg -c "assert true|assert_bool.*true" "$f" 2>/dev/null || echo 0)
   LET_IGNORE=$(rg -c "let _ =" "$f" 2>/dev/null || echo 0)
   TODO_COUNT=$(rg -c '\(\* TODO|\(\* FIXME' "$f" 2>/dev/null || echo 0)
 
-  # Count bonus patterns
   REAL_ASSERT=$(rg -c 'Alcotest\.|assert_equal|check_raises' "$f" 2>/dev/null || echo 0)
   PROP_TEST=$(rg -c 'QCheck|quickcheck|Crowbar|property' "$f" 2>/dev/null || echo 0)
   ROUNDTRIP=$(rg -c 'roundtrip' "$f" 2>/dev/null || echo 0)
 
-  # Compute a simplified score
-  # base 0.5, penalties (capped contribution), bonuses (capped contribution)
   PENALTY=$(echo "scale=2; $ASSERT_TRUE * 0.3 + $LET_IGNORE * 0.2 + $TODO_COUNT * 0.15" | bc)
   BONUS=$(echo "scale=2; $REAL_ASSERT * 0.05 + $PROP_TEST * 0.05 + $ROUNDTRIP * 0.1" | bc)
-  # Cap bonus at 0.5
   BONUS=$(echo "scale=2; if ($BONUS > 0.5) 0.5 else $BONUS" | bc)
   SCORE=$(echo "scale=2; s = 0.5 - $PENALTY + $BONUS; if (s < 0) 0 else if (s > 1) 1 else s" | bc)
 
-  # Classify
   TIER="good"
   if (( $(echo "$SCORE < 0.3" | bc -l) )); then
     TIER="FAKE"

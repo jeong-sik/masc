@@ -4,11 +4,19 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
-let keepalives : (string, bool ref) Hashtbl.t = Hashtbl.create 8
+type keepalive_entry = {
+  stop : bool ref;
+  started_at : float;
+}
+
+let keepalives : (string, keepalive_entry) Hashtbl.t = Hashtbl.create 8
 
 let running_keepers () = Hashtbl.length keepalives
 
 let keeper_keepalive_running name = Hashtbl.mem keepalives name
+
+let keeper_keepalive_started_at name =
+  Hashtbl.find_opt keepalives name |> Option.map (fun entry -> entry.started_at)
 
 let keeper_spawn_slots_available () =
   let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
@@ -21,7 +29,8 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
   else if not (keeper_spawn_slots_available ()) then ()
   else (
     let stop = ref false in
-    Hashtbl.replace keepalives m.name stop;
+    Hashtbl.replace keepalives m.name
+      { stop; started_at = Time_compat.now () };
     (try
        if not (Room_utils.is_initialized ctx.config) then
          ignore (Room.init ctx.config ~agent_name:None)
@@ -244,6 +253,6 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
 let stop_keepalive name =
   match Hashtbl.find_opt keepalives name with
   | None -> ()
-  | Some stop ->
-      stop := true;
+  | Some entry ->
+      entry.stop := true;
       Hashtbl.remove keepalives name

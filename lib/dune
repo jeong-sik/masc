@@ -127,7 +127,6 @@
    chain_orchestrator_eio
    chain_run_store
    chain_native_eio
-   llm_client_eio
    log
    lodge_cascade
    lodge_atmosphere
@@ -375,6 +374,11 @@
    ;; SWARM-RISC Phase 4: Speculative Execution + MCTS
    mcts_tree
    speculative_engine)
+ (private_modules
+  keeper_exec_tools
+  keeper_exec_status
+  keeper_exec_persona
+  keeper_keepalive)
  (libraries
    yojson
    base64

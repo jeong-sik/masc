@@ -459,6 +459,7 @@ type runtime_doctor = {
   actual_slots : int option;
   expected_ctx : int option;
   actual_ctx : int option;
+  configured_capacity : int option;
   runtime_blocker : string option;
   detail : string option;
 }
@@ -563,6 +564,7 @@ let read_runtime_doctor_json run_dir =
             actual_slots = U.member "actual_slots" json |> U.to_int_option;
             expected_ctx = U.member "expected_ctx" json |> U.to_int_option;
             actual_ctx = U.member "actual_ctx" json |> U.to_int_option;
+            configured_capacity = U.member "configured_capacity" json |> U.to_int_option;
             runtime_blocker = get_string_opt json "runtime_blocker";
             detail = get_string_opt json "detail";
           }
@@ -591,6 +593,7 @@ let swarm_proof_json config =
         ("final", Option.value ~default:`Null (Option.map (fun v -> `Int v) final_markers));
       ]
   in
+  let expected_dir = swarm_live_dir config in
   match latest_swarm_live_artifact config "swarm-live-summary.json" with
   | Some summary_artifact -> (
       match Safe_ops.read_json_file_safe summary_artifact.path with
@@ -605,6 +608,10 @@ let swarm_proof_json config =
             [
               ("status", `String "present");
               ("source", `String "artifact");
+              ("reason_code", `String "artifact_present");
+              ( "status_summary",
+                `String
+                  "A swarm-live summary artifact was found and parsed successfully." );
               ("run_id", `String summary_artifact.run_id);
               ("captured_at", `String captured_at);
               ( "pass",
@@ -629,6 +636,7 @@ let swarm_proof_json config =
                   ?done_workers:(int_member summary_json "completed_workers")
                   ?final_markers:(int_member summary_json "final_markers_seen")
                   () );
+              ("expected_artifact_dir", `String summary_artifact.run_dir);
               ("artifact_ref", `String summary_artifact.path);
               ("missing_reason", `Null);
             ]
@@ -636,12 +644,17 @@ let swarm_proof_json config =
           [
             ("status", `String "missing");
             ("source", `String "none");
+            ("reason_code", `String "summary_unreadable");
+            ( "status_summary",
+              `String
+                "A swarm-live summary artifact exists, but it could not be read." );
             ("run_id", `Null);
             ("captured_at", `Null);
             ("pass", `Null);
             ("peak_hot_slots", `Null);
             ("ctx_per_slot", `Null);
             ("workers", workers_json ());
+            ("expected_artifact_dir", `String summary_artifact.run_dir);
             ("artifact_ref", `Null);
             ( "missing_reason",
               `String
@@ -656,6 +669,10 @@ let swarm_proof_json config =
                 [
                   ("status", `String "fallback");
                   ("source", `String "slot_samples");
+                  ("reason_code", `String "slot_samples_only");
+                  ( "status_summary",
+                    `String
+                      "Only slot telemetry was found; worker completion proof is still missing." );
                   ("run_id", `String slot_artifact.run_id);
                   ( "captured_at",
                     match metrics.captured_at with
@@ -671,6 +688,7 @@ let swarm_proof_json config =
                     | Some value -> `Int value
                     | None -> `Null );
                   ("workers", workers_json ());
+                  ("expected_artifact_dir", `String slot_artifact.run_dir);
                   ("artifact_ref", `String slot_artifact.path);
                   ( "missing_reason",
                     `String
@@ -681,12 +699,17 @@ let swarm_proof_json config =
                 [
                   ("status", `String "missing");
                   ("source", `String "none");
+                  ("reason_code", `String "slot_samples_unreadable");
+                  ( "status_summary",
+                    `String
+                      "Slot telemetry exists, but the dashboard could not summarize it." );
                   ("run_id", `Null);
                   ("captured_at", `Null);
                   ("pass", `Null);
                   ("peak_hot_slots", `Null);
                   ("ctx_per_slot", `Null);
                   ("workers", workers_json ());
+                  ("expected_artifact_dir", `String slot_artifact.run_dir);
                   ("artifact_ref", `Null);
                   ( "missing_reason",
                     `String
@@ -697,12 +720,17 @@ let swarm_proof_json config =
             [
               ("status", `String "missing");
               ("source", `String "none");
+              ("reason_code", `String "no_swarm_live_artifacts");
+              ( "status_summary",
+                `String
+                  "No swarm-live proof artifacts were found for the current control-plane state." );
               ("run_id", `Null);
               ("captured_at", `Null);
               ("pass", `Null);
               ("peak_hot_slots", `Null);
               ("ctx_per_slot", `Null);
               ("workers", workers_json ());
+              ("expected_artifact_dir", `String expected_dir);
               ("artifact_ref", `Null);
               ( "missing_reason",
                 `String

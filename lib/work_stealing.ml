@@ -86,12 +86,12 @@ let steal scheduler ~thief_id =
         let stealable = Reservation_station.list_stealable victim_rs in
         match stealable with
         | [] -> No_victim
-        | candidates ->
+        | oldest :: rest ->
             (* Pick the oldest stealable entry (FIFO — steal big/old work) *)
             let oldest = List.fold_left (fun acc e ->
               if e.Reservation_station.enqueued_at < acc.Reservation_station.enqueued_at
               then e else acc
-            ) (List.hd candidates) (List.tl candidates) in
+            ) oldest rest in
             let stolen_opt =
               Reservation_station.steal_entry victim_rs
                 ~op_id:oldest.Reservation_station.op_id

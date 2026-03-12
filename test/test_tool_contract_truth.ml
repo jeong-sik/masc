@@ -97,6 +97,8 @@ let test_hidden_tools_report_contract_status () =
               "masc_archive_save";
               "masc_claim";
               "masc_transition";
+              "masc_runtime_verify";
+              "masc_llama_runtime_verify";
               "masc_verify_handoff";
             ]
           state
@@ -111,6 +113,14 @@ let test_hidden_tools_report_contract_status () =
       let canonical = find_tool_exn tools "masc_transition" in
       check string "transition real" "real"
         (tool_string_field canonical "implementationStatus");
+      let runtime_verify = find_tool_exn tools "masc_runtime_verify" in
+      check string "runtime verify real" "real"
+        (tool_string_field runtime_verify "implementationStatus");
+      let runtime_alias = find_tool_exn tools "masc_llama_runtime_verify" in
+      check string "llama runtime verify adapter alias" "adapter"
+        (tool_string_field runtime_alias "implementationStatus");
+      check string "llama runtime verify canonical" "masc_runtime_verify"
+        (tool_string_field runtime_alias "canonicalName");
       let verify_handoff = find_tool_exn tools "masc_verify_handoff" in
       check string "verify_handoff real" "real"
         (tool_string_field verify_handoff "implementationStatus"))

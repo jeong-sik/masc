@@ -199,8 +199,7 @@ let handle_start ctx args =
   end
 
 let handle_status args =
-  let open Yojson.Safe.Util in
-  let trace = match args |> member "trace_id" |> to_string_option with
+  let trace = match Safe_ops.json_string_opt "trace_id" args with
     | Some id -> Some id
     | None -> !latest_trace_id
   in
@@ -237,13 +236,11 @@ let handle_status args =
        | other -> other)
 
 let handle_stop args =
-  let open Yojson.Safe.Util in
-  let trace = match args |> member "trace_id" |> to_string_option with
+  let trace = match Safe_ops.json_string_opt "trace_id" args with
     | Some id -> Some id
     | None -> !latest_trace_id
   in
-  let reason = args |> member "reason" |> to_string_option
-               |> Option.value ~default:"manual stop" in
+  let reason = Safe_ops.json_string ~default:"manual stop" "reason" args in
   match trace with
   | None -> `Assoc [("error", `String "No perpetual agent running")]
   | Some id ->
@@ -260,12 +257,11 @@ let handle_stop args =
       ]
 
 let handle_inject args =
-  let open Yojson.Safe.Util in
-  let trace = match args |> member "trace_id" |> to_string_option with
+  let trace = match Safe_ops.json_string_opt "trace_id" args with
     | Some id -> Some id
     | None -> !latest_trace_id
   in
-  let message = args |> member "message" |> to_string in
+  let message = Safe_ops.json_string "message" args in
   match trace with
   | None -> `Assoc [("error", `String "No perpetual agent running")]
   | Some id ->

@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-all clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
+.PHONY: build test test-unit test-contract test-contract-live test-all clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check health ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
 
 # Default target
 all: build
@@ -71,6 +71,12 @@ fmt:
 # Check formatting
 fmt-check:
 	dune fmt --root . --preview || true
+
+# Health snapshot (typecheck + anti-fake + unsafe pattern counts)
+health:
+	@mkdir -p .health
+	bash scripts/health_snapshot.sh --json-out .health/health-snapshot.json
+	@echo "Health snapshot: .health/health-snapshot.json"
 
 # CI target (for GitHub Actions)
 ci: fmt-check test test-contract

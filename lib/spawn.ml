@@ -368,66 +368,102 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
 
   (* Build command args - direct execution without shell *)
   let base_args = parse_command config.command |> add_default_model_arg agent_name in
-  let cmd_args = ["timeout"; string_of_int timeout] @ base_args @ mcp_args @ prompt_args in
-  let cmd_array = Array.of_list cmd_args in
+  if base_args = [] then
+    {
+      success = false;
+      output =
+        Printf.sprintf "spawn command is empty for agent '%s'" agent_name;
+      exit_code = 2;
+      elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+      input_tokens = None;
+      output_tokens = None;
+      cache_creation_tokens = None;
+      cache_read_tokens = None;
+      cost_usd = None;
+    }
+  else (
+    let cmd_args =
+      [ "timeout"; string_of_int timeout ] @ base_args @ mcp_args @ prompt_args
+    in
+    let cmd_array = Array.of_list cmd_args in
 
-  (* Change to working dir if specified *)
-  let original_dir = Sys.getcwd () in
-  let () = match working_dir with
-    | Some dir -> Sys.chdir dir
-    | None -> match config.working_dir with
+    (* Change to working dir if specified *)
+    let original_dir = Sys.getcwd () in
+    let () =
+      match working_dir with
       | Some dir -> Sys.chdir dir
-      | None -> ()
-  in
-
-  try
-    (* Create pipes for stdin and stdout *)
-    let (stdout_read, stdout_write) = Unix.pipe () in
-    let (stdin_read, stdin_write) = Unix.pipe () in
-    
-    (* Spawn process directly without shell *)
-    let pid = Unix.create_process 
-      (List.hd cmd_args) cmd_array
-      stdin_read stdout_write Unix.stderr in
-    
-    (* Close unused ends *)
-    Unix.close stdout_write;
-    Unix.close stdin_read;
-    
-    (* Gemini CLI expects prompt via -p; other CLIs still read stdin. *)
-    let stdin_content = if agent_name = "gemini" then "" else augmented_prompt in
-    let _ = Unix.write_substring stdin_write stdin_content 0 (String.length stdin_content) in
-    Unix.close stdin_write;
-    
-    (* Read output *)
-    let ic = Unix.in_channel_of_descr stdout_read in
-    let raw_output = In_channel.input_all ic in
-    In_channel.close ic;
-    
-    (* Wait for process *)
-    let (_, status) = Unix.waitpid [] pid in
-
-    (* Restore directory *)
-    Sys.chdir original_dir;
-
-    let elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
-    let exit_code = match status with
-      | Unix.WEXITED code -> code
-      | Unix.WSIGNALED _ -> -1
-      | Unix.WSTOPPED _ -> -2
+      | None -> (
+          match config.working_dir with
+          | Some dir -> Sys.chdir dir
+          | None -> ())
     in
 
-    (* Extract token usage for Claude (JSON output) *)
-    let (output, input_tokens, output_tokens, cache_creation, cache_read, cost_usd) =
-      if agent_name = "claude" then
-        let (result_opt, inp, out, cache_c, cache_r, cost) = parse_claude_json raw_output in
-        (Option.value result_opt ~default:raw_output, inp, out, cache_c, cache_r, cost)
-      else if agent_name = "gemini" then
-        let inp, out, cached, cost = parse_gemini_output raw_output in
-        let result_text = Option.value (extract_gemini_response_text raw_output) ~default:raw_output in
-        (result_text, inp, out, None, cached, cost)
-      else
-        (raw_output, None, None, None, None, None)
+    try
+      (* Create pipes for stdin and stdout *)
+      let (stdout_read, stdout_write) = Unix.pipe () in
+      let (stdin_read, stdin_write) = Unix.pipe () in
+
+      (* Spawn process directly without shell *)
+      let pid =
+        Unix.create_process (Array.get cmd_array 0) cmd_array stdin_read
+          stdout_write Unix.stderr
+      in
+
+      (* Close unused ends *)
+      Unix.close stdout_write;
+      Unix.close stdin_read;
+
+      (* Gemini CLI expects prompt via -p; other CLIs still read stdin. *)
+      let stdin_content = if agent_name = "gemini" then "" else augmented_prompt in
+      let _ =
+        Unix.write_substring stdin_write stdin_content 0
+          (String.length stdin_content)
+      in
+      Unix.close stdin_write;
+
+      (* Read output *)
+      let ic = Unix.in_channel_of_descr stdout_read in
+      let raw_output = In_channel.input_all ic in
+      In_channel.close ic;
+
+      (* Wait for process *)
+      let (_, status) = Unix.waitpid [] pid in
+
+      (* Restore directory *)
+      Sys.chdir original_dir;
+
+      let elapsed_ms =
+        int_of_float ((Time_compat.now () -. start_time) *. 1000.0)
+      in
+      let exit_code =
+        match status with
+        | Unix.WEXITED code -> code
+        | Unix.WSIGNALED _ -> -1
+        | Unix.WSTOPPED _ -> -2
+      in
+
+      (* Extract token usage for Claude (JSON output) *)
+      let (output, input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
+          =
+        if agent_name = "claude" then
+          let (result_opt, inp, out, cache_c, cache_r, cost) =
+            parse_claude_json raw_output
+          in
+          ( Option.value result_opt ~default:raw_output,
+            inp,
+            out,
+            cache_c,
+            cache_r,
+            cost )
+        else if agent_name = "gemini" then
+          let inp, out, cached, cost = parse_gemini_output raw_output in
+          let result_text =
+            Option.value (extract_gemini_response_text raw_output)
+              ~default:raw_output
+          in
+          (result_text, inp, out, None, cached, cost)
+        else
+          (raw_output, None, None, None, None, None)
     in
 
     {
@@ -453,7 +489,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
       cache_creation_tokens = None;
       cache_read_tokens = None;
       cost_usd = None;
-    }
+    })
 
 (** Spawn and wait for result (synchronous) *)
 let spawn_sync = spawn

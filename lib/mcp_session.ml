@@ -14,7 +14,9 @@ let encode_base62 n =
     else aux (base62_chars.[n mod 62] :: acc) (n / 62)
   in
   if n = 0 then "0"
-  else String.init (List.length (aux [] n)) (fun i -> List.nth (aux [] n) i)
+  else
+    let chars = aux [] n |> Array.of_list in
+    String.init (Array.length chars) (fun i -> chars.(i))
 
 (** Validate session ID per MCP spec: visible ASCII only (0x21-0x7E) *)
 let is_valid id =

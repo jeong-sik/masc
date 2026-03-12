@@ -278,7 +278,7 @@ Status here is code-level (unverified). Use test logs for runtime verification.
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
 | JSON-RPC 2.0 Format | yes | `mcp_protocol.ml` |
-| Protocol Version Header | yes | `X-MCP-Protocol-Version: 2025-11-25` |
+| Protocol Version Header | yes | `MCP-Protocol-Version: 2025-11-25` |
 | Standard Error Codes | yes | -32700, -32600, -32601, -32602, -32603 |
 | Origin Validation | yes | `validate_origin` with allowlist |
 
@@ -295,7 +295,7 @@ Status here is code-level (unverified). Use test logs for runtime verification.
 
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
-| Session ID | yes | `session.ml` - `X-MCP-Session-ID` header |
+| Session ID | yes | `session.ml` - `Mcp-Session-Id` header (legacy `X-MCP-Session-ID` still accepted for compatibility) |
 | Event IDs (Resumability) | yes | SSE `id:` field, `Last-Event-ID` reconnect |
 | Cancellation Tokens | yes | `cancellation.ml` - LIFO callbacks |
 | Resource Subscriptions | yes | `subscriptions.ml` - 6 resource types |

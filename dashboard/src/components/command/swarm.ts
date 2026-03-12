@@ -9,6 +9,7 @@ import type {
   CommandPlaneSwarmLane,
   CommandPlaneSwarmProof,
   CommandPlaneSwarmResponse,
+  CommandPlaneSwarmStatus,
   CommandPlaneSwarmTimelineEvent,
   CommandPlaneSwarmWorker,
 } from '../../types'
@@ -72,6 +73,15 @@ function runResolutionLabel(kind?: string | null): string {
   }
 }
 
+function runtimeStateLabel(
+  provider: CommandPlaneSwarmResponse['provider'] | null | undefined,
+): string {
+  if (!provider) return '확인 필요'
+  if (provider.runtime_blocker) return '막힘'
+  if (provider.provider_reachable) return '준비됨'
+  return '확인 필요'
+}
+
 export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResponse }) {
   const runId = swarm.run_id
   const recommendation = swarm.resolution_recommendation
@@ -109,7 +119,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
   return html`
     <article class="command-guide-card ${toneClass(tone)}">
       <div class="command-guide-head">
-        <strong>Run Resolution</strong>
+        <strong>런 해석</strong>
         <span class="command-chip ${toneClass(tone)}">
           ${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)}
         </span>
@@ -120,10 +130,10 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
           : recommendation?.reason ?? '이 run에 대한 별도 resolution recommendation은 아직 없습니다.'}
       </p>
       <div class="command-card-grid">
-        <span>Run</span><span>${runId}</span>
-        <span>Provenance</span><span>${recommendation?.provenance ?? 'recorded'}</span>
-        <span>Engine</span><span>${recommendation?.decision_engine ?? 'operator_record'}</span>
-        <span>Authoritative</span><span>${recommendation?.authoritative ? 'yes' : 'no'}</span>
+        <span>런</span><span>${runId}</span>
+        <span>근거 경로</span><span>${recommendation?.provenance ?? 'recorded'}</span>
+        <span>결정 엔진</span><span>${recommendation?.decision_engine ?? 'operator_record'}</span>
+        <span>권위성</span><span>${recommendation?.authoritative ? '예' : '아니오'}</span>
       </div>
       ${recommendation?.evidence
         ? html`
@@ -155,13 +165,13 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
           ? html`
               <div class="command-action-row">
                 ${recommendation.continue_available
-                  ? html`<button class="control-btn ghost" onClick=${() => { void previewAction('swarm_run_continue') }} disabled=${operatorActionBusy.value}>Continue</button>`
+                  ? html`<button class="control-btn ghost" onClick=${() => { void previewAction('swarm_run_continue') }} disabled=${operatorActionBusy.value}>계속</button>`
                   : null}
                 ${recommendation.rerun_available
-                  ? html`<button class="control-btn" onClick=${() => { void previewAction('swarm_run_rerun') }} disabled=${operatorActionBusy.value}>Rerun</button>`
+                  ? html`<button class="control-btn" onClick=${() => { void previewAction('swarm_run_rerun') }} disabled=${operatorActionBusy.value}>재실행</button>`
                   : null}
                 ${recommendation.abandon_available
-                  ? html`<button class="control-btn ghost" onClick=${() => { void previewAction('swarm_run_abandon') }} disabled=${operatorActionBusy.value}>Abandon</button>`
+                  ? html`<button class="control-btn ghost" onClick=${() => { void previewAction('swarm_run_abandon') }} disabled=${operatorActionBusy.value}>포기</button>`
                   : null}
               </div>
             `
@@ -354,10 +364,54 @@ function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEvent }) {
 
 function SwarmGapDot({ gap }: { gap: CommandPlaneSwarmGap }) {
   return html`
-    <div class="swarm-gap-inline">
-      <span class="swarm-gap-dot"></span>
-      <span class="command-chip ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
-      <span class="command-card-sub">${gap.summary}</span>
+    <article class="command-card compact">
+      <div class="command-card-head">
+        <div>
+          <strong>${gap.summary}</strong>
+          <div class="command-card-sub">${gap.code} · lane ${gap.lane_ids.join(', ') || 'n/a'}</div>
+        </div>
+        <span class="command-chip ${toneClass(gap.severity)}">${gap.count}</span>
+      </div>
+      ${gap.why_it_matters ? html`<p>${gap.why_it_matters}</p>` : null}
+      ${gap.next_tool || gap.next_step
+        ? html`
+            <div class="command-card-grid">
+              <span>다음 도구</span><span>${gap.next_tool ?? 'masc_observe_traces'}</span>
+              <span>다음 확인</span><span>${gap.next_step ?? '최근 trace를 확인합니다.'}</span>
+            </div>
+          `
+        : null}
+    </article>
+  `
+}
+
+function SwarmNarrativeCard({
+  swarm,
+}: {
+  swarm?: CommandPlaneSwarmStatus
+}) {
+  const narrative = swarm?.narrative
+  if (!narrative) return null
+  return html`
+    <div class="command-guide-card highlight">
+      <div class="command-guide-head">
+        <strong>읽는 순서</strong>
+        <span class="command-chip">${narrative.state ?? 'idle'}</span>
+      </div>
+      <div class="proof-summary-stack">
+        <article class="proof-summary-block">
+          <strong>무엇으로 시작됐나</strong>
+          <span>${narrative.started ?? '시작 근거가 없습니다.'}</span>
+        </article>
+        <article class="proof-summary-block">
+          <strong>지금 무엇을 하고 있나</strong>
+          <span>${narrative.active_work ?? '현재 작업 설명이 없습니다.'}</span>
+        </article>
+        <article class="proof-summary-block">
+          <strong>끝났는가</strong>
+          <span>${narrative.completion ?? '종료 근거가 없습니다.'}</span>
+        </article>
+      </div>
     </div>
   `
 }
@@ -379,8 +433,10 @@ function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
         </div>
       ${proof
         ? html`
+            <p>${proof.status_summary ?? proof.missing_reason ?? '아직 스웜 증거가 수집되지 않았습니다.'}</p>
             <div class="command-card-grid">
               <span>소스</span><span>${proof.source}</span>
+              <span>상태 코드</span><span>${proof.reason_code ?? 'n/a'}</span>
               <span>런</span><span>${proof.run_id ?? 'n/a'}</span>
               <span>수집 시각</span><span>${relativeTime(proof.captured_at)}</span>
               <span>통과</span><span>${proof.pass == null ? 'n/a' : proof.pass ? '예' : '아니오'}</span>
@@ -388,6 +444,9 @@ function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
               <span>Ctx / Slot</span><span>${proof.ctx_per_slot ?? 'n/a'}</span>
               <span>워커 증거</span><span>${proof.workers.expected ?? 'n/a'} 예상 · ${proof.workers.done ?? 'n/a'} 완료 · ${proof.workers.final ?? 'n/a'} 최종</span>
             </div>
+            ${proof.expected_artifact_dir
+              ? html`<div class="command-card-foot">expected ${proof.expected_artifact_dir}</div>`
+              : null}
             ${proof.artifact_ref
               ? html`<div class="command-card-foot">${proof.artifact_ref}</div>`
               : null}
@@ -439,6 +498,8 @@ function SwarmPanel() {
               </div>
 
               <div class="command-card-stack">
+                <${SwarmNarrativeCard} swarm=${swarm} />
+
                 <div class="command-guide-card highlight ${focusKey === 'recommendation' ? 'focus' : ''}">
                   <div class="command-guide-head">
                     <strong>${recommendation?.label ?? '운영자 상태 확인'}</strong>
@@ -456,7 +517,7 @@ function SwarmPanel() {
                     <span class="command-chip ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
                   </div>
                   ${gaps.length > 0
-                    ? html`<div class="swarm-event-rail">${gaps.slice(0, 4).map(gap => html`<${SwarmGapDot} gap=${gap} />`)}</div>`
+                    ? html`<div class="command-card-stack">${gaps.slice(0, 4).map(gap => html`<${SwarmGapDot} gap=${gap} />`)}</div>`
                     : html`<p>지금 보이는 핵심 공백은 없습니다.</p>`}
                 </div>
 
@@ -547,15 +608,13 @@ export function SwarmSurface() {
   const swarm = commandPlaneSwarm.value
   const runId = dashboardSwarmRunId()
   const operationId = dashboardSwarmOperationId()
-  const runtimeState = swarm?.provider?.runtime_blocker
-    ? 'blocked'
-    : swarm?.provider?.provider_reachable
-      ? 'ready'
-      : 'check'
+  const runtimeState = runtimeStateLabel(swarm?.provider)
+  const configuredCapacity = swarm?.provider?.configured_capacity ?? 0
   const actualSlots = swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0
   const expectedSlots = swarm?.provider?.expected_slots ?? 'n/a'
   const actualCtx = swarm?.provider?.actual_ctx ?? swarm?.provider?.ctx_per_slot ?? 0
   const expectedCtx = swarm?.provider?.expected_ctx ?? 'n/a'
+  const peakHotSlots = swarm?.summary?.peak_hot_slots ?? swarm?.provider?.peak_active_slots ?? 0
   return html`
     <div class="command-section-stack">
       <${SwarmPanel} />
@@ -574,14 +633,15 @@ export function SwarmSurface() {
                     <div class="command-summary-grid">
                       <div class="monitor-stat-card"><span>실행 런</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room 정보 없음'}</small></div>
                       <div class="monitor-stat-card"><span>워커</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0}개 가동 · ${swarm.summary?.completed_workers ?? 0}개 완료</small></div>
-                      <div class="monitor-stat-card"><span>런타임</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
-                      <div class="monitor-stat-card"><span>고동시성</span><strong>${swarm.summary?.pass_hot_concurrency ? '통과' : '확인 필요'}</strong><small>${swarm.provider?.slot_url ?? 'slot 정보 없음'}</small></div>
+                      <div class="monitor-stat-card"><span>런타임 계약</span><strong>${runtimeState}</strong><small>설정 ${configuredCapacity || 'n/a'} · 실제 ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
+                      <div class="monitor-stat-card"><span>고동시성</span><strong>${swarm.summary?.pass_hot_concurrency ? '통과' : '확인 필요'}</strong><small>최대 hot ${peakHotSlots} · ${swarm.provider?.slot_url ?? 'slot 정보 없음'}</small></div>
                       <div class="monitor-stat-card"><span>종단 점검</span><strong>${swarm.summary?.pass_end_to_end ? '통과' : '확인 필요'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
                     </div>
                     <div class="command-card-grid">
                       <span>작전</span><span>${swarm.operation?.operation_id ?? operationId ?? '없음'}</span>
                       <span>분대</span><span>${swarm.squad?.label ?? '없음'}</span>
                       <span>실행체</span><span>${swarm.detachment?.detachment_id ?? '없음'}</span>
+                      <span>목표 해석</span><span>target profile 기준, 달성 사실과 분리</span>
                       <span>예상 워커</span><span>${swarm.summary?.expected_workers ?? 0}명</span>
                       <span>최종 마커</span><span>${swarm.summary?.final_markers_seen ?? 0}</span>
                       <span>런타임 막힘</span><span>${swarm.provider?.runtime_blocker ?? '없음'}</span>
@@ -629,21 +689,25 @@ export function SwarmSurface() {
           ${swarm?.provider
             ? html`
                 <div class="command-card-grid">
-                  <span>Provider</span><span>${swarm.provider.provider_base_url ?? 'n/a'}</span>
-                  <span>Provider Reachable</span><span>${swarm.provider.provider_reachable == null ? 'n/a' : swarm.provider.provider_reachable ? 'yes' : 'no'}</span>
-                  <span>Requested Model</span><span>${swarm.provider.provider_model_id ?? 'n/a'}</span>
-                  <span>Actual Model</span><span>${swarm.provider.actual_model_id ?? 'n/a'}</span>
-                  <span>Slot URL</span><span>${swarm.provider.slot_url ?? 'n/a'}</span>
-                  <span>Expected Slots</span><span>${swarm.provider.expected_slots ?? 'n/a'}</span>
-                  <span>Actual Slots</span><span>${swarm.provider.actual_slots ?? swarm.provider.total_slots ?? 0}</span>
-                  <span>Expected Ctx</span><span>${swarm.provider.expected_ctx ?? 'n/a'}</span>
-                  <span>Actual Ctx</span><span>${swarm.provider.actual_ctx ?? swarm.provider.ctx_per_slot ?? 0}</span>
-                  <span>Active Now</span><span>${swarm.provider.active_slots_now ?? 0}</span>
-                  <span>Peak Active</span><span>${swarm.provider.peak_active_slots ?? 0}</span>
-                  <span>Sample Count</span><span>${swarm.provider.sample_count ?? 0}</span>
-                  <span>Last Sample</span><span>${swarm.provider.last_sample_at ? relativeTime(swarm.provider.last_sample_at) : 'n/a'}</span>
-                  <span>런타임 막힘</span><span>${swarm.provider.runtime_blocker ?? 'none'}</span>
-                  <span>Doctor Checked</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : 'n/a'}</span>
+                  <span>프로바이더</span><span>${swarm.provider.provider_base_url ?? '정보 없음'}</span>
+                  <span>프로바이더 응답</span><span>${swarm.provider.provider_reachable == null ? '정보 없음' : swarm.provider.provider_reachable ? '가능' : '불가'}</span>
+                  <span>요청 모델</span><span>${swarm.provider.provider_model_id ?? '정보 없음'}</span>
+                  <span>실제 모델</span><span>${swarm.provider.actual_model_id ?? '정보 없음'}</span>
+                  <span>슬롯 URL</span><span>${swarm.provider.slot_url ?? '정보 없음'}</span>
+                  <span>설정 용량</span><span>${swarm.provider.configured_capacity ?? '정보 없음'}</span>
+                  <span>요구 슬롯</span><span>${swarm.provider.expected_slots ?? '정보 없음'}</span>
+                  <span>실제 슬롯</span><span>${swarm.provider.actual_slots ?? swarm.provider.total_slots ?? 0}</span>
+                  <span>요구 컨텍스트</span><span>${swarm.provider.expected_ctx ?? '정보 없음'}</span>
+                  <span>실제 컨텍스트</span><span>${swarm.provider.actual_ctx ?? swarm.provider.ctx_per_slot ?? 0}</span>
+                  <span>현재 hot</span><span>${swarm.provider.active_slots_now ?? 0}</span>
+                  <span>최대 hot</span><span>${swarm.provider.peak_active_slots ?? 0}</span>
+                  <span>샘플 수</span><span>${swarm.provider.sample_count ?? 0}</span>
+                  <span>마지막 샘플</span><span>${swarm.provider.last_sample_at ? relativeTime(swarm.provider.last_sample_at) : '정보 없음'}</span>
+                  <span>런타임 막힘</span><span>${swarm.provider.runtime_blocker ?? '없음'}</span>
+                  <span>검사 시각</span><span>${swarm.provider.checked_at ? relativeTime(swarm.provider.checked_at) : '정보 없음'}</span>
+                </div>
+                <div class="command-card-sub">
+                  target profile과 실제 런타임은 다를 수 있습니다. 설정 용량, 실제 슬롯, 최대 hot 슬롯을 분리해서 읽으세요.
                 </div>
                 ${swarm.provider.detail
                   ? html`<div class="command-card-sub">${swarm.provider.detail}</div>`
@@ -651,15 +715,15 @@ export function SwarmSurface() {
                 ${swarm.provider.timeline.length > 0
                   ? html`<div class="command-trace-stack">
                       ${swarm.provider.timeline.slice(-12).map(sample => html`
-                        <article class="command-trace-row">
-                          <div class="command-trace-main">
-                            <div class="command-trace-head">
-                              <strong>${sample.active_slots} active</strong>
-                              <span class="command-chip">${relativeTime(sample.timestamp)}</span>
+                          <article class="command-trace-row">
+                            <div class="command-trace-main">
+                              <div class="command-trace-head">
+                                <strong>hot ${sample.active_slots}</strong>
+                                <span class="command-chip">${relativeTime(sample.timestamp)}</span>
+                              </div>
+                            <div class="command-card-sub">slot ids ${sample.active_slot_ids.join(', ') || '없음'}</div>
                             </div>
-                            <div class="command-card-sub">slots ${sample.active_slot_ids.join(', ') || 'none'}</div>
-                          </div>
-                        </article>
+                          </article>
                       `)}
                     </div>`
                   : html`<div class="empty-state">slot telemetry가 아직 없습니다.</div>`}

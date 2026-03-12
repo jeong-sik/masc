@@ -101,6 +101,10 @@ let explicit_metadata : (string * metadata) list =
       deprecated ~canonical_name:"masc_dispatch_plan"
         ~replacement:"masc_dispatch_plan"
         "Alias retained for compatibility; use masc_dispatch_plan." );
+    ( "masc_llama_runtime_verify",
+      deprecated ~canonical_name:"masc_runtime_verify"
+        ~replacement:"masc_runtime_verify" ~allow_direct_call_when_hidden:true
+        "Deprecated llama-specific alias retained for compatibility; use masc_runtime_verify." );
     ( "masc_unit_update",
       deprecated ~canonical_name:"masc_unit_define"
         ~replacement:"masc_unit_define"
@@ -297,6 +301,18 @@ let metadata_to_fields name =
   match meta.reason with
   | Some reason -> ("reason", `String reason) :: with_replacement
   | None -> with_replacement
+
+let public_contract_fields name =
+  let meta = metadata name in
+  let base =
+    [
+      ( "implementationStatus",
+        `String (implementation_status_to_string meta.implementation_status) );
+    ]
+  in
+  match meta.canonical_name with
+  | Some canonical_name -> ("canonicalName", `String canonical_name) :: base
+  | None -> base
 
 let allow_direct_call name =
   let meta = metadata name in

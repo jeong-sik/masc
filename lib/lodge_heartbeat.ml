@@ -1353,14 +1353,13 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
       try
         let json = Yojson.Safe.from_string json_str in
         (match Yojson.Safe.Util.member "errors" json with
-         | `List errors when errors <> [] ->
+         | `List (first_err :: _) ->
            let msg = try
-             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-           with Failure _ | Yojson.Safe.Util.Type_error (_, _) -> "unknown error" in
+             first_err |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+           with Yojson.Safe.Util.Type_error (_, _) -> "unknown error" in
            Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
            Error msg
-         | _ ->
-           let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
+         | _ ->           let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
            let success = result |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
            if not success then begin
              let msg = result |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option |> Option.value ~default:"unknown error" in
@@ -3044,20 +3043,25 @@ let load_agent_specialties_from_neo4j () =
         match arr with
         | inner_node :: _ ->
           let inner = Yojson.Safe.Util.to_list inner_node in
-          let name = Yojson.Safe.Util.to_string (List.nth inner 0) in
-          let traits = Yojson.Safe.Util.(List.nth inner 1 |> to_list |> List.map to_string) in
-          let description =
-            match List.nth inner 2 with
-            | `Null -> ""
-            | `String s -> s
-            | _ -> ""
-          in
-          (* Combine traits + words from description as keywords *)
-          let desc_words = description
-            |> String.split_on_char ' '
-            |> List.filter (fun w -> String.length w > 3)
-          in
-          Some (name, traits @ desc_words)
+          (match inner with
+           | name_json :: traits_json :: description_json :: _ ->
+             let name = Yojson.Safe.Util.to_string name_json in
+             let traits =
+               Yojson.Safe.Util.(traits_json |> to_list |> List.map to_string)
+             in
+             let description =
+               match description_json with
+               | `Null -> ""
+               | `String s -> s
+               | _ -> ""
+             in
+             (* Combine traits + words from description as keywords *)
+             let desc_words = description
+               |> String.split_on_char ' '
+               |> List.filter (fun w -> String.length w > 3)
+             in
+             Some (name, traits @ desc_words)
+           | _ -> None)
         | [] -> None
       with Yojson.Safe.Util.Type_error _ | Failure _ -> None
     ) records

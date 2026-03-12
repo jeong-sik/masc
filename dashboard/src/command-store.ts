@@ -690,6 +690,9 @@ function normalizeSwarmGap(raw: unknown): CommandPlaneSwarmGap | null {
     code,
     severity,
     summary,
+    why_it_matters: asString(raw.why_it_matters) ?? undefined,
+    next_tool: asString(raw.next_tool) ?? undefined,
+    next_step: asString(raw.next_step) ?? undefined,
     lane_ids: asStringArray(raw.lane_ids),
     count: asNumber(raw.count) ?? 0,
   }
@@ -699,9 +702,17 @@ function normalizeSwarmStatus(raw: unknown): CommandPlaneSwarmStatus | undefined
   if (!isRecord(raw)) return undefined
   const overview = isRecord(raw.overview) ? raw.overview : {}
   const gaps = isRecord(raw.gaps) ? raw.gaps : {}
+  const narrative = isRecord(raw.narrative) ? raw.narrative : {}
   const recommendation = isRecord(raw.recommended_next_action) ? raw.recommended_next_action : undefined
   return {
     generated_at: asString(raw.generated_at),
+    narrative: {
+      state: asString(narrative.state) ?? undefined,
+      started: asString(narrative.started) ?? undefined,
+      active_work: asString(narrative.active_work) ?? undefined,
+      completion: asString(narrative.completion) ?? undefined,
+      lane_id: asString(narrative.lane_id) ?? null,
+    },
     overview: {
       active_lanes: asNumber(overview.active_lanes),
       moving_lanes: asNumber(overview.moving_lanes),
@@ -745,6 +756,8 @@ function normalizeSwarmProof(raw: unknown): CommandPlaneSwarmProof | undefined {
   return {
     status: asString(raw.status) ?? 'missing',
     source: asString(raw.source) ?? 'none',
+    reason_code: asString(raw.reason_code) ?? null,
+    status_summary: asString(raw.status_summary) ?? null,
     run_id: asString(raw.run_id) ?? null,
     captured_at: asString(raw.captured_at) ?? null,
     ...(pass !== undefined ? { pass } : {}),
@@ -758,6 +771,7 @@ function normalizeSwarmProof(raw: unknown): CommandPlaneSwarmProof | undefined {
       done: asNumber(workers.done),
       final: asNumber(workers.final),
     },
+    expected_artifact_dir: asString(raw.expected_artifact_dir) ?? null,
     artifact_ref: asString(raw.artifact_ref) ?? null,
     missing_reason: asString(raw.missing_reason) ?? null,
   }
@@ -1185,6 +1199,7 @@ function normalizeSwarmProvider(raw: unknown): CommandPlaneSwarmProvider | undef
     actual_slots: asNumber(raw.actual_slots),
     expected_ctx: asNumber(raw.expected_ctx),
     actual_ctx: asNumber(raw.actual_ctx),
+    configured_capacity: asNumber(raw.configured_capacity),
     slot_reachable: asBoolean(raw.slot_reachable) ?? null,
     slot_status_code: asNumber(raw.slot_status_code) ?? null,
     runtime_blocker: asString(raw.runtime_blocker) ?? null,

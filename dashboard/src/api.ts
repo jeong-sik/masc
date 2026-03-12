@@ -11,6 +11,7 @@ import type {
   DashboardMissionSessionDetailResponse,
   DashboardProofResponse,
   DashboardPlanningResponse,
+  DashboardRoomTruthResponse,
   DashboardShellResponse,
   BoardPost,
   BoardComment,
@@ -63,6 +64,16 @@ function readStoredAgentName(): string | null {
   } catch {
     return null
   }
+}
+
+export function currentDashboardActor(): string {
+  const params = getQueryParams()
+  return (
+    params.get('agent')?.trim()
+    || params.get('agent_name')?.trim()
+    || readStoredAgentName()
+    || 'dashboard'
+  )
 }
 
 function authHeaders(): Record<string, string> {
@@ -307,6 +318,10 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
 
 export function fetchDashboardShell(): Promise<DashboardShellResponse> {
   return get('/api/v1/dashboard/shell')
+}
+
+export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
+  return get('/api/v1/dashboard/room-truth')
 }
 
 export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {

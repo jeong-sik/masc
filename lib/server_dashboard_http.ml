@@ -2467,6 +2467,7 @@ let dashboard_proof_http_json ~state request =
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
+  let current_room = Room.current_room_id config in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let gardener_json = Gardener.status_json () in
@@ -2475,7 +2476,8 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let build = Build_identity.current () in
   `Assoc
     [
-      ("room", `String room_state.project);
+      ("room", `String current_room);
+      ("current_room", `String current_room);
       ("room_base_path", `String config.base_path);
       ( "cluster",
         `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME"))
@@ -2544,6 +2546,28 @@ let json_int_field key json ~default =
   | `Intlit raw -> (try int_of_string raw with Failure _ -> default)
   | _ -> default
 
+let json_string_field_opt key json =
+  match Yojson.Safe.Util.member key json with
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let json_assoc_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ as value -> value
+  | _ -> `Assoc []
+
+let json_record_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ as value -> Some value
+  | _ -> None
+
+let count_where items predicate =
+  List.fold_left
+    (fun acc item -> if predicate item then acc + 1 else acc)
+    0 items
+
 let dashboard_current_room_id config =
   Room.current_room_id config
 
@@ -2593,6 +2617,251 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
   Dashboard_execution.json ?actor:(operator_actor_hint request) ?fixture
     ~config:state.Mcp_server.room_config ~sw ~clock
     ~proc_mgr:state.Mcp_server.proc_mgr ()
+
+let dashboard_room_truth_http_json ~state ~sw ~clock request =
+  let config = state.Mcp_server.room_config in
+  let actor = operator_actor_hint request in
+  let shell_json = dashboard_shell_http_json config in
+  let execution_json = dashboard_execution_http_json ~state ~sw ~clock request in
+  let command_summary_json =
+    if Room.is_initialized config then
+      try
+        Server_command_plane_http.command_plane_summary_http_json ~state
+      with _ -> `Assoc []
+    else
+      `Assoc []
+  in
+  let operator_ctx : _ Operator_control.context =
+    {
+      config;
+      agent_name = Option.value ~default:"dashboard" actor;
+      sw;
+      clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
+      mcp_session_id = None;
+    }
+  in
+  let operator_digest_json =
+    match Operator_control.digest_json ?actor operator_ctx with
+    | Ok json -> json
+    | Error message ->
+        `Assoc
+          [
+            ("health", `String "warn");
+            ("attention_summary", `Assoc [ ("count", `Int 0); ("provenance", `String "derived") ]);
+            ("recommendation_summary", `Assoc [ ("count", `Int 0); ("provenance", `String "fallback") ]);
+            ("error", `String message);
+          ]
+  in
+  let operator_snapshot_json =
+    Operator_control.snapshot_json ?actor
+      ~include_messages:false ~include_sessions:false ~include_keepers:false
+      operator_ctx
+  in
+  let orchestra_json =
+    if Room.is_initialized config then
+      try Command_plane_orchestra.json operator_ctx with _ -> `Assoc []
+    else
+      `Assoc
+        [
+          ( "focus",
+            `Assoc
+              [
+                ("label", `String "초기 room truth");
+                ("reason", `String "방이 아직 초기화되지 않았습니다. 기본 room 상태부터 확인하세요.");
+                ("source", `String "orchestra");
+                ("provenance", `String "derived");
+                ("target_kind", `String "node");
+                ("target_id", `String "room:default");
+                ("suggested_surface", `String "summary");
+                ("suggested_params", `Assoc []);
+              ] );
+        ]
+  in
+  let execution_queue =
+    match Yojson.Safe.Util.member "execution_queue" execution_json with
+    | `List items -> items
+    | _ -> []
+  in
+  let execution_session_briefs = json_list_field "session_briefs" execution_json in
+  let execution_operation_briefs = json_list_field "operation_briefs" execution_json in
+  let execution_worker_support =
+    json_list_field "worker_support_briefs" execution_json
+  in
+  let execution_continuity =
+    json_list_field "continuity_briefs" execution_json
+  in
+  let execution_keepers = json_list_field "keepers" execution_json in
+  let top_queue =
+    match execution_queue with
+    | head :: _ -> head
+    | [] -> `Null
+  in
+  let has_text key json =
+    match json_string_field_opt key json with
+    | Some _ -> true
+    | None -> false
+  in
+  let execution_summary =
+    let existing = json_assoc_field "summary" execution_json in
+    match Yojson.Safe.Util.member "blocked_sessions" existing with
+    | `Int _ | `Intlit _ ->
+        existing
+    | _ ->
+        `Assoc
+          [
+            ("active_sessions", `Int (List.length execution_session_briefs));
+            ( "blocked_sessions",
+              `Int
+                (count_where execution_session_briefs
+                   (fun row ->
+                     let health = json_string_field_opt "health" row in
+                     let status = json_string_field_opt "status" row in
+                     has_text "blocker_summary" row
+                     || health = Some "warn"
+                     || health = Some "bad"
+                     || status = Some "blocked")) );
+            ("active_operations", `Int (List.length execution_operation_briefs));
+            ( "blocked_operations",
+              `Int (count_where execution_operation_briefs (has_text "blocker_summary")) );
+            ( "worker_alerts",
+              `Int
+                (count_where execution_worker_support
+                   (fun row ->
+                     match json_string_field_opt "tone" row with
+                     | Some "warn" | Some "bad" -> true
+                     | _ -> false)) );
+            ( "continuity_alerts",
+              `Int
+                (count_where execution_continuity
+                   (fun row ->
+                     match json_string_field_opt "tone" row with
+                     | Some "warn" | Some "bad" -> true
+                     | _ -> false)) );
+            ("priority_items", `Int (List.length execution_queue));
+            ("keepers", `Int (List.length execution_keepers));
+          ]
+  in
+  let command_ops = json_assoc_field "operations" command_summary_json in
+  let command_detachments = json_assoc_field "detachments" command_summary_json in
+  let command_alerts = json_assoc_field "alerts" command_summary_json in
+  let command_decisions = json_assoc_field "decisions" command_summary_json in
+  let swarm_status = json_assoc_field "swarm_status" command_summary_json in
+  let swarm_overview = json_assoc_field "overview" swarm_status in
+  let command_summary =
+    `Assoc
+      [
+        ( "active_operations",
+          `Int
+            (json_int_field "active" (json_assoc_field "summary" command_ops)
+               ~default:0) );
+        ( "active_detachments",
+          `Int
+            (json_int_field "active"
+               (json_assoc_field "summary" command_detachments)
+               ~default:0) );
+        ( "pending_approvals",
+          `Int
+            (json_int_field "pending"
+               (json_assoc_field "summary" command_decisions)
+               ~default:0) );
+        ( "bad_alerts",
+          `Int
+            (json_int_field "bad" (json_assoc_field "summary" command_alerts)
+               ~default:0) );
+        ( "warn_alerts",
+          `Int
+            (json_int_field "warn" (json_assoc_field "summary" command_alerts)
+               ~default:0) );
+        ("moving_lanes", `Int (json_int_field "moving_lanes" swarm_overview ~default:0));
+        ("active_lanes", `Int (json_int_field "active_lanes" swarm_overview ~default:0));
+        ("provenance", `String "truth");
+      ]
+  in
+  let focus_json =
+    match json_record_field "focus" orchestra_json with
+    | Some focus ->
+        let suggested_surface = json_string_field_opt "suggested_surface" focus in
+        let suggested_tab =
+          match suggested_surface with
+          | Some "intervene" -> "intervene"
+          | _ -> "command"
+        in
+        `Assoc
+          [
+            ("label", Yojson.Safe.Util.member "label" focus);
+            ("reason", Yojson.Safe.Util.member "reason" focus);
+            ("source", `String "orchestra");
+            ("provenance", `String "derived");
+            ("target_kind", Yojson.Safe.Util.member "target_kind" focus);
+            ("target_id", Yojson.Safe.Util.member "target_id" focus);
+            ("suggested_tab", `String suggested_tab);
+            ( "suggested_surface",
+              match suggested_surface with
+              | Some value when not (String.equal value "intervene") -> `String value
+              | _ -> `Null );
+            ("suggested_params", json_assoc_field "suggested_params" focus);
+          ]
+    | None -> (
+        let recommendation_summary =
+          json_assoc_field "recommendation_summary" operator_digest_json
+        in
+        match json_record_field "top_action" recommendation_summary with
+        | Some top_action ->
+            `Assoc
+              [
+                ("label", `String "운영 권고");
+                ("reason", Yojson.Safe.Util.member "reason" top_action);
+                ("source", `String "operator");
+                ( "provenance",
+                  match json_string_field_opt "provenance" recommendation_summary with
+                  | Some value -> `String value
+                  | None -> `String "fallback" );
+                ("target_kind", `String "action");
+                ("target_id", Yojson.Safe.Util.member "target_id" top_action);
+                ("suggested_tab", `String "intervene");
+                ("suggested_surface", `Null);
+                ( "suggested_params",
+                  `Assoc
+                    [
+                      ("action_type", Yojson.Safe.Util.member "action_type" top_action);
+                      ("target_type", Yojson.Safe.Util.member "target_type" top_action);
+                      ("target_id", Yojson.Safe.Util.member "target_id" top_action);
+                    ] );
+              ]
+        | None -> `Null)
+  in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ( "room",
+        `Assoc
+          [
+            ("status", json_assoc_field "status" shell_json);
+            ("counts", json_assoc_field "counts" shell_json);
+            ("provenance", `String "truth");
+          ] );
+      ( "execution",
+        `Assoc
+          [
+            ("summary", execution_summary);
+            ("top_queue", top_queue);
+            ("provenance", `String "derived");
+          ] );
+      ("command", command_summary);
+      ( "operator",
+        `Assoc
+          [
+            ("health", Yojson.Safe.Util.member "health" operator_digest_json);
+            ("attention_summary", json_assoc_field "attention_summary" operator_digest_json);
+            ( "recommendation_summary",
+              json_assoc_field "recommendation_summary" operator_digest_json );
+            ( "pending_confirm_summary",
+              json_assoc_field "pending_confirm_summary" operator_snapshot_json );
+            ("provenance", `String "derived");
+          ] );
+      ("focus", focus_json);
+    ]
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in

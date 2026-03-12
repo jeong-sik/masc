@@ -3117,7 +3117,9 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?input ?checkpoint (p
               (* Skip if node already completed in checkpoint *)
               if node_completed_in_checkpoint ctx node.Chain_types.id then begin
                 set_node_status ctx node.Chain_types.id Skipped;
-                Ok (Hashtbl.find ctx.outputs node.Chain_types.id)
+                match Hashtbl.find_opt ctx.outputs node.Chain_types.id with
+                | Some v -> Ok v
+                | None -> Error "Node marked completed but output missing"
               end
               else begin
                 let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in

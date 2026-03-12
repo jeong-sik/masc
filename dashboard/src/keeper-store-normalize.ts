@@ -1,0 +1,267 @@
+import type {
+  Keeper,
+  KeeperDiagnostic,
+  KeeperLifecycleState,
+  KeeperMetricPoint,
+} from './types'
+import { isRecord, asString, asNumber, asStringArray, toIsoTimestamp } from './components/common/normalize'
+
+function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
+  const raw = typeof value === 'string' ? value.toLowerCase() : ''
+  if (
+    raw === 'active'
+    || raw === 'busy'
+    || raw === 'listening'
+    || raw === 'idle'
+    || raw === 'inactive'
+    || raw === 'offline'
+  ) {
+    return raw
+  }
+  if (raw === 'in_progress' || raw === 'claimed') return 'busy'
+  if (raw === 'dead' || raw === 'left') return 'offline'
+  return 'offline'
+}
+
+export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
+  const status = keeper.status?.toLowerCase() ?? ''
+  if (status === 'offline' || status === 'inactive') return 'offline'
+
+  const series = keeper.metrics_series
+  if (!series || series.length === 0) {
+    return 'idle'
+  }
+  const latest = series[series.length - 1]
+  if (!latest) return 'idle'
+  if (latest.is_handoff) return 'handoff-imminent'
+  if (latest.is_compaction) return 'compacting'
+  const ratio = latest.context_ratio
+  if (ratio > 0.85) return 'handoff-imminent'
+  if (ratio > 0.70) return 'preparing'
+  if (ratio > 0.50) return 'compacting'
+  return 'active'
+}
+
+export function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number>): number | null {
+  const mapped = heartbeats.get(keeper.name)
+  if (mapped != null) return mapped
+
+  const direct = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : Number.NaN
+  if (!Number.isNaN(direct)) return direct
+
+  const ageSeconds = [
+    keeper.last_turn_ago_s,
+    keeper.last_proactive_ago_s,
+    keeper.last_handoff_ago_s,
+    keeper.last_compaction_ago_s,
+  ].find(value => typeof value === 'number' && Number.isFinite(value) && value >= 0)
+
+  return typeof ageSeconds === 'number'
+    ? Date.now() - (ageSeconds * 1000)
+    : null
+}
+
+function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item): KeeperMetricPoint | null => {
+      if (!isRecord(item)) return null
+      const ts = asNumber(item.ts_unix)
+      const contextRatio = asNumber(item.context_ratio)
+      if (ts == null || contextRatio == null) return null
+      const handoffObj = isRecord(item.handoff) ? item.handoff : null
+      return {
+        ts,
+        context_ratio: contextRatio,
+        context_tokens: asNumber(item.context_tokens) ?? 0,
+        context_max: asNumber(item.context_max) ?? 0,
+        latency_ms: asNumber(item.latency_ms) ?? 0,
+        generation: asNumber(item.generation) ?? 0,
+        channel: typeof item.channel === 'string' ? item.channel : 'turn',
+        is_handoff: handoffObj != null && item.handoff_performed === true,
+        is_compaction: item.compacted === true,
+        compaction_saved_tokens: asNumber(item.compaction_saved_tokens) ?? 0,
+        compaction_trigger: typeof item.compaction_trigger === 'string' ? item.compaction_trigger : null,
+        model_used: typeof item.model_used === 'string' ? item.model_used : '',
+        cost_usd: asNumber(item.cost_usd) ?? Number.NaN,
+        handoff_to_model: handoffObj ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null) : null,
+        handoff_new_generation: handoffObj ? (asNumber(handoffObj.new_generation) ?? null) : null,
+      }
+    })
+    .filter((item): item is KeeperMetricPoint => item !== null)
+}
+
+function normalizeMetricsWindow(raw: unknown): Keeper['metrics_window'] | undefined {
+  if (!isRecord(raw)) return undefined
+
+  const normalized: Keeper['metrics_window'] = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (key === 'top_tools') {
+      if (!Array.isArray(value)) continue
+      const topTools = value.filter(item =>
+        isRecord(item)
+        && typeof item.tool === 'string'
+        && item.tool.trim() !== '',
+      )
+      if (topTools.length > 0) normalized.top_tools = topTools
+      continue
+    }
+
+    const numberValue = asNumber(value)
+    if (numberValue != null) {
+      normalized[key] = numberValue
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined
+}
+
+function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null {
+  if (!isRecord(raw)) return null
+  const healthState = asString(raw.health_state)
+  const nextActionPath = asString(raw.next_action_path)
+  const lastReplyStatus = asString(raw.last_reply_status)
+  if (!healthState || !nextActionPath || !lastReplyStatus) return null
+  const quietReason = (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason']
+  return {
+    health_state: healthState as KeeperDiagnostic['health_state'],
+    quiet_reason: quietReason,
+    next_action_path: nextActionPath as KeeperDiagnostic['next_action_path'],
+    last_reply_status: lastReplyStatus as KeeperDiagnostic['last_reply_status'],
+    last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? asString(raw.last_reply_at) ?? null,
+    last_reply_preview: asString(raw.last_reply_preview) ?? null,
+    last_error: asString(raw.last_error) ?? null,
+    next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,
+    recoverable:
+      typeof raw.recoverable === 'boolean'
+        ? raw.recoverable
+        : nextActionPath === 'recover',
+    summary: asString(raw.summary),
+    keepalive_running:
+      typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
+  }
+}
+
+export function normalizeKeepers(raw: unknown): Keeper[] {
+  const rows =
+    Array.isArray(raw)
+      ? raw
+      : isRecord(raw) && Array.isArray(raw.keepers)
+        ? raw.keepers
+        : []
+
+  return rows
+    .map((row): Keeper | null => {
+      if (!isRecord(row)) return null
+      const agentRaw = isRecord(row.agent) ? row.agent : null
+      const contextRaw = isRecord(row.context) ? row.context : null
+      const metricsWindow = normalizeMetricsWindow(row.metrics_window)
+
+      const name = asString(row.name)
+      if (!name) return null
+
+      const contextRatio = asNumber(row.context_ratio) ?? asNumber(contextRaw?.context_ratio)
+      const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
+      const model = asString(row.model) ?? asString(row.active_model) ?? asString(row.primary_model)
+      const skillSecondary = asStringArray(row.skill_secondary)
+      const metricsSeries = normalizeMetricsSeries(row.metrics_series)
+
+      const normalizedContext =
+        contextRaw
+          ? {
+              source: asString(contextRaw.source),
+              context_ratio: asNumber(contextRaw.context_ratio),
+              context_tokens: asNumber(contextRaw.context_tokens),
+              context_max: asNumber(contextRaw.context_max),
+              message_count: asNumber(contextRaw.message_count),
+              has_checkpoint: typeof contextRaw.has_checkpoint === 'boolean' ? contextRaw.has_checkpoint : undefined,
+            }
+          : undefined
+
+      const normalizedAgent =
+        agentRaw
+          ? {
+              name: asString(agentRaw.name),
+              exists: typeof agentRaw.exists === 'boolean' ? agentRaw.exists : undefined,
+              error: asString(agentRaw.error),
+              agent_type: asString(agentRaw.agent_type),
+              status: asString(agentRaw.status),
+              current_task: asString(agentRaw.current_task) ?? null,
+              joined_at: asString(agentRaw.joined_at),
+              last_seen: asString(agentRaw.last_seen),
+              last_seen_ago_s: asNumber(agentRaw.last_seen_ago_s),
+              capabilities: asStringArray(agentRaw.capabilities),
+              is_zombie: typeof agentRaw.is_zombie === 'boolean' ? agentRaw.is_zombie : undefined,
+            }
+          : undefined
+
+      return {
+        name,
+        runtime_class:
+          row.runtime_class === 'persistent_agent' ? 'persistent_agent' : 'resident_keeper',
+        desired:
+          typeof row.desired === 'boolean' ? row.desired : undefined,
+        resident_registered:
+          typeof row.resident_registered === 'boolean' ? row.resident_registered : undefined,
+        reconcile_status: asString(row.reconcile_status) ?? null,
+        emoji: asString(row.emoji),
+        koreanName: asString(row.koreanName) ?? asString(row.korean_name),
+        agent_name: asString(row.agent_name),
+        trace_id: asString(row.trace_id),
+        model,
+        primary_model: asString(row.primary_model),
+        active_model: asString(row.active_model),
+        next_model_hint: asString(row.next_model_hint) ?? null,
+        status: normalizeKeeperAgentStatus(statusRaw),
+        presence_keepalive:
+          typeof row.presence_keepalive === 'boolean' ? row.presence_keepalive : undefined,
+        presence_keepalive_sec: asNumber(row.presence_keepalive_sec),
+        keepalive_running:
+          typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
+        proactive_enabled:
+          typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
+        proactive_idle_sec: asNumber(row.proactive_idle_sec),
+        proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
+        last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),
+        generation: asNumber(row.generation),
+        turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
+        keeper_age_s: asNumber(row.keeper_age_s),
+        last_turn_ago_s: asNumber(row.last_turn_ago_s),
+        last_handoff_ago_s: asNumber(row.last_handoff_ago_s),
+        last_compaction_ago_s: asNumber(row.last_compaction_ago_s),
+        last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
+        last_proactive_preview: asString(row.last_proactive_preview) ?? null,
+        context_ratio: contextRatio,
+        context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
+        context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),
+        context_source: asString(row.context_source) ?? asString(contextRaw?.source),
+        context: normalizedContext,
+        traits: asStringArray(row.traits),
+        interests: asStringArray(row.interests),
+        primaryValue: asString(row.primaryValue) ?? asString(row.primary_value),
+        activityLevel: asNumber(row.activityLevel) ?? asNumber(row.activity_level),
+        memory_recent_note: asString(row.memory_recent_note) ?? null,
+        recent_input_preview: asString(row.recent_input_preview) ?? null,
+        recent_output_preview: asString(row.recent_output_preview) ?? null,
+        recent_tool_names: asStringArray(row.recent_tool_names) ?? [],
+        allowed_tool_names: asStringArray(row.allowed_tool_names) ?? [],
+        latest_tool_names: asStringArray(row.latest_tool_names) ?? [],
+        latest_tool_call_count: asNumber(row.latest_tool_call_count) ?? null,
+        tool_audit_source: asString(row.tool_audit_source) ?? null,
+        tool_audit_at: toIsoTimestamp(row.tool_audit_at) ?? asString(row.tool_audit_at) ?? null,
+        conversation_tail_count: asNumber(row.conversation_tail_count),
+        k2k_count: asNumber(row.k2k_count),
+        handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),
+        compaction_count: asNumber(row.compaction_count),
+        last_compaction_saved_tokens: asNumber(row.last_compaction_saved_tokens),
+        diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
+        skill_primary: asString(row.skill_primary) ?? null,
+        skill_secondary: skillSecondary,
+        skill_reason: asString(row.skill_reason) ?? null,
+        metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
+        metrics_window: metricsWindow,
+        agent: normalizedAgent,
+      }
+    })
+    .filter((row): row is Keeper => row !== null)
+}

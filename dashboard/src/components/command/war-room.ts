@@ -346,7 +346,7 @@ export function WarRoomSurface() {
           <div class="monitor-stat-card">
             <span>런타임</span>
             <strong>${swarmHasEvidence ? (swarm?.provider?.runtime_blocker ? '막힘' : swarm?.provider?.provider_reachable ? '준비됨' : selectedSession ? displayStatus(selectedSession.status) : '확인 필요') : (selectedSession ? displayStatus(selectedSession.status) : '확인 필요')}</strong>
-            <small>${swarmHasEvidence ? `슬롯 ${swarm?.provider?.active_slots_now ?? 0}/${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · 컨텍스트 ${swarm?.provider?.actual_ctx ?? swarm?.provider?.ctx_per_slot ?? 0}` : `세션 워커 ${sessionDigest?.worker_cards.length ?? 0}`}</small>
+            <small>${swarmHasEvidence ? `설정 ${swarm?.provider?.configured_capacity ?? 'n/a'} · 실제 ${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · hot ${swarm?.summary?.peak_hot_slots ?? swarm?.provider?.peak_active_slots ?? 0}` : `세션 워커 ${sessionDigest?.worker_cards.length ?? 0}`}</small>
           </div>
           <div class="monitor-stat-card ${toneClass(blockers.length > 0 || pendingApprovals > 0 ? 'warn' : 'ok')}">
             <span>압력</span>

@@ -15,8 +15,10 @@ import {
   runCommandPlaneDispatchTick,
   setCommandPlaneSurface,
 } from '../../command-store'
+import { refreshRoomTruth } from '../../room-truth-store'
 import { refreshOperatorSnapshot } from '../../operator-store'
 import { navigate, route } from '../../router'
+import { RoomTruthStrip } from '../common/room-truth-strip'
 import { SurfaceSemanticIntro } from '../common/semantic-layer'
 import {
   commandSurfaceForContext,
@@ -233,6 +235,7 @@ export function Command() {
           <button
             class="control-btn ghost"
             onClick=${() => {
+              void refreshRoomTruth()
               void refreshCommandPlaneCurrentSurface()
               void refreshCommandPlaneChainSummary()
               void refreshCommandPlaneSwarm()
@@ -254,6 +257,7 @@ export function Command() {
         ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
         : null}
       <${SurfaceSemanticIntro} surfaceId="command" />
+      <${RoomTruthStrip} />
       <${CommandWorkflowBanner} />
       ${commandPlaneSurface.value === 'warroom' ? null : html`<${CommandEntryStrip} />`}
       <${SurfaceTabs} />

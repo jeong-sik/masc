@@ -1378,10 +1378,16 @@ let test_summary_json_swarm_proof_prefers_artifact () =
         (proof |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
       Alcotest.(check string) "artifact source" "artifact"
         (proof |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "artifact reason code" "artifact_present"
+        (proof |> Yojson.Safe.Util.member "reason_code"
+       |> Yojson.Safe.Util.to_string);
       Alcotest.(check string) "artifact run id" "run-artifact"
         (proof |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
       Alcotest.(check bool) "artifact pass" true
         (proof |> Yojson.Safe.Util.member "pass" |> Yojson.Safe.Util.to_bool);
+      Alcotest.(check string) "artifact expected dir" run_dir
+        (proof |> Yojson.Safe.Util.member "expected_artifact_dir"
+       |> Yojson.Safe.Util.to_string);
       Alcotest.(check int) "artifact worker expected" 4
         (proof |> Yojson.Safe.Util.member "workers"
        |> Yojson.Safe.Util.member "expected"
@@ -1425,10 +1431,16 @@ let test_summary_json_swarm_proof_fallback_and_missing () =
         (fallback_proof |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
       Alcotest.(check string) "fallback source" "slot_samples"
         (fallback_proof |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "fallback reason code" "slot_samples_only"
+        (fallback_proof |> Yojson.Safe.Util.member "reason_code"
+       |> Yojson.Safe.Util.to_string);
       Alcotest.(check string) "fallback run id" "run-fallback"
         (fallback_proof |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
       Alcotest.(check bool) "fallback pass omitted" true
         (fallback_proof |> Yojson.Safe.Util.member "pass" = `Null);
+      Alcotest.(check string) "fallback expected dir" run_dir
+        (fallback_proof |> Yojson.Safe.Util.member "expected_artifact_dir"
+       |> Yojson.Safe.Util.to_string);
       let missing_config = Room.default_config missing_dir in
       ignore (Room.init missing_config ~agent_name:(Some "owner"));
       let missing_summary = Command_plane_v2.summary_json missing_config in
@@ -1437,8 +1449,15 @@ let test_summary_json_swarm_proof_fallback_and_missing () =
         (missing_proof |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
       Alcotest.(check string) "missing source" "none"
         (missing_proof |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "missing reason code" "no_swarm_live_artifacts"
+        (missing_proof |> Yojson.Safe.Util.member "reason_code"
+       |> Yojson.Safe.Util.to_string);
       Alcotest.(check bool) "missing reason present" true
-        (missing_proof |> Yojson.Safe.Util.member "missing_reason" <> `Null))
+        (missing_proof |> Yojson.Safe.Util.member "missing_reason" <> `Null);
+      Alcotest.(check bool) "missing summary present" true
+        (missing_proof |> Yojson.Safe.Util.member "status_summary" <> `Null);
+      Alcotest.(check bool) "missing expected dir present" true
+        (missing_proof |> Yojson.Safe.Util.member "expected_artifact_dir" <> `Null))
 let test_swarm_live_json_reads_custom_worker_count_from_operation_note () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1570,6 +1589,7 @@ let test_swarm_live_json_reads_runtime_doctor_and_blockers () =
             ("actual_slots", `Int 0);
             ("expected_ctx", `Int 262144);
             ("actual_ctx", `Int 0);
+            ("configured_capacity", `Int 12);
             ("runtime_blocker", `String "provider_unreachable");
             ("detail", `String "provider smoke request failed");
           ]);
@@ -1581,6 +1601,8 @@ let test_swarm_live_json_reads_runtime_doctor_and_blockers () =
         (swarm |> member "provider" |> member "expected_slots" |> to_int);
       Alcotest.(check int) "actual ctx from doctor" 0
         (swarm |> member "provider" |> member "actual_ctx" |> to_int);
+      Alcotest.(check int) "configured capacity from doctor" 12
+        (swarm |> member "provider" |> member "configured_capacity" |> to_int);
       Alcotest.(check string) "runtime blocker surfaced" "provider_unreachable"
         (swarm |> member "provider" |> member "runtime_blocker" |> to_string);
       Alcotest.(check bool) "blocker list contains runtime issue" true

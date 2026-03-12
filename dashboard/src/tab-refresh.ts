@@ -1,5 +1,6 @@
 import { route } from './router'
 import { refreshExecution, refreshBoard, refreshGoals, refreshTrpg } from './store'
+import { refreshRoomTruth } from './room-truth-store'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionBriefing, refreshMissionSnapshot } from './mission-store'
 import { refreshProofSnapshot } from './proof-store'
@@ -13,6 +14,7 @@ import {
 
 export function refreshForTab(tab: string) {
   if (tab === 'command') {
+    refreshRoomTruth()
     refreshCommandPlaneCurrentSurface()
     refreshCommandPlaneChainSummary()
     if (
@@ -31,6 +33,7 @@ export function refreshForTab(tab: string) {
   }
 
   if (tab === 'mission') {
+    refreshRoomTruth()
     refreshMissionSnapshot()
     refreshMissionBriefing()
   }
@@ -39,9 +42,13 @@ export function refreshForTab(tab: string) {
     refreshProofSnapshot(route.value.params.session_id, route.value.params.operation_id)
   }
 
-  if (tab === 'execution') refreshExecution()
+  if (tab === 'execution') {
+    refreshRoomTruth()
+    refreshExecution()
+  }
 
   if (tab === 'intervene') {
+    refreshRoomTruth()
     refreshOperatorSnapshot()
     refreshOperatorRoomDigest()
   }

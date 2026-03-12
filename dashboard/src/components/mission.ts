@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
+import { RoomTruthStrip } from './common/room-truth-strip'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { navigate } from '../router'
 import {
@@ -94,6 +95,8 @@ export function Mission() {
           <span class="command-chip">${mission.generated_at ? relativeTime(mission.generated_at) : '기록 없음'}</span>
         </div>
       </div>
+
+      <${RoomTruthStrip} />
 
       <${MissionContextBar}
         cluster=${mission.summary.cluster}

@@ -157,7 +157,10 @@ function missionKeeperBrief(keeper: Keeper): DashboardMissionKeeperBrief | null 
 function KpiGrid({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   const lastPt = series[series.length - 1] as KeeperMetricPoint | undefined
-  const latestCost = lastPt?.cost_usd != null ? `$${lastPt.cost_usd.toFixed(4)}` : '—'
+  const latestCost =
+    lastPt && Number.isFinite(lastPt.cost_usd)
+      ? `$${lastPt.cost_usd.toFixed(4)}`
+      : null
 
   const items: { label: string; value: string | number; hint?: string }[] = [
     {
@@ -203,10 +206,14 @@ function KpiGrid({ keeper }: { keeper: Keeper }) {
         <div class="kpi-value">${keeper.compaction_count ?? '—'}</div>
         <div class="kpi-label">Compactions</div>
       </div>
-      <div class="kpi-tile">
-        <div class="kpi-value">${latestCost}</div>
-        <div class="kpi-label">Cost (USD)</div>
-      </div>
+      ${latestCost
+        ? html`
+            <div class="kpi-tile">
+              <div class="kpi-value">${latestCost}</div>
+              <div class="kpi-label">Cost (USD)</div>
+            </div>
+          `
+        : null}
     </div>
   `
 }
@@ -428,9 +435,18 @@ function RuntimeSignals({ keeper }: { keeper: Keeper }) {
     { label: 'Fallback Rate', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
   ]
 
+  const visibleRows = rows.filter(row =>
+    !(
+      row.value === '-'
+      || row.value === '—'
+      || row.value === ''
+    ))
+
+  if (visibleRows.length === 0) return null
+
   return html`
     <div class="keeper-signal-list">
-      ${rows.map(r => html`
+      ${visibleRows.map(r => html`
         <div class="keeper-signal-row">
           <span>${r.label}</span>
           <strong>${r.value}</strong>

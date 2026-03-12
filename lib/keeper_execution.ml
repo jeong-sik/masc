@@ -2,8 +2,9 @@
     compaction, proactive/explicit room behavior, and keepalive runtime. *)
 
 open Tool_args
-
-include Keeper_alerting
+open Keeper_types
+open Keeper_memory
+open Keeper_alerting
 
 let execute_keeper_tool_call
     ~(config : Room.config)
@@ -1047,8 +1048,8 @@ let set_room_cursor meta room_id seq =
   { meta with last_seen_seq_by_room = dedupe_keep_order ((room_id, seq) :: kept) }
 
 let room_ids_for_meta config (meta : keeper_meta) : string list =
-  match meta.room_scope with
-  | "all" ->
+  match Keeper_contract.room_scope_of_string meta.room_scope with
+  | Keeper_contract.All ->
       let open Yojson.Safe.Util in
       let listed =
         match Room.rooms_list config |> member "rooms" with
@@ -1062,7 +1063,7 @@ let room_ids_for_meta config (meta : keeper_meta) : string list =
       in
       let current = Room.current_room_id config in
       dedupe_keep_order (current :: listed)
-  | _ -> [ Room.current_room_id config ]
+  | Keeper_contract.Current -> [ Room.current_room_id config ]
 
 let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
   let room_ids = room_ids_for_meta config meta in
@@ -1179,8 +1180,11 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   if models = [] then errors := "models is required" :: !errors;
   if active_model <> "" && not (List.mem active_model (allowed_models @ models)) then
     errors := "active_model must be included in models or allowed_models" :: !errors;
-  if Safe_ops.json_string ~default:"legacy" "trigger_mode" json = "explicit_only"
-     && mention_targets = []
+  if
+    (Safe_ops.json_string ~default:"legacy" "trigger_mode" json
+     |> Keeper_contract.trigger_mode_of_string
+     |> Keeper_contract.trigger_mode_is_explicit_only)
+    && mention_targets = []
   then errors := "mention_targets is required for explicit_only trigger_mode" :: !errors;
   List.rev !errors
 
@@ -2655,10 +2659,10 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
   if not (keeper_autonomy_enabled ()) then None
   else if meta.active_goal_ids = [] then None
   else
-    match Keeper_autonomy.autonomy_level_of_string meta.autonomy_level with
-    | None -> None
-    | Some L1_Reactive -> None
-    | Some level ->
+    let level = Keeper_contract.autonomy_level_of_string meta.autonomy_level in
+    match level with
+    | L1_Reactive -> None
+    | level ->
         let primary = match specs with p :: _ -> p | [] -> Llm_client.default_local_model_spec () in
         let verify_model =
           match Llm_client.default_verifier_model_spec () with
@@ -3341,13 +3345,13 @@ let run_learned_policy_room_event
   match load_keeper_reward_model reward_model_path with
   | Error e -> Error e
   | Ok reward_model ->
-      let action_budget = canonical_policy_action_budget meta.policy_action_budget in
+      let action_budget = Keeper_contract.policy_action_budget_of_string meta.policy_action_budget in
       let observation = keeper_policy_observation_of_room_message ~meta ~room_id msg in
       let feature_vector = keeper_policy_feature_vector observation in
       let candidate_actions =
         [ ("noop", true); ("reply_in_room", true) ]
         @
-        if action_budget = "board" then [ ("board_post", true) ] else []
+        if action_budget = Keeper_contract.Board then [ ("board_post", true) ] else []
       in
       let candidate_scores =
         List.map
@@ -3465,7 +3469,8 @@ let run_learned_policy_room_event
             ("keeper", `String meta.name);
             ("trace_id", `String meta.trace_id);
             ("policy_mode", `String meta.policy_mode);
-            ("policy_action_budget", `String action_budget);
+            ( "policy_action_budget",
+              `String (Keeper_contract.policy_action_budget_to_string action_budget) );
             ("reward_model", `String reward_model.version);
             ("reward_model_path", `String reward_model.path);
             ("observation", keeper_policy_observation_to_json observation);
@@ -3488,7 +3493,13 @@ let run_learned_policy_room_event
       Ok updated_meta
 
 let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : keeper_meta =
-  if meta.trigger_mode <> "explicit_only" then meta
+  if
+    meta.trigger_mode
+    |> Keeper_contract.trigger_mode_of_string
+    |> Keeper_contract.trigger_mode_is_explicit_only
+    |> not
+  then
+    meta
   else
     let meta = ensure_keeper_room_presence ctx.config meta in
     let targets =
@@ -3755,7 +3766,11 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             if proactive_warmup_elapsed
             then
               (try
-                 if meta_current.trigger_mode = "explicit_only" then
+                 if
+                   meta_current.trigger_mode
+                   |> Keeper_contract.trigger_mode_of_string
+                   |> Keeper_contract.trigger_mode_is_explicit_only
+                 then
                    maybe_emit_explicit_room_replies ctx meta_current
                  else
                    maybe_emit_proactive ctx meta_current

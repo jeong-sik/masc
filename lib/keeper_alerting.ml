@@ -1,7 +1,8 @@
 (** Keeper_alerting — alert fanout, skill routing, path safety checks,
     and tool-call preparation helpers for keeper execution. *)
 
-include Keeper_memory
+open Keeper_types
+open Keeper_memory
 
 let keeper_llm_tools = Tool_shard.keeper_llm_tools
 
@@ -936,4 +937,3 @@ let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
       `Assoc [("kind", `String "signaled"); ("signal", `Int sig_num)]
   | Unix.WSTOPPED sig_num ->
       `Assoc [("kind", `String "stopped"); ("signal", `Int sig_num)]
-

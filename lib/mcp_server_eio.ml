@@ -1683,7 +1683,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         if String.length path > 0 && path.[0] = '~' then
           let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in
           Filename.concat home (String.sub path 1 (String.length path - 1))
-        else if Filename.is_relative path then          Filename.concat (Sys.getcwd ()) path
+        else if Filename.is_relative path then
+          Filename.concat (Sys.getcwd ()) path
         else
           path
       in

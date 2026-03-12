@@ -32,6 +32,12 @@ val extract : string -> string option
 val resolve_targets : mode -> available_agents:string list -> string list
 (** Get target agents based on mode and available agents *)
 
+val is_mentioned : string -> string -> bool
+(** Check whether content contains an exact direct mention for a target *)
+
+val any_mentioned : targets:string list -> string -> bool
+(** Check whether content contains an exact direct mention for any target *)
+
 val spawnable_agents : string list
 (** List of agent types that can be auto-spawned *)
 

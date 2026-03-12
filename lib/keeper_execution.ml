@@ -1323,17 +1323,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
   { meta with joined_room_ids = List.rev successful_rooms }
 
 let exact_direct_mention_present ~(targets : string list) (content : string) : bool =
-  let escaped_targets = targets |> List.map Str.quote |> List.filter (fun s -> String.trim s <> "") in
-  List.exists
-    (fun target ->
-      let pattern =
-        Printf.sprintf "\\(^\\|[^@A-Za-z0-9_-]\\)@%s\\([^A-Za-z0-9_-]\\|$\\)" target
-      in
-      try
-        ignore (Str.search_forward (Str.regexp_case_fold pattern) content 0);
-        true
-      with Not_found -> false)
-    escaped_targets
+  Mention.any_mentioned ~targets content
 
 let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =
   `Assoc

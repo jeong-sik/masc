@@ -177,6 +177,9 @@ let keeper_policy_observation_of_room_message
     ~(room_id : string)
     (msg : Types.message) : keeper_policy_observation =
   let now_ts = Time_compat.now () in
+  let mention_targets =
+    if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
+  in
   let last_turn_ago_s =
     if meta.last_turn_ts <= 0.0 then 0.0 else max 0.0 (now_ts -. meta.last_turn_ts)
   in
@@ -185,7 +188,7 @@ let keeper_policy_observation_of_room_message
     room_id = Some room_id;
     from_agent = msg.from_agent;
     message = msg.content;
-    direct_mention = true;
+    direct_mention = Mention.any_mentioned ~targets:mention_targets msg.content;
     has_question = observation_has_question msg.content;
     message_chars = String.length msg.content;
     total_turns = meta.total_turns;

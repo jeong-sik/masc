@@ -86,6 +86,22 @@ let test_default_model_override_label_result () =
                 label
           | Error msg -> fail msg))
 
+let test_resolve_voice_aliases () =
+  let elevenlabs = Option.get (Adapter.resolve_voice_adapter "elevenlabs") in
+  check string "elevenlabs alias" "elevenlabs-direct" elevenlabs.canonical_name;
+  let openai_compat = Option.get (Adapter.resolve_voice_adapter "openai_compat") in
+  check string "openai compat alias" "voice-openai-compat"
+    openai_compat.canonical_name
+
+let test_voice_auth_env_resolution () =
+  let elevenlabs = Option.get (Adapter.resolve_voice_adapter "elevenlabs-direct") in
+  check (option string) "elevenlabs auth env"
+    (Some "ELEVENLABS_API_KEY")
+    (Adapter.voice_auth_env_name elevenlabs);
+  let openai_compat = Option.get (Adapter.resolve_voice_adapter "voice-openai-compat") in
+  check (option string) "endpoint override auth env"
+    (Some "VOICE_PROXY_KEY")
+    (Adapter.voice_auth_env_name ~endpoint_api_key_env:"VOICE_PROXY_KEY" openai_compat)
 let () =
   run "Provider Adapter"
     [
@@ -104,5 +120,8 @@ let () =
             test_default_model_provider_prefix_result;
           test_case "default override label" `Quick
             test_default_model_override_label_result;
+          test_case "resolve voice aliases" `Quick test_resolve_voice_aliases;
+          test_case "voice auth env resolution" `Quick
+            test_voice_auth_env_resolution;
         ] );
     ]

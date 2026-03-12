@@ -29,6 +29,11 @@ type output_contract =
   | Human_stdout
   | Json_stdout
 
+type voice_transport =
+  | Voice_openai_compat
+  | Voice_elevenlabs_direct
+  | Voice_mcp
+
 type adapter = {
   canonical_name : string;
   runtime_kind : runtime_kind;
@@ -43,6 +48,14 @@ type cli_adapter = {
   prompt_transport : prompt_transport;
   output_contract : output_contract;
   default_allowed_mcp_servers : string list;
+}
+
+type voice_adapter = {
+  canonical_name : string;
+  transport : voice_transport;
+  provider_family : provider_family;
+  auth_mode : auth_mode;
+  aliases : string list;
 }
 
 type gemini_direct_auth =
@@ -84,6 +97,11 @@ let string_of_prompt_transport = function
 let string_of_output_contract = function
   | Human_stdout -> "human_stdout"
   | Json_stdout -> "json_stdout"
+
+let string_of_voice_transport = function
+  | Voice_openai_compat -> "openai_compat"
+  | Voice_elevenlabs_direct -> "elevenlabs_direct"
+  | Voice_mcp -> "voice_mcp"
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
@@ -184,14 +202,47 @@ let cli_adapters =
     };
   ]
 
-let resolve_adapter adapters label =
+let voice_openai_compat_adapter =
+  {
+    canonical_name = "voice-openai-compat";
+    transport = Voice_openai_compat;
+    provider_family = OpenAI_family;
+    auth_mode = No_auth;
+    aliases =
+      [ "voice-openai-compat"; "openai_compat"; "openai"; "railway-elevenlabs-proxy" ];
+  }
+
+let voice_elevenlabs_direct_adapter =
+  {
+    canonical_name = "elevenlabs-direct";
+    transport = Voice_elevenlabs_direct;
+    provider_family = Custom_family "elevenlabs";
+    auth_mode = Api_key "ELEVENLABS_API_KEY";
+    aliases = [ "elevenlabs-direct"; "elevenlabs"; "tts-elevenlabs" ];
+  }
+
+let voice_mcp_adapter =
+  {
+    canonical_name = "voice-mcp";
+    transport = Voice_mcp;
+    provider_family = Custom_family "voice_mcp";
+    auth_mode = No_auth;
+    aliases = [ "voice-mcp"; "voice_mcp"; "mcp"; "local-voice-mcp" ];
+  }
+
+let voice_adapters =
+  [
+    voice_openai_compat_adapter;
+    voice_elevenlabs_direct_adapter;
+    voice_mcp_adapter;
+  ]
+
+let resolve_direct_adapter label =
   let normalized = normalize_label label in
   List.find_opt
-    (fun adapter ->
+    (fun (adapter : adapter) ->
       List.exists (fun alias -> normalize_label alias = normalized) adapter.aliases)
-    adapters
-
-let resolve_direct_adapter label = resolve_adapter direct_adapters label
+    direct_adapters
 let resolve_cli_adapter label =
   let normalized = normalize_label label in
   List.find_opt
@@ -203,6 +254,37 @@ let resolve_cli_adapter label =
 
 let resolve_cli_canonical_name label =
   Option.map (fun adapter -> adapter.meta.canonical_name) (resolve_cli_adapter label)
+
+let resolve_voice_adapter label =
+  let normalized = normalize_label label in
+  List.find_opt
+    (fun (adapter : voice_adapter) ->
+      List.exists (fun alias -> normalize_label alias = normalized) adapter.aliases)
+    voice_adapters
+
+let voice_adapter_for_endpoint_kind = function
+  | Voice_config.Openai_compat -> voice_openai_compat_adapter
+  | Voice_config.Elevenlabs_direct -> voice_elevenlabs_direct_adapter
+  | Voice_config.Voice_mcp -> voice_mcp_adapter
+
+let voice_adapter_for_endpoint (endpoint : Voice_config.endpoint) =
+  match resolve_voice_adapter endpoint.id with
+  | Some adapter -> adapter
+  | None -> voice_adapter_for_endpoint_kind endpoint.kind
+
+let voice_auth_env_name ?endpoint_api_key_env (adapter : voice_adapter) =
+  match endpoint_api_key_env with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed <> "" then Some trimmed
+      else (
+        match adapter.auth_mode with
+        | Api_key env_name -> Some env_name
+        | _ -> None)
+  | None -> (
+      match adapter.auth_mode with
+      | Api_key env_name -> Some env_name
+      | _ -> None)
 
 let default_cli_agent_name () = "claude"
 

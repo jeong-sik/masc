@@ -26,7 +26,7 @@ let schemas : tool_schema list =
     {
       name = "masc_voice_speak";
       description =
-        "Send text to the voice bridge for an agent. Uses the configured voice and may fall back to text_fallback when voice is unavailable.";
+        "Send text to the voice bridge for an agent. Returns an error unless a reachable voice backend actually accepts the request.";
       input_schema =
         `Assoc
           [
@@ -147,19 +147,6 @@ let require_net_or_error (ctx : 'a context) =
   | Some net -> Ok net
   | None -> Error "voice bridge requires net (server_state.net is None)"
 
-let message_preview message =
-  String.sub message 0 (min 50 (String.length message))
-
-let text_fallback_json ~agent_id ~message =
-  let voice = Voice_bridge.get_voice_for_agent agent_id in
-  `Assoc
-    [
-      ("status", `String "text_fallback");
-      string_assoc "agent_id" agent_id;
-      string_assoc "voice" voice;
-      string_assoc "message_preview" (message_preview message);
-    ]
-
 let handle_voice_speak (ctx : 'a context) args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
   let message = get_string args "message" "" in
@@ -173,12 +160,12 @@ let handle_voice_speak (ctx : 'a context) args : result =
   if agent_id = "" || String.trim message = "" then
     (false, "Error: agent_id and message are required")
   else
-    match ctx.net with
-    | Some net ->
+    match require_net_or_error ctx with
+    | Error message -> (false, message)
+    | Ok net ->
         json_string_of_result
           (Voice_bridge.agent_speak ~sw:ctx.sw ~clock:ctx.clock ~net ~agent_id
              ~message ?provider ~priority ())
-    | None -> (true, Yojson.Safe.to_string (text_fallback_json ~agent_id ~message))
 
 let handle_voice_session_start (ctx : 'a context) args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
@@ -203,33 +190,19 @@ let handle_voice_session_end (ctx : 'a context) args : result =
   if agent_id = "" then
     (false, "Error: agent_id is required")
   else
-    match ctx.net with
-    | Some net ->
+    match require_net_or_error ctx with
+    | Error message -> (false, message)
+    | Ok net ->
         json_string_of_result
           (Voice_bridge.end_voice_session ~sw:ctx.sw ~clock:ctx.clock ~net
              ~agent_id)
-    | None ->
-        ( true,
-          Yojson.Safe.to_string
-            (`Assoc
-              [
-                ("status", `String "skipped");
-                ("reason", `String "voice bridge unavailable");
-              ]) )
 
 let handle_voice_sessions (ctx : 'a context) _args : result =
-  match ctx.net with
-  | Some net ->
+  match require_net_or_error ctx with
+  | Error message -> (false, message)
+  | Ok net ->
       json_string_of_result
         (Voice_bridge.list_voice_sessions ~sw:ctx.sw ~clock:ctx.clock ~net)
-  | None ->
-      ( true,
-        Yojson.Safe.to_string
-          (`Assoc
-            [
-              ("sessions", `List []);
-              ("status", `String "voice_server_unavailable");
-            ]) )
 
 let handle_voice_agent _ctx args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
@@ -239,14 +212,11 @@ let handle_voice_agent _ctx args : result =
     json_string_of_result (Voice_bridge.get_agent_voice ~agent_id)
 
 let handle_voice_transcript (ctx : 'a context) _args : result =
-  match ctx.net with
-  | Some net ->
+  match require_net_or_error ctx with
+  | Error message -> (false, message)
+  | Ok net ->
       json_string_of_result
         (Voice_bridge.get_transcript ~sw:ctx.sw ~clock:ctx.clock ~net ())
-  | None ->
-      ( true,
-        Yojson.Safe.to_string
-          (`Assoc [ ("transcript", `List []); ("turn_count", `Int 0) ]) )
 
 let handle_voice_conference_start (ctx : 'a context) args : result =
   let agent_ids =
@@ -279,21 +249,12 @@ let handle_voice_conference_end (ctx : 'a context) args : result =
   if agent_ids = [] then
     (false, "Error: agent_ids must include at least one agent")
   else
-    match ctx.net with
-    | Some net ->
+    match require_net_or_error ctx with
+    | Error message -> (false, message)
+    | Ok net ->
         json_string_of_result
           (Voice_bridge.end_conference ~sw:ctx.sw ~clock:ctx.clock ~net
              ~agent_ids ())
-    | None ->
-        ( true,
-          Yojson.Safe.to_string
-            (`Assoc
-              [
-                ("ended", `Int 0);
-                ("skipped", `Int (List.length agent_ids));
-                ("failed", `Int 0);
-                ("total", `Int (List.length agent_ids));
-              ]) )
 
 let dispatch (ctx : 'a context) ~name ~args : result option =
   match name with

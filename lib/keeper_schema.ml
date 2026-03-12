@@ -142,6 +142,11 @@ let resident_schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "Current persisted model label. Prefer 'default' for adapter-managed selection; explicit-only keepers may still pin a concrete provider:model label.");
         ]);
+        ("policy_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "heuristic"; `String "learned_offline_v1"; `String "explicit_event_v1"]);
+          ("description", `String "Behavior selection mode. explicit_event_v1 disables heuristic routing and uses explicit lifecycle/timer events only.");
+        ]);
         ("scope_kind", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "local"; `String "global"]);
@@ -229,6 +234,19 @@ let resident_schemas : tool_schema list = [
         ("context_budget", `Assoc [
           ("type", `String "number");
           ("description", `String "How much compressed context to transfer to successor (0.0-1.0, default: 0.6).");
+        ]);
+        ("voice_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, keeper lifecycle/check-in events may trigger voice output.");
+        ]);
+        ("voice_channel", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "voice_text"; `String "voice_only"; `String "text_only"]);
+          ("description", `String "How keeper event output is surfaced: voice+text, voice only, or text only.");
+        ]);
+        ("voice_agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Voice bridge agent id to use when emitting keeper voice events.");
         ]);
       ]);
       ("required", `List [`String "name"]);
@@ -454,8 +472,8 @@ let resident_schemas : tool_schema list = [
         ]);
         ("policy_mode", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "heuristic"; `String "learned_offline_v1"]);
-          ("description", `String "Behavior selection mode. learned_offline_v1 disables keeper heuristics and uses the reward model scorer.");
+          ("enum", `List [`String "heuristic"; `String "learned_offline_v1"; `String "explicit_event_v1"]);
+          ("description", `String "Behavior selection mode. learned_offline_v1 disables keeper heuristics and uses the reward model scorer. explicit_event_v1 uses explicit lifecycle/timer events only.");
         ]);
         ("action_budget", `Assoc [
           ("type", `String "string");

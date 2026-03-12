@@ -27,9 +27,13 @@ let handle_keeper_up ctx args : tool_result =
     let models_in = get_string_list args "models" in
     let allowed_models_in = get_string_list args "allowed_models" in
     let active_model_opt = get_string_opt args "active_model" in
+    let policy_mode_opt = get_string_opt args "policy_mode" in
     let room_scope_opt = get_string_opt args "room_scope" in
     let scope_kind_opt = get_string_opt args "scope_kind" in
     let trigger_mode_opt = get_string_opt args "trigger_mode" in
+    let voice_enabled_opt = get_bool_opt args "voice_enabled" in
+    let voice_channel_opt = get_string_opt args "voice_channel" in
+    let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
     let mention_targets_in = get_string_list args "mention_targets" in
     let verify_opt = get_bool_opt args "verify" in
     let presence_keepalive_opt = get_bool_opt args "presence_keepalive" in
@@ -118,8 +122,27 @@ let handle_keeper_up ctx args : tool_result =
         |> Option.value
              ~default:
                (match requested_models with
-                | model :: _ -> model
+               | model :: _ -> model
                 | [] -> "")
+      in
+      let policy_mode =
+        policy_mode_opt
+        |> Option.map canonical_policy_mode
+        |> Option.value
+             ~default:
+               (if default_voice_enabled_for name then "explicit_event_v1"
+                else Keeper_contract.policy_mode_to_string Keeper_contract.Heuristic)
+      in
+      let voice_enabled =
+        Option.value ~default:(default_voice_enabled_for name) voice_enabled_opt
+      in
+      let voice_channel =
+        voice_channel_opt
+        |> Option.map canonical_voice_channel
+        |> Option.value ~default:(default_voice_channel_for name)
+      in
+      let voice_agent_id =
+        Option.value ~default:(default_voice_agent_id_for name) voice_agent_id_opt
       in
       let mention_targets =
         let raw =
@@ -281,13 +304,16 @@ let handle_keeper_up ctx args : tool_result =
                models = requested_models;
                allowed_models;
                active_model;
-               policy_mode = Keeper_contract.policy_mode_to_string Keeper_contract.Heuristic;
+               policy_mode;
                policy_action_budget =
                  Keeper_contract.policy_action_budget_to_string Keeper_contract.Conversation;
                policy_reward_model_path = "";
                scope_kind;
                room_scope;
                trigger_mode;
+               voice_enabled;
+               voice_channel;
+               voice_agent_id;
                mention_targets;
                joined_room_ids = [];
                last_seen_seq_by_room = [];
@@ -363,6 +389,10 @@ let handle_keeper_up ctx args : tool_result =
                  ("desires", `String meta.desires);
                  ("instructions", `String meta.instructions);
                  ("models", `List (List.map (fun s -> `String s) meta.models));
+                 ("policy_mode", `String meta.policy_mode);
+                 ("voice_enabled", `Bool meta.voice_enabled);
+                 ("voice_channel", `String meta.voice_channel);
+                 ("voice_agent_id", `String meta.voice_agent_id);
                  ("presence_keepalive", `Bool meta.presence_keepalive);
                  ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
                  ("proactive_enabled", `Bool meta.proactive_enabled);
@@ -509,12 +539,23 @@ let handle_keeper_up ctx args : tool_result =
         models;
         allowed_models;
         active_model;
-        policy_mode = canonical_policy_mode old.policy_mode;
+        policy_mode =
+          (policy_mode_opt
+          |> Option.map canonical_policy_mode
+          |> Option.value ~default:(canonical_policy_mode old.policy_mode));
         policy_action_budget = canonical_policy_action_budget old.policy_action_budget;
         policy_reward_model_path = old.policy_reward_model_path;
         scope_kind;
         room_scope;
         trigger_mode;
+        voice_enabled =
+          Option.value ~default:old.voice_enabled voice_enabled_opt;
+        voice_channel =
+          (voice_channel_opt
+          |> Option.map canonical_voice_channel
+          |> Option.value ~default:old.voice_channel);
+        voice_agent_id =
+          Option.value ~default:old.voice_agent_id voice_agent_id_opt;
         mention_targets;
         persona_profile_path =
           if String.trim old.persona_profile_path <> "" then old.persona_profile_path
@@ -723,6 +764,10 @@ let handle_keeper_msg ctx args : tool_result =
             in
             raw |> dedupe_keep_order
           in
+          let policy_mode =
+            if default_voice_enabled_for name then "explicit_event_v1"
+            else Keeper_contract.policy_mode_to_string Keeper_contract.Heuristic
+          in
           let meta = {
             name;
             agent_name = keeper_agent_name name;
@@ -741,13 +786,16 @@ let handle_keeper_msg ctx args : tool_result =
             models = inline_models;
             allowed_models;
             active_model;
-            policy_mode = Keeper_contract.policy_mode_to_string Keeper_contract.Heuristic;
+            policy_mode;
             policy_action_budget =
               Keeper_contract.policy_action_budget_to_string Keeper_contract.Conversation;
             policy_reward_model_path = "";
             scope_kind;
             room_scope;
             trigger_mode;
+            voice_enabled = default_voice_enabled_for name;
+            voice_channel = default_voice_channel_for name;
+            voice_agent_id = default_voice_agent_id_for name;
             mention_targets;
             joined_room_ids = [];
             last_seen_seq_by_room = [];

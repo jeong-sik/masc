@@ -154,7 +154,22 @@ let canonical_trigger_mode = function
 
 let canonical_policy_mode = function
   | "learned_offline_v1" -> "learned_offline_v1"
+  | "explicit_event_v1" -> "explicit_event_v1"
   | _ -> "heuristic"
+
+let canonical_voice_channel = function
+  | "voice_only" -> "voice_only"
+  | "text_only" -> "text_only"
+  | _ -> "voice_text"
+
+let default_voice_enabled_for name =
+  String.equal (String.lowercase_ascii (String.trim name)) "sangsu"
+
+let default_voice_channel_for name =
+  if default_voice_enabled_for name then "voice_text" else "text_only"
+
+let default_voice_agent_id_for name =
+  if default_voice_enabled_for name then name else ""
 
 let canonical_policy_action_budget = function
   | "board" -> "board"
@@ -384,6 +399,9 @@ type keeper_meta = {
   handoff_threshold: float;
   handoff_cooldown_sec: int;
   context_budget: float;
+  voice_enabled: bool;
+  voice_channel: string;
+  voice_agent_id: string;
   last_handoff_ts: float;
   created_at: string;
   updated_at: string;
@@ -468,6 +486,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("handoff_threshold", `Float m.handoff_threshold);
       ("handoff_cooldown_sec", `Int m.handoff_cooldown_sec);
       ("context_budget", `Float m.context_budget);
+      ("voice_enabled", `Bool m.voice_enabled);
+      ("voice_channel", `String m.voice_channel);
+      ("voice_agent_id", `String m.voice_agent_id);
       ("last_handoff_ts", `Float m.last_handoff_ts);
       ("created_at", `String m.created_at);
       ("updated_at", `String m.updated_at);
@@ -554,6 +575,16 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     in
     let policy_reward_model_path =
       Safe_ops.json_string ~default:"" "policy_reward_model_path" json
+    in
+    let voice_enabled =
+      Safe_ops.json_bool ~default:(default_voice_enabled_for name) "voice_enabled" json
+    in
+    let voice_channel =
+      Safe_ops.json_string ~default:(default_voice_channel_for name) "voice_channel" json
+      |> canonical_voice_channel
+    in
+    let voice_agent_id =
+      Safe_ops.json_string ~default:(default_voice_agent_id_for name) "voice_agent_id" json
     in
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
@@ -739,6 +770,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           handoff_threshold;
           handoff_cooldown_sec;
           context_budget;
+          voice_enabled;
+          voice_channel;
+          voice_agent_id;
           last_handoff_ts;
           created_at = if created_at = "" then now_iso () else created_at;
           updated_at = if updated_at = "" then now_iso () else updated_at;
@@ -777,6 +811,9 @@ type resident_keeper_spec = {
   name : string;
   persistent_name : string;
   desired : bool;
+  voice_enabled : bool;
+  voice_channel : string;
+  voice_agent_id : string;
   seed_meta : Yojson.Safe.t;
   created_at : string;
   updated_at : string;
@@ -796,6 +833,9 @@ let resident_keeper_to_json (spec : resident_keeper_spec) =
       ("name", `String spec.name);
       ("persistent_name", `String spec.persistent_name);
       ("desired", `Bool spec.desired);
+      ("voice_enabled", `Bool spec.voice_enabled);
+      ("voice_channel", `String spec.voice_channel);
+      ("voice_agent_id", `String spec.voice_agent_id);
       ("seed_meta", spec.seed_meta);
       ("created_at", `String spec.created_at);
       ("updated_at", `String spec.updated_at);
@@ -816,6 +856,21 @@ let resident_keeper_of_json (json : Yojson.Safe.t) :
       | `Bool value -> value
       | _ -> true
     in
+    let voice_enabled =
+      match json |> member "voice_enabled" with
+      | `Bool value -> value
+      | _ -> default_voice_enabled_for name
+    in
+    let voice_channel =
+      match json |> member "voice_channel" |> to_string_option with
+      | Some value -> canonical_voice_channel value
+      | None -> default_voice_channel_for name
+    in
+    let voice_agent_id =
+      match json |> member "voice_agent_id" |> to_string_option with
+      | Some value -> value
+      | None -> default_voice_agent_id_for name
+    in
     let seed_meta =
       match json |> member "seed_meta" with
       | `Assoc _ as value -> value
@@ -831,7 +886,18 @@ let resident_keeper_of_json (json : Yojson.Safe.t) :
       | Some value -> value
       | None -> created_at
     in
-    Ok { name; persistent_name; desired; seed_meta; created_at; updated_at }
+    Ok
+      {
+        name;
+        persistent_name;
+        desired;
+        voice_enabled;
+        voice_channel;
+        voice_agent_id;
+        seed_meta;
+        created_at;
+        updated_at;
+      }
   with Yojson.Safe.Util.Type_error (msg, _) | Failure msg ->
     Error ("resident keeper parse error: " ^ msg)
 
@@ -906,6 +972,9 @@ let register_resident_keeper_from_meta config (meta : keeper_meta) :
       name = meta.name;
       persistent_name = meta.name;
       desired = true;
+      voice_enabled = meta.voice_enabled;
+      voice_channel = meta.voice_channel;
+      voice_agent_id = meta.voice_agent_id;
       seed_meta = meta_to_json meta;
       created_at;
       updated_at = now_iso ();

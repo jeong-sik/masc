@@ -569,35 +569,29 @@ let reject_iteration ?config (state : Mdal.loop_state) ~message =
 let handle_start (ctx : context) args =
   let open Yojson.Safe.Util in
   try
-    let profile_name = args |> member "profile" |> to_string in
+    let profile_name = Safe_ops.json_string "profile" args in
     let worker_model_arg = resolve_worker_model_arg args in
     (* Build profile: start from built-in or create custom *)
     let base_profile =
       if profile_name = "custom" then
-        let metric_fn = args |> member "metric_fn" |> to_string_option in
-        let goal_str = args |> member "goal" |> to_string_option in
+        let metric_fn = Safe_ops.json_string_opt "metric_fn" args in
+        let goal_str = Safe_ops.json_string_opt "goal" args in
         match metric_fn, goal_str with
         | Some mfn, Some gs ->
           let goal = Mdal.parse_goal gs in
           { Mdal.name = "custom";
             metric_fn = mfn;
             goal;
-            target = (args |> member "target" |> to_string_option
-                      |> Option.value ~default:gs);
-            reference = args |> member "reference" |> to_string_option;
-            agent = (args |> member "agent" |> to_string_option
-                     |> Option.value ~default:"claude");
-            max_iterations = (args |> member "max_iterations" |> to_int_option
-                              |> Option.value ~default:20);
-            max_time_seconds = args |> member "max_time_seconds" |> to_number_option;
+            target = Safe_ops.json_string ~default:gs "target" args;
+            reference = Safe_ops.json_string_opt "reference" args;
+            agent = Safe_ops.json_string ~default:"claude" "agent" args;
+            max_iterations = Safe_ops.json_int ~default:20 "max_iterations" args;
+            max_time_seconds = Safe_ops.json_float_opt "max_time_seconds" args;
             stagnation_threshold = 0.005;
             stagnation_count = 3;
-            heuristics = (args |> member "heuristics" |> to_string_option
-                          |> Option.value ~default:"");
-            tools_allow = (args |> member "tools_allow" |> to_option (fun j ->
-              to_list j |> List.map to_string) |> Option.value ~default:[]);
-            tools_deny = (args |> member "tools_deny" |> to_option (fun j ->
-              to_list j |> List.map to_string) |> Option.value ~default:[]);
+            heuristics = Safe_ops.json_string ~default:"" "heuristics" args;
+            tools_allow = Safe_ops.json_string_list "tools_allow" args;
+            tools_deny = Safe_ops.json_string_list "tools_deny" args;
           }
         | None, _ ->
           invalid_arg "Custom profile requires 'metric_fn'"
@@ -1036,22 +1030,19 @@ let handle_swarm_start (ctx : context) args =
   | None, _ -> `Assoc [("error", `String "Clock not available (swarm requires Eio runtime)")]
   | _, None -> `Assoc [("error", `String "Switch not available (swarm requires Eio runtime)")]
   | Some clock, Some sw ->
-    let swarm_id = args |> member "swarm_id" |> to_string in
-    let title = args |> member "title" |> to_string_option |> Option.value ~default:swarm_id in
+    let swarm_id = Safe_ops.json_string "swarm_id" args in
+    let title = Safe_ops.json_string ~default:swarm_id "title" args in
     let workers_json = args |> member "workers" |> to_list in
     match parse_all_workers workers_json with
     | Error e -> `Assoc [("error", `String e)]
     | Ok [] -> `Assoc [("error", `String "workers must not be empty")]
     | Ok workers ->
     let aggregate_strategy =
-      args |> member "aggregate_strategy" |> to_string_option
-      |> Option.value ~default:"average"
+      Safe_ops.json_string ~default:"average" "aggregate_strategy" args
       |> parse_aggregate_strategy
     in
-    let aggregate_goal_expr = args |> member "aggregate_goal_expr" |> to_string in
-    let max_wall_time_sec =
-      args |> member "max_wall_time_sec" |> to_number_option
-    in
+    let aggregate_goal_expr = Safe_ops.json_string "aggregate_goal_expr" args in
+    let max_wall_time_sec = Safe_ops.json_float_opt "max_wall_time_sec" args in
     let config : Mdal_swarm.swarm_config = {
       swarm_id;
       title;

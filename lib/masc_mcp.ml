@@ -311,8 +311,6 @@ module Keeper_alerting = Keeper_alerting
 module Keeper_execution = Keeper_execution
 module Keeper_keepalive = Keeper_keepalive
 module Keeper_runtime = Keeper_runtime
-module Keeper_keepalive = Keeper_keepalive
-module Keeper_exec_status = Keeper_exec_status
 
 (* Autonomy Adjuster — Feedback Closure (Phase 4) *)
 module Autonomy_adjuster = Autonomy_adjuster

@@ -335,6 +335,44 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   return extractMcpText(parsed)
 }
 
+function parseMcpJsonText(text: string): Record<string, unknown> {
+  const trimmed = text.trim()
+  if (!trimmed) return {}
+  return JSON.parse(trimmed) as Record<string, unknown>
+}
+
+export async function fetchAutoresearchStatus(loopId: string): Promise<Record<string, unknown>> {
+  return parseMcpJsonText(await callMcpTool('masc_autoresearch_status', { loop_id: loopId }))
+}
+
+export async function injectAutoresearchHypothesis(
+  loopId: string,
+  hypothesis: string,
+): Promise<Record<string, unknown>> {
+  return parseMcpJsonText(
+    await callMcpTool('masc_autoresearch_inject', {
+      loop_id: loopId,
+      hypothesis,
+    }),
+  )
+}
+
+export async function runAutoresearchCycle(loopId: string): Promise<Record<string, unknown>> {
+  return parseMcpJsonText(await callMcpTool('masc_autoresearch_cycle', { loop_id: loopId }))
+}
+
+export async function stopAutoresearchLoop(
+  loopId: string,
+  reason?: string,
+): Promise<Record<string, unknown>> {
+  return parseMcpJsonText(
+    await callMcpTool('masc_autoresearch_stop', {
+      loop_id: loopId,
+      ...(reason ? { reason } : {}),
+    }),
+  )
+}
+
 async function callKeeperMessageRaw(
   name: string,
   message: string,

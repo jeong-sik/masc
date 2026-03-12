@@ -248,6 +248,7 @@ let permission_for_tool = function
   | "masc_gardener_health" | "masc_gardener_config" | "masc_gardener_status"
   | "masc_gardener_propose_spawn" | "masc_gardener_retire_agent" ->
       Some CanReadState
+  | "masc_autoresearch_status" -> Some CanReadState
   | "masc_add_task" -> Some CanAddTask
   | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
   | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" -> Some CanCompleteTask
@@ -283,6 +284,10 @@ let permission_for_tool = function
   | "masc_dispatch_recall" | "masc_policy_approve"
   | "masc_policy_deny" | "masc_policy_update" ->
       Some CanBroadcast
+  | "masc_autoresearch_start" | "masc_autoresearch_swarm_start"
+  | "masc_autoresearch_cycle" | "masc_autoresearch_inject"
+  | "masc_autoresearch_stop" ->
+      Some CanAdmin
   (* Command-plane write operations require Admin *)
   | "masc_policy_freeze_unit" | "masc_policy_kill_switch" ->
       Some CanAdmin

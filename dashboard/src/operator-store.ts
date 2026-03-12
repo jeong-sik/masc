@@ -213,16 +213,25 @@ function normalizeSessionCard(raw: unknown): OperatorSessionCard | null {
 
 function normalizeLinkedAutoresearch(raw: unknown): OperatorLinkedAutoresearch | null {
   if (!isRecord(raw)) return null
+  const loopId = asString(raw.loop_id)
+  const status = asString(raw.status)
+  if (!loopId && !status) return null
   return {
-    loop_id: asString(raw.loop_id) ?? null,
+    loop_id: loopId ?? null,
     session_id: asString(raw.session_id) ?? null,
-    status: asString(raw.status) ?? null,
+    status: status ?? null,
     current_cycle: asNumber(raw.current_cycle) ?? undefined,
     best_score: asNumber(raw.best_score) ?? null,
     last_decision: asString(raw.last_decision) ?? null,
     target_file: asString(raw.target_file) ?? null,
+    workdir: asString(raw.workdir) ?? null,
+    source_workdir: asString(raw.source_workdir) ?? null,
     program_note: asString(raw.program_note) ?? null,
     operation_id: asString(raw.operation_id) ?? null,
+    queued_hypothesis: asString(raw.queued_hypothesis) ?? null,
+    warnings: extractArray(raw.warnings)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
     error: asString(raw.error) ?? null,
   }
 }

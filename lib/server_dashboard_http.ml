@@ -2574,6 +2574,20 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
           ] );
     ]
 
+let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
+  let ctx : Tool_misc.context =
+    {
+      config;
+      agent_name = Option.value ~default:"dashboard" actor;
+    }
+  in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("tool_inventory", Tool_misc.tool_inventory_json ctx ~include_hidden:true ~include_deprecated:true);
+      ("tool_usage", Tool_unified.summary_report ());
+    ]
+
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in
   Dashboard_execution.json ?actor:(operator_actor_hint request) ?fixture

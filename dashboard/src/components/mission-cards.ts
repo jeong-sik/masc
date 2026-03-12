@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { extractAgentInfo } from './common/agent-info'
+import { linkedRecentToolsEmptyState, observedToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import {
@@ -521,6 +522,10 @@ export function SessionDetailCard({
 export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
   const info = extractAgentInfo(row.brief.agent_name)
   const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 방 단위'
+  const recentToolsLabel =
+    row.recentTools.length > 0
+      ? row.recentTools.join(', ')
+      : toolAuditStateLabel(observedToolsEmptyState(row.keeper, row.brief.tool_audit_source))
   return html`
     <article class="mission-activity-card ${toneClass(row.brief.status ?? row.agent?.status)}">
       <button class="mission-card-select" onClick=${() => openAgentDetail(row.brief.agent_name)}>
@@ -568,7 +573,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
             </div>
           </div>
           <div class="mission-activity-foot">
-            <span>최근 도구 · ${row.recentTools.length > 0 ? row.recentTools.join(', ') : '도구 텔레메트리 없음'}</span>
+            <span>최근 도구 · ${recentToolsLabel}</span>
           </div>
         </details>
       </details>
@@ -586,6 +591,10 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
   ]
     .filter((value): value is string => value !== null)
     .join(' · ')
+  const recentToolsLabel =
+    row.recentTools.length > 0
+      ? row.recentTools.join(', ')
+      : toolAuditStateLabel(linkedRecentToolsEmptyState(row.keeper))
 
   return html`
     <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)}">
@@ -632,7 +641,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
             </div>
           </div>
           <div class="mission-activity-foot">
-            <span>최근 도구 · ${row.recentTools.length > 0 ? row.recentTools.join(', ') : '도구 사용 없음'}</span>
+            <span>최근 도구 · ${recentToolsLabel}</span>
           </div>
         </details>
       </details>

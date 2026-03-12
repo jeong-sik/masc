@@ -28,6 +28,7 @@ import { Command } from './components/command'
 import { Ops } from './components/ops'
 import { Memory } from './components/memory'
 import { Execution } from './components/agents'
+import { Tools } from './components/tools'
 import { Planning } from './components/goals'
 import { Governance } from './components/governance'
 import { Lab } from './components/lab'
@@ -462,6 +463,8 @@ function TabContent() {
       return html`<${Proof} />`
     case 'execution':
       return html`<${Execution} />`
+    case 'tools':
+      return html`<${Tools} />`
     case 'live':
       return html`<${Live} />`
     case 'memory':

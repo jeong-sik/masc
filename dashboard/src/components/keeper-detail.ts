@@ -19,6 +19,14 @@ import {
   KeeperRuntimeActions,
 } from './keeper-shared'
 import { showToast } from './common/toast'
+import {
+  allowlistEmptyState,
+  auditMetadataState,
+  linkedRecentToolsEmptyState,
+  observedToolsEmptyState,
+  openToolsInventory,
+  toolAuditStateLabel,
+} from './common/tool-audit'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -439,15 +447,32 @@ function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const recentTools = keeperRecentTools(keeper)
   const topTools = keeperTopTools(keeper)
   const missionBrief = missionKeeperBrief(keeper)
-  const allowedTools = missionBrief?.allowed_tool_names ?? []
-  const observedTools = missionBrief?.latest_tool_names ?? []
-  const toolCallCount = missionBrief?.latest_tool_call_count
-  const auditSource = missionBrief?.tool_audit_source
-  const auditAt = missionBrief?.tool_audit_at
+  const allowedTools =
+    missionBrief?.allowed_tool_names && missionBrief.allowed_tool_names.length > 0
+      ? missionBrief.allowed_tool_names
+      : keeper.allowed_tool_names ?? []
+  const observedTools =
+    missionBrief?.latest_tool_names && missionBrief.latest_tool_names.length > 0
+      ? missionBrief.latest_tool_names
+      : keeper.latest_tool_names ?? []
+  const toolCallCount = missionBrief?.latest_tool_call_count ?? keeper.latest_tool_call_count
+  const auditSource = missionBrief?.tool_audit_source ?? keeper.tool_audit_source
+  const auditAt = missionBrief?.tool_audit_at ?? keeper.tool_audit_at
   const capabilities = keeper.agent?.capabilities ?? []
   const roomName = room.current_room ?? room.room_id ?? serverStatus.value?.room ?? 'default'
   const project = room.project ?? serverStatus.value?.project ?? '확인 없음'
   const cluster = room.cluster ?? serverStatus.value?.cluster ?? '확인 없음'
+  const allowlistFallback = toolAuditStateLabel(allowlistEmptyState(keeper))
+  const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
+  const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
+  const linkedRecentFallback = toolAuditStateLabel(linkedRecentToolsEmptyState(keeper))
+  const currentTaskLabel =
+    keeper.agent?.current_task
+    ?? (keeper.status === 'offline' ? 'offline' : 'not_collected')
+  const skillRouteLabel =
+    keeper.skill_primary
+    ?? (keeper.status === 'offline' ? 'offline' : 'not_collected')
+  const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? recentTools[0] ?? null
 
   return html`
     <div class="keeper-signal-list">
@@ -465,46 +490,53 @@ function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       </div>
       <div class="keeper-signal-row">
         <span>Current task</span>
-        <strong>${keeper.agent?.current_task ?? '없음'}</strong>
+        <strong>${currentTaskLabel}</strong>
       </div>
       <div class="keeper-signal-row">
         <span>Skill route</span>
-        <strong>${keeper.skill_primary ?? '미확인'}</strong>
+        <strong>${skillRouteLabel}</strong>
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-top:4px;">
+        <button class="control-btn ghost" onClick=${() => { openToolsInventory(openToolsQuery) }}>
+          Open tools panel
+        </button>
       </div>
       <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
         <span style="font-size:12px; color:#888;">Allowed tools</span>
+        <span style="font-size:11px; color:#64748b;">Currently permitted tools for this keeper runtime.</span>
         <div style="display:flex; flex-wrap:wrap; gap:6px;">
           ${allowedTools.length > 0
             ? allowedTools.map(tool => html`<span class="pill">${tool}</span>`)
-            : html`<span style="font-size:12px; color:#888;">allowlist 미보고</span>`}
+            : html`<span style="font-size:12px; color:#888;">${allowlistFallback}</span>`}
         </div>
       </div>
       <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
         <span style="font-size:12px; color:#888;">Observed tools</span>
+        <span style="font-size:11px; color:#64748b;">Recent execution evidence from heartbeat or runtime telemetry.</span>
         <div style="display:flex; flex-wrap:wrap; gap:6px;">
           ${observedTools.length > 0
             ? observedTools.map(tool => html`<span class="pill">${tool}</span>`)
-            : html`<span style="font-size:12px; color:#888;">observed tool-use evidence 없음</span>`}
+            : html`<span style="font-size:12px; color:#888;">${observedFallback}</span>`}
         </div>
       </div>
       <div class="keeper-signal-row">
         <span>Tool calls</span>
-        <strong>${typeof toolCallCount === 'number' ? toolCallCount : '—'}</strong>
+        <strong>${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback}</strong>
       </div>
       <div class="keeper-signal-row">
         <span>Evidence source</span>
-        <strong>${auditSource ?? 'unreported'}</strong>
+        <strong>${auditSource ?? metadataFallback}</strong>
       </div>
       <div class="keeper-signal-row">
         <span>Observed at</span>
-        <strong>${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : 'unreported'}</strong>
+        <strong>${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : metadataFallback}</strong>
       </div>
       <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
         <span style="font-size:12px; color:#888;">Keeper recent tools</span>
         <div style="display:flex; flex-wrap:wrap; gap:6px;">
           ${recentTools.length > 0
             ? recentTools.map(tool => html`<span class="pill">${tool}</span>`)
-            : html`<span style="font-size:12px; color:#888;">도구 텔레메트리 없음</span>`}
+            : html`<span style="font-size:12px; color:#888;">${linkedRecentFallback}</span>`}
         </div>
       </div>
       ${topTools.length > 0

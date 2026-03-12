@@ -319,6 +319,11 @@ export interface Keeper {
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_tool_names?: string[]
+  allowed_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
   conversation_tail_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>
@@ -2707,6 +2712,7 @@ export type TabId =
   | 'mission'
   | 'proof'
   | 'execution'
+  | 'tools'
   | 'live'
   | 'memory'
   | 'governance'
@@ -2719,6 +2725,7 @@ export const VALID_TABS: TabId[] = [
   'mission',
   'proof',
   'execution',
+  'tools',
   'live',
   'memory',
   'governance',

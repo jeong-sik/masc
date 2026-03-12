@@ -1,16 +1,18 @@
-# MASC Mitosis - Cell Division for Infinite Agent Lifecycle
+# MASC Mitosis
+
+**Legacy terminology note**: `mitosis` and `DNA` are older internal labels for a two-phase handoff flow. In new user-facing docs, prefer `handoff` and `capsule` where possible.
 
 ## Overview
 
-Mitosis는 세포 분열에서 영감을 받은 에이전트 컨텍스트 관리 패턴입니다.
-컨텍스트 오버플로우 전에 **proactive하게** 새 세션으로 핸드오프합니다.
+Mitosis는 컨텍스트 한계에 도달하기 전에 handoff를 준비하고 실행하는 2단계 패턴입니다.
+코드와 테스트에는 기존 용어가 남아 있지만, 문서 해석은 handoff 중심으로 보는 편이 정확합니다.
 
 ```
-Traditional: 100% → CRASH → Lost context
-Mitosis:      50% → Prepare → 80% → Handoff → Seamless continuation
+Single-stage handoff: wait until the limit is near, then transfer
+Two-phase handoff:   prepare early, then transfer with buffer
 ```
 
-## 2-Phase Division Pattern
+## 2-Phase Handoff Pattern
 
 ### Phase 1: Prepare (50% threshold)
 - DNA 추출 (현재 컨텍스트 압축)
@@ -162,7 +164,9 @@ type mitosis_config = {
 - `deduplicate_lines` 함수
 - 중복 라인 제거 (O(n log n) StringSet)
 
-## Cell States
+## Internal State Names
+
+아래 이름은 코드에 남아 있는 내부 상태 이름입니다. 일반 설명에서는 `lifecycle` 또는 `handoff state`로 읽으면 됩니다.
 
 | State | Description |
 |-------|-------------|
@@ -236,7 +240,7 @@ test_mitosis.ml: 22 tests
 - [x] Handoff 실행 구현 (`masc_mitosis_handoff`) - ✅ 2026-02-01
 - [ ] 멀티 에이전트 릴레이
 - [ ] DNA 압축 알고리즘 개선
-- [ ] 메트릭스 수집 (분열 횟수, 성공률)
+- [ ] 메트릭스 수집 (handoff 횟수, 성공률)
 
 ## Changelog
 

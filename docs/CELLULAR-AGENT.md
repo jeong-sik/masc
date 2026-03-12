@@ -1,86 +1,73 @@
-# Cellular Agent Pattern
+# Context Handoff Pattern
 
-**Status**: Phase 8 (Implemented)
-**Module**: `lib/handover.ml`
+**Legacy name**: Cellular Agent Pattern
+**Status**: Implemented
+**Primary modules**: `lib/handover_eio.ml`, `lib/tool_handover.ml`
+
+## Terminology Note
+
+This project historically used `cellular`, `DNA`, and similar biology-heavy terms for handoff flow. New documentation should prefer:
+
+- `handoff` for context transfer
+- `capsule` or `handoff record` for the transferred summary
+
+Older code paths and documents may still use the legacy terms.
 
 ## Overview
 
-Cellular Agent는 **Spawn → Work → Preserve (DNA) → Die** 사이클을 따르는 ephemeral 에이전트 패턴입니다.
+The handoff pattern lets one agent stop work and leave a structured record for another agent to continue from. The record is durable, human-readable, and tool-addressable.
 
-에이전트가 죽을 때 (context limit, timeout, crash) 다음 에이전트에게 구조화된 상태를 전달하는 **"last will and testament"** 패턴을 구현합니다.
+Use this pattern when:
 
-## Prior Art & Inspiration
+- context usage is getting high
+- the current agent is timing out or stopping
+- ownership needs to move to another runtime or model
+- a task should resume later without losing decisions and file context
 
-| Source | Concept | MASC Adaptation |
-|--------|---------|-----------------|
-| **Stanford Generative Agents** | Memory Stream + Reflection | Handover = compressed memory |
-| **MemGPT** | Self-managed memory tiers | Context % triggers handover |
-| **Erlang "Let It Crash"** | Supervisor + State recovery | MASC = Supervisor |
-| **A-MEM** | Zettelkasten linking | Task/Session relationships |
+## Handoff Record
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    MASC Supervisor                          │
-│  ┌─────────┐    ┌─────────┐    ┌─────────┐                 │
-│  │ Agent A │───▶│ Handover│───▶│ Agent B │                 │
-│  │  (dies) │    │  (DNA)  │    │ (spawns)│                 │
-│  └─────────┘    └─────────┘    └─────────┘                 │
-│       │              │              │                       │
-│       ▼              ▼              ▼                       │
-│   context=85%    .masc/handovers/   claim + resume          │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Handover Record (DNA)
+Representative fields in a handoff record:
 
 ```ocaml
 type handover_record = {
   id: string;
   from_agent: string;
-  to_agent: string option;  (* None = any agent can pick up *)
+  to_agent: string option;
   task_id: string;
   session_id: string;
-
-  (* Core state *)
   current_goal: string;
   progress_summary: string;
   completed_steps: string list;
   pending_steps: string list;
-
-  (* Thinking context - the "implicit knowledge" problem *)
   key_decisions: string list;
   assumptions: string list;
   warnings: string list;
   unresolved_errors: string list;
-
-  (* File state *)
   modified_files: string list;
   locked_files: string list;
-
-  (* Meta *)
   created_at: float;
   context_usage_percent: int;
   handover_reason: string;
 }
 ```
 
+The record is meant to preserve execution context, not to reproduce the full original conversation.
+
 ## Trigger Reasons
 
 | Reason | Description | Example |
 |--------|-------------|---------|
-| `ContextLimit(pct)` | Context window 임계값 도달 | `context_limit_85` |
-| `Timeout(secs)` | 작업 시간 초과 | `timeout_300s` |
-| `Explicit` | 사용자/에이전트가 명시적 요청 | `explicit` |
-| `FatalError(msg)` | 복구 불가능한 에러 | `error: API rate limit` |
-| `TaskComplete` | 작업 정상 완료 | `task_complete` |
+| `ContextLimit(pct)` | context usage crossed a threshold | `context_limit_85` |
+| `Timeout(secs)` | runtime budget exhausted | `timeout_300s` |
+| `Explicit` | user or agent requested handoff | `explicit` |
+| `FatalError(msg)` | unrecoverable local failure | `error: API rate limit` |
+| `TaskComplete` | work finished and a checkpoint is still useful | `task_complete` |
 
 ## MCP Tools
 
 ### `masc_handover_create`
 
-Planning context에서 handover 생성.
+Create a handoff record from the current task state.
 
 ```json
 {
@@ -102,7 +89,7 @@ Planning context에서 handover 생성.
 
 ### `masc_handover_list`
 
-대기 중인 handover 목록 조회.
+List handoffs, optionally filtering to unclaimed ones.
 
 ```json
 {
@@ -112,7 +99,7 @@ Planning context에서 handover 생성.
 
 ### `masc_handover_claim`
 
-Handover를 claim (다른 에이전트가 가져가지 못하도록).
+Claim a handoff so another agent does not resume the same work in parallel.
 
 ```json
 {
@@ -123,7 +110,7 @@ Handover를 claim (다른 에이전트가 가져가지 못하도록).
 
 ### `masc_handover_get`
 
-Handover 상세 조회 (마크다운 형태).
+Read a handoff in markdown form for human inspection or prompt injection.
 
 ```json
 {
@@ -133,8 +120,7 @@ Handover 상세 조회 (마크다운 형태).
 
 ### `masc_handover_claim_and_spawn`
 
-Handover claim + successor agent 자동 spawn.
-DNA 컨텍스트가 새 에이전트의 프롬프트로 전달됨.
+Claim a handoff and start the successor runtime in one step.
 
 ```json
 {
@@ -145,103 +131,33 @@ DNA 컨텍스트가 새 에이전트의 프롬프트로 전달됨.
 }
 ```
 
-**Workflow**:
-1. Handover claim (다른 에이전트가 가져갈 수 없게)
-2. DNA → 마크다운 프롬프트 변환
-3. Successor agent spawn (claude/gemini/codex/ollama)
-4. 결과 반환
+## Typical Flow
 
-## Example: Full Lifecycle
-
-### 1. Agent A가 context limit 도달
-
-```
-Claude (85% context) → masc_handover_create
-```
-
-### 2. Handover DNA 생성됨
-
-```markdown
-# Agent Handover DNA
-
-## Meta
-- **ID**: handover-abc123
-- **From**: claude → (unclaimed)
-- **Task**: task-001
-- **Reason**: context_limit_85
-
-## Current Goal
-PK-32008 LocalStorage SSR 버그 수정
-
-## Completed
-- 버그 재현 확인
-- SSR 환경에서 window 객체 접근 문제 확인
-
-## ⏳ Pending
-- localStorage 접근을 useEffect로 이동
-- 테스트 작성
-- PR 생성
-
-## Key Decisions
-- SSR-safe 패턴으로 typeof window !== 'undefined' 사용
-```
-
-### 3. Agent B가 claim
-
-```
-Gemini → masc_handover_claim(handover_id, "gemini")
-Gemini → masc_handover_get(handover_id)  # DNA 읽기
-Gemini → Resume work from pending_steps
-```
-
-### 4. Agent B가 작업 완료
-
-```
-Gemini → masc_handover_create(reason=TaskComplete)
-         또는 masc_done(task_id)
-```
+1. Source agent creates a handoff with its current goal, completed steps, warnings, and touched files.
+2. Successor agent lists or claims an available handoff.
+3. Successor reads the handoff markdown and resumes from `pending_steps`.
+4. If the successor also needs to stop, it creates another handoff or marks the task complete.
 
 ## Storage
 
+Handoffs are stored under:
+
+```text
+.masc/handovers/
+  handover-*.json
+  pending.json
 ```
-.masc/
-└── handovers/
-    ├── handover-abc123.json
-    ├── handover-def456.json
-    └── pending.json  (index)
-```
 
-## Design Decisions
+This path comes from `lib/handover_eio.ml`.
 
-### Why JSON over Binary?
+## Design Notes
 
-- 사람이 읽을 수 있음 (디버깅 용이)
-- 다른 도구/스크립트와 통합 쉬움
-- Git으로 추적 가능
-
-### Why Markdown Output?
-
-- LLM이 자연스럽게 파싱
-- 사람도 바로 읽을 수 있음
-- 기존 MCP 응답 형식과 일관성
-
-### Why Explicit Claim?
-
-- Race condition 방지
-- 누가 작업 중인지 명확
-- 중복 작업 방지
-
-## Future Work
-
-- [ ] Redis backend 지원 (분산 환경)
-- [ ] Handover chain 추적 (A → B → C)
-- [ ] Auto-spawn on claim (Orchestrator 연동)
-- [ ] Context compression (요약 전략)
-- [ ] Handover quality metrics
+- JSON is used for persistence because it is easy to inspect and script against.
+- Markdown output is used because it is readable to both humans and LLMs.
+- Explicit claim exists to avoid duplicate resume work.
 
 ## Related
 
-- `MASC-V2-DESIGN.md` - Overall MASC architecture
-- `INTERRUPT-DESIGN.md` - Human-in-the-loop patterns
-- `lib/orchestrator.ml` - Self-sustaining loop
-- `lib/planning.ml` - PDCA cycle integration
+- `docs/MITOSIS.md` - two-phase proactive handoff flow
+- `docs/INTERRUPT-DESIGN.md` - approval and pause patterns
+- `docs/GLOSSARY.md` - preferred terminology

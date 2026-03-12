@@ -1106,6 +1106,48 @@ let test_full_cycle_discard () =
     | None -> fail "expected Some for cycle"
   )
 
+let test_cycle_commit_failure_restores_head () =
+  let workdir = setup_integration_repo () in
+  Fun.protect ~finally:(fun () -> cleanup_integration_repo workdir) (fun () ->
+    ignore (Sys.command (Printf.sprintf
+      "cd %s && printf '#!/bin/sh\\nexit 1\\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
+      (Filename.quote workdir)));
+    let state = make_state
+      ~loop_id:"ar-integ-commit-fail"
+      ~goal:"Maximize line count"
+      ~metric_fn:"sh metric.sh"
+      ~target_file:"target.py"
+      ~workdir
+      ~baseline:3.0
+      ~best_score:3.0
+      () in
+    Hashtbl.replace Tool.active_loops "ar-integ-commit-fail" state;
+    Tool.latest_loop_id := Some "ar-integ-commit-fail";
+    Tool.set_generator "ar-integ-commit-fail"
+      (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_
+           ~target_file:_ ~file_content ~llm_model:_ ->
+        Ok ("Add a line", file_content ^ "line4\n"));
+    let ctx = make_tool_ctx ~base_path:workdir () in
+    match Tool.dispatch ctx ~name:"masc_autoresearch_cycle" ~args:(`Assoc []) with
+    | Some (false, json_str) ->
+      let json = Yojson.Safe.from_string json_str in
+      let open Yojson.Safe.Util in
+      check bool "git commit failure surfaced" true
+        (AR.contains_substring (json |> member "error" |> to_string) "git commit failed");
+      let content = AR.read_file (Filename.concat workdir "target.py") in
+      check bool "file restored to HEAD" true
+        (AR.contains_substring content "line3" && not (AR.contains_substring content "line4"));
+      let ic = Unix.open_process_in
+        (Printf.sprintf "cd %s && git log --oneline | wc -l | tr -d ' '"
+          (Filename.quote workdir)) in
+      let count = Fun.protect ~finally:(fun () ->
+        ignore (Unix.close_process_in ic)
+      ) (fun () -> try int_of_string (String.trim (input_line ic)) with _ -> 0) in
+      check int "HEAD commit preserved" 1 count
+    | Some (true, s) -> fail ("expected git commit failure, got success: " ^ s)
+    | None -> fail "expected Some for cycle"
+  )
+
 (* ============================================ *)
 (* Test runner                                  *)
 (* ============================================ *)
@@ -1226,5 +1268,7 @@ let () =
     ("integration", [
       test_case "full cycle keep" `Quick test_full_cycle_keep;
       test_case "full cycle discard" `Quick test_full_cycle_discard;
+      test_case "commit failure restores HEAD" `Quick
+        test_cycle_commit_failure_restores_head;
     ]);
   ]

@@ -256,6 +256,112 @@ let test_voice_provider_alias_selects_adapter_endpoint () =
       let endpoint = List.hd endpoints in
       check string "selected direct endpoint" "elevenlabs-direct" endpoint.id
 
+let test_voice_request_builder_follows_adapter_contract () =
+  let config_json =
+    {|
+{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "Roger",
+    "default_voice_settings": {
+      "stability": 0.28,
+      "similarity_boost": 0.82,
+      "style": 0.45
+    },
+    "endpoints": [
+      {
+        "id": "elevenlabs-direct",
+        "kind": "elevenlabs_direct",
+        "base_url": "https://api.elevenlabs.io/v1/",
+        "api_key_env": "ELEVENLABS_API_KEY",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      {
+        "id": "openai-stt",
+        "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      {
+        "id": "local-session",
+        "kind": "voice_mcp",
+        "base_url": "http://127.0.0.1:8936",
+        "enabled": true
+      }
+    ]
+  }
+}
+|}
+  in
+  with_temp_voice_config config_json @@ fun () ->
+      let endpoint = List.hd (Masc_mcp.Voice_bridge.available_tts_endpoints ~provider:"elevenlabs" ()) in
+      let tuning = Masc_mcp.Voice_bridge.tuning_for_agent "sangsu" in
+      match
+        Masc_mcp.Provider_adapter.voice_http_request_for_tts endpoint ~api_key:"secret"
+          ~message:"hello" ~voice:"Roger" ~model:"eleven_multilingual_v2" ~tuning
+      with
+      | Error msg -> failf "request build failed: %s" msg
+      | Ok request ->
+          check bool "elevenlabs path" true
+            (String.ends_with ~suffix:"/text-to-speech/CwhRBWXzGAHq8TQ4Fs17" request.url);
+          check bool "has xi-api-key" true
+            (List.mem ("xi-api-key", "secret") request.headers)
+
+let test_voice_session_urls_follow_adapter_contract () =
+  let config_json =
+    {|
+{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "Roger",
+    "endpoints": [
+      {
+        "id": "elevenlabs-direct",
+        "kind": "elevenlabs_direct",
+        "base_url": "https://api.elevenlabs.io/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      {
+        "id": "openai-stt",
+        "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      {
+        "id": "local-voice-mcp",
+        "kind": "voice_mcp",
+        "base_url": "https://voice.example/base",
+        "enabled": true
+      }
+    ]
+  }
+}
+|}
+  in
+  with_temp_voice_config config_json @@ fun () ->
+      check string "mcp uri" "https://voice.example/base/mcp"
+        (Uri.to_string (Masc_mcp.Voice_bridge.voice_mcp_uri ()));
+      check string "health uri" "https://voice.example/base/health"
+        (Uri.to_string (Masc_mcp.Voice_bridge.voice_health_uri ()))
+
 let test_voice_speak_without_net_errors () =
   with_ctx_no_net (fun ctx ->
       let ok, body =
@@ -485,6 +591,10 @@ let () =
             test_voice_agent_reads_nested_tuning_config;
           test_case "voice provider alias selects adapter endpoint" `Quick
             test_voice_provider_alias_selects_adapter_endpoint;
+          test_case "voice request builder follows adapter contract" `Quick
+            test_voice_request_builder_follows_adapter_contract;
+          test_case "voice session urls follow adapter contract" `Quick
+            test_voice_session_urls_follow_adapter_contract;
           test_case "speak without net errors" `Quick
             test_voice_speak_without_net_errors;
           test_case "session start no net" `Quick test_voice_session_start_without_net_errors;

@@ -57,67 +57,29 @@ let local_playback_enabled_for_agent agent_id =
   | Ok config -> Voice_config.local_playback_enabled_for_agent config agent_id
   | Error _ -> false
 
-let ends_with ~suffix s =
-  let slen = String.length s in
-  let plen = String.length suffix in
-  slen >= plen && String.sub s (slen - plen) plen = suffix
-
-let compose_endpoint_from_base ~base_url ~path =
-  let base_uri = Uri.of_string base_url in
-  let base_path = Uri.path base_uri in
-  let base_path =
-    if base_path = "" then "/"
-    else if ends_with ~suffix:"/" base_path && String.length base_path > 1 then
-      String.sub base_path 0 (String.length base_path - 1)
-    else base_path
-  in
-  let final_path =
-    if path = "/mcp" then
-      if ends_with ~suffix:"/mcp" base_path then base_path
-      else if base_path = "/" then "/mcp"
-      else base_path ^ "/mcp"
-    else if path = "/health" then
-      if ends_with ~suffix:"/health" base_path then base_path
-      else if ends_with ~suffix:"/mcp" base_path then
-        String.sub base_path 0 (String.length base_path - 4) ^ "/health"
-      else if base_path = "/" then "/health"
-      else base_path ^ "/health"
-    else if base_path = "/" then path
-    else base_path ^ path
-  in
-  Uri.with_path base_uri final_path
-
-let active_session_endpoint () =
-  match load_voice_config () with
-  | Ok config -> Voice_config.select_endpoint config.session.endpoints
-  | Error _ -> None
-
-let session_mcp_uri endpoint =
-  match endpoint.Voice_config.mcp_url with
-  | Some url -> Uri.of_string url
-  | None -> (
-      match endpoint.base_url with
-      | Some base_url -> compose_endpoint_from_base ~base_url ~path:"/mcp"
-      | None -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ())
-
-let session_health_uri endpoint =
-  match endpoint.Voice_config.health_url with
-  | Some url -> Uri.of_string url
-  | None -> (
-      match endpoint.base_url with
-      | Some base_url -> compose_endpoint_from_base ~base_url ~path:"/health"
-      | None ->
-          Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ())
-
 let voice_mcp_uri () =
-  match active_session_endpoint () with
-  | Some endpoint -> session_mcp_uri endpoint
-  | None -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ()
+  match load_voice_config () with
+  | Ok config -> (
+      match Provider_adapter.voice_session_endpoint_result config with
+      | Ok endpoint -> (
+          match Provider_adapter.voice_session_mcp_url_of_endpoint endpoint with
+          | Ok url -> Uri.of_string url
+          | Error _ -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" () )
+      | Error _ -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ())
+  | Error _ -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ()
 
 let voice_health_uri () =
-  match active_session_endpoint () with
-  | Some endpoint -> session_health_uri endpoint
-  | None ->
+  match load_voice_config () with
+  | Ok config -> (
+      match Provider_adapter.voice_session_endpoint_result config with
+      | Ok endpoint -> (
+          match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+          | Ok url -> Uri.of_string url
+          | Error _ ->
+              Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" () )
+      | Error _ ->
+          Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ())
+  | Error _ ->
       Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ()
 
 let voice_mcp_host () =
@@ -146,13 +108,6 @@ let log_error msg =
 
 let log_debug msg =
   Log.debug "%s %s" log_prefix msg
-
-let local_playback_enabled config ~agent_id =
-  config.Voice_config.local_playback.enabled
-  &&
-  (match config.local_playback.agents with
-  | [] -> true
-  | agents -> List.mem agent_id agents)
 
 let split_path_env value =
   String.split_on_char ':' value
@@ -192,7 +147,7 @@ let start_local_playback ~sw ~agent_id ~audio_file =
   match load_voice_config () with
   | Error _ -> ()
   | Ok config ->
-      if not (local_playback_enabled config ~agent_id) then
+      if not (Voice_config.local_playback_enabled_for_agent config agent_id) then
         ()
       else
         match local_playback_argv ~audio_file () with
@@ -243,13 +198,6 @@ let elevenlabs_voice_ids = [
   ("Laura",  "FGY2WhTYpPnrIDTdsKH5");
 ]
 
-let voice_name_to_id name =
-  match List.assoc_opt name elevenlabs_voice_ids with
-  | Some id -> id
-  | None ->
-      let trimmed = String.trim name in
-      if trimmed = "" then "21m00Tcm4TlvDq8ikWAM" else trimmed
-
 (** Ensure .masc/audio/ directory exists *)
 let masc_base_dir () =
   match Sys.getenv_opt "ME_ROOT" with
@@ -263,21 +211,17 @@ let ensure_audio_dir () =
   else if not (Sys.is_directory dir) then
     log_error "voice audio path exists but is not a directory"
 
-let normalize_base_url value =
-  let trimmed = String.trim value in
-  if ends_with ~suffix:"/" trimmed && String.length trimmed > 1 then
-    String.sub trimmed 0 (String.length trimmed - 1)
-  else
-    trimmed
-
 let endpoint_url endpoint =
-  match endpoint.Voice_config.kind with
-  | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
-      endpoint.base_url
-  | Voice_config.Voice_mcp -> (
-      match endpoint.mcp_url with
-      | Some _ as url -> url
-      | None -> endpoint.base_url)
+  if Provider_adapter.voice_endpoint_supports_http_tts endpoint then
+    Provider_adapter.voice_endpoint_base_url endpoint
+  else
+    match endpoint.Voice_config.kind with
+    | Voice_config.Voice_mcp -> (
+        match endpoint.mcp_url with
+        | Some _ as url -> url
+        | None -> endpoint.base_url)
+    | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
+        Provider_adapter.voice_endpoint_base_url endpoint
 
 let endpoint_url_json endpoint =
   match endpoint_url endpoint with
@@ -411,11 +355,7 @@ let play_audio_locally ~agent_id ~audio_file =
 
 let resolve_api_key endpoint =
   let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
-  match
-    Provider_adapter.voice_auth_env_name
-      ?endpoint_api_key_env:endpoint.Voice_config.api_key_env
-      adapter
-  with
+  match Provider_adapter.voice_endpoint_auth_env_name endpoint with
   | Some env_name -> (
       match Sys.getenv_opt env_name with
       | Some value when String.trim value <> "" -> Ok (String.trim value)
@@ -480,103 +420,20 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
       | Unix.WEXITED code -> Error (Printf.sprintf "curl exit %d" code)
       | _ -> Error "curl process failed")
 
-let speak_via_openai_compat_to_file endpoint ~agent_id ~message ~voice ~model ~output_file =
-  let open Result in
+let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output_file =
   let* api_key = resolve_api_key endpoint in
-  let base_url =
-    match endpoint.base_url with
-    | Some value -> Ok (normalize_base_url value)
-    | None ->
-        Error
-          (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
-  in
-  let* base_url = base_url in
-  let headers =
-    [ ("Content-Type", "application/json"); ("Accept", "audio/mpeg") ]
-    @
-    if api_key = "" then [] else [ ("Authorization", "Bearer " ^ api_key) ]
-  in
   let tuning = tuning_for_agent agent_id in
-  let body_json =
-    `Assoc
-      [
-        ("input", `String message);
-        ("voice", `String voice);
-        ("model", `String model);
-        ("response_format", `String "mp3");
-        ( "voice_settings",
-          `Assoc
-            [
-              ("stability", `Float tuning.stability);
-              ("similarity_boost", `Float tuning.similarity_boost);
-              ("style", `Float tuning.style);
-            ] );
-      ]
+  let* request =
+    Provider_adapter.voice_http_request_for_tts endpoint ~api_key ~message ~voice
+      ~model ~tuning
   in
-  run_audio_http_request_to_file
-    ~url:(base_url ^ "/audio/speech")
-    ~headers ~body_json ~output_file
-
-let speak_via_elevenlabs_to_file endpoint ~agent_id ~message ~voice ~model ~output_file =
-  let open Result in
-  let* api_key = resolve_api_key endpoint in
-  let base_url =
-    match endpoint.base_url with
-    | Some value -> Ok (normalize_base_url value)
-    | None ->
-        Error
-          (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
-  in
-  let* base_url = base_url in
-  let voice_id = voice_name_to_id voice in
-  let headers =
-    [
-      ("xi-api-key", api_key);
-      ("Content-Type", "application/json");
-      ("Accept", "audio/mpeg");
-    ]
-  in
-  let tuning = tuning_for_agent agent_id in
-  let body_json =
-    `Assoc
-      [
-        ("text", `String message);
-        ("model_id", `String model);
-        ( "voice_settings",
-          `Assoc
-            [
-              ("stability", `Float tuning.stability);
-              ("similarity_boost", `Float tuning.similarity_boost);
-              ("style", `Float tuning.style);
-            ] );
-      ]
-  in
-  run_audio_http_request_to_file
-    ~url:(Printf.sprintf "%s/text-to-speech/%s" base_url voice_id)
-    ~headers ~body_json ~output_file
+  run_audio_http_request_to_file ~url:request.url ~headers:request.headers
+    ~body_json:request.body_json ~output_file
 
 let available_tts_endpoints ?provider () =
-  let normalize value = String.lowercase_ascii (String.trim value) in
-  let endpoint_matches_provider label endpoint =
-    let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
-    let labels =
-      endpoint.id
-      :: Voice_config.string_of_endpoint_kind endpoint.kind
-      :: Provider_adapter.string_of_voice_transport adapter.transport
-      :: adapter.canonical_name
-      :: adapter.aliases
-    in
-    let target = normalize label in
-    List.exists (fun candidate -> String.equal (normalize candidate) target) labels
-  in
   match load_voice_config () with
   | Error _ -> []
-  | Ok config ->
-      let endpoints = Voice_config.enabled_endpoints config.tts.endpoints in
-      (match provider with
-      | Some label when String.trim label <> "" ->
-          List.filter (endpoint_matches_provider label) endpoints
-      | _ -> endpoints)
+  | Ok config -> Provider_adapter.select_voice_endpoints ?provider config.tts.endpoints
 
 let provider_error_json endpoint message =
   append_provider_metadata
@@ -639,25 +496,17 @@ let tts_preview_bytes_from_request_json json =
         in
         Error detail
     | endpoint :: rest -> (
-        match endpoint.Voice_config.kind with
-        | Voice_config.Voice_mcp ->
+        let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
+        if not (Provider_adapter.voice_transport_supports_http_tts adapter) then
             let note =
               Printf.sprintf "%s: preview unsupported for voice_mcp" endpoint.id
             in
             try_endpoints (note :: attempted) rest
-        | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
+        else
             let output_file = Filename.temp_file "masc_voice_preview" ".mp3" in
             let result =
-              match endpoint.Voice_config.kind with
-              | Voice_config.Openai_compat ->
-                  speak_via_openai_compat_to_file endpoint ~agent_id:"preview"
-                    ~message:text ~voice ~model
-                    ~output_file
-              | Voice_config.Elevenlabs_direct ->
-                  speak_via_elevenlabs_to_file endpoint ~agent_id:"preview"
-                    ~message:text ~voice ~model
-                    ~output_file
-              | Voice_config.Voice_mcp -> assert false
+              speak_via_http_tts_to_file endpoint ~agent_id:"preview" ~message:text
+                ~voice ~model ~output_file
             in
             Fun.protect
               ~finally:(fun () -> (try Sys.remove output_file with Sys_error _ -> ()))
@@ -850,7 +699,11 @@ let extract_mcp_result json =
     Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))
 
 let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
-  let uri = session_mcp_uri endpoint in
+  let uri =
+    match Provider_adapter.voice_session_mcp_url_of_endpoint endpoint with
+    | Ok url -> Uri.of_string url
+    | Error _ -> voice_mcp_uri ()
+  in
   let request_body =
     `Assoc
       [
@@ -879,11 +732,13 @@ let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
 
 let attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
     ~priority endpoint =
-  match endpoint.Voice_config.kind with
-  | Voice_config.Openai_compat ->
+  let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Provider_adapter.Voice_openai_compat
+  | Provider_adapter.Voice_elevenlabs_direct ->
       let audio_file = make_audio_file ~agent_id in
       (match
-         speak_via_openai_compat_to_file endpoint ~message ~voice ~model
+         speak_via_http_tts_to_file endpoint ~message ~voice ~model
            ~agent_id ~output_file:audio_file
        with
       | Ok file_size ->
@@ -905,32 +760,7 @@ let attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
       | Error error ->
           (try Sys.remove audio_file with Sys_error _ -> ());
           Error error)
-  | Voice_config.Elevenlabs_direct ->
-      let audio_file = make_audio_file ~agent_id in
-      (match
-         speak_via_elevenlabs_to_file endpoint ~message ~voice ~model
-           ~agent_id ~output_file:audio_file
-       with
-      | Ok file_size ->
-          start_local_playback ~sw ~agent_id ~audio_file;
-          Ok
-            (append_provider_metadata
-               (`Assoc
-                 [
-                   ("status", `String "spoken");
-                   ("agent_id", `String agent_id);
-                   ("voice", `String voice);
-                   ("audio_file", `String audio_file);
-                   ("audio_size", `Int file_size);
-                   ( "message_preview",
-                     `String
-                       (String.sub message 0 (min 50 (String.length message))) );
-                 ])
-               endpoint)
-      | Error error ->
-          (try Sys.remove audio_file with Sys_error _ -> ());
-          Error error)
-  | Voice_config.Voice_mcp ->
+  | Provider_adapter.Voice_mcp ->
       let args =
         `Assoc
           [
@@ -970,16 +800,7 @@ let cache_duration () =
 let session_endpoint_result () =
   match load_voice_config () with
   | Error message -> Error message
-  | Ok config -> (
-      match Voice_config.select_endpoint config.session.endpoints with
-      | Some endpoint -> (
-          match endpoint.Voice_config.kind with
-          | Voice_config.Voice_mcp -> Ok endpoint
-          | _ ->
-              Error
-                (Printf.sprintf
-                   "session endpoint %s must use kind=voice_mcp" endpoint.id) )
-      | None -> Error "no configured session endpoint")
+  | Ok config -> Provider_adapter.voice_session_endpoint_result config
 
 let is_voice_server_available ~sw ~clock ~net =
   match session_endpoint_result () with
@@ -987,7 +808,11 @@ let is_voice_server_available ~sw ~clock ~net =
       voice_server_available := Some false;
       false
   | Ok endpoint ->
-      let health_target = Uri.to_string (session_health_uri endpoint) in
+      let health_target =
+        match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+        | Ok url -> url
+        | Error _ -> Uri.to_string (voice_health_uri ())
+      in
       if !voice_server_health_target <> Some health_target then (
         voice_server_health_target := Some health_target;
         voice_server_available := None;
@@ -999,7 +824,11 @@ let is_voice_server_available ~sw ~clock ~net =
         voice_server_check_time := now;
         let check () =
           try
-            let uri = session_health_uri endpoint in
+            let uri =
+              match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+              | Ok url -> Uri.of_string url
+              | Error _ -> voice_health_uri ()
+            in
             let client = client_for_uri ~net uri in
             let resp, _ = Cohttp_eio.Client.get ~sw client uri in
             let status = Cohttp.Response.status resp in
@@ -1020,32 +849,6 @@ let is_voice_server_available ~sw ~clock ~net =
             voice_server_available := Some false;
             false
       end
-
-(** Text-only fallback for when voice is unavailable *)
-let text_fallback ?reason ?(attempted_endpoints = []) ~agent_id ~message () =
-  let voice = get_voice_for_agent agent_id in
-  log_info (Printf.sprintf "[Text fallback] %s (%s): %s"
-    agent_id voice
-    (String.sub message 0 (min 50 (String.length message))));
-  let fields =
-    [
-      ("status", `String "text_fallback");
-      ("agent_id", `String agent_id);
-      ("voice", `String voice);
-      ( "message_preview",
-        `String (String.sub message 0 (min 50 (String.length message))) );
-    ]
-    @
-    (match reason with Some value -> [ ("reason", `String value) ] | None -> [])
-    @
-    if attempted_endpoints = [] then []
-    else
-      [
-        ( "attempted_endpoints",
-          `List (List.map (fun value -> `String value) attempted_endpoints) );
-      ]
-  in
-  Ok (`Assoc fields)
 
 let call_session_tool ~sw ~clock ~net ~tool_name ~arguments =
   match session_endpoint_result () with
@@ -1272,7 +1075,11 @@ let health_check ~sw ~clock:_ ~net () =
   match session_endpoint_result () with
   | Error error -> Error error
   | Ok endpoint ->
-      let uri = session_health_uri endpoint in
+      let uri =
+        match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+        | Ok url -> Uri.of_string url
+        | Error _ -> voice_health_uri ()
+      in
       try
         let client = client_for_uri ~net uri in
         let resp, body = Cohttp_eio.Client.get ~sw client uri in

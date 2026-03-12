@@ -104,8 +104,12 @@ export function MissionBriefingCard() {
   return html`
     <${Card} title="판단 레이어" class="mission-briefing-card" semanticId="mission.llm_briefing">
       <div class="mission-section-head">
-        <h3>휴리스틱 대신 별도 판단 결과</h3>
-        <p>핵심 해석 3줄만 먼저 보여주고, 근거는 접어서 둡니다.</p>
+        <h3>왜 그렇게 보이나</h3>
+        <p>사회 truth를 읽은 뒤에만 별도 판단 결과를 참고하고, 근거는 접어서 둡니다.</p>
+        <div class="mission-briefing-meta">
+          <span class="command-chip">narrative</span>
+          <span class="command-chip warn">fallback on failure</span>
+        </div>
       </div>
 
       <div class="mission-briefing-meta">

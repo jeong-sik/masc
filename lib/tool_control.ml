@@ -26,9 +26,7 @@ let handle_resume ctx _args =
 
 let handle_pause_status ctx args =
   let requested_room = get_string args "room_id" "" |> String.trim in
-  let current_room =
-    Room.read_current_room ctx.config |> Option.value ~default:"default"
-  in
+  let current_room = Room.current_room_id ctx.config in
   let room_id = if requested_room = "" then current_room else requested_room in
   let payload =
     match Room.pause_info ctx.config with

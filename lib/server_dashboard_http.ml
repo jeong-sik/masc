@@ -2478,6 +2478,7 @@ let dashboard_proof_http_json ~state request =
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
+  let current_room = Room.current_room_id config in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let gardener_json = Gardener.status_json () in
@@ -2486,7 +2487,8 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let build = Build_identity.current () in
   `Assoc
     [
-      ("room", `String room_state.project);
+      ("room", `String current_room);
+      ("current_room", `String current_room);
       ("room_base_path", `String config.base_path);
       ( "cluster",
         `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME"))

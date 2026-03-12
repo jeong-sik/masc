@@ -15,6 +15,42 @@ let test name f =
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
     exit 1
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  needle_len = 0 || loop 0
+
+let with_tool_ctx suffix f =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let tmp =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-hb-%s-%d" suffix
+         (int_of_float (Unix.gettimeofday () *. 1000000.0)))
+  in
+  Unix.mkdir tmp 0o755;
+  let config = Room.default_config tmp in
+  ignore (Room.init config ~agent_name:(Some "test"));
+  let ctx =
+    {
+      Tool_heartbeat.config;
+      agent_name = "test";
+      sw;
+      clock = Eio.Stdenv.clock env;
+    }
+  in
+  Fun.protect
+    ~finally:(fun () -> ignore (Heartbeat.stop_by_agent ~agent_name:"test"))
+    (fun () -> f ctx)
+
 (* Heartbeat module tests (extracted from mcp_server_eio) *)
 let () = test "heartbeat_generate_id" (fun () ->
   let id1 = Heartbeat.generate_id () in
@@ -92,57 +128,61 @@ let () = test "get_int_missing" (fun () ->
 )
 
 let () = test "dispatch_unknown_tool" (fun () ->
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let tmp = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc-hb-test-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
-  Unix.mkdir tmp 0o755;
-  let config = Room.default_config tmp in
-  let ctx = { Tool_heartbeat.config; agent_name = "test"; sw; clock = Eio.Stdenv.clock env } in
-  let args = `Assoc [] in
-  assert (Tool_heartbeat.dispatch ctx ~name:"unknown_tool" ~args = None)
+  with_tool_ctx "dispatch-unknown" (fun ctx ->
+      let args = `Assoc [] in
+      assert (Tool_heartbeat.dispatch ctx ~name:"unknown_tool" ~args = None))
 )
 
 let () = test "dispatch_heartbeat_list" (fun () ->
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let tmp = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc-hb-test2-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
-  Unix.mkdir tmp 0o755;
-  let config = Room.default_config tmp in
-  let ctx = { Tool_heartbeat.config; agent_name = "test"; sw; clock = Eio.Stdenv.clock env } in
-  let args = `Assoc [] in
-  match Tool_heartbeat.dispatch ctx ~name:"masc_heartbeat_list" ~args with
-  | Some (success, _result) -> assert success
-  | None -> failwith "dispatch returned None"
+  with_tool_ctx "dispatch-list" (fun ctx ->
+      let args = `Assoc [] in
+      match Tool_heartbeat.dispatch ctx ~name:"masc_heartbeat_list" ~args with
+      | Some (success, _result) -> assert success
+      | None -> failwith "dispatch returned None")
+)
+
+let () = test "handle_heartbeat_start_clamps_interval_and_marks_smart" (fun () ->
+  with_tool_ctx "start-smart" (fun ctx ->
+      let args =
+        `Assoc
+          [
+            ("interval", `Int 1);
+            ("message", `String "ping");
+            ("smart", `Bool true);
+          ]
+      in
+      let (success, result) = Tool_heartbeat.handle_heartbeat_start ctx args in
+      assert success;
+      assert (contains_substring result "interval: 5s");
+      assert (contains_substring result "[SMART]");
+      let heartbeats = Heartbeat.list () in
+      let hb =
+        match
+          List.find_opt
+            (fun hb ->
+              hb.Heartbeat.agent_name = "test" && hb.message = "ping")
+            heartbeats
+        with
+        | Some hb -> hb
+        | None -> failwith "heartbeat not registered"
+      in
+      assert (hb.interval = 5))
 )
 
 let () = test "handle_heartbeat_stop_missing_id" (fun () ->
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let tmp = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc-hb-test3-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
-  Unix.mkdir tmp 0o755;
-  let config = Room.default_config tmp in
-  let ctx = { Tool_heartbeat.config; agent_name = "test"; sw; clock = Eio.Stdenv.clock env } in
-  let args = `Assoc [] in
-  let (success, result) = Tool_heartbeat.handle_heartbeat_stop ctx args in
-  assert (not success);
-  assert (String.length result > 0)
+  with_tool_ctx "stop-missing" (fun ctx ->
+      let args = `Assoc [] in
+      let (success, result) = Tool_heartbeat.handle_heartbeat_stop ctx args in
+      assert (not success);
+      assert (String.length result > 0))
 )
 
 let () = test "handle_heartbeat_stop_not_found" (fun () ->
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let tmp = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc-hb-test4-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
-  Unix.mkdir tmp 0o755;
-  let config = Room.default_config tmp in
-  let ctx = { Tool_heartbeat.config; agent_name = "test"; sw; clock = Eio.Stdenv.clock env } in
-  let args = `Assoc [("heartbeat_id", `String "nonexistent")] in
-  let (success, result) = Tool_heartbeat.handle_heartbeat_stop ctx args in
-  assert (not success);
-  assert (String.length result > 0 (* contains emoji *))
+  with_tool_ctx "stop-not-found" (fun ctx ->
+      let args = `Assoc [("heartbeat_id", `String "nonexistent")] in
+      let (success, result) = Tool_heartbeat.handle_heartbeat_stop ctx args in
+      assert (not success);
+      assert (String.length result > 0 (* contains emoji *)))
 )
 
 let () = Printf.printf "\n✅ All Tool_heartbeat tests passed!\n"

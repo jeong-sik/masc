@@ -24,7 +24,6 @@ import type {
   DashboardSemanticPanel,
   DashboardSemanticSurfaceId,
   DashboardExecutionHandoff,
-  DashboardExecutionSummary,
   DashboardExecutionQueueItem,
   DashboardExecutionSessionBrief,
   DashboardExecutionOperationBrief,
@@ -55,7 +54,6 @@ export const messages = signal<Message[]>([])
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
 export const perpetualStatus = signal<PerpetualStatus | null>(null)
-export const executionSummary = signal<DashboardExecutionSummary | null>(null)
 export const executionQueue = signal<DashboardExecutionQueueItem[]>([])
 export const executionSessionBriefs = signal<DashboardExecutionSessionBrief[]>([])
 export const executionOperationBriefs = signal<DashboardExecutionOperationBrief[]>([])
@@ -322,26 +320,6 @@ function normalizeExecutionTone(value: unknown): DashboardExecutionQueueItem['se
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
   if (raw === 'ok' || raw === 'warn' || raw === 'bad') return raw
   return 'ok'
-}
-
-function normalizeExecutionSummary(raw: unknown): DashboardExecutionSummary | null {
-  if (!isRecord(raw)) return null
-  return {
-    active_sessions: asNumber(raw.active_sessions),
-    blocked_sessions: asNumber(raw.blocked_sessions),
-    active_operations: asNumber(raw.active_operations),
-    blocked_operations: asNumber(raw.blocked_operations),
-    runtime_pressure: asNumber(raw.runtime_pressure),
-    worker_alerts: asNumber(raw.worker_alerts),
-    continuity_alerts: asNumber(raw.continuity_alerts),
-    priority_items: asNumber(raw.priority_items),
-    todo_tasks: asNumber(raw.todo_tasks),
-    claimed_tasks: asNumber(raw.claimed_tasks),
-    running_tasks: asNumber(raw.running_tasks),
-    done_tasks: asNumber(raw.done_tasks),
-    cancelled_tasks: asNumber(raw.cancelled_tasks),
-    keepers: asNumber(raw.keepers),
-  }
 }
 
 function normalizeExecutionHandoff(raw: unknown): DashboardExecutionHandoff | null {
@@ -1126,7 +1104,6 @@ export async function refreshExecution(): Promise<void> {
       .filter((row): row is Message => row !== null)
     messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
     keepers.value = normalizeKeepers(data.keepers, normalizedStatus ?? serverStatus.value)
-    executionSummary.value = normalizeExecutionSummary(data.summary)
     executionLodgeTick.value = normalizeExecutionLodgeTick(data.lodge_tick)
     executionLodgeCheckins.value = (Array.isArray(data.lodge_checkins) ? data.lodge_checkins : [])
       .map(normalizeExecutionLodgeCheckin)

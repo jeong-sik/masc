@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals'
-import { callMcpTool, runOperatorAction, sendKeeperMessage } from './api'
+import { callMcpTool, currentDashboardActor, runOperatorAction } from './api'
 import type {
   Keeper,
   KeeperConversationDelivery,
@@ -318,6 +318,28 @@ function normalizeStatusDetail(name: string, text: string, rawStatus: unknown): 
   }
 }
 
+function keeperReplyTextFromOperatorResult(raw: unknown): string {
+  if (typeof raw === 'string') return raw.trim()
+  if (!isRecord(raw)) return ''
+  const direct =
+    asString(raw.reply)
+    ?? asString(raw.content)
+    ?? asString(raw.text)
+    ?? asString(raw.message)
+  if (direct && direct.trim()) return direct.trim()
+  const nested = raw.result
+  if (typeof nested === 'string') return nested.trim()
+  if (isRecord(nested)) {
+    const nestedText =
+      asString(nested.reply)
+      ?? asString(nested.content)
+      ?? asString(nested.text)
+      ?? asString(nested.message)
+    return nestedText?.trim() ?? ''
+  }
+  return ''
+}
+
 function appendThreadEntry(name: string, entry: KeeperConversationEntry): void {
   const existing = keeperThreads.value[name] ?? []
   keeperThreads.value = {
@@ -426,6 +448,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
   const keeperName = name.trim()
   const message = prompt.trim()
   if (!keeperName || !message) return
+  const actor = currentDashboardActor()
   const localId = `local-${Date.now()}`
   appendThreadEntry(keeperName, {
     id: localId,
@@ -438,7 +461,14 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
   setRecordValue(keeperSending, keeperName, true)
   setRecordValue(keeperActionErrors, keeperName, null)
   try {
-    const reply = await sendKeeperMessage(keeperName, message)
+    const response = await runOperatorAction({
+      actor,
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: keeperName,
+      payload: { message },
+    })
+    const reply = keeperReplyTextFromOperatorResult(response.result)
     keeperThreads.value = {
       ...keeperThreads.value,
       [keeperName]: (keeperThreads.value[keeperName] ?? []).map(entry =>

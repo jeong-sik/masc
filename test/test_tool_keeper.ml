@@ -70,6 +70,17 @@ let with_env name value f =
       Unix.putenv name value;
       f ())
 
+let stop_keeper_via_tool env sw base_dir keeper_name =
+  let config = Masc_mcp.Room.default_config base_dir in
+  let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+    { config; sw; clock = Eio.Stdenv.clock env }
+  in
+  match
+    Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_down"
+      ~args:(`Assoc [ ("name", `String keeper_name) ])
+  with
+  | Some _ | None -> ()
+
 let string_is_valid_utf8 s =
   let len = String.length s in
   let rec loop i =
@@ -195,7 +206,7 @@ let test_keeper_model_set_persists_active_model () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -308,7 +319,7 @@ let test_persona_list_and_create_from_persona () =
   let me_root = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir;
       rm_rf me_root)
     (fun () ->
@@ -492,7 +503,7 @@ let test_keeper_policy_tools_roundtrip () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir)
     (fun () ->
       let reward_model_path = Filename.concat base_dir "reward-model.json" in
@@ -675,7 +686,7 @@ let test_keeper_policy_set_rejects_invalid_mode () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -805,13 +816,13 @@ let test_keeper_policy_set_accepts_explicit_event_v1 () =
       check string "policy mode updated" "explicit_event_v1"
         Yojson.Safe.Util.(json |> member "policy_mode" |> to_string))
 
-let test_resident_bootstrap_marks_stale_explicit_keeper () =
+let test_resident_bootstrap_recovers_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -836,7 +847,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
             ])
       in
       check bool "keeper up ok" true ok;
-      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      stop_keeper_via_tool env sw base_dir "sangsu";
       let meta =
         match Masc_mcp.Keeper_types.read_meta config "sangsu" with
         | Ok (Some meta) -> meta
@@ -857,8 +868,9 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       | Error e -> fail e);
       let stats = Masc_mcp.Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
       check bool "bootstrap enabled" true stats.enabled;
-      check int "started stale resident" 0 stats.started;
+      check int "started stale resident" 1 stats.started;
       check int "stale resident counted" 1 stats.stale;
+      check int "recovering stale resident counted" 1 stats.recovering;
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -873,8 +885,12 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       in
       check bool "status ok" true ok;
       let status_json = Yojson.Safe.from_string status_body in
-      check bool "keepalive running" false
-        Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
+      check bool "keepalive running" true
+        Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool);
+      check string "continuity state recovering" "recovering"
+        Yojson.Safe.Util.(
+          status_json |> member "diagnostic" |> member "continuity_state"
+          |> to_string))
 
 let () =
   run "Tool_keeper" [
@@ -907,7 +923,7 @@ let () =
            test_keeper_up_defaults_sangsu_to_explicit_voice_policy;
          test_case "policy set accepts explicit_event_v1" `Quick
            test_keeper_policy_set_accepts_explicit_event_v1;
-         test_case "resident bootstrap marks stale explicit keeper" `Quick
-           test_resident_bootstrap_marks_stale_explicit_keeper;
+         test_case "resident bootstrap recovers stale explicit keeper" `Quick
+           test_resident_bootstrap_recovers_stale_explicit_keeper;
        ]);
   ]

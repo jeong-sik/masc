@@ -1,7 +1,8 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
-import { extractAgentInfo } from './common/agent-info'
-import { linkedRecentToolsEmptyState, observedToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'
+import { KeeperCard, type CanonicalKeeperCardModel } from './common/keeper-card'
+import { keeperRuntimeLabel } from './common/keeper-identity'
+import { linkedRecentToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import {
@@ -19,7 +20,6 @@ import type {
   DashboardMissionSessionDetailResponse,
 } from '../types'
 import {
-  type EnrichedAgentRow,
   type EnrichedKeeperRow,
   toneClass,
   relativeTime,
@@ -70,26 +70,6 @@ export function MissionContextBar({
         <strong>${generatedAt ? relativeTime(generatedAt) : '기록 없음'}</strong>
       </div>
     </div>
-  `
-}
-
-export function SummaryStat({
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  label: string
-  value: string | number
-  detail: string
-  tone?: string | null
-}) {
-  return html`
-    <article class="mission-stat-card ${toneClass(tone)}">
-      <span class="mission-stat-label">${label}</span>
-      <strong class="mission-stat-value">${value}</strong>
-      <small class="mission-stat-detail">${detail}</small>
-    </article>
   `
 }
 
@@ -315,6 +295,7 @@ export function SessionBriefCard({
   const members = brief.member_previews.slice(0, 4)
   const action = brief.top_recommendation ?? null
   const incident = brief.top_attention ?? null
+  const memberPreviewLabels = members.map(member => member.display_name ?? member.agent_name)
 
   return html`
     <article class="mission-crew-card ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)} ${selected ? 'is-selected' : ''}">
@@ -331,7 +312,7 @@ export function SessionBriefCard({
           <div class="mission-fact-tile">
             <span>멤버</span>
             <strong>${brief.member_names.length}</strong>
-            <small>${brief.member_names.slice(0, 3).join(', ') || '없음'}</small>
+            <small>${memberPreviewLabels.slice(0, 3).join(', ') || brief.member_names.slice(0, 3).join(', ') || '없음'}</small>
           </div>
           <div class="mission-fact-tile">
             <span>가동 시간</span>
@@ -376,9 +357,12 @@ export function SessionBriefCard({
             <div class="mission-member-preview-grid">
               ${members.map(member => html`
                 <button class="mission-member-preview" onClick=${() => openAgentDetail(member.agent_name)}>
-                  <strong>${member.agent_name}</strong>
+                  <strong>${member.display_name ?? member.agent_name}</strong>
                   <span>${member.current_work ?? '현재 작업 없음'}</span>
-                  <small>${member.recent_output_preview ?? member.recent_input_preview ?? '최근 입출력 없음'}</small>
+                  <small>
+                    ${member.recent_output_preview ?? member.recent_input_preview ?? '최근 입출력 없음'}
+                    ${member.is_live === false ? ' · archived participant' : ''}
+                  </small>
                 </button>
               `)}
             </div>
@@ -465,10 +449,11 @@ export function SessionDetailCard({
             ${detail.participants.length > 0
               ? detail.participants.map(participant => html`
                   <button class="mission-member-preview" onClick=${() => openAgentDetail(participant.agent_name)}>
-                    <strong>${participant.agent_name}</strong>
+                    <strong>${participant.display_name ?? participant.agent_name}</strong>
                     <span>${participant.current_work ?? '현재 작업 없음'}</span>
                     <small>
                       ${participant.recent_output_preview ?? participant.recent_input_preview ?? '최근 입출력 없음'}
+                      ${participant.is_live === false ? ' · archived participant' : ''}
                       ${participant.last_activity_at ? ` · ${relativeTime(participant.last_activity_at)}` : ''}
                     </small>
                   </button>
@@ -519,68 +504,6 @@ export function SessionDetailCard({
   `
 }
 
-export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
-  const info = extractAgentInfo(row.brief.agent_name)
-  const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 방 단위'
-  const recentToolsLabel =
-    row.recentTools.length > 0
-      ? row.recentTools.join(', ')
-      : toolAuditStateLabel(observedToolsEmptyState(row.keeper, row.brief.tool_audit_source))
-  return html`
-    <article class="mission-activity-card ${toneClass(row.brief.status ?? row.agent?.status)}">
-      <button class="mission-card-select" onClick=${() => openAgentDetail(row.brief.agent_name)}>
-        <div class="mission-activity-head">
-          <div class="mission-activity-title">
-            <span class="agent-emoji">${row.agent?.emoji ?? row.keeper?.emoji ?? ''}</span>
-            <div>
-              <strong>${row.brief.agent_name}</strong>
-              <span>${info.model !== info.nickname ? `${info.model} · ` : ''}${info.nickname}</span>
-            </div>
-          </div>
-          <span class="command-chip ${toneClass(row.brief.status ?? row.agent?.status)}">${statusLabel(row.brief.status ?? row.agent?.status)}</span>
-        </div>
-
-        <div class="mission-activity-meta">
-          <span>어디서 · ${row.where}</span>
-          <span>누구와 · ${who}</span>
-          <span>주의 신호 · ${row.brief.related_attention_count}</span>
-        </div>
-
-        <div class="mission-activity-focus">
-          <span>무엇을</span>
-          <strong>${row.currentWork}</strong>
-          ${row.how ? html`<small>어떻게 · ${row.how}</small>` : null}
-        </div>
-      </button>
-
-      <details class="mission-card-disclosure">
-        <summary>최근 흐름</summary>
-        <div class="mission-activity-foot">
-          ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : html`<span>최근 사건 요약 없음</span>`}
-          <span>관련 세션 · ${row.brief.related_session_id ?? '없음'}</span>
-        </div>
-
-        <details class="mission-card-disclosure compact">
-          <summary>입력 · 응답 · 도구</summary>
-          <div class="mission-io-stack">
-            <div class="mission-io-item">
-              <span>최근 입력</span>
-              <strong>${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'}</strong>
-            </div>
-            <div class="mission-io-item">
-              <span>최근 응답</span>
-              <strong>${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
-            </div>
-          </div>
-          <div class="mission-activity-foot">
-            <span>최근 도구 · ${recentToolsLabel}</span>
-          </div>
-        </details>
-      </details>
-    </article>
-  `
-}
-
 export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
   const continuity = [
     `세대 ${row.brief.generation ?? row.keeper?.generation ?? 0}`,
@@ -595,58 +518,44 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
     row.recentTools.length > 0
       ? row.recentTools.join(', ')
       : toolAuditStateLabel(linkedRecentToolsEmptyState(row.keeper))
+  const runtimeLabel = keeperRuntimeLabel(
+    row.brief.name,
+    row.brief.agent_name ?? row.keeper?.agent_name,
+  )
+  const model: CanonicalKeeperCardModel = {
+    name: row.brief.name,
+    koreanName: row.keeper?.koreanName ?? null,
+    runtimeLabel,
+    emoji: row.keeper?.emoji ?? null,
+    tone: toneClass(row.brief.status ?? row.keeper?.status),
+    statusRaw: row.brief.status ?? row.keeper?.status ?? null,
+    statusLabel: statusLabel(row.brief.status ?? row.keeper?.status),
+    focus: row.currentWork,
+    lastActivityAt: row.keeper?.last_heartbeat ?? null,
+    lastActivityFallback: '최근 활동 없음',
+    continuity: continuity || '연속성 정보 없음',
+    contextRatio: row.brief.context_ratio ?? row.keeper?.context_ratio ?? null,
+    summary: row.keeper?.skill_reason ? `판단 요약 · ${trimText(row.keeper.skill_reason, 120)}` : null,
+    relatedSessionId: null,
+    recentEvent: row.recentEvent,
+    recentInput: row.recentInput,
+    recentOutput: row.recentOutput,
+    recentTools: row.recentTools,
+    allowedTools: [],
+    disclosureLabel: '연속성 상세',
+  }
 
-  return html`
-    <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)}">
-      <button class="mission-card-select" onClick=${() => { if (row.keeper) openKeeperDetail(row.keeper) }}>
-        <div class="mission-activity-head">
-          <div class="mission-activity-title">
-            <span class="agent-emoji">${row.keeper?.emoji ?? ''}</span>
-            <div>
-              <strong>${row.brief.name}</strong>
-              ${row.keeper?.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
-            </div>
-          </div>
-          <span class="command-chip ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
-        </div>
-
-        <div class="mission-activity-meta">
-          <span>최근 하트비트 · ${row.keeper?.last_heartbeat ? relativeTime(row.keeper.last_heartbeat) : '기록 없음'}</span>
-          <span>${continuity || '연속성 정보 없음'}</span>
-        </div>
-
-        <div class="mission-activity-focus">
-          <span>무엇을</span>
-          <strong>${row.currentWork}</strong>
-          ${row.keeper?.skill_reason ? html`<small>판단 요약 · ${trimText(row.keeper.skill_reason, 120)}</small>` : null}
-        </div>
-      </button>
-
-      <details class="mission-card-disclosure">
-        <summary>연속성 상세</summary>
-        <div class="mission-activity-foot">
-          <span>에이전트 · ${row.brief.agent_name ?? row.keeper?.agent_name ?? '기록 없음'}</span>
-          ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : null}
-        </div>
-        <details class="mission-card-disclosure compact">
-          <summary>입력 · 응답 · 도구</summary>
-          <div class="mission-io-stack">
-            <div class="mission-io-item">
-              <span>최근 입력</span>
-              <strong>${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'}</strong>
-            </div>
-            <div class="mission-io-item">
-              <span>최근 응답</span>
-              <strong>${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
-            </div>
-          </div>
-          <div class="mission-activity-foot">
-            <span>최근 도구 · ${recentToolsLabel}</span>
-          </div>
-        </details>
-      </details>
-    </article>
-  `
+  return html`<${KeeperCard}
+    variant="mission"
+    model=${{
+      ...model,
+      recentTools: row.recentTools.length > 0 ? row.recentTools : [recentToolsLabel],
+      recentEvent:
+        row.recentEvent
+        ?? `runtime agent · ${row.brief.agent_name ?? row.keeper?.agent_name ?? '기록 없음'}`,
+    }}
+    onClick=${() => { if (row.keeper) openKeeperDetail(row.keeper) }}
+  />`
 }
 
 export function InternalSignalCard({ item }: { item: DashboardMissionInternalSignal }) {

@@ -58,8 +58,9 @@ let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
     in
     let stats = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
     if stats.enabled then
-      Printf.eprintf "[keeper-bootstrap] scanned=%d started=%d stale=%d\n%!"
-        stats.scanned stats.started stats.stale
+      Printf.eprintf
+        "[keeper-bootstrap] scanned=%d started=%d stale=%d recovering=%d\n%!"
+        stats.scanned stats.started stats.stale stats.recovering
   with exn ->
     Printf.eprintf "[main] keeper bootstrap failed: %s\n%!"
       (Printexc.to_string exn)

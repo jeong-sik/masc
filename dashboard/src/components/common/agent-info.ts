@@ -14,6 +14,10 @@ export type AgentInfo = {
 }
 
 export function extractAgentInfo(name: string): AgentInfo {
+  if (name.startsWith('keeper-')) {
+    const nickname = name.slice('keeper-'.length)
+    return { model: 'keeper runtime', nickname, isKeeper: true }
+  }
   const idx = name.indexOf('-')
   if (idx < 0) {
     return { model: name, nickname: name, isKeeper: name === 'keeper' }

@@ -66,6 +66,16 @@ function readStoredAgentName(): string | null {
   }
 }
 
+export function currentDashboardActor(): string {
+  const params = getQueryParams()
+  return (
+    params.get('agent')?.trim()
+    || params.get('agent_name')?.trim()
+    || readStoredAgentName()
+    || 'dashboard'
+  )
+}
+
 function authHeaders(): Record<string, string> {
   const params = getQueryParams()
   const headers: Record<string, string> = {}

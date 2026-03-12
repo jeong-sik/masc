@@ -293,6 +293,8 @@ let test_dashboard_mission_projection () =
         ~context:"fixture context"
         ~allowed_tools:[ "masc_board_comment" ]
         ();
+      Sys.remove
+        (Filename.concat (Lib.Room_utils.agents_dir config) "llama-local-delta.json");
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
@@ -307,6 +309,7 @@ let test_dashboard_mission_projection () =
         let open Yojson.Safe.Util in
         let attention_queue = json |> member "attention_queue" |> to_list in
         let sessions = json |> member "sessions" |> to_list in
+        let summary = json |> member "summary" in
         let session_briefs = json |> member "session_briefs" |> to_list in
         let agent_briefs = json |> member "agent_briefs" |> to_list in
         let internal_signals = json |> member "internal_signals" |> to_list in
@@ -318,11 +321,6 @@ let test_dashboard_mission_projection () =
           agent_briefs
           |> List.find (fun row ->
                  row |> member "agent_name" |> to_string = "llama-local-alpha")
-        in
-        let beta_brief =
-          agent_briefs
-          |> List.find (fun row ->
-                 row |> member "agent_name" |> to_string = "llama-local-beta")
         in
         check bool "attention_queue present" true (attention_queue <> []);
         check string "top attention kind" "spawn_failure_present"
@@ -337,6 +335,10 @@ let test_dashboard_mission_projection () =
            |> member "top_action" |> member "action_type" |> to_string);
         check string "session brief id" session_id
           (session_briefs |> List.hd |> member "session_id" |> to_string);
+        check bool "mission summary trims paused" true
+          (summary |> member "paused" = `Null);
+        check bool "mission summary trims active_agents" true
+          (summary |> member "active_agents" = `Null);
         check string "session card id" session_id
           (sessions |> List.hd |> member "session_id" |> to_string);
         check bool "session blocker summary comes from attention" true
@@ -364,25 +366,29 @@ let test_dashboard_mission_projection () =
            |> List.exists (fun row ->
                   row |> member "agent_name" |> to_string = "llama-local-delta"
                   && row |> member "related_session_id" |> to_string = session_id));
+        let delta_brief =
+          agent_briefs
+          |> List.find (fun row ->
+                 row |> member "agent_name" |> to_string = "llama-local-delta")
+        in
+        check bool "summary-only participant marked non-live" false
+          (delta_brief |> member "is_live" |> to_bool);
+        check string "summary-only participant archived reason"
+          "not in current room state"
+          (delta_brief |> member "archived_reason" |> to_string);
+        check bool "participant preview omits old tool telemetry" true
+          (delta_brief |> member "recent_tool_names" = `Null);
         let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
         check bool "recent input preserves exact alpha mention" true
           (contains alpha_input "@llama-local-alpha");
         check bool "recent input excludes unrelated beta mention" false
           (contains alpha_input "@llama-local-beta");
-        check bool "allowed tools captured" true
-          (alpha_brief |> member "allowed_tool_names" |> to_list
-           |> List.exists (fun value -> value |> to_string = "masc_board_vote"));
-        check bool "latest tool names captured" true
-          (alpha_brief |> member "latest_tool_names" |> to_list
-           |> List.exists (fun value -> value |> to_string = "masc_board_vote"));
-        check int "latest tool count captured" 2
-          (alpha_brief |> member "latest_tool_call_count" |> to_int);
-        check string "tool audit source" "heartbeat_result"
-          (alpha_brief |> member "tool_audit_source" |> to_string);
-        check string "newer task keeps prior result evidence" "heartbeat_task_pending_result"
-          (beta_brief |> member "tool_audit_source" |> to_string);
-        check bool "newer task preserves latest observed tools" true
-          ((beta_brief |> member "latest_tool_names" |> to_list) <> []);
+        check bool "agent brief omits old audit surface" true
+          (alpha_brief |> member "allowed_tool_names" = `Null);
+        check bool "agent brief omits social context fields" true
+          (alpha_brief |> member "where" = `Null);
+        check string "agent brief keeps session linkage" session_id
+          (alpha_brief |> member "related_session_id" |> to_string);
         check bool "internal signal includes pending confirm" true
           (internal_signals
            |> List.exists (fun row ->
@@ -463,8 +469,8 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
         in
         check bool "fallback allowed tools present" true
           ((brief |> member "allowed_tool_names" |> to_list) <> []);
-        check bool "fallback source omitted without evidence" true
-          (brief |> member "tool_audit_source" = `Null);
+        check string "fallback source" "keeper_policy"
+          (brief |> member "tool_audit_source" |> to_string);
         check bool "no observed tools without evidence" true
           ((brief |> member "latest_tool_names" |> to_list) = []);
       ))

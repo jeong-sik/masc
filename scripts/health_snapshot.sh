@@ -83,9 +83,57 @@ extract_baseline_value() {
   printf '%s' "${value:-0}"
 }
 
+build_baseline_content_from_ref() {
+  local ref="$1"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  git archive "$ref" lib test >/dev/null 2>&1 || {
+    rm -rf "$tmp_dir"
+    return 1
+  }
+  git archive "$ref" lib test | tar -x -C "$tmp_dir"
+
+  local baseline_lib_failwith baseline_lib_list_hd baseline_lib_list_tl
+  local baseline_lib_option_get baseline_lib_obj_magic
+  local baseline_test_failwith baseline_test_list_hd baseline_test_list_tl
+  local baseline_test_option_get baseline_test_obj_magic
+
+  baseline_lib_failwith="$(count_pattern "$tmp_dir/lib" 'failwith')"
+  baseline_lib_list_hd="$(count_pattern "$tmp_dir/lib" 'List\.hd')"
+  baseline_lib_list_tl="$(count_pattern "$tmp_dir/lib" 'List\.tl')"
+  baseline_lib_option_get="$(count_pattern "$tmp_dir/lib" 'Option\.get')"
+  baseline_lib_obj_magic="$(count_pattern "$tmp_dir/lib" 'Obj\.magic')"
+
+  baseline_test_failwith="$(count_pattern "$tmp_dir/test" 'failwith')"
+  baseline_test_list_hd="$(count_pattern "$tmp_dir/test" 'List\.hd')"
+  baseline_test_list_tl="$(count_pattern "$tmp_dir/test" 'List\.tl')"
+  baseline_test_option_get="$(count_pattern "$tmp_dir/test" 'Option\.get')"
+  baseline_test_obj_magic="$(count_pattern "$tmp_dir/test" 'Obj\.magic')"
+
+  rm -rf "$tmp_dir"
+
+  cat <<EOF
+{
+  "version": 1,
+  "counts": {
+    "lib_failwith": ${baseline_lib_failwith},
+    "lib_list_hd": ${baseline_lib_list_hd},
+    "lib_list_tl": ${baseline_lib_list_tl},
+    "lib_option_get": ${baseline_lib_option_get},
+    "lib_obj_magic": ${baseline_lib_obj_magic},
+    "test_failwith": ${baseline_test_failwith},
+    "test_list_hd": ${baseline_test_list_hd},
+    "test_list_tl": ${baseline_test_list_tl},
+    "test_option_get": ${baseline_test_option_get},
+    "test_obj_magic": ${baseline_test_obj_magic}
+  }
+}
+EOF
+}
+
 load_baseline_content() {
   if [ -n "$BASELINE_REF" ]; then
-    if git show "${BASELINE_REF}:${BASELINE_FILE}" 2>/dev/null; then
+    if build_baseline_content_from_ref "$BASELINE_REF" 2>/dev/null; then
       return 0
     fi
   fi

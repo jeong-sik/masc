@@ -152,5 +152,29 @@ let () =
                 |> Option.value ~default:""
               in
               check string "tier field" "full" tier_val);
+          test_case "public contract keeps implementation status only" `Quick
+            (fun () ->
+              let fields = Tool_catalog.public_contract_fields "masc_join" in
+              let status_val =
+                List.assoc_opt "implementationStatus" fields
+                |> Option.map (function `String s -> s | _ -> "")
+                |> Option.value ~default:""
+              in
+              check string "status field" "real" status_val;
+              check bool "visibility omitted" true
+                (List.assoc_opt "visibility" fields = None);
+              check bool "lifecycle omitted" true
+                (List.assoc_opt "lifecycle" fields = None));
+          test_case "public contract keeps canonical alias" `Quick (fun () ->
+              let fields =
+                Tool_catalog.public_contract_fields "masc_llama_runtime_verify"
+              in
+              let canonical_val =
+                List.assoc_opt "canonicalName" fields
+                |> Option.map (function `String s -> s | _ -> "")
+                |> Option.value ~default:""
+              in
+              check string "canonical field" "masc_runtime_verify"
+                canonical_val);
         ] );
     ]

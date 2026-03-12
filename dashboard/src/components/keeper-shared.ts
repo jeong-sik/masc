@@ -88,6 +88,16 @@ function formatEligible(seconds?: number | null): string | null {
   return `${Math.ceil(seconds / 60)}m`
 }
 
+function continuityStateLabel(state?: KeeperDiagnostic['continuity_state'] | null): string | null {
+  switch (state) {
+    case 'desired_offline': return 'desired offline'
+    case 'recovering': return 'recovering'
+    case 'healthy': return 'healthy'
+    case 'offline': return 'offline'
+    default: return null
+  }
+}
+
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
   if (!keeper) return null
   const detail = keeperStatusDetails.value[keeper.name]
@@ -115,23 +125,41 @@ export function KeeperDiagnosticSummary({
   const diagnostic = effectiveDiagnostic(keeper)
   const busy = keeperHydrating.value[keeper.name]
 
+  if (!diagnostic) {
+    return html`
+      <div class="control-result-box">
+        <div class="control-status-copy">
+          실시간 진단 데이터가 아직 없습니다.
+        </div>
+        ${showRawStatus
+          ? html`<pre class="keeper-status-console">${detail?.rawText ?? 'No keeper status loaded yet.'}</pre>`
+          : null}
+      </div>
+    `
+  }
+
   return html`
     <div class="control-result-box">
       <div class="control-inline-meta">
+        ${continuityStateLabel(diagnostic?.continuity_state)
+          ? html`<span class="pill">${continuityStateLabel(diagnostic?.continuity_state)}</span>`
+          : null}
         <span class="pill">${diagnostic?.health_state ?? 'unknown'}</span>
         <span class="pill">${quietReasonLabel(diagnostic?.quiet_reason)}</span>
         <span class="pill">next ${nextActionLabel(diagnostic?.next_action_path ?? 'direct_message')}</span>
         ${busy ? html`<span class="pill">refreshing</span>` : null}
       </div>
       <div class="control-status-copy">
-        ${diagnostic?.summary ?? 'Keeper diagnostic summary is not available yet. Probe or open the detail overlay to inspect current runtime state.'}
+        ${diagnostic?.continuity_summary
+          ?? diagnostic?.summary
+          ?? 'Keeper diagnostic summary is not available yet. Probe or open the detail overlay to inspect current runtime state.'}
       </div>
       <div class="control-status-copy">
-        Reply: ${diagnostic?.last_reply_status ?? 'unknown'}
-        ${diagnostic?.last_reply_at ? html` · ${formatTime(diagnostic.last_reply_at)}` : null}
-        ${diagnostic?.next_eligible_at_s ? html` · next eligible ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
+        Reply: ${diagnostic.last_reply_status}
+        ${diagnostic.last_reply_at ? html` · ${formatTime(diagnostic.last_reply_at)}` : null}
+        ${diagnostic.next_eligible_at_s ? html` · next eligible ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
       </div>
-      ${diagnostic?.last_error
+      ${diagnostic.last_error
         ? html`<div class="control-status-copy control-error-copy">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus

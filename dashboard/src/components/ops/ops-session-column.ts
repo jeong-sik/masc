@@ -9,6 +9,7 @@ import {
 } from '../../operator-store'
 import {
   actionTypeLabel,
+  authoritativeLabel,
   displayStatus,
   guidanceFreshnessLabel,
   guidanceLayerLabel,
@@ -90,7 +91,7 @@ export function OpsSessionColumn() {
               ${activeSummary?.summary ?? '현재 이 session에 대한 resident guidance가 없습니다. fallback digest를 표시합니다.'}
             </div>
             <div class="ops-guidance-meta">
-              <span>authoritative ${sessionDigest.authoritative_judgment_available ? 'yes' : 'no'}</span>
+              <span>${authoritativeLabel(sessionDigest.authoritative_judgment_available)}</span>
               <span>${guidanceFreshnessLabel(activeSummary)}</span>
               ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
             </div>

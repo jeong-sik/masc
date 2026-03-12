@@ -10,6 +10,7 @@ import {
 } from '../../operator-store'
 import {
   actionTypeLabel,
+  authoritativeLabel,
   broadcastMessage,
   confirmPending,
   deliveryModeLabel,
@@ -173,7 +174,7 @@ export function OpsRoomColumn() {
             ${activeSummary?.summary ?? '현재 active guidance 요약이 없습니다. fallback queue만 표시합니다.'}
           </div>
           <div class="ops-guidance-meta">
-            <span>authoritative ${roomDigest?.authoritative_judgment_available ? 'yes' : 'no'}</span>
+            <span>${authoritativeLabel(roomDigest?.authoritative_judgment_available)}</span>
             <span>${guidanceFreshnessLabel(activeSummary)}</span>
             ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
           </div>

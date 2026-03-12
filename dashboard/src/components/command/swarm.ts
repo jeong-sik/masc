@@ -26,6 +26,7 @@ import {
 } from '../../operator-store'
 import { route } from '../../router'
 import { PanelSemanticDetails } from '../common/semantic-layer'
+import { authoritativeLabel, provenanceLabel, sourceOfTruthLabel } from '../common/truth-copy'
 import { workflowContextForRoute } from '../../workflow-context'
 import {
   currentCommandPlaneSummary,
@@ -131,9 +132,9 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
       </p>
       <div class="command-card-grid">
         <span>런</span><span>${runId}</span>
-        <span>근거 경로</span><span>${recommendation?.provenance ?? 'recorded'}</span>
+        <span>근거 경로</span><span>${provenanceLabel(recommendation?.provenance ?? 'recorded')}</span>
         <span>결정 엔진</span><span>${recommendation?.decision_engine ?? 'operator_record'}</span>
-        <span>권위성</span><span>${recommendation?.authoritative ? '예' : '아니오'}</span>
+        <span>판단 경로</span><span>${authoritativeLabel(recommendation?.authoritative)}</span>
       </div>
       ${recommendation?.evidence
         ? html`
@@ -261,7 +262,7 @@ function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
         <div class="swarm-lane-head-left">
           <span class="swarm-motion-dot ${lane.motion_state}"></span>
           <div>
-            <span class="swarm-lane-kicker">${lane.kind} · ${lane.source_of_truth}</span>
+            <span class="swarm-lane-kicker">${lane.kind} · ${sourceOfTruthLabel(lane.source_of_truth)}</span>
             <strong>${lane.label}</strong>
           </div>
         </div>

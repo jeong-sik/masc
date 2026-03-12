@@ -2,6 +2,11 @@
 
 import { signal } from '@preact/signals'
 import { showToast } from '../common/toast'
+import {
+  authoritativeLabel,
+  guidanceLayerLabel as sharedGuidanceLayerLabel,
+  guidanceLayerTone as sharedGuidanceLayerTone,
+} from '../common/truth-copy'
 import type {
   OperatorAttentionItem,
   OperatorGuidanceSummary,
@@ -63,27 +68,9 @@ export function prettyJson(value: unknown): string {
   }
 }
 
-export function guidanceLayerLabel(value?: string | null): string {
-  switch ((value ?? '').trim().toLowerCase()) {
-    case 'judgment':
-      return '상주 판단'
-    case 'fallback':
-      return '보조 읽기 모델'
-    default:
-      return value?.trim() || '안내'
-  }
-}
-
-export function guidanceLayerTone(value?: string | null): OpsPriorityTone {
-  switch ((value ?? '').trim().toLowerCase()) {
-    case 'judgment':
-      return 'ok'
-    case 'fallback':
-      return 'warn'
-    default:
-      return 'warn'
-  }
-}
+export const guidanceLayerLabel = sharedGuidanceLayerLabel
+export const guidanceLayerTone = sharedGuidanceLayerTone
+export { authoritativeLabel }
 
 export function runtimeJudgeLabel(runtime?: OperatorResidentJudgeRuntime | null): string {
   if (!runtime?.enabled) return '꺼짐'

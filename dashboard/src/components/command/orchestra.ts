@@ -15,6 +15,7 @@ import {
 } from '../../command-store'
 import { navigate } from '../../router'
 import { PanelSemanticDetails } from '../common/semantic-layer'
+import { provenanceLabel } from '../common/truth-copy'
 import {
   relativeTime,
   surfaceRouteParams,
@@ -371,7 +372,7 @@ function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOrchestra
           ${relatedSignals.map(signalNode => html`<span class="command-chip ${toneClass(signalNode.tone)}">${signalNode.label}</span>`)}
         </div>
       ` : null}
-      <div class="command-card-sub">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>
+      <div class="command-card-sub">연결 ${relatedEdges.length}개 · 근거 ${provenanceLabel(node.provenance)}</div>
       ${(node.link_tab && (node.link_surface || Object.keys(node.link_params ?? {}).length > 0))
         ? html`
             <div class="command-action-row">

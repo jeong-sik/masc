@@ -5,14 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.84.0] - 2026-03-11
+## [2.84.0] - 2026-03-12
 
 ### Added
 - **OAS-backed Agent Control Contract** — internal agent-control export now publishes `/api/v1/openapi.json` with canonical MCP operation metadata and current Agent SDK aliases
+- **Resident Judgment Overlay** — operator snapshot includes resident judgment and dashboard surfacing (#811)
+- **Admin Snapshot Surface** — admin-level snapshot and update tools for keeper inspection (#814)
+- **Local Voice Playback** — internal local voice playback selection for browser-based voice (#816)
+- **Gardener Backlog Triage** — gardener starts backlog triage sessions on worker pressure signals (#812)
 
 ### Changed
 - **Generated Agent SDK Control Tools** — swarm-facing MASC control tools are now generated from shared contract metadata instead of hand-written wrappers
 - **Truthful Transport Mapping** — `tool_to_endpoint` now falls back to `/mcp` when no real REST route exists instead of advertising fake paths
+- **Keeper Core Module Split** — split keeper core modules for independent lifecycle management (#810)
+- **Default Model Alias** — LLM layer uses default model alias for simplified configuration (#813, #815)
+- **Dashboard Proof Surface** — humanized proof surface in dashboard (#806)
+- **Global Local Output Budget** — llama runtime enforces global local output budget (#818)
+
+### Fixed
+- Pending confirmations are now actor-aware in operator flow (#809)
+- Admin surface auth and keeper wiring follow-up (#817)
+- Lodge falls back to `LLAMA_DEFAULT_MODEL` when worker model is unset (#808)
+- Removed runtime dependencies from keeper tests (#807)
 
 ## [2.83.0] - 2026-03-11
 

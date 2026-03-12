@@ -43,7 +43,7 @@ jobs:
       - name: Install dependencies
         run: |
           for attempt in 1 2 3; do
-            opam install . --deps-only --with-test --yes && break
+            opam install . --deps-only --yes && break
             if [ "$attempt" -eq 3 ]; then
               echo "opam install failed after ${attempt} attempts"
               exit 1

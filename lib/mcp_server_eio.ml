@@ -3162,6 +3162,7 @@ type tools_list_params = {
   include_usage : bool;
   mode : string option;
   tier : string option;
+  cursor : string option;
 }
 
 let bool_param payload key =
@@ -3170,6 +3171,61 @@ let bool_param payload key =
   | `Null -> Ok false
   | `Bool value -> Ok value
   | _ -> Error (Printf.sprintf "Invalid params: %s must be a boolean" key)
+
+let cursor_param payload =
+  let open Yojson.Safe.Util in
+  match payload |> member "cursor" with
+  | `Null -> Ok None
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then
+        Error "Invalid params: cursor must not be empty"
+      else
+        Ok (Some trimmed)
+  | _ -> Error "Invalid params: cursor must be a string"
+
+let decode_cursor_offset = function
+  | None -> Ok 0
+  | Some raw -> (
+      match int_of_string_opt raw with
+      | Some offset when offset >= 0 -> Ok offset
+      | _ -> Error "Invalid params: cursor must be a non-negative integer string")
+
+let rec drop_list n = function
+  | xs when n <= 0 -> xs
+  | [] -> []
+  | _ :: rest -> drop_list (n - 1) rest
+
+let rec take_list n xs =
+  if n <= 0 then
+    []
+  else
+    match xs with
+    | [] -> []
+    | x :: rest -> x :: take_list (n - 1) rest
+
+let paginate_json_items ?(page_size = 128) ~field_name items cursor =
+  match decode_cursor_offset cursor with
+  | Error msg -> Error msg
+  | Ok offset ->
+      let total = List.length items in
+      let page = items |> drop_list offset |> take_list page_size in
+      let next_offset = offset + List.length page in
+      let fields =
+        [ (field_name, `List page) ]
+        @
+        if next_offset < total then
+          [ ("nextCursor", `String (string_of_int next_offset)) ]
+        else
+          []
+      in
+      Ok (`Assoc fields)
+
+let cursor_only_params params =
+  match params with
+  | None -> Ok None
+  | Some (`Assoc _ as payload) -> cursor_param payload
+  | Some _ -> Error "Invalid params: expected object"
 
 let requested_tool_list_params params =
   let open Yojson.Safe.Util in
@@ -3182,6 +3238,7 @@ let requested_tool_list_params params =
         include_usage = false;
         mode = None;
         tier = None;
+        cursor = None;
       }
   | Some (`Assoc _ as payload) -> (
       let names_result =
@@ -3218,6 +3275,9 @@ let requested_tool_list_params params =
       match names_result with
       | Error _ as err -> err
       | Ok names -> (
+          match cursor_param payload with
+          | Error _ as err -> err
+          | Ok cursor -> (
           match mode_result with
           | Error _ as err -> err
           | Ok mode -> (
@@ -3240,7 +3300,8 @@ let requested_tool_list_params params =
                         include_usage;
                         mode;
                         tier;
-                      }))))))
+                        cursor;
+                      })))))))
   | Some _ -> Error "Invalid params: expected object"
 
 let handle_initialize_eio ?(profile = Full) id params =
@@ -3258,7 +3319,8 @@ let handle_initialize_eio ?(profile = Full) id params =
       ])
 
 let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_usage = false) ?mode ?tier state id =
+    ?(include_deprecated = false) ?(include_usage = false) ?mode ?tier ?cursor
+    state id =
   let usage_summary =
     if include_usage then
       Some (Telemetry_eio.summarize_tool_usage ?fs:state.Mcp_server.fs state.Mcp_server.room_config)
@@ -3285,21 +3347,25 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
              Tool_catalog.is_in_tier t schema.name))
     |> List.map (tool_json_for_profile ?usage_summary profile)
   in
-  let result_fields =
-    [ ("tools", `List tools) ]
-    @
-    match usage_summary with
-    | Some summary ->
-        [
-          ("usageTelemetryAvailable", `Bool summary.telemetry_available);
-          ("usageTelemetryPath", `String summary.telemetry_path);
-          ("usageTotalCalls", `Int summary.total_calls);
-        ]
-    | None -> []
-  in
-  make_response ~id (`Assoc result_fields)
+  match paginate_json_items ~field_name:"tools" tools cursor with
+  | Error msg -> make_error ~id (-32602) msg
+  | Ok (`Assoc result_fields) ->
+      let result_fields =
+        result_fields
+        @
+        match usage_summary with
+        | Some summary ->
+            [
+              ("usageTelemetryAvailable", `Bool summary.telemetry_available);
+              ("usageTelemetryPath", `String summary.telemetry_path);
+              ("usageTotalCalls", `Int summary.total_calls);
+            ]
+        | None -> []
+      in
+      make_response ~id (`Assoc result_fields)
+  | Ok _ -> make_error ~id (-32603) "Internal error: invalid paginated tools result"
 
-let handle_list_resources_eio id =
+let handle_list_resources_eio id cursor =
   let tool_help_resources =
     Config.raw_all_tool_schemas
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
@@ -3316,14 +3382,26 @@ let handle_list_resources_eio id =
   let resources_json =
     List.map Mcp_server.resource_to_json (Mcp_server.resources @ tool_help_resources)
   in
-  make_response ~id (`Assoc [("resources", `List resources_json)])
+  match paginate_json_items ~field_name:"resources" resources_json cursor with
+  | Ok paged -> make_response ~id paged
+  | Error msg -> make_error ~id (-32602) msg
 
-let handle_list_resource_templates_eio id =
+let handle_list_resource_templates_eio id cursor =
   let templates_json = List.map Mcp_server.resource_template_to_json Mcp_server.resource_templates in
-  make_response ~id (`Assoc [("resourceTemplates", `List templates_json)])
+  match paginate_json_items ~field_name:"resourceTemplates" templates_json cursor with
+  | Ok paged -> make_response ~id paged
+  | Error msg -> make_error ~id (-32602) msg
 
-let handle_list_prompts_eio id =
-  make_response ~id (Mcp_prompt_surface.list_json ())
+let handle_list_prompts_eio id cursor =
+  match Mcp_prompt_surface.list_json () with
+  | `Assoc fields -> (
+      match List.assoc_opt "prompts" fields with
+      | Some (`List prompts) -> (
+          match paginate_json_items ~field_name:"prompts" prompts cursor with
+          | Ok paged -> make_response ~id paged
+          | Error msg -> make_error ~id (-32602) msg)
+      | _ -> make_error ~id (-32603) "Internal error: invalid prompt list payload")
+  | _ -> make_error ~id (-32603) "Internal error: invalid prompt list payload"
 
 let handle_get_prompt_eio state id params =
   match params with
@@ -3389,19 +3467,29 @@ let handle_request
                    | "initialize" -> handle_initialize_eio ~profile id req.params
                    | "initialized"
                    | "notifications/initialized" -> make_response ~id `Null
-                   | "resources/list" -> handle_list_resources_eio id
+                   | "resources/list" -> (
+                       match cursor_only_params req.params with
+                       | Ok cursor -> handle_list_resources_eio id cursor
+                       | Error msg -> make_error ~id (-32602) msg)
                    | "resources/read" ->
                        (* Eio native - pure sync resource reading *)
                        handle_read_resource_eio state id req.params
-                   | "resources/templates/list" -> handle_list_resource_templates_eio id
-                   | "prompts/list" -> handle_list_prompts_eio id
+                   | "resources/templates/list" -> (
+                       match cursor_only_params req.params with
+                       | Ok cursor -> handle_list_resource_templates_eio id cursor
+                       | Error msg -> make_error ~id (-32602) msg)
+                   | "prompts/list" -> (
+                       match cursor_only_params req.params with
+                       | Ok cursor -> handle_list_prompts_eio id cursor
+                       | Error msg -> make_error ~id (-32602) msg)
                    | "prompts/get" -> handle_get_prompt_eio state id req.params
                    | "tools/list" -> (
                        match requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier } ->
+                       | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier; cursor } ->
                            handle_list_tools_eio ~profile ?names ~include_hidden
-                             ~include_deprecated ~include_usage ?mode ?tier state id)
+                             ~include_deprecated ~include_usage ?mode ?tier ?cursor
+                             state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

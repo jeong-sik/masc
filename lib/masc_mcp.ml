@@ -183,6 +183,7 @@ module Server_trpg_rest = Server_trpg_rest
 module Server_dashboard_http = Server_dashboard_http
 module Server_routes_http = Server_routes_http
 module Server_h2_gateway = Server_h2_gateway
+module Server_runtime_bootstrap = Server_runtime_bootstrap
 module Server_command_plane_http = Server_command_plane_http
 module Server_mcp_transport_http = Server_mcp_transport_http
 module Swarm_status = Swarm_status

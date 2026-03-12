@@ -778,6 +778,11 @@
  (modules test_anti_fake)
  (libraries masc_mcp alcotest yojson))
 
+(test
+ (name test_keeper_exec_helpers)
+ (modules test_keeper_exec_helpers)
+ (libraries masc_mcp alcotest yojson unix))
+
 ; P3 Phase 5: Tool_board coverage tests
 (test
  (name test_tool_board_coverage)

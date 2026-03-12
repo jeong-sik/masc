@@ -429,6 +429,28 @@ export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
   return get('/api/v1/dashboard/planning')
 }
 
+// --- Tool metrics (P4 Phase 4.5) ---
+
+export interface ToolMetricsTopEntry {
+  name: string
+  call_count: number
+  tier: string
+}
+
+export interface ToolMetricsResponse {
+  total_calls: number
+  distinct_tools_called: number
+  top_20: ToolMetricsTopEntry[]
+  never_called_count: number
+  tier_distribution: { essential: number; standard: number; full: number }
+  dispatch_v2_enabled: boolean
+  registered_count: number
+}
+
+export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
+  return get('/api/v1/tool-metrics')
+}
+
 // --- Individual resource fetchers (selective SSE-driven refresh) ---
 
 export interface PaginatedAgentsResponse {

@@ -836,6 +836,18 @@
  (modules test_tool_registry)
  (libraries masc_mcp alcotest yojson))
 
+; Tool Dispatch — O(1) Hashtbl central dispatch registry (P4 Phase 4.3)
+(test
+ (name test_tool_dispatch)
+ (modules test_tool_dispatch)
+ (libraries masc_mcp alcotest yojson))
+
+; Tool Unified — unified query interface across catalog, registry, dispatch (P4 Phase 4.4)
+(test
+ (name test_tool_unified)
+ (modules test_tool_unified)
+ (libraries masc_mcp alcotest yojson))
+
 ; Mode Tool Count — end-to-end Config.enabled_tool_schemas per mode
 (test
  (name test_mode_tool_count)

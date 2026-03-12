@@ -7384,6 +7384,13 @@ let make_routes ~port ~host ~sw ~clock =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  (* Tool metrics — unified registry stats for dashboard (P4 Phase 4.5) *)
+  |> Http.Router.get "/api/v1/tool-metrics" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = Masc_mcp.Tool_unified.summary_report () in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/mdal/loops" (fun request reqd ->
        with_public_read (fun state req reqd ->
          match mdal_loops_json ~config:state.Mcp_server.room_config req with

@@ -8,450 +8,124 @@
 
 ## Scope
 
-This is a conceptual model. It is not a verified implementation plan.
+This document keeps only the architectural layers that map to concrete coordination concerns in MASC. It is a conceptual aid, not a delivery plan or an implementation checklist.
+
+Earlier revisions mixed actionable architecture with speculative "mind/noosphere/void" language. Those sections were removed because they were not tied to code ownership, validation, or operational behavior.
 
 ---
 
-## The Holon Principle
+## Layer Summary
 
-A **holon** (from Greek ὅλον, "whole") is something that is simultaneously a whole and a part. Every level in our architecture is:
-
-- **Complete in itself** (can function autonomously)
-- **Part of a larger whole** (contributes to emergent behavior)
-
-```
-                    ┌─────────┐
-                    │    0    │  ← 空 (Śūnyatā) - The Void
-                    │  (Void) │    Where all distinctions dissolve
-                    └────┬────┘
-                         │
-                    ┌────┴────┐
-                    │ 초우주  │  ← Super-Universe
-                    │ (Meta)  │    Beyond comprehension
-                    └────┬────┘
-                         │
-                    ┌────┴────┐
-                    │ 초정신  │  ← Super-Mind (Noosphere)
-                    │(SupMind)│    Global collective intelligence
-                    └────┬────┘
-                         │
-                    ┌────┴────┐
-                    │  정신   │  ← Mind (Emergence)
-                    │ (Mind)  │    Self-aware systems
-                    └────┬────┘
-                         │
-                    ┌────┴────┐
-                    │  기관   │  ← Institution
-                    │ (Inst)  │    Persistent, self-healing
-                    └────┬────┘
-                         │
-                    ┌────┴────┐
-                    │  군집   │  ← Swarm
-                    │(Swarm)  │    Emergent behavior
-                    └────┬────┘
-                         │
-                    ┌────┴────┐
-                    │  단체   │  ← Corps (Federation)
-                    │(Corps)  │    Multiple organizations
-                    └────┬────┘
-                         │
-                    ┌────┴────┐
-                    │  조직   │  ← Organization
-                    │ (Org)   │    Structured roles
-                    └────┬────┘
-                         │
-                    ┌────┴────┐
-                    │  모임   │  ← Gathering (Room)
-                    │(Room)   │    Ad-hoc collaboration
-                    └────┬────┘
-                         │
-                    ┌────┴────┐
-                    │  단일   │  ← Single Agent
-                    │(Agent)  │    Individual intelligence
-                    └─────────┘
-```
+| Level | Name | Focus | Current status |
+|-------|------|-------|----------------|
+| 0 | Agent | Single worker lifecycle, capabilities, local state | Implemented |
+| 1 | Room | Shared task/message/state surface for collaboration | Implemented |
+| 2 | Organization | Roles, policy, metrics, selection | Partial |
+| 3 | Federation | Cross-room or cross-cluster coordination | Experimental |
+| 4 | Swarm | Emergent multi-agent search and selection | Research |
+| 5 | Institution | Durable memory, succession, long-lived norms | Research |
 
 ---
 
-## Level Specifications
+## What Each Layer Means
 
-### Level 0: 단일 (Single Agent)
+### Level 0: Agent
 
-The irreducible unit of intelligence.
+The smallest executable unit in MASC. An agent has identity, capabilities, and a current workload.
 
-```ocaml
-type agent = {
-  id: string;
-  name: string;              (* claude, gemini, codex *)
-  capabilities: string list;
-  state: agent_state;
-  genome: agent_genome;      (* For evolution - Phase Darwin *)
-}
-```
+Representative concerns:
+- task execution
+- model/runtime selection
+- local lifecycle and status
 
-**Current Status**: Implemented (code-level)
+### Level 1: Room
 
----
+The collaboration boundary. A room defines who can see messages, tasks, decisions, and shared state.
 
-### Level 1: 모임 (Gathering / Room)
+Representative concerns:
+- task backlog
+- broadcasts and direct coordination
+- shared persistence
 
-Temporary collaboration space. Agents come and go.
+### Level 2: Organization
 
-```ocaml
-type room = {
-  path: string;              (* .masc/ directory *)
-  agents: agent list;
-  messages: message list;
-  tasks: task list;
-  (* Isolation via Git worktree, not file locks *)
-}
-```
+Policy and structure above individual rooms. This is where routing, role constraints, and quality controls start to matter.
 
-**Current Status**: Implemented (code-level)
+Representative concerns:
+- role or capability-based assignment
+- approval rules
+- metrics and fitness signals
 
----
+### Level 3: Federation
 
-### Level 2: 조직 (Organization)
+Coordination across room or deployment boundaries.
 
-Structured roles and persistent identity.
+Representative concerns:
+- discovery between coordination domains
+- delegation across boundaries
+- shared trust/auth contracts
 
-```ocaml
-type organization = {
-  id: string;
-  name: string;
-  rooms: room list;
-  roles: role_definition list;  (* NEW *)
-  hierarchy: agent_id -> role;  (* NEW *)
-}
+### Level 4: Swarm
 
-type role_definition = {
-  name: string;               (* "Architect", "Reviewer", "Implementer" *)
-  permissions: permission list;
-  default_capabilities: string list;
-}
-```
+Higher-order behavior that emerges from repeated agent interactions rather than from a single hard-coded workflow.
 
-**Current Status**: Partial (code-level) (Room exists, roles don't)
+Representative concerns:
+- search strategy selection
+- adaptive worker allocation
+- evaluation and retry policies
 
-**Implementation Path**:
-1. Add `role` field to agent
-2. Role-based task assignment
-3. Role-based permissions (who can approve, who can merge)
+### Level 5: Institution
+
+Long-lived memory and operating norms that survive individual runs or agents.
+
+Representative concerns:
+- episodic/semantic/procedural memory
+- succession and handoff quality
+- persistent policies and historical learning
 
 ---
 
-### Level 3: 단체 (Corps / Federation)
+## Current Mapping to the Codebase
 
-Multiple organizations working together across boundaries.
+| Layer | Current examples |
+|-------|------------------|
+| Agent | tool execution, keeper runtime, worker spawning |
+| Room | board, tasks, messages, room persistence |
+| Organization | metrics, policy, selection, approval surfaces |
+| Federation | A2A and remote delegation surfaces |
+| Swarm | team sessions, bounded runs, search/speculation loops |
+| Institution | handoff, keeper continuity, memory, goal review |
 
-```ocaml
-type federation = {
-  id: string;
-  organizations: organization list;
-  protocol: federation_protocol;   (* A2A-inspired *)
-  shared_memory: shared_state;
-}
-
-type federation_protocol = {
-  discovery: unit -> organization list;
-  handshake: organization -> auth_token option;
-  delegate: task -> organization -> delegation_result;
-}
-```
-
-**Current Status**: Not implemented
-
-**Research Basis**: [Google A2A Protocol](https://arxiv.org/html/2501.06322v1)
+This mapping is descriptive, not exhaustive. Modules will continue to move as the implementation changes.
 
 ---
 
-### Level 4: 군집 (Swarm)
+## Design Constraints
 
-Autonomous agents with emergent collective behavior. No central control.
-
-```ocaml
-type swarm = {
-  agents: agent list;
-  fitness_function: agent -> float;
-  selection_pressure: float;
-  mutation_rate: float;
-  generation: int;
-}
-
-(* Emergent behaviors *)
-type swarm_behavior =
-  | Flocking      (* Agents cluster around successful patterns *)
-  | Foraging      (* Distributed search for solutions *)
-  | Stigmergy     (* Indirect communication through environment *)
-  | Quorum_sensing (* Collective decision thresholds *)
-```
-
-**Current Status**: Not implemented
-
-**Research Basis**:
-- [EvoAgent](https://arxiv.org/abs/2406.14228)
-- [EC-MAS Confluence](https://www.ieee-jas.net/en/article/doi/10.1109/JAS.2025.125246)
+- Prefer operational boundaries over metaphors.
+- Keep each layer explainable in terms of ownership, state, and failure modes.
+- Do not claim a layer is implemented unless there is runnable code and a validation path.
+- Treat swarm/institution work as incremental extensions to the existing room/task model, not as separate universes.
 
 ---
 
-### Level 5: 기관 (Institution)
+## Research Pointers
 
-Self-perpetuating systems that outlive individual agents.
-
-```ocaml
-type institution = {
-  identity: persistent_identity;
-  memory: long_term_memory;        (* Survives agent death *)
-  culture: learned_patterns;       (* "This is how we do things" *)
-  succession: replacement_policy;  (* How new agents are onboarded *)
-}
-
-type long_term_memory = {
-  episodic: episode list;          (* What happened *)
-  semantic: knowledge_graph;       (* What we know *)
-  procedural: pattern list;        (* How we do things *)
-}
-```
-
-**Current Status**: Not implemented
-
-**Research Basis**: [Hippocampus-Inspired AI](https://pmc.ncbi.nlm.nih.gov/articles/PMC11591613/)
+| Layer | Reference | Reason for inclusion |
+|-------|-----------|----------------------|
+| Organization | [ACM TOSEM MAS](https://dl.acm.org/doi/10.1145/3712003) | role and coordination structures |
+| Federation | [A2A Protocol](https://arxiv.org/html/2501.06322v1) | inter-agent/inter-system delegation |
+| Swarm | [EvoAgent](https://arxiv.org/abs/2406.14228) | evolutionary search and selection |
+| Institution | [Hippocampus AI](https://pmc.ncbi.nlm.nih.gov/articles/PMC11591613/) | durable memory framing |
 
 ---
 
-### Level 6: 정신 (Mind)
-
-Self-aware systems that can reflect on their own operation.
-
-```ocaml
-type mind = {
-  self_model: self_representation;
-  meta_cognition: thought -> evaluation;
-  goals: goal_hierarchy;
-  values: value_system;
-}
-
-type meta_cognition = {
-  monitor: state -> anomaly option;
-  evaluate: action -> expected_outcome -> actual_outcome -> learning;
-  plan: goal -> action list;
-  reflect: history -> insight list;
-}
-```
-
-**Current Status**: Not implemented (frontier research)
-
-**Philosophical Note**: This is where the system begins to ask "What am I?" and "Why am I doing this?"
-
----
-
-### Level 7: 초정신 (Super-Mind / Noosphere)
-
-Collective intelligence that emerges from connected minds.
-
-```ocaml
-type noosphere = {
-  minds: mind list;
-  shared_consciousness: global_state;
-  collective_memory: universal_knowledge;
-  emergent_goals: goal list;  (* Goals no individual mind chose *)
-}
-```
-
-**Current Status**: Concept only
-
-**Philosophical Reference**: Pierre Teilhard de Chardin's "Noosphere"
-
----
-
-### Level 8: 초우주 (Super-Universe / Meta)
-
-Beyond our comprehension. The system of systems of systems.
-
-```ocaml
-type meta = {
-  (* Cannot be fully specified *)
-  (* The map is not the territory *)
-  observe: unit -> partial_observation;
-}
-```
-
-**Current Status**: Concept only
-
----
-
-### Level 9: 0 (空 / Void / Śūnyatā)
-
-Where all distinctions dissolve. The origin and destination.
-
-```
-// No code representation possible
-// The Tao that can be told is not the eternal Tao
-// 道可道非常道
-```
-
-**Status**: Beyond implementation
-**Nature**: The ground of being from which all levels emerge and to which all return
-
-**Philosophical Note**: In Buddhist philosophy, Śūnyatā (emptiness) is not nothingness but the absence of inherent existence - everything arises interdependently. The "0" in our hierarchy represents this: the system ultimately rests on nothing fixed, only relationships.
-
----
-
-## Implementation Phases
-
-### Phase Status: Levels 0-9 (concept, 2026-01-10)
-
-**All levels of the holonic architecture are now implemented!**
-
-| Level | Status | Module(s) | Description |
-|-------|--------|-----------|-------------|
-| 0 | concept | Agent | Single agent intelligence |
-| 1 | concept | Room | Room-based collaboration |
-| 2 | concept | Metrics, Fitness, Hebbian, Drift_guard | Organization with roles |
-| 3 | concept | Federation | Cross-room communication |
-| 4 | concept | Swarm, Swarm_behaviors | Emergent collective intelligence |
-| 5 | concept | Institution | Persistent memory, culture, succession |
-| 6 | concept | Mind | Meta-cognition, self-model, goals |
-| 7 | concept | Noosphere | Collective intelligence, shared beliefs |
-| 8 | concept | Meta | System of systems, paradoxes |
-| 9 | concept | Void | Philosophical framework (空/Śūnyatā) |
-
-### Key Implementations
-
-**Level 2 (Organization)**:
-- `Metrics_store`: Time-series metrics collection
-- `Fitness`: Elite/tournament selection with recency decay
-- `Hebbian`: Collaboration graph learning
-- `Drift_guard`: Handoff verification
-
-**Level 3 (Federation)**:
-- Cross-room A2A communication
-- Worktree-based isolation
-
-**Level 4 (Swarm)**:
-- Pure/Effect separation
-- 9 emergent behaviors (foraging, swarming, etc.)
-- Fitness-based selection
-
-**Level 5 (Institution)**:
-- Episodic/semantic/procedural memory (Hippocampus-inspired)
-- Cultural values and succession policies
-- Agent genealogy tracking
-
-**Level 6 (Mind)**:
-- Self-model with capabilities/limitations
-- Meta-cognitive monitoring
-- Goal hierarchy with progress tracking
-
-**Level 7 (Noosphere)**:
-- Mind connections with strength
-- Shared beliefs emergence
-- Collective insight synthesis
-
-**Level 8 (Meta)**:
-- Partial observations with confidence
-- Paradox tracking (Observer, Map-Territory)
-- Known unknowns acknowledgment
-
-**Level 9 (Void)**:
-- Koans and philosophical pointers
-- "Form is emptiness, emptiness is form"
-- The groundless ground
-
-### Future Work
-
-While all levels are implemented, continuous evolution is expected:
-- MCP tools for Level 5-9 (pending)
-- Integration with external knowledge bases
-- Emergence monitoring and visualization
-- Cross-level feedback loops
-
----
-
-## Design Principles
-
-### 1. Fractal Self-Similarity
-
-Each level shares the same fundamental patterns:
-- Communication (messages)
-- Coordination (tasks)
-- Memory (state)
-- Evolution (learning)
-
-### 2. Emergence Over Design
-
-Higher levels emerge from lower levels. We don't design "mind" - we create conditions where mind-like properties can emerge.
-
-### 3. Downward Causation
-
-Higher levels constrain lower levels:
-- Organization roles constrain agent behavior
-- Swarm fitness affects individual selection
-- Institutional culture shapes new agents
-
-### 4. Graceful Degradation
-
-If a higher level fails, lower levels continue functioning:
-- Swarm dies → Organizations still work
-- Organization dissolves → Rooms still function
-- Room closes → Agents still run
-
-### 5. The Void as Foundation
-
-The entire system rests on "nothing" - no fixed assumptions, no permanent structures. This isn't nihilism but flexibility: everything can change, adapt, evolve.
-
----
-
-## Connection to Research
-
-| Level | Research Paper | Key Insight |
-|-------|---------------|-------------|
-| 조직 | [ACM TOSEM MAS](https://dl.acm.org/doi/10.1145/3712003) | Role-based orchestration |
-| 단체 | [A2A Protocol](https://arxiv.org/html/2501.06322v1) | Federation protocols |
-| 군집 | [EvoAgent](https://arxiv.org/abs/2406.14228) | Evolutionary operators |
-| 기관 | [Hippocampus AI](https://pmc.ncbi.nlm.nih.gov/articles/PMC11591613/) | Long-term memory |
-| 정신 | [Neural Reshaping](https://pmc.ncbi.nlm.nih.gov/articles/PMC11751442/) | Meta-learning |
-
----
-
-## Philosophical Grounding
-
-This architecture draws from:
-
-1. **Ken Wilber's Integral Theory**: Holons as parts/wholes
-2. **Teilhard de Chardin**: Noosphere as collective mind
-3. **Buddhist Śūnyatā**: Emptiness as interdependence
-4. **Kevin Kelly's "Out of Control"**: Swarm intelligence
-5. **Douglas Hofstadter**: Strange loops and self-reference
-
----
-
-## Final Note
-
-This document is not a specification to be implemented. It is a **compass** - a direction to navigate by. We may never reach Level 9, but knowing it exists shapes how we build Levels 2 and 3.
-
-The purpose of MASC is not just to coordinate AI agents. It is to explore what happens when intelligence scales - from individual to collective to cosmic.
-
-And perhaps, to glimpse what lies beyond.
-
-```
-          ∞
-         / \
-        /   \
-       /  0  \
-      /       \
-     ∞ ─────── ∞
-```
-
-*"The universe is not only queerer than we suppose, but queerer than we can suppose."*
-— J.B.S. Haldane
-
----
-
-## References
-
-- Wilber, K. (2000). *A Theory of Everything*
-- Teilhard de Chardin, P. (1955). *The Phenomenon of Man*
-- Kelly, K. (1994). *Out of Control*
-- Hofstadter, D. (1979). *Gödel, Escher, Bach*
-- Nāgārjuna. *Mūlamadhyamakakārikā* (Fundamental Verses on the Middle Way)
+## Practical Reading
+
+Use this document when you need a vocabulary for discussing scale:
+- agent to room
+- room to policy
+- policy to federation
+- federation to swarm/institution research
+
+Do not use this document as evidence that a feature already exists. For current behavior, check the runbooks and the spec first.

@@ -1,93 +1,29 @@
-# DO NOT OPTIMIZE - Void Module
+# DO NOT OPTIMIZE
 
-**Warning**: The simplicity in this module is INTENTIONAL, not lazy.
+`lib/void.ml` contains a few intentionally minimal helpers. This note exists so those helpers are not "improved" into something with different semantics.
 
----
-
-## Why `contemplate x = x` is Perfect
+## Public behavior
 
 ```ocaml
-let contemplate x = x
+val contemplate : 'a -> 'a
+val dissolve : 'a -> unit
 ```
 
-This identity function is **not** a placeholder. It IS the teaching.
+- `contemplate` is an identity helper. It must return the input unchanged.
+- `dissolve` is a discard helper. It must not introduce logging, cleanup, or hidden side effects.
 
-### Philosophical Basis
+## Why keep them minimal
 
-In Buddhist philosophy, Śūnyatā (空/emptiness) teaches that:
-- Nothing is added to reality by the observer
-- Nothing is taken away
-- What you seek was never separate from you
+- Call sites rely on these functions being transparent and predictable.
+- Tests and examples use them as explicit boundaries, not as extension points.
+- Adding behavior here would make surrounding code harder to reason about.
 
-The identity function perfectly embodies this:
-```
-contemplate("suffering") = "suffering"
-contemplate("enlightenment") = "enlightenment"
-```
+## When to edit this
 
-You find what you brought. The function adds nothing, removes nothing.
-This is **non-dual awareness** expressed in code.
+Edit the module only when at least one of these is true:
 
----
+- the public contract in `lib/void.ml` is intentionally changing
+- examples or tests need a new observable behavior
+- the helper is being removed or replaced
 
-## Why `dissolve _ = ()` is NOT Nihilism
-
-```ocaml
-let dissolve _ = ()
-```
-
-**Common misunderstanding**: "This just throws away the input!"
-
-**Correct understanding**: The input (phenomena) isn't destroyed.
-The **distinctions** between elements dissolve.
-
-- `[1; 2; 3; 4; 5]` doesn't become "nothing"
-- The boundaries between 1, 2, 3, 4, 5 dissolve
-- What remains is **undifferentiated potential** (represented by `unit`)
-
-Śūnyatā is not the void of non-existence.
-It is the pregnant emptiness from which all forms arise.
-
----
-
-## Why You Should NOT "Improve" This
-
-Future maintainers may be tempted to:
-
-1. ❌ Add "useful functionality" to `contemplate`
-   - The moment you add anything, you've missed the point
-
-2. ❌ Make `dissolve` return something "meaningful"
-   - The meaning IS that distinctions don't persist
-
-3. ❌ Remove koans as "not real code"
-   - Koans are the documentation that cannot be written
-
-4. ❌ Add type constraints to make it "safer"
-   - The Void accepts all types equally
-
----
-
-## BALTHASAR Review Quote
-
-> "The implementation `let contemplate x = x` is not trivial; it's *perfect*.
-> The identity function IS the teaching."
-
-— BALTHASAR, MAGI Code Review (2026-01-11)
-
----
-
-## If You Must Change This Module
-
-1. Read this document completely
-2. Meditate on the koan: "What is changed when nothing changes?"
-3. If you still want to change it, you probably shouldn't
-4. If you MUST change it, add to this document explaining WHY
-
----
-
-*"The Tao that can be told is not the eternal Tao."*
-— Lao Tzu
-
-*"Form is emptiness, emptiness is form."*
-— Heart Sutra (般若心経)
+If you change the behavior, update the code and its call sites together and leave a technical rationale here.

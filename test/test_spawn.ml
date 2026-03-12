@@ -122,6 +122,22 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_vote_create" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains run_deliverable" true
     (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains board_post" true
+    (List.mem "mcp__masc__masc_board_post" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains tool_stats" true
+    (List.mem "mcp__masc__masc_tool_stats" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains tool_help" true
+    (List.mem "mcp__masc__masc_tool_help" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains tool_admin_snapshot" true
+    (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains keeper_tool_catalog" true
+    (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains tool_list" true
+    (List.mem "mcp__masc__masc_tool_list" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains tool_grant" true
+    (List.mem "mcp__masc__masc_tool_grant" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains tool_revoke" true
+    (List.mem "mcp__masc__masc_tool_revoke" Spawn.masc_mcp_tools);
   ()
 
 let test_spawn_bare_ollama_rejected () =

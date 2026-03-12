@@ -295,10 +295,18 @@ let permission_for_tool = function
   | "masc_interrupt" | "masc_branch" -> Some CanInterrupt
   | "masc_approve" | "masc_reject" -> Some CanApprove
   | "masc_cost_log" | "masc_cleanup_zombies" -> Some CanBroadcast (* Worker level *)
+  | "masc_board_list" | "masc_board_get" | "masc_board_hearths"
+  | "masc_board_search" | "masc_board_profile" | "masc_board_stats" ->
+      Some CanReadState
+  | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
+  | "masc_board_comment_vote" -> Some CanBroadcast
   (* Auth tools - special handling *)
   | "masc_auth_enable" | "masc_auth_disable" | "masc_auth_create_token"
   | "masc_auth_revoke" -> Some CanInit  (* Admin only *)
   | "masc_auth_status" | "masc_auth_refresh" -> Some CanReadState
+  | "masc_tool_stats" | "masc_tool_help" | "masc_keeper_tool_catalog"
+  | "masc_tool_list" -> Some CanReadState
+  | "masc_tool_grant" | "masc_tool_revoke" -> Some CanAdmin
   | "masc_tool_admin_snapshot" -> Some CanReadState
   | "masc_tool_admin_update" -> Some CanAdmin
   | _ -> None

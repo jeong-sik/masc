@@ -46,10 +46,6 @@ function groupBy<T>(items: T[], getKey: (item: T) => string): Map<string, T[]> {
   return out
 }
 
-function nodeMap(orchestra: CommandPlaneOrchestraResponse): Map<string, CommandPlaneOrchestraNode> {
-  return new Map(orchestra.nodes.map(node => [node.id, node]))
-}
-
 function layout(orchestra: CommandPlaneOrchestraResponse): Map<string, Point> {
   const positions = new Map<string, Point>()
   const nodes = orchestra.nodes

@@ -726,6 +726,106 @@ let keeper_diagnostic_summary ~health_state ~quiet_reason =
           "Keeper metadata exists but no reply turn has been recorded yet."
       | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
 
+let keeper_continuity_state
+    ~(desired : bool)
+    ~(meta : keeper_meta)
+    ~(keepalive_running : bool)
+    ~(keepalive_started_at : float option)
+    ~(health_state : string)
+    ~(now_ts : float) =
+  let healthy_like =
+    String.equal health_state "healthy" || String.equal health_state "idle"
+  in
+  let recently_started =
+    match keepalive_started_at with
+    | Some started_at ->
+        let recovery_window_s =
+          float_of_int (max 60 (min 600 (meta.presence_keepalive_sec * 2)))
+        in
+        now_ts -. started_at < recovery_window_s
+    | None -> false
+  in
+  if desired && meta.presence_keepalive then
+    if not keepalive_running then "desired_offline"
+    else if recently_started || not healthy_like then "recovering"
+    else "healthy"
+  else if keepalive_running && healthy_like then "healthy"
+  else if keepalive_running then "recovering"
+  else "offline"
+
+let keeper_continuity_summary continuity_state =
+  match continuity_state with
+  | "desired_offline" ->
+      "Desired always-on keeper is offline. The runtime should reconcile it back into live presence."
+  | "recovering" ->
+      "Keeper runtime is reconciling back into live presence."
+  | "healthy" ->
+      "Keeper runtime is aligned with the desired live presence."
+  | _ -> "Keeper runtime is offline."
+
+let augment_keeper_diagnostic_json
+    ~(desired : bool)
+    ~(meta : keeper_meta)
+    ~(keepalive_running : bool)
+    ~(keepalive_started_at : float option)
+    ~(now_ts : float)
+    (diagnostic : Yojson.Safe.t) : Yojson.Safe.t =
+  let health_state =
+    json_string_opt "health_state" diagnostic |> Option.value ~default:"offline"
+  in
+  let continuity_state =
+    keeper_continuity_state ~desired ~meta ~keepalive_running
+      ~keepalive_started_at ~health_state ~now_ts
+  in
+  let continuity_summary = keeper_continuity_summary continuity_state in
+  let summary =
+    match json_string_opt "summary" diagnostic with
+    | Some base when continuity_state = "healthy" -> base
+    | Some _ | None -> continuity_summary
+  in
+  match diagnostic with
+  | `Assoc fields ->
+      let filtered =
+        fields
+        |> List.filter (fun (key, _) ->
+               not
+                 (String.equal key "summary"
+                 || String.equal key "continuity_state"
+                 || String.equal key "continuity_summary"))
+      in
+      `Assoc
+        (("summary", `String summary)
+        :: ("continuity_state", `String continuity_state)
+        :: ("continuity_summary", `String continuity_summary)
+        :: filtered)
+  | other -> other
+
+let keeper_surface_status
+    ~(agent_status : Yojson.Safe.t)
+    ~(diagnostic : Yojson.Safe.t) =
+  let health_state =
+    json_string_opt "health_state" diagnostic
+    |> Option.value ~default:"offline"
+    |> String.lowercase_ascii
+  in
+  if String.equal health_state "offline" then "offline"
+  else
+    match json_string_opt "status" agent_status with
+    | Some status -> (
+        match String.lowercase_ascii status with
+        | ("active" | "busy" | "listening" | "idle") as status -> status
+        | "offline" | "inactive" -> "offline"
+        | _ -> (
+            match health_state with
+            | "idle" -> "idle"
+            | "healthy" | "stale" | "degraded" -> "active"
+            | _ -> "offline"))
+    | None -> (
+        match health_state with
+        | "idle" -> "idle"
+        | "healthy" | "stale" | "degraded" -> "active"
+        | _ -> "offline")
+
 let keeper_diagnostic_json
     ~(meta : keeper_meta)
     ~(agent_status : Yojson.Safe.t)

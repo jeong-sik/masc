@@ -805,7 +805,7 @@ let test_keeper_policy_set_accepts_explicit_event_v1 () =
       check string "policy mode updated" "explicit_event_v1"
         Yojson.Safe.Util.(json |> member "policy_mode" |> to_string))
 
-let test_resident_bootstrap_marks_stale_explicit_keeper () =
+let test_resident_bootstrap_recovers_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -857,8 +857,9 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       | Error e -> fail e);
       let stats = Masc_mcp.Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
       check bool "bootstrap enabled" true stats.enabled;
-      check int "started stale resident" 0 stats.started;
+      check int "started stale resident" 1 stats.started;
       check int "stale resident counted" 1 stats.stale;
+      check int "recovering stale resident counted" 1 stats.recovering;
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -873,8 +874,12 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       in
       check bool "status ok" true ok;
       let status_json = Yojson.Safe.from_string status_body in
-      check bool "keepalive running" false
-        Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
+      check bool "keepalive running" true
+        Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool);
+      check string "continuity state recovering" "recovering"
+        Yojson.Safe.Util.(
+          status_json |> member "diagnostic" |> member "continuity_state"
+          |> to_string))
 
 let () =
   run "Tool_keeper" [
@@ -907,7 +912,7 @@ let () =
            test_keeper_up_defaults_sangsu_to_explicit_voice_policy;
          test_case "policy set accepts explicit_event_v1" `Quick
            test_keeper_policy_set_accepts_explicit_event_v1;
-         test_case "resident bootstrap marks stale explicit keeper" `Quick
-           test_resident_bootstrap_marks_stale_explicit_keeper;
+         test_case "resident bootstrap recovers stale explicit keeper" `Quick
+           test_resident_bootstrap_recovers_stale_explicit_keeper;
        ]);
   ]

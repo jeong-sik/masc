@@ -214,6 +214,12 @@ export type KeeperReplyStatus =
   | 'error'
   | 'unknown'
 
+export type KeeperContinuityState =
+  | 'desired_offline'
+  | 'recovering'
+  | 'healthy'
+  | 'offline'
+
 export interface KeeperDiagnostic {
   health_state: KeeperHealthState
   quiet_reason?: KeeperQuietReason | null
@@ -226,6 +232,8 @@ export interface KeeperDiagnostic {
   recoverable?: boolean
   summary?: string
   keepalive_running?: boolean
+  continuity_state?: KeeperContinuityState | null
+  continuity_summary?: string | null
 }
 
 export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'

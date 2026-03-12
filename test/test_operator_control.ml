@@ -1598,7 +1598,9 @@ let test_snapshot_keeper_tool_audit_fallback () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "audit-keeper";
+      cleanup_dir base_dir)
     (fun () ->
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
@@ -1614,11 +1616,12 @@ let test_snapshot_keeper_tool_audit_fallback () =
                 ("name", `String keeper_name);
                 ("goal", `String "Expose dashboard fallback keeper audit");
                 ("models", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
-                ("presence_keepalive", `Bool false);
+                ("presence_keepalive", `Bool true);
                 ("proactive_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
+      Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
       let snapshot =
         Operator_control.snapshot_json ~include_messages:false ~include_sessions:false
           ~include_keepers:true (operator_ctx env sw config "operator")
@@ -1638,7 +1641,9 @@ let test_snapshot_keeper_tool_audit_fallback () =
       Alcotest.(check bool) "diagnostic present" true
         (keeper |> member "diagnostic" <> `Null);
       Alcotest.(check string) "diagnostic health offline" "offline"
-        (keeper |> member "diagnostic" |> member "health_state" |> to_string))
+        (keeper |> member "diagnostic" |> member "health_state" |> to_string);
+      Alcotest.(check string) "diagnostic continuity desired offline" "desired_offline"
+        (keeper |> member "diagnostic" |> member "continuity_state" |> to_string))
 
 let test_manual_lodge_tick_updates_observable_state () =
   let base_dir = temp_dir () in

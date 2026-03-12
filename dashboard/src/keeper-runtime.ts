@@ -139,6 +139,9 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     recoverable: diagnosticRecoverable(raw.recoverable, nextActionPath as KeeperDiagnostic['next_action_path']),
     summary: diagnosticSummary(raw.summary, healthState as KeeperDiagnostic['health_state'], (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason']),
     keepalive_running: typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
+    continuity_state:
+      (asString(raw.continuity_state) ?? null) as KeeperDiagnostic['continuity_state'],
+    continuity_summary: asString(raw.continuity_summary) ?? null,
   }
 }
 

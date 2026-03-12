@@ -3,6 +3,7 @@ import { refreshExecution, refreshBoard, refreshGoals, refreshTrpg } from './sto
 import { refreshRoomTruth } from './room-truth-store'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionBriefing, refreshMissionSnapshot } from './mission-store'
+import { refreshSocialGraph } from './social-store'
 import { refreshProofSnapshot } from './proof-store'
 import {
   commandPlaneSurface,
@@ -45,6 +46,10 @@ export function refreshForTab(tab: string) {
   if (tab === 'execution') {
     refreshRoomTruth()
     refreshExecution()
+  }
+
+  if (tab === 'social') {
+    refreshSocialGraph()
   }
 
   if (tab === 'intervene') {

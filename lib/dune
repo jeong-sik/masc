@@ -59,6 +59,7 @@
    server_h2_gateway
    server_runtime_bootstrap
    server_command_plane_http
+   server_social_http
    server_mcp_transport_http
    web_dashboard
    credits_dashboard
@@ -73,6 +74,7 @@
    glm_pool
    graphql_endpoint
    graphql_api
+   social_motion
    handover_eio
    hat
    heartbeat

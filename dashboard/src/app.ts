@@ -24,6 +24,11 @@ import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS } from './config/navigation'
 import { refreshMissionSnapshot } from './mission-store'
+import {
+  connectSocialStream,
+  disconnectSocialStream,
+  refreshSocialGraph,
+} from './social-store'
 
 export function App() {
   useEffect(() => {
@@ -37,6 +42,8 @@ export function App() {
     refreshExecution()
     refreshDashboardSemantics()
     refreshMissionSnapshot()
+    refreshSocialGraph()
+    connectSocialStream()
 
     // Setup SSE -> store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()
@@ -46,6 +53,7 @@ export function App() {
 
     return () => {
       disconnectSSE()
+      disconnectSocialStream()
       unsubSSE()
       stopPeriodicRefresh()
     }

@@ -76,6 +76,13 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     description: '실시간 에이전트 활동과 이벤트 스트림을 한눈에 모니터링',
   },
   {
+    id: 'social',
+    label: '사회',
+    icon: '\u273A',
+    group: 'observe',
+    description: '에이전트 사회의 생성, 결속, 긴장, 인계 흐름을 그래프로 보는 표면',
+  },
+  {
     id: 'planning',
     label: '계획',
     icon: '\uD83C\uDFAF',

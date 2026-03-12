@@ -82,6 +82,11 @@
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
+ (name test_social_motion)
+ (modules test_social_motion)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_dashboard_tools)
  (modules test_dashboard_tools)
  (libraries masc_mcp alcotest yojson unix))

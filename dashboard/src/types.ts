@@ -2796,6 +2796,68 @@ export interface JournalEntry {
   postId?: string
 }
 
+// --- Social Motion ---
+
+export interface SocialEntityRef {
+  kind: string
+  id: string
+}
+
+export interface SocialEvent {
+  seq: number
+  ts_ms?: number
+  ts_iso?: string
+  room_id: string
+  kind: string
+  actor?: SocialEntityRef | null
+  subject?: SocialEntityRef | null
+  payload?: unknown
+  tags?: string[]
+}
+
+export interface SocialGraphNode {
+  id: string
+  kind: string
+  label: string
+  status: string
+  weight: number
+  last_event_at?: string
+  meta?: unknown
+}
+
+export interface SocialGraphEdge {
+  id: string
+  source: string
+  target: string
+  kind: string
+  weight: number
+  active: boolean
+  last_event_at?: string
+  meta?: unknown
+}
+
+export interface SocialGraphSnapshot {
+  generated_at?: string
+  window?: {
+    limit?: number
+    room_id?: string | null
+    kinds?: string[]
+  }
+  stats?: {
+    event_count?: number
+    node_count?: number
+    edge_count?: number
+    agent_count?: number
+    task_count?: number
+    decision_count?: number
+    operation_count?: number
+    active_agents?: number
+  }
+  nodes: SocialGraphNode[]
+  edges: SocialGraphEdge[]
+  timeline: SocialEvent[]
+}
+
 // --- Sort modes ---
 
 export type BoardSortMode = 'hot' | 'trending' | 'recent' | 'updated' | 'discussed'
@@ -2859,6 +2921,7 @@ export type TabId =
   | 'execution'
   | 'tools'
   | 'live'
+  | 'social'
   | 'memory'
   | 'governance'
   | 'planning'
@@ -2872,6 +2935,7 @@ export const VALID_TABS: TabId[] = [
   'execution',
   'tools',
   'live',
+  'social',
   'memory',
   'governance',
   'planning',

@@ -41,6 +41,7 @@ import type {
   OperatorDigest,
   OperatorSnapshot,
   DashboardSemanticsResponse,
+  SocialGraphSnapshot,
   CommandPlaneHelpResponse,
   CommandPlaneChainRunResponse,
   CommandPlaneChainSummary,
@@ -316,6 +317,10 @@ export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
 
 export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
   return get('/api/v1/dashboard/execution')
+}
+
+export function fetchSocialGraph(): Promise<SocialGraphSnapshot> {
+  return get('/api/v1/social-graph')
 }
 
 export function fetchDashboardMemory(

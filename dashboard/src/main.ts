@@ -19,6 +19,7 @@ import './styles/command.css'
 import './styles/activity.css'
 import './styles/animations.css'
 import './styles/live.css'
+import './styles/social.css'
 import './styles/tool-metrics.css'
 import './styles/tools.css'
 

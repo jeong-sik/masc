@@ -1324,6 +1324,21 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("autonomy_level", `String (Keeper_autonomy.autonomy_level_to_string level));
                  ]) with exn ->
                    Printf.eprintf "[keeper] SSE keeper_autonomy_start broadcast failed: %s\n%!" (Printexc.to_string exn));
+                 ignore
+                   (Social_motion.emit config ~room_id:(Room.current_room_id config)
+                      ~kind:"keeper.autonomy_started"
+                      ~actor:(Social_motion.entity ~kind:"agent" meta.name)
+                      ~tags:[ "keeper"; "autonomy"; "start" ]
+                      ~payload:
+                        (`Assoc
+                          [
+                            ("goal_id", `String pa.goal_id);
+                            ("action", `String pa.action_description);
+                            ( "autonomy_level",
+                              `String
+                                (Keeper_autonomy.autonomy_level_to_string level) );
+                          ])
+                      ());
                  (* 5-2: Execute the approved plan *)
                  let (summary, exec_cost, tools_used) =
                    execute_approved_plan ~config ~meta ~specs ~plan ~pa
@@ -1373,6 +1388,19 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("cost_usd", `Float exec_cost);
                  ]) with exn ->
                    Printf.eprintf "[keeper] SSE keeper_autonomy_complete broadcast failed: %s\n%!" (Printexc.to_string exn));
+                 ignore
+                   (Social_motion.emit config ~room_id:(Room.current_room_id config)
+                      ~kind:"keeper.autonomy_completed"
+                      ~actor:(Social_motion.entity ~kind:"agent" meta.name)
+                      ~tags:[ "keeper"; "autonomy"; "complete" ]
+                      ~payload:
+                        (`Assoc
+                          [
+                            ("goal_id", `String pa.goal_id);
+                            ("result", `String outcome);
+                            ("cost_usd", `Float exec_cost);
+                          ])
+                      ());
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;
@@ -1414,6 +1442,19 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("caution", `String warning);
                  ]) with exn ->
                    Printf.eprintf "[keeper] SSE keeper_autonomy_start (cautioned) broadcast failed: %s\n%!" (Printexc.to_string exn));
+                 ignore
+                   (Social_motion.emit config ~room_id:(Room.current_room_id config)
+                      ~kind:"keeper.autonomy_started"
+                      ~actor:(Social_motion.entity ~kind:"agent" meta.name)
+                      ~tags:[ "keeper"; "autonomy"; "start"; "caution" ]
+                      ~payload:
+                        (`Assoc
+                          [
+                            ("goal_id", `String pa.goal_id);
+                            ("action", `String pa.action_description);
+                            ("warning", `String warning);
+                          ])
+                      ());
                  (* 5-2: Execute despite caution *)
                  let (summary, exec_cost, tools_used) =
                    execute_approved_plan ~config ~meta ~specs ~plan ~pa
@@ -1464,6 +1505,20 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("warning", `String warning);
                  ]) with exn ->
                    Printf.eprintf "[keeper] SSE keeper_autonomy_complete (cautioned) broadcast failed: %s\n%!" (Printexc.to_string exn));
+                 ignore
+                   (Social_motion.emit config ~room_id:(Room.current_room_id config)
+                      ~kind:"keeper.autonomy_completed"
+                      ~actor:(Social_motion.entity ~kind:"agent" meta.name)
+                      ~tags:[ "keeper"; "autonomy"; "complete"; "caution" ]
+                      ~payload:
+                        (`Assoc
+                          [
+                            ("goal_id", `String pa.goal_id);
+                            ("result", `String outcome);
+                            ("warning", `String warning);
+                            ("cost_usd", `Float exec_cost);
+                          ])
+                      ());
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;

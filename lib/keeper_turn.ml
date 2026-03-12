@@ -1973,6 +1973,22 @@ let handle_keeper_msg ctx args : tool_result =
                         auto_rules.guardrail_reason));
                    ]) with exn ->
                      Printf.eprintf "[keeper] SSE keeper_guardrail broadcast failed: %s\n%!" (Printexc.to_string exn)));
+                 ignore
+                   (Social_motion.emit ctx.config
+                      ~room_id:(Room.current_room_id ctx.config)
+                      ~kind:"keeper.guardrail"
+                      ~actor:(Social_motion.entity ~kind:"agent" meta_turn.name)
+                      ~tags:[ "keeper"; "guardrail" ]
+                      ~payload:
+                        (`Assoc
+                          [
+                            ( "reason",
+                              `String
+                                (Option.value
+                                   ~default:"policy threshold exceeded"
+                                   auto_rules.guardrail_reason) );
+                          ])
+                      ());
                 let do_handoff =
                   auto_rules.handoff &&
 		                (now_ts -. meta_turn.last_handoff_ts >= float_of_int meta_turn.handoff_cooldown_sec)
@@ -2148,6 +2164,23 @@ let handle_keeper_msg ctx args : tool_result =
                       | Some r -> `String r | None -> `Null);
                   ]) with exn ->
                     Printf.eprintf "[keeper] SSE keeper_compaction broadcast failed: %s\n%!" (Printexc.to_string exn)));
+                if compacted then
+                  ignore
+                    (Social_motion.emit ctx.config
+                       ~room_id:(Room.current_room_id ctx.config)
+                       ~kind:"keeper.compaction"
+                       ~actor:(Social_motion.entity ~kind:"agent" meta_turn.name)
+                       ~tags:[ "keeper"; "compaction" ]
+                       ~payload:
+                         (`Assoc
+                           [
+                             ("saved_tokens", `Int (before_compact_tokens - after_compact_tokens));
+                             ( "trigger",
+                               match compaction_trigger with
+                               | Some reason -> `String reason
+                               | None -> `Null );
+                           ])
+                       ());
 
                 let json = `Assoc [
                   ("name", `String meta_turn.name);
@@ -2395,6 +2428,21 @@ let handle_keeper_msg ctx args : tool_result =
                   ("to_model", `String next_model.model_id);
                 ]) with exn ->
                Printf.eprintf "[keeper] SSE keeper_handoff broadcast failed: %s\n%!" (Printexc.to_string exn));
+                ignore
+                  (Social_motion.emit ctx.config
+                     ~room_id:(Room.current_room_id ctx.config)
+                     ~kind:"agent.handoff"
+                     ~actor:(Social_motion.entity ~kind:"agent" meta_turn.name)
+                     ~subject:(Social_motion.entity ~kind:"agent" meta_turn.name)
+                     ~tags:[ "keeper"; "handoff" ]
+                     ~payload:
+                       (`Assoc
+                         [
+                           ("from_generation", `Int meta_turn.generation);
+                           ("to_generation", `Int next_generation);
+                           ("to_model", `String next_model.model_id);
+                         ])
+                     ());
 
                 let json = `Assoc [
                   ("name", `String meta'.name);

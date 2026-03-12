@@ -14,6 +14,7 @@ import { Planning } from './goals'
 import { Governance } from './governance'
 import { Lab } from './lab'
 import { Live } from './live'
+import { Social } from './social'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from '../config/navigation'
@@ -152,6 +153,8 @@ export function TabContent() {
       return html`<${Tools} />`
     case 'live':
       return html`<${Live} />`
+    case 'social':
+      return html`<${Social} />`
     case 'memory':
       return html`<${Memory} />`
     case 'governance':

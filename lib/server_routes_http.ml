@@ -48,6 +48,7 @@ module Tool_board = Tool_board
 module Process_eio = Process_eio
 module Mdal = Mdal
 module Server_command_plane_http = Server_command_plane_http
+module Server_social_http = Server_social_http
 module Server_mcp_transport_http = Server_mcp_transport_http
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
@@ -111,6 +112,17 @@ let command_plane_http_deps : Server_command_plane_http.deps =
     get_net;
     get_origin;
     cors_headers;
+  }
+
+let social_http_deps : Server_social_http.deps =
+  {
+    query_param;
+    int_query_param;
+    get_origin;
+    cors_headers;
+    get_switch = (fun () -> Some (get_switch ()));
+    get_clock = (fun () -> Some (get_clock ()));
+    get_session_id_any;
   }
 
 let command_plane_summary_http_json ~state =
@@ -213,6 +225,15 @@ let command_plane_operation_stop_http_json ~state request ~args =
 let command_plane_operation_finalize_http_json ~state request ~args =
   Server_command_plane_http.command_plane_operation_finalize_http_json
     ~deps:command_plane_http_deps ~state request ~args
+
+let social_events_http_json ~state request =
+  Server_social_http.events_http_json ~deps:social_http_deps ~state request
+
+let social_graph_http_json ~state request =
+  Server_social_http.graph_http_json ~deps:social_http_deps ~state request
+
+let social_events_stream_http ~state request reqd =
+  Server_social_http.handle_stream ~deps:social_http_deps ~state request reqd
 
 let command_plane_dispatch_plan_http_json ~state request ~args =
   Server_command_plane_http.command_plane_dispatch_plan_http_json ~state request
@@ -1645,6 +1666,25 @@ let make_routes ~port ~host ~sw ~clock =
        with_public_read (fun state req reqd ->
          let json = dashboard_proof_http_json ~state req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/events" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = social_events_http_json ~state req in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/events/stream" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         social_events_stream_http ~state request reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/social-graph" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = social_graph_http_json ~state req in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
   (* Tool metrics — unified registry stats for dashboard (P4 Phase 4.5) *)

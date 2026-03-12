@@ -39,6 +39,15 @@ let broadcast_decision_event ~event_type ~agent ?(data=`Null) () =
   ] in
   Sse.broadcast notification
 
+let emit_social_event ctx ~kind ~actor ?subject ~payload ~tags () =
+  match ctx.room_config with
+  | Some config ->
+      ignore
+        (Social_motion.emit config ~room_id:(Room.current_room_id config) ~kind
+           ~actor:(Social_motion.entity ~kind:"agent" actor)
+           ?subject ~tags ~payload ())
+  | None -> ()
+
 let parse_context_ref args =
   match Yojson.Safe.Util.member "context" args with
   | `Assoc _ as json ->
@@ -97,6 +106,16 @@ let handle_debate_start ctx args =
           ("description", `String topic);
           ("urgency", `String "medium");
         ]) ();
+      emit_social_event ctx ~kind:"decision.opened" ~actor:ctx.agent_name
+        ~subject:(Social_motion.entity ~kind:"decision" debate.Debate.id)
+        ~tags:[ "decision"; "open" ]
+        ~payload:
+          (`Assoc
+            [
+              ("decision_id", `String debate.Debate.id);
+              ("topic", `String topic);
+            ])
+        ();
       broadcast_decision_event ~event_type:"decision_phase" ~agent:ctx.agent_name
         ~data:(`Assoc [
           ("issue_id", `String debate.Debate.id);
@@ -162,6 +181,22 @@ let handle_debate_argue ctx args =
           ("reasoning", `String content);
           ("confidence", `Float 0.8);
         ]) ();
+      emit_social_event ctx ~kind:"decision.voted" ~actor:ctx.agent_name
+        ~subject:(Social_motion.entity ~kind:"decision" debate_id)
+        ~tags:[ "decision"; "argument" ]
+        ~payload:
+          (`Assoc
+            [
+              ("decision_id", `String debate_id);
+              ("position",
+               `String
+                 (match position with
+                 | Debate.Support -> "for"
+                 | Debate.Oppose -> "against"
+                 | Debate.Neutral -> "neutral"));
+              ("reasoning", `String content);
+            ])
+        ();
       (true, Printf.sprintf "Argument #%d added%s. Total: %d" (count - 1) reply_info count)
     | Error e -> (false, Printf.sprintf "Error: %s" e)
 
@@ -179,6 +214,16 @@ let handle_debate_close ctx args =
           ("issue_id", `String debate.Debate.id);
           ("phase", `String "resolved");
         ]) ();
+      emit_social_event ctx ~kind:"decision.resolved" ~actor:ctx.agent_name
+        ~subject:(Social_motion.entity ~kind:"decision" debate.Debate.id)
+        ~tags:[ "decision"; "resolved" ]
+        ~payload:
+          (`Assoc
+            [
+              ("decision_id", `String debate.Debate.id);
+              ("topic", `String debate.topic);
+            ])
+        ();
       let json = `Assoc [
         ("id", `String debate.Debate.id);
         ("topic", `String debate.topic);
@@ -231,6 +276,17 @@ let handle_consensus_start ctx args =
           ("issue_id", `String session.Consensus.id);
           ("phase", `String "voting");
         ]) ();
+      emit_social_event ctx ~kind:"decision.opened" ~actor:ctx.agent_name
+        ~subject:(Social_motion.entity ~kind:"decision" session.Consensus.id)
+        ~tags:[ "decision"; "vote" ]
+        ~payload:
+          (`Assoc
+            [
+              ("decision_id", `String session.Consensus.id);
+              ("topic", `String topic);
+              ("phase", `String "voting");
+            ])
+        ();
       let json = `Assoc [
         ("id", `String session.Consensus.id);
         ("topic", `String session.topic);
@@ -276,6 +332,17 @@ let handle_consensus_vote ctx args =
           ("option_id", `String decision_str);
           ("weight", `Float 1.0);
         ]) ();
+      emit_social_event ctx ~kind:"decision.voted" ~actor:ctx.agent_name
+        ~subject:(Social_motion.entity ~kind:"decision" session_id)
+        ~tags:[ "decision"; "vote" ]
+        ~payload:
+          (`Assoc
+            [
+              ("decision_id", `String session_id);
+              ("choice", `String decision_str);
+              ("reason", `String reason);
+            ])
+        ();
       (true, Printf.sprintf "Vote cast. Total votes: %d/%d"
         (List.length session.Consensus.votes) session.quorum)
     | Error e ->
@@ -310,6 +377,17 @@ let handle_consensus_close ctx args =
           ("margin", `Float session.threshold);
           ("dissenting", `List []);
         ]) ();
+      emit_social_event ctx ~kind:"decision.resolved" ~actor:"system"
+        ~subject:(Social_motion.entity ~kind:"decision" session.Consensus.id)
+        ~tags:[ "decision"; "consensus"; "resolved" ]
+        ~payload:
+          (`Assoc
+            [
+              ("decision_id", `String session.Consensus.id);
+              ("result", `String result);
+              ("vote_count", `Int (List.length session.votes));
+            ])
+        ();
       let json = `Assoc [
         ("id", `String session.Consensus.id);
         ("topic", `String session.topic);

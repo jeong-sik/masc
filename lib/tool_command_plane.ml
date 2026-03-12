@@ -41,6 +41,12 @@ let json_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, json_error message)
 
+let emit_social_event (ctx : (_, _) context) ~kind ?subject ~payload ~tags () =
+  ignore
+    (Social_motion.emit ctx.config ~room_id:(Room.current_room_id ctx.config) ~kind
+       ~actor:(Social_motion.entity ~kind:"agent" ctx.agent_name)
+       ?subject ~payload ~tags ())
+
 let assoc_field key value = (key, value)
 
 let env_int_or ~name ~default =
@@ -952,6 +958,13 @@ let handle_operation_start (ctx : (_, _) context) args : result =
                 operation_args
             with
             | Ok operation ->
+                emit_social_event ctx ~kind:"operation.started"
+                  ~subject:
+                    (Social_motion.entity ~kind:"operation"
+                       operation.operation_id)
+                  ~tags:[ "operation"; "start" ]
+                  ~payload:(Command_plane_v2.operation_to_json operation)
+                  ();
                 (match launch with
                 | Some current_launch ->
                     launch_chain_background ctx operation current_launch
@@ -1654,16 +1667,48 @@ let handle_unit_reassign (ctx : (_, _) context) args : result =
   json_result (Command_plane_v2.unit_reassign_json ctx.config ~actor:ctx.agent_name args)
 
 let handle_operation_pause (ctx : (_, _) context) args : result =
-  json_result (Command_plane_v2.pause_operation_json ctx.config ~actor:ctx.agent_name args)
+  match Command_plane_v2.pause_operation_json ctx.config ~actor:ctx.agent_name args with
+  | Ok json ->
+      let operation_id = get_string args "operation_id" "" in
+      if operation_id <> "" then
+        emit_social_event ctx ~kind:"operation.paused"
+          ~subject:(Social_motion.entity ~kind:"operation" operation_id)
+          ~tags:[ "operation"; "pause" ] ~payload:json ();
+      (true, Yojson.Safe.to_string json)
+  | Error message -> (false, json_error message)
 
 let handle_operation_resume (ctx : (_, _) context) args : result =
-  json_result (Command_plane_v2.resume_operation_json ctx.config ~actor:ctx.agent_name args)
+  match Command_plane_v2.resume_operation_json ctx.config ~actor:ctx.agent_name args with
+  | Ok json ->
+      let operation_id = get_string args "operation_id" "" in
+      if operation_id <> "" then
+        emit_social_event ctx ~kind:"operation.resumed"
+          ~subject:(Social_motion.entity ~kind:"operation" operation_id)
+          ~tags:[ "operation"; "resume" ] ~payload:json ();
+      (true, Yojson.Safe.to_string json)
+  | Error message -> (false, json_error message)
 
 let handle_operation_stop (ctx : (_, _) context) args : result =
-  json_result (Command_plane_v2.stop_operation_json ctx.config ~actor:ctx.agent_name args)
+  match Command_plane_v2.stop_operation_json ctx.config ~actor:ctx.agent_name args with
+  | Ok json ->
+      let operation_id = get_string args "operation_id" "" in
+      if operation_id <> "" then
+        emit_social_event ctx ~kind:"operation.stopped"
+          ~subject:(Social_motion.entity ~kind:"operation" operation_id)
+          ~tags:[ "operation"; "stop" ] ~payload:json ();
+      (true, Yojson.Safe.to_string json)
+  | Error message -> (false, json_error message)
 
 let handle_operation_finalize (ctx : (_, _) context) args : result =
-  json_result (Command_plane_v2.finalize_operation_json ctx.config ~actor:ctx.agent_name args)
+  match Command_plane_v2.finalize_operation_json ctx.config ~actor:ctx.agent_name args with
+  | Ok json ->
+      let operation_id = get_string args "operation_id" "" in
+      if operation_id <> "" then
+        emit_social_event ctx ~kind:"operation.finalized"
+          ~subject:(Social_motion.entity ~kind:"operation" operation_id)
+          ~tags:[ "operation"; "finalize" ] ~payload:json ();
+      (true, Yojson.Safe.to_string json)
+  | Error message -> (false, json_error message)
 
 let handle_dispatch_plan (ctx : (_, _) context) args : result =
   (true, Yojson.Safe.to_string (Command_plane_v2.dispatch_plan_json ctx.config args))
@@ -1703,10 +1748,30 @@ let handle_policy_status (ctx : (_, _) context) : result =
   (true, Yojson.Safe.to_string (Command_plane_v2.policy_status_json ctx.config))
 
 let handle_policy_approve (ctx : (_, _) context) args : result =
-  json_result (Command_plane_v2.policy_approve_json ctx.config ~actor:ctx.agent_name args)
+  match Command_plane_v2.policy_approve_json ctx.config ~actor:ctx.agent_name args with
+  | Ok json ->
+      let unit_id = get_string args "unit_id" "" in
+      let subject =
+        if unit_id = "" then None
+        else Some (Social_motion.entity ~kind:"unit" unit_id)
+      in
+      emit_social_event ctx ~kind:"policy.approved" ?subject
+        ~tags:[ "policy"; "approve" ] ~payload:json ();
+      (true, Yojson.Safe.to_string json)
+  | Error message -> (false, json_error message)
 
 let handle_policy_deny (ctx : (_, _) context) args : result =
-  json_result (Command_plane_v2.policy_deny_json ctx.config ~actor:ctx.agent_name args)
+  match Command_plane_v2.policy_deny_json ctx.config ~actor:ctx.agent_name args with
+  | Ok json ->
+      let unit_id = get_string args "unit_id" "" in
+      let subject =
+        if unit_id = "" then None
+        else Some (Social_motion.entity ~kind:"unit" unit_id)
+      in
+      emit_social_event ctx ~kind:"policy.denied" ?subject
+        ~tags:[ "policy"; "deny" ] ~payload:json ();
+      (true, Yojson.Safe.to_string json)
+  | Error message -> (false, json_error message)
 
 let handle_policy_update (ctx : (_, _) context) args : result =
   json_result (Command_plane_v2.policy_update_json ctx.config ~actor:ctx.agent_name args)

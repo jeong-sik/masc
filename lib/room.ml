@@ -539,6 +539,21 @@ and join config ~agent_name ?(agent_type_override=None) ~capabilities
     session_id
     (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
     (now_iso ()));
+  ignore
+    (Social_motion.emit config ~room_id:(current_room_id config)
+       ~kind:"agent.joined"
+       ~actor:(Social_motion.entity ~kind:"agent" nickname)
+       ~subject:(Social_motion.entity ~kind:"agent" nickname)
+       ~tags:[ "agent"; "join" ]
+       ~payload:
+         (`Assoc
+           [
+             ("agent_name", `String nickname);
+             ("agent_type", `String agent_type);
+             ("session_id", `String session_id);
+             ("capabilities", `List (List.map (fun s -> `String s) capabilities));
+           ])
+       ());
 
   Printf.sprintf {|✅ %s joined the room!
 
@@ -634,6 +649,21 @@ and join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
       session_id
       (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
       (now_iso ()));
+    ignore
+      (Social_motion.emit config ~room_id
+         ~kind:"agent.joined"
+         ~actor:(Social_motion.entity ~kind:"agent" nickname)
+         ~subject:(Social_motion.entity ~kind:"agent" nickname)
+         ~tags:[ "agent"; "join" ]
+         ~payload:
+           (`Assoc
+             [
+               ("agent_name", `String nickname);
+               ("agent_type", `String agent_type);
+               ("session_id", `String session_id);
+               ("capabilities", `List (List.map (fun s -> `String s) capabilities));
+             ])
+         ());
     Printf.sprintf "✅ %s joined room %s" nickname room_id
   end
 
@@ -677,6 +707,14 @@ and leave config ~agent_name =
     log_event config (Printf.sprintf
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
+    ignore
+      (Social_motion.emit config ~room_id:(current_room_id config)
+         ~kind:"agent.left"
+         ~actor:(Social_motion.entity ~kind:"agent" actual_name)
+         ~subject:(Social_motion.entity ~kind:"agent" actual_name)
+         ~tags:[ "agent"; "leave" ]
+         ~payload:(`Assoc [ ("agent_name", `String actual_name) ])
+         ());
 
     Printf.sprintf "✅ %s left the room" actual_name
   end else
@@ -711,6 +749,34 @@ and broadcast_in_room config ~room_id ~from_agent ~content =
     backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
       ~message:(Yojson.Safe.to_string (message_to_yojson msg))
   in
+  ignore
+    (Social_motion.emit config ~room_id ~kind:"message.broadcast"
+       ~actor:(Social_motion.entity ~kind:"agent" safe_agent)
+       ?subject:
+         (match mention with
+         | Some target -> Some (Social_motion.entity ~kind:"agent" target)
+         | None -> None)
+       ~tags:
+         (match mention with
+         | Some _ -> [ "message"; "broadcast"; "mention" ]
+         | None -> [ "message"; "broadcast" ])
+       ~payload:
+         (`Assoc
+           [
+             ("content", `String safe_content);
+             ("mention", match mention with Some target -> `String target | None -> `Null);
+           ])
+       ());
+  (match mention with
+  | Some target ->
+      ignore
+        (Social_motion.emit config ~room_id ~kind:"message.mentioned"
+           ~actor:(Social_motion.entity ~kind:"agent" safe_agent)
+           ~subject:(Social_motion.entity ~kind:"agent" target)
+           ~tags:[ "message"; "mention" ]
+           ~payload:(`Assoc [ ("content", `String safe_content) ])
+           ())
+  | None -> ());
   Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 (** Pause the room - stops orchestrator from spawning new agents *)
@@ -939,6 +1005,21 @@ let add_task config ~title ~priority ~description =
   write_backlog config new_backlog;
 
   let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
+  ignore
+    (Social_motion.emit config ~room_id:(current_room_id config)
+       ~kind:"task.created"
+       ~actor:(Social_motion.entity ~kind:"agent" "system")
+       ~subject:(Social_motion.entity ~kind:"task" task_id)
+       ~tags:[ "task"; "create" ]
+       ~payload:
+         (`Assoc
+           [
+             ("task_id", `String task_id);
+             ("title", `String title);
+             ("description", `String description);
+             ("priority", `Int priority);
+           ])
+       ());
   Printf.sprintf "✅ Added %s: %s" task_id title
 
 (** Add task with a required role constraint *)
@@ -1004,6 +1085,24 @@ let batch_add_tasks config tasks =
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
       let _ = broadcast config ~from_agent:"system" ~content:msg in
+      List.iter
+        (fun (task : Types.task) ->
+          ignore
+            (Social_motion.emit config ~room_id:(current_room_id config)
+               ~kind:"task.created"
+               ~actor:(Social_motion.entity ~kind:"agent" "system")
+               ~subject:(Social_motion.entity ~kind:"task" task.id)
+               ~tags:[ "task"; "create"; "batch" ]
+               ~payload:
+                 (`Assoc
+                   [
+                     ("task_id", `String task.id);
+                     ("title", `String task.title);
+                     ("description", `String task.description);
+                     ("priority", `Int task.priority);
+                   ])
+               ()))
+        added_tasks;
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
     with e ->
       Printf.sprintf "❌ Error adding batch tasks: %s" (Printexc.to_string e)
@@ -1126,6 +1225,19 @@ let claim_task_r config ~agent_name ~task_id
                   end;
                   let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
                   log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_claim"); ("agent", `String agent_name); ("task", `String task_id); ("ts", `String (now_iso ()))]));
+                  ignore
+                    (Social_motion.emit config ~room_id:(current_room_id config)
+                       ~kind:"task.claimed"
+                       ~actor:(Social_motion.entity ~kind:"agent" agent_name)
+                       ~subject:(Social_motion.entity ~kind:"task" task_id)
+                       ~tags:[ "task"; "claim" ]
+                       ~payload:
+                         (`Assoc
+                           [
+                             ("task_id", `String task_id);
+                             ("assignee", `String agent_name);
+                           ])
+                       ());
                   Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
           end)
       with e -> Error (Types.IoError (Printexc.to_string e))
@@ -1233,6 +1345,30 @@ let transition_task_r config ~agent_name ~task_id ~action
                             (status_to_string task.task_status)
                             (status_to_string new_status)
                             now);
+                          let social_kind =
+                            match action with
+                            | "claim" -> "task.claimed"
+                            | "start" -> "task.started"
+                            | "done" -> "task.done"
+                            | "cancel" -> "task.cancelled"
+                            | "release" -> "task.released"
+                            | _ -> "task.transition"
+                          in
+                          ignore
+                            (Social_motion.emit config ~room_id:(current_room_id config)
+                               ~kind:social_kind
+                               ~actor:(Social_motion.entity ~kind:"agent" agent_name)
+                               ~subject:(Social_motion.entity ~kind:"task" task_id)
+                               ~tags:[ "task"; action ]
+                               ~payload:
+                                 (`Assoc
+                                   [
+                                     ("task_id", `String task_id);
+                                     ("action", `String action);
+                                     ("from_status", `String (status_to_string task.task_status));
+                                     ("to_status", `String (status_to_string new_status));
+                                   ])
+                               ());
                           Ok (Printf.sprintf "✅ %s %s → %s" task_id
                                 (status_to_string task.task_status)
                                 (status_to_string new_status))
@@ -1369,6 +1505,19 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
               let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
               log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_done"); ("agent", `String agent_name); ("task", `String task_id); ("notes", if notes = "" then `Null else `String notes); ("ts", `String (now_iso ()))]));
+              ignore
+                (Social_motion.emit config ~room_id:(current_room_id config)
+                   ~kind:"task.done"
+                   ~actor:(Social_motion.entity ~kind:"agent" agent_name)
+                   ~subject:(Social_motion.entity ~kind:"task" task_id)
+                   ~tags:[ "task"; "done" ]
+                   ~payload:
+                     (`Assoc
+                       [
+                         ("task_id", `String task_id);
+                         ("notes", if notes = "" then `Null else `String notes);
+                       ])
+                   ());
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
             end
       with e -> Error (Types.IoError (Printexc.to_string e))
@@ -1423,6 +1572,19 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
               log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_cancelled"); ("agent", `String agent_name); ("task", `String task_id); ("reason", if reason = "" then `Null else `String reason); ("ts", `String (now_iso ()))]));
+              ignore
+                (Social_motion.emit config ~room_id:(current_room_id config)
+                   ~kind:"task.cancelled"
+                   ~actor:(Social_motion.entity ~kind:"agent" agent_name)
+                   ~subject:(Social_motion.entity ~kind:"task" task_id)
+                   ~tags:[ "task"; "cancel" ]
+                   ~payload:
+                     (`Assoc
+                       [
+                         ("task_id", `String task_id);
+                         ("reason", if reason = "" then `Null else `String reason);
+                       ])
+                   ());
               Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)
             end
       with e -> Error (Types.IoError (Printexc.to_string e))

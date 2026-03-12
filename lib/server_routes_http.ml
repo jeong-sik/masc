@@ -993,6 +993,8 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token state ~agent_name ~argumen
           Printf.sprintf
             "❌ Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
             timeout_sec "masc_keeper_msg" )
+    | Eio.Cancel.Cancelled _ as exn ->
+        raise exn
     | exn ->
         let err = Printexc.to_string exn in
         if contains_casefold err "Invalid_argument(\"MASC not initialized" then
@@ -1199,21 +1201,37 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
           in
           let dispatch_result =
             try
-              Ok
-                (execute_keeper_stream_tool ~sw ~clock
-                   ?auth_token:(auth_token_from_request request)
-                   state ~agent_name ~arguments:args)
-            with exn -> Error (Printexc.to_string exn)
+              Eio.Fiber.first
+                (fun () ->
+                  Ok
+                    (execute_keeper_stream_tool ~sw ~clock
+                       ?auth_token:(auth_token_from_request request)
+                       state ~agent_name ~arguments:args))
+                (fun () ->
+                  let rec wait_for_disconnect () =
+                    if !closed || Httpun.Body.Writer.is_closed writer then
+                      Error "client disconnected"
+                    else (
+                      Eio.Time.sleep clock 0.25;
+                      wait_for_disconnect ())
+                  in
+                  wait_for_disconnect ())
+            with
+            | Eio.Cancel.Cancelled _ ->
+                Error "client disconnected"
+            | exn ->
+                Error (Printexc.to_string exn)
           in
           match dispatch_result with
           | Error err ->
-              ignore
-                (keeper_stream_send_event writer mutex closed
-                   Ag_ui.(
-                     make_event ~thread_id ~run_id:(Some run_id)
-                       ~custom_name:(Some "KEEPER_CHAT_ERROR")
-                       ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
-                       Run_error))
+              if err <> "client disconnected" then
+                ignore
+                  (keeper_stream_send_event writer mutex closed
+                     Ag_ui.(
+                       make_event ~thread_id ~run_id:(Some run_id)
+                         ~custom_name:(Some "KEEPER_CHAT_ERROR")
+                         ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
+                         Run_error))
           | Ok (false, err) ->
               ignore
                 (keeper_stream_send_event writer mutex closed

@@ -21,6 +21,56 @@ let cleanup_dir dir =
   in
   rm dir
 
+let extra_session ~room_id ~session_id now =
+  let open Lib.Team_session_types in
+  {
+    session_id;
+    goal = Printf.sprintf "execution session for %s" room_id;
+    created_by = "fixture-root";
+    room_id;
+    operation_id = None;
+    status = Running;
+    duration_seconds = 600;
+    execution_scope = Observe_only;
+    checkpoint_interval_sec = 60;
+    min_agents = 1;
+    scale_profile = Scale_standard;
+    control_profile = Control_flat;
+    orchestration_mode = Assist;
+    communication_mode = Comm_hybrid;
+    model_cascade = [];
+    fallback_policy = Fallback_none;
+    instruction_profile = Profile_standard;
+    alert_channel = Alert_both;
+    auto_resume = false;
+    report_formats = [ Markdown; Json ];
+    turn_count = 1;
+    agent_names = [ "fixture-root" ];
+    planned_workers = [];
+    broadcast_count = 0;
+    portal_count = 0;
+    cascade_attempted = 0;
+    cascade_success = 0;
+    cascade_failed = 0;
+    fallback_task_created = 0;
+    min_agents_violation_streak = 0;
+    policy_violations = [];
+    baseline_done_counts = [];
+    final_done_delta_total = None;
+    final_done_delta_by_agent = None;
+    started_at = now -. 30.0;
+    planned_end_at = now +. 570.0;
+    stopped_at = None;
+    last_checkpoint_at = Some now;
+    last_event_at = Some now;
+    last_turn_at = Some now;
+    stop_reason = None;
+    generated_report = false;
+    artifacts_dir = Filename.concat ".masc/team-sessions" session_id;
+    created_at_iso = Lib.Types.now_iso ();
+    updated_at_iso = Lib.Types.now_iso ();
+  }
+
 let test_dashboard_execution_fixture () =
   let dir = test_dir () in
   Fun.protect
@@ -138,6 +188,41 @@ let test_dashboard_execution_current_room_status () =
           (status |> member "current_room" |> to_string);
       ))
 
+let test_dashboard_execution_filters_sessions_to_current_room () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Room.room_create config ~name:"Other Room" ~description:None);
+      let now = Unix.gettimeofday () in
+      Lib.Team_session_store.save_session config
+        (extra_session ~room_id:"default" ~session_id:"ts-execution-current" now);
+      Lib.Team_session_store.save_session config
+        (extra_session ~room_id:"other-room" ~session_id:"ts-execution-other" now);
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Dashboard_execution.json
+            ~config
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~proc_mgr:None
+            ()
+        in
+        let open Yojson.Safe.Util in
+        let sessions = json |> member "session_briefs" |> to_list in
+        check bool "current room session visible" true
+          (sessions
+           |> List.exists (fun row ->
+                  row |> member "session_id" |> to_string = "ts-execution-current"));
+        check bool "other room session hidden" false
+          (sessions
+           |> List.exists (fun row ->
+                  row |> member "session_id" |> to_string = "ts-execution-other"));
+      ))
+
 let () =
   Alcotest.run "Dashboard Execution"
     [
@@ -147,5 +232,7 @@ let () =
           Alcotest.test_case "live empty room is safe" `Quick test_dashboard_execution_live_empty_room;
           Alcotest.test_case "current room drives status" `Quick
             test_dashboard_execution_current_room_status;
+          Alcotest.test_case "filters sessions to current room" `Quick
+            test_dashboard_execution_filters_sessions_to_current_room;
         ] );
     ]

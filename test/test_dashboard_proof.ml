@@ -275,7 +275,7 @@ let test_dashboard_proof_prefers_actual_activity_over_stronger_persisted_verdict
        |> U.to_string);
       check string "verdict basis remains live" "live"
         (json |> U.member "summary" |> U.member "verdict_basis" |> U.to_string);
-      check int "only one active actor counted" 1
+      check int "checkpoint contribution keeps two actors active" 2
         (json |> U.member "summary" |> U.member "actors_count" |> U.to_int);
       check int "planned actors kept separate" 6
         (json |> U.member "summary" |> U.member "planned_actor_count" |> U.to_int);
@@ -398,6 +398,70 @@ let test_dashboard_proof_uses_historical_verdict_when_live_is_empty () =
         (json |> U.member "summary" |> U.member "verdict_basis"
        |> U.to_string))
 
+let test_dashboard_proof_defaults_to_current_room_session () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let now = Unix.gettimeofday () in
+      let current_session =
+        { (sample_session now "ts-proof-current-room") with
+          room_id = "default";
+          started_at = now -. 120.0;
+        }
+      in
+      let foreign_session =
+        { (sample_session now "ts-proof-foreign-room") with
+          room_id = "other-room";
+          started_at = now -. 30.0;
+        }
+      in
+      seed_session_artifacts ~session:(Some current_session) config
+        "ts-proof-current-room";
+      seed_session_artifacts ~session:(Some foreign_session) config
+        "ts-proof-foreign-room";
+      let json = Lib.Dashboard_proof.json ~config () in
+      check string "defaults to current room session" "ts-proof-current-room"
+        (json |> U.member "session_id" |> U.to_string))
+
+let test_dashboard_proof_checkpoint_done_delta_adds_actor_contribution () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-checkpoint-actor" in
+      let now = Unix.gettimeofday () in
+      let session =
+        {
+          (sample_session ~min_agents:1 ~agent_names:[ "gardener"; "worker-a" ] now session_id) with
+          room_id = "default";
+        }
+      in
+      seed_session_artifacts ~session:(Some session)
+        ~events:
+          [
+            ( "team_turn",
+              `Assoc
+                [
+                  ("actor", `String "gardener");
+                  ("kind", `String "broadcast");
+                  ("message", `String "@gardener backlog triage session started");
+                ] );
+          ]
+        config session_id;
+      let json = Lib.Dashboard_proof.json ~config ~session_id () in
+      let contributions = json |> U.member "actor_contributions" |> U.to_list in
+      check bool "checkpoint actor included" true
+        (contributions
+         |> List.exists (fun row ->
+                row |> U.member "actor" |> U.to_string = "worker-a"));
+      check int "actor count follows contribution rows" 2
+        (json |> U.member "summary" |> U.member "actors_count" |> U.to_int))
+
 let () =
   Alcotest.run "dashboard_proof"
     [
@@ -414,5 +478,9 @@ let () =
             test_dashboard_proof_ignores_unknown_mentions_outside_session;
           test_case "uses historical verdict when live is empty" `Quick
             test_dashboard_proof_uses_historical_verdict_when_live_is_empty;
+          test_case "defaults to current room session" `Quick
+            test_dashboard_proof_defaults_to_current_room_session;
+          test_case "checkpoint done_delta adds actor contribution" `Quick
+            test_dashboard_proof_checkpoint_done_delta_adds_actor_contribution;
         ] );
     ]

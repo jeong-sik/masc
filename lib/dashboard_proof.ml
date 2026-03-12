@@ -268,7 +268,7 @@ let actor_status_detail (acc : actor_acc) =
           acc.mention_count
   | _ -> "계획된 참여자로 보이지만 아직 남겨진 흔적이 없습니다."
 
-let build_actor_contributions session events =
+let build_actor_contributions ?config ?session_id session events =
   let table = Hashtbl.create 16 in
   let known_names = known_session_actor_names session in
   let is_known_name actor =
@@ -316,6 +316,25 @@ let build_actor_contributions session events =
                    target_acc.recent_request_at <-
                      option_prefer_new target_acc.recent_request_at request_at))
     events;
+  (match config, session_id with
+  | Some config, Some session_id -> (
+      match Team_session_store.load_latest_checkpoint config session_id with
+      | Some checkpoint ->
+          List.iter
+            (fun (actor, delta) ->
+              if delta > 0 then
+                let acc = get_or_create_actor table session actor in
+                acc.observed_event_count <- max acc.observed_event_count 1;
+                acc.recent_event_summary <-
+                  Some (Printf.sprintf "Checkpoint progress +%d" delta);
+                acc.recent_output_preview <-
+                  option_prefer_new acc.recent_output_preview
+                    (Some (Printf.sprintf "done delta +%d" delta));
+                acc.last_active_at <-
+                  option_prefer_new acc.last_active_at (Some checkpoint.ts_iso))
+            checkpoint.done_delta_by_agent
+      | None -> ())
+  | _ -> ());
   Hashtbl.to_seq_values table
   |> List.of_seq
   |> List.sort (fun a b ->
@@ -510,6 +529,20 @@ let cp_backing_json config operation_id =
       ("swarm_proof", U.member "swarm_proof" summary);
     ]
 
+let execution_backing_status_json cp_backing cp_trace_count =
+  match cp_backing with
+  | None -> "none"
+  | Some backing ->
+      let detachment_total =
+        match
+          backing |> U.member "detachments" |> U.member "summary" |> U.member "total"
+        with
+        | `Int value -> value
+        | `Intlit raw -> (match int_of_string_opt raw with Some value -> value | None -> 0)
+        | _ -> 0
+      in
+      if cp_trace_count > 0 || detachment_total > 0 then "present" else "missing"
+
 let session_summary_json session verdict ~planned_actor_count ~active_actor_count
     ~mentioned_actor_count ~unanswered_actor_count ~interaction_count
     ~evidence_count ~cp_trace_count ~live_verdict ~historical_verdict
@@ -638,13 +671,25 @@ let room_json config =
       ("message_seq", `Int state.message_seq);
     ]
 
+let current_room_id config =
+  match Room.read_current_room config with
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> "default"
+
+let session_matches_current_room current_room (session : Team_session_types.session) =
+  String.equal session.room_id current_room
+
 let json ?actor:_ ?session_id ?operation_id ~config () =
   let requested_session_id = session_id in
   let requested_operation_id = operation_id in
+  let current_room = current_room_id config in
   let sessions =
     Team_session_store.list_sessions config
     |> List.sort (fun (a : Team_session_types.session) (b : Team_session_types.session) ->
            compare b.started_at a.started_at)
+  in
+  let scoped_sessions =
+    sessions |> List.filter (session_matches_current_room current_room)
   in
   let session =
     match session_id with
@@ -653,7 +698,7 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
             String.equal candidate.session_id target)
           sessions
     | None -> (
-        match sessions with
+        match scoped_sessions with
         | x :: _ -> Some x
         | [] -> None)
   in
@@ -670,7 +715,9 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
     | Some current -> Team_session_store.read_events ~max_events:200 config current
     | None -> []
   in
-  let contributions = build_actor_contributions session events in
+  let contributions =
+    build_actor_contributions ~config ?session_id session events
+  in
   let planned_actor_count =
     match session with
     | Some current -> List.length (Team_session_types.planned_participant_names current)
@@ -771,12 +818,16 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
   let verdict, verdict_basis =
     combine_verdicts ~live_verdict ~historical_verdict
   in
+  let execution_backing_status =
+    execution_backing_status_json cp_backing cp_trace_count
+  in
   let goal_binding =
     match session with
     | None ->
         `Assoc
           [
             ("session_goal", `Null);
+            ("current_room", `String current_room);
             ("operation_id", match operation_id with Some value -> `String value | None -> `Null);
           ]
     | Some current ->
@@ -785,6 +836,7 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
             ("session_id", `String current.session_id);
             ("session_goal", `String current.goal);
             ("status", `String (Team_session_types.status_to_string current.status));
+            ("current_room", `String current_room);
             ("operation_id", match operation_id with Some value -> `String value | None -> `Null);
             ("broadcast_count", `Int current.broadcast_count);
             ("portal_count", `Int current.portal_count);
@@ -820,10 +872,12 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
       ( "selection",
         selection_json ~requested_session_id
           ~requested_operation_id ~session
-          ~operation_id ~session_count:(List.length sessions) );
+          ~operation_id ~session_count:(List.length scoped_sessions) );
       ("session_id", match session_id with Some value -> `String value | None -> `Null);
       ("operation_id", match operation_id with Some value -> `String value | None -> `Null);
       ("proof_verdict", `String verdict);
+      ("collaboration_verdict", `String verdict);
+      ("execution_backing_status", `String execution_backing_status);
       ( "summary",
         session_summary_json session verdict ~planned_actor_count
           ~active_actor_count ~mentioned_actor_count ~unanswered_actor_count

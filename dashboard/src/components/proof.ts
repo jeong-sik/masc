@@ -448,10 +448,11 @@ export function Proof() {
   const contributions = safeArray<DashboardProofActorContribution>(snapshot?.actor_contributions)
   const artifacts = safeArray<DashboardProofArtifactRef>(snapshot?.artifacts)
   const toolEvidence = safeArray<DashboardProofToolEvidence>(snapshot?.tool_evidence)
-  const verdict = snapshot?.proof_verdict ?? 'insufficient'
-  const liveVerdict = summary?.live_verdict ?? verdict
+  const verdict = snapshot?.collaboration_verdict ?? snapshot?.proof_verdict ?? 'insufficient'
+  const liveVerdict = summary?.live_verdict ?? snapshot?.proof_verdict ?? verdict
   const historicalVerdict = summary?.historical_verdict ?? null
   const verdictBasis = summary?.verdict_basis ?? 'live'
+  const executionBackingStatus = snapshot?.execution_backing_status ?? 'none'
   const cpEvidence = snapshot?.cp_backing_evidence ?? null
   const traceCount = Array.isArray((cpEvidence as { traces?: { events?: unknown[] } } | null)?.traces?.events)
     ? ((cpEvidence as { traces?: { events?: unknown[] } }).traces?.events?.length ?? 0)
@@ -509,6 +510,11 @@ export function Proof() {
           <span>판정</span>
           <strong>${verdictLabel(verdict)}</strong>
           <small>${summary?.detail ?? '협업 증거를 verdict로 요약합니다.'}</small>
+        </div>
+        <div class="summary-stat-card ${executionBackingStatus === 'present' ? 'ok' : executionBackingStatus === 'missing' ? 'warn' : ''}">
+          <span>실행 backing</span>
+          <strong>${executionBackingStatus === 'present' ? '있음' : executionBackingStatus === 'missing' ? '누락' : '없음'}</strong>
+          <small>협업 verdict와 분리해서 읽습니다.</small>
         </div>
         <div class="summary-stat-card ${verdictTone(liveVerdict)}">
           <span>Live 판정</span>

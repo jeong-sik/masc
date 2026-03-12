@@ -321,6 +321,11 @@ let proof_verdict ~actor_count ~interaction_present ~evidence_present ~artifact_
   else
     "insufficient"
 
+let canonical_verdict_of_proof_doc proof_doc =
+  match string_field "verdict" proof_doc with
+  | Some ("proved" | "proved_strong") -> Some "proven"
+  | _ -> None
+
 let cp_backing_json config operation_id =
   let traces = Cp_snapshot.list_traces_json config ~operation_id ~limit:20 () in
   let detachments = Cp_snapshot.list_detachments_json ~operation_id config in
@@ -490,10 +495,18 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
     tool_evidence_count > 0 || deliverable_count > 0 || checkpoints_count > 0
     || Option.is_some proof_doc
   in
-  let verdict =
+  let fallback_verdict () =
     proof_verdict ~actor_count:(List.length actor_names)
       ~interaction_present:(interaction_count > 0)
       ~evidence_present ~artifact_present
+  in
+  let verdict =
+    match proof_doc with
+    | Some doc -> (
+        match canonical_verdict_of_proof_doc doc with
+        | Some canonical -> canonical
+        | None -> fallback_verdict ())
+    | None -> fallback_verdict ()
   in
   let goal_binding =
     match session with

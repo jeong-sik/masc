@@ -620,10 +620,16 @@ let keepers_json config =
               | `Bool value -> value
               | _ -> false
             in
+            let now_ts = Time_compat.now () in
             let diagnostic =
               Keeper_exec_status.keeper_diagnostic_json ~meta
                 ~agent_status:agent_json ~keepalive_running ~history_items:[]
-                ~now_ts:(Time_compat.now ())
+                ~now_ts
+              |> Keeper_exec_status.augment_keeper_diagnostic_json ~desired:true
+                   ~meta ~keepalive_running
+                   ~keepalive_started_at:
+                     (Keeper_keepalive.keeper_keepalive_started_at meta.name)
+                   ~now_ts
             in
             let allowed_tool_names, latest_tool_names, latest_tool_call_count,
                 tool_audit_source, tool_audit_at =
@@ -632,9 +638,8 @@ let keepers_json config =
             let agent_status =
               if not agent_exists then "offline"
               else
-                match agent_json |> U.member "status" with
-                | `String status -> status
-                | _ -> "unknown"
+                Keeper_exec_status.keeper_surface_status
+                  ~agent_status:agent_json ~diagnostic
             in
             Some
               (`Assoc

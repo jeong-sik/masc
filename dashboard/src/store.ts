@@ -641,6 +641,9 @@ function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null {
     summary,
     keepalive_running:
       typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
+    continuity_state:
+      (asString(raw.continuity_state) ?? null) as KeeperDiagnostic['continuity_state'],
+    continuity_summary: asString(raw.continuity_summary) ?? null,
   }
 }
 

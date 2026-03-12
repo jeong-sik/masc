@@ -103,6 +103,7 @@ jobs:
             --head "$HEAD_REF" \
             --recent-main 50 \
             --duplicate-policy warn
+
   build:
     name: Build and Test
     runs-on: ubuntu-latest

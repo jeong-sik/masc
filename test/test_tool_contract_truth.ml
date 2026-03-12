@@ -4,6 +4,7 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Config = Masc_mcp.Config
 module Mode = Masc_mcp.Mode
 module Room = Masc_mcp.Room
+module Tool_catalog = Masc_mcp.Tool_catalog
 
 let temp_dir () =
   let dir = Filename.temp_file "test_tool_contract_truth_" "" in
@@ -82,48 +83,40 @@ let test_visible_tools_expose_only_truthful_statuses () =
         tools)
 
 let test_hidden_tools_report_contract_status () =
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let room_path = Room.masc_dir state.room_config in
-      ignore (Config.switch_mode room_path Mode.Full);
-      let tools =
-        tools_list_response ~clock ~sw ~include_hidden:true
-          ~names:
-            [
-              "masc_archive_save";
-              "masc_claim";
-              "masc_transition";
-              "masc_runtime_verify";
-              "masc_llama_runtime_verify";
-              "masc_verify_handoff";
-            ]
-          state
-        |> response_tools
-      in
-      let placeholder = find_tool_exn tools "masc_archive_save" in
-      check string "archive_save placeholder" "placeholder"
-        (tool_string_field placeholder "implementationStatus");
-      let alias = find_tool_exn tools "masc_claim" in
-      check string "claim adapter" "adapter"
-        (tool_string_field alias "implementationStatus");
-      let canonical = find_tool_exn tools "masc_transition" in
-      check string "transition real" "real"
-        (tool_string_field canonical "implementationStatus");
-      let runtime_verify = find_tool_exn tools "masc_runtime_verify" in
-      check string "runtime verify real" "real"
-        (tool_string_field runtime_verify "implementationStatus");
-      let runtime_alias = find_tool_exn tools "masc_llama_runtime_verify" in
-      check string "llama runtime verify adapter alias" "adapter"
-        (tool_string_field runtime_alias "implementationStatus");
-      check string "llama runtime verify canonical" "masc_runtime_verify"
-        (tool_string_field runtime_alias "canonicalName");
-      let verify_handoff = find_tool_exn tools "masc_verify_handoff" in
-      check string "verify_handoff real" "real"
-        (tool_string_field verify_handoff "implementationStatus"))
+  let hidden_tool name =
+    let fields = Tool_catalog.metadata_to_fields name in
+    `Assoc (("name", `String name) :: fields)
+  in
+  let tools =
+    [
+      hidden_tool "masc_archive_save";
+      hidden_tool "masc_claim";
+      hidden_tool "masc_transition";
+      hidden_tool "masc_runtime_verify";
+      hidden_tool "masc_llama_runtime_verify";
+      hidden_tool "masc_verify_handoff";
+    ]
+  in
+  let placeholder = find_tool_exn tools "masc_archive_save" in
+  check string "archive_save placeholder" "placeholder"
+    (tool_string_field placeholder "implementationStatus");
+  let alias = find_tool_exn tools "masc_claim" in
+  check string "claim adapter" "adapter"
+    (tool_string_field alias "implementationStatus");
+  let canonical = find_tool_exn tools "masc_transition" in
+  check string "transition real" "real"
+    (tool_string_field canonical "implementationStatus");
+  let runtime_verify = find_tool_exn tools "masc_runtime_verify" in
+  check string "runtime verify real" "real"
+    (tool_string_field runtime_verify "implementationStatus");
+  let runtime_alias = find_tool_exn tools "masc_llama_runtime_verify" in
+  check string "llama runtime verify adapter alias" "adapter"
+    (tool_string_field runtime_alias "implementationStatus");
+  check string "llama runtime verify canonical" "masc_runtime_verify"
+    (tool_string_field runtime_alias "canonicalName");
+  let verify_handoff = find_tool_exn tools "masc_verify_handoff" in
+  check string "verify_handoff real" "real"
+    (tool_string_field verify_handoff "implementationStatus")
 
 let () =
   run "tool contract truth"

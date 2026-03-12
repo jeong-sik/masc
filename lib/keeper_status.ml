@@ -283,6 +283,12 @@ let handle_keeper_status ctx args : tool_result =
              ~keepalive_running
              ~history_items
              ~now_ts
+           |> augment_keeper_diagnostic_json
+                ~desired:(is_resident_keeper ctx.config m.name)
+                ~meta:m
+                ~keepalive_running
+                ~keepalive_started_at:(keeper_keepalive_started_at m.name)
+                ~now_ts
          in
 
          let compaction_history_tail =

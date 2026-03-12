@@ -1876,6 +1876,13 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ~keepalive_running
                   ~history_items:conversation_items
                   ~now_ts
+                |> Keeper_exec_status.augment_keeper_diagnostic_json
+                     ~desired:true
+                     ~meta:m
+                     ~keepalive_running
+                     ~keepalive_started_at:
+                       (Keeper_keepalive.keeper_keepalive_started_at m.name)
+                     ~now_ts
               in
               let detail_fields =
                 if compact then []
@@ -1934,6 +1941,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("auto_handoff", `Bool m.auto_handoff);
               ("handoff_threshold", `Float m.handoff_threshold);
               ("agent", agent);
+              ( "status",
+                `String
+                  (Keeper_exec_status.keeper_surface_status ~agent_status:agent
+                     ~diagnostic) );
               ("diagnostic", diagnostic);
               ("keeper_age_s", `Float keeper_age_s);
               ("uptime_hours", `Float (keeper_age_s /. 3600.0));

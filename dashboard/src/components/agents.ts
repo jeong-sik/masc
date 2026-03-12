@@ -3,16 +3,16 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
+import { KeeperCard, type CanonicalKeeperCardModel } from './common/keeper-card'
 import { RoomTruthStrip } from './common/room-truth-strip'
+import { keeperRuntimeLabel } from './common/keeper-identity'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { StatusBadge } from './common/status-badge'
-import { MitosisRing } from './common/mitosis-ring'
 import { TimeAgo } from './common/time-ago'
 import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
 import { navigate } from '../router'
 import {
-  executionSummary,
   executionQueue,
   executionSessionBriefs,
   executionOperationBriefs,
@@ -89,11 +89,6 @@ function queueKindLabel(kind: DashboardExecutionQueueItem['kind']): string {
   return kind === 'session' ? '세션' : '작전'
 }
 
-function formatContext(value?: number | null): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
-  return `${Math.round(value * 100)}%`
-}
-
 function findKeeper(name?: string | null): Keeper | null {
   if (!name) return null
   return keepers.value.find(keeper => keeper.name === name || keeper.agent_name === name) ?? null
@@ -138,13 +133,6 @@ function lodgeActionKindLabel(value?: DashboardExecutionLodgeCheckin['action_kin
     default:
       return value
   }
-}
-
-function renderToolSummary(tools: string[] | undefined, empty = '없음') {
-  const rows = tools ?? []
-  if (rows.length === 0) return empty
-  if (rows.length <= 3) return rows.join(', ')
-  return `${rows.slice(0, 3).join(', ')} +${rows.length - 3}`
 }
 
 function openHandoff(handoff: DashboardExecutionHandoff | null | undefined): void {
@@ -361,15 +349,10 @@ function LodgeCheckinRow({ row }: { row: DashboardExecutionLodgeCheckin }) {
         <span>trigger · ${row.trigger ?? 'unknown'}</span>
         ${row.checked_at ? html`<span><${TimeAgo} timestamp=${row.checked_at} /></span>` : null}
         <span>action · ${lodgeActionKindLabel(row.action_kind)}</span>
-        <span>allow ${row.allowed_tool_names.length}</span>
-        <span>used ${row.used_tool_names.length}</span>
       </div>
       ${row.summary && row.summary !== row.reason
         ? html`<div class="monitor-focus">${row.summary}</div>`
         : null}
-      <div class="monitor-footnote">
-        허용 도구: ${renderToolSummary(row.allowed_tool_names)} · 사용 도구: ${renderToolSummary(row.used_tool_names)}
-      </div>
       ${row.failure_reason || row.decision_reason
         ? html`<div class="monitor-footnote">
             ${row.failure_reason ? `실패 이유: ${row.failure_reason}` : `판단 이유: ${row.decision_reason}`}
@@ -421,53 +404,45 @@ function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
     const keeper = findKeeper(row.name)
     if (keeper) openKeeperDetail(keeper)
   }
+  const runtimeLabel = keeperRuntimeLabel(row.name, row.agent_name)
+  const model: CanonicalKeeperCardModel = {
+    name: row.name,
+    koreanName: row.korean_name ?? null,
+    runtimeLabel,
+    emoji: row.emoji ?? null,
+    tone: row.tone,
+    statusRaw: row.status ?? null,
+    statusLabel: statusLabel(row.status),
+    stateClass: row.state,
+    stateLabel: continuityStateLabel(row.state),
+    contextRatio: row.context_ratio ?? null,
+    note: row.note,
+    focus: row.focus,
+    lastActivityAt: row.last_signal_at ?? null,
+    lastActivityFallback: '최근 활동 없음',
+    relatedSessionId: row.related_session_id ?? null,
+    continuity: row.continuity ?? null,
+    lifecycle: row.lifecycle ?? null,
+    summary: row.continuity_summary ?? row.recent_output_preview ?? null,
+    recentInput: row.recent_input_preview ?? null,
+    recentOutput: row.recent_output_preview ?? null,
+    recentTools: row.recent_tool_names ?? [],
+    allowedTools: row.allowed_tool_names ?? [],
+    routeSummary: row.skill_route_summary ?? null,
+    auditSource: row.tool_audit_source ?? null,
+    auditAt: row.tool_audit_at ?? null,
+    disclosureLabel: '연속성 상세',
+  }
 
-  return html`
-    <button class="monitor-row ${row.tone} state-${row.state}" data-testid="execution.continuity-card" onClick=${onClick}>
-      <div class="monitor-row-header">
-        <span class="agent-emoji">${row.emoji ?? ''}</span>
-        <div class="monitor-row-title">
-          <div class="monitor-name-line">
-            <span class="monitor-title">${row.name}</span>
-            ${row.korean_name ? html`<span class="monitor-sub">${row.korean_name}</span>` : null}
-          </div>
-          <div class="monitor-note">${row.note}</div>
-        </div>
-        <${MitosisRing} ratio=${row.context_ratio ?? 0} size=${34} stroke=${4} />
-        <${StatusBadge} status=${row.status ?? 'unknown'} />
-        <span class="monitor-pill ${row.tone}">${continuityStateLabel(row.state)}</span>
-      </div>
-
-      <div class="monitor-meta">
-        ${row.last_signal_at ? html`<span>최근 활동 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 활동 없음</span>`}
-        ${row.related_session_id ? html`<span>세션 · ${row.related_session_id}</span>` : null}
-        ${row.continuity ? html`<span>${row.continuity}</span>` : null}
-        ${row.lifecycle ? html`<span>생애주기 ${row.lifecycle}</span>` : null}
-        <span>컨텍스트 ${formatContext(row.context_ratio)}</span>
-      </div>
-
-      <div class="monitor-focus">${row.focus}</div>
-      ${row.recent_output_preview || row.continuity_summary
-        ? html`<div class="monitor-footnote">${row.recent_output_preview ?? row.continuity_summary}</div>`
-        : null}
-      ${row.skill_route_summary || row.tool_audit_source
-        ? html`<div class="monitor-footnote">
-            ${row.skill_route_summary ? `route · ${row.skill_route_summary}` : ''}
-            ${row.tool_audit_source ? `${row.skill_route_summary ? ' · ' : ''}audit · ${row.tool_audit_source}` : ''}
-            ${row.tool_audit_at ? html` · <${TimeAgo} timestamp=${row.tool_audit_at} />` : null}
-          </div>`
-        : null}
-      ${(row.recent_tool_names?.length ?? 0) > 0 || (row.allowed_tool_names?.length ?? 0) > 0
-        ? html`<div class="monitor-footnote">
-            recent tools: ${renderToolSummary(row.recent_tool_names)} · allowed: ${renderToolSummary(row.allowed_tool_names)}
-          </div>`
-        : null}
-    </button>
-  `
+  return html`<${KeeperCard}
+    variant="execution"
+    model=${model}
+    onClick=${onClick}
+    testId="execution.continuity-card"
+  />`
 }
 
 export function Execution() {
-  const summary = executionSummary.value
   const queueRows = executionQueue.value
   const sessionRowsAll = executionSessionBriefs.value
   const operationRowsAll = executionOperationBriefs.value
@@ -549,15 +524,6 @@ export function Execution() {
     <div class="agents-monitor">
       <${SurfaceSemanticIntro} surfaceId="execution" />
       <${RoomTruthStrip} />
-      <div class="stats-grid">
-        <${MonitorStat} label="활성 세션" value=${summary?.active_sessions ?? sessionRowsAll.length} color="#4ade80" caption="실행 관점 세션 수" />
-        <${MonitorStat} label="막힌 세션" value=${summary?.blocked_sessions ?? sessionRowsAll.filter(item => toneClass(item.health ?? item.status) !== 'ok').length} color="#fbbf24" caption="개입이 필요한 세션 수" />
-        <${MonitorStat} label="활성 작전" value=${summary?.active_operations ?? operationRowsAll.length} color="#22d3ee" caption="지휘 평면 작전 수" />
-        <${MonitorStat} label="막힌 작전" value=${summary?.blocked_operations ?? operationRowsAll.filter(item => item.blocker_summary).length} color="#fb7185" caption="원인 확인이 필요한 작전 수" />
-        <${MonitorStat} label="인력 경고" value=${summary?.worker_alerts ?? workerSupportAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="지원 인력 압박" />
-        <${MonitorStat} label="연속성 경고" value=${summary?.continuity_alerts ?? continuityAll.filter(item => item.tone !== 'ok').length} color="#fb7185" caption="키퍼 연속성 압박" />
-      </div>
-
       <${Card}
         title="실행 대기열"
         class="section"
@@ -652,8 +618,8 @@ export function Execution() {
           testId="execution.continuity"
         >
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">연속성 보조 면</h2>
-            <p class="monitor-subheadline">키퍼 연속성은 보조 면으로만 두고, 상태가 좋지 않은 키퍼 위주로 보여줍니다.</p>
+            <h2 class="monitor-headline">키퍼 연속성 요약</h2>
+            <p class="monitor-subheadline">카드 제목은 keeper 이름이고, keeper-*-agent 형태의 runtime agent는 보조 라벨로만 표시합니다.</p>
           </div>
           <div class="monitor-list">
             ${continuityRows.length === 0

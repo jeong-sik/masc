@@ -328,6 +328,20 @@ let test_spawn_bare_ollama_rejected () =
        true
      with Not_found -> false)
 
+let test_spawn_empty_command_rejected () =
+  let result = Spawn.spawn ~agent_name:"   " ~prompt:"test" () in
+  check bool "spawn rejected" false result.Spawn.success;
+  check int "exit code" 2 result.Spawn.exit_code;
+  check bool "mentions empty command" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "spawn command is empty")
+           result.Spawn.output 0
+       in
+       true
+     with Not_found -> false)
+
 (* ============================================================
    build_mcp_args Tests
    ============================================================ *)
@@ -754,6 +768,7 @@ let () =
       test_case "ollama removed" `Quick test_get_config_ollama_removed;
       test_case "unknown" `Quick test_get_config_unknown;
       test_case "bare ollama rejected" `Quick test_spawn_bare_ollama_rejected;
+      test_case "empty command rejected" `Quick test_spawn_empty_command_rejected;
     ];
     "build_mcp_args", [
       test_case "empty" `Quick test_build_mcp_args_empty;

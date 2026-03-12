@@ -25,7 +25,6 @@ import {
 } from './mission-utils'
 import {
   MissionContextBar,
-  SummaryStat,
   MissionBriefingCard,
   AttentionCard,
   SessionBriefCard,
@@ -66,16 +65,6 @@ export function Mission() {
     .filter(item => item.related_session_ids.length > 0)
     .slice(0, 6)
   const internalSignals = mission.internal_signals.slice(0, 3)
-  const blockedSessions = sessionRows.filter(row => {
-    const tone = row.top_attention?.severity ?? row.health ?? row.status
-    return toneClass(tone) !== 'ok' || Boolean(row.blocker_summary)
-  }).length
-  const activeParticipants = new Set(
-    sessionRows.flatMap(row => row.member_names),
-  ).size
-  const liveOutputs =
-    sessionRows.flatMap(row => row.member_previews ?? []).filter(row => row.recent_output_preview).length
-    + keeperRows.filter(row => row.recentOutput).length
 
   useEffect(() => {
     void refreshMissionSessionDetail(activeSessionId)
@@ -106,15 +95,6 @@ export function Mission() {
       />
 
       <${MissionBriefingCard} />
-
-      <div class="mission-stat-grid">
-        <${SummaryStat} label="활성 세션" value=${sessionRows.length} detail="지금 진행중인 협업 단위" tone=${focusSession?.top_attention?.severity ?? focusSession?.health ?? 'ok'} />
-        <${SummaryStat} label="막힌 세션" value=${blockedSessions} detail="주의가 필요한 흐름" tone=${blockedSessions > 0 ? 'warn' : 'ok'} />
-        <${SummaryStat} label="참여자" value=${activeParticipants} detail="현재 세션에 연결된 주체" tone=${activeParticipants > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="키퍼 관찰" value=${keeperRows.length} detail="연속성 확인 대상" tone=${keeperRows[0]?.brief.status ?? 'ok'} />
-        <${SummaryStat} label="최근 응답" value=${liveOutputs} detail="메인에서 바로 읽을 수 있는 응답 수" tone=${liveOutputs > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="내부 신호" value=${internalSignals.length} detail="시스템 진단은 보조 면에만 유지" tone=${internalSignals[0]?.severity ?? 'ok'} />
-      </div>
 
       ${activeSessionId
         ? html`
@@ -174,8 +154,8 @@ export function Mission() {
 
       <${Card} title="키퍼 연속성" class="mission-list-card" semanticId="mission.keeper_activity">
         <div class="mission-section-head">
-          <h3>연속성 보조 면</h3>
-          <p>키퍼는 세션과 별개로 보고, 연속성 판단에 필요한 정보만 먼저 보여줍니다.</p>
+          <h3>키퍼 연속성 요약</h3>
+          <p>카드 제목은 keeper 이름이고, runtime agent 이름은 상세에만 보조 라벨로 보여줍니다.</p>
         </div>
         <div class="mission-activity-list">
           ${keeperRows.length > 0

@@ -140,7 +140,6 @@ let keeper_source_files () =
          Filename.check_suffix name ".ml"
          && String.starts_with ~prefix:"keeper_" name)
   |> List.map (Filename.concat "lib")
-
 (* HIGH priority patterns *)
 
 let test_source_main_keeper_bootstrap () =

@@ -5476,6 +5476,8 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let tempo = Tempo.get_tempo config in
   let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let gardener_json = Masc_mcp.Gardener.status_json () in
+  let guardian_json = Masc_mcp.Guardian.status_json () in
+  let sentinel_json = Masc_mcp.Sentinel.status_json () in
   let build = Build_identity.current () in
   `Assoc
     [
@@ -5489,6 +5491,8 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("paused", `Bool room_state.paused);
       ("lodge", lodge_json);
       ("gardener", gardener_json);
+      ("guardian", guardian_json);
+      ("sentinel", sentinel_json);
       ("version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
     ]

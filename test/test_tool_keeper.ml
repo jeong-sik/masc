@@ -513,8 +513,8 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
+      stop_keeper_via_tool env sw base_dir "resident-demo";
+      stop_keeper_via_tool env sw base_dir "persistent-demo";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -590,7 +590,7 @@ let test_resident_keeper_msg_bootstraps_then_requires_message () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "bootstrap-demo";
+      stop_keeper_via_tool env sw base_dir "bootstrap-demo";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -626,7 +626,7 @@ let test_persistent_agent_msg_rejects_missing_message () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
+      stop_keeper_via_tool env sw base_dir "persistent-demo";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -666,7 +666,7 @@ let test_persistent_agent_create_from_persona_and_status () =
   let me_root = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-sangsu";
+      stop_keeper_via_tool env sw base_dir "persistent-sangsu";
       rm_rf base_dir;
       rm_rf me_root)
     (fun () ->
@@ -741,8 +741,8 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "resident-demo";
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
+      stop_keeper_via_tool env sw base_dir "resident-demo";
+      stop_keeper_via_tool env sw base_dir "persistent-demo";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in

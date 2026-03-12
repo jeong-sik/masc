@@ -1819,15 +1819,12 @@ let handle_keeper_msg ctx args : tool_result =
 			                      ~route:effective_skill_route
 			                      safe_reply_raw
 			              in
+                          let raw_reply = safe_reply_with_skill in
                           let safe_reply =
-                            if no_state_block then
-                              let stripped =
-                                strip_state_blocks_text safe_reply_with_skill
-                                |> String.trim
-                              in
-                              if stripped = "" then safe_reply_with_skill else stripped
-                            else
-                              safe_reply_with_skill
+                            let fallback =
+                              if no_state_block then Some "State updated." else None
+                            in
+                            user_visible_reply_text ?fallback raw_reply
                           in
               let repetition_risk =
                 repetition_risk_score
@@ -1847,7 +1844,7 @@ let handle_keeper_msg ctx args : tool_result =
               Context_manager.persist_message session assistant_msg;
               let now_ts = Time_compat.now () in
               let continuity_summary_from_reply =
-                match parse_state_snapshot_from_reply safe_reply with
+                match parse_state_snapshot_from_reply raw_reply with
                 | None -> meta.continuity_summary
                 | Some snapshot -> keeper_state_snapshot_to_summary_text snapshot
               in
@@ -1917,7 +1914,7 @@ let handle_keeper_msg ctx args : tool_result =
                   ctx.config
                   meta_turn
                   ~turn:meta_turn.total_turns
-                  ~reply:safe_reply
+                  ~reply:raw_reply
               in
               let memory_top_kind =
                 match memory_note_kinds with

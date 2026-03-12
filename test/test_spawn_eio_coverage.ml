@@ -152,6 +152,10 @@ let test_masc_mcp_tools_contains_tool_help () =
   check bool "contains tool_help" true
     (List.mem "mcp__masc__masc_tool_help" Spawn_eio.masc_mcp_tools)
 
+let test_masc_mcp_tools_contains_tool_stats () =
+  check bool "contains tool_stats" true
+    (List.mem "mcp__masc__masc_tool_stats" Spawn_eio.masc_mcp_tools)
+
 let test_masc_mcp_tools_contains_tool_admin_snapshot () =
   check bool "contains tool_admin_snapshot" true
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn_eio.masc_mcp_tools)
@@ -463,6 +467,8 @@ let () =
         test_masc_mcp_tools_contains_vote_create;
       test_case "contains run_deliverable" `Quick
         test_masc_mcp_tools_contains_run_deliverable;
+      test_case "contains tool_stats" `Quick
+        test_masc_mcp_tools_contains_tool_stats;
       test_case "contains tool_help" `Quick
         test_masc_mcp_tools_contains_tool_help;
       test_case "contains tool_admin_snapshot" `Quick

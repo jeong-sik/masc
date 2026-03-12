@@ -200,6 +200,16 @@ let test_permission_for_tool_broadcast () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
+let test_permission_for_tool_board_list () =
+  match Auth.permission_for_tool "masc_board_list" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_board_post () =
+  match Auth.permission_for_tool "masc_board_post" with
+  | Some Types.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
+
 let test_permission_for_tool_portal_open () =
   match Auth.permission_for_tool "masc_portal_open" with
   | Some Types.CanOpenPortal -> ()
@@ -420,6 +430,8 @@ let () =
       test_case "claim_next" `Quick test_permission_for_tool_claim_next;
       test_case "done" `Quick test_permission_for_tool_done;
       test_case "broadcast" `Quick test_permission_for_tool_broadcast;
+      test_case "board_list" `Quick test_permission_for_tool_board_list;
+      test_case "board_post" `Quick test_permission_for_tool_board_post;
       test_case "portal_open" `Quick test_permission_for_tool_portal_open;
       test_case "portal_send" `Quick test_permission_for_tool_portal_send;
       test_case "worktree_create" `Quick test_permission_for_tool_worktree_create;

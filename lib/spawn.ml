@@ -60,6 +60,7 @@ let masc_mcp_tools = [
   "mcp__masc__masc_board_vote";
   "mcp__masc__masc_board_get";
   (* Tool management + discovery *)
+  "mcp__masc__masc_tool_stats";
   "mcp__masc__masc_tool_help";
   "mcp__masc__masc_tool_admin_snapshot";
   "mcp__masc__masc_keeper_tool_catalog";

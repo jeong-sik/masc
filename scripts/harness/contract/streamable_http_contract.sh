@@ -10,13 +10,52 @@ cleanup() {
 }
 trap cleanup EXIT
 
+curl_with_retry() {
+  local attempt=1
+  local max_attempts="${CURL_RETRY_COUNT:-1}"
+  local retry_delay="${CURL_RETRY_DELAY_SEC:-1}"
+  local timeout_sec="${CURL_TIMEOUT_SEC:-25}"
+
+  while true; do
+    if curl --max-time "$timeout_sec" "$@"; then
+      return 0
+    fi
+    local status=$?
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      return "$status"
+    fi
+    case "$status" in
+      7|28)
+        sleep "$retry_delay"
+        attempt=$((attempt + 1))
+        ;;
+      *)
+        return "$status"
+        ;;
+    esac
+  done
+}
+
+wait_for_mcp_ready() {
+  local timeout_sec="${MCP_READY_TIMEOUT_SEC:-20}"
+  local deadline=$(( $(date +%s) + timeout_sec ))
+  while [[ "$(date +%s)" -lt "$deadline" ]]; do
+    if curl -fsS --max-time 2 "$BASE_URL/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "FAIL: MCP server did not become ready at $BASE_URL" >&2
+  return 1
+}
+
 post_with_accept() {
   local accept_header="$1"
   local body="$2"
   local header_file="$3"
   local body_file="$4"
 
-  curl -sS -D "$header_file" -o "$body_file" \
+  curl_with_retry -sS -D "$header_file" -o "$body_file" \
     -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H "Accept: $accept_header" \
@@ -39,7 +78,7 @@ post_with_session() {
     extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
   fi
 
-  curl -sS -D "$header_file" -o "$body_file" \
+  curl_with_retry -sS -D "$header_file" -o "$body_file" \
     -X POST "$MCP_URL" \
     "${extra_headers[@]}" \
     -d "$body"
@@ -59,7 +98,7 @@ get_with_session() {
     extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
   fi
 
-  curl -sS -D "$header_file" -o "$body_file" --max-time 2 \
+  curl_with_retry -sS -D "$header_file" -o "$body_file" --max-time 2 \
     "$MCP_URL" \
     "${extra_headers[@]}" || true
 }
@@ -77,7 +116,7 @@ delete_with_session() {
     extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
   fi
 
-  curl -sS -D "$header_file" -o "$body_file" \
+  curl_with_retry -sS -D "$header_file" -o "$body_file" \
     -X DELETE "$MCP_URL" \
     "${extra_headers[@]}"
 }
@@ -118,6 +157,7 @@ header_value() {
 }
 
 echo "[1/8] strict Accept rejection"
+wait_for_mcp_ready
 h1="$tmpdir/reject.headers"
 b1="$tmpdir/reject.body"
 post_with_accept "application/json" \

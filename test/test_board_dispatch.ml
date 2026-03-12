@@ -45,6 +45,40 @@ let test_create_and_get_post () =
           Alcotest.(check string) "content matches"
             "dispatch test post" fetched.content
 
+let test_structured_post_roundtrip () =
+  let meta = `Assoc [("source", `String "keeper_autonomy")] in
+  match Board_dispatch.create_post ~author:"sangsu"
+          ~title:"Explicit title"
+          ~content:"Visible line\n\n[STATE]\nGoal: keep context\n[/STATE]"
+          ~post_kind:Board.Automation_post
+          ~meta_json:meta
+          () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      Alcotest.(check string) "title stored" "Explicit title" post.title;
+      Alcotest.(check string) "body stripped" "Visible line" post.body;
+      let state_block =
+        match post.meta_json with
+        | Some (`Assoc fields) -> (
+            match List.assoc_opt "state_block" fields with
+            | Some (`String value) -> value
+            | _ -> "")
+        | _ -> ""
+      in
+      Alcotest.(check bool) "state block extracted" true (String.length state_block > 0);
+      Board.reset_global_for_test ();
+      Board_dispatch.reset_for_test ();
+      Board_dispatch.init_jsonl ();
+      match Board_dispatch.get_post ~post_id:pid with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok fetched ->
+          Alcotest.(check string) "roundtrip title" "Explicit title" fetched.title;
+          Alcotest.(check string) "roundtrip content alias" "Visible line" fetched.content;
+          Alcotest.(check string) "roundtrip body" "Visible line" fetched.body;
+          Alcotest.(check string) "roundtrip kind" "automation"
+            (Board.post_kind_to_string fetched.post_kind)
+
 let test_list_posts () =
   ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 1" ());
   ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 2" ());
@@ -160,6 +194,7 @@ let () =
     ];
     "posts", [
       Alcotest.test_case "create and get" `Quick (with_eio test_create_and_get_post);
+      Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
     ];

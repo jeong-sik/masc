@@ -33,6 +33,8 @@ let create_posts_table_q =
      id TEXT PRIMARY KEY, \
      author TEXT NOT NULL, \
      content TEXT NOT NULL, \
+     title TEXT, \
+     body TEXT, \
      visibility TEXT NOT NULL DEFAULT 'internal', \
      created_at DOUBLE PRECISION NOT NULL, \
      updated_at DOUBLE PRECISION NOT NULL, \
@@ -41,8 +43,26 @@ let create_posts_table_q =
      votes_down INT NOT NULL DEFAULT 0, \
      reply_count INT NOT NULL DEFAULT 0, \
      hearth TEXT, \
-     thread_id TEXT \
+     thread_id TEXT, \
+     post_kind TEXT, \
+     meta_json TEXT \
    )"
+
+let alter_posts_add_title_q =
+  (Caqti_type.unit ->. Caqti_type.unit)
+  "ALTER TABLE masc_board_posts ADD COLUMN IF NOT EXISTS title TEXT"
+
+let alter_posts_add_body_q =
+  (Caqti_type.unit ->. Caqti_type.unit)
+  "ALTER TABLE masc_board_posts ADD COLUMN IF NOT EXISTS body TEXT"
+
+let alter_posts_add_post_kind_q =
+  (Caqti_type.unit ->. Caqti_type.unit)
+  "ALTER TABLE masc_board_posts ADD COLUMN IF NOT EXISTS post_kind TEXT"
+
+let alter_posts_add_meta_json_q =
+  (Caqti_type.unit ->. Caqti_type.unit)
+  "ALTER TABLE masc_board_posts ADD COLUMN IF NOT EXISTS meta_json TEXT"
 
 let create_comments_table_q =
   (Caqti_type.unit ->. Caqti_type.unit)
@@ -111,6 +131,10 @@ let create pool =
   let init_result = Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
     let* () = C.exec create_posts_table_q () in
+    let* () = C.exec alter_posts_add_title_q () in
+    let* () = C.exec alter_posts_add_body_q () in
+    let* () = C.exec alter_posts_add_post_kind_q () in
+    let* () = C.exec alter_posts_add_meta_json_q () in
     let* () = C.exec create_comments_table_q () in
     let* () = C.exec create_votes_table_q () in
     let* () = C.exec create_idx_posts_score_q () in
@@ -135,13 +159,14 @@ let create pool =
 (* TTL filter clause — uses DB server time *)
 let ttl_where = "(expires_at = 0 OR expires_at > extract(epoch from now()))"
 
-(* Post row: 12 fields packed as t4(t3, t3, t3, t3) *)
+(* Post row: 16 fields packed as t4(t4, t4, t4, t4) *)
 let post_row_t = Caqti_type.(
   t4
-    (t3 string string string)                         (* id, author, content *)
-    (t3 string float float)                           (* visibility, created_at, updated_at *)
-    (t3 float int int)                                (* expires_at, votes_up, votes_down *)
-    (t3 int (option string) (option string))          (* reply_count, hearth, thread_id *)
+    (t4 string string string (option string))         (* id, author, content, title *)
+    (t4 (option string) string float float)           (* body, visibility, created_at, updated_at *)
+    (t4 float int int int)                            (* expires_at, votes_up, votes_down, reply_count *)
+    (t4 (option string) (option string) (option string) (option string))
+                                                    (* hearth, thread_id, post_kind, meta_json *)
 )
 
 (* Comment row: 9 fields packed as t3(t3, t3, t3) *)
@@ -154,13 +179,44 @@ let comment_row_t = Caqti_type.(
 
 (** {1 Row Conversion} *)
 
-let post_of_row ((id, author, content), (vis_str, created_at, updated_at),
-                 (expires_at, votes_up, votes_down), (reply_count, hearth, thread_id)) =
+let post_of_row
+    ((id, author, content, title_opt), (body_opt, vis_str, created_at, updated_at),
+     (expires_at, votes_up, votes_down, reply_count),
+     (hearth, thread_id, post_kind_raw, meta_raw)) =
   match Post_id.of_string id, Agent_id.of_string author, visibility_of_string vis_str with
   | Ok pid, Ok aid, Some vis ->
-      Some { id = pid; author = aid; content; visibility = vis;
-             created_at; updated_at; expires_at;
-             votes_up; votes_down; reply_count; hearth; thread_id }
+      let post_kind =
+        match post_kind_raw with
+        | Some raw -> post_kind_of_string raw
+        | None -> None
+      in
+      let meta_json =
+        match meta_raw with
+        | Some raw -> (try Some (Yojson.Safe.from_string raw) with _ -> None)
+        | None -> None
+      in
+      let title, body, post_kind, meta_json =
+        normalize_post_payload ~author ~content ?title:title_opt ?body:body_opt
+          ?post_kind ?meta_json ~visibility:vis ~expires_at ~hearth ()
+      in
+      Some {
+        id = pid;
+        author = aid;
+        title;
+        body;
+        content = body;
+        post_kind;
+        meta_json;
+        visibility = vis;
+        created_at;
+        updated_at;
+        expires_at;
+        votes_up;
+        votes_down;
+        reply_count;
+        hearth;
+        thread_id;
+      }
   | _ -> None
 
 let comment_of_row ((id, post_id, parent_id), (author, content, created_at),
@@ -178,20 +234,22 @@ let comment_of_row ((id, post_id, parent_id), (author, content, created_at),
 (** {1 Post Queries} *)
 
 let post_columns =
-  "id, author, content, visibility, created_at, updated_at, \
-   expires_at, votes_up, votes_down, reply_count, hearth, thread_id"
+  "id, author, content, title, body, visibility, created_at, updated_at, \
+   expires_at, votes_up, votes_down, reply_count, hearth, thread_id, \
+   post_kind, meta_json"
 
 let insert_post_q =
   (Caqti_type.(t4
-    (t3 string string string)
-    (t3 string float float)
-    (t3 float int int)
-    (t3 int (option string) (option string)))
+    (t4 string string string (option string))
+    (t4 (option string) string float float)
+    (t4 float int int int)
+    (t4 (option string) (option string) (option string) (option string)))
   ->. Caqti_type.unit)
   "INSERT INTO masc_board_posts \
-     (id, author, content, visibility, created_at, updated_at, \
-      expires_at, votes_up, votes_down, reply_count, hearth, thread_id) \
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+     (id, author, content, title, body, visibility, created_at, updated_at, \
+      expires_at, votes_up, votes_down, reply_count, hearth, thread_id, \
+      post_kind, meta_json) \
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"
 
 let get_post_q =
   (Caqti_type.string ->? post_row_t)
@@ -463,40 +521,54 @@ let notify_event t event =
 
 (** {1 Operations} *)
 
-let create_post t ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours)
-    ?hearth ?thread_id () =
+let create_post t ~author ~content ?title ?body ?post_kind ?meta_json
+    ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours) ?hearth ?thread_id () =
   match Agent_id.of_string author with
   | Error e -> Error e
   | Ok author_id ->
-  if String.length content > Limits.max_content_length then
-    Error (Validation_error (Printf.sprintf "Content too long: %d > %d"
-      (String.length content) Limits.max_content_length))
-  else if String.length content = 0 then
-    Error (Validation_error "Content cannot be empty")
-  else
   let ttl = if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours in
   let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
   let now = Time_compat.now () in
+  let expires_at = if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0) in
+  let title, body, normalized_kind, normalized_meta =
+    normalize_post_payload ~author ~content ?title ?body ?post_kind ?meta_json
+      ~visibility ~expires_at ~hearth ()
+  in
+  if String.length body > Limits.max_content_length then
+    Error (Validation_error (Printf.sprintf "Content too long: %d > %d"
+      (String.length body) Limits.max_content_length))
+  else if String.length body = 0 then
+    Error (Validation_error "Content cannot be empty")
+  else
   let post = {
     id = Post_id.generate ();
     author = author_id;
-    content;
+    title;
+    body;
+    content = body;
+    post_kind = normalized_kind;
+    meta_json = normalized_meta;
     visibility;
     created_at = now;
     updated_at = now;
-    expires_at = if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0);
+    expires_at;
     votes_up = 0;
     votes_down = 0;
     reply_count = 0;
     hearth;
     thread_id;
   } in
+  let meta_raw =
+    match post.meta_json with
+    | Some json -> Some (Yojson.Safe.to_string json)
+    | None -> None
+  in
   let vis_str = visibility_to_string post.visibility in
   let row = (
-    (Post_id.to_string post.id, Agent_id.to_string post.author, post.content),
-    (vis_str, post.created_at, post.updated_at),
-    (post.expires_at, post.votes_up, post.votes_down),
-    (post.reply_count, post.hearth, post.thread_id)
+    (Post_id.to_string post.id, Agent_id.to_string post.author, post.content, Some post.title),
+    (Some post.body, vis_str, post.created_at, post.updated_at),
+    (post.expires_at, post.votes_up, post.votes_down, post.reply_count),
+    (post.hearth, post.thread_id, Some (post_kind_to_string post.post_kind), meta_raw)
   ) in
   (* Capacity check + insert in single connection to avoid TOCTOU *)
   let result = Caqti_eio.Pool.use (fun conn ->

@@ -789,11 +789,23 @@ function derivePostTitle(content: string): string {
   return `${firstLine.slice(0, 93)}...`
 }
 
+function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
+  if (!isRecord(raw)) return null
+  const source = asString(raw.source, '').trim() || null
+  const stateBlock = asString(raw.state_block, '').trim() || null
+  if (!source && !stateBlock) return null
+  return {
+    source,
+    state_block: stateBlock,
+  }
+}
+
 function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
   const author = asString(raw.author, '').trim()
-  const content = asString(raw.content, '').trim()
+  const body = (asString(raw.body, '').trim() || asString(raw.content, '').trim())
+  const content = body
   if (!id || !author) return null
 
   const score = asNumber(raw.score, 0)
@@ -817,7 +829,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     asString(raw.updated_at_iso, '').trim()
     || (raw.updated_at !== undefined ? toIsoTimestamp(raw.updated_at) : createdAt)
   const titleRaw = asString(raw.title, '').trim()
-  const title = titleRaw || derivePostTitle(content)
+  const title = titleRaw || derivePostTitle(body)
   const tags = Array.isArray(raw.tags)
     ? raw.tags.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
     : []
@@ -833,7 +845,9 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
           : undefined
       })(),
     title,
+    body,
     content,
+    meta: normalizeBoardMeta(raw.meta),
     tags,
     votes,
     vote_balance: score,
@@ -896,7 +910,9 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
       author: 'unknown',
       post_kind: 'human',
       title: 'Post',
+      body: '',
       content: '',
+      meta: null,
       tags: [],
       votes: 0,
       comment_count: 0,

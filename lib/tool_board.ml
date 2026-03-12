@@ -24,6 +24,8 @@ let format_timestamp_relative ts =
   else Printf.sprintf "%dd ago" (int_of_float (diff /. 86400.0))
 
 let format_ttl_remaining expires_at =
+  if expires_at = 0.0 then "permanent"
+  else
   let now = Time_compat.now () in
   let remaining = expires_at -. now in
   if remaining <= 0.0 then "expired"
@@ -57,14 +59,15 @@ let format_post (p : Board.post) =
   let score = p.votes_up - p.votes_down in
   let hearth_str = match p.hearth with Some h -> Printf.sprintf " [🔥%s]" h | None -> "" in
   let thread_str = match p.thread_id with Some t -> Printf.sprintf " [→ Thread: %s]" t | None -> "" in
-  Printf.sprintf "**%s** [%s]%s (by %s, %s, TTL: %s)\n%s\n[↑%d ↓%d = %+d] [%d replies]%s"
+  Printf.sprintf "**%s** · %s [%s]%s (by %s, %s, TTL: %s)\n%s\n[↑%d ↓%d = %+d] [%d replies]%s"
     (Board.Post_id.to_string p.id)
+    p.title
     vis_str
     hearth_str
     (Board.Agent_id.to_string p.author)
     time_str
     ttl_str
-    p.content
+    p.body
     p.votes_up p.votes_down score
     p.reply_count
     thread_str
@@ -108,19 +111,34 @@ let format_comment_tree ?(max_depth=5) (comments : Board.comment list) =
 (** {1 Handlers} *)
 
 let handle_post_create args =
-  let content = get_string args "content" "" in
+  let title = get_string_opt args "title" in
+  let body = get_string_opt args "body" in
+  let content = match body with Some value -> value | None -> get_string args "content" "" in
   let author = get_string args "author" "anonymous" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
   let visibility_str = get_string args "visibility" "internal" in
   let hearth = get_string_opt args "hearth" in
   let thread_id = get_string_opt args "thread_id" in
+  let post_kind =
+    match get_string_opt args "post_kind" with
+    | Some raw -> Board.post_kind_of_string raw
+    | None -> None
+  in
+  let meta_json =
+    match Yojson.Safe.Util.member "meta" args with
+    | `Assoc _ as meta -> Some meta
+    | _ -> None
+  in
 
   let visibility = match visibility_of_string visibility_str with
     | Some v -> v
     | None -> Board.Internal
   in
 
-  match Board_dispatch.create_post ~author ~content ~visibility ~ttl_hours ?hearth ?thread_id () with
+  match
+    Board_dispatch.create_post ~author ~content ?title ?body ?post_kind ?meta_json
+      ~visibility ~ttl_hours ?hearth ?thread_id ()
+  with
   | Ok post ->
       let json = Board.post_to_yojson post in
       (true, Printf.sprintf "✅ Post created:\n%s" (Yojson.Safe.pretty_to_string json))
@@ -167,7 +185,8 @@ let handle_post_list args =
   (* Filter out lodge-system posts when exclude_system is true *)
   let all_posts = if exclude_system then
     List.filter (fun (p : Board.post) ->
-      Board.Agent_id.to_string p.author <> "lodge-system"
+      Board.classify_post_kind p <> Board.System_post
+      && Board.Agent_id.to_string p.author <> "lodge-system"
     ) all_posts
   else all_posts
   in
@@ -362,8 +381,12 @@ let tool_post_create : Types.tool_schema = {
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
+      ("title", `Assoc [("type", `String "string"); ("description", `String "Optional post title")]);
+      ("body", `Assoc [("type", `String "string"); ("description", `String "Canonical visible body text")]);
       ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
       ("author", `Assoc [("type", `String "string"); ("description", `String "Author name")]);
+      ("post_kind", `Assoc [("type", `String "string"); ("description", `String "human|automation|system (optional)")]);
+      ("meta", `Assoc [("type", `String "object"); ("description", `String "Optional structured operational metadata")]);
       ("visibility", `Assoc [("type", `String "string"); ("description", `String "public|unlisted|internal|direct (default: internal)")]);
       ("ttl_hours", `Assoc [("type", `String "integer"); ("description", `String "Time-to-live in hours (default: 168, max: 720)")]);
       ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. webrtc, code-review)")]);

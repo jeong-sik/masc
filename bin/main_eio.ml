@@ -298,7 +298,9 @@ let filter_board_posts ~exclude_system posts =
   if not exclude_system then posts
   else
     List.filter
-      (fun (p : Board.post) -> not (is_system_board_author (Board.Agent_id.to_string p.author)))
+      (fun (p : Board.post) ->
+         Board.classify_post_kind p <> Board.System_post
+         && not (is_system_board_author (Board.Agent_id.to_string p.author)))
       posts
 
 let max_filtered_board_window = 5200
@@ -306,26 +308,6 @@ let max_filtered_board_window = 5200
 let board_fetch_limit ~exclude_system ~limit ~offset =
   let base = limit + offset in
   if exclude_system then max base max_filtered_board_window else base
-
-let board_title_of_content content =
-  let trimmed = String.trim content in
-  let without_flair =
-    if String.length trimmed >= 7 && String.sub trimmed 0 7 = "[flair:" then
-      match String.index_opt trimmed ']' with
-      | Some idx when idx + 1 < String.length trimmed ->
-          String.trim (String.sub trimmed (idx + 1) (String.length trimmed - idx - 1))
-      | _ -> trimmed
-    else
-      trimmed
-  in
-  let first_line =
-    match String.split_on_char '\n' without_flair with
-    | line :: _ -> String.trim line
-    | [] -> ""
-  in
-  let line = if first_line = "" then "Untitled post" else first_line in
-  if String.length line <= 96 then line
-  else String.sub line 0 93 ^ "..."
 
 let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
   let base_fields =
@@ -346,7 +328,8 @@ let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
   `Assoc
     ( fields
       @ [
-          ("title", `String (board_title_of_content p.content));
+          ("title", `String p.title);
+          ("body", `String p.body);
           ("votes", `Int score);
           ("comment_count", `Int p.reply_count);
           ("created_at_iso", `String (iso8601_of_unix p.created_at));

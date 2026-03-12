@@ -116,10 +116,19 @@ type visibility =
   | Internal    (* This MASC instance only *)
   | Direct      (* Mentioned agents only *)
 
+type post_kind =
+  | Human_post
+  | Automation_post
+  | System_post
+
 type post = {
   id: Post_id.t;
   author: Agent_id.t;
+  title: string;
+  body: string;
   content: string;
+  post_kind: post_kind;
+  meta_json: Yojson.Safe.t option;
   visibility: visibility;
   created_at: float;
   updated_at: float;   (* Last activity: vote, comment, edit *)
@@ -348,15 +357,16 @@ let visibility_to_string = function
   | Internal -> "internal"
   | Direct -> "direct"
 
-type post_kind =
-  | Human_post
-  | Automation_post
-  | System_post
-
 let post_kind_to_string = function
   | Human_post -> "human"
   | Automation_post -> "automation"
   | System_post -> "system"
+
+let post_kind_of_string = function
+  | "human" -> Some Human_post
+  | "automation" -> Some Automation_post
+  | "system" -> Some System_post
+  | _ -> None
 
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
@@ -370,16 +380,16 @@ let contains_substring haystack needle =
     in
     loop 0
 
-let classify_post_kind (p : post) =
-  let author = Agent_id.to_string p.author |> String.lowercase_ascii in
+let infer_post_kind ~author ~visibility ~expires_at ~hearth =
+  let author = String.lowercase_ascii author in
   let hearth =
-    match p.hearth with
+    match hearth with
     | Some value -> String.lowercase_ascii (String.trim value)
     | None -> ""
   in
   if author = "lodge-system" || author = "team-session" then
     System_post
-  else if p.visibility = Internal && p.expires_at > 0.0 && hearth <> ""
+  else if visibility = Internal && expires_at > 0.0 && hearth <> ""
           && (String.starts_with ~prefix:"mdal" hearth
               || contains_substring hearth "harness")
   then
@@ -387,10 +397,99 @@ let classify_post_kind (p : post) =
   else
     Human_post
 
+let classify_post_kind (p : post) = p.post_kind
+
+let state_start_marker = "[STATE]"
+let state_end_marker = "[/STATE]"
+
+let extract_state_block (text : string) : string option * string =
+  let start_re = Str.regexp_string state_start_marker in
+  let end_re = Str.regexp_string state_end_marker in
+  try
+    let start_idx = Str.search_forward start_re text 0 in
+    let block_body_start = start_idx + String.length state_start_marker in
+    let end_idx =
+      try Str.search_forward end_re text block_body_start
+      with Not_found -> String.length text
+    in
+    let block_end =
+      min (String.length text) (end_idx + String.length state_end_marker)
+    in
+    let state_block =
+      String.sub text start_idx (block_end - start_idx) |> String.trim
+    in
+    let before =
+      if start_idx = 0 then "" else String.sub text 0 start_idx
+    in
+    let after =
+      if block_end >= String.length text then ""
+      else String.sub text block_end (String.length text - block_end)
+    in
+    Some state_block, String.trim (before ^ after)
+  with Not_found -> None, String.trim text
+
+let meta_state_block (meta_json : Yojson.Safe.t option) =
+  match meta_json with
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "state_block" fields with
+      | Some (`String value) ->
+          let value = String.trim value in
+          if value = "" then None else Some value
+      | _ -> None)
+  | _ -> None
+
+let merge_meta_json ?state_block (meta_json : Yojson.Safe.t option) :
+    Yojson.Safe.t option =
+  let fields =
+    match meta_json with
+    | Some (`Assoc assoc) -> assoc
+    | _ -> []
+  in
+  let fields =
+    match state_block with
+    | Some block when block <> "" && not (List.mem_assoc "state_block" fields) ->
+        ("state_block", `String block) :: fields
+    | _ -> fields
+  in
+  match fields with
+  | [] -> None
+  | _ -> Some (`Assoc fields)
+
+let derive_post_title (body : string) =
+  let first_line =
+    body
+    |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.find_opt (fun line -> line <> "")
+    |> Option.value ~default:"Untitled post"
+  in
+  if String.length first_line <= 80 then first_line
+  else String.sub first_line 0 77 ^ "..."
+
+let normalize_post_payload ~author ~content ?title ?body ?post_kind ?meta_json
+    ~visibility ~expires_at ~hearth () =
+  let raw_body = Option.value body ~default:content in
+  let extracted_state, stripped_body = extract_state_block raw_body in
+  let normalized_body = String.trim stripped_body in
+  let normalized_title =
+    match title with
+    | Some value when String.trim value <> "" -> String.trim value
+    | _ -> derive_post_title normalized_body
+  in
+  let normalized_kind =
+    match post_kind with
+    | Some kind -> kind
+    | None -> infer_post_kind ~author ~visibility ~expires_at ~hearth
+  in
+  let merged_meta = merge_meta_json ?state_block:extracted_state meta_json in
+  normalized_title, normalized_body, normalized_kind, merged_meta
+
 let post_to_yojson (p : post) : Yojson.Safe.t =
   `Assoc ([
     ("id", `String (Post_id.to_string p.id));
     ("author", `String (Agent_id.to_string p.author));
+    ("title", `String p.title);
+    ("body", `String p.body);
     ("post_kind", `String (post_kind_to_string (classify_post_kind p)));
     ("content", `String p.content);
     ("visibility", `String (visibility_to_string p.visibility));
@@ -402,7 +501,8 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
     ("score", `Int (p.votes_up - p.votes_down));
     ("reply_count", `Int p.reply_count);
   ] @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
-    @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> []))
+    @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> [])
+    @ (match p.meta_json with Some meta -> [("meta", meta)] | None -> []))
 
 let comment_to_yojson (c : comment) : Yojson.Safe.t =
   `Assoc [
@@ -470,7 +570,8 @@ let append_comment (c : comment) =
 
 (** {1 Post Operations} *)
 
-let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours) ?hearth ?thread_id ()
+let create_post store ~author ~content ?title ?body ?post_kind ?meta_json
+    ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours) ?hearth ?thread_id ()
   : (post, board_error) result =
   maybe_sweep store;
 
@@ -479,19 +580,26 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
   | Error e -> Error e
   | Ok author_id ->
 
-  (* Validate content length *)
-  if String.length content > Limits.max_content_length then
-    Error (Validation_error (Printf.sprintf "Content too long: %d > %d"
-      (String.length content) Limits.max_content_length))
-  else if String.length content = 0 then
-    Error (Validation_error "Content cannot be empty")
-  else
-
-  (* Validate TTL: 0 = permanent, else cap at max_ttl_hours *)
   let ttl = if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours in
 
   (* Normalize hearth: lowercase + trim *)
   let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
+  let expires_at =
+    let now = Time_compat.now () in
+    if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0)
+  in
+  let normalized_title, normalized_body, normalized_kind, normalized_meta =
+    normalize_post_payload ~author ~content ?title ?body ?post_kind ?meta_json
+      ~visibility ~expires_at ~hearth ()
+  in
+
+  (* Validate body length *)
+  if String.length normalized_body > Limits.max_content_length then
+    Error (Validation_error (Printf.sprintf "Content too long: %d > %d"
+      (String.length normalized_body) Limits.max_content_length))
+  else if String.length normalized_body = 0 then
+    Error (Validation_error "Content cannot be empty")
+  else
 
   with_lock store (fun () ->
     (* Check capacity *)
@@ -502,11 +610,15 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
       let post = {
         id = Post_id.generate ();
         author = author_id;
-        content;
+        title = normalized_title;
+        body = normalized_body;
+        content = normalized_body;
+        post_kind = normalized_kind;
+        meta_json = normalized_meta;
         visibility;
         created_at = now;
         updated_at = now;  (* Initially same as created_at *)
-        expires_at = if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0);
+        expires_at;
         votes_up = 0;
         votes_down = 0;
         reply_count = 0;
@@ -847,6 +959,8 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     let id_str = json |> member "id" |> to_string in
     let author_str = json |> member "author" |> to_string in
     let content = json |> member "content" |> to_string in
+    let title_opt = json |> member "title" |> to_string_option in
+    let body_opt = json |> member "body" |> to_string_option in
     let vis_str = json |> member "visibility" |> to_string in
     let created_at = json |> member "created_at" |> to_float in
     (* Backward compat: default updated_at to created_at if missing *)
@@ -857,9 +971,45 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     let reply_count = json |> member "reply_count" |> to_int_option |> Option.value ~default:0 in
     let hearth = json |> member "hearth" |> to_string_option in
     let thread_id = json |> member "thread_id" |> to_string_option in
+    let post_kind_opt =
+      match json |> member "post_kind" |> to_string_option with
+      | Some raw -> post_kind_of_string raw
+      | None -> None
+    in
+    let meta_json =
+      match json |> member "meta" with
+      | `Assoc _ as meta -> Some meta
+      | `Null -> None
+      | _ -> (
+          match json |> member "meta_json" |> to_string_option with
+          | Some raw -> (try Some (Yojson.Safe.from_string raw) with _ -> None)
+          | None -> None)
+    in
     match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with
     | Ok id, Ok author, Some visibility ->
-        Some { id; author; content; visibility; created_at; updated_at; expires_at; votes_up; votes_down; reply_count; hearth; thread_id }
+        let title, body, post_kind, meta_json =
+          normalize_post_payload ~author:author_str ~content ?title:title_opt
+            ?body:body_opt ?post_kind:post_kind_opt ?meta_json
+            ~visibility ~expires_at ~hearth ()
+        in
+        Some {
+          id;
+          author;
+          title;
+          body;
+          content = body;
+          post_kind;
+          meta_json;
+          visibility;
+          created_at;
+          updated_at;
+          expires_at;
+          votes_up;
+          votes_down;
+          reply_count;
+          hearth;
+          thread_id;
+        }
     | _ -> None
   with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
@@ -1117,14 +1267,16 @@ let flair_to_yojson (name, emoji, label) =
 
 (** Enhanced post_to_yojson with karma *)
 let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
-  let flair = extract_flair p.content in
+  let flair = extract_flair p.body in
   let flair_json = match flair with Some f -> flair_to_yojson f | None -> `Null in
   `Assoc ([
     ("id", `String (Post_id.to_string p.id));
     ("author", `String (Agent_id.to_string p.author));
     ("author_karma", `Int author_karma);
+    ("title", `String p.title);
+    ("body", `String p.body);
     ("post_kind", `String (post_kind_to_string (classify_post_kind p)));
-    ("content", `String p.content);
+    ("content", `String p.body);
     ("flair", flair_json);
     ("visibility", `String (visibility_to_string p.visibility));
     ("created_at", `Float p.created_at);
@@ -1135,4 +1287,5 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("score", `Int (p.votes_up - p.votes_down));
     ("reply_count", `Int p.reply_count);
   ] @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
-    @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> []))
+    @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> [])
+    @ (match p.meta_json with Some meta -> [("meta", meta)] | None -> []))

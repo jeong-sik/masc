@@ -550,7 +550,7 @@ let keepers_json config =
         | Error _ | Ok None -> None
         | Ok (Some meta) ->
             let agent_json =
-              Keeper_execution.parse_agent_status config ~agent_name:meta.agent_name
+              Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
             in
             let agent_status =
               match agent_json |> U.member "status" with
@@ -576,9 +576,9 @@ let keepers_json config =
                   ("context_ratio", `Null);
                   ("context_tokens", `Int meta.last_total_tokens);
                   ("last_model_used", `String meta.last_model_used);
-                  ("active_model", `String (Keeper_execution.active_model_of_meta meta));
+                  ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                   ( "next_model_hint",
-                    string_option_to_json (Keeper_execution.next_model_hint_of_meta meta)
+                    string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta)
                   );
                   ("autonomy_level", `String meta.autonomy_level);
                   ( "active_goal_ids",
@@ -604,7 +604,7 @@ let persistent_agents_json config =
         | Error _ | Ok None -> None
         | Ok (Some meta) ->
             let agent_json =
-              Keeper_execution.parse_agent_status config ~agent_name:meta.agent_name
+              Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
             in
             let agent_status =
               match agent_json |> U.member "status" with
@@ -630,8 +630,8 @@ let persistent_agents_json config =
                   ("context_ratio", `Null);
                   ("context_tokens", `Int meta.last_total_tokens);
                   ("last_model_used", `String meta.last_model_used);
-                  ("active_model", `String (Keeper_execution.active_model_of_meta meta));
-                  ("next_model_hint", string_option_to_json (Keeper_execution.next_model_hint_of_meta meta));
+                  ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
+                  ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
                   ("autonomy_level", `String meta.autonomy_level);
                   ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
                   ("last_autonomous_action_at",

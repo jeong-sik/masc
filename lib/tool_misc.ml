@@ -167,7 +167,9 @@ let keeper_tool_policy_json autonomy_level =
         ]
 
 let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
-  let status_json = Keeper_execution.parse_agent_status ctx.config ~agent_name:meta.agent_name in
+  let status_json =
+    Keeper_exec_status.parse_agent_status ctx.config ~agent_name:meta.agent_name
+  in
   let status =
     match U.member "status" status_json with
     | `String value -> value
@@ -190,7 +192,7 @@ let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
        ("reward_model_path",
         if String.trim meta.policy_reward_model_path = "" then `Null
         else `String meta.policy_reward_model_path);
-       ("active_model", `String (Keeper_execution.active_model_of_meta meta));
+       ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
        ("allowed_models", `List (List.map (fun model -> `String model) meta.allowed_models));
        ("updated_at", `String meta.updated_at);
      ]

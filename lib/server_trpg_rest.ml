@@ -1686,14 +1686,14 @@ let trpg_keeper_summary_rows (config : Room.config) =
            | Error _ -> None
            | Ok None -> None
            | Ok (Some (m : Keeper_types.keeper_meta)) ->
-               let agent = Keeper_execution.parse_agent_status config ~agent_name:m.agent_name in
+               let agent = Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name in
                let agent_exists = trpg_json_bool_field agent "exists" ~default:false in
                let agent_status =
                  trpg_json_string_opt_field agent "status"
                  |> Option.value ~default:"unknown"
                in
                let is_zombie = trpg_json_bool_field agent "is_zombie" ~default:false in
-               let keepalive_running = Keeper_execution.keeper_keepalive_running m.name in
+               let keepalive_running = Keeper_keepalive.keeper_keepalive_running m.name in
                Some
                  (`Assoc
                    [
@@ -2584,4 +2584,3 @@ let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
          | _ ->
              ignore (send_raw_data
                "event: error\ndata: {\"error\":\"server not ready\"}\n\n"))
-

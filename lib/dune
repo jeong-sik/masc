@@ -70,6 +70,10 @@
    server_h2_gateway
    server_runtime_bootstrap
    server_command_plane_http
+   server_command_plane_http_support
+   server_command_plane_http_stream
+   server_command_plane_http_mutations
+   server_command_plane_http_help
    server_mcp_transport_http
    server_mcp_transport_http_types
    server_mcp_transport_http_session
@@ -436,6 +440,7 @@
    mcts_tree
    speculative_engine)
 <<<<<<< HEAD
+<<<<<<< HEAD
 (private_modules
  room_utils_backend_setup
  room_utils_paths_backend
@@ -465,6 +470,10 @@
  server_mcp_transport_http_mcp_handlers
  server_mcp_transport_http_admin
  server_mcp_transport_http_ag_ui
+ server_command_plane_http_support
+ server_command_plane_http_stream
+ server_command_plane_http_mutations
+ server_command_plane_http_help
  tool_command_plane_support
  tool_command_plane_chain_common
  tool_command_plane_chain_launch

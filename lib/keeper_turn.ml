@@ -27,6 +27,17 @@ let handle_keeper_up ctx args : tool_result =
     let models_in = get_string_list args "models" in
     let allowed_models_in = get_string_list args "allowed_models" in
     let active_model_opt = get_string_opt args "active_model" in
+    let policy_mode_opt = get_string_opt args "policy_mode" in
+    let policy_action_budget_opt = get_string_opt args "policy_action_budget" in
+    let policy_reward_model_path_opt = get_string_opt args "policy_reward_model_path" in
+    let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
+    let policy_shell_mode_opt = get_string_opt args "policy_shell_mode" in
+    let initiative_enabled_opt = get_bool_opt args "initiative_enabled" in
+    let initiative_scope_opt = get_string_opt args "initiative_scope" in
+    let initiative_idle_sec_opt = Safe_ops.json_int_opt "initiative_idle_sec" args in
+    let initiative_cooldown_sec_opt = Safe_ops.json_int_opt "initiative_cooldown_sec" args in
+    let initiative_context_mode_opt = get_string_opt args "initiative_context_mode" in
+    let initiative_post_ttl_hours_opt = Safe_ops.json_int_opt "initiative_post_ttl_hours" args in
     let room_scope_opt = get_string_opt args "room_scope" in
     let scope_kind_opt = get_string_opt args "scope_kind" in
     let trigger_mode_opt = get_string_opt args "trigger_mode" in
@@ -68,6 +79,12 @@ let handle_keeper_up ctx args : tool_result =
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in
     let desires_opt = parse_self_model_opt args "desires" in
+    let resolve_reward_model_path raw_path =
+      let trimmed = String.trim raw_path in
+      if trimmed = "" then ""
+      else if Filename.is_relative trimmed then Filename.concat ctx.config.base_path trimmed
+      else trimmed
+    in
     match read_meta ctx.config name with
     | Error e -> (false, Printf.sprintf "❌ %s" e)
   | Ok None ->
@@ -107,10 +124,10 @@ let handle_keeper_up ctx args : tool_result =
           profile_defaults.allowed_models
       in
       let allowed_models =
-        dedupe_keep_order
-          (allowed_models_in
-           @ profile_defaults.allowed_models
-           @ requested_models)
+        resolve_allowed_models
+          ~explicit_allowed_models:allowed_models_in
+          ~seed_allowed_models:profile_defaults.allowed_models
+          ~models:requested_models
       in
       let active_model =
         active_model_opt
@@ -120,6 +137,59 @@ let handle_keeper_up ctx args : tool_result =
                (match requested_models with
                 | model :: _ -> model
                 | [] -> "")
+      in
+      let policy_mode =
+        first_some policy_mode_opt profile_defaults.policy_mode
+        |> Option.value ~default:"heuristic"
+        |> canonical_policy_mode
+      in
+      let policy_action_budget =
+        first_some policy_action_budget_opt profile_defaults.policy_action_budget
+        |> Option.value ~default:"conversation"
+        |> canonical_policy_action_budget
+      in
+      let policy_reward_model_path =
+        first_some policy_reward_model_path_opt profile_defaults.policy_reward_model_path
+        |> Option.value ~default:""
+        |> resolve_reward_model_path
+      in
+      let policy_voice_enabled =
+        first_some policy_voice_enabled_opt profile_defaults.policy_voice_enabled
+        |> Option.value ~default:false
+      in
+      let policy_shell_mode =
+        first_some policy_shell_mode_opt profile_defaults.policy_shell_mode
+        |> Option.value ~default:"disabled"
+        |> canonical_policy_shell_mode
+      in
+      let initiative_enabled =
+        first_some initiative_enabled_opt profile_defaults.initiative_enabled
+        |> Option.value ~default:false
+      in
+      let initiative_scope =
+        first_some initiative_scope_opt profile_defaults.initiative_scope
+        |> Option.value ~default:"board_only"
+        |> canonical_initiative_scope
+      in
+      let initiative_idle_sec =
+        first_some initiative_idle_sec_opt profile_defaults.initiative_idle_sec
+        |> Option.value ~default:3600
+        |> normalize_initiative_idle_sec
+      in
+      let initiative_cooldown_sec =
+        first_some initiative_cooldown_sec_opt profile_defaults.initiative_cooldown_sec
+        |> Option.value ~default:3600
+        |> normalize_initiative_cooldown_sec
+      in
+      let initiative_context_mode =
+        first_some initiative_context_mode_opt profile_defaults.initiative_context_mode
+        |> Option.value ~default:"board_snapshot"
+        |> canonical_initiative_context_mode
+      in
+      let initiative_post_ttl_hours =
+        first_some initiative_post_ttl_hours_opt profile_defaults.initiative_post_ttl_hours
+        |> Option.value ~default:24
+        |> normalize_initiative_post_ttl_hours
       in
       let mention_targets =
         let raw =
@@ -133,6 +203,16 @@ let handle_keeper_up ctx args : tool_result =
         (false, "❌ goal is required when creating a keeper")
       else if requested_models = [] then
         (false, "❌ models is required when creating a keeper")
+      else if policy_mode = "heuristic" && policy_action_budget <> "conversation" then
+        (false, "❌ policy_action_budget=board requires policy_mode=learned_offline_v1")
+      else if policy_voice_enabled && policy_mode <> "learned_offline_v1" then
+        (false, "❌ policy_voice_enabled=true requires policy_mode=learned_offline_v1")
+      else if policy_shell_mode = "readonly" && policy_mode <> "learned_offline_v1" then
+        (false, "❌ policy_shell_mode=readonly requires policy_mode=learned_offline_v1")
+      else if policy_mode = "learned_offline_v1" && policy_action_budget <> "board"
+              && initiative_enabled
+      then
+        (false, "❌ initiative_enabled=true requires policy_action_budget=board in learned_offline_v1")
       else
         let verify = Option.value ~default:false verify_opt in
         let presence_keepalive =
@@ -281,10 +361,17 @@ let handle_keeper_up ctx args : tool_result =
                models = requested_models;
                allowed_models;
                active_model;
-               policy_mode = Keeper_contract.policy_mode_to_string Keeper_contract.Heuristic;
-               policy_action_budget =
-                 Keeper_contract.policy_action_budget_to_string Keeper_contract.Conversation;
-               policy_reward_model_path = "";
+               policy_mode;
+               policy_action_budget;
+               policy_reward_model_path;
+               policy_voice_enabled;
+               policy_shell_mode;
+               initiative_enabled;
+               initiative_scope;
+               initiative_idle_sec;
+               initiative_cooldown_sec;
+               initiative_context_mode;
+               initiative_post_ttl_hours;
                scope_kind;
                room_scope;
                trigger_mode;
@@ -368,6 +455,20 @@ let handle_keeper_up ctx args : tool_result =
                  ("proactive_enabled", `Bool meta.proactive_enabled);
                  ("proactive_idle_sec", `Int meta.proactive_idle_sec);
                  ("proactive_cooldown_sec", `Int meta.proactive_cooldown_sec);
+                 ("policy_mode", `String meta.policy_mode);
+                 ("policy_action_budget", `String meta.policy_action_budget);
+                 ("policy_reward_model_path",
+                   if String.trim meta.policy_reward_model_path = ""
+                   then `Null
+                   else `String meta.policy_reward_model_path);
+                 ("policy_voice_enabled", `Bool meta.policy_voice_enabled);
+                 ("policy_shell_mode", `String meta.policy_shell_mode);
+                 ("initiative_enabled", `Bool meta.initiative_enabled);
+                 ("initiative_scope", `String meta.initiative_scope);
+                 ("initiative_idle_sec", `Int meta.initiative_idle_sec);
+                 ("initiative_cooldown_sec", `Int meta.initiative_cooldown_sec);
+                 ("initiative_context_mode", `String meta.initiative_context_mode);
+                 ("initiative_post_ttl_hours", `Int meta.initiative_post_ttl_hours);
                  ("drift_enabled", `Bool meta.drift_enabled);
                  ("drift_min_turn_gap", `Int meta.drift_min_turn_gap);
                  ("compaction_profile", `String meta.compaction_profile);
@@ -410,11 +511,12 @@ let handle_keeper_up ctx args : tool_result =
         else profile_defaults.allowed_models
       in
       let allowed_models =
-        dedupe_keep_order
-          (allowed_models_in
-           @ old.allowed_models
-           @ profile_defaults.allowed_models
-           @ models)
+        resolve_allowed_models
+          ~explicit_allowed_models:allowed_models_in
+          ~seed_allowed_models:
+            (if old.allowed_models <> [] then old.allowed_models
+             else profile_defaults.allowed_models)
+          ~models
       in
       let active_model =
         active_model_opt
@@ -426,6 +528,87 @@ let handle_keeper_up ctx args : tool_result =
                (match models with
                 | model :: _ -> model
                 | [] -> "")
+      in
+      let policy_mode =
+        first_some
+          policy_mode_opt
+          (first_some
+             (if String.trim old.policy_mode <> "" then Some old.policy_mode else None)
+             profile_defaults.policy_mode)
+        |> Option.value ~default:"heuristic"
+        |> canonical_policy_mode
+      in
+      let policy_action_budget =
+        first_some
+          policy_action_budget_opt
+          (first_some
+             (if String.trim old.policy_action_budget <> "" then Some old.policy_action_budget else None)
+             profile_defaults.policy_action_budget)
+        |> Option.value ~default:"conversation"
+        |> canonical_policy_action_budget
+      in
+      let policy_reward_model_path =
+        first_some
+          policy_reward_model_path_opt
+          (first_some
+             (if String.trim old.policy_reward_model_path <> "" then Some old.policy_reward_model_path else None)
+             profile_defaults.policy_reward_model_path)
+        |> Option.value ~default:""
+        |> resolve_reward_model_path
+      in
+      let policy_voice_enabled =
+        first_some
+          policy_voice_enabled_opt
+          (first_some (Some old.policy_voice_enabled) profile_defaults.policy_voice_enabled)
+        |> Option.value ~default:false
+      in
+      let policy_shell_mode =
+        first_some
+          policy_shell_mode_opt
+          (first_some (Some old.policy_shell_mode) profile_defaults.policy_shell_mode)
+        |> Option.value ~default:"disabled"
+        |> canonical_policy_shell_mode
+      in
+      let initiative_enabled =
+        first_some
+          initiative_enabled_opt
+          (first_some (Some old.initiative_enabled) profile_defaults.initiative_enabled)
+        |> Option.value ~default:false
+      in
+      let initiative_scope =
+        first_some
+          initiative_scope_opt
+          (first_some (Some old.initiative_scope) profile_defaults.initiative_scope)
+        |> Option.value ~default:"board_only"
+        |> canonical_initiative_scope
+      in
+      let initiative_idle_sec =
+        first_some
+          initiative_idle_sec_opt
+          (first_some (Some old.initiative_idle_sec) profile_defaults.initiative_idle_sec)
+        |> Option.value ~default:3600
+        |> normalize_initiative_idle_sec
+      in
+      let initiative_cooldown_sec =
+        first_some
+          initiative_cooldown_sec_opt
+          (first_some (Some old.initiative_cooldown_sec) profile_defaults.initiative_cooldown_sec)
+        |> Option.value ~default:3600
+        |> normalize_initiative_cooldown_sec
+      in
+      let initiative_context_mode =
+        first_some
+          initiative_context_mode_opt
+          (first_some (Some old.initiative_context_mode) profile_defaults.initiative_context_mode)
+        |> Option.value ~default:"board_snapshot"
+        |> canonical_initiative_context_mode
+      in
+      let initiative_post_ttl_hours =
+        first_some
+          initiative_post_ttl_hours_opt
+          (first_some (Some old.initiative_post_ttl_hours) profile_defaults.initiative_post_ttl_hours)
+        |> Option.value ~default:24
+        |> normalize_initiative_post_ttl_hours
       in
       let room_scope =
         room_scope_opt
@@ -471,6 +654,15 @@ let handle_keeper_up ctx args : tool_result =
           ~fallback_message:old.compaction_message_gate
           ~fallback_token:old.compaction_token_gate
       in
+      if policy_mode = "heuristic" && policy_action_budget <> "conversation" then
+        (false, "❌ policy_action_budget=board requires policy_mode=learned_offline_v1")
+      else if policy_voice_enabled && policy_mode <> "learned_offline_v1" then
+        (false, "❌ policy_voice_enabled=true requires policy_mode=learned_offline_v1")
+      else if policy_shell_mode = "readonly" && policy_mode <> "learned_offline_v1" then
+        (false, "❌ policy_shell_mode=readonly requires policy_mode=learned_offline_v1")
+      else if initiative_enabled && (policy_mode <> "learned_offline_v1" || policy_action_budget <> "board") then
+        (false, "❌ initiative_enabled=true requires policy_mode=learned_offline_v1 and policy_action_budget=board")
+      else
       let updated = { old with
         goal;
         short_goal;
@@ -509,9 +701,17 @@ let handle_keeper_up ctx args : tool_result =
         models;
         allowed_models;
         active_model;
-        policy_mode = canonical_policy_mode old.policy_mode;
-        policy_action_budget = canonical_policy_action_budget old.policy_action_budget;
-        policy_reward_model_path = old.policy_reward_model_path;
+        policy_mode;
+        policy_action_budget;
+        policy_reward_model_path;
+        policy_voice_enabled;
+        policy_shell_mode;
+        initiative_enabled;
+        initiative_scope;
+        initiative_idle_sec;
+        initiative_cooldown_sec;
+        initiative_context_mode;
+        initiative_post_ttl_hours;
         scope_kind;
         room_scope;
         trigger_mode;
@@ -693,7 +893,10 @@ let handle_keeper_msg ctx args : tool_result =
               inline_instructions
           in
           let allowed_models =
-            dedupe_keep_order (profile_defaults.allowed_models @ inline_models)
+            resolve_allowed_models
+              ~explicit_allowed_models:[]
+              ~seed_allowed_models:profile_defaults.allowed_models
+              ~models:inline_models
           in
           let active_model =
             profile_defaults.active_model
@@ -702,6 +905,56 @@ let handle_keeper_msg ctx args : tool_result =
                    (match inline_models with
                     | model :: _ -> model
                     | [] -> "")
+          in
+          let policy_mode =
+            profile_defaults.policy_mode
+            |> Option.value ~default:"heuristic"
+            |> canonical_policy_mode
+          in
+          let policy_action_budget =
+            profile_defaults.policy_action_budget
+            |> Option.value ~default:"conversation"
+            |> canonical_policy_action_budget
+          in
+          let policy_reward_model_path =
+            profile_defaults.policy_reward_model_path
+            |> Option.value ~default:""
+          in
+          let policy_voice_enabled =
+            profile_defaults.policy_voice_enabled |> Option.value ~default:false
+          in
+          let policy_shell_mode =
+            profile_defaults.policy_shell_mode
+            |> Option.value ~default:"disabled"
+            |> canonical_policy_shell_mode
+          in
+          let initiative_enabled =
+            profile_defaults.initiative_enabled |> Option.value ~default:false
+          in
+          let initiative_scope =
+            profile_defaults.initiative_scope
+            |> Option.value ~default:"board_only"
+            |> canonical_initiative_scope
+          in
+          let initiative_idle_sec =
+            profile_defaults.initiative_idle_sec
+            |> Option.value ~default:3600
+            |> normalize_initiative_idle_sec
+          in
+          let initiative_cooldown_sec =
+            profile_defaults.initiative_cooldown_sec
+            |> Option.value ~default:3600
+            |> normalize_initiative_cooldown_sec
+          in
+          let initiative_context_mode =
+            profile_defaults.initiative_context_mode
+            |> Option.value ~default:"board_snapshot"
+            |> canonical_initiative_context_mode
+          in
+          let initiative_post_ttl_hours =
+            profile_defaults.initiative_post_ttl_hours
+            |> Option.value ~default:24
+            |> normalize_initiative_post_ttl_hours
           in
           let room_scope =
             profile_defaults.room_scope |> Option.value ~default:"current"
@@ -741,10 +994,17 @@ let handle_keeper_msg ctx args : tool_result =
             models = inline_models;
             allowed_models;
             active_model;
-            policy_mode = Keeper_contract.policy_mode_to_string Keeper_contract.Heuristic;
-            policy_action_budget =
-              Keeper_contract.policy_action_budget_to_string Keeper_contract.Conversation;
-            policy_reward_model_path = "";
+            policy_mode;
+            policy_action_budget;
+            policy_reward_model_path;
+            policy_voice_enabled;
+            policy_shell_mode;
+            initiative_enabled;
+            initiative_scope;
+            initiative_idle_sec;
+            initiative_cooldown_sec;
+            initiative_context_mode;
+            initiative_post_ttl_hours;
             scope_kind;
             room_scope;
             trigger_mode;
@@ -1108,7 +1368,7 @@ let handle_keeper_msg ctx args : tool_result =
                   messages = msgs;
                   temperature = 0.7;
                   max_tokens = turn_max_tokens;
-                  tools = keeper_llm_tools;
+                  tools = keeper_allowed_llm_tools meta;
                   response_format = `Text;
                 } : Llm_client.completion_request)
               ) specs
@@ -1235,7 +1495,7 @@ let handle_keeper_msg ctx args : tool_result =
                       all_tools_so_far
                   in
                   let next_tools =
-                    if write_done then [] else keeper_llm_tools
+                    keeper_allowed_llm_tools ~write_done meta
                   in
                   let followup_requests =
                     List.map (fun (model : Llm_client.model_spec) ->

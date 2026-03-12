@@ -16,10 +16,10 @@
     - max_fanout: 20 (prevents exponential explosion in parallel branches)
 
     These limits can be configured via environment variables:
-    - LLM_MCP_CHAIN_MAX_DEPTH (default: 20)
-    - LLM_MCP_CHAIN_MAX_CONCURRENCY (default: 10)
-    - LLM_MCP_CHAIN_MAX_NODES (default: 100)
-    - LLM_MCP_CHAIN_MAX_FANOUT (default: 20)
+    - MASC_CHAIN_MAX_DEPTH (default: 20)
+    - MASC_CHAIN_MAX_CONCURRENCY (default: 10)
+    - MASC_CHAIN_MAX_NODES (default: 100)
+    - MASC_CHAIN_MAX_FANOUT (default: 20)
 *)
 
 (* Fiber-safe random state for subgraph ID generation *)
@@ -31,25 +31,25 @@ open Chain_types
 
 (** Maximum allowed chain depth to prevent stack overflow *)
 let security_max_depth =
-  match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_DEPTH" with
+  match Sys.getenv_opt "MASC_CHAIN_MAX_DEPTH" with
   | Some s -> (try max 1 (int_of_string s) with Failure _ -> 20)
   | None -> 20
 
 (** Maximum allowed concurrency to prevent resource exhaustion *)
 let security_max_concurrency =
-  match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_CONCURRENCY" with
+  match Sys.getenv_opt "MASC_CHAIN_MAX_CONCURRENCY" with
   | Some s -> (try max 1 (int_of_string s) with Failure _ -> 10)
   | None -> 10
 
 (** Maximum total nodes in a chain to prevent memory exhaustion *)
 let security_max_nodes =
-  match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_NODES" with
+  match Sys.getenv_opt "MASC_CHAIN_MAX_NODES" with
   | Some s -> (try max 1 (int_of_string s) with Failure _ -> 100)
   | None -> 100
 
 (** Maximum nodes in a single fanout/parallel to prevent exponential explosion *)
 let security_max_fanout =
-  match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_FANOUT" with
+  match Sys.getenv_opt "MASC_CHAIN_MAX_FANOUT" with
   | Some s -> (try max 1 (int_of_string s) with Failure _ -> 20)
   | None -> 20
 

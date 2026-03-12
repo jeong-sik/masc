@@ -1,4 +1,4 @@
-(** Structured logging for llm-mcp
+(** Structured logging for the native MASC chain plane
 
     Provides leveled logging with optional JSON output for production.
 
@@ -10,8 +10,8 @@
     ]}
 
     Environment variables:
-    - LLM_MCP_LOG_LEVEL: debug|info|warn|error (default: info)
-    - LLM_MCP_LOG_FORMAT: text|json (default: text)
+    - MASC_CHAIN_LOG_LEVEL: debug|info|warn|error (default: info)
+    - MASC_CHAIN_LOG_FORMAT: text|json (default: text)
 
     @since 0.3.0
 *)
@@ -67,10 +67,10 @@ let config = {
 
 let init () =
   (* Read from environment *)
-  (match Sys.getenv_opt "LLM_MCP_LOG_LEVEL" with
+  (match Sys.getenv_opt "MASC_CHAIN_LOG_LEVEL" with
    | Some s -> config.min_level <- level_of_string (String.lowercase_ascii s)
    | None -> ());
-  (match Sys.getenv_opt "LLM_MCP_LOG_FORMAT" with
+  (match Sys.getenv_opt "MASC_CHAIN_LOG_FORMAT" with
    | Some "json" -> config.format <- Json
    | _ -> config.format <- Text)
 

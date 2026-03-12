@@ -1,4 +1,4 @@
-(** Centralized error types for llm-mcp
+(** Centralized error types for chain/provider execution
 
     This module provides structured error types to replace string-based errors.
     Benefits:

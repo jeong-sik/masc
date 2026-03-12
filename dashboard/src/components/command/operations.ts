@@ -333,7 +333,7 @@ export function ChainsSurface() {
         </div>
         <article class="command-guide-card ${chainStatusTone(summary?.connection.status)}">
           <div class="command-guide-head">
-            <strong>llm-mcp 연결</strong>
+            <strong>native chain 연결</strong>
             <span class="command-chip ${chainStatusTone(summary?.connection.status)}">${summary?.connection.status ?? 'disconnected'}</span>
           </div>
           <p>${summary?.connection.message ?? '체인 요약은 MASC 프록시를 통해 집계됩니다.'}</p>

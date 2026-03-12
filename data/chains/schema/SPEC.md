@@ -160,7 +160,7 @@ Validate chains using the JSON Schema:
 ajv validate -s schema/chain-v1.schema.json -d my-chain.json
 
 # Using OCaml
-dune exec -- llm-mcp chain.validate my-chain.json
+dune exec -- masc-mcp chain.validate my-chain.json
 ```
 
 ## Versioning
@@ -178,4 +178,4 @@ MIT License - Use freely, attribution appreciated.
 
 ---
 
-*Part of the [llm-mcp](https://github.com/jeong-sik/llm-mcp) project*
+*Part of the MASC chain plane*

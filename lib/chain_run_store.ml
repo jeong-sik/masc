@@ -6,9 +6,9 @@
 
 open Chain_types
 
-let max_history () = Safe_parse.env_int ~var:"LLM_MCP_CHAIN_RUN_HISTORY" ~default:50
-let max_output_chars () = Safe_parse.env_int ~var:"LLM_MCP_CHAIN_OUTPUT_MAX_CHARS" ~default:4000
-let max_preview_chars () = Safe_parse.env_int ~var:"LLM_MCP_CHAIN_OUTPUT_PREVIEW_CHARS" ~default:240
+let max_history () = Safe_parse.env_int ~var:"MASC_CHAIN_RUN_HISTORY" ~default:50
+let max_output_chars () = Safe_parse.env_int ~var:"MASC_CHAIN_OUTPUT_MAX_CHARS" ~default:4000
+let max_preview_chars () = Safe_parse.env_int ~var:"MASC_CHAIN_OUTPUT_PREVIEW_CHARS" ~default:240
 
 let default_store_path () =
   let home =
@@ -16,15 +16,12 @@ let default_store_path () =
     | Some path when String.trim path <> "" -> path
     | _ -> "/tmp"
   in
-  Filename.concat home "logs/llm_mcp_chain_runs.jsonl"
+  Filename.concat home "logs/masc_chain_run_store.jsonl"
 
 let store_path () =
   match Sys.getenv_opt "MASC_CHAIN_RUN_STORE_PATH" with
   | Some path when String.trim path <> "" -> path
-  | _ -> (
-      match Sys.getenv_opt "LLM_MCP_CHAIN_RUN_STORE_PATH" with
-      | Some path when String.trim path <> "" -> path
-      | _ -> default_store_path ())
+  | _ -> default_store_path ()
 
 let ensure_dir path =
   let rec ensure current =

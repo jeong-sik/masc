@@ -1,5 +1,15 @@
 # MASC-MCP Full Specification
 
+> Warning
+> This file is no longer the current architecture SSOT.
+> Treat it as a historical broad specification snapshot.
+> For current merged truth, start from:
+> - [README.md](../README.md)
+> - [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md)
+> - [MCP-SURFACE-AUDIT.md](./MCP-SURFACE-AUDIT.md)
+> - [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
+> - [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)
+
 > Multi-Agent Streaming Coordination over Model Context Protocol
 
 **Version**: 3.0.0 (Phase 13)

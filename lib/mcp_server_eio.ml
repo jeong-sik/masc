@@ -61,6 +61,9 @@ let validate_initialize_params = Mcp_server.validate_initialize_params
 let has_field = Mcp_server.has_field
 let get_field = Mcp_server.get_field
 
+let public_tool_help_schemas () =
+  Config.visible_tool_schemas ()
+
 (* Heartbeat module extracted to lib/heartbeat.ml for testability *)
 
 (** Unregister agent synchronously - adapter for Session.registry
@@ -186,21 +189,20 @@ let handle_read_resource_eio state id params =
           | "tool-help-index" ->
               ( "text/markdown",
                 Some
-                  (Tool_help_registry.index_markdown Config.raw_all_tool_schemas) )
+                  (Tool_help_registry.index_markdown (public_tool_help_schemas ())) )
           | s when String.starts_with ~prefix:"tool-help/" s ->
               let tool_name =
                 String.sub s (String.length "tool-help/")
                   (String.length s - String.length "tool-help/")
               in
-              let text =
+              let text_opt =
                 match
-                  Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name
+                  Tool_help_registry.find_entry (public_tool_help_schemas ()) tool_name
                 with
-                | Some entry -> Tool_help_registry.entry_markdown entry
-                | None ->
-                    Printf.sprintf "# %s\n\nUnknown tool." tool_name
+                | Some entry -> Some (Tool_help_registry.entry_markdown entry)
+                | None -> None
               in
-              ("text/markdown", Some text)
+              ("text/markdown", text_opt)
           | "status" -> ("text/markdown", Some (Room.status config))
           | "status.json" ->
               let state_json = Types.room_state_to_yojson (Room.read_state config) in
@@ -441,7 +443,10 @@ let handle_read_resource_eio state id params =
         in
 
         match text_opt with
-        | None -> make_error ~id (-32602) ("Unknown resource: " ^ uri_str)
+        | None ->
+            make_error ~id
+              ~data:(`Assoc [ ("uri", `String uri_str) ])
+              (-32002) "Resource not found"
         | Some text ->
             let contents = `List [
               `Assoc [
@@ -3287,6 +3292,10 @@ let maybe_assoc_field name = function
 let tool_output_schema_field _name = None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
+  let implementation_status =
+    Tool_catalog.implementation_status schema.name
+    |> Tool_catalog.implementation_status_to_string
+  in
   let base =
     [
       ("name", `String schema.name);
@@ -3296,6 +3305,7 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
         `List
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
+      ("implementationStatus", `String implementation_status);
     ]
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
@@ -3606,7 +3616,7 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
 
 let handle_list_resources_eio id cursor =
   let tool_help_resources =
-    Config.raw_all_tool_schemas
+    public_tool_help_schemas ()
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
            String.compare a.name b.name)
     |> List.map (fun (schema : Types.tool_schema) ->

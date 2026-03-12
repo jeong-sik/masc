@@ -150,6 +150,65 @@ let rec resources_list_all ~clock ~sw ?cursor state acc =
   match next_cursor_of_response response with
   | Some next -> resources_list_all ~clock ~sw ~cursor:next state (acc @ resources)
   | None -> acc @ resources
+
+let resource_read_response ~clock ~sw state uri =
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 24);
+          ("method", `String "resources/read");
+          ("params", `Assoc [ ("uri", `String uri) ]);
+        ])
+  in
+  Mcp_eio.handle_request ~clock ~sw state request
+
+let error_code_exn response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "error" fields with
+      | Some (`Assoc error_fields) -> (
+          match List.assoc_opt "code" error_fields with
+          | Some (`Int code) -> code
+          | _ -> Alcotest.fail "error code missing")
+      | _ -> Alcotest.fail "error not an object")
+  | _ -> Alcotest.fail "response not an object"
+
+let error_message_exn response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "error" fields with
+      | Some (`Assoc error_fields) -> (
+          match List.assoc_opt "message" error_fields with
+          | Some (`String message) -> message
+          | _ -> Alcotest.fail "error message missing")
+      | _ -> Alcotest.fail "error not an object")
+  | _ -> Alcotest.fail "response not an object"
+
+let resource_text_exn response =
+  match response with
+  | `Assoc fields -> (
+      match List.assoc_opt "result" fields with
+      | Some (`Assoc result_fields) -> (
+          match List.assoc_opt "contents" result_fields with
+          | Some (`List (`Assoc content_fields :: _)) -> (
+              match List.assoc_opt "text" content_fields with
+              | Some (`String value) -> value
+              | _ -> Alcotest.fail "resource text missing")
+          | _ -> Alcotest.fail "resource contents missing")
+      | _ -> Alcotest.fail "result not an object")
+  | _ -> Alcotest.fail "response not an object"
+
+let resource_uris resources =
+  resources
+  |> List.filter_map (function
+       | `Assoc fields -> (
+           match List.assoc_opt "uri" fields with
+           | Some (`String uri) -> Some uri
+           | _ -> None)
+       | _ -> None)
+
 let find_tool_exn tools name =
   match
     List.find_map
@@ -1451,6 +1510,21 @@ let test_handle_request_resources_list_includes_tool_help () =
     (Option.is_some (next_cursor_of_response response));
   cleanup_dir base_path
 
+let test_handle_request_resources_list_hides_hidden_tool_help () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let uris = resources_list_all ~clock ~sw state [] |> resource_uris in
+  Alcotest.(check bool) "visible tool help listed" true
+    (List.mem "masc://tool-help/masc_status" uris);
+  Alcotest.(check bool) "hidden deprecated tool help omitted" false
+    (List.mem "masc://tool-help/masc_claim" uris);
+  Alcotest.(check bool) "hidden placeholder tool help omitted" false
+    (List.mem "masc://tool-help/masc_archive_save" uris);
+  cleanup_dir base_path
+
 let test_handle_request_resources_list_paginates () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -1538,33 +1612,44 @@ let test_handle_request_tool_help_resource_read () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let request =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ("id", `Int 24);
-          ("method", `String "resources/read");
-          ("params", `Assoc [ ("uri", `String "masc://tool-help/masc_status") ]);
-        ])
+  let response =
+    resource_read_response ~clock ~sw state "masc://tool-help/masc_status"
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  let text =
-    match response with
-    | `Assoc fields -> (
-        match List.assoc_opt "result" fields with
-        | Some (`Assoc result_fields) -> (
-            match List.assoc_opt "contents" result_fields with
-            | Some (`List (`Assoc content_fields :: _)) -> (
-                match List.assoc_opt "text" content_fields with
-                | Some (`String value) -> value
-                | _ -> Alcotest.fail "resource text missing")
-            | _ -> Alcotest.fail "resource contents missing")
-        | _ -> Alcotest.fail "result not an object")
-    | _ -> Alcotest.fail "response not an object"
-  in
+  let text = resource_text_exn response in
   Alcotest.(check bool) "resource contains heading" true
     (contains_substring text "# masc_status");
+  cleanup_dir base_path
+
+let test_handle_request_tool_help_index_hides_hidden_tools () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let response =
+    resource_read_response ~clock ~sw state "masc://tool-help-index"
+  in
+  let text = resource_text_exn response in
+  Alcotest.(check bool) "index includes visible tool" true
+    (contains_substring text "`masc_status`");
+  Alcotest.(check bool) "index excludes hidden alias" false
+    (contains_substring text "`masc_claim`");
+  Alcotest.(check bool) "index excludes placeholder tool" false
+    (contains_substring text "`masc_archive_save`");
+  cleanup_dir base_path
+
+let test_handle_request_resource_not_found_error_code () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let response =
+    resource_read_response ~clock ~sw state "masc://tool-help/masc_claim"
+  in
+  Alcotest.(check int) "resource miss code" (-32002) (error_code_exn response);
+  Alcotest.(check string) "resource miss message" "Resource not found"
+    (error_message_exn response);
   cleanup_dir base_path
 
 let test_handle_request_resources_subscribe_requires_session () =
@@ -1688,9 +1773,15 @@ let eio_tests = [
   "handle prompts/get command_truth filters run_id", `Quick,
     test_handle_request_prompts_get_command_truth_filters_run_id;
   "handle resources/list includes tool-help", `Quick, test_handle_request_resources_list_includes_tool_help;
+  "handle resources/list hides hidden tool-help", `Quick,
+    test_handle_request_resources_list_hides_hidden_tool_help;
   "handle resources/list paginates", `Quick,
     test_handle_request_resources_list_paginates;
   "handle resources/read tool-help", `Quick, test_handle_request_tool_help_resource_read;
+  "handle tool-help index hides hidden tools", `Quick,
+    test_handle_request_tool_help_index_hides_hidden_tools;
+  "handle resources/read not found code", `Quick,
+    test_handle_request_resource_not_found_error_code;
   "handle resources/subscribe requires session", `Quick,
     test_handle_request_resources_subscribe_requires_session;
   "handle resources/subscribe roundtrip", `Quick,

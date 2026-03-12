@@ -64,10 +64,17 @@ let me_root_opt () =
       | Some path -> Some path
       | None -> Sys.getenv_opt "DUNE_SOURCEROOT" |> trim_opt)
 
-let me_root () =
+let me_root_result () =
   match me_root_opt () with
-  | Some path -> path
-  | None -> failwith "MASC_WORKSPACE_ROOT or ME_ROOT is required (tests may use DUNE_SOURCEROOT)"
+  | Some path -> Ok path
+  | None ->
+      Error
+        "MASC_WORKSPACE_ROOT or ME_ROOT is required (tests may use DUNE_SOURCEROOT)"
+
+let me_root () =
+  match me_root_result () with
+  | Ok path -> path
+  | Error msg -> failwith msg
 
 let sb_path_opt () =
   match Sys.getenv_opt "MASC_SB_PATH" |> trim_opt with
@@ -79,10 +86,17 @@ let sb_path_opt () =
           if existing_file path then Some path else None
       | None -> None)
 
-let sb_path () =
+let sb_path_result () =
   match sb_path_opt () with
-  | Some path -> path
-  | None -> failwith "Unable to resolve scripts/sb. Set MASC_SB_PATH or MASC_WORKSPACE_ROOT."
+  | Some path -> Ok path
+  | None ->
+      Error
+        "Unable to resolve scripts/sb. Set MASC_SB_PATH or MASC_WORKSPACE_ROOT."
+
+let sb_path () =
+  match sb_path_result () with
+  | Ok path -> path
+  | Error msg -> failwith msg
 
 let masc_http_port () =
   match Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt with
@@ -92,16 +106,25 @@ let masc_http_port () =
       | Some port -> port
       | None -> "8935")
 
-let masc_http_base_url () =
+let rec masc_http_base_url () =
+  match masc_http_base_url_result () with
+  | Ok base -> base
+  | Error msg -> failwith msg
+
+and masc_http_base_url_result () =
   match Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt with
-  | Some base -> strip_trailing_slashes base
+  | Some base -> Ok (strip_trailing_slashes base)
   | None ->
       let host =
         match Sys.getenv_opt "MASC_HOST" |> trim_opt with
-        | Some value -> value
-        | None -> failwith "MASC_HTTP_BASE_URL is required (or set MASC_HOST with MASC_HTTP_PORT/MASC_PORT)"
+        | Some value -> Ok value
+        | None ->
+            Error
+              "MASC_HTTP_BASE_URL is required (or set MASC_HOST with MASC_HTTP_PORT/MASC_PORT)"
       in
-      Printf.sprintf "http://%s:%s" host (masc_http_port ())
+      Result.map
+        (fun host -> Printf.sprintf "http://%s:%s" host (masc_http_port ()))
+        host
 
 let libdatachannel_path_candidates () =
   let env_path =
@@ -497,25 +520,40 @@ module Endpoints = struct
   let llm_mcp_url =
     get_string ~default:"" "LLM_MCP_URL"  (* Default empty - not used *)
 
+  let masc_host_result () =
+    match Uri.host (Uri.of_string (masc_http_base_url ())) with
+    | Some host -> Ok host
+    | None -> Error "MASC_HTTP_BASE_URL must include a host"
+
   (** MASC server host *)
   let masc_host () =
-    match Uri.host (Uri.of_string (masc_http_base_url ())) with
-    | Some host -> host
-    | None -> failwith "MASC_HTTP_BASE_URL must include a host"
+    match masc_host_result () with
+    | Ok host -> host
+    | Error msg -> failwith msg
+
+  let masc_port_result () =
+    match Uri.port (Uri.of_string (masc_http_base_url ())) with
+    | Some port -> Ok port
+    | None -> (
+        match Uri.scheme (Uri.of_string (masc_http_base_url ())) with
+        | Some "https" -> Ok 443
+        | Some "http" -> Ok 80
+        | _ -> Error "MASC_HTTP_BASE_URL must include a port or scheme")
 
   (** MASC server port *)
   let masc_port () =
-    match Uri.port (Uri.of_string (masc_http_base_url ())) with
-    | Some port -> port
-    | None -> (
-        match Uri.scheme (Uri.of_string (masc_http_base_url ())) with
-        | Some "https" -> 443
-        | Some "http" -> 80
-        | _ -> failwith "MASC_HTTP_BASE_URL must include a port or scheme")
+    match masc_port_result () with
+    | Ok port -> port
+    | Error msg -> failwith msg
+
+  let masc_sse_url_result () =
+    Result.map (fun base -> Printf.sprintf "%s/sse" base) (masc_http_base_url_result ())
 
   (** MASC SSE URL (derived) *)
   let masc_sse_url () =
-    Printf.sprintf "%s/sse" (masc_http_base_url ())
+    match masc_sse_url_result () with
+    | Ok url -> url
+    | Error msg -> failwith msg
 end
 
 (** {1 Gardener — Self-Organizing Agent Ecosystem} *)

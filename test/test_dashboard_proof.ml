@@ -268,6 +268,13 @@ let test_dashboard_proof_prefers_actual_activity_over_stronger_persisted_verdict
       let json = Lib.Dashboard_proof.json ~config ~session_id () in
       check string "top-level verdict follows actual activity" "partial"
         (json |> U.member "proof_verdict" |> U.to_string);
+      check string "live verdict" "partial"
+        (json |> U.member "summary" |> U.member "live_verdict" |> U.to_string);
+      check string "historical verdict" "proven"
+        (json |> U.member "summary" |> U.member "historical_verdict"
+       |> U.to_string);
+      check string "verdict basis remains live" "live"
+        (json |> U.member "summary" |> U.member "verdict_basis" |> U.to_string);
       check int "only one active actor counted" 1
         (json |> U.member "summary" |> U.member "actors_count" |> U.to_int);
       check int "planned actors kept separate" 6
@@ -325,6 +332,72 @@ let test_dashboard_proof_marks_mentioned_only_actor_as_unanswered () =
       check string "request source" "supervisor"
         (worker_b |> U.member "requested_by" |> U.to_string))
 
+let test_dashboard_proof_ignores_unknown_mentions_outside_session () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-ignore-unknown-mentions" in
+      let session =
+        sample_session ~agent_names:[ "worker-a"; "worker-b" ]
+          (Unix.gettimeofday ()) session_id
+      in
+      seed_session_artifacts ~session:(Some session)
+        ~events:
+          [
+            ( "team_turn",
+              `Assoc
+                [
+                  ("actor", `String "supervisor");
+                  ("kind", `String "broadcast");
+                  ( "message",
+                    `String
+                      "@worker-b review this proof, and @external-bot can ignore it." );
+                ] );
+            ( "team_turn",
+              `Assoc
+                [
+                  ("actor", `String "worker-a");
+                  ("kind", `String "note");
+                  ("message", `String "Adjusted the proof summary copy.");
+                ] );
+          ]
+        config session_id;
+      let json = Lib.Dashboard_proof.json ~config ~session_id () in
+      check int "only known mention counted" 1
+        (json |> U.member "summary" |> U.member "mentioned_actor_count"
+       |> U.to_int);
+      check bool "unknown mention not promoted to actor" false
+        (json |> U.member "actor_contributions" |> U.to_list
+       |> List.exists (fun row ->
+              String.equal "external-bot" (row |> U.member "actor" |> U.to_string))))
+
+let test_dashboard_proof_uses_historical_verdict_when_live_is_empty () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-historical-only" in
+      let session = sample_session ~agent_names:[ "worker-a"; "worker-b" ]
+          (Unix.gettimeofday ()) session_id in
+      Lib.Team_session_store.save_session config session;
+      write_manual_proof config session_id "proved";
+      let json = Lib.Dashboard_proof.json ~config ~session_id () in
+      check string "historical-only final verdict is partial" "partial"
+        (json |> U.member "proof_verdict" |> U.to_string);
+      check string "live verdict is insufficient" "insufficient"
+        (json |> U.member "summary" |> U.member "live_verdict" |> U.to_string);
+      check string "historical verdict is proven" "proven"
+        (json |> U.member "summary" |> U.member "historical_verdict"
+       |> U.to_string);
+      check string "basis is historical_only" "historical_only"
+        (json |> U.member "summary" |> U.member "verdict_basis"
+       |> U.to_string))
+
 let () =
   Alcotest.run "dashboard_proof"
     [
@@ -337,5 +410,9 @@ let () =
             test_dashboard_proof_prefers_actual_activity_over_stronger_persisted_verdict;
           test_case "marks mentioned-only actor as unanswered" `Quick
             test_dashboard_proof_marks_mentioned_only_actor_as_unanswered;
+          test_case "ignores unknown mentions outside session" `Quick
+            test_dashboard_proof_ignores_unknown_mentions_outside_session;
+          test_case "uses historical verdict when live is empty" `Quick
+            test_dashboard_proof_uses_historical_verdict_when_live_is_empty;
         ] );
     ]

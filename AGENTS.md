@@ -1,6 +1,17 @@
 # MASC-MCP Agent Instructions
 
-Multi-Agent Streaming Coordination server. OCaml 5.x + Eio, 203 MCP tools.
+Multi-Agent Streaming Coordination server.
+
+Current SSOTs:
+
+- Public MCP surface and grouping: `docs/MCP-SURFACE-AUDIT.md`
+- Current merged architecture: `docs/MERGED-ARCHITECTURE-SSOT.md`
+- Canonical public overview: `README.md`
+
+Notes:
+
+- Tool counts and module snapshots in this file are approximate and may drift.
+- Prefer script-based local start flows. The `launchctl` example below is historical, not the default recommendation.
 
 ## Commands
 

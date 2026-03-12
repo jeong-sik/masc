@@ -466,13 +466,19 @@ let handle_tool_admin_update ctx args =
       let result =
         match categories_opt, mode_opt with
         | Some categories, _ ->
-            let config = Config.set_categories room_path categories in
+            let config =
+              Config.set_categories ~actor:ctx.agent_name
+                ~source:"masc_tool_admin_update:mode" room_path categories
+            in
             Ok config
         | None, Some "custom" ->
             Error "mode=custom requires enabled_categories"
         | None, Some raw -> (
             match Mode.mode_of_string raw with
-            | Some mode -> Ok (Config.switch_mode room_path mode)
+            | Some mode ->
+                Ok
+                  (Config.switch_mode ~actor:ctx.agent_name
+                     ~source:"masc_tool_admin_update:mode" room_path mode)
             | None -> Error (Printf.sprintf "unknown mode: %s" raw))
         | None, None -> Error "mode or enabled_categories is required"
       in

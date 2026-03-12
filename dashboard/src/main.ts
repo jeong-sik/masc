@@ -21,6 +21,7 @@ import './styles/animations.css'
 import './styles/live.css'
 import './styles/tool-metrics.css'
 import './styles/tools.css'
+import './styles/chat.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

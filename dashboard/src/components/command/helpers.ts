@@ -32,14 +32,14 @@ export function prettyJson(value: unknown): string {
 }
 
 export function relativeTime(iso?: string | null): string {
-  if (!iso) return 'n/a'
+  if (!iso) return '정보 없음'
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return iso
   const deltaSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (deltaSec < 60) return `${deltaSec}s ago`
-  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}m ago`
-  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}h ago`
-  return `${Math.round(deltaSec / 86400)}d ago`
+  if (deltaSec < 60) return `${deltaSec}초 전`
+  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 전`
+  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 전`
+  return `${Math.round(deltaSec / 86400)}일 전`
 }
 
 export function expiryTone(iso?: string | null): string {
@@ -50,15 +50,15 @@ export function expiryTone(iso?: string | null): string {
 }
 
 export function deadlineLabel(iso?: string | null): string {
-  if (!iso) return 'n/a'
+  if (!iso) return '정보 없음'
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return iso
   const deltaSec = Math.round((ts - Date.now()) / 1000)
-  if (deltaSec <= 0) return 'expired'
-  if (deltaSec < 60) return `in ${deltaSec}s`
-  if (deltaSec < 3600) return `in ${Math.round(deltaSec / 60)}m`
-  if (deltaSec < 86400) return `in ${Math.round(deltaSec / 3600)}h`
-  return `in ${Math.round(deltaSec / 86400)}d`
+  if (deltaSec <= 0) return '기한 지남'
+  if (deltaSec < 60) return `${deltaSec}초 후`
+  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 후`
+  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 후`
+  return `${Math.round(deltaSec / 86400)}일 후`
 }
 
 export function toneClass(tone?: string | null): string {
@@ -116,15 +116,15 @@ export function chainStatusTone(status?: string | null): string {
 }
 
 export function formatPercent(value?: number | null): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a'
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '정보 없음'
   return `${Math.round(value * 100)}%`
 }
 
 export function formatElapsed(value?: number | null): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a'
-  if (value < 60) return `${Math.round(value)}s`
-  if (value < 3600) return `${Math.round(value / 60)}m`
-  return `${Math.round(value / 3600)}h`
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '정보 없음'
+  if (value < 60) return `${Math.round(value)}초`
+  if (value < 3600) return `${Math.round(value / 60)}분`
+  return `${Math.round(value / 3600)}시간`
 }
 
 export function clampPercent(value?: number | null): number {
@@ -152,10 +152,10 @@ export function gaugeStyle(percent: number, color: string): string {
 }
 
 export function historySummary(history?: ChainHistoryEventSummary | null): string {
-  if (!history) return 'No recent chain history'
+  if (!history) return '최근 체인 이력이 없습니다'
   const pieces = [history.event]
   if (typeof history.duration_ms === 'number') pieces.push(`${history.duration_ms}ms`)
-  if (typeof history.tokens === 'number') pieces.push(`${history.tokens} tokens`)
+  if (typeof history.tokens === 'number') pieces.push(`토큰 ${history.tokens}`)
   if (history.message) pieces.push(history.message)
   return pieces.join(' · ')
 }
@@ -187,28 +187,28 @@ export const CHAIN_SSE_EVENT_TYPES = ['chain_start', 'node_start', 'node_complet
 
 export const COMMAND_SURFACE_GUIDE: Record<CommandPlaneSurface, { title: string; description: string }> = {
   warroom: {
-    title: '라이브 워룸',
-    description: '실제 run, worker, message, trace를 한 화면에서 따라가는 기본 진입 표면입니다.',
+    title: '실시간 워룸',
+    description: '실제 실행, 워커, 메시지, 트레이스를 한 화면에서 따라가는 기본 진입 표면입니다.',
   },
   operations: {
     title: '현재 작전 상세',
-    description: '활성 operation, detachment, dependency를 먼저 읽는 기본 진입 표면입니다.',
+    description: '활성 작전, 분견대, 의존 관계를 먼저 읽는 기본 진입 표면입니다.',
   },
   orchestra: {
     title: '룸 오케스트라 맵',
-    description: 'room, session, lane, worker, keeper를 한 장의 작전판으로 읽는 시각화 표면입니다.',
+    description: '룸, 세션, 레인, 워커, 키퍼를 한 장의 작전판으로 읽는 시각화 표면입니다.',
   },
   swarm: {
     title: '스웜 실행 흐름',
-    description: 'lane 이동, worker 결속, blocker를 따라가며 현장감 있게 보는 표면입니다.',
+    description: '레인 이동, 워커 결속, 막힘을 따라가며 현장감 있게 보는 표면입니다.',
   },
   chains: {
     title: '체인 런타임',
-    description: '체인 연결 상태와 operation별 실행 그래프를 확인하는 표면입니다.',
+    description: '체인 연결 상태와 작전별 실행 그래프를 확인하는 표면입니다.',
   },
   topology: {
     title: '지휘 계층',
-    description: '실제 managed unit인지, live agent 기반 자동 투영인지 구분해서 봅니다.',
+    description: '실제 관리 유닛인지, 실시간 에이전트 기반 자동 투영인지 구분해서 봅니다.',
   },
   alerts: {
     title: '경보 모음',
@@ -216,11 +216,11 @@ export const COMMAND_SURFACE_GUIDE: Record<CommandPlaneSurface, { title: string;
   },
   trace: {
     title: '최근 트레이스',
-    description: 'operation, actor, unit 단위 이벤트를 시간순으로 보는 표면입니다.',
+    description: '작전, 주체, 유닛 단위 이벤트를 시간순으로 보는 표면입니다.',
   },
   control: {
     title: '승인과 제어',
-    description: 'decision 승인과 unit 제어를 실제로 수행하는 표면입니다.',
+    description: '결정 승인과 유닛 제어를 실제로 수행하는 표면입니다.',
   },
   summary: {
     title: '지휘 요약',
@@ -280,13 +280,13 @@ export function chainEventsUrl(): string {
 export function unitKindLabel(kind: string): string {
   switch (kind) {
     case 'company':
-      return '중대 / Company'
+      return '중대'
     case 'platoon':
-      return '소대 / Platoon'
+      return '소대'
     case 'squad':
-      return '분대 / Squad'
+      return '분대'
     case 'agent':
-      return '에이전트 / Agent'
+      return '에이전트'
     default:
       return kind
   }
@@ -312,22 +312,22 @@ export function currentSurfaceRecommendation(surface: CommandPlaneSurface): {
     case 'warroom':
       return {
         tool: 'masc_observe_operations',
-        reason: 'live run, worker, message, trace를 한 화면에서 보고 필요한 detail 표면으로 바로 점프합니다.',
+        reason: '실시간 실행, 워커, 메시지, 트레이스를 한 화면에서 보고 필요한 세부 표면으로 바로 이동합니다.',
       }
     case 'operations':
       return {
         tool: 'masc_operation_status',
-        reason: `활성 작전 ${summary?.operations.summary?.active ?? 0}개와 dependency를 먼저 확인합니다.`,
+        reason: `활성 작전 ${summary?.operations.summary?.active ?? 0}개와 의존 관계를 먼저 확인합니다.`,
       }
     case 'swarm':
       return {
         tool: swarm?.recommended_next_tool ?? summary?.swarm_status?.recommended_next_action?.tool ?? 'masc_observe_traces',
-        reason: summary?.swarm_status?.recommended_next_action?.reason ?? 'lane 이동과 blocker를 보고 다음 probe 도구를 고릅니다.',
+        reason: summary?.swarm_status?.recommended_next_action?.reason ?? '레인 이동과 막힘 근거를 보고 다음 확인 도구를 고릅니다.',
       }
     case 'orchestra':
       return {
         tool: 'masc_operator_snapshot',
-        reason: 'room, session, lane, worker, keeper를 한 장에서 훑은 뒤 drill-down 대상을 고릅니다.',
+        reason: '룸, 세션, 레인, 워커, 키퍼를 한 장에서 훑은 뒤 내려볼 대상을 고릅니다.',
       }
     case 'chains':
       return {
@@ -337,22 +337,22 @@ export function currentSurfaceRecommendation(surface: CommandPlaneSurface): {
     case 'topology':
       return {
         tool: 'masc_observe_topology',
-        reason: '이 구조가 실제 관리 단위인지 자동 투영인지 먼저 구분해야 command-plane을 오해하지 않습니다.',
+        reason: '이 구조가 실제 관리 단위인지 자동 투영인지 먼저 구분해야 지휘면을 오해하지 않습니다.',
       }
     case 'alerts':
       return {
         tool: 'masc_observe_alerts',
-        reason: '경보에서 먼저 문제가 된 unit과 operation을 고릅니다.',
+        reason: '경보에서 먼저 문제가 된 유닛과 작전을 고릅니다.',
       }
     case 'trace':
       return {
         tool: 'masc_observe_traces',
-        reason: 'trace 흐름으로 원인 이벤트를 바로 따라갈 수 있습니다.',
+        reason: '트레이스 흐름으로 원인 이벤트를 바로 따라갈 수 있습니다.',
       }
     case 'control':
       return {
         tool: 'masc_operator_action',
-        reason: '승인이나 kill switch 같은 실제 조작은 control 표면과 operator action이 이어집니다.',
+        reason: '승인이나 kill switch 같은 실제 조작은 제어 표면과 operator action이 이어집니다.',
       }
     case 'summary':
     default:

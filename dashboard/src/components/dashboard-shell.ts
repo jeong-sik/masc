@@ -35,16 +35,27 @@ export function ConnectionStatus() {
   return html`
     <div class="connection-status ${isConnected ? 'connected' : 'disconnected'}">
       <span class="status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
-      <span class="status-text">${isConnected ? 'Live' : '재연결 중...'}</span>
-      <span class="event-count">${eventCount.value} events</span>
+      <span class="status-text">${isConnected ? '연결됨' : '재연결 중...'}</span>
+      <span class="event-count">이벤트 ${eventCount.value}</span>
     </div>
   `
 }
 
 function shortCommit(commit: string | null | undefined): string {
   const value = commit?.trim()
-  if (!value) return 'commit unavailable'
+  if (!value) return '커밋 정보 없음'
   return value.length > 10 ? value.slice(0, 10) : value
+}
+
+function residentStatusLabel(
+  kind: 'lodge' | 'gardener' | 'guardian' | 'sentinel',
+  status: 'live' | 'quiet' | 'starting' | 'idle' | 'disabled',
+) {
+  if (status === 'live') return '가동 중'
+  if (status === 'quiet') return '조용함'
+  if (status === 'starting') return '기동 중'
+  if (status === 'idle') return kind === 'guardian' ? '유휴' : '대기 중'
+  return '비활성'
 }
 
 export function BuildIdentityBadge() {
@@ -53,8 +64,8 @@ export function BuildIdentityBadge() {
   const label = build
     ? `v${build.release_version} · ${shortCommit(build.commit)}`
     : status?.version
-      ? `v${status.version} · commit unavailable`
-      : 'version unavailable'
+      ? `v${status.version} · 커밋 정보 없음`
+      : '버전 정보 없음'
 
   return html`
     <div class="build-identity-wrap">
@@ -66,7 +77,7 @@ export function BuildIdentityBadge() {
           buildIdentityOpen.value = !buildIdentityOpen.value
         }}
       >
-        Server Build · ${label}
+        서버 빌드 · ${label}
       </button>
       ${buildIdentityOpen.value
         ? html`
@@ -77,19 +88,19 @@ export function BuildIdentityBadge() {
               </div>
               <div class="build-badge-row">
                 <span>커밋</span>
-                <strong>${build?.commit ?? 'commit unavailable'}</strong>
+                <strong>${build?.commit ?? '커밋 정보 없음'}</strong>
               </div>
               <div class="build-badge-row">
                 <span>서버 시작</span>
-                <strong>${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : 'unknown'}</strong>
+                <strong>${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
               </div>
               <div class="build-badge-row">
                 <span>업타임</span>
-                <strong>${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : 'unknown'}</strong>
+                <strong>${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : '알 수 없음'}</strong>
               </div>
               <div class="build-badge-row">
                 <span>쉘 스냅샷</span>
-                <strong>${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : 'unknown'}</strong>
+                <strong>${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
               </div>
             </div>
           `
@@ -139,14 +150,16 @@ function SnapshotCard({ currentTab }: { currentTab: string }) {
     residentCards.push(
       renderResidentRuntimeCard(
         'Lodge',
-        lodge.enabled ? (lodge.quiet_active ? 'Quiet' : 'Live') : 'Disabled',
+        lodge.enabled
+          ? residentStatusLabel('lodge', lodge.quiet_active ? 'quiet' : 'live')
+          : residentStatusLabel('lodge', 'disabled'),
         lodge.enabled ? (lodge.quiet_active ? 'warn' : 'ok') : 'bad',
         [
-          renderRuntimeStat('Ticks', lodge.total_ticks ?? 0),
-          renderRuntimeStat('Checkins', lodge.total_checkins ?? 0),
+          renderRuntimeStat('틱', lodge.total_ticks ?? 0),
+          renderRuntimeStat('체크인', lodge.total_checkins ?? 0),
           renderRuntimeStat(
-            'Last result',
-            lodge.last_tick_result?.activity_report ?? lodge.last_skip_reason ?? 'none',
+            '최근 결과',
+            lodge.last_tick_result?.activity_report ?? lodge.last_skip_reason ?? '없음',
           ),
         ],
       ),
@@ -157,22 +170,26 @@ function SnapshotCard({ currentTab }: { currentTab: string }) {
     residentCards.push(
       renderResidentRuntimeCard(
         'Gardener',
-        gardener.alive ? 'Live' : gardener.enabled ? 'Starting' : 'Disabled',
+        gardener.alive
+          ? residentStatusLabel('gardener', 'live')
+          : gardener.enabled
+            ? residentStatusLabel('gardener', 'starting')
+            : residentStatusLabel('gardener', 'disabled'),
         gardener.alive ? 'ok' : gardener.enabled ? 'warn' : 'bad',
         [
           renderRuntimeStat(
-            'Last tick',
+            '최근 tick',
             gardener.last_tick_completed_at
               ? html`<${TimeAgo} timestamp=${gardener.last_tick_completed_at} />`
-              : 'never',
+              : '기록 없음',
           ),
           renderRuntimeStat(
-            'Decision',
-            `${gardener.last_intervention ?? 'none'} · ${gardener.last_decision_source ?? 'none'}`,
+            '판단',
+            `${gardener.last_intervention ?? '없음'} · ${gardener.last_decision_source ?? '없음'}`,
           ),
           renderRuntimeStat(
-            'Backlog',
-            `${gardener.health_summary?.todo_count ?? 0} todo · P1/2 ${gardener.health_summary?.high_priority_todo ?? 0}`,
+            '백로그',
+            `미할당 ${gardener.health_summary?.todo_count ?? 0} · P1/2 ${gardener.health_summary?.high_priority_todo ?? 0}`,
           ),
         ],
         gardener.last_reason ?? gardener.last_error ?? undefined,
@@ -185,15 +202,19 @@ function SnapshotCard({ currentTab }: { currentTab: string }) {
     residentCards.push(
       renderResidentRuntimeCard(
         'Guardian',
-        guardianLive ? 'Live' : guardian.enabled ? 'Idle' : 'Disabled',
+        guardianLive
+          ? residentStatusLabel('guardian', 'live')
+          : guardian.enabled
+            ? residentStatusLabel('guardian', 'idle')
+            : residentStatusLabel('guardian', 'disabled'),
         guardianLive ? 'ok' : guardian.enabled ? 'warn' : 'bad',
         [
-          renderRuntimeStat('Mode', guardian.mode ?? 'unknown'),
+          renderRuntimeStat('모드', guardian.mode ?? '알 수 없음'),
           renderRuntimeStat(
-            'Loops',
+            '루프',
             `zombie ${guardian.zombie_loop_running ? 'on' : 'off'} · gc ${guardian.gc_loop_running ? 'on' : 'off'}`,
           ),
-          renderRuntimeStat('Owner', guardian.runtime_owner ?? 'none'),
+          renderRuntimeStat('소유자', guardian.runtime_owner ?? '없음'),
         ],
         guardian.last_lodge_result?.message
           ?? guardian.last_gc_result
@@ -207,14 +228,18 @@ function SnapshotCard({ currentTab }: { currentTab: string }) {
     residentCards.push(
       renderResidentRuntimeCard(
         'Sentinel',
-        sentinel.started ? 'Live' : sentinel.enabled ? 'Starting' : 'Disabled',
+        sentinel.started
+          ? residentStatusLabel('sentinel', 'live')
+          : sentinel.enabled
+            ? residentStatusLabel('sentinel', 'starting')
+            : residentStatusLabel('sentinel', 'disabled'),
         sentinel.started ? 'ok' : sentinel.enabled ? 'warn' : 'bad',
         [
-          renderRuntimeStat('Agent', sentinel.agent_name ?? 'sentinel'),
-          renderRuntimeStat('Consumers', sentinel.consumers?.length ?? 0),
-          renderRuntimeStat('Guardian owner', sentinel.guardian_runtime_owner ?? 'none'),
+          renderRuntimeStat('에이전트', sentinel.agent_name ?? 'sentinel'),
+          renderRuntimeStat('소비자', sentinel.consumers?.length ?? 0),
+          renderRuntimeStat('가디언 소유자', sentinel.guardian_runtime_owner ?? '없음'),
         ],
-        sentinel.llm_enabled === true ? 'LLM-enabled housekeeping resident' : undefined,
+        sentinel.llm_enabled === true ? 'LLM 기반 housekeeping resident' : undefined,
       ),
     )
   }
@@ -224,23 +249,23 @@ function SnapshotCard({ currentTab }: { currentTab: string }) {
       <div class="rail-card-head">
         <h3>현황</h3>
         <${PanelSemanticDetails} panelId="side_rail.snapshot" compact=${true} />
-        <span class="rail-section-chip ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? 'Live' : 'Offline'}</span>
+        <span class="rail-section-chip ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? '연결됨' : '오프라인'}</span>
       </div>
       <div class="rail-stat-grid">
         <div class="rail-stat-card">
-          <span>Agent</span>
+          <span>에이전트</span>
           <strong>${agents.value.length}</strong>
         </div>
         <div class="rail-stat-card">
-          <span>Keeper</span>
+          <span>키퍼</span>
           <strong>${keepers.value.length}</strong>
         </div>
         <div class="rail-stat-card">
-          <span>Task</span>
+          <span>태스크</span>
           <strong>${tasks.value.length}</strong>
         </div>
         <div class="rail-stat-card">
-          <span>Event</span>
+          <span>이벤트</span>
           <strong>${eventCount.value}</strong>
         </div>
       </div>
@@ -260,7 +285,7 @@ function SnapshotCard({ currentTab }: { currentTab: string }) {
         </button>
       </div>
       ${build
-        ? html`<div class="rail-build-hint">Server Build · v${build.release_version} · ${shortCommit(build.commit)}</div>`
+        ? html`<div class="rail-build-hint">서버 빌드 · v${build.release_version} · ${shortCommit(build.commit)}</div>`
         : null}
       ${residentCards.length > 0
         ? html`
@@ -296,7 +321,7 @@ function InterveneRailCard() {
           <strong>${sessionCount}</strong>
         </div>
         <div class="rail-stat-card">
-          <span>Keeper</span>
+          <span>키퍼</span>
           <strong>${keeperCount}</strong>
         </div>
       </div>
@@ -398,6 +423,6 @@ export function TabContent() {
 
 export function DashboardMain() {
   return dashboardLoading.value && !connected.value
-    ? html`<div class="loading-indicator">Loading dashboard...</div>`
+    ? html`<div class="loading-indicator">대시보드 불러오는 중...</div>`
     : html`<${TabContent} />`
 }

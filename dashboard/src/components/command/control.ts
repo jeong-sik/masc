@@ -13,6 +13,23 @@ import {
 import { PanelSemanticDetails } from '../common/semantic-layer'
 import { actionDisabled, fire, relativeTime, toneClass } from './helpers'
 
+function controlStatusLabel(value?: string | null): string {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'pending':
+      return '대기 중'
+    case 'approved':
+      return '승인됨'
+    case 'denied':
+      return '거부됨'
+    case 'executed':
+      return '실행됨'
+    case 'active':
+      return '가동 중'
+    default:
+      return value?.trim() || '확인 필요'
+  }
+}
+
 function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
   const approveKey = `approve:${decision.decision_id}`
   const denyKey = `deny:${decision.decision_id}`
@@ -24,29 +41,29 @@ function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
           <strong>${decision.requested_action}</strong>
           <div class="command-card-sub">${decision.scope_type}:${decision.scope_id}</div>
         </div>
-        <span class="command-chip ${toneClass(decision.status)}">${decision.status ?? 'pending'}</span>
+        <span class="command-chip ${toneClass(decision.status)}">${controlStatusLabel(decision.status ?? 'pending')}</span>
       </div>
       <div class="command-card-grid">
-        <span>Decision</span><span>${decision.decision_id}</span>
-        <span>By</span><span>${decision.requested_by ?? 'unknown'}</span>
-        <span>Source</span><span>${decision.source ?? 'managed'}</span>
-        <span>Trace</span><span class="mono">${decision.trace_id}</span>
-        <span>Created</span><span>${relativeTime(decision.created_at)}</span>
-        <span>Reason</span><span>${decision.reason ?? 'n/a'}</span>
+        <span>결정 ID</span><span>${decision.decision_id}</span>
+        <span>요청자</span><span>${decision.requested_by ?? '알 수 없음'}</span>
+        <span>출처</span><span>${decision.source ?? 'managed'}</span>
+        <span>트레이스</span><span class="mono">${decision.trace_id}</span>
+        <span>생성 시각</span><span>${relativeTime(decision.created_at)}</span>
+        <span>이유</span><span>${decision.reason ?? '정보 없음'}</span>
       </div>
       ${decision.status === 'pending' && !isLegacy
         ? html`
             <div class="command-action-row">
               <button class="control-btn ghost" disabled=${actionDisabled(approveKey)} onClick=${() => fire(() => approveCommandPlaneDecision(decision.decision_id))}>
-                ${actionDisabled(approveKey) ? 'Approving…' : 'Approve'}
+                ${actionDisabled(approveKey) ? '승인 중…' : '승인'}
               </button>
               <button class="control-btn ghost" disabled=${actionDisabled(denyKey)} onClick=${() => fire(() => denyCommandPlaneDecision(decision.decision_id))}>
-                ${actionDisabled(denyKey) ? 'Denying…' : 'Deny'}
+                ${actionDisabled(denyKey) ? '거부 중…' : '거부'}
               </button>
             </div>
           `
         : null}
-      ${isLegacy ? html`<div class="command-card-foot">Legacy operator approval. Use operator control for execution.</div>` : null}
+      ${isLegacy ? html`<div class="command-card-foot">레거시 operator 승인입니다. 실제 실행은 operator control에서 처리합니다.</div>` : null}
     </article>
   `
 }
@@ -68,19 +85,19 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
         <span class="command-chip ${toneClass(utilization > 100 ? 'bad' : utilization > 70 ? 'warn' : 'ok')}">${utilization}%</span>
       </div>
       <div class="command-card-grid">
-        <span>Roster</span><span>${row.roster_live ?? 0}/${row.roster_total ?? 0}</span>
-        <span>Headcount Cap</span><span>${row.headcount_cap ?? 0}</span>
-        <span>Ops</span><span>${row.active_operations ?? 0}/${row.active_operation_cap ?? 0}</span>
-        <span>Autonomy</span><span>${unit.policy?.autonomy_level ?? 'n/a'}</span>
-        <span>Frozen</span><span>${frozen ? 'yes' : 'no'}</span>
-        <span>Kill Switch</span><span>${killSwitch ? 'on' : 'off'}</span>
+        <span>편성</span><span>${row.roster_live ?? 0}/${row.roster_total ?? 0}</span>
+        <span>정원</span><span>${row.headcount_cap ?? 0}</span>
+        <span>작전</span><span>${row.active_operations ?? 0}/${row.active_operation_cap ?? 0}</span>
+        <span>자율성</span><span>${unit.policy?.autonomy_level ?? '정보 없음'}</span>
+        <span>동결</span><span>${frozen ? '예' : '아니오'}</span>
+        <span>킬 스위치</span><span>${killSwitch ? '켜짐' : '꺼짐'}</span>
       </div>
       <div class="command-action-row">
         <button class="control-btn ghost" disabled=${actionDisabled(freezeKey)} onClick=${() => fire(() => toggleCommandPlaneFreeze(unit.unit_id, !frozen))}>
-          ${actionDisabled(freezeKey) ? 'Applying…' : frozen ? 'Unfreeze' : 'Freeze'}
+          ${actionDisabled(freezeKey) ? '적용 중…' : frozen ? '동결 해제' : '동결'}
         </button>
         <button class="control-btn ghost" disabled=${actionDisabled(killKey)} onClick=${() => fire(() => toggleCommandPlaneKillSwitch(unit.unit_id, !killSwitch))}>
-          ${actionDisabled(killKey) ? 'Applying…' : killSwitch ? 'Clear Kill Switch' : 'Enable Kill Switch'}
+          ${actionDisabled(killKey) ? '적용 중…' : killSwitch ? '킬 스위치 해제' : '킬 스위치 켜기'}
         </button>
       </div>
     </article>
@@ -105,14 +122,14 @@ export function ControlSurface() {
 
       <section class="card command-section">
         <div class="card-title-row">
-          <div class="card-title">Unit 제어</div>
+          <div class="card-title">유닛 제어</div>
           <${PanelSemanticDetails} panelId="command.control" compact=${true} />
         </div>
         ${snapshot && snapshot.capacity.capacity.length > 0
           ? html`<div class="command-card-stack">
               ${snapshot.capacity.capacity.map(row => html`<${CapacityRowCard} row=${row} />`)}
             </div>`
-          : html`<div class="empty-state">제어할 capacity 행이 아직 없습니다.</div>`}
+          : html`<div class="empty-state">제어할 용량 행이 아직 없습니다.</div>`}
       </section>
     </div>
   `

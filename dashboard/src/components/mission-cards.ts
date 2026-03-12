@@ -23,6 +23,9 @@ import {
   toneClass,
   relativeTime,
   formatDuration,
+  statusLabel,
+  missionTargetTypeLabel,
+  signalClassLabel,
   trimText,
   actionModeLabel,
   actionTargetLabel,
@@ -50,20 +53,20 @@ export function MissionContextBar({
   return html`
     <div class="mission-context-bar">
       <div class="mission-context-item">
-        <span>cluster</span>
+        <span>클러스터</span>
         <strong>${cluster ?? '확인 없음'}</strong>
       </div>
       <div class="mission-context-item">
-        <span>project</span>
+        <span>프로젝트</span>
         <strong>${project ?? '확인 없음'}</strong>
       </div>
       <div class="mission-context-item">
-        <span>room</span>
-        <strong>${room ?? 'default'}</strong>
+        <span>방</span>
+        <strong>${room ?? '기본 방'}</strong>
       </div>
       <div class="mission-context-item">
-        <span>generated</span>
-        <strong>${generatedAt ? relativeTime(generatedAt) : 'fresh'}</strong>
+        <span>갱신 시각</span>
+        <strong>${generatedAt ? relativeTime(generatedAt) : '기록 없음'}</strong>
       </div>
     </div>
   `
@@ -98,28 +101,28 @@ export function MissionBriefingCard() {
     || (briefing?.status === 'unavailable' && !briefing?.cached)
 
   return html`
-    <${Card} title="LLM 판단 레이어" class="mission-briefing-card" semanticId="mission.llm_briefing">
+    <${Card} title="판단 레이어" class="mission-briefing-card" semanticId="mission.llm_briefing">
       <div class="mission-section-head">
-        <h3>heuristic 대신 별도 판단 계층</h3>
+        <h3>휴리스틱 대신 별도 판단 결과</h3>
         <p>핵심 해석 3줄만 먼저 보여주고, 근거는 접어서 둡니다.</p>
       </div>
 
       <div class="mission-briefing-meta">
         <span class="command-chip ${briefingTone}">
-          ${briefing?.status ?? (missionBriefingError.value ? 'error' : 'loading')}
+          ${statusLabel(briefing?.status ?? (missionBriefingError.value ? 'error' : 'loading'))}
         </span>
         ${briefing?.model ? html`<span class="command-chip">${briefing.model}</span>` : null}
         ${briefing?.generated_at ? html`<span class="command-chip">${relativeTime(briefing.generated_at)}</span>` : null}
-        ${briefing?.cached ? html`<span class="command-chip">cached</span>` : null}
-        ${briefing?.stale ? html`<span class="command-chip warn">stale</span>` : null}
-        ${briefing?.refreshing ? html`<span class="command-chip warn">refreshing</span>` : null}
+        ${briefing?.cached ? html`<span class="command-chip">캐시</span>` : null}
+        ${briefing?.stale ? html`<span class="command-chip warn">오래됨</span>` : null}
+        ${briefing?.refreshing ? html`<span class="command-chip warn">갱신 중</span>` : null}
       </div>
 
       ${missionBriefingError.value ? html`<div class="empty-state error">${missionBriefingError.value}</div>` : null}
       ${briefing?.error ? html`<div class="empty-state error">${briefing.error}</div>` : null}
       ${briefing?.summary ? html`<div class="mission-inline-note">${briefing.summary}</div>` : null}
       ${briefing?.last_error && !briefing.error
-        ? html`<div class="mission-inline-note">최근 refresh 실패: ${briefing.last_error}</div>`
+        ? html`<div class="mission-inline-note">최근 갱신 실패: ${briefing.last_error}</div>`
         : null}
 
       ${briefing && briefing.sections.length > 0
@@ -130,12 +133,10 @@ export function MissionBriefingCard() {
                   <div class="mission-card-head">
                     <strong>${section.label}</strong>
                     <div class="mission-briefing-section-chips">
-                      <span class="command-chip ${toneClass(section.status)}">${section.status}</span>
-                      ${section.signal_class === 'metadata_gap'
-                        ? html`<span class="command-chip">metadata gap</span>`
-                        : section.signal_class === 'mixed'
-                          ? html`<span class="command-chip warn">mixed</span>`
-                          : null}
+                      <span class="command-chip ${toneClass(section.status)}">${statusLabel(section.status)}</span>
+                      ${signalClassLabel(section.signal_class)
+                        ? html`<span class="command-chip ${section.signal_class === 'mixed' ? 'warn' : ''}">${signalClassLabel(section.signal_class)}</span>`
+                        : null}
                       ${section.evidence_quality ? html`<span class="command-chip">${section.evidence_quality}</span>` : null}
                     </div>
                   </div>
@@ -159,7 +160,7 @@ export function MissionBriefingCard() {
                 <div class="empty-state">
                   ${briefing?.status === 'pending'
                     ? '최신 스냅샷으로 브리핑을 생성 중입니다. 마지막 성공 결과가 생기면 자동으로 다시 읽습니다.'
-                    : '판단 레이어 결과가 아직 없습니다.'}
+                    : '판단 결과가 아직 없습니다.'}
                 </div>
               `
             : null)}
@@ -167,13 +168,13 @@ export function MissionBriefingCard() {
       ${briefing && briefing.metadata_gaps.length > 0
         ? html`
             <details class="mission-card-disclosure compact mission-briefing-gaps">
-              <summary>Observability Gaps (${briefing.metadata_gap_count ?? briefing.metadata_gaps.length})</summary>
+              <summary>관측 공백 (${briefing.metadata_gap_count ?? briefing.metadata_gaps.length})</summary>
               <div class="mission-list-stack">
                 ${briefing.metadata_gaps.map(item => html`
                   <article class="mission-briefing-gap ${item.severity === 'watch' ? 'warn' : ''}">
                     <div class="mission-card-head">
-                      <strong>${item.scope_type}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
-                      <span class="command-chip ${item.severity === 'watch' ? 'warn' : ''}">${item.severity}</span>
+                      <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
+                      <span class="command-chip ${item.severity === 'watch' ? 'warn' : ''}">${statusLabel(item.severity)}</span>
                     </div>
                     <p>${item.summary}</p>
                   </article>
@@ -216,26 +217,26 @@ export function AttentionCard({
         <div class="mission-card-head">
           <div>
             <strong>${item.summary}</strong>
-            <div class="mission-card-target">${item.kind}${item.target_id ? ` · ${item.target_id}` : ''}</div>
+            <div class="mission-card-target">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</div>
           </div>
           <span class="command-chip ${toneClass(action?.severity ?? item.severity)}">${action ? actionModeLabel(action) : item.severity}</span>
         </div>
 
         <div class="mission-fact-grid">
           <div class="mission-fact-tile">
-            <span>영향 session</span>
+            <span>영향 세션</span>
             <strong>${item.related_session_ids.length}</strong>
             <small>${item.related_session_ids.slice(0, 2).join(', ') || '없음'}</small>
           </div>
           <div class="mission-fact-tile">
-            <span>영향 agent</span>
+            <span>영향 에이전트</span>
             <strong>${item.related_agent_names.length}</strong>
             <small>${item.related_agent_names.slice(0, 3).join(', ') || '없음'}</small>
           </div>
           <div class="mission-fact-tile">
             <span>최근 신호</span>
-            <strong>${item.last_seen_at ? relativeTime(item.last_seen_at) : 'n/a'}</strong>
-            <small>${item.target_type}</small>
+            <strong>${item.last_seen_at ? relativeTime(item.last_seen_at) : '기록 없음'}</strong>
+            <small>${missionTargetTypeLabel(item.target_type)}</small>
           </div>
           <div class="mission-fact-tile">
             <span>다음 액션</span>
@@ -255,12 +256,12 @@ export function AttentionCard({
                 ${linkedSessions.slice(0, 4).map(session => html`
                   <button class="mission-link-row" onClick=${() => toggleSession(session.session_id)}>
                     <strong>${session.goal}</strong>
-                    <span>${session.status ?? 'unknown'} · ${session.last_event_summary ?? '최근 사건 없음'}</span>
+                    <span>${statusLabel(session.status)} · ${session.last_event_summary ?? '최근 사건 없음'}</span>
                   </button>
                 `)}
               </div>
             `
-          : html`<div class="empty-state">직접 연결된 session이 아직 없습니다.</div>`}
+          : html`<div class="empty-state">직접 연결된 세션이 아직 없습니다.</div>`}
 
         ${item.related_agent_names.length > 0
           ? html`
@@ -275,7 +276,7 @@ export function AttentionCard({
         ${item.evidence_preview.length > 0
           ? html`
               <details class="mission-card-disclosure compact">
-                <summary>evidence preview</summary>
+                <summary>근거 미리보기</summary>
                 <div class="mission-evidence-list">
                   ${item.evidence_preview.map(text => html`<span>${text}</span>`)}
                 </div>
@@ -287,10 +288,10 @@ export function AttentionCard({
       <div class="mission-card-actions">
         ${action
           ? html`
-              <button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, 'Mission attention')}>
+              <button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, '상황판 주의 신호')}>
                 이 액션으로 개입 열기
               </button>
-              <button class="control-btn ghost" onClick=${() => openActionCommand(action, incident, 'Mission attention')}>
+              <button class="control-btn ghost" onClick=${() => openActionCommand(action, incident, '상황판 주의 신호')}>
                 원인 보기
               </button>
             `
@@ -322,14 +323,14 @@ export function SessionBriefCard({
             <strong>${brief.goal}</strong>
             <div class="mission-card-target">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           </div>
-          <span class="command-chip ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${brief.status ?? 'unknown'}</span>
+          <span class="command-chip ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
         </div>
 
         <div class="mission-fact-grid">
           <div class="mission-fact-tile">
             <span>멤버</span>
             <strong>${brief.member_names.length}</strong>
-            <small>${brief.member_names.slice(0, 3).join(', ') || 'n/a'}</small>
+            <small>${brief.member_names.slice(0, 3).join(', ') || '없음'}</small>
           </div>
           <div class="mission-fact-tile">
             <span>가동 시간</span>
@@ -338,13 +339,13 @@ export function SessionBriefCard({
           </div>
           <div class="mission-fact-tile">
             <span>최근 흐름</span>
-            <strong>${brief.last_event_at ? relativeTime(brief.last_event_at) : 'n/a'}</strong>
+            <strong>${brief.last_event_at ? relativeTime(brief.last_event_at) : '기록 없음'}</strong>
             <small>${brief.communication_summary ?? '요약 없음'}</small>
           </div>
           <div class="mission-fact-tile">
-            <span>커버리지</span>
+            <span>충원 상태</span>
             <strong>${brief.active_count ?? 0}/${brief.required_count || 1}</strong>
-            <small>active / required</small>
+            <small>활성 / 필요</small>
           </div>
         </div>
       </button>
@@ -353,7 +354,7 @@ export function SessionBriefCard({
 
       <div class="mission-crew-event">
         <span>최근 사건</span>
-        <strong>${brief.last_event_summary ?? '최근 session event가 없습니다.'}</strong>
+        <strong>${brief.last_event_summary ?? '최근 세션 이벤트가 없습니다.'}</strong>
         <small>${brief.last_event_at ? relativeTime(brief.last_event_at) : '시각 없음'}</small>
       </div>
 
@@ -362,7 +363,7 @@ export function SessionBriefCard({
             <div class="mission-pill-row">
               ${brief.operation_badges.slice(0, 3).map(operation => html`
                 <span class="mission-pill">
-                  ${operation.operation_id} · ${operation.status ?? 'unknown'}${operation.stage ? ` · ${operation.stage}` : ''}
+                  ${operation.operation_id} · ${statusLabel(operation.status)}${operation.stage ? ` · ${operation.stage}` : ''}
                 </span>
               `)}
             </div>
@@ -387,7 +388,7 @@ export function SessionBriefCard({
         <button class="control-btn ghost" onClick=${() => openSession('intervene', brief.session_id)}>세션 개입 열기</button>
         <button class="control-btn ghost" onClick=${() => openSession('command', brief.session_id)}>세션 원인 보기</button>
         ${action
-          ? html`<button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, 'Mission session brief')}>추천 액션 열기</button>`
+          ? html`<button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, '상황판 세션 요약')}>추천 액션 열기</button>`
           : null}
       </div>
     </article>
@@ -445,9 +446,9 @@ export function SessionDetailCard({
                   <article class="mission-timeline-row">
                     <div class="mission-card-head">
                       <strong>${item.summary}</strong>
-                      <span>${item.timestamp ? relativeTime(item.timestamp) : 'n/a'}</span>
+                      <span>${item.timestamp ? relativeTime(item.timestamp) : '시각 없음'}</span>
                     </div>
-                    <small>${item.actor ? `${item.actor} · ` : ''}${item.event_type ?? 'event'}</small>
+                    <small>${item.actor ? `${item.actor} · ` : ''}${item.event_type ?? '이벤트'}</small>
                   </article>
                 `)
               : html`<div class="empty-state">표시할 세션 이벤트가 없습니다.</div>`}
@@ -479,7 +480,7 @@ export function SessionDetailCard({
       <div class="mission-detail-grid">
         <div class="mission-detail-column">
           <div class="mission-card-head">
-            <strong>연결된 operation</strong>
+            <strong>연결된 작전</strong>
             <span class="command-chip">${detail.operations.length}</span>
           </div>
           <div class="mission-link-list">
@@ -487,11 +488,11 @@ export function SessionDetailCard({
               ? detail.operations.map(operation => html`
                   <button class="mission-link-row" onClick=${() => openSession('command', session.session_id)}>
                     <strong>${operation.operation_id}</strong>
-                    <span>${operation.status ?? 'unknown'}${operation.stage ? ` · ${operation.stage}` : ''}</span>
-                    <small>${operation.detachment_status ?? operation.objective ?? 'detachment 정보 없음'}</small>
+                    <span>${statusLabel(operation.status)}${operation.stage ? ` · ${operation.stage}` : ''}</span>
+                    <small>${operation.detachment_status ?? operation.objective ?? '분견대 정보 없음'}</small>
                   </button>
                 `)
-              : html`<div class="empty-state">연결된 operation이 없습니다.</div>`}
+              : html`<div class="empty-state">연결된 작전이 없습니다.</div>`}
           </div>
         </div>
 
@@ -505,11 +506,11 @@ export function SessionDetailCard({
               ? detail.keepers.map(keeper => html`
                   <div class="mission-link-row static">
                     <strong>${keeper.name}</strong>
-                    <span>${keeper.status ?? 'unknown'}${keeper.generation != null ? ` · gen ${keeper.generation}` : ''}</span>
-                    <small>${keeper.current_work ?? 'current work 없음'}</small>
+                    <span>${statusLabel(keeper.status)}${keeper.generation != null ? ` · 세대 ${keeper.generation}` : ''}</span>
+                    <small>${keeper.current_work ?? '현재 작업 정보 없음'}</small>
                   </div>
                 `)
-              : html`<div class="empty-state">직접 연결된 keeper는 없습니다.</div>`}
+              : html`<div class="empty-state">직접 연결된 키퍼는 없습니다.</div>`}
           </div>
         </div>
       </div>
@@ -519,7 +520,7 @@ export function SessionDetailCard({
 
 export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
   const info = extractAgentInfo(row.brief.agent_name)
-  const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 room-level'
+  const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 방 단위'
   return html`
     <article class="mission-activity-card ${toneClass(row.brief.status ?? row.agent?.status)}">
       <button class="mission-card-select" onClick=${() => openAgentDetail(row.brief.agent_name)}>
@@ -531,13 +532,13 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
               <span>${info.model !== info.nickname ? `${info.model} · ` : ''}${info.nickname}</span>
             </div>
           </div>
-          <span class="command-chip ${toneClass(row.brief.status ?? row.agent?.status)}">${row.brief.status ?? row.agent?.status ?? 'unknown'}</span>
+          <span class="command-chip ${toneClass(row.brief.status ?? row.agent?.status)}">${statusLabel(row.brief.status ?? row.agent?.status)}</span>
         </div>
 
         <div class="mission-activity-meta">
           <span>어디서 · ${row.where}</span>
           <span>누구와 · ${who}</span>
-          <span>attention · ${row.brief.related_attention_count}</span>
+          <span>주의 신호 · ${row.brief.related_attention_count}</span>
         </div>
 
         <div class="mission-activity-focus">
@@ -548,22 +549,22 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
       </button>
 
       <details class="mission-card-disclosure">
-        <summary>recent trace</summary>
+        <summary>최근 흐름</summary>
         <div class="mission-activity-foot">
           ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : html`<span>최근 사건 요약 없음</span>`}
-          <span>관련 session · ${row.brief.related_session_id ?? '없음'}</span>
+          <span>관련 세션 · ${row.brief.related_session_id ?? '없음'}</span>
         </div>
 
         <details class="mission-card-disclosure compact">
-          <summary>input / output / tools</summary>
+          <summary>입력 · 응답 · 도구</summary>
           <div class="mission-io-stack">
             <div class="mission-io-item">
-              <span>최근 input</span>
-              <strong>${row.recentInput ?? '표시 가능한 recent input 없음'}</strong>
+              <span>최근 입력</span>
+              <strong>${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'}</strong>
             </div>
             <div class="mission-io-item">
-              <span>최근 output</span>
-              <strong>${row.recentOutput ?? '표시 가능한 recent output 없음'}</strong>
+              <span>최근 응답</span>
+              <strong>${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
             </div>
           </div>
           <div class="mission-activity-foot">
@@ -577,11 +578,11 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
 
 export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
   const continuity = [
-    `gen ${row.brief.generation ?? row.keeper?.generation ?? 0}`,
+    `세대 ${row.brief.generation ?? row.keeper?.generation ?? 0}`,
     row.brief.context_ratio != null
-      ? `ctx ${Math.round(row.brief.context_ratio * 100)}%`
-      : (row.keeper?.context_ratio != null ? `ctx ${Math.round(row.keeper.context_ratio * 100)}%` : null),
-    row.brief.last_turn_ago_s != null ? `last turn ${Math.round(row.brief.last_turn_ago_s)}s` : null,
+      ? `컨텍스트 ${Math.round(row.brief.context_ratio * 100)}%`
+      : (row.keeper?.context_ratio != null ? `컨텍스트 ${Math.round(row.keeper.context_ratio * 100)}%` : null),
+    row.brief.last_turn_ago_s != null ? `최근 턴 ${Math.round(row.brief.last_turn_ago_s)}초 전` : null,
   ]
     .filter((value): value is string => value !== null)
     .join(' · ')
@@ -597,12 +598,12 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
               ${row.keeper?.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
             </div>
           </div>
-          <span class="command-chip ${toneClass(row.brief.status ?? row.keeper?.status)}">${row.brief.status ?? row.keeper?.status ?? 'unknown'}</span>
+          <span class="command-chip ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
         </div>
 
         <div class="mission-activity-meta">
-          <span>최근 heartbeat · ${row.keeper?.last_heartbeat ? relativeTime(row.keeper.last_heartbeat) : 'n/a'}</span>
-          <span>${continuity || 'continuity 정보 없음'}</span>
+          <span>최근 하트비트 · ${row.keeper?.last_heartbeat ? relativeTime(row.keeper.last_heartbeat) : '기록 없음'}</span>
+          <span>${continuity || '연속성 정보 없음'}</span>
         </div>
 
         <div class="mission-activity-focus">
@@ -613,21 +614,21 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
       </button>
 
       <details class="mission-card-disclosure">
-        <summary>continuity detail</summary>
+        <summary>연속성 상세</summary>
         <div class="mission-activity-foot">
-          <span>agent · ${row.brief.agent_name ?? row.keeper?.agent_name ?? 'n/a'}</span>
+          <span>에이전트 · ${row.brief.agent_name ?? row.keeper?.agent_name ?? '기록 없음'}</span>
           ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : null}
         </div>
         <details class="mission-card-disclosure compact">
-          <summary>input / output / tools</summary>
+          <summary>입력 · 응답 · 도구</summary>
           <div class="mission-io-stack">
             <div class="mission-io-item">
-              <span>최근 input</span>
-              <strong>${row.recentInput ?? '표시 가능한 recent input 없음'}</strong>
+              <span>최근 입력</span>
+              <strong>${row.recentInput ?? '표시 가능한 최근 입력이 없습니다'}</strong>
             </div>
             <div class="mission-io-item">
-              <span>최근 output</span>
-              <strong>${row.recentOutput ?? '표시 가능한 recent output 없음'}</strong>
+              <span>최근 응답</span>
+              <strong>${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
             </div>
           </div>
           <div class="mission-activity-foot">
@@ -646,17 +647,17 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
     <article class="mission-action-card ${toneClass(item.severity)}">
       <div class="mission-card-head">
         <span class="command-chip ${toneClass(item.severity)}">
-          ${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? 'signal'}
+          ${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? '내부 신호'}
         </span>
-        <span class="mission-card-target">${item.target_type}${item.target_id ? ` · ${item.target_id}` : ''}</span>
+        <span class="mission-card-target">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
       </div>
       <p>${item.summary}</p>
       ${action ? html`<div class="mission-action-preview">${action.reason}</div>` : null}
       <div class="mission-card-actions">
         ${action
           ? html`
-              <button class="control-btn ghost" onClick=${() => openActionIntervene(action, attention, 'Mission internal signal')}>이 액션으로 개입 열기</button>
-              <button class="control-btn ghost" onClick=${() => openActionCommand(action, attention, 'Mission internal signal')}>이 이슈의 원인 보기</button>
+              <button class="control-btn ghost" onClick=${() => openActionIntervene(action, attention, '상황판 내부 신호')}>이 액션으로 개입 열기</button>
+              <button class="control-btn ghost" onClick=${() => openActionCommand(action, attention, '상황판 내부 신호')}>이 이슈의 원인 보기</button>
             `
           : attention
             ? html`

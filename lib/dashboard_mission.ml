@@ -177,6 +177,58 @@ let tool_audit_json_fields agent_name =
     ("tool_audit_at", json_string_option tool_audit_at);
   ]
 
+let keeper_tool_audit_json_fields keeper agent_name =
+  let fallback_allowed =
+    Dashboard_utils.string_list_of_json (member_assoc "allowed_tool_names" keeper)
+  in
+  let fallback_latest =
+    Dashboard_utils.string_list_of_json (member_assoc "latest_tool_names" keeper)
+  in
+  let fallback_count =
+    match member_assoc "latest_tool_call_count" keeper with
+    | `Int value -> Some value
+    | `Intlit raw -> (try Some (int_of_string raw) with Failure _ -> None)
+    | _ -> if fallback_latest = [] then None else Some (List.length fallback_latest)
+  in
+  let fallback_source =
+    trim_to_option (string_field "tool_audit_source" keeper)
+  in
+  let fallback_at =
+    trim_to_option (string_field "tool_audit_at" keeper)
+  in
+  let allowed_tool_names, latest_tool_names, latest_tool_call_count,
+      tool_audit_source, tool_audit_at =
+    match A2a_tools.latest_heartbeat_task agent_name,
+          A2a_tools.latest_heartbeat_result agent_name with
+    | Some task, Some result ->
+        if task.seq > result.seq then
+          (task.allowed_tools, [], None, Some "heartbeat_task", Some task.created_at)
+        else
+          ( task.allowed_tools,
+            result.tool_names,
+            Some result.tool_call_count,
+            Some "heartbeat_result",
+            Some result.updated_at )
+    | Some task, None ->
+        (task.allowed_tools, [], None, Some "heartbeat_task", Some task.created_at)
+    | None, Some result ->
+        ( fallback_allowed,
+          result.tool_names,
+          Some result.tool_call_count,
+          Some "heartbeat_result",
+          Some result.updated_at )
+    | None, None ->
+        (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
+  in
+  [
+    ("allowed_tool_names", string_list_json allowed_tool_names);
+    ("latest_tool_names", string_list_json latest_tool_names);
+    ( "latest_tool_call_count",
+      option_to_json (fun value -> `Int value) latest_tool_call_count );
+    ("tool_audit_source", json_string_option tool_audit_source);
+    ("tool_audit_at", json_string_option tool_audit_at);
+  ]
+
 let recent_tool_names_for_agent agent_name =
   match A2a_tools.latest_heartbeat_result agent_name with
   | Some snapshot -> snapshot.tool_names
@@ -908,7 +960,7 @@ let build_keeper_briefs snapshot_json =
                            | None -> trim_to_option (string_field "goal" keeper)) );
                       ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
                     ]
-                    @ tool_audit_json_fields
+                    @ keeper_tool_audit_json_fields keeper
                         (match trim_to_option (string_field "agent_name" keeper) with
                          | Some agent_name -> agent_name
                          | None -> name));

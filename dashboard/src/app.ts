@@ -23,6 +23,7 @@ import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS } from './config/navigation'
 import { refreshMissionSnapshot } from './mission-store'
+
 export function App() {
   useEffect(() => {
     // Initialize hash router and compatible deep links
@@ -67,7 +68,7 @@ export function App() {
       <header class="dashboard-header">
         <div class="header-title-wrap">
           <h1>
-            MASC Dashboard
+            MASC 대시보드
             <${BuildIdentityBadge} />
           </h1>
           <p class="header-subtitle">${currentView?.description ?? '운영자 의사결정 및 실행 콘솔'}</p>

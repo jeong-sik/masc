@@ -20,14 +20,14 @@ function SemanticMetricRow({ metric }: { metric: DashboardSemanticMetric }) {
       </div>
       <p>${metric.what_it_measures}</p>
       <div class="semantic-grid compact">
-        <span>Why</span><span>${metric.why_it_exists}</span>
-        <span>Source</span><span>${metric.source_path}</span>
-        <span>Trigger</span><span>${metric.update_trigger}</span>
-        <span>Agent Effect</span><span>${metric.agent_behavior_effect}</span>
-        <span>Ecosystem</span><span>${metric.ecosystem_effect}</span>
-        <span>Interpret</span><span>${metric.interpretation}</span>
-        <span>Bad Smell</span><span>${metric.bad_smell}</span>
-        <span>Next</span><span>${metric.next_action}</span>
+        <span>이유</span><span>${metric.why_it_exists}</span>
+        <span>근거 경로</span><span>${metric.source_path}</span>
+        <span>갱신 조건</span><span>${metric.update_trigger}</span>
+        <span>에이전트 영향</span><span>${metric.agent_behavior_effect}</span>
+        <span>생태계 영향</span><span>${metric.ecosystem_effect}</span>
+        <span>해석</span><span>${metric.interpretation}</span>
+        <span>나쁜 냄새</span><span>${metric.bad_smell}</span>
+        <span>다음 액션</span><span>${metric.next_action}</span>
       </div>
     </article>
   `
@@ -37,11 +37,11 @@ function SemanticPanelBody({ panel }: { panel: DashboardSemanticPanel }) {
   return html`
     <div class="semantic-body">
       <div class="semantic-grid">
-        <span>Purpose</span><span>${panel.purpose}</span>
-        <span>Solves</span><span>${panel.problem_solved}</span>
-        <span>When</span><span>${panel.when_active}</span>
-        <span>Agent Role</span><span>${panel.agent_role}</span>
-        <span>Ecosystem</span><span>${panel.ecosystem_function}</span>
+        <span>목적</span><span>${panel.purpose}</span>
+        <span>무엇을 푸나</span><span>${panel.problem_solved}</span>
+        <span>언제 보나</span><span>${panel.when_active}</span>
+        <span>에이전트 역할</span><span>${panel.agent_role}</span>
+        <span>생태계 기능</span><span>${panel.ecosystem_function}</span>
       </div>
       ${panel.related_tools.length > 0
         ? html`<div class="semantic-tag-row">
@@ -60,7 +60,7 @@ function SemanticPanelBody({ panel }: { panel: DashboardSemanticPanel }) {
 export function PanelSemanticDetails({
   panelId,
   compact = false,
-  label = 'Why',
+  label = '왜 필요한가',
 }: {
   panelId: string
   compact?: boolean
@@ -69,7 +69,7 @@ export function PanelSemanticDetails({
   const panel = findDashboardSemanticPanel(panelId)
   if (!panel) {
     return dashboardSemanticsLoading.value
-      ? html`<span class="semantic-inline-state">Loading semantics…</span>`
+      ? html`<span class="semantic-inline-state">의미 계층 불러오는 중…</span>`
       : null
   }
   return html`
@@ -90,7 +90,7 @@ export function SurfaceSemanticIntro({
   const surface = findDashboardSemanticSurface(surfaceId)
   if (!surface) {
     if (dashboardSemanticsLoading.value) {
-      return html`<div class="semantic-surface-card ${compact ? 'compact' : ''}">Loading semantics…</div>`
+      return html`<div class="semantic-surface-card ${compact ? 'compact' : ''}">의미 계층 불러오는 중…</div>`
     }
     if (dashboardSemanticsError.value) {
       return html`<div class="semantic-surface-card ${compact ? 'compact' : ''}">${dashboardSemanticsError.value}</div>`
@@ -105,10 +105,10 @@ export function SurfaceSemanticIntro({
       </div>
       <p class="semantic-lead">${surface.purpose}</p>
       <div class="semantic-grid">
-        <span>Solves</span><span>${surface.problem_solved}</span>
-        <span>When</span><span>${surface.when_active}</span>
-        <span>Agent Role</span><span>${surface.agent_role}</span>
-        <span>Ecosystem</span><span>${surface.ecosystem_function}</span>
+        <span>무엇을 푸나</span><span>${surface.problem_solved}</span>
+        <span>언제 보나</span><span>${surface.when_active}</span>
+        <span>에이전트 역할</span><span>${surface.agent_role}</span>
+        <span>생태계 기능</span><span>${surface.ecosystem_function}</span>
       </div>
       ${surface.panels.length > 0
         ? html`<div class="semantic-tag-row">

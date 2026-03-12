@@ -1,4 +1,4 @@
-// Planning surface — task-first layout with collapsible goals and MDAL
+// 계획 표면 — 태스크 우선 레이아웃과 접을 수 있는 goals / MDAL
 
 import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
@@ -80,9 +80,9 @@ function priorityStars(n: number): string {
 
 function horizonLabel(h: string): string {
   switch (h) {
-    case 'short': return 'Short-term'
-    case 'mid': return 'Mid-term'
-    case 'long': return 'Long-term'
+    case 'short': return '단기'
+    case 'mid': return '중기'
+    case 'long': return '장기'
     default: return h
   }
 }
@@ -118,6 +118,15 @@ function priorityLabel(p: number): string {
     case 2: return 'P2'
     case 3: return 'P3'
     default: return 'P4'
+  }
+}
+
+function statusFilterLabel(value: StatusFilter): string {
+  switch (value) {
+    case 'active': return '진행 중'
+    case 'completed': return '완료'
+    case 'paused': return '일시정지'
+    default: return '전체'
   }
 }
 
@@ -171,7 +180,7 @@ function HorizonGroup({ horizon, items }: { horizon: string; items: Goal[] }) {
   if (items.length === 0) return null
   const sorted = [...items].sort((a, b) => b.priority - a.priority)
   return html`
-    <${Card} title="${horizonLabel(horizon)} Goals (${items.length})" class="section" semanticId="planning.goal_pipeline">
+    <${Card} title="${horizonLabel(horizon)} 목표 (${items.length})" class="section" semanticId="planning.goal_pipeline">
       <div class="goal-list">
         ${sorted.map(g => html`<${GoalRow} key=${g.id} goal=${g} />`)}
       </div>
@@ -183,24 +192,24 @@ function FilterBar() {
   return html`
     <div class="goal-filters">
       <div class="goal-filter-group">
-        <label class="goal-filter-label">Horizon</label>
+        <label class="goal-filter-label">범위</label>
         ${(['all', 'short', 'mid', 'long'] as HorizonFilter[]).map(h => html`
           <button
             class="goal-filter-btn ${horizonFilter.value === h ? 'active' : ''}"
             onClick=${() => { horizonFilter.value = h }}
           >
-            ${h === 'all' ? 'All' : horizonLabel(h)}
+            ${h === 'all' ? '전체' : horizonLabel(h)}
           </button>
         `)}
       </div>
       <div class="goal-filter-group">
-        <label class="goal-filter-label">Status</label>
+        <label class="goal-filter-label">상태</label>
         ${(['all', 'active', 'completed', 'paused'] as StatusFilter[]).map(s => html`
           <button
             class="goal-filter-btn ${statusFilter.value === s ? 'active' : ''}"
             onClick=${() => { statusFilter.value = s }}
           >
-            ${s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+            ${statusFilterLabel(s)}
           </button>
         `)}
       </div>
@@ -220,27 +229,27 @@ function GoalsSummary() {
     <div class="goal-summary">
       <div class="goal-summary-item">
         <div class="goal-summary-value">${all.length}</div>
-        <div class="goal-summary-label">Total</div>
+        <div class="goal-summary-label">전체</div>
       </div>
       <div class="goal-summary-item">
         <div class="goal-summary-value" style="color:#4ade80">${active}</div>
-        <div class="goal-summary-label">Active</div>
+        <div class="goal-summary-label">진행 중</div>
       </div>
       <div class="goal-summary-item">
         <div class="goal-summary-value" style="color:#888">${completed}</div>
-        <div class="goal-summary-label">Completed</div>
+        <div class="goal-summary-label">완료</div>
       </div>
       <div class="goal-summary-item">
         <div class="goal-summary-value" style="color:${horizonColor('short')}">${byHorizon.short}</div>
-        <div class="goal-summary-label">Short</div>
+        <div class="goal-summary-label">단기</div>
       </div>
       <div class="goal-summary-item">
         <div class="goal-summary-value" style="color:${horizonColor('mid')}">${byHorizon.mid}</div>
-        <div class="goal-summary-label">Mid</div>
+        <div class="goal-summary-label">중기</div>
       </div>
       <div class="goal-summary-item">
         <div class="goal-summary-value" style="color:${horizonColor('long')}">${byHorizon.long}</div>
-        <div class="goal-summary-label">Long</div>
+        <div class="goal-summary-label">장기</div>
       </div>
     </div>
   `
@@ -250,8 +259,8 @@ function LoopRow({ loop }: { loop: MdalLoop }) {
   const latest = loop.history[0]
   const latestToolSummary =
     loop.latest_tool_names && loop.latest_tool_names.length > 0
-      ? `${loop.latest_tool_call_count ?? loop.latest_tool_names.length} tool${(loop.latest_tool_call_count ?? loop.latest_tool_names.length) === 1 ? '' : 's'}: ${loop.latest_tool_names.join(', ')}`
-      : 'No evidence yet'
+      ? `${loop.latest_tool_call_count ?? loop.latest_tool_names.length}개 도구: ${loop.latest_tool_names.join(', ')}`
+      : '아직 근거 없음'
 
   return html`
     <div class="planning-loop-row">
@@ -269,14 +278,14 @@ function LoopRow({ loop }: { loop: MdalLoop }) {
 
         <div class="planning-loop-metrics">
           <span>Baseline ${formatMetric(loop.baseline_metric)}</span>
-          <span>Current ${formatMetric(loop.current_metric)}</span>
+          <span>현재 ${formatMetric(loop.current_metric)}</span>
           <span class=${formatMetricDelta(loop).startsWith('+') ? 'planning-loop-good' : 'planning-loop-bad'}>
             Delta ${formatMetricDelta(loop)}
           </span>
           <span>Elapsed ${formatElapsed(loop.elapsed_seconds)}</span>
         </div>
 
-        <div class="planning-loop-target">${loop.target || 'No explicit target provided'}</div>
+        <div class="planning-loop-target">${loop.target || '명시된 목표가 없습니다'}</div>
         ${(loop.stop_reason || loop.error_message)
           ? html`
               <div class="planning-loop-footnote">
@@ -285,15 +294,15 @@ function LoopRow({ loop }: { loop: MdalLoop }) {
             `
           : null}
         <div class="planning-loop-footnote">
-          ${loop.strict_mode ? 'Strict hard evidence' : 'Legacy'} · ${loop.worker_engine ?? 'unknown engine'} · ${latestToolSummary}
+          ${loop.strict_mode ? '엄격 근거 모드' : '레거시'} · ${loop.worker_engine ?? '엔진 정보 없음'} · ${latestToolSummary}
         </div>
         ${latest
           ? html`
               <div class="planning-loop-footnote">
-                Latest iteration #${latest.iteration}: ${latest.changes || latest.next_suggestion || 'No narrative'}
+                최근 반복 #${latest.iteration}: ${latest.changes || latest.next_suggestion || '서술 정보 없음'}
               </div>
             `
-          : html`<div class="planning-loop-footnote">No iteration history yet</div>`}
+          : html`<div class="planning-loop-footnote">반복 이력이 아직 없습니다</div>`}
       </div>
     </div>
   `
@@ -336,36 +345,36 @@ function TaskBacklog() {
   const sortedDone = [...done].sort(sortByTimeDesc)
 
   return html`
-    <${Card} title="Task Backlog" class="section" semanticId="planning.backlog">
+    <${Card} title="태스크 백로그" class="section" semanticId="planning.backlog">
       <div class="kanban-board">
         <div class="kanban-column">
           <div class="kanban-header todo">
-            <span>TO DO</span>
+            <span>할 일</span>
             <span class="kanban-badge">${todo.length}</span>
           </div>
           ${sortedTodo.length === 0
-            ? html`<div class="empty-state" style="opacity: 0.5;">No pending tasks</div>`
+            ? html`<div class="empty-state" style="opacity: 0.5;">대기 중인 태스크가 없습니다</div>`
             : sortedTodo.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         </div>
         <div class="kanban-column">
           <div class="kanban-header inprogress">
-            <span>IN PROGRESS</span>
+            <span>진행 중</span>
             <span class="kanban-badge">${inProgress.length}</span>
           </div>
           ${sortedInProgress.length === 0
-            ? html`<div class="empty-state" style="opacity: 0.5;">No active tasks</div>`
+            ? html`<div class="empty-state" style="opacity: 0.5;">진행 중인 태스크가 없습니다</div>`
             : sortedInProgress.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         </div>
         <div class="kanban-column">
           <div class="kanban-header done">
-            <span>DONE</span>
+            <span>완료</span>
             <span class="kanban-badge">${done.length}</span>
           </div>
           ${sortedDone.length === 0
-            ? html`<div class="empty-state" style="opacity: 0.5;">No completed tasks</div>`
+            ? html`<div class="empty-state" style="opacity: 0.5;">완료된 태스크가 없습니다</div>`
             : sortedDone.slice(0, 20).map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
           ${sortedDone.length > 20
-            ? html`<div class="empty-state" style="opacity: 0.5;">...and ${sortedDone.length - 20} more</div>`
+            ? html`<div class="empty-state" style="opacity: 0.5;">...외 ${sortedDone.length - 20}개 더 있음</div>`
             : null}
         </div>
       </div>
@@ -393,23 +402,23 @@ export function Planning() {
       <!-- Step 1: Task-based stats grid -->
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-label">Total tasks</div>
+          <div class="stat-label">전체 태스크</div>
           <div class="stat-value">${totalTasks}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">TODO</div>
+          <div class="stat-label">할 일</div>
           <div class="stat-value" style="color:#e0e0e0">${todo.length}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">In Progress</div>
+          <div class="stat-label">진행 중</div>
           <div class="stat-value" style="color:#fbbf24">${inProgress.length}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Done</div>
+          <div class="stat-label">완료</div>
           <div class="stat-value" style="color:#4ade80">${done.length}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">High Priority</div>
+          <div class="stat-label">높은 우선순위</div>
           <div class="stat-value" style="color:${highPriority > 0 ? '#f87171' : '#888'}">${highPriority}</div>
         </div>
       </div>
@@ -424,7 +433,7 @@ export function Planning() {
           }}
           disabled=${goalsLoading.value || mdalLoading.value}
         >
-          ${goalsLoading.value || mdalLoading.value ? 'Refreshing...' : 'Refresh planning data'}
+          ${goalsLoading.value || mdalLoading.value ? '새로고침 중...' : '계획 데이터 새로고침'}
         </button>
       </div>
 
@@ -434,7 +443,7 @@ export function Planning() {
       <!-- Step 3: Goals in collapsible details -->
       <details class="overview-section-collapsible" open=${hasGoals}>
         <summary>
-          Goal Pipeline
+          목표 파이프라인
           <span class="monitor-pill">${goals.value.length}</span>
         </summary>
         <div>
@@ -442,9 +451,9 @@ export function Planning() {
             <${GoalsSummary} />
             <${FilterBar} />
             ${goalsLoading.value && goals.value.length === 0
-              ? html`<div class="loading-indicator">Loading goals...</div>`
+              ? html`<div class="loading-indicator">목표 불러오는 중...</div>`
               : filteredGoals.value.length === 0
-                ? html`<div class="empty-state">No goals match the current filters</div>`
+                ? html`<div class="empty-state">현재 필터에 맞는 목표가 없습니다</div>`
                 : html`
                     <${HorizonGroup} horizon="short" items=${grouped.short ?? []} />
                     <${HorizonGroup} horizon="mid" items=${grouped.mid ?? []} />
@@ -452,7 +461,7 @@ export function Planning() {
                   `}
           ` : html`
             <div class="empty-state">
-              No goals defined. Use <code>masc_goal_upsert</code> to create goals.
+              정의된 목표가 없습니다. <code>masc_goal_upsert</code>로 목표를 만들 수 있습니다.
             </div>
           `}
         </div>
@@ -461,16 +470,16 @@ export function Planning() {
       <!-- MDAL Loops in collapsible details -->
       <details class="overview-section-collapsible" open=${hasLoops}>
         <summary>
-          MDAL Loops
+          MDAL 루프
           <span class="monitor-pill">${loops.length}</span>
         </summary>
         <div>
           ${mdalLoading.value && loops.length === 0
-            ? html`<div class="loading-indicator">Loading MDAL loops...</div>`
+            ? html`<div class="loading-indicator">MDAL 루프 불러오는 중...</div>`
             : loops.length === 0 && (mdalState === 'error' || lastMdalError.value)
-              ? html`<div class="empty-state">MDAL snapshot could not be loaded${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. Check backend health.</div>`
+              ? html`<div class="empty-state">MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요.</div>`
               : loops.length === 0
-                ? html`<div class="empty-state">No active loops. Use <code>masc_mdal_start</code> to start a loop.</div>`
+                ? html`<div class="empty-state">가동 중인 루프가 없습니다. <code>masc_mdal_start</code>로 시작할 수 있습니다.</div>`
                 : html`
                   <div class="planning-loop-list">
                     ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}

@@ -1,6 +1,6 @@
 # ADR-001: Mitosis vs Compaction - 컨텍스트 한계 대응 전략
 
-**Status**: Accepted (논쟁 중)  
+**Status**: Accepted
 **Date**: 2026-02-01  
 **Reviewers**: BALTHASAR (skeptic), Human (arbiter)
 

@@ -88,7 +88,7 @@ function filteredItems(items: GovernanceDecisionItem[]): GovernanceDecisionItem[
 }
 
 function serializePreview(value: unknown): string {
-  if (value == null) return 'none'
+  if (value == null) return '없음'
   if (typeof value === 'string') return value
   try {
     return JSON.stringify(value, null, 2)
@@ -109,7 +109,7 @@ function toneClass(raw: string | null | undefined): string {
 }
 
 function confidenceText(confidence: number | null | undefined): string {
-  if (typeof confidence !== 'number' || Number.isNaN(confidence)) return 'n/a'
+  if (typeof confidence !== 'number' || Number.isNaN(confidence)) return '확인 필요'
   return `${Math.round(confidence * 100)}%`
 }
 
@@ -132,7 +132,7 @@ async function loadDecisionDetail(item: GovernanceDecisionItem | null) {
       selectedConsensusDetail.value = await fetchConsensusSessionSummary(item.id)
     }
   } catch (err) {
-    governanceError.value = err instanceof Error ? err.message : 'Failed to load governance detail'
+    governanceError.value = err instanceof Error ? err.message : '거버넌스 상세를 불러오지 못했습니다'
   } finally {
     detailLoading.value = false
   }
@@ -155,7 +155,7 @@ export async function refreshGovernance() {
     selectedDecisionKey.value = next ? itemKey(next) : null
     await loadDecisionDetail(next)
   } catch (err) {
-    governanceError.value = err instanceof Error ? err.message : 'Failed to load governance state'
+    governanceError.value = err instanceof Error ? err.message : '거버넌스 상태를 불러오지 못했습니다'
   } finally {
     governanceLoading.value = false
   }
@@ -170,10 +170,10 @@ async function submitDebate() {
   try {
     const created = await startDebate(topic)
     governanceTopicInput.value = ''
-    showToast(created?.id ? `Debate started: ${created.id}` : 'Debate started', 'success')
+    showToast(created?.id ? `토론을 시작했습니다: ${created.id}` : '토론을 시작했습니다', 'success')
     await refreshGovernance()
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to start debate'
+    const message = err instanceof Error ? err.message : '토론 시작에 실패했습니다'
     governanceError.value = message
     showToast(message, 'error')
   } finally {
@@ -190,10 +190,10 @@ async function respondToPendingConfirm(decision: 'confirm' | 'deny') {
   governanceActing.value = true
   try {
     await confirmOperatorAction(actor, confirmToken, decision)
-    showToast(decision === 'confirm' ? 'Action approved' : 'Action denied', 'success')
+    showToast(decision === 'confirm' ? '액션을 승인했습니다' : '액션을 거부했습니다', 'success')
     await refreshGovernance()
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to update pending action'
+    const message = err instanceof Error ? err.message : '대기 중인 액션 처리에 실패했습니다'
     governanceError.value = message
     showToast(message, 'error')
   } finally {
@@ -207,24 +207,24 @@ function GovernanceSummaryStrip() {
   return html`
     <div class="board-summary-strip">
       <div class="board-summary-item">
-        <span class="board-summary-label">Open debates</span>
+        <span class="board-summary-label">열린 토론</span>
         <strong>${summary?.debates_open ?? governanceData.value?.debates?.length ?? 0}</strong>
       </div>
       <div class="board-summary-item">
-        <span class="board-summary-label">Consensus sessions</span>
+        <span class="board-summary-label">합의 세션</span>
         <strong>${summary?.sessions_active ?? governanceData.value?.sessions?.length ?? 0}</strong>
       </div>
       <div class="board-summary-item">
-        <span class="board-summary-label">Needs quorum</span>
+        <span class="board-summary-label">정족수 부족</span>
         <strong>${summary?.sessions_without_quorum ?? 0}</strong>
       </div>
       <div class="board-summary-item">
-        <span class="board-summary-label">Ready to execute</span>
+        <span class="board-summary-label">실행 준비</span>
         <strong>${summary?.ready_to_execute ?? 0}</strong>
       </div>
       <div class="board-summary-item">
-        <span class="board-summary-label">Judge</span>
-        <strong>${judge?.judge_online ?? summary?.judge_online ? 'Online' : 'Offline'}</strong>
+        <span class="board-summary-label">판정기</span>
+        <strong>${judge?.judge_online ?? summary?.judge_online ? '온라인' : '오프라인'}</strong>
       </div>
     </div>
   `
@@ -232,13 +232,13 @@ function GovernanceSummaryStrip() {
 
 function GovernanceToolbar() {
   return html`
-    <${Card} title="Governance Console" class="section" semanticId="governance.supervisor">
+    <${Card} title="거버넌스 콘솔" class="section" semanticId="governance.supervisor">
       <div class="governance-toolbar">
         <div class="council-create">
           <input
             class="control-input"
             type="text"
-            placeholder="Start debate topic..."
+            placeholder="토론 주제를 입력하세요..."
             value=${governanceTopicInput.value}
             onInput=${(event: Event) => {
               governanceTopicInput.value = (event.target as HTMLInputElement).value
@@ -253,20 +253,20 @@ function GovernanceToolbar() {
             onClick=${submitDebate}
             disabled=${governanceStarting.value || governanceTopicInput.value.trim() === ''}
           >
-            ${governanceStarting.value ? 'Starting...' : 'Start Debate'}
+            ${governanceStarting.value ? '시작 중...' : '토론 시작'}
           </button>
           <button class="control-btn ghost" onClick=${refreshGovernance} disabled=${governanceLoading.value}>
-            ${governanceLoading.value ? 'Refreshing...' : 'Refresh'}
+            ${governanceLoading.value ? '새로고침 중...' : '새로고침'}
           </button>
         </div>
         <div class="governance-filter-row">
           ${(
             [
-              ['open', 'Open'],
-              ['needs_quorum', 'Needs Quorum'],
-              ['ready', 'Ready'],
-              ['needs_approval', 'Needs Approval'],
-              ['judge_offline', 'Judge Offline'],
+              ['open', '열림'],
+              ['needs_quorum', '정족수 부족'],
+              ['ready', '준비됨'],
+              ['needs_approval', '승인 필요'],
+              ['judge_offline', '판정기 오프라인'],
             ] as Array<[GovernanceFilter, string]>
           ).map(([key, label]) => html`
             <button
@@ -289,12 +289,12 @@ function GovernanceToolbar() {
 function DecisionInbox() {
   const items = filteredItems(governanceData.value?.items ?? [])
   return html`
-    <${Card} title="Decision Inbox" class="section" semanticId="governance.inbox">
+    <${Card} title="의사결정 수신함" class="section" semanticId="governance.inbox">
       <div class="council-list governance-inbox">
         ${items.length === 0
           ? html`
               <div class="empty-state">
-                Governance is quiet. No debates or consensus sessions match the current filter.
+                지금 필터에 맞는 토론이나 합의 세션이 없습니다.
               </div>
             `
           : items.map(item => {
@@ -310,23 +310,23 @@ function DecisionInbox() {
                       <span class="council-topic">${item.topic}</span>
                     </div>
                     <div class="council-sub">
-                      <span>${item.truth_summary || 'No fact summary'}</span>
+                      <span>${item.truth_summary || '사실 요약이 아직 없습니다'}</span>
                       ${item.last_activity_at
                         ? html`<span><${TimeAgo} timestamp=${item.last_activity_at} /></span>`
                         : null}
                     </div>
                     <div class="governance-chip-row">
                       ${item.guardrail_state?.requires_human_gate
-                        ? html`<span class="governance-chip warn">needs approval</span>`
+                        ? html`<span class="governance-chip warn">승인 필요</span>`
                         : null}
                       ${item.guardrail_state?.ready_to_execute
-                        ? html`<span class="governance-chip ok">ready</span>`
+                        ? html`<span class="governance-chip ok">준비됨</span>`
                         : null}
                       ${item.kind === 'consensus' && (item.votes ?? 0) < (item.quorum ?? 0)
-                        ? html`<span class="governance-chip warn">quorum debt</span>`
+                        ? html`<span class="governance-chip warn">정족수 부족</span>`
                         : null}
                       ${!hasJudgeSummary(item)
-                        ? html`<span class="governance-chip dim">judge offline</span>`
+                        ? html`<span class="governance-chip dim">판정기 오프라인</span>`
                         : null}
                     </div>
                   </div>
@@ -355,7 +355,7 @@ function ArgumentEntry({ argument }: { argument: CouncilDebateArgument }) {
       <div class="governance-ledger-body">${argument.content}</div>
       <div class="governance-chip-row">
         ${argument.evidence.map(ref => html`<span class="governance-chip">${ref}</span>`)}
-        ${argument.reply_to != null ? html`<span class="governance-chip">reply #${argument.reply_to}</span>` : null}
+        ${argument.reply_to != null ? html`<span class="governance-chip">답글 #${argument.reply_to}</span>` : null}
         ${argument.mentions.map(name => html`<span class="governance-chip">@${name}</span>`)}
         ${argument.archetype ? html`<span class="governance-chip dim">${argument.archetype}</span>` : null}
       </div>
@@ -371,9 +371,9 @@ function VoteEntry({ vote }: { vote: CouncilSessionSummary['votes'][number] }) {
         <strong>${vote.agent}</strong>
         ${vote.timestamp ? html`<span><${TimeAgo} timestamp=${vote.timestamp} /></span>` : null}
       </div>
-      <div class="governance-ledger-body">${vote.reason || 'No reason recorded.'}</div>
+      <div class="governance-ledger-body">${vote.reason || '기록된 이유가 없습니다.'}</div>
       <div class="governance-chip-row">
-        ${vote.weight != null ? html`<span class="governance-chip">weight ${vote.weight}</span>` : null}
+        ${vote.weight != null ? html`<span class="governance-chip">가중치 ${vote.weight}</span>` : null}
         ${vote.archetype ? html`<span class="governance-chip dim">${vote.archetype}</span>` : null}
       </div>
     </div>
@@ -386,14 +386,14 @@ function DecisionDetail() {
   const session = selectedConsensusDetail.value
   return html`
     <${Card}
-      title=${item ? `${item.kind === 'debate' ? 'Debate' : 'Consensus'} Detail` : 'Decision Detail'}
+      title=${item ? `${item.kind === 'debate' ? '토론' : '합의'} 상세` : '의사결정 상세'}
       class="section"
       semanticId="governance.detail"
     >
       ${detailLoading.value
-        ? html`<div class="loading-indicator">Loading governance detail...</div>`
+        ? html`<div class="loading-indicator">거버넌스 상세 불러오는 중...</div>`
         : !item
-          ? html`<div class="empty-state">Select a decision item to inspect truth and judgment.</div>`
+          ? html`<div class="empty-state">사실 계층과 판단을 보려면 의사결정 항목을 고르세요.</div>`
           : item.kind === 'debate' && debate
             ? html`
                 <div class="governance-detail-head">
@@ -419,7 +419,7 @@ function DecisionDetail() {
                   : null}
                 <div class="governance-ledger">
                   ${debate.arguments.length === 0
-                    ? html`<div class="empty-state">No arguments recorded yet.</div>`
+                    ? html`<div class="empty-state">기록된 토론이 아직 없습니다.</div>`
                     : debate.arguments.map(argument => html`<${ArgumentEntry} key=${argument.index} argument=${argument} />`)}
                 </div>
               `
@@ -431,7 +431,7 @@ function DecisionDetail() {
                       <div class="council-sub">
                         <span>${session.session.id}</span>
                         <span>${session.session.state}</span>
-                        <span>initiator ${session.session.initiator}</span>
+                      <span>시작자 ${session.session.initiator}</span>
                         ${session.session.created_at
                           ? html`<span><${TimeAgo} timestamp=${session.session.created_at} /></span>`
                           : null}
@@ -449,11 +449,11 @@ function DecisionDetail() {
                     : null}
                   <div class="governance-ledger">
                     ${session.votes.length === 0
-                      ? html`<div class="empty-state">No votes recorded yet.</div>`
+                      ? html`<div class="empty-state">기록된 표결이 아직 없습니다.</div>`
                       : session.votes.map(vote => html`<${VoteEntry} key=${vote.agent + vote.timestamp} vote=${vote} />`)}
                   </div>
                 `
-              : html`<div class="empty-state">Detail is unavailable for this decision.</div>`}
+              : html`<div class="empty-state">이 의사결정의 상세를 아직 읽을 수 없습니다.</div>`}
     <//>
   `
 }
@@ -475,12 +475,12 @@ function RouteCard({
     <div class="governance-side-block">
       <h4>${title}</h4>
       <div class="council-sub">
-        ${toolName ? html`<span>tool ${toolName}</span>` : null}
-        ${'action_type' in route && route.action_type ? html`<span>action ${route.action_type}</span>` : null}
+        ${toolName ? html`<span>도구 ${toolName}</span>` : null}
+        ${'action_type' in route && route.action_type ? html`<span>액션 ${route.action_type}</span>` : null}
         ${'confirmation_state' in route && route.confirmation_state ? html`<span>${route.confirmation_state}</span>` : null}
         ${'created_at' in route && route.created_at ? html`<span><${TimeAgo} timestamp=${route.created_at} /></span>` : null}
       </div>
-      ${targetType ? html`<div class="governance-side-line">target ${targetType}${targetId ? `:${targetId}` : ''}</div>` : null}
+      ${targetType ? html`<div class="governance-side-line">대상 ${targetType}${targetId ? `:${targetId}` : ''}</div>` : null}
       ${reason ? html`<div class="governance-side-line">${reason}</div>` : null}
       ${preview ? html`<pre class="council-detail governance-preview">${serializePreview(preview)}</pre>` : null}
     </div>
@@ -497,40 +497,40 @@ function GuardrailPane() {
   const judge = governanceData.value?.judge
   return html`
     <div class="governance-side-column">
-      <${Card} title="Why / Guardrail" class="section" semanticId="governance.guardrail">
+      <${Card} title="이유 / 가드레일" class="section" semanticId="governance.guardrail">
         ${!item
-          ? html`<div class="empty-state">Select a decision to inspect judgment and route.</div>`
+          ? html`<div class="empty-state">판단과 경로를 보려면 의사결정을 고르세요.</div>`
           : html`
               <div class="governance-side-block">
-                <h4>Judge</h4>
+                <h4>판정기</h4>
                 <div class="council-sub">
-                  <span>${judge?.judge_online ? 'online' : 'offline'}</span>
+                  <span>${judge?.judge_online ? '온라인' : '오프라인'}</span>
                   ${judge?.model_used ? html`<span>${judge.model_used}</span>` : null}
                   ${judge?.generated_at ? html`<span><${TimeAgo} timestamp=${judge.generated_at} /></span>` : null}
                 </div>
                 ${item.judgment_summary
                   ? html`<div class="governance-summary-callout">${item.judgment_summary}</div>`
-                  : html`<div class="governance-side-line">No current LLM judgment. Showing truth layer only.</div>`}
+                  : html`<div class="governance-side-line">현재 LLM 판단이 없어 사실 계층만 보여줍니다.</div>`}
                 <div class="council-sub">
-                  <span>confidence ${confidenceText(item.confidence)}</span>
+                  <span>신뢰도 ${confidenceText(item.confidence)}</span>
                   ${judgment?.keeper_name ? html`<span>${judgment.keeper_name}</span>` : null}
                 </div>
               </div>
 
-              <${RouteCard} title="Recommended Route" route=${item.recommended_action} />
-              <${RouteCard} title="Executed Route" route=${item.executed_route} />
+              <${RouteCard} title="추천 경로" route=${item.recommended_action} />
+              <${RouteCard} title="실행된 경로" route=${item.executed_route} />
 
               <div class="governance-side-block">
-                <h4>Guardrail State</h4>
+                <h4>가드레일 상태</h4>
                 <div class="council-sub">
-                  <span>${guardrail?.requires_human_gate ? 'human gate required' : 'no human gate'}</span>
-                  ${guardrail?.ready_to_execute ? html`<span>ready to execute</span>` : null}
+                  <span>${guardrail?.requires_human_gate ? '사람 승인 필요' : '사람 승인 없음'}</span>
+                  ${guardrail?.ready_to_execute ? html`<span>실행 준비됨</span>` : null}
                 </div>
                 ${guardrail?.pending_confirm
                   ? html`
                       <div class="governance-side-line">
-                        pending ${guardrail.pending_confirm.action_type || 'action'}
-                        ${guardrail.pending_confirm.target_type ? ` on ${guardrail.pending_confirm.target_type}` : ''}
+                        대기 중 ${guardrail.pending_confirm.action_type || '액션'}
+                        ${guardrail.pending_confirm.target_type ? ` · ${guardrail.pending_confirm.target_type}` : ''}
                       </div>
                       <div class="governance-action-row">
                         <button
@@ -538,44 +538,44 @@ function GuardrailPane() {
                           onClick=${() => respondToPendingConfirm('confirm')}
                           disabled=${governanceActing.value}
                         >
-                          ${governanceActing.value ? 'Working...' : 'Approve'}
+                          ${governanceActing.value ? '처리 중...' : '승인'}
                         </button>
                         <button
                           class="control-btn ghost"
                           onClick=${() => respondToPendingConfirm('deny')}
                           disabled=${governanceActing.value}
                         >
-                          ${governanceActing.value ? 'Working...' : 'Deny'}
+                          ${governanceActing.value ? '처리 중...' : '거부'}
                         </button>
                       </div>
                     `
-                  : html`<div class="governance-side-line">No pending human gate for this decision.</div>`}
+                  : html`<div class="governance-side-line">이 의사결정에 대기 중인 사람 승인은 없습니다.</div>`}
               </div>
             `}
       <//>
 
-      <${Card} title="Context" class="section" semanticId="governance.context">
+      <${Card} title="맥락" class="section" semanticId="governance.context">
         ${!item
-          ? html`<div class="empty-state">No context selected.</div>`
+          ? html`<div class="empty-state">선택된 맥락이 없습니다.</div>`
           : html`
               <div class="governance-side-block">
                 <div class="governance-chip-row">
                   ${context?.board_post_id ? html`<span class="governance-chip">board ${context.board_post_id}</span>` : null}
                   ${context?.task_id ? html`<span class="governance-chip">task ${context.task_id}</span>` : null}
-                  ${context?.operation_id ? html`<span class="governance-chip">operation ${context.operation_id}</span>` : null}
+                  ${context?.operation_id ? html`<span class="governance-chip">작전 ${context.operation_id}</span>` : null}
                   ${context?.team_session_id ? html`<span class="governance-chip">session ${context.team_session_id}</span>` : null}
                 </div>
                 ${item.related_agents.length > 0
                   ? html`
-                      <div class="governance-side-line">related agents</div>
+                      <div class="governance-side-line">관련 에이전트</div>
                       <div class="governance-chip-row">
                         ${item.related_agents.map(name => html`<span class="governance-chip dim">${name}</span>`)}
                       </div>
                     `
-                  : html`<div class="governance-side-line">No explicit linked context recorded.</div>`}
+                  : html`<div class="governance-side-line">명시적으로 연결된 맥락 기록이 없습니다.</div>`}
                 ${item.evidence_refs.length > 0
                   ? html`
-                      <div class="governance-side-line">evidence refs</div>
+                      <div class="governance-side-line">근거 참조</div>
                       <div class="governance-chip-row">
                         ${item.evidence_refs.map(ref => html`<span class="governance-chip">${ref}</span>`)}
                       </div>
@@ -585,7 +585,7 @@ function GuardrailPane() {
           `}
       <//>
 
-      <${Card} title="Recent Activity" class="section" semanticId="governance.activity">
+      <${Card} title="최근 활동" class="section" semanticId="governance.activity">
         <div class="governance-activity-list">
           ${(governanceData.value?.activity ?? []).slice(0, 8).map((event: GovernanceTimelineEvent) => html`
             <div class="governance-activity-row">
@@ -594,11 +594,11 @@ function GuardrailPane() {
                 ${event.actor ? html`<strong>${event.actor}</strong>` : null}
                 ${event.created_at ? html`<span><${TimeAgo} timestamp=${event.created_at} /></span>` : null}
               </div>
-              <div class="governance-ledger-body">${event.summary || event.topic || 'Activity recorded.'}</div>
+              <div class="governance-ledger-body">${event.summary || event.topic || '활동이 기록되었습니다.'}</div>
             </div>
           `)}
           ${(governanceData.value?.activity ?? []).length === 0
-            ? html`<div class="empty-state">No governance activity recorded.</div>`
+            ? html`<div class="empty-state">기록된 거버넌스 활동이 없습니다.</div>`
             : null}
         </div>
       <//>

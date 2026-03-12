@@ -357,13 +357,8 @@ v1 → v2 마이그레이션:
   - P1: Hebbian Learning, Effect System
   - P2: Terminology Normalization, Telemetry
 
-### Vision & Philosophy
+### Vision Docs
 
-- **[HOLONIC-ARCHITECTURE.md](./HOLONIC-ARCHITECTURE.md)** - 스케일 확장 비전
-  - 단일 → 모임 → 조직 → 단체 → 군집 → 기관 → 정신 → 초정신 → 초우주 → 0
-  - Holon 원리: 모든 레벨이 전체이자 부분
-  - 철학적 기반: Ken Wilber, Teilhard de Chardin, Buddhist Śūnyatā
-
----
-
-*Designed with MAGI Trinity: CASPER (실용), BALTHASAR (철학)*
+- **[HOLONIC-ARCHITECTURE.md](./HOLONIC-ARCHITECTURE.md)** - coordination layers from agent to institution
+  - conceptual vocabulary for scale discussion
+  - not a proof that higher-order layers are implemented

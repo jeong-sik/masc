@@ -233,9 +233,35 @@ export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 
 export type KeeperConversationDelivery =
   | 'history'
   | 'sending'
+  | 'streaming'
   | 'delivered'
   | 'timeout'
   | 'error'
+
+export interface KeeperConversationUsage {
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+}
+
+export interface KeeperConversationDetails {
+  traceId?: string | null
+  generation?: number | null
+  modelUsed?: string | null
+  latencyMs?: number | null
+  costUsd?: number | null
+  usage?: KeeperConversationUsage | null
+  skillPrimary?: string | null
+  skillReason?: string | null
+  stateBlock?: string | null
+  rawPayload?: unknown
+}
+
+export type KeeperConversationStreamState =
+  | 'opening'
+  | 'streaming'
+  | 'finalizing'
+  | null
 
 export interface KeeperConversationEntry {
   id: string
@@ -244,6 +270,8 @@ export interface KeeperConversationEntry {
   text: string
   timestamp?: string | null
   delivery: KeeperConversationDelivery
+  streamState?: KeeperConversationStreamState
+  details?: KeeperConversationDetails | null
   error?: string | null
 }
 
@@ -954,6 +982,11 @@ export interface DashboardExecutionSummary {
   worker_alerts?: number
   continuity_alerts?: number
   priority_items?: number
+  todo_tasks?: number
+  claimed_tasks?: number
+  running_tasks?: number
+  done_tasks?: number
+  cancelled_tasks?: number
   keepers?: number
 }
 
@@ -1105,6 +1138,7 @@ export interface DashboardExecutionContinuityBrief {
 export interface DashboardExecutionResponse {
   generated_at?: string
   status?: ServerStatus
+  summary?: DashboardExecutionSummary
   lodge_tick?: DashboardExecutionLodgeTick | null
   lodge_checkins?: unknown[]
   execution_queue?: unknown[]
@@ -1179,6 +1213,16 @@ export interface DashboardMissionSummary {
   cluster?: string
   project?: string
   current_room?: string | null
+  paused?: boolean
+  tempo_interval_s?: number
+  active_agents?: number
+  keeper_pressure?: number
+  active_operations?: number
+  pending_approvals?: number
+  incident_count?: number
+  recommended_action_count?: number
+  top_attention?: OperatorAttentionItem | null
+  top_action?: OperatorRecommendedAction | null
 }
 
 export interface DashboardMissionCommandFocus {
@@ -1237,9 +1281,11 @@ export interface DashboardMissionParticipantPreview {
   agent_name: string
   display_name?: string | null
   is_live?: boolean
+  status?: string
   current_work?: string | null
   recent_input_preview?: string | null
   recent_output_preview?: string | null
+  recent_tool_names: string[]
   last_activity_at?: string | null
 }
 
@@ -1274,11 +1320,21 @@ export interface DashboardMissionAgentBrief {
   is_live?: boolean
   archived_reason?: string | null
   status?: string
+  where?: string | null
+  with_whom: string[]
   current_work?: string | null
   related_session_id?: string | null
+  related_attention_count: number
   last_activity_at?: string | null
   recent_output_preview?: string | null
   recent_input_preview?: string | null
+  recent_event?: string | null
+  recent_tool_names: string[]
+  allowed_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
 }
 
 export interface DashboardMissionKeeperBrief {

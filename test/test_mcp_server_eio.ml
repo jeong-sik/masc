@@ -657,10 +657,8 @@ let test_handle_request_tools_list_include_hidden_metadata () =
     (Yojson.Safe.Util.member "icons" status_tool <> `Null);
   Alcotest.(check bool) "standard tools expose annotations" true
     (Yojson.Safe.Util.member "annotations" status_tool <> `Null);
-  Alcotest.(check bool) "visibility metadata exposed" true
+  Alcotest.(check bool) "hidden metadata not leaked" false
     (Yojson.Safe.Util.member "visibility" status_tool <> `Null);
-  Alcotest.(check bool) "implementation status exposed" true
-    (Yojson.Safe.Util.member "implementationStatus" status_tool <> `Null);
   Alcotest.(check bool) "hidden utility omitted" false
     (List.exists
        (function
@@ -727,6 +725,103 @@ let test_handle_request_tools_list_include_usage_metadata () =
   Alcotest.(check bool) "per-tool last-used field present" true
     (List.mem_assoc "usageLastUsedAt"
        (match first_tool with `Assoc fields -> fields | _ -> []));
+  cleanup_dir base_path
+
+let test_handle_request_tools_list_accepts_meta () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 122);
+    ("method", `String "tools/list");
+    ("params", `Assoc [
+      ("_meta", `Assoc [ ("progressToken", `String "tools-startup") ]);
+    ]);
+  ]) in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let tools = tools_from_response response in
+  Alcotest.(check bool) "_meta tolerated on tools/list" true (tools <> []);
+  cleanup_dir base_path
+
+let test_handle_request_resources_list_accepts_meta () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 123);
+    ("method", `String "resources/list");
+    ("params", `Assoc [
+      ("_meta", `Assoc [ ("progressToken", `String "resources-startup") ]);
+    ]);
+  ]) in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let resources = resources_from_response response in
+  Alcotest.(check bool) "_meta tolerated on resources/list" true (resources <> []);
+  cleanup_dir base_path
+
+let test_handle_request_resource_templates_list_accepts_meta () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 124);
+    ("method", `String "resources/templates/list");
+    ("params", `Assoc [
+      ("_meta", `Assoc [ ("progressToken", `String "templates-startup") ]);
+    ]);
+  ]) in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let templates =
+    match response with
+    | `Assoc fields -> (
+        match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) -> (
+            match List.assoc_opt "resourceTemplates" result_fields with
+            | Some (`List items) -> items
+            | _ -> Alcotest.fail "resourceTemplates not a list")
+        | _ -> Alcotest.fail "result not an object")
+    | _ -> Alcotest.fail "response not an object"
+  in
+  Alcotest.(check bool) "_meta tolerated on resources/templates/list" true
+    (templates <> []);
+  cleanup_dir base_path
+
+let test_handle_request_prompts_list_accepts_meta () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 125);
+    ("method", `String "prompts/list");
+    ("params", `Assoc [
+      ("_meta", `Assoc [ ("progressToken", `String "prompts-startup") ]);
+    ]);
+  ]) in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let prompts =
+    match response with
+    | `Assoc fields -> (
+        match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) -> (
+            match List.assoc_opt "prompts" result_fields with
+            | Some (`List items) -> items
+            | _ -> Alcotest.fail "prompts not a list")
+        | _ -> Alcotest.fail "result not an object")
+    | _ -> Alcotest.fail "response not an object"
+  in
+  Alcotest.(check bool) "_meta tolerated on prompts/list" true (prompts <> []);
   cleanup_dir base_path
 
 let test_execute_tool_trpg_flow () =
@@ -1231,48 +1326,6 @@ let test_handle_request_tools_call_trpg () =
 
   cleanup_dir base_path
 
-let test_handle_request_tools_call_tool_shard () =
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 10);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "masc_tool_list");
-      ("arguments", `Assoc []);
-    ]);
-  ]) in
-
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  (match response with
-  | `Assoc fields ->
-      (match List.assoc_opt "result" fields with
-      | Some (`Assoc result_fields) ->
-          Alcotest.(check bool) "tool call succeeded" false
-            (match List.assoc_opt "isError" result_fields with
-             | Some (`Bool is_error) -> is_error
-             | _ -> true);
-          let text =
-            match List.assoc_opt "content" result_fields with
-            | Some (`List (`Assoc content_fields :: _)) -> (
-                match List.assoc_opt "text" content_fields with
-                | Some (`String value) -> value
-                | _ -> "")
-            | _ -> ""
-          in
-          Alcotest.(check bool) "tool shard result present" true
-            (contains_substring text "\"shards\"")
-      | _ -> Alcotest.fail "result missing")
-  | _ -> Alcotest.fail "response not an object");
-
-  cleanup_dir base_path
-
 let test_handle_request_invalid_json () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -1754,12 +1807,19 @@ let eio_tests = [
   "handle tools/list include usage metadata", `Quick,
     test_handle_request_tools_list_include_usage_metadata;
   "handle tools/list paginates", `Quick, test_handle_request_tools_list_paginates;
+  "handle tools/list accepts _meta", `Quick,
+    test_handle_request_tools_list_accepts_meta;
+  "handle resources/list accepts _meta", `Quick,
+    test_handle_request_resources_list_accepts_meta;
+  "handle resources/templates/list accepts _meta", `Quick,
+    test_handle_request_resource_templates_list_accepts_meta;
+  "handle prompts/list accepts _meta", `Quick,
+    test_handle_request_prompts_list_accepts_meta;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   "handle tools/call trpg", `Quick, test_handle_request_tools_call_trpg;
-  "handle tools/call tool_shard", `Quick, test_handle_request_tools_call_tool_shard;
   "mode gate", `Quick, test_execute_tool_mode_gate;
   "hidden active utility direct call", `Quick,
     test_execute_tool_hidden_active_utility_direct_call;

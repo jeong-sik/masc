@@ -1565,10 +1565,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match Tool_room.dispatch simple_ctx_room ~name ~args:arguments with
   | Some result -> result
   | None ->
-  let shard_ok, shard_json = Tool_shard.execute name arguments in
-  if shard_ok then
-    (true, Yojson.Safe.pretty_to_string shard_json)
-  else
   match Tool_control.dispatch simple_ctx_control ~name ~args:arguments with
   | Some result -> result
   | None ->
@@ -2691,7 +2687,7 @@ Time: %s
       let initial_content = arg_get_string "initial_content" "" in
       let max_turns = arg_get_int "max_turns" 50 in
       let source_post_id = arg_get_string_opt "post_id" in
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if topic = "" then (false, "❌ topic required")
       else begin
         let convo_config : Council.Conversation.config = {
@@ -2723,7 +2719,7 @@ Time: %s
       let confidence = arg_get_float_opt "confidence" in
       let reply_to = arg_get_string_opt "reply_to" in
       let mentions = arg_get_string_list "mentions" in
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" || content = "" then
         (false, "❌ thread_id and content required")
       else begin
@@ -2756,7 +2752,7 @@ Time: %s
       let thread_id = arg_get_string "thread_id" "" in
       let concluder = arg_get_string "concluder" agent_name in
       let conclusion = arg_get_string "conclusion" "" in
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" || conclusion = "" then
         (false, "❌ thread_id and conclusion required")
       else begin
@@ -2775,7 +2771,7 @@ Time: %s
 
   | "masc_convo_get" ->
       let thread_id = arg_get_string "thread_id" "" in
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" then (false, "❌ thread_id required")
       else begin
         let convo_config : Council.Conversation.config = {
@@ -2790,7 +2786,7 @@ Time: %s
       end
 
   | "masc_convo_list" ->
-      let current_room = Room.current_room_id config in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       let convo_config : Council.Conversation.config = {
         base_path = config.base_path;
         room = current_room;
@@ -3305,7 +3301,6 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
     ]
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
-    @ Tool_catalog.metadata_to_fields schema.name
     @
     match usage_summary with
     | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
@@ -3472,10 +3467,15 @@ let requested_tool_list_params params =
                       })))))))
   | Some _ -> Error "Invalid params: expected object"
 
+let validate_optional_meta payload =
+  match Yojson.Safe.Util.member "_meta" payload with
+  | `Null
+  | `Assoc _ -> Ok ()
+  | _ -> Error "Invalid params: _meta must be an object"
 let parse_cursor_only_params params =
   let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
-  let allowed = [ "cursor" ] in
+  let allowed = [ "_meta"; "cursor" ] in
   let unknown =
     fields
     |> List.filter_map (fun (key, _value) ->
@@ -3487,6 +3487,7 @@ let parse_cursor_only_params params =
          (String.concat ", " unknown))
   else
     let payload = `Assoc fields in
+    let* () = validate_optional_meta payload in
     match payload |> member "cursor" with
     | `Null -> Ok { cursor = None }
     | `String cursor -> Ok { cursor = Some cursor }

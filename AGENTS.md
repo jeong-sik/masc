@@ -6,20 +6,20 @@ Multi-Agent Streaming Coordination server. OCaml 5.x + Eio, 203 MCP tools.
 
 ```bash
 # Build
-dune build
+dune build --root .
 
 # Test
-dune runtest
+dune runtest --root .
 make test
 
 # Run (dev)
-dune exec masc_mcp -- --port 8935
+dune exec --root . masc_mcp -- --port 8935
 
 # Run (prod via launchd)
 launchctl kickstart -k gui/$(id -u)/com.jeong-sik.masc-mcp
 
 # Type check only
-dune build @check
+dune build --root . @check
 ```
 
 ## Project Structure
@@ -113,13 +113,13 @@ let heartbeat_action_models = [
 
 ```bash
 # Full test suite
-dune runtest
+dune runtest --root .
 
 # Single test
-dune exec test/test_board.exe
+dune exec --root . test/test_board.exe
 
 # Type check without linking
-dune build @check
+dune build --root . @check
 ```
 
 - Tests use `Alcotest` framework
@@ -154,7 +154,7 @@ dune build @check
 
 ### Always Do
 
-- Run `dune build` after any .ml file change to verify compilation
+- Run `dune build --root .` after any .ml file change to verify compilation
 - Use newtype modules for IDs (Post_id, Agent_id, Task_id)
 - Protect shared mutable state with Eio.Mutex
 - Use `Fun.protect ~finally` for resource cleanup

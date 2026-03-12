@@ -21,7 +21,7 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 
 # 빌드
-dune build
+dune build --root .
 ```
 
 ## 실행

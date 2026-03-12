@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 ITERATIONS=${1:-10}
 TARGET=${2:-"mitosis"}
 LOG_DIR="logs/feedback-loop"
@@ -25,7 +28,7 @@ for i in $(seq 1 $ITERATIONS); do
   
   # 1. Build
   echo "🔨 Building..."
-  if ! opam exec -- dune build 2>&1; then
+  if ! opam exec -- dune build --root "$REPO_DIR" 2>&1; then
     echo "{\"iteration\":$i,\"phase\":\"build\",\"status\":\"failed\"}" >> "$LOG_FILE"
     echo "❌ Build failed at iteration $i"
     continue
@@ -33,7 +36,7 @@ for i in $(seq 1 $ITERATIONS); do
   
   # 2. Test
   echo "🧪 Testing..."
-  TEST_OUTPUT=$(opam exec -- dune test 2>&1 || true)
+  TEST_OUTPUT=$(opam exec -- dune test --root "$REPO_DIR" 2>&1 || true)
   TEST_PASSED=$(echo "$TEST_OUTPUT" | grep -c "Test Successful" || echo "0")
   TEST_FAILED=$(echo "$TEST_OUTPUT" | grep -c "FAILED\|Error" || echo "0")
   

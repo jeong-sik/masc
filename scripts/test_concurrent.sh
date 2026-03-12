@@ -26,7 +26,7 @@ mkdir -p "$SHARED_DIR"
 # Build
 echo "[Build] Building test executable..."
 cd "$PROJECT_DIR"
-dune build test/test_concurrent_distributed.exe
+dune build --root "$PROJECT_DIR" test/test_concurrent_distributed.exe
 
 # Direct path to built binary (avoids dune exec lock)
 BINARY="$PROJECT_DIR/_build/default/test/test_concurrent_distributed.exe"

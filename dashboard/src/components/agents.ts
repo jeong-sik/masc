@@ -16,6 +16,8 @@ import {
   executionSessionBriefs,
   executionOperationBriefs,
   executionWorkerSupportBriefs,
+  executionLodgeTick,
+  executionLodgeCheckins,
   executionContinuityBriefs,
   executionOfflineWorkerBriefs,
   keepers,
@@ -25,6 +27,8 @@ import type {
   DashboardExecutionSessionBrief,
   DashboardExecutionOperationBrief,
   DashboardExecutionWorkerSupportBrief,
+  DashboardExecutionLodgeTick,
+  DashboardExecutionLodgeCheckin,
   DashboardExecutionContinuityBrief,
   DashboardExecutionHandoff,
   Keeper,
@@ -109,6 +113,37 @@ function continuityStateLabel(state: DashboardExecutionContinuityBrief['state'])
     case 'warning': return '주의'
     default: return '정상'
   }
+}
+
+function lodgeOutcomeLabel(outcome: DashboardExecutionLodgeCheckin['outcome']): string {
+  switch (outcome) {
+    case 'acted': return '행동'
+    case 'passed': return '통과'
+    case 'skipped': return '건너뜀'
+    case 'failed': return '실패'
+    default: return outcome
+  }
+}
+
+function lodgeActionKindLabel(value?: DashboardExecutionLodgeCheckin['action_kind'] | null): string {
+  switch (value) {
+    case 'post': return 'post'
+    case 'comment': return 'comment'
+    case 'vote': return 'vote'
+    case 'none':
+    case null:
+    case undefined:
+      return 'none'
+    default:
+      return value
+  }
+}
+
+function renderToolSummary(tools: string[] | undefined, empty = '없음') {
+  const rows = tools ?? []
+  if (rows.length === 0) return empty
+  if (rows.length <= 3) return rows.join(', ')
+  return `${rows.slice(0, 3).join(', ')} +${rows.length - 3}`
 }
 
 function openHandoff(handoff: DashboardExecutionHandoff | null | undefined): void {
@@ -282,6 +317,67 @@ function OperationCard({ brief, selected }: { brief: DashboardExecutionOperation
   `
 }
 
+function LodgeTickCard({ tick }: { tick: DashboardExecutionLodgeTick | null }) {
+  if (!tick) {
+    return html`<div class="empty-state">최근 lodge tick 기록이 없습니다.</div>`
+  }
+  return html`
+    <div class="monitor-nested-card">
+      <div class="stats-grid">
+        <${MonitorStat} label="checked" value=${tick.checked ?? 0} color="#22d3ee" />
+        <${MonitorStat} label="acted" value=${tick.acted ?? 0} color="#4ade80" />
+        <${MonitorStat} label="passed" value=${tick.passed ?? 0} color="#94a3b8" />
+        <${MonitorStat} label="skipped" value=${tick.skipped ?? 0} color="#fbbf24" />
+        <${MonitorStat} label="failed" value=${tick.failed ?? 0} color="#fb7185" />
+      </div>
+      <div class="monitor-meta">
+        ${tick.last_tick_at ? html`<span>마지막 tick <${TimeAgo} timestamp=${tick.last_tick_at} /></span>` : html`<span>마지막 tick 없음</span>`}
+        ${tick.last_skip_reason ? html`<span>대표 skip 이유 · ${tick.last_skip_reason}</span>` : null}
+      </div>
+      ${tick.activity_report ? html`<div class="monitor-footnote">${tick.activity_report}</div>` : null}
+    </div>
+  `
+}
+
+function LodgeCheckinRow({ row }: { row: DashboardExecutionLodgeCheckin }) {
+  return html`
+    <button
+      class="monitor-row ${toneClass(row.outcome === 'failed' ? 'bad' : row.outcome === 'skipped' ? 'warn' : 'ok')}"
+      data-testid="execution.lodge-checkin-card"
+      onClick=${() => openAgentDetail(row.agent_name)}
+    >
+      <div class="monitor-row-header">
+        <div class="monitor-row-title">
+          <div class="monitor-name-line">
+            <span class="monitor-title">${row.agent_name}</span>
+            ${row.worker_name ? html`<span class="monitor-sub">worker · ${row.worker_name}</span>` : null}
+          </div>
+          <div class="monitor-note">${row.reason ?? row.summary ?? '이유가 기록되지 않았습니다.'}</div>
+        </div>
+        <span class="monitor-pill ${toneClass(row.outcome === 'failed' ? 'bad' : row.outcome === 'skipped' ? 'warn' : 'ok')}">${lodgeOutcomeLabel(row.outcome)}</span>
+      </div>
+      <div class="monitor-meta">
+        <span>trigger · ${row.trigger ?? 'unknown'}</span>
+        ${row.checked_at ? html`<span><${TimeAgo} timestamp=${row.checked_at} /></span>` : null}
+        <span>action · ${lodgeActionKindLabel(row.action_kind)}</span>
+        <span>allow ${row.allowed_tool_names.length}</span>
+        <span>used ${row.used_tool_names.length}</span>
+      </div>
+      ${row.summary && row.summary !== row.reason
+        ? html`<div class="monitor-focus">${row.summary}</div>`
+        : null}
+      <div class="monitor-footnote">
+        허용 도구: ${renderToolSummary(row.allowed_tool_names)} · 사용 도구: ${renderToolSummary(row.used_tool_names)}
+      </div>
+      ${row.failure_reason || row.decision_reason
+        ? html`<div class="monitor-footnote">
+            ${row.failure_reason ? `실패 이유: ${row.failure_reason}` : `판단 이유: ${row.decision_reason}`}
+          </div>`
+        : null}
+    </button>
+  `
+}
+
 function WorkerSupportRow({
   row,
   testId,
@@ -350,7 +446,21 @@ function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
       </div>
 
       <div class="monitor-focus">${row.focus}</div>
-      ${row.skill_reason ? html`<div class="monitor-footnote">연속성 이유: ${row.skill_reason}</div>` : null}
+      ${row.continuity_summary || row.recent_output_preview
+        ? html`<div class="monitor-footnote">${row.continuity_summary ?? row.recent_output_preview}</div>`
+        : null}
+      ${row.skill_route_summary || row.tool_audit_source
+        ? html`<div class="monitor-footnote">
+            ${row.skill_route_summary ? `route · ${row.skill_route_summary}` : ''}
+            ${row.tool_audit_source ? `${row.skill_route_summary ? ' · ' : ''}audit · ${row.tool_audit_source}` : ''}
+            ${row.tool_audit_at ? html` · <${TimeAgo} timestamp=${row.tool_audit_at} />` : null}
+          </div>`
+        : null}
+      ${(row.recent_tool_names?.length ?? 0) > 0 || (row.allowed_tool_names?.length ?? 0) > 0
+        ? html`<div class="monitor-footnote">
+            recent tools: ${renderToolSummary(row.recent_tool_names)} · allowed: ${renderToolSummary(row.allowed_tool_names)}
+          </div>`
+        : null}
     </button>
   `
 }
@@ -361,6 +471,8 @@ export function Execution() {
   const sessionRowsAll = executionSessionBriefs.value
   const operationRowsAll = executionOperationBriefs.value
   const workerSupportAll = executionWorkerSupportBriefs.value
+  const lodgeTick = executionLodgeTick.value
+  const lodgeCheckinsAll = executionLodgeCheckins.value
   const continuityAll = executionContinuityBriefs.value
   const offlineRowsAll = executionOfflineWorkerBriefs.value
 
@@ -417,6 +529,12 @@ export function Execution() {
     activeSessionId
       ? continuityAll.filter(item => item.related_session_id === activeSessionId || item.tone !== 'ok')
       : continuityAll
+
+  const lodgeCheckins =
+    activeSessionId
+      ? lodgeCheckinsAll.filter(item =>
+          sessionRows.some(row => row.member_names.includes(item.agent_name)))
+      : lodgeCheckinsAll
 
   const offlineRows =
     activeSessionId || activeOperationId
@@ -487,6 +605,24 @@ export function Execution() {
             ${operationRows.length === 0
               ? html`<div class="empty-state">선택된 실행과 연결된 작전이 없습니다.</div>`
               : operationRows.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)}
+          </div>
+        <//>
+
+        <${Card}
+          title="Lodge Check-ins"
+          class="section"
+          semanticId="execution.lodge"
+          testId="execution.lodge-checkins"
+        >
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">Lodge Check-ins</h2>
+            <p class="monitor-subheadline">최근 lodge tick에서 누가 무엇을 허용받았고, 실제로 어떻게 행동했는지 먼저 보여줍니다.</p>
+          </div>
+          <${LodgeTickCard} tick=${lodgeTick} />
+          <div class="monitor-list">
+            ${lodgeCheckins.length === 0
+              ? html`<div class="empty-state">최근 lodge check-in 기록이 없습니다.</div>`
+              : lodgeCheckins.map(row => html`<${LodgeCheckinRow} key=${`${row.agent_name}-${row.checked_at ?? row.outcome}`} row=${row} />`)}
           </div>
         <//>
 

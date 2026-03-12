@@ -591,7 +591,7 @@ type audit_event = {
 }
 
 let audit_log_path (config : Room.config) =
-  Filename.concat (Room_utils.masc_dir config) "audit.log"
+  Filename.concat (Room_utils.masc_dir config) "audit.jsonl"
 
 let audit_event_to_json (e : audit_event) : Yojson.Safe.t =
   `Assoc [

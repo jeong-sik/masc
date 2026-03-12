@@ -39,7 +39,6 @@ let test_dashboard_execution_fixture () =
             ()
         in
         let open Yojson.Safe.Util in
-        let summary = json |> member "summary" in
         let execution_queue = json |> member "execution_queue" |> to_list in
         let session_briefs = json |> member "session_briefs" |> to_list in
         let operation_briefs = json |> member "operation_briefs" |> to_list in
@@ -48,8 +47,8 @@ let test_dashboard_execution_fixture () =
         let lodge_checkins = json |> member "lodge_checkins" |> to_list in
         let continuity_briefs = json |> member "continuity_briefs" |> to_list in
         let offline_worker_briefs = json |> member "offline_worker_briefs" |> to_list in
-        check int "fixture blocked sessions" 1 (summary |> member "blocked_sessions" |> to_int);
-        check int "fixture blocked operations" 2 (summary |> member "blocked_operations" |> to_int);
+        check bool "summary removed from execution payload" true
+          (json |> member "summary" = `Null);
         check int "lodge checked count" 3 (lodge_tick |> member "checked" |> to_int);
         check int "lodge checkins" 3 (List.length lodge_checkins);
         check string "top queue kind" "session"

@@ -8,6 +8,8 @@ import type {
   Task,
   Message,
   Keeper,
+  KeeperMetricPoint,
+  KeeperDiagnostic,
   BoardPost,
   ServerStatus,
   PerpetualStatus,
@@ -22,7 +24,6 @@ import type {
   DashboardSemanticPanel,
   DashboardSemanticSurfaceId,
   DashboardExecutionHandoff,
-  DashboardExecutionSummary,
   DashboardExecutionQueueItem,
   DashboardExecutionSessionBrief,
   DashboardExecutionOperationBrief,
@@ -41,12 +42,7 @@ import {
   fetchTrpgState,
 } from './api'
 import { journal } from './sse'
-import { normalizeLodgeRuntimeStatus } from './keeper-runtime'
-import {
-  deriveLifecycleState,
-  keeperFreshnessTs,
-  normalizeKeepers,
-} from './keeper-store-normalize'
+import { deriveKeeperDiagnostic, normalizeLodgeRuntimeStatus } from './keeper-runtime'
 import { buildAgentMotion, type AgentMotionSnapshot } from './components/common/agent-motion'
 import { isRecord, asString, asNumber, asStringArray, toIsoTimestamp } from './components/common/normalize'
 
@@ -58,7 +54,6 @@ export const messages = signal<Message[]>([])
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
 export const perpetualStatus = signal<PerpetualStatus | null>(null)
-export const executionSummary = signal<DashboardExecutionSummary | null>(null)
 export const executionQueue = signal<DashboardExecutionQueueItem[]>([])
 export const executionSessionBriefs = signal<DashboardExecutionSessionBrief[]>([])
 export const executionOperationBriefs = signal<DashboardExecutionOperationBrief[]>([])
@@ -154,15 +149,30 @@ export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = 
   return map
 })
 
+// --- Keeper lifecycle derivation ---
+
+export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
+  const status = keeper.status?.toLowerCase() ?? ''
+  if (status === 'offline' || status === 'inactive') return 'offline'
+
+  const series = keeper.metrics_series
+  if (!series || series.length === 0) {
+    return 'idle'
+  }
+  const latest = series[series.length - 1]
+  if (!latest) return 'idle'
+  if (latest.is_handoff) return 'handoff-imminent'
+  if (latest.is_compaction) return 'compacting'
+  const ratio = latest.context_ratio
+  if (ratio > 0.85) return 'handoff-imminent'
+  if (ratio > 0.70) return 'preparing'
+  if (ratio > 0.50) return 'compacting'
+  return 'active'
+}
+
 export const keeperLifecycles: ReadonlySignal<Map<string, KeeperLifecycleState>> = computed(() => {
   const map = new Map<string, KeeperLifecycleState>()
   for (const k of keepers.value) {
-    const status = k.status?.toLowerCase() ?? ''
-    if (status === 'offline' || status === 'inactive') {
-      map.set(k.name, 'offline')
-      continue
-    }
-    if (!k.metrics_series || k.metrics_series.length === 0) continue
     map.set(k.name, deriveLifecycleState(k))
   }
   return map
@@ -170,6 +180,25 @@ export const keeperLifecycles: ReadonlySignal<Map<string, KeeperLifecycleState>>
 
 // Heartbeat staleness threshold (120 seconds)
 const HEARTBEAT_STALE_MS = 120_000
+
+function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number>): number | null {
+  const mapped = heartbeats.get(keeper.name)
+  if (mapped != null) return mapped
+
+  const direct = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : Number.NaN
+  if (!Number.isNaN(direct)) return direct
+
+  const ageSeconds = [
+    keeper.last_turn_ago_s,
+    keeper.last_proactive_ago_s,
+    keeper.last_handoff_ago_s,
+    keeper.last_compaction_ago_s,
+  ].find(value => typeof value === 'number' && Number.isFinite(value) && value >= 0)
+
+  return typeof ageSeconds === 'number'
+    ? Date.now() - (ageSeconds * 1000)
+    : null
+}
 
 export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
   const now = Date.now()
@@ -291,26 +320,6 @@ function normalizeExecutionTone(value: unknown): DashboardExecutionQueueItem['se
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
   if (raw === 'ok' || raw === 'warn' || raw === 'bad') return raw
   return 'ok'
-}
-
-function normalizeExecutionSummary(raw: unknown): DashboardExecutionSummary | null {
-  if (!isRecord(raw)) return null
-  return {
-    active_sessions: asNumber(raw.active_sessions),
-    blocked_sessions: asNumber(raw.blocked_sessions),
-    active_operations: asNumber(raw.active_operations),
-    blocked_operations: asNumber(raw.blocked_operations),
-    runtime_pressure: asNumber(raw.runtime_pressure),
-    worker_alerts: asNumber(raw.worker_alerts),
-    continuity_alerts: asNumber(raw.continuity_alerts),
-    priority_items: asNumber(raw.priority_items),
-    todo_tasks: asNumber(raw.todo_tasks),
-    claimed_tasks: asNumber(raw.claimed_tasks),
-    running_tasks: asNumber(raw.running_tasks),
-    done_tasks: asNumber(raw.done_tasks),
-    cancelled_tasks: asNumber(raw.cancelled_tasks),
-    keepers: asNumber(raw.keepers),
-  }
 }
 
 function normalizeExecutionHandoff(raw: unknown): DashboardExecutionHandoff | null {
@@ -544,6 +553,205 @@ function mergeMessages(current: Message[], incoming: Message[]): Message[] {
     .sort((a, b) => messageSortKey(a) - messageSortKey(b))
     .slice(-500)
 }
+
+function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item): KeeperMetricPoint | null => {
+      if (!isRecord(item)) return null
+      const ts = asNumber(item.ts_unix)
+      if (ts == null) return null
+      const handoffObj = isRecord(item.handoff) ? item.handoff : null
+      return {
+        ts,
+        context_ratio: asNumber(item.context_ratio) ?? 0,
+        context_tokens: asNumber(item.context_tokens) ?? 0,
+        context_max: asNumber(item.context_max) ?? 0,
+        latency_ms: asNumber(item.latency_ms) ?? 0,
+        generation: asNumber(item.generation) ?? 0,
+        channel: typeof item.channel === 'string' ? item.channel : 'turn',
+        is_handoff: handoffObj != null && item.handoff_performed === true,
+        is_compaction: item.compacted === true,
+        compaction_saved_tokens: asNumber(item.compaction_saved_tokens) ?? 0,
+        compaction_trigger: typeof item.compaction_trigger === 'string' ? item.compaction_trigger : null,
+        model_used: typeof item.model_used === 'string' ? item.model_used : '',
+        cost_usd: asNumber(item.cost_usd) ?? 0,
+        handoff_to_model: handoffObj ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null) : null,
+        handoff_new_generation: handoffObj ? (asNumber(handoffObj.new_generation) ?? null) : null,
+      }
+    })
+    .filter((item): item is KeeperMetricPoint => item !== null)
+}
+
+function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null {
+  if (!isRecord(raw)) return null
+  const healthState = asString(raw.health_state)
+  const nextActionPath = asString(raw.next_action_path)
+  const lastReplyStatus = asString(raw.last_reply_status)
+  if (!healthState || !nextActionPath || !lastReplyStatus) return null
+  const quietReason = (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason']
+  const summary =
+    asString(raw.summary)
+    ?? (
+      healthState === 'offline' || healthState === 'degraded' || healthState === 'stale'
+        ? 'Keeper is not in a healthy reply state. Probe or recover before relying on automation.'
+        : quietReason === 'quiet_hours'
+          ? 'Lodge quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep.'
+          : quietReason === 'min_gap'
+            ? 'Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait.'
+            : quietReason === 'never_started'
+              ? 'Keeper metadata exists but no reply turn has been recorded yet.'
+              : 'Keeper is reachable. Send a direct message for an immediate response.'
+    )
+  return {
+    health_state: healthState as KeeperDiagnostic['health_state'],
+    quiet_reason: quietReason,
+    next_action_path: nextActionPath as KeeperDiagnostic['next_action_path'],
+    last_reply_status: lastReplyStatus as KeeperDiagnostic['last_reply_status'],
+    last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? asString(raw.last_reply_at) ?? null,
+    last_reply_preview: asString(raw.last_reply_preview) ?? null,
+    last_error: asString(raw.last_error) ?? null,
+    next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,
+    recoverable:
+      typeof raw.recoverable === 'boolean'
+        ? raw.recoverable
+        : nextActionPath === 'recover',
+    summary,
+    keepalive_running:
+      typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
+  }
+}
+
+function normalizeKeepers(raw: unknown, serverStatusValue?: ServerStatus | null): Keeper[] {
+  const rows =
+    Array.isArray(raw)
+      ? raw
+      : isRecord(raw) && Array.isArray(raw.keepers)
+        ? raw.keepers
+        : []
+
+  return rows
+    .map((row): Keeper | null => {
+      if (!isRecord(row)) return null
+      const agentRaw = isRecord(row.agent) ? row.agent : null
+      const contextRaw = isRecord(row.context) ? row.context : null
+      const metricsWindowRaw = isRecord(row.metrics_window) ? row.metrics_window : undefined
+
+      const name = asString(row.name)
+      if (!name) return null
+
+      const contextRatio = asNumber(row.context_ratio) ?? asNumber(contextRaw?.context_ratio)
+      const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
+      const status = normalizeAgentStatus(statusRaw)
+      const model = asString(row.model) ?? asString(row.active_model) ?? asString(row.primary_model)
+      const skillSecondary = asStringArray(row.skill_secondary)
+
+      const normalizedContext =
+        contextRaw
+          ? {
+              source: asString(contextRaw.source),
+              context_ratio: asNumber(contextRaw.context_ratio),
+              context_tokens: asNumber(contextRaw.context_tokens),
+              context_max: asNumber(contextRaw.context_max),
+              message_count: asNumber(contextRaw.message_count),
+              has_checkpoint: typeof contextRaw.has_checkpoint === 'boolean' ? contextRaw.has_checkpoint : undefined,
+            }
+          : undefined
+
+      const normalizedAgent =
+        agentRaw
+          ? {
+              name: asString(agentRaw.name),
+              exists: typeof agentRaw.exists === 'boolean' ? agentRaw.exists : undefined,
+              error: asString(agentRaw.error),
+              agent_type: asString(agentRaw.agent_type),
+              status: asString(agentRaw.status),
+              current_task: asString(agentRaw.current_task) ?? null,
+              joined_at: asString(agentRaw.joined_at),
+              last_seen: asString(agentRaw.last_seen),
+              last_seen_ago_s: asNumber(agentRaw.last_seen_ago_s),
+              capabilities: asStringArray(agentRaw.capabilities),
+              is_zombie: typeof agentRaw.is_zombie === 'boolean' ? agentRaw.is_zombie : undefined,
+            }
+          : undefined
+
+      const metricsSeries = normalizeMetricsSeries(row.metrics_series)
+
+      const keeper: Keeper = {
+        name,
+        runtime_class:
+          row.runtime_class === 'persistent_agent' ? 'persistent_agent' : 'resident_keeper',
+        desired:
+          typeof row.desired === 'boolean' ? row.desired : undefined,
+        resident_registered:
+          typeof row.resident_registered === 'boolean' ? row.resident_registered : undefined,
+        reconcile_status: asString(row.reconcile_status) ?? null,
+        emoji: asString(row.emoji),
+        koreanName: asString(row.koreanName) ?? asString(row.korean_name),
+        agent_name: asString(row.agent_name),
+        trace_id: asString(row.trace_id),
+        model,
+        primary_model: asString(row.primary_model),
+        active_model: asString(row.active_model),
+        next_model_hint: asString(row.next_model_hint) ?? null,
+        status,
+        presence_keepalive:
+          typeof row.presence_keepalive === 'boolean' ? row.presence_keepalive : undefined,
+        presence_keepalive_sec: asNumber(row.presence_keepalive_sec),
+        keepalive_running:
+          typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
+        proactive_enabled:
+          typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
+        proactive_idle_sec: asNumber(row.proactive_idle_sec),
+        proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
+        last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),
+        generation: asNumber(row.generation),
+        turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
+        keeper_age_s: asNumber(row.keeper_age_s),
+        last_turn_ago_s: asNumber(row.last_turn_ago_s),
+        last_handoff_ago_s: asNumber(row.last_handoff_ago_s),
+        last_compaction_ago_s: asNumber(row.last_compaction_ago_s),
+        last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
+        last_proactive_preview: asString(row.last_proactive_preview) ?? null,
+        context_ratio: contextRatio,
+        context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
+        context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),
+        context_source: asString(row.context_source) ?? asString(contextRaw?.source),
+        context: normalizedContext,
+        traits: asStringArray(row.traits),
+        interests: asStringArray(row.interests),
+        primaryValue: asString(row.primaryValue) ?? asString(row.primary_value),
+        activityLevel: asNumber(row.activityLevel) ?? asNumber(row.activity_level),
+        memory_recent_note: asString(row.memory_recent_note) ?? null,
+        recent_input_preview: asString(row.recent_input_preview) ?? null,
+        recent_output_preview: asString(row.recent_output_preview) ?? null,
+        recent_tool_names: asStringArray(row.recent_tool_names) ?? [],
+        allowed_tool_names: asStringArray(row.allowed_tool_names) ?? [],
+        latest_tool_names: asStringArray(row.latest_tool_names) ?? [],
+        latest_tool_call_count: asNumber(row.latest_tool_call_count) ?? null,
+        tool_audit_source: asString(row.tool_audit_source) ?? null,
+        tool_audit_at: toIsoTimestamp(row.tool_audit_at) ?? asString(row.tool_audit_at) ?? null,
+        conversation_tail_count: asNumber(row.conversation_tail_count),
+        k2k_count: asNumber(row.k2k_count),
+        handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),
+        compaction_count: asNumber(row.compaction_count),
+        last_compaction_saved_tokens: asNumber(row.last_compaction_saved_tokens),
+        diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
+        skill_primary: asString(row.skill_primary) ?? null,
+        skill_secondary: skillSecondary,
+        skill_reason: asString(row.skill_reason) ?? null,
+        metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
+        metrics_window: metricsWindowRaw as Keeper['metrics_window'],
+        agent: normalizedAgent,
+      }
+      keeper.diagnostic =
+        normalizeKeeperDiagnostic(row.diagnostic)
+        ?? deriveKeeperDiagnostic(keeper, serverStatusValue?.lodge ?? null)
+      return keeper
+    })
+    .filter((row): row is Keeper => row !== null)
+}
+
 function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | undefined {
   if (!isRecord(raw)) return undefined
   const releaseVersion = asString(raw.release_version)
@@ -895,8 +1103,7 @@ export async function refreshExecution(): Promise<void> {
       .map(normalizeMessage)
       .filter((row): row is Message => row !== null)
     messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
-    keepers.value = normalizeKeepers(data.keepers)
-    executionSummary.value = normalizeExecutionSummary(data.summary)
+    keepers.value = normalizeKeepers(data.keepers, normalizedStatus ?? serverStatus.value)
     executionLodgeTick.value = normalizeExecutionLodgeTick(data.lodge_tick)
     executionLodgeCheckins.value = (Array.isArray(data.lodge_checkins) ? data.lodge_checkins : [])
       .map(normalizeExecutionLodgeCheckin)

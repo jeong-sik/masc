@@ -254,16 +254,6 @@ function normalizeSummary(raw: unknown): DashboardMissionSummary {
     cluster: asString(root.cluster),
     project: asString(root.project),
     current_room: asString(root.current_room) ?? null,
-    paused: asBoolean(root.paused),
-    tempo_interval_s: asNumber(root.tempo_interval_s),
-    active_agents: asNumber(root.active_agents),
-    keeper_pressure: asNumber(root.keeper_pressure),
-    active_operations: asNumber(root.active_operations),
-    pending_approvals: asNumber(root.pending_approvals),
-    incident_count: asNumber(root.incident_count),
-    recommended_action_count: asNumber(root.recommended_action_count),
-    top_attention: normalizeAttentionItem(root.top_attention),
-    top_action: normalizeRecommendedAction(root.top_action),
   }
 }
 
@@ -370,13 +360,11 @@ function normalizeParticipantPreview(raw: unknown): DashboardMissionParticipantP
   if (!agentName) return null
   return {
     agent_name: agentName,
-    status: asString(raw.status),
+    display_name: asString(raw.display_name) ?? null,
+    is_live: typeof raw.is_live === 'boolean' ? raw.is_live : undefined,
     current_work: asString(raw.current_work) ?? null,
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
-    recent_tool_names: extractArray(raw.recent_tool_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
     last_activity_at: asString(raw.last_activity_at) ?? null,
   }
 }
@@ -433,30 +421,15 @@ function normalizeAgentBrief(raw: unknown): DashboardMissionAgentBrief | null {
   if (!agentName) return null
   return {
     agent_name: agentName,
+    display_name: asString(raw.display_name) ?? null,
+    is_live: typeof raw.is_live === 'boolean' ? raw.is_live : undefined,
+    archived_reason: asString(raw.archived_reason) ?? null,
     status: asString(raw.status),
-    where: asString(raw.where) ?? null,
-    with_whom: extractArray(raw.with_whom)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
     current_work: asString(raw.current_work) ?? null,
     related_session_id: asString(raw.related_session_id) ?? null,
-    related_attention_count: asNumber(raw.related_attention_count) ?? 0,
     last_activity_at: asString(raw.last_activity_at) ?? null,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
-    recent_event: asString(raw.recent_event) ?? null,
-    recent_tool_names: extractArray(raw.recent_tool_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    allowed_tool_names: extractArray(raw.allowed_tool_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    latest_tool_names: extractArray(raw.latest_tool_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    latest_tool_call_count: asNumber(raw.latest_tool_call_count) ?? null,
-    tool_audit_source: asString(raw.tool_audit_source) ?? null,
-    tool_audit_at: asString(raw.tool_audit_at) ?? null,
   }
 }
 

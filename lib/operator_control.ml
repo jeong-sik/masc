@@ -620,16 +620,10 @@ let keepers_json config =
               | `Bool value -> value
               | _ -> false
             in
-            let now_ts = Time_compat.now () in
             let diagnostic =
               Keeper_exec_status.keeper_diagnostic_json ~meta
                 ~agent_status:agent_json ~keepalive_running ~history_items:[]
-                ~now_ts
-              |> Keeper_exec_status.augment_keeper_diagnostic_json ~desired:true
-                   ~meta ~keepalive_running
-                   ~keepalive_started_at:
-                     (Keeper_keepalive.keeper_keepalive_started_at meta.name)
-                   ~now_ts
+                ~now_ts:(Time_compat.now ())
             in
             let allowed_tool_names, latest_tool_names, latest_tool_call_count,
                 tool_audit_source, tool_audit_at =
@@ -638,8 +632,9 @@ let keepers_json config =
             let agent_status =
               if not agent_exists then "offline"
               else
-                Keeper_exec_status.keeper_surface_status
-                  ~agent_status:agent_json ~diagnostic
+                match agent_json |> U.member "status" with
+                | `String status -> status
+                | _ -> "unknown"
             in
             Some
               (`Assoc
@@ -2939,6 +2934,23 @@ let swarm_run_chain_preview (request : action_request) swarm_json =
 let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
 
+let first_nonempty_string_field keys json =
+  let rec loop = function
+    | [] -> None
+    | key :: rest -> (
+        match U.member key json with
+        | `String value when String.trim value <> "" -> Some (String.trim value)
+        | _ -> loop rest)
+  in
+  loop keys
+
+let keeper_reply_text dispatched_json =
+  match dispatched_json with
+  | `String value when String.trim value <> "" -> Some (String.trim value)
+  | `Assoc _ ->
+      first_nonempty_string_field [ "reply"; "content"; "text"; "message" ] dispatched_json
+  | _ -> None
+
 let string_of_trigger = function
   | Lodge_heartbeat.Scheduled -> "scheduled"
   | Lodge_heartbeat.ContentAlert _ -> "content_alert"
@@ -3507,11 +3519,13 @@ let execute_action (ctx : 'a context) (request : action_request) :
         | None -> Error "masc_keeper_msg dispatch unavailable"
       in
       let _ = ok in
+      let dispatched_json = json_of_dispatch_output body in
       Ok
         (`Assoc
           [
             ("delegated_tool", `String "masc_keeper_msg");
-            ("result", json_of_dispatch_output body);
+            ("result", dispatched_json);
+            ("reply", string_option_to_json (keeper_reply_text dispatched_json));
           ])
   | "swarm_run_continue" ->
       let* () = validate_target_type "swarm_run" request in

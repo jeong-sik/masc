@@ -1,6 +1,6 @@
 import type { TabId } from '../types'
 
-export type DashboardNavGroup = 'observe' | 'context' | 'act' | 'lab'
+export type DashboardNavGroup = 'now' | 'why' | 'act' | 'lab'
 
 export interface DashboardNavItem {
   id: TabId
@@ -18,24 +18,24 @@ export interface DashboardNavSection {
 
 export const DASHBOARD_NAV_SECTIONS: DashboardNavSection[] = [
   {
-    id: 'observe',
-    label: '관찰',
-    description: '지금 상태, 실행 압력, 계획 상태를 먼저 읽는 운영 표면',
+    id: 'now',
+    label: '지금',
+    description: '지금 무슨 일이 벌어지는지 사회의 현재 상태를 먼저 읽는 표면',
   },
   {
-    id: 'context',
-    label: '맥락',
-    description: '비동기 메모리와 의사결정 거버넌스를 분리해서 보는 표면',
+    id: 'why',
+    label: '이유',
+    description: '왜 그렇게 보이는지 근거, 메모리, 거버넌스로 뒤를 파는 표면',
   },
   {
     id: 'act',
     label: '개입',
-    description: '개입과 운영 기준 지휘를 실행하는 표면',
+    description: '운영자 액션과 계획 조정을 통해 지금 상태를 바꾸는 표면',
   },
   {
     id: 'lab',
     label: '실험',
-    description: '실험적 기능은 메인 operator console 밖으로 분리',
+    description: '실험적 오케스트레이션과 고급 지휘 표면을 분리해서 보는 영역',
   },
 ]
 
@@ -44,77 +44,77 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     id: 'mission',
     label: '상황판',
     icon: '\uD83C\uDFE0',
-    group: 'observe',
-    description: '지금 문제, 다음 액션, 운영 포커스를 먼저 보는 기본 랜딩',
-  },
-  {
-    id: 'proof',
-    label: '근거',
-    icon: '\uD83D\uDD0D',
-    group: 'observe',
-    description: '협업, 대화, 도구, 근거 기록을 증명 중심으로 읽는 표면',
+    group: 'now',
+    description: 'room 중심으로 지금 상황과 사회의 흐름을 가장 먼저 읽는 기본 랜딩',
   },
   {
     id: 'execution',
     label: '실행',
     icon: '\uD83E\uDD16',
-    group: 'observe',
-    description: '워커, 태스크, 키퍼 연속성을 분리해서 보는 실행 표면',
-  },
-  {
-    id: 'tools',
-    label: '도구',
-    icon: '\uD83E\uDDF0',
-    group: 'observe',
-    description: '시스템 전체 도구 inventory와 사용 통계를 함께 읽는 표면',
+    group: 'now',
+    description: 'agents, keepers, sessions를 중심으로 사회의 행위자를 읽는 표면',
   },
   {
     id: 'live',
     label: '라이브',
     icon: '\uD83D\uDCE1',
-    group: 'observe',
-    description: '실시간 에이전트 활동과 이벤트 스트림을 한눈에 모니터링',
+    group: 'now',
+    description: '실시간 에이전트 활동과 이벤트 흐름을 사회 관찰 관점으로 보는 표면',
   },
   {
-    id: 'planning',
-    label: '계획',
-    icon: '\uD83C\uDFAF',
-    group: 'observe',
-    description: '목표, 지표 루프, 백로그 압력을 읽는 계획 표면',
+    id: 'proof',
+    label: '근거',
+    icon: '\uD83D\uDD0D',
+    group: 'why',
+    description: '협업, 대화, 실행의 증거 경로를 확인하는 표면',
   },
   {
     id: 'memory',
     label: '메모리',
     icon: '\uD83D\uDCAC',
-    group: 'context',
-    description: '게시글과 댓글로 room의 비동기 메모리를 읽는 표면',
+    group: 'why',
+    description: '게시글, 댓글, 비동기 기억으로 room의 누적 맥락을 읽는 표면',
   },
   {
     id: 'governance',
     label: '거버넌스',
     icon: '\u2696\uFE0F',
-    group: 'context',
-    description: '토론과 표결을 분리해 의사결정 상태를 보는 표면',
+    group: 'why',
+    description: '토론, 표결, 판단 구조를 규범과 결정의 관점에서 읽는 표면',
+  },
+  {
+    id: 'planning',
+    label: '계획',
+    icon: '\uD83C\uDFAF',
+    group: 'act',
+    description: '목표, 백로그, 압력을 운영 관점으로 읽는 계획 표면',
+  },
+  {
+    id: 'tools',
+    label: '도구',
+    icon: '\uD83E\uDDF0',
+    group: 'act',
+    description: '시스템 전체 도구 inventory와 사용 건강도를 확인하는 운영 표면',
   },
   {
     id: 'intervene',
     label: '개입',
     icon: '\uD83C\uDFAE',
     group: 'act',
-    description: '룸, 세션, 키퍼 액션을 실행하는 개입 화면',
+    description: '룸, 세션, 키퍼에 직접 개입하는 운영 화면',
   },
   {
     id: 'command',
     label: '지휘',
     icon: '\uD83E\uDDED',
-    group: 'act',
-    description: '유닛 계층, 작전 체인, 승인, 추적 이력을 보는 상세 화면',
+    group: 'lab',
+    description: 'command-plane, swarm, resolution 같은 고급 지휘/실험 표면',
   },
   {
     id: 'lab',
     label: '실험',
     icon: '\u2694\uFE0F',
     group: 'lab',
-    description: 'TRPG 같은 실험 표면을 메인 콘솔 밖에서 다룹니다',
+    description: 'TRPG 같은 실험 표면을 메인 사회/운영 콘솔 밖에서 다룹니다',
   },
 ]

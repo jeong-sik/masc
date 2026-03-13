@@ -83,7 +83,6 @@ let contains_substring s needle =
     else loop (i + 1)
   in
   if n_len = 0 then true else loop 0
-
 let string_is_valid_utf8 s =
   let len = String.length s in
   let rec loop i =

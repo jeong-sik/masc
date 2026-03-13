@@ -1636,7 +1636,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
         |> member "keepers" |> member "items" |> to_list
         |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
       in
-      Alcotest.(check string) "status keeps live agent truth" "active"
+      Alcotest.(check string) "offline when no agent runtime" "offline"
         (keeper |> member "status" |> to_string);
       Alcotest.(check bool) "allowed tool fallback present" true
         ((keeper |> member "allowed_tool_names" |> to_list) <> []);

@@ -248,7 +248,17 @@ let test_digest_room_exposes_pending_confirm_attention () =
            (fun item ->
              String.equal "derived"
                Yojson.Safe.Util.(item |> member "provenance" |> to_string))
-           attention_items))
+           attention_items);
+      (* command_* attention items only appear when microarch signals
+         are warn/bad; in a fresh room they are absent *)
+      Alcotest.(check bool) "no command attention in fresh room" true
+        (not
+           (List.exists
+              (fun item ->
+                String.starts_with
+                  ~prefix:"command_"
+                  Yojson.Safe.Util.(item |> member "kind" |> to_string))
+              attention_items)))
 
 let test_digest_team_session_shape () =
   Eio_main.run @@ fun env ->

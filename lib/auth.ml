@@ -239,7 +239,7 @@ let permission_for_tool = function
   | "masc_runtime_verify" | "masc_llama_runtime_verify"
   | "masc_llama_runtime_bench"
   | "masc_unit_list" | "masc_operation_status"
-  | "masc_policy_status" | "masc_dispatch_plan" | "masc_dispatch_route"
+  | "masc_policy_status" | "masc_dispatch_plan"
   | "masc_observe_topology" | "masc_observe_operations"
   | "masc_observe_swarm" | "masc_observe_capacity" | "masc_observe_alerts"
   | "masc_observe_traces"

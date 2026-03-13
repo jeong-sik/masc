@@ -744,30 +744,6 @@ Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pu
     ];
   };
   {
-    name = "masc_archive_save";
-    description = "Save a record to the archive (실록). Records debates, votes, and decisions.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("type", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "debate"; `String "vote"; `String "decision"; `String "post"]);
-          ("description", `String "Record type");
-        ]);
-        ("content", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Record content");
-        ]);
-        ("agents", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Participating agents");
-        ]);
-      ]);
-      ("required", `List [`String "content"]);
-    ];
-  };
-  {
     name = "masc_interrupt";
     description = "Pause workflow and wait for user approval (LangGraph interrupt pattern). Use before dangerous operations like database deletion, production changes, or external API calls. The workflow will be suspended until approved or rejected.";
     input_schema = `Assoc [

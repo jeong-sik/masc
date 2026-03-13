@@ -69,22 +69,6 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
 
 let explicit_metadata : (string * metadata) list =
   [
-    ( "masc_archive_save",
-      {
-        visibility = Hidden;
-        lifecycle = Active;
-        implementation_status = Placeholder;
-        canonical_name = None;
-        replacement = None;
-        reason =
-          Some
-            "Placeholder only: requires Eio server context for persistence and is not part of the truthful default tool surface.";
-        allow_direct_call_when_hidden = false;
-      } );
-    ( "masc_dispatch_route",
-      deprecated ~canonical_name:"masc_dispatch_plan"
-        ~replacement:"masc_dispatch_plan"
-        "Alias retained for compatibility; use masc_dispatch_plan." );
     ( "masc_post_create",
       hidden_active
         "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface." );

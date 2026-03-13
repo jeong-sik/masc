@@ -94,8 +94,6 @@ let test_hidden_tools_report_contract_status () =
         tools_list_response ~clock ~sw ~include_hidden:true
           ~names:
             [
-              "masc_archive_save";
-              "masc_dispatch_route";
               "masc_dispatch_plan";
               "masc_transition";
               "masc_runtime_verify";
@@ -104,14 +102,6 @@ let test_hidden_tools_report_contract_status () =
           state
         |> response_tools
       in
-      let placeholder = find_tool_exn tools "masc_archive_save" in
-      check string "archive_save placeholder" "placeholder"
-        (tool_string_field placeholder "implementationStatus");
-      let alias = find_tool_exn tools "masc_dispatch_route" in
-      check string "dispatch_route adapter" "adapter"
-        (tool_string_field alias "implementationStatus");
-      check string "dispatch_route canonical" "masc_dispatch_plan"
-        (tool_string_field alias "canonicalName");
       let dispatch_plan = find_tool_exn tools "masc_dispatch_plan" in
       check string "dispatch_plan real" "real"
         (tool_string_field dispatch_plan "implementationStatus");

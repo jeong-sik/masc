@@ -161,7 +161,7 @@ let tool_category tool_name =
   | "masc_operation_resume" | "masc_operation_stop"
   | "masc_operation_finalize"
   (* Dispatch *)
-  | "masc_dispatch_plan" | "masc_dispatch_route"
+  | "masc_dispatch_plan"
   | "masc_dispatch_assign" | "masc_dispatch_rebalance"
   | "masc_dispatch_escalate" | "masc_dispatch_recall"
   | "masc_dispatch_tick"
@@ -400,7 +400,6 @@ let tool_category tool_name =
   | "masc_risc_metrics" | "masc_risc_ooo_metrics" -> RISC
 
   (* ── Deprecated/archived tools (hidden via tool_catalog, excluded from presets) ── *)
-  | "masc_archive_save" -> Unknown
 
   (* ── Prefix-based fallbacks for legacy dot-separated names ── *)
   | _ when String.starts_with ~prefix:"lodge_" tool_name -> Comm

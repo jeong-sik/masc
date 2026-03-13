@@ -365,6 +365,15 @@ let derived_llama_runtime_actor ~session_id ~prompt =
   let digest = Digest.string (session_id ^ "\n" ^ prompt) |> Digest.to_hex in
   Printf.sprintf "llama-local-%s" (String.sub digest 0 8)
 
+let normalize_spawn_agent agent_name =
+  let normalized = String.lowercase_ascii (String.trim agent_name) in
+  if normalized = "" then "default" else normalized
+
+let is_local_spawn_agent agent_name =
+  match normalize_spawn_agent agent_name with
+  | "default" | "llama" -> true
+  | _ -> false
+
 type routing_decision = {
   model_tier : Team_session_types.model_tier;
   task_profile : Team_session_types.task_profile;
@@ -383,6 +392,7 @@ type spawn_spec = {
   spawn_model_explicit : bool;
   spawn_role : string option;
   worker_class : Team_session_types.worker_class option;
+  worker_size : Team_session_types.worker_size option;
   parent_actor : string option;
   capsule_mode : Team_session_types.capsule_mode option;
   runtime_pool : string option;
@@ -432,6 +442,29 @@ let int_env_default name ~default =
   | Some raw -> (
       try int_of_string raw with Failure _ -> default)
   | None -> default
+
+let default_worker_size_for_class = function
+  | Some Team_session_types.Worker_manager ->
+      Some Team_session_types.Worker_xlg
+  | Some Team_session_types.Worker_executor ->
+      Some Team_session_types.Worker_lg
+  | Some Team_session_types.Worker_scout
+  | Some Team_session_types.Worker_librarian ->
+      Some Team_session_types.Worker_sm
+  | Some Team_session_types.Worker_metacog ->
+      Some Team_session_types.Worker_lg
+  | None -> Some Team_session_types.Worker_lg
+
+let explicit_worker_size_of_spec (spec : spawn_spec) =
+  match spec.worker_size with
+  | Some _ as size -> size
+  | None ->
+      Option.bind spec.model_tier Team_session_types.worker_size_of_model_tier
+
+let worker_size_of_spec (spec : spawn_spec) =
+  match explicit_worker_size_of_spec spec with
+  | Some _ as size -> size
+  | None -> default_worker_size_for_class spec.worker_class
 
 let contains_ci haystack needle =
   let haystack = String.lowercase_ascii haystack in
@@ -839,13 +872,16 @@ let finalize_routing_decision ~spawn_model ~(decision : routing_decision) =
   (resolved_model, resolved_tier, escalated, reason)
 
 let resolve_routing_for_spec (spec : spawn_spec) =
-  if not (String.equal spec.spawn_agent "llama") then
+  if not (is_local_spawn_agent spec.spawn_agent) then
     spec
   else
     let explicit_tier =
-      match spec.model_tier with
-      | Some tier -> Some tier
-      | None -> infer_model_tier_from_model_name spec.spawn_model
+      match spec.worker_size with
+      | Some size -> Team_session_types.model_tier_of_worker_size size
+      | None -> (
+          match spec.model_tier with
+          | Some tier -> Some tier
+          | None -> infer_model_tier_from_model_name spec.spawn_model)
     in
     let heuristic =
       heuristic_routing ~spawn_prompt:spec.spawn_prompt ~spawn_role:spec.spawn_role
@@ -863,6 +899,7 @@ let resolve_routing_for_spec (spec : spawn_spec) =
           if confidence >= router_judge_confidence_threshold ()
              || Option.is_some spec.task_profile
              || Option.is_some spec.model_tier
+             || Option.is_some spec.worker_size
           then
             decision
           else
@@ -908,10 +945,17 @@ let resolve_routing_for_spec (spec : spawn_spec) =
     let routing_note =
       routing_summary_line { decision with model_tier; reason = routing_reason; escalated = routing_escalated }
     in
+    let worker_size =
+      match spec.worker_size with
+      | Some _ as explicit -> explicit
+      | None -> Team_session_types.worker_size_of_model_tier model_tier
+    in
     {
       spec with
+      spawn_agent = normalize_spawn_agent spec.spawn_agent;
       spawn_model;
       model_tier = Some model_tier;
+      worker_size;
       task_profile = Some decision.task_profile;
       risk_level = Some decision.risk_level;
       routing_confidence;
@@ -1045,6 +1089,13 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
         Error
           (Printf.sprintf "spawn_batch[%d].%s is required" batch_index key)
   in
+  let get_optional_required_string key =
+    match member key json with
+    | `String s ->
+        let trimmed = String.trim s in
+        if trimmed = "" then None else Some trimmed
+    | _ -> None
+  in
   let get_optional_string key =
     match member key json with
     | `String s ->
@@ -1057,6 +1108,13 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
       (get_optional_string key)
       (fun raw ->
         Team_session_types.worker_class_of_string
+          (String.lowercase_ascii (String.trim raw)))
+  in
+  let get_optional_worker_size key =
+    Option.bind
+      (get_optional_string key)
+      (fun raw ->
+        Team_session_types.worker_size_of_string
           (String.lowercase_ascii (String.trim raw)))
   in
   let get_optional_model_tier key =
@@ -1107,16 +1165,20 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
     | `Intlit s -> (try max 1 (int_of_string s) with Failure _ -> default_timeout)
     | _ -> default_timeout
   in
-  match (get_required_string "spawn_agent", get_required_string "spawn_prompt") with
-  | Ok spawn_agent, Ok spawn_prompt ->
+  match get_required_string "spawn_prompt" with
+  | Ok spawn_prompt ->
       Ok
         {
-          spawn_agent;
+          spawn_agent =
+            normalize_spawn_agent
+              (Option.value ~default:"default"
+                 (get_optional_required_string "spawn_agent"));
           spawn_prompt;
           spawn_model = get_optional_string "spawn_model";
           spawn_model_explicit = Option.is_some (get_optional_string "spawn_model");
           spawn_role = get_optional_string "spawn_role";
           worker_class = get_optional_worker_class "worker_class";
+          worker_size = get_optional_worker_size "worker_size";
           parent_actor = get_optional_string "parent_actor";
           capsule_mode = get_optional_capsule_mode "capsule_mode";
           runtime_pool = get_optional_string "runtime_pool";
@@ -1132,7 +1194,7 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
           spawn_selection_note = get_optional_string "spawn_selection_note";
           spawn_timeout_seconds = get_timeout "spawn_timeout_seconds";
         }
-  | Error e, _ | _, Error e -> Error e
+  | Error e -> Error e
 
 let parse_step_spawn_specs args =
   let singular_agent = get_string_opt args "spawn_agent" in
@@ -1172,13 +1234,11 @@ let parse_step_spawn_specs args =
       else
         match (singular_agent, singular_prompt) with
         | None, None -> Ok []
-        | Some _, None | None, Some _ ->
-            Error "spawn_agent and spawn_prompt must be provided together"
-        | Some spawn_agent, Some spawn_prompt ->
+        | None, Some spawn_prompt ->
             route_specs
               [
                 {
-                  spawn_agent;
+                  spawn_agent = "default";
                   spawn_prompt;
                   spawn_model = get_string_opt args "spawn_model";
                   spawn_model_explicit = Option.is_some (get_string_opt args "spawn_model");
@@ -1188,6 +1248,75 @@ let parse_step_spawn_specs args =
                       (get_string_opt args "worker_class")
                       (fun raw ->
                         Team_session_types.worker_class_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  worker_size =
+                    Option.bind
+                      (get_string_opt args "worker_size")
+                      (fun raw ->
+                        Team_session_types.worker_size_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  parent_actor = get_string_opt args "parent_actor";
+                  capsule_mode =
+                    Option.bind
+                      (get_string_opt args "capsule_mode")
+                      (fun raw ->
+                        Team_session_types.capsule_mode_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  runtime_pool = get_string_opt args "runtime_pool";
+                  lane_id = get_string_opt args "lane_id";
+                  control_domain =
+                    Option.bind
+                      (get_string_opt args "control_domain")
+                      (fun raw ->
+                        Team_session_types.control_domain_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  supervisor_actor = get_string_opt args "supervisor_actor";
+                  model_tier =
+                    Option.bind
+                      (get_string_opt args "model_tier")
+                      (fun raw ->
+                        Team_session_types.model_tier_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  model_tier_explicit = Option.is_some (get_string_opt args "model_tier");
+                  task_profile =
+                    Option.bind
+                      (get_string_opt args "task_profile")
+                      (fun raw ->
+                        Team_session_types.task_profile_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  risk_level =
+                    Option.bind
+                      (get_string_opt args "risk_level")
+                      (fun raw ->
+                        Team_session_types.risk_level_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  routing_confidence = get_float_opt args "routing_confidence";
+                  routing_reason = get_string_opt args "routing_reason";
+                  spawn_selection_note = get_string_opt args "spawn_selection_note";
+                  spawn_timeout_seconds = get_int args "spawn_timeout_seconds" 300;
+                };
+              ]
+        | Some _, None -> Error "spawn_prompt is required when spawning a worker"
+        | Some spawn_agent, Some spawn_prompt ->
+            route_specs
+              [
+                {
+                  spawn_agent = normalize_spawn_agent spawn_agent;
+                  spawn_prompt;
+                  spawn_model = get_string_opt args "spawn_model";
+                  spawn_model_explicit = Option.is_some (get_string_opt args "spawn_model");
+                  spawn_role = get_string_opt args "spawn_role";
+                  worker_class =
+                    Option.bind
+                      (get_string_opt args "worker_class")
+                      (fun raw ->
+                        Team_session_types.worker_class_of_string
+                          (String.lowercase_ascii (String.trim raw)));
+                  worker_size =
+                    Option.bind
+                      (get_string_opt args "worker_size")
+                      (fun raw ->
+                        Team_session_types.worker_size_of_string
                           (String.lowercase_ascii (String.trim raw)));
                   parent_actor = get_string_opt args "parent_actor";
                   capsule_mode =
@@ -1260,6 +1389,28 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
       | None -> false);
   }
 
+let resolve_target_worker_name (session : Team_session_types.session)
+    target_agent =
+  let trimmed = String.trim target_agent in
+  let matches_runtime_actor worker =
+    match worker.Team_session_types.runtime_actor with
+    | Some actor -> String.equal (String.trim actor) trimmed
+    | None -> false
+  in
+  let matches_role worker =
+    match worker.Team_session_types.spawn_role with
+    | Some role -> String.equal (String.trim role) trimmed
+    | None -> false
+  in
+  match List.find_opt matches_runtime_actor session.planned_workers with
+  | Some worker -> worker.Team_session_types.runtime_actor
+  | None -> (
+      match
+        session.planned_workers |> List.filter matches_role
+      with
+      | [ worker ] -> worker.Team_session_types.runtime_actor
+      | _ -> None)
+
 let register_planned_workers config session_id workers =
   match Team_session_store.update_session config session_id (fun session ->
             {
@@ -1294,6 +1445,9 @@ let register_planned_workers config session_id workers =
                 |> Team_session_types.counts_to_json );
               ( "tier_counts",
                 Team_session_types.model_tier_counts updated.planned_workers
+                |> Team_session_types.counts_to_json );
+              ( "worker_size_counts",
+                Team_session_types.worker_size_counts updated.planned_workers
                 |> Team_session_types.counts_to_json );
               ( "task_profile_counts",
                 Team_session_types.task_profile_counts updated.planned_workers
@@ -1402,18 +1556,21 @@ let handle_step ctx args : result =
       match ensure_session_access ctx session_id with
       | Error e -> (false, json_error e)
       | Ok () ->
+          let session_opt = Team_session_store.load_session ctx.config session_id in
           let spawn_specs_result = parse_step_spawn_specs args in
           match spawn_specs_result with
           | Error e -> (false, json_error e)
           | Ok raw_spawn_specs ->
               let spawn_specs =
-                match Team_session_store.load_session ctx.config session_id with
+                match session_opt with
                 | Some session ->
                     annotate_control_hierarchy_for_session session raw_spawn_specs
                 | None -> raw_spawn_specs
               in
+              let delegate_prompt_opt = get_string_opt args "delegate_prompt" in
               let turn_kind_result =
-                if spawn_specs <> [] then parse_turn_kind_opt args
+                if spawn_specs <> [] || Option.is_some delegate_prompt_opt then
+                  parse_turn_kind_opt args
                 else
                   match parse_turn_kind args with
                   | Ok kind -> Ok (Some kind)
@@ -1437,11 +1594,13 @@ let handle_step ctx args : result =
               | Ok actor ->
               let base_message = get_string_opt args "message" in
               let target_agent = get_string_opt args "target_agent" in
+              let delegate_prompt = delegate_prompt_opt in
               let task_title = get_string_opt args "task_title" in
               let task_description = get_string_opt args "task_description" in
               let task_priority = get_int args "task_priority" 3 in
               let append_spawn_event ?spawn_agent ?runtime_actor ?spawn_role
-                  ?spawn_model ?worker_class ?parent_actor ?capsule_mode
+                  ?spawn_model ?worker_class ?worker_size ?worker_backend
+                  ?parent_actor ?capsule_mode
                   ?runtime_pool ?lane_id ?controller_level ?control_domain
                   ?supervisor_actor ?model_tier ?task_profile ?risk_level
                   ?routing_confidence ?routing_reason ?assigned_runtime
@@ -1469,6 +1628,15 @@ let handle_step ctx args : result =
                             `String
                               (Team_session_types.worker_class_to_string kind))
                           worker_class );
+                      ( "worker_size",
+                        Option.fold ~none:`Null
+                          ~some:(fun size ->
+                            `String
+                              (Team_session_types.worker_size_to_string size))
+                          worker_size );
+                      ( "worker_backend",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          worker_backend );
                       ( "parent_actor",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           parent_actor );
@@ -1543,6 +1711,35 @@ let handle_step ctx args : result =
                 Team_session_store.append_event ctx.config session_id
                   ~event_type:"team_step_spawn" ~detail
               in
+              let append_delegate_event ~worker_name ~delegate_prompt ~success
+                  ?tool_names ?tool_call_count ?output_preview ?error () =
+                Team_session_store.append_event ctx.config session_id
+                  ~event_type:"team_step_delegate"
+                  ~detail:
+                    (`Assoc
+                      [
+                        ("actor", `String actor);
+                        ("target_agent", `String worker_name);
+                        ("delegate_prompt", `String delegate_prompt);
+                        ("worker_backend", `String "oas-local");
+                        ("success", `Bool success);
+                        ( "tool_names",
+                          Option.fold ~none:(`List [])
+                            ~some:(fun names ->
+                              `List (List.map (fun name -> `String name) names))
+                            tool_names );
+                        ( "tool_call_count",
+                          Option.fold ~none:`Null ~some:(fun n -> `Int n)
+                            tool_call_count );
+                        ( "output_preview",
+                          Option.fold ~none:`Null ~some:(fun s -> `String s)
+                            output_preview );
+                        ( "error",
+                          Option.fold ~none:`Null ~some:(fun s -> `String s)
+                            error );
+                        ("ts_iso", `String (Types.now_iso ()));
+                      ])
+              in
               let release_prepared_runtime (prepared : prepared_spawn) ~success
                   ?error ?latency_ms () =
                 match prepared.runtime_lease with
@@ -1558,7 +1755,7 @@ let handle_step ctx args : result =
               in
               let prepare_spawn (spec : spawn_spec) =
                 let runtime_actor_name =
-                  if String.equal spec.spawn_agent "llama" then
+                  if is_local_spawn_agent spec.spawn_agent then
                     Some
                       (derived_llama_runtime_actor ~session_id
                          ~prompt:spec.spawn_prompt)
@@ -1566,11 +1763,18 @@ let handle_step ctx args : result =
                     None
                 in
                 let runtime_model =
-                  if String.equal spec.spawn_agent "llama" then
-                    match spec.spawn_model with
-                    | None ->
-                        Error
-                          "spawn_model is required when spawn_agent=llama"
+                  if is_local_spawn_agent spec.spawn_agent then
+                    let model_name =
+                      match spec.spawn_model with
+                      | Some model_name -> Some model_name
+                      | None ->
+                          let default_model =
+                            Llm_client.default_local_model_spec ()
+                          in
+                          Some default_model.model_id
+                    in
+                    match model_name with
+                    | None -> Error "local worker model resolution failed"
                     | Some model_name -> (
                         match
                           Local_runtime_pool.acquire
@@ -1612,6 +1816,10 @@ let handle_step ctx args : result =
                             ?spawn_role:failed_spec.spawn_role
                             ?spawn_model:failed_spec.spawn_model
                             ?worker_class:failed_spec.worker_class
+                            ?worker_size:(worker_size_of_spec failed_spec)
+                            ?worker_backend:
+                              (if is_local_spawn_agent failed_spec.spawn_agent
+                               then Some "oas-local" else None)
                             ?parent_actor:failed_spec.parent_actor
                             ?capsule_mode:failed_spec.capsule_mode
                             ?runtime_pool:failed_spec.runtime_pool
@@ -1663,6 +1871,10 @@ let handle_step ctx args : result =
                               ?spawn_role:prepared.spec.spawn_role
                               ?spawn_model:prepared.spec.spawn_model
                               ?worker_class:prepared.spec.worker_class
+                              ?worker_size:(worker_size_of_spec prepared.spec)
+                              ?worker_backend:
+                                (if is_local_spawn_agent prepared.spec.spawn_agent
+                                 then Some "oas-local" else None)
                               ?parent_actor:prepared.spec.parent_actor
                               ?capsule_mode:prepared.spec.capsule_mode
                               ?runtime_pool:prepared.spec.runtime_pool
@@ -1697,6 +1909,10 @@ let handle_step ctx args : result =
                                   ?spawn_role:prepared.spec.spawn_role
                                   ?spawn_model:prepared.spec.spawn_model
                                   ?worker_class:prepared.spec.worker_class
+                                  ?worker_size:(worker_size_of_spec prepared.spec)
+                                  ?worker_backend:
+                                    (if is_local_spawn_agent prepared.spec.spawn_agent
+                                     then Some "oas-local" else None)
                                   ?parent_actor:prepared.spec.parent_actor
                                   ?capsule_mode:prepared.spec.capsule_mode
                                   ?runtime_pool:prepared.spec.runtime_pool
@@ -1736,13 +1952,17 @@ let handle_step ctx args : result =
                                    (fun prepared ->
                                      release_prepared_runtime prepared
                                        ~success:false ~error:msg ();
-                                     append_spawn_event
-                                       ~spawn_agent:prepared.spec.spawn_agent
-                                       ?runtime_actor:prepared.runtime_actor_name
-                                       ?spawn_role:prepared.spec.spawn_role
-                                       ?spawn_model:prepared.spec.spawn_model
-                                       ?worker_class:prepared.spec.worker_class
-                                       ?parent_actor:prepared.spec.parent_actor
+                                       append_spawn_event
+                                         ~spawn_agent:prepared.spec.spawn_agent
+                                         ?runtime_actor:prepared.runtime_actor_name
+                                         ?spawn_role:prepared.spec.spawn_role
+                                         ?spawn_model:prepared.spec.spawn_model
+                                         ?worker_class:prepared.spec.worker_class
+                                         ?worker_size:(worker_size_of_spec prepared.spec)
+                                         ?worker_backend:
+                                           (if is_local_spawn_agent prepared.spec.spawn_agent
+                                            then Some "oas-local" else None)
+                                         ?parent_actor:prepared.spec.parent_actor
                                        ?capsule_mode:prepared.spec.capsule_mode
                                        ?runtime_pool:prepared.spec.runtime_pool
                                        ?lane_id:prepared.spec.lane_id
@@ -1782,6 +2002,13 @@ let handle_step ctx args : result =
                                             ?runtime_role:prepared.spec.spawn_role
                                             ?runtime_selection_note:
                                               prepared.spec.spawn_selection_note
+                                            ?worker_class:prepared.spec.worker_class
+                                            ?worker_size:(worker_size_of_spec prepared.spec)
+                                            ?execution_scope:
+                                              (Option.map
+                                                 (fun (session : Team_session_types.session) ->
+                                                   session.execution_scope)
+                                                 session_opt)
                                             ~runtime_session_id:session_id ()
                                         in
                                         let output_preview =
@@ -1803,6 +2030,10 @@ let handle_step ctx args : result =
                                           ?spawn_role:prepared.spec.spawn_role
                                           ?spawn_model:prepared.spec.spawn_model
                                           ?worker_class:prepared.spec.worker_class
+                                          ?worker_size:(worker_size_of_spec prepared.spec)
+                                          ?worker_backend:
+                                            (if is_local_spawn_agent prepared.spec.spawn_agent
+                                             then Some "oas-local" else None)
                                           ?parent_actor:prepared.spec.parent_actor
                                           ?capsule_mode:prepared.spec.capsule_mode
                                           ?runtime_pool:prepared.spec.runtime_pool
@@ -1878,6 +2109,17 @@ let handle_step ctx args : result =
                                                         (Team_session_types.worker_class_to_string
                                                            kind))
                                                     prepared.spec.worker_class );
+                                                ( "worker_size",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun size ->
+                                                      `String
+                                                        (Team_session_types.worker_size_to_string
+                                                           size))
+                                                    (worker_size_of_spec prepared.spec) );
+                                                ( "worker_backend",
+                                                  if is_local_spawn_agent prepared.spec.spawn_agent
+                                                  then `String "oas-local"
+                                                  else `Null );
                                                 ( "parent_actor",
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
@@ -2015,6 +2257,112 @@ let handle_step ctx args : result =
                   match turn_json_result with
                   | Error e -> (false, json_error e)
                   | Ok turn_json ->
+                      let delegate_result_json =
+                        match (delegate_prompt, target_agent) with
+                        | None, _ -> None
+                        | Some _, _ when spawn_specs <> [] ->
+                            Some
+                              (`Assoc
+                                [
+                                  ( "error",
+                                    `String
+                                      "delegate_prompt cannot be combined with worker spawn" );
+                                ])
+                        | Some _, None ->
+                            Some
+                              (`Assoc
+                                [
+                                  ( "error",
+                                    `String
+                                      "target_agent is required when delegate_prompt is provided" );
+                                ])
+                        | Some delegate_prompt, Some target_agent -> (
+                            match session_opt with
+                            | None ->
+                                Some
+                                  (`Assoc
+                                    [
+                                      ("error", `String "team session not found");
+                                    ])
+                            | Some session -> (
+                                match
+                                  resolve_target_worker_name session
+                                    target_agent
+                                with
+                                | None ->
+                                    Some
+                                      (`Assoc
+                                        [
+                                          ( "error",
+                                            `String
+                                              "target_agent did not match a known worker container"
+                                          );
+                                        ])
+                                | Some worker_name -> (
+                                    match
+                                      Local_agent_eio.continue_worker ~sw:ctx.sw
+                                        ~base_path:ctx.config.base_path
+                                        ~worker_name ~team_session_id:session_id
+                                        ~prompt:delegate_prompt
+                                    with
+                                    | Ok run_result ->
+                                        let output_preview =
+                                          truncate_for_event run_result.output
+                                        in
+                                        append_delegate_event ~worker_name
+                                          ~delegate_prompt
+                                          ~success:true
+                                          ~tool_names:run_result.tool_names
+                                          ~tool_call_count:
+                                            run_result.tool_call_count
+                                          ~output_preview ();
+                                        Some
+                                          (`Assoc
+                                            [
+                                              ("worker_name", `String worker_name);
+                                              ("worker_backend", `String "oas-local");
+                                              ( "output",
+                                                `String run_result.output );
+                                              ( "output_preview",
+                                                `String output_preview );
+                                              ( "tool_call_count",
+                                                `Int
+                                                  run_result.tool_call_count );
+                                              ( "tool_names",
+                                                `List
+                                                  (List.map
+                                                     (fun name -> `String name)
+                                                     run_result.tool_names) );
+                                              ( "input_tokens",
+                                                int_opt_to_json
+                                                  run_result.input_tokens );
+                                              ( "output_tokens",
+                                                int_opt_to_json
+                                                  run_result.output_tokens );
+                                              ( "cost_usd",
+                                                float_opt_to_json
+                                                  run_result.cost_usd );
+                                            ])
+                                    | Error err ->
+                                        append_delegate_event ~worker_name
+                                          ~delegate_prompt
+                                          ~success:false ~error:err ();
+                                        Some
+                                          (`Assoc
+                                            [ ("error", `String err) ]))))
+                      in
+                      let delegate_error =
+                        match delegate_result_json with
+                        | Some (`Assoc fields) -> (
+                            match List.assoc_opt "error" fields with
+                            | Some (`String e) when String.trim e <> "" ->
+                                Some e
+                            | _ -> None)
+                        | _ -> None
+                      in
+                      match delegate_error with
+                      | Some e -> (false, json_error e)
+                      | None ->
                       let vote_result_json =
                         match get_string_opt args "vote_topic" with
                         | None -> None
@@ -2147,6 +2495,7 @@ let handle_step ctx args : result =
                                 ("session_id", `String session_id);
                                 ("turn", Option.value ~default:`Null turn_json);
                                 ("spawn", Option.fold ~none:`Null ~some:(fun j -> j) spawn_result_json);
+                                ("delegate", Option.fold ~none:`Null ~some:(fun j -> j) delegate_result_json);
                                 ("vote", Option.fold ~none:`Null ~some:(fun j -> j) vote_result_json);
                                 ("run", Option.fold ~none:`Null ~some:(fun j -> j) run_json);
                               ]
@@ -2538,6 +2887,7 @@ let schemas : tool_schema list =
                       ] );
                   ("message", `Assoc [ ("type", `String "string") ]);
                   ("target_agent", `Assoc [ ("type", `String "string") ]);
+                  ("delegate_prompt", `Assoc [ ("type", `String "string") ]);
                   ("task_title", `Assoc [ ("type", `String "string") ]);
                   ("task_description", `Assoc [ ("type", `String "string") ]);
                   ("task_priority", `Assoc [ ("type", `String "integer") ]);
@@ -2557,6 +2907,12 @@ let schemas : tool_schema list =
 	                              `String "librarian";
 	                              `String "metacog";
 	                            ] );
+	                      ] );
+	                  ( "worker_size",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ("enum", `List [ `String "sm"; `String "lg"; `String "xlg" ]);
 	                      ] );
 	                  ("parent_actor", `Assoc [ ("type", `String "string") ]);
 	                  ( "capsule_mode",
@@ -2654,6 +3010,12 @@ let schemas : tool_schema list =
 	                                                `String "metacog";
 	                                              ] );
 	                                        ] );
+	                                    ( "worker_size",
+	                                      `Assoc
+	                                        [
+	                                          ("type", `String "string");
+	                                          ("enum", `List [ `String "sm"; `String "lg"; `String "xlg" ]);
+	                                        ] );
 	                                    ("parent_actor", `Assoc [ ("type", `String "string") ]);
 	                                    ( "capsule_mode",
 	                                      `Assoc
@@ -2728,7 +3090,6 @@ let schemas : tool_schema list =
                               ( "required",
                                 `List
                                   [
-                                    `String "spawn_agent";
                                     `String "spawn_prompt";
                                   ] );
                             ] );

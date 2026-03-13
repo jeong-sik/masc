@@ -1,5 +1,9 @@
 open Printf
 
+module Oas = Agent_sdk
+
+let ( let* ) = Result.bind
+
 type tool_exec_result = {
   text : string;
   is_error : bool;
@@ -15,6 +19,36 @@ type run_result = {
   tool_names : string list;
   session_id : string;
 }
+
+type tool_profile =
+  | Profile_session_min
+  | Profile_session_dev
+
+type shell_profile =
+  | Shell_none
+  | Shell_readonly
+  | Shell_dev
+
+type worker_container_meta = {
+  version : int;
+  worker_name : string;
+  mcp_session_id : string;
+  team_session_id : string option;
+  role : string option;
+  selection_note : string option;
+  execution_scope : Team_session_types.execution_scope;
+  tool_profile : tool_profile;
+  shell_profile : shell_profile;
+  worker_class : Team_session_types.worker_class option;
+  worker_size : Team_session_types.worker_size option;
+  effective_model : string;
+  effective_tier : Team_session_types.model_tier option;
+  checkpoint_path : string;
+  turn_log_path : string;
+  last_run_at : float option;
+}
+
+let worker_container_version = 1
 
 let jsonrpc_id = ref 1000
 
@@ -641,6 +675,314 @@ let worker_auth_token ~base_path ~worker_name =
   else
     Ok None
 
+let configured_backend () =
+  match Sys.getenv_opt "MASC_LOCAL_WORKER_BACKEND" with
+  | Some raw when String.lowercase_ascii (String.trim raw) = "legacy" -> `Legacy
+  | _ -> `Oas
+
+let tool_profile_to_string = function
+  | Profile_session_min -> "session_min"
+  | Profile_session_dev -> "session_dev"
+
+let tool_profile_of_string = function
+  | "session_min" -> Some Profile_session_min
+  | "session_dev" -> Some Profile_session_dev
+  | _ -> None
+
+let shell_profile_to_string = function
+  | Shell_none -> "none"
+  | Shell_readonly -> "readonly"
+  | Shell_dev -> "dev"
+
+let shell_profile_of_string = function
+  | "none" -> Some Shell_none
+  | "readonly" -> Some Shell_readonly
+  | "dev" -> Some Shell_dev
+  | _ -> None
+
+let worker_container_root ~base_path ~(team_session_id : string option) =
+  match team_session_id with
+  | Some session_id ->
+      Filename.concat
+        (Filename.concat
+           (Filename.concat (Filename.concat base_path ".masc") "team-sessions")
+           session_id)
+        "workers"
+  | None ->
+      Filename.concat (Filename.concat base_path ".masc") "local-workers"
+
+let safe_worker_token worker_name =
+  worker_name
+  |> String.to_seq
+  |> Seq.map (function
+       | ('a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.') as ch -> ch
+       | _ -> '_')
+  |> String.of_seq
+
+let worker_container_dir ~base_path ~(team_session_id : string option)
+    ~worker_name =
+  Filename.concat
+    (worker_container_root ~base_path ~team_session_id)
+    (safe_worker_token worker_name)
+
+let worker_meta_path ~base_path ~team_session_id ~worker_name =
+  Filename.concat
+    (worker_container_dir ~base_path ~team_session_id ~worker_name)
+    "meta.json"
+
+let worker_checkpoint_path ~base_path ~team_session_id ~worker_name =
+  Filename.concat
+    (worker_container_dir ~base_path ~team_session_id ~worker_name)
+    "checkpoint.json"
+
+let worker_turn_log_path ~base_path ~team_session_id ~worker_name =
+  Filename.concat
+    (worker_container_dir ~base_path ~team_session_id ~worker_name)
+    "turns.jsonl"
+
+let ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name =
+  let dir = worker_container_dir ~base_path ~team_session_id ~worker_name in
+  Team_session_store.write_text_file (Filename.concat dir ".keep") "";
+  (try Sys.remove (Filename.concat dir ".keep") with Sys_error _ -> ())
+
+let stable_worker_session_id ?team_session_id worker_name =
+  let basis =
+    String.concat "\n"
+      [
+        worker_name;
+        Option.value ~default:"global" team_session_id;
+      ]
+  in
+  let digest = Digest.string basis |> Digest.to_hex in
+  sprintf "worker-%s" (String.sub digest 0 12)
+
+let session_min_tool_names =
+  Agent_tool_surfaces.llama_worker_tool_names
+
+let execution_scope_or_default = function
+  | Some scope -> scope
+  | None -> Team_session_types.Limited_code_change
+
+let infer_model_tier_from_model_name model_name =
+  let model_name = String.trim model_name in
+  let haystack = String.lowercase_ascii model_name in
+  let contains needle =
+    let needle = String.lowercase_ascii needle in
+    let needle_len = String.length needle in
+    let haystack_len = String.length haystack in
+    let rec loop idx =
+      if needle_len = 0 then true
+      else if idx + needle_len > haystack_len then false
+      else if String.sub haystack idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+  in
+  if model_name = "" then
+    None
+  else if contains "35b" then
+      Some Team_session_types.Tier_35b
+  else if contains "27b" then
+      Some Team_session_types.Tier_27b
+  else if contains "9b" then
+      Some Team_session_types.Tier_9b
+  else
+    None
+
+let worker_profiles_of_scope scope =
+  match scope with
+  | Team_session_types.Observe_only ->
+      (Profile_session_min, Shell_readonly)
+  | Team_session_types.Limited_code_change ->
+      (Profile_session_dev, Shell_dev)
+
+let derive_effective_tier worker_size model_id =
+  match worker_size with
+  | Some size -> Team_session_types.model_tier_of_worker_size size
+  | None -> infer_model_tier_from_model_name model_id
+
+let effective_worker_size worker_size model_id =
+  match worker_size with
+  | Some _ as explicit -> explicit
+  | None ->
+      Option.bind
+        (infer_model_tier_from_model_name model_id)
+        Team_session_types.worker_size_of_model_tier
+
+let worker_meta_to_yojson (meta : worker_container_meta) =
+  `Assoc
+    [
+      ("version", `Int meta.version);
+      ("worker_name", `String meta.worker_name);
+      ("mcp_session_id", `String meta.mcp_session_id);
+      ( "team_session_id",
+        Option.fold ~none:`Null ~some:(fun s -> `String s) meta.team_session_id
+      );
+      ("role", Option.fold ~none:`Null ~some:(fun s -> `String s) meta.role);
+      ( "selection_note",
+        Option.fold ~none:`Null ~some:(fun s -> `String s) meta.selection_note
+      );
+      ( "execution_scope",
+        `String
+          (Team_session_types.execution_scope_to_string meta.execution_scope) );
+      ("tool_profile", `String (tool_profile_to_string meta.tool_profile));
+      ("shell_profile", `String (shell_profile_to_string meta.shell_profile));
+      ( "worker_class",
+        Option.fold ~none:`Null
+          ~some:(fun kind ->
+            `String (Team_session_types.worker_class_to_string kind))
+          meta.worker_class );
+      ( "worker_size",
+        Option.fold ~none:`Null
+          ~some:(fun size ->
+            `String (Team_session_types.worker_size_to_string size))
+          meta.worker_size );
+      ("effective_model", `String meta.effective_model);
+      ( "effective_tier",
+        Option.fold ~none:`Null
+          ~some:(fun tier ->
+            `String (Team_session_types.model_tier_to_string tier))
+          meta.effective_tier );
+      ("checkpoint_path", `String meta.checkpoint_path);
+      ("turn_log_path", `String meta.turn_log_path);
+      ( "last_run_at",
+        Option.fold ~none:`Null ~some:(fun ts -> `Float ts) meta.last_run_at );
+    ]
+
+let worker_meta_of_yojson json =
+  let open Yojson.Safe.Util in
+  match json with
+  | `Assoc _ -> (
+      match json |> member "worker_name" |> to_string_option with
+      | None -> None
+      | Some worker_name ->
+          let execution_scope =
+            json |> member "execution_scope" |> to_string_option
+            |> Option.map (fun value ->
+                   Team_session_types.execution_scope_of_string
+                     (String.lowercase_ascii (String.trim value)))
+            |> execution_scope_or_default
+          in
+          Some
+            {
+              version =
+                json |> member "version" |> to_int_option
+                |> Option.value ~default:worker_container_version;
+              worker_name;
+              mcp_session_id =
+                json |> member "mcp_session_id" |> to_string_option
+                |> Option.value ~default:(stable_worker_session_id worker_name);
+              team_session_id =
+                json |> member "team_session_id" |> to_string_option;
+              role = json |> member "role" |> to_string_option;
+              selection_note =
+                json |> member "selection_note" |> to_string_option;
+              execution_scope;
+              tool_profile =
+                (match json |> member "tool_profile" |> to_string_option with
+                | Some value -> (
+                    match tool_profile_of_string value with
+                    | Some profile -> profile
+                    | None -> fst (worker_profiles_of_scope execution_scope))
+                | None -> fst (worker_profiles_of_scope execution_scope));
+              shell_profile =
+                (match json |> member "shell_profile" |> to_string_option with
+                | Some value -> (
+                    match shell_profile_of_string value with
+                    | Some profile -> profile
+                    | None -> snd (worker_profiles_of_scope execution_scope))
+                | None -> snd (worker_profiles_of_scope execution_scope));
+              worker_class =
+                (match json |> member "worker_class" |> to_string_option with
+                | Some value ->
+                    Team_session_types.worker_class_of_string
+                      (String.lowercase_ascii (String.trim value))
+                | None -> None);
+              worker_size =
+                (match json |> member "worker_size" |> to_string_option with
+                | Some value ->
+                    Team_session_types.worker_size_of_string
+                      (String.lowercase_ascii (String.trim value))
+                | None -> None);
+              effective_model =
+                json |> member "effective_model" |> to_string_option
+                |> Option.value ~default:"";
+              effective_tier =
+                (match json |> member "effective_tier" |> to_string_option with
+                | Some value ->
+                    Team_session_types.model_tier_of_string
+                      (String.lowercase_ascii (String.trim value))
+                | None -> None);
+              checkpoint_path =
+                json |> member "checkpoint_path" |> to_string_option
+                |> Option.value ~default:"";
+              turn_log_path =
+                json |> member "turn_log_path" |> to_string_option
+                |> Option.value ~default:"";
+              last_run_at = json |> member "last_run_at" |> to_float_option;
+            })
+  | _ -> None
+
+let load_worker_meta ~base_path ~team_session_id ~worker_name =
+  let path = worker_meta_path ~base_path ~team_session_id ~worker_name in
+  if Sys.file_exists path then
+    try
+      Yojson.Safe.from_file path |> worker_meta_of_yojson
+    with Yojson.Json_error _ | Sys_error _ -> None
+  else
+    None
+
+let save_worker_meta ~base_path ~team_session_id ~worker_name
+    (meta : worker_container_meta) =
+  try
+    ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
+    Team_session_store.write_text_file
+      (worker_meta_path ~base_path ~team_session_id ~worker_name)
+      (meta |> worker_meta_to_yojson |> Yojson.Safe.pretty_to_string);
+    Ok ()
+  with Sys_error msg ->
+    Error
+      (sprintf "failed to save worker meta for %s: %s" worker_name msg)
+
+let load_worker_checkpoint ~base_path ~team_session_id ~worker_name =
+  let path =
+    worker_checkpoint_path ~base_path ~team_session_id ~worker_name
+  in
+  if Sys.file_exists path then
+    try
+      let raw = In_channel.with_open_text path In_channel.input_all in
+      Oas.Checkpoint.of_string raw |> Result.to_option
+    with Sys_error _ -> None
+  else
+    None
+
+let save_worker_checkpoint ~base_path ~team_session_id ~worker_name checkpoint =
+  try
+    ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
+    Team_session_store.write_text_file
+      (worker_checkpoint_path ~base_path ~team_session_id ~worker_name)
+      (Oas.Checkpoint.to_string checkpoint);
+    Ok ()
+  with Sys_error msg ->
+    Error
+      (sprintf "failed to save worker checkpoint for %s: %s" worker_name msg)
+
+let append_worker_turn_log ~base_path ~team_session_id ~worker_name json =
+  try
+    ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
+    Team_session_store.append_text_file
+      (worker_turn_log_path ~base_path ~team_session_id ~worker_name)
+      (Yojson.Safe.to_string json ^ "\n");
+    Ok ()
+  with Sys_error msg ->
+    Error
+      (sprintf "failed to append worker turn log for %s: %s" worker_name msg)
+
+let resolved_mcp_session_id ~base_path ~team_session_id ~worker_name =
+  match load_worker_meta ~base_path ~team_session_id ~worker_name with
+  | Some meta when String.trim meta.mcp_session_id <> "" -> meta.mcp_session_id
+  | _ -> stable_worker_session_id ?team_session_id worker_name
+
 let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
     ~worker_name =
   let interval = local_worker_heartbeat_interval_sec () in
@@ -672,151 +1014,514 @@ let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
               worker_name (Printexc.to_string exn));
       fun () -> active := false
 
-let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
-    ~selection_note
+let resolve_execution_scope ~base_path ~(team_session_id : string option)
+    ?execution_scope () =
+  match execution_scope with
+  | Some scope -> scope
+  | None -> (
+      match team_session_id with
+      | Some session_id -> (
+          match Team_session_store.load_session (Room.default_config base_path) session_id with
+          | Some session -> session.execution_scope
+          | None -> Team_session_types.Limited_code_change)
+      | None -> Team_session_types.Limited_code_change)
+
+let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt
+    ~allowed_tools =
+  let allowed_names =
+    match allowed_tools |> List.map strip_mcp_prefix |> unique_preserve_order with
+    | [] -> session_min_tool_names
+    | names -> names
+  in
+  let listed_schemas =
+    list_masc_tools ~sw ~auth_token ~session_id ~names:(Some allowed_names) ()
+  in
+  Result.map
+    (fun schemas ->
+      schemas
+      |> List.filter (fun (schema : Types.tool_schema) ->
+             List.mem schema.name allowed_names)
+      |> List.map (fun (schema : Types.tool_schema) ->
+             let call_fn input =
+               let args =
+                 input
+                 |> inject_default_agent_name ~worker_name
+                      ~schema:(Some schema)
+                 |> inject_prompt_full_context ~prompt ~tool_name:schema.name
+               in
+               match
+                 call_masc_tool ~sw ~auth_token ~session_id ~tool_name:schema.name
+                   ~args
+               with
+               | Ok result when result.is_error -> Error result.text
+               | Ok result -> Ok result.text
+               | Error e -> Error e
+             in
+             Oas.Mcp.mcp_tool_to_sdk_tool ~call_fn
+               {
+                 Oas.Mcp.name = schema.name;
+                 description = schema.description;
+                 input_schema = schema.input_schema;
+               }))
+    listed_schemas
+
+let build_local_shell_tools ~execution_scope ~base_path =
+  match Process_eio.get_proc_mgr (), Process_eio.get_clock () with
+  | Ok proc_mgr, Ok clock -> (
+      match execution_scope with
+      | Team_session_types.Observe_only ->
+          Ok
+            (Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock
+               ~workdir:base_path ())
+      | Team_session_types.Limited_code_change ->
+          Ok
+            (Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir:base_path
+               ()))
+  | Error e, _ | _, Error e -> Error e
+
+let oas_provider_of_model (model : Llm_client.model_spec) : Oas.Provider.config =
+  {
+    Oas.Provider.provider =
+      Oas.Provider.OpenAICompat
+        {
+          base_url = model.api_url;
+          auth_header = None;
+          path = "/v1/chat/completions";
+          static_token = None;
+        };
+    model_id = model.model_id;
+    api_key_env = "DUMMY_KEY";
+  }
+
+let oas_tool_names (tools : Oas.Tool.t list) =
+  List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
+
+let oas_extract_text (response : Oas.Types.api_response) =
+  response.content
+  |> List.filter_map (function Oas.Types.Text text -> Some text | _ -> None)
+  |> String.concat "\n"
+
+let make_worker_meta ~base_path ~team_session_id ~worker_name ~mcp_session_id
+    ~role ~selection_note ~execution_scope ~worker_class ~worker_size
+    ~effective_model =
+  let tool_profile, shell_profile = worker_profiles_of_scope execution_scope in
+  let effective_tier = derive_effective_tier worker_size effective_model in
+  {
+    version = worker_container_version;
+    worker_name;
+    mcp_session_id;
+    team_session_id;
+    role;
+    selection_note;
+    execution_scope;
+    tool_profile;
+    shell_profile;
+    worker_class;
+    worker_size = effective_worker_size worker_size effective_model;
+    effective_model;
+    effective_tier;
+    checkpoint_path =
+      worker_checkpoint_path ~base_path ~team_session_id ~worker_name;
+    turn_log_path =
+      worker_turn_log_path ~base_path ~team_session_id ~worker_name;
+    last_run_at = None;
+  }
+
+let append_worker_completion_log ~base_path ~team_session_id ~worker_name
+    ~prompt ~tool_names ~status ~output ?error () =
+  append_worker_turn_log ~base_path ~team_session_id ~worker_name
+    (`Assoc
+      [
+        ("ts", `Float (Time_compat.now ()));
+        ("status", `String status);
+        ("prompt", `String (safe_text_for_followup prompt));
+        ("tool_names", `List (List.map (fun name -> `String name) tool_names));
+        ("output_preview", `String (safe_text_for_followup output));
+        ( "error",
+          Option.fold ~none:`Null ~some:(fun value -> `String value) error );
+      ])
+
+let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
+    ~hooks =
+  let config =
+    {
+      Oas.Types.default_config with
+      name = worker_name;
+      model = Oas.Types.Custom model.Llm_client.model_id;
+      system_prompt = Some system_prompt;
+      max_tokens = local_worker_max_tokens ();
+      max_turns;
+      temperature = Some 0.2;
+      top_p = Some 0.95;
+      top_k = Some 20;
+      min_p = Some 0.0;
+      enable_thinking = Some false;
+      tool_choice = Some Oas.Types.Auto;
+    }
+  in
+  let options =
+    {
+      Oas.Agent.default_options with
+      provider = Some (oas_provider_of_model model);
+      hooks;
+      guardrails =
+        {
+          Oas.Guardrails.tool_filter =
+            Oas.Guardrails.AllowList (oas_tool_names tools);
+          max_tool_calls_per_turn = Some 12;
+        };
+    }
+  in
+  (config, options)
+
+let run_worker_oas ~sw ~base_path ~worker_name
+    ~(model : Llm_client.model_spec) ~team_session_id
+    ?worker_class ?worker_size ?execution_scope ~role ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
-    (run_result, string) result =
-  let mcp_session_id = worker_session_id worker_name in
-  match worker_auth_token ~base_path ~worker_name with
-  | Error e -> Error e
-  | Ok auth_token ->
-      let _ =
-        match join_worker ~sw ~auth_token ~session_id:mcp_session_id ~worker_name with
-        | Ok _ -> ()
-        | Error e -> raise (Failure ("worker join failed: " ^ e))
-      in
-      let stop_heartbeat =
-        start_worker_heartbeat ~sw ~auth_token ~session_id:mcp_session_id
-          ~worker_name
-      in
-      Fun.protect
-        ~finally:(fun () ->
-          stop_heartbeat ();
-          ignore (leave_worker ~sw ~auth_token ~session_id:mcp_session_id ~worker_name))
-        (fun () ->
-          let allowed_names =
-            allowed_tools |> List.map strip_mcp_prefix |> unique_preserve_order
+    unit -> (run_result, string) result =
+  fun () ->
+    let mcp_session_id =
+      resolved_mcp_session_id ~base_path ~team_session_id ~worker_name
+    in
+    let execution_scope =
+      resolve_execution_scope ~base_path ~team_session_id ?execution_scope ()
+    in
+    let meta =
+      make_worker_meta ~base_path ~team_session_id ~worker_name ~mcp_session_id
+        ~role ~selection_note ~execution_scope ~worker_class ~worker_size
+        ~effective_model:model.model_id
+    in
+    match worker_auth_token ~base_path ~worker_name with
+    | Error e -> Error e
+    | Ok auth_token ->
+        let net = Eio_context.get_net () in
+        let system_prompt =
+          default_system_prompt ~worker_name ~model_id:model.model_id
+            ?session_id:team_session_id ?role ?selection_note ()
+        in
+        let stop_heartbeat =
+          start_worker_heartbeat ~sw ~auth_token ~session_id:mcp_session_id
+            ~worker_name
+        in
+        Fun.protect
+          ~finally:(fun () ->
+            stop_heartbeat ();
+            ignore
+              (leave_worker ~sw ~auth_token ~session_id:mcp_session_id
+                 ~worker_name))
+          (fun () ->
+          let _ =
+            match join_worker ~sw ~auth_token ~session_id:mcp_session_id
+                    ~worker_name with
+            | Ok _ -> ()
+            | Error e -> raise (Failure ("worker join failed: " ^ e))
           in
-          let listed_schemas =
-            match
-              list_masc_tools ~sw ~auth_token ~session_id:mcp_session_id
-                ~names:(Some allowed_names) ()
-            with
-            | Ok schemas -> schemas
-            | Error e -> raise (Failure ("tools/list failed: " ^ e))
+          let* mcp_tools =
+            build_oas_mcp_tools ~sw ~auth_token ~session_id:mcp_session_id
+              ~worker_name ~prompt ~allowed_tools
           in
-          let tool_schemas =
-            List.filter
-              (fun (schema : Types.tool_schema) ->
-                List.mem schema.name allowed_names)
-              listed_schemas
+          let* shell_tools =
+            build_local_shell_tools ~execution_scope ~base_path
           in
-          let tool_defs = tool_defs_of_schemas tool_schemas in
-          if tool_defs = [] then
-            Error "no MASC tool definitions available for local worker"
-          else
-            let zero_usage = make_usage () in
-            let rec loop ~round ~usage_acc ~tools_used current_prompt =
-              let request : Llm_client.completion_request =
+          let tools = mcp_tools @ shell_tools in
+          let tool_names_ref = ref [] in
+          let hooks =
+            {
+              Oas.Hooks.empty with
+              pre_tool_use =
+                Some
+                  (function
+                    | Oas.Hooks.PreToolUse { tool_name; _ } ->
+                        tool_names_ref := tool_name :: !tool_names_ref;
+                        Oas.Hooks.Continue
+                    | _ -> Oas.Hooks.Continue);
+            }
+          in
+          let max_turns = max 2 (min 12 (max 2 (timeout_sec / 20))) in
+          let config, options =
+            build_oas_agent ~worker_name ~model ~system_prompt ~tools
+              ~max_turns ~hooks
+          in
+          let agent = Oas.Agent.create ~net ~config ~tools ~options () in
+          let result =
+            Oas.Agent.run ~sw agent prompt
+          in
+          let checkpoint =
+            Oas.Agent.checkpoint ~session_id:mcp_session_id agent
+          in
+          let tool_names =
+            List.rev !tool_names_ref |> unique_preserve_order
+          in
+          let* () =
+            save_worker_checkpoint ~base_path ~team_session_id ~worker_name
+              checkpoint
+          in
+          let* () =
+            save_worker_meta ~base_path ~team_session_id ~worker_name
+              { meta with last_run_at = Some (Time_compat.now ()) }
+          in
+          Oas.Agent.close agent;
+          match result with
+          | Ok response ->
+              let output = oas_extract_text response in
+              let* () =
+                append_worker_completion_log ~base_path ~team_session_id
+                  ~worker_name ~prompt ~tool_names ~status:"ok" ~output ()
+              in
+              Ok
                 {
-                  model;
-                  messages =
-                    [
-                      Llm_client.system_msg
-                        (default_system_prompt ~worker_name
-                           ~model_id:model.model_id ?session_id:team_session_id
-                           ?role ?selection_note ());
-                      Llm_client.user_msg current_prompt;
-                    ];
-                  temperature = 0.2;
-                  max_tokens = local_worker_max_tokens ();
-                  tools = tool_defs;
-                  response_format = `Text;
+                  output;
+                  model_used =
+                    (if String.trim response.model <> "" then response.model
+                     else model.model_id);
+                  input_tokens = Some checkpoint.usage.total_input_tokens;
+                  output_tokens = Some checkpoint.usage.total_output_tokens;
+                  cost_usd = estimate_cost_usd model
+                      (make_usage ~input_tokens:checkpoint.usage.total_input_tokens
+                         ~output_tokens:checkpoint.usage.total_output_tokens ());
+                  tool_call_count = List.length tool_names;
+                  tool_names;
+                  session_id = mcp_session_id;
+                }
+          | Error err ->
+              let detail = Agent_sdk__Error.to_string err in
+              let* () =
+                append_worker_completion_log ~base_path ~team_session_id
+                  ~worker_name ~prompt ~tool_names ~status:"error"
+                  ~output:detail ~error:detail ()
+              in
+              Error detail)
+
+let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
+    ~(prompt : string) : (run_result, string) result =
+  let team_session_id = Some team_session_id in
+  let meta =
+    load_worker_meta ~base_path ~team_session_id ~worker_name
+  in
+  let checkpoint =
+    load_worker_checkpoint ~base_path ~team_session_id ~worker_name
+  in
+  match meta, checkpoint with
+  | None, _ -> Error (sprintf "worker container not found: %s" worker_name)
+  | _, None -> Error (sprintf "worker checkpoint not found: %s" worker_name)
+  | Some meta, Some checkpoint -> (
+      match worker_auth_token ~base_path ~worker_name with
+      | Error e -> Error e
+      | Ok auth_token ->
+          let net = Eio_context.get_net () in
+          let stop_heartbeat =
+            start_worker_heartbeat ~sw ~auth_token ~session_id:meta.mcp_session_id
+              ~worker_name
+          in
+          Fun.protect
+            ~finally:(fun () ->
+              stop_heartbeat ();
+              ignore
+                (leave_worker ~sw ~auth_token
+                   ~session_id:meta.mcp_session_id ~worker_name))
+            (fun () ->
+              let _ =
+                match join_worker ~sw ~auth_token
+                        ~session_id:meta.mcp_session_id ~worker_name with
+                | Ok _ -> ()
+                | Error e -> raise (Failure ("worker join failed: " ^ e))
+              in
+              let allowed_tools =
+                session_min_tool_names |> List.map (fun name -> "mcp__masc__" ^ name)
+              in
+              let* mcp_tools =
+                build_oas_mcp_tools ~sw ~auth_token
+                  ~session_id:meta.mcp_session_id ~worker_name ~prompt
+                  ~allowed_tools
+              in
+              let shell_tools =
+                match meta.shell_profile with
+                | Shell_none -> Ok []
+                | Shell_readonly ->
+                    build_local_shell_tools
+                      ~execution_scope:Team_session_types.Observe_only ~base_path
+                | Shell_dev ->
+                    build_local_shell_tools
+                      ~execution_scope:Team_session_types.Limited_code_change
+                      ~base_path
+              in
+              let* shell_tools = shell_tools in
+              let tools = mcp_tools @ shell_tools in
+              let tool_names_ref = ref [] in
+              let hooks =
+                {
+                  Oas.Hooks.empty with
+                  pre_tool_use =
+                    Some
+                      (function
+                        | Oas.Hooks.PreToolUse { tool_name; _ } ->
+                            tool_names_ref := tool_name :: !tool_names_ref;
+                            Oas.Hooks.Continue
+                        | _ -> Oas.Hooks.Continue);
                 }
               in
-              match Llm_client.complete ~timeout_sec request with
-              | Error e -> Error e
-              | Ok resp ->
-                  let tool_calls =
-                    match resp.tool_calls with
-                    | [] -> parse_text_tool_calls resp.content
-                    | calls -> calls
+              let model =
+                let base_model = Llm_client.default_local_model_spec () in
+                match checkpoint.model with
+                | Oas.Types.Custom model_id ->
+                    { base_model with model_id }
+                | _ ->
+                    { base_model with model_id = meta.effective_model }
+              in
+              let config, options =
+                build_oas_agent ~worker_name ~model
+                  ~system_prompt:
+                    (default_system_prompt ~worker_name ~model_id:model.model_id
+                       ?session_id:meta.team_session_id ?role:meta.role
+                       ?selection_note:meta.selection_note ())
+                  ~tools ~max_turns:8 ~hooks
+              in
+              let agent =
+                Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()
+              in
+              let result =
+                Oas.Agent.run ~sw agent prompt
+              in
+              let next_checkpoint =
+                Oas.Agent.checkpoint ~session_id:meta.mcp_session_id agent
+              in
+              let tool_names =
+                List.rev !tool_names_ref |> unique_preserve_order
+              in
+              let* () =
+                save_worker_checkpoint ~base_path ~team_session_id ~worker_name
+                  next_checkpoint
+              in
+              let* () =
+                save_worker_meta ~base_path ~team_session_id ~worker_name
+                  { meta with last_run_at = Some (Time_compat.now ()) }
+              in
+              Oas.Agent.close agent;
+              match result with
+              | Ok response ->
+                  let output = oas_extract_text response in
+                  let* () =
+                    append_worker_completion_log ~base_path ~team_session_id
+                      ~worker_name ~prompt ~tool_names ~status:"ok" ~output ()
                   in
-                  let usage_acc = merge_usage usage_acc resp.usage in
-                  if tool_calls = [] then
-                    let output =
-                      let trimmed = String.trim resp.content in
-                      if trimmed <> "" then trimmed
-                      else if tools_used <> [] then
-                        sprintf "(tools executed: %s)"
-                          (String.concat ", " (unique_preserve_order tools_used))
-                      else
-                        "(no output)"
+                  Ok
+                    {
+                      output;
+                      model_used =
+                        (if String.trim response.model <> "" then response.model
+                         else meta.effective_model);
+                      input_tokens = Some next_checkpoint.usage.total_input_tokens;
+                      output_tokens = Some next_checkpoint.usage.total_output_tokens;
+                      cost_usd =
+                        estimate_cost_usd model
+                          (make_usage
+                             ~input_tokens:next_checkpoint.usage.total_input_tokens
+                             ~output_tokens:next_checkpoint.usage.total_output_tokens
+                             ());
+                      tool_call_count = List.length tool_names;
+                      tool_names;
+                      session_id = meta.mcp_session_id;
+                    }
+              | Error err ->
+                  let detail = Agent_sdk__Error.to_string err in
+                  let* () =
+                    append_worker_completion_log ~base_path ~team_session_id
+                      ~worker_name ~prompt ~tool_names ~status:"error"
+                      ~output:detail ~error:detail ()
+                  in
+                  Error detail))
+
+let run_worker_legacy ~sw ~base_path ~worker_name
+    ~(model : Llm_client.model_spec) ~team_session_id ~role
+    ~selection_note
+    ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
+    unit -> (run_result, string) result =
+  fun () ->
+    let mcp_session_id =
+      resolved_mcp_session_id ~base_path ~team_session_id ~worker_name
+    in
+    match worker_auth_token ~base_path ~worker_name with
+    | Error e -> Error e
+    | Ok auth_token ->
+        let stop_heartbeat =
+          start_worker_heartbeat ~sw ~auth_token ~session_id:mcp_session_id
+            ~worker_name
+        in
+        Fun.protect
+          ~finally:(fun () ->
+            stop_heartbeat ();
+            ignore
+              (leave_worker ~sw ~auth_token ~session_id:mcp_session_id
+                 ~worker_name))
+          (fun () ->
+            let _ =
+              match
+                join_worker ~sw ~auth_token ~session_id:mcp_session_id
+                  ~worker_name
+              with
+              | Ok _ -> ()
+              | Error e -> raise (Failure ("worker join failed: " ^ e))
+            in
+            let allowed_names =
+              allowed_tools |> List.map strip_mcp_prefix |> unique_preserve_order
+            in
+            let listed_schemas =
+              match
+                list_masc_tools ~sw ~auth_token ~session_id:mcp_session_id
+                  ~names:(Some allowed_names) ()
+              with
+              | Ok schemas -> schemas
+              | Error e -> raise (Failure ("tools/list failed: " ^ e))
+            in
+            let tool_schemas =
+              List.filter
+                (fun (schema : Types.tool_schema) ->
+                  List.mem schema.name allowed_names)
+                listed_schemas
+            in
+            let tool_defs = tool_defs_of_schemas tool_schemas in
+            if tool_defs = [] then
+              Error "no MASC tool definitions available for local worker"
+            else
+              let zero_usage = make_usage () in
+              let rec loop ~round ~usage_acc ~tools_used current_prompt =
+                let request : Llm_client.completion_request =
+                  {
+                    model;
+                    messages =
+                      [
+                        Llm_client.system_msg
+                          (default_system_prompt ~worker_name
+                             ~model_id:model.model_id ?session_id:team_session_id
+                             ?role ?selection_note ());
+                        Llm_client.user_msg current_prompt;
+                      ];
+                    temperature = 0.2;
+                    max_tokens = local_worker_max_tokens ();
+                    tools = tool_defs;
+                    response_format = `Text;
+                  }
+                in
+                match Llm_client.complete ~timeout_sec request with
+                | Error e -> Error e
+                | Ok resp ->
+                    let tool_calls =
+                      match resp.tool_calls with
+                      | [] -> parse_text_tool_calls resp.content
+                      | calls -> calls
                     in
-                    Ok
-                      {
-                        output;
-                        model_used = resp.model_used;
-                        input_tokens = Some usage_acc.input_tokens;
-                        output_tokens = Some usage_acc.output_tokens;
-                        cost_usd = estimate_cost_usd model usage_acc;
-                        tool_call_count = List.length tools_used;
-                        tool_names = unique_preserve_order tools_used;
-                        session_id = mcp_session_id;
-                      }
-                  else
-                    let tool_outputs =
-                      List.map
-                        (fun (tc : Llm_client.tool_call) ->
-                          let schema =
-                            tool_schema_of_name tool_schemas tc.call_name
-                          in
-                          let parsed_args =
-                            match Yojson.Safe.from_string tc.call_arguments with
-                            | json -> json
-                            | exception Yojson.Json_error msg ->
-                                `Assoc [ ("error", `String ("invalid tool args: " ^ msg)) ]
-                          in
-                          let args =
-                            parsed_args
-                            |> inject_default_agent_name ~worker_name ~schema
-                            |> inject_prompt_full_context ~prompt ~tool_name:tc.call_name
-                          in
-                          let output =
-                            match
-                              call_masc_tool ~sw ~auth_token
-                                ~session_id:mcp_session_id
-                                ~tool_name:tc.call_name ~args
-                            with
-                            | Ok result ->
-                                if result.is_error then
-                                  Yojson.Safe.to_string
-                                    (`Assoc
-                                       [
-                                         ("tool", `String tc.call_name);
-                                         ("error", `String result.text);
-                                       ])
-                                else result.text
-                            | Error e ->
-                                Yojson.Safe.to_string
-                                  (`Assoc
-                                     [ ("tool", `String tc.call_name); ("error", `String e) ])
-                          in
-                          ((tc : Llm_client.tool_call), output))
-                        tool_calls
-                    in
-                    let round_tools =
-                      List.map (fun (tc : Llm_client.tool_call) -> tc.call_name) tool_calls
-                    in
-                    let tools_used = tools_used @ round_tools in
-                    let output =
-                      let trimmed = String.trim resp.content in
-                      if trimmed <> "" then trimmed
-                      else
-                        sprintf "(tools executed: %s)"
-                          (String.concat ", " (unique_preserve_order tools_used))
-                    in
-                    if round >= 3 then
+                    let usage_acc = merge_usage usage_acc resp.usage in
+                    if tool_calls = [] then
+                      let output =
+                        let trimmed = String.trim resp.content in
+                        if trimmed <> "" then trimmed
+                        else if tools_used <> [] then
+                          sprintf "(tools executed: %s)"
+                            (String.concat ", "
+                               (unique_preserve_order tools_used))
+                        else
+                          "(no output)"
+                      in
                       Ok
                         {
                           output;
@@ -829,8 +1534,97 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id ~role
                           session_id = mcp_session_id;
                         }
                     else
-                      loop ~round:(round + 1) ~usage_acc ~tools_used
-                        (followup_prompt ~original_prompt:prompt ~tool_outputs
-                           ~already_used:tools_used)
-            in
-            loop ~round:1 ~usage_acc:zero_usage ~tools_used:[] prompt)
+                      let tool_outputs =
+                        List.map
+                          (fun (tc : Llm_client.tool_call) ->
+                            let schema =
+                              tool_schema_of_name tool_schemas tc.call_name
+                            in
+                            let parsed_args =
+                              match Yojson.Safe.from_string tc.call_arguments with
+                              | json -> json
+                              | exception Yojson.Json_error msg ->
+                                  `Assoc
+                                    [
+                                      ( "error",
+                                        `String
+                                          ("invalid tool args: " ^ msg) );
+                                    ]
+                            in
+                            let args =
+                              parsed_args
+                              |> inject_default_agent_name ~worker_name ~schema
+                              |> inject_prompt_full_context ~prompt
+                                   ~tool_name:tc.call_name
+                            in
+                            let output =
+                              match
+                                call_masc_tool ~sw ~auth_token
+                                  ~session_id:mcp_session_id
+                                  ~tool_name:tc.call_name ~args
+                              with
+                              | Ok result ->
+                                  if result.is_error then
+                                    Yojson.Safe.to_string
+                                      (`Assoc
+                                        [
+                                          ("tool", `String tc.call_name);
+                                          ("error", `String result.text);
+                                        ])
+                                  else result.text
+                              | Error e ->
+                                  Yojson.Safe.to_string
+                                    (`Assoc
+                                      [
+                                        ("tool", `String tc.call_name);
+                                        ("error", `String e);
+                                      ])
+                            in
+                            (tc, output))
+                          tool_calls
+                      in
+                      let round_tools =
+                        List.map
+                          (fun (tc : Llm_client.tool_call) -> tc.call_name)
+                          tool_calls
+                      in
+                      let tools_used = tools_used @ round_tools in
+                      let output =
+                        let trimmed = String.trim resp.content in
+                        if trimmed <> "" then trimmed
+                        else
+                          sprintf "(tools executed: %s)"
+                            (String.concat ", "
+                               (unique_preserve_order tools_used))
+                      in
+                      if round >= 3 then
+                        Ok
+                          {
+                            output;
+                            model_used = resp.model_used;
+                            input_tokens = Some usage_acc.input_tokens;
+                            output_tokens = Some usage_acc.output_tokens;
+                            cost_usd = estimate_cost_usd model usage_acc;
+                            tool_call_count = List.length tools_used;
+                            tool_names = unique_preserve_order tools_used;
+                            session_id = mcp_session_id;
+                          }
+                      else
+                        loop ~round:(round + 1) ~usage_acc ~tools_used
+                          (followup_prompt ~original_prompt:prompt ~tool_outputs
+                             ~already_used:tools_used)
+              in
+              loop ~round:1 ~usage_acc:zero_usage ~tools_used:[] prompt)
+
+let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
+    ?worker_class ?worker_size ?execution_scope ~role ~selection_note
+    ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
+    unit -> (run_result, string) result =
+  match configured_backend () with
+  | `Legacy ->
+      run_worker_legacy ~sw ~base_path ~worker_name ~model ~team_session_id
+        ~role ~selection_note ~prompt ~allowed_tools ~timeout_sec
+  | `Oas ->
+      run_worker_oas ~sw ~base_path ~worker_name ~model ~team_session_id
+        ?worker_class ?worker_size ?execution_scope ~role ~selection_note
+        ~prompt ~allowed_tools ~timeout_sec

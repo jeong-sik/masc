@@ -74,6 +74,11 @@ type model_tier =
   | Tier_27b
   | Tier_9b
 
+type worker_size =
+  | Worker_sm
+  | Worker_lg
+  | Worker_xlg
+
 type task_profile =
   | Profile_extract
   | Profile_normalize
@@ -352,6 +357,27 @@ let model_tier_of_string = function
   | "9b" -> Some Tier_9b
   | _ -> None
 
+let worker_size_to_string = function
+  | Worker_sm -> "sm"
+  | Worker_lg -> "lg"
+  | Worker_xlg -> "xlg"
+
+let worker_size_of_string = function
+  | "sm" -> Some Worker_sm
+  | "lg" -> Some Worker_lg
+  | "xlg" -> Some Worker_xlg
+  | _ -> None
+
+let model_tier_of_worker_size = function
+  | Worker_sm -> Some Tier_9b
+  | Worker_lg -> Some Tier_27b
+  | Worker_xlg -> Some Tier_35b
+
+let worker_size_of_model_tier = function
+  | Tier_9b -> Some Worker_sm
+  | Tier_27b -> Some Worker_lg
+  | Tier_35b -> Some Worker_xlg
+
 let task_profile_to_string = function
   | Profile_extract -> "extract"
   | Profile_normalize -> "normalize"
@@ -619,6 +645,19 @@ let model_tier_counts workers =
     workers;
   Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
 
+let worker_size_counts workers =
+  let tbl = Hashtbl.create 4 in
+  List.iter
+    (fun (worker : planned_worker) ->
+      match Option.bind worker.model_tier worker_size_of_model_tier with
+      | None -> ()
+      | Some size ->
+          let key = worker_size_to_string size in
+          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
+          Hashtbl.replace tbl key (prev + 1))
+    workers;
+  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+
 let task_profile_counts workers =
   let tbl = Hashtbl.create 8 in
   List.iter
@@ -689,6 +728,10 @@ let planned_worker_to_yojson (w : planned_worker) =
         Option.fold ~none:`Null
           ~some:(fun tier -> `String (model_tier_to_string tier))
           w.model_tier );
+      ( "worker_size",
+        Option.fold ~none:`Null
+          ~some:(fun size -> `String (worker_size_to_string size))
+          (Option.bind w.model_tier worker_size_of_model_tier) );
       ( "task_profile",
         Option.fold ~none:`Null
           ~some:(fun profile -> `String (task_profile_to_string profile))
@@ -749,11 +792,23 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
             supervisor_actor =
               member "supervisor_actor" json |> to_string_option;
             model_tier =
-              Option.bind
-                (member "model_tier" json |> to_string_option)
-                (fun value ->
-                  model_tier_of_string
-                    (String.lowercase_ascii (String.trim value)));
+              (match
+                 Option.bind
+                   (member "model_tier" json |> to_string_option)
+                   (fun value ->
+                     model_tier_of_string
+                       (String.lowercase_ascii (String.trim value)))
+               with
+              | Some tier -> Some tier
+              | None ->
+                  let size_opt =
+                    match member "worker_size" json |> to_string_option with
+                    | Some value ->
+                        worker_size_of_string
+                          (String.lowercase_ascii (String.trim value))
+                    | None -> None
+                  in
+                  Option.bind size_opt model_tier_of_worker_size);
             task_profile =
               Option.bind
                 (member "task_profile" json |> to_string_option)

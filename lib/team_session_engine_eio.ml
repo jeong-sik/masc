@@ -535,6 +535,10 @@ let summary_json_of_session (config : Room.config)
     Team_session_types.model_tier_counts session.planned_workers
     |> Team_session_types.counts_to_json
   in
+  let worker_size_counts =
+    Team_session_types.worker_size_counts session.planned_workers
+    |> Team_session_types.counts_to_json
+  in
   let task_profile_counts =
     Team_session_types.task_profile_counts session.planned_workers
     |> Team_session_types.counts_to_json
@@ -575,6 +579,7 @@ let summary_json_of_session (config : Room.config)
       ("controller_counts", controller_counts);
       ("control_domain_counts", control_domain_counts);
       ("tier_counts", tier_counts);
+      ("worker_size_counts", worker_size_counts);
       ("task_profile_counts", task_profile_counts);
       ("escalation_count", `Int escalation_count);
       ( "routing_reason_summary",

@@ -135,8 +135,11 @@ INSTALLED_EXE="$(command -v masc-mcp || true)"
 # Eio-based server (main_eio.exe) - for PostgresNative backend
 WORKSPACE_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_eio.exe"
 LOCAL_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
+WORKSPACE_STDIO_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_stdio_eio.exe"
+LOCAL_STDIO_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_stdio_eio.exe"
 MASC_EXE=""
 MASC_EIO_EXE=""
+MASC_STDIO_EIO_EXE=""
 
 # 1. Pre-downloaded release binary (fastest, no build needed)
 if [ -x "$RELEASE_BINARY" ]; then
@@ -158,6 +161,12 @@ elif [ -x "$LOCAL_EIO_EXE" ]; then
     MASC_EIO_EXE="$LOCAL_EIO_EXE"
 fi
 
+if [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
+    MASC_STDIO_EIO_EXE="$WORKSPACE_STDIO_EIO_EXE"
+elif [ -x "$LOCAL_STDIO_EIO_EXE" ]; then
+    MASC_STDIO_EIO_EXE="$LOCAL_STDIO_EIO_EXE"
+fi
+
 # 5. Build Eio version if not found (Lwt deprecated, download disabled)
 if [ -z "$MASC_EIO_EXE" ]; then
     echo "Building MASC MCP server from source..." >&2
@@ -170,6 +179,23 @@ if [ -z "$MASC_EIO_EXE" ]; then
         MASC_EIO_EXE="$LOCAL_EIO_EXE"
     else
         echo "Error: build failed." >&2
+        exit 1
+    fi
+fi
+
+if [ "$HTTP_MODE" = "false" ] && [ -z "$MASC_STDIO_EIO_EXE" ]; then
+    echo "Building MASC MCP stdio server from source..." >&2
+    if ! command -v dune >/dev/null 2>&1; then
+        echo "Error: dune not found. Cannot build stdio server." >&2
+        exit 1
+    fi
+    dune build --root "$SCRIPT_DIR" bin/main_stdio_eio.exe 1>&2
+    if [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
+        MASC_STDIO_EIO_EXE="$WORKSPACE_STDIO_EIO_EXE"
+    elif [ -x "$LOCAL_STDIO_EIO_EXE" ]; then
+        MASC_STDIO_EIO_EXE="$LOCAL_STDIO_EIO_EXE"
+    else
+        echo "Error: failed to build stdio server." >&2
         exit 1
     fi
 fi
@@ -273,7 +299,7 @@ RUNTIME_NAME="Lwt"
 
 if [ "$EIO_MODE" = "true" ]; then
     RUNTIME_NAME="Eio"
-    if [ -z "$MASC_EIO_EXE" ]; then
+    if [ "$HTTP_MODE" = "true" ] && [ -z "$MASC_EIO_EXE" ]; then
         echo "Building MASC MCP server (Eio mode)..." >&2
         if ! command -v dune >/dev/null 2>&1; then
             echo "Error: dune not found. Cannot build Eio server." >&2
@@ -289,11 +315,15 @@ if [ "$EIO_MODE" = "true" ]; then
             exit 1
         fi
     fi
-    SELECTED_EXE="$MASC_EIO_EXE"
+    if [ "$HTTP_MODE" = "true" ]; then
+        SELECTED_EXE="$MASC_EIO_EXE"
+    else
+        SELECTED_EXE="$MASC_STDIO_EIO_EXE"
+    fi
 fi
 
 # Eio server has different CLI format and is HTTP-only
-if [ "$EIO_MODE" = "true" ]; then
+if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
     echo "  Host: $HOST" >&2
     echo "  Port: $PORT" >&2
@@ -334,5 +364,9 @@ else
         echo "  Base path (input): $BASE_PATH" >&2
     fi
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
-    exec "$SELECTED_EXE" --stdio --path "$BASE_PATH"
+    if [ "$EIO_MODE" = "true" ]; then
+        exec "$SELECTED_EXE" --base-path "$BASE_PATH"
+    else
+        exec "$SELECTED_EXE" --stdio --path "$BASE_PATH"
+    fi
 fi

@@ -199,7 +199,7 @@ let run_local ~agent_name ~identity_prompt ~goal ~context ~allow_post
       match
         Local_agent_eio.run_worker ~sw ~base_path:(base_path ()) ~worker_name ~model
           ~team_session_id:None ~role:(Some "lodge-worker") ~selection_note:None
-          ~prompt ~allowed_tools ~timeout_sec:90
+          ~prompt ~allowed_tools ~timeout_sec:90 ()
       with
       | Error e -> Error e
       | Ok run_result ->

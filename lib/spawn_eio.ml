@@ -343,7 +343,8 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
 *)
 let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
     ?room_config ?runtime_agent_name ?runtime_model ?runtime_role
-    ?runtime_session_id ?runtime_selection_note () : spawn_result =
+    ?runtime_session_id ?runtime_selection_note ?worker_class ?worker_size
+    ?execution_scope () : spawn_result =
   let start_time = Time_compat.now () in
   let normalized_agent = String.lowercase_ascii (String.trim agent_name) in
   if Provider_adapter.is_bare_ollama_label normalized_agent then
@@ -457,9 +458,10 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
          match
            Local_agent_eio.run_worker ~sw ~base_path ~worker_name ~model
              ~team_session_id:runtime_session_id ~role:runtime_role
+             ?worker_class ?worker_size ?execution_scope
              ~selection_note:runtime_selection_note
              ~prompt:augmented_prompt ~allowed_tools:llama_mcp_tools
-             ~timeout_sec:timeout
+             ~timeout_sec:timeout ()
          with
          | Ok result ->
              {

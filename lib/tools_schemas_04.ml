@@ -211,31 +211,6 @@ Matches topic pattern (e.g., 'Merge PR #123') and runs corresponding action.";
     ];
   };
 
-  {
-    name = "masc_archive_save";
-    description = "Save a record to the archive (실록). Records debates, votes, and decisions.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("type", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "debate"; `String "vote"; `String "decision"; `String "post"]);
-          ("description", `String "Record type");
-        ]);
-        ("content", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Record content");
-        ]);
-        ("agents", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Participating agents");
-        ]);
-      ]);
-      ("required", `List [`String "content"]);
-    ];
-  };
-
   (* ============================================ *)
   (* Social Features (Moltbook-style)             *)
   (* ============================================ *)

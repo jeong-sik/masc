@@ -154,10 +154,10 @@ flowchart TD
 
 | Type | Examples | Status |
 |------|----------|--------|
-| Intentional compatibility | `masc_claim`, `masc_dispatch_route`, `experiment_start`, `masc_trpg_*` | Hidden aliases; keep if compatibility matters |
+| Intentional compatibility | `masc_claim`, `experiment_start`, `masc_trpg_*` | Hidden aliases; keep if compatibility matters |
 | Intentional internal-only | `Prompt_registry`, `data/prompts/*.json` | Real runtime feature, not public MCP surface |
 | Experimental but documented | `SWARM-RISC`, `GAME-VIEW-PROTOCOL` draft | Keep clearly labeled as non-canonical or draft |
-| Placeholder / review-needed | `masc_archive_save` | Hidden placeholder, not truthful default surface |
+| Placeholder / review-needed | none | Dead hidden placeholder removed from the MCP schema inventory |
 | Documentation orphan | old count claims, old module lists, stale “full spec” prose | Should be downgraded to historical or refreshed |
 
 ## Requirements Coverage

@@ -226,17 +226,6 @@ let schemas : tool_schema list = [
           ];
     };
     {
-      name = "masc_dispatch_route";
-      description =
-        "Alias for masc_dispatch_plan. Return recommended route candidates for large-scale hierarchy dispatch.";
-      input_schema =
-        object_schema
-          [
-            ("operation_id", string_prop "Optional operation id to route.");
-            ("assigned_unit_id", string_prop "Optional current unit id.");
-          ];
-    };
-    {
       name = "masc_dispatch_assign";
       description =
         "Assign or move an operation to a new unit. Cross-platoon or strict-policy moves become pending approvals.";

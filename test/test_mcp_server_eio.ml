@@ -451,10 +451,6 @@ let test_handle_request_tools_list () =
     false
     (List.mem "masc_claim" names);
   Alcotest.(check bool)
-    "superseded masc_dispatch_route hidden from list"
-    false
-    (List.mem "masc_dispatch_route" names);
-  Alcotest.(check bool)
     "low-usage social tool hidden from list"
     false
     (List.mem "masc_post_create" names);
@@ -462,10 +458,6 @@ let test_handle_request_tools_list () =
     "low-usage vote utility hidden from list"
     false
     (List.mem "masc_vote_create" names);
-  Alcotest.(check bool)
-    "placeholder tool hidden by default"
-    false
-    (List.mem "masc_archive_save" names);
   Alcotest.(check bool) "first page non-empty" true (names <> []);
   Alcotest.(check bool) "first page exposes next cursor" true
     (Option.is_some (next_cursor_of_response first_page));
@@ -840,8 +832,8 @@ let test_handle_request_tools_list_with_placeholder_flag () =
       |> List.filter_map (function `String s -> Some s | _ -> None)
     in
     Alcotest.(check bool)
-      "placeholder tool visible with flag"
-      true
+      "placeholder tool removed even with flag"
+      false
       (List.mem "masc_archive_save" names);
 
     cleanup_dir base_path)

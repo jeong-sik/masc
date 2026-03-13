@@ -24,7 +24,6 @@ let dispatch (ctx : (_, _) context) ~name ~args : result option =
   | "masc_chain_snapshot" -> Some (handle_chain_snapshot ctx)
   | "masc_chain_run_get" -> Some (handle_chain_run_get ctx args)
   | "masc_dispatch_plan" -> Some (handle_dispatch_plan ctx args)
-  | "masc_dispatch_route" -> Some (handle_dispatch_route ctx args)
   | "masc_dispatch_assign" -> Some (handle_dispatch_assign ctx args)
   | "masc_dispatch_rebalance" -> Some (handle_dispatch_rebalance ctx args)
   | "masc_dispatch_escalate" -> Some (handle_dispatch_escalate ctx args)

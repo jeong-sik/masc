@@ -539,7 +539,7 @@ let execution_smoke_fixture_json () =
                 ("seen_count", `Int 3);
                 ("planned_count", `Int 4);
                 ("required_count", `Int 1);
-                ("counts_basis", `String "recent_turns");
+                ("counts_basis", `String "live=recent_turns · planned=roster");
                 ("top_handoff", intervene_handoff);
                 ("intervene_handoff", intervene_handoff);
                 ("command_handoff", command_handoff);
@@ -563,7 +563,7 @@ let execution_smoke_fixture_json () =
                 ("seen_count", `Int 1);
                 ("planned_count", `Int 1);
                 ("required_count", `Int 1);
-                ("counts_basis", `String "recent_turns");
+                ("counts_basis", `String "live=recent_turns · planned=roster");
                 ("top_handoff", command_handoff);
                 ("intervene_handoff", intervene_handoff);
                 ("command_handoff", command_handoff);
@@ -1505,6 +1505,12 @@ let build_session_seed session_json session_cards =
       let explicit = List.length planned in
       if explicit > 0 then explicit else List.length member_names
     in
+    let counts_basis =
+      if List.length (string_list_of_json (member_assoc "planned_participants" summary)) > 0 then
+        "live=recent_turns · planned=planned_participants"
+      else
+        "live=recent_turns · planned=known_members"
+    in
     Some
       {
         session_id;
@@ -1540,7 +1546,7 @@ let build_session_seed session_json session_cards =
         seen_count;
         planned_count;
         required_count = int_field ~default:1 "required_agents" team_health;
-        counts_basis = "recent_turns";
+        counts_basis;
         runtime_blocker;
         worker_gap_summary;
         top_attention;

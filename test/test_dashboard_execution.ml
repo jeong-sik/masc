@@ -62,7 +62,7 @@ let test_dashboard_execution_fixture () =
           (session_briefs |> List.hd |> member "seen_count" |> to_int);
         check int "fixture planned count" 4
           (session_briefs |> List.hd |> member "planned_count" |> to_int);
-        check string "fixture counts basis" "recent_turns"
+        check string "fixture counts basis" "live=recent_turns · planned=roster"
           (session_briefs |> List.hd |> member "counts_basis" |> to_string);
         check int "operation briefs" 2 (List.length operation_briefs);
         check int "worker briefs" 3 (List.length worker_briefs);

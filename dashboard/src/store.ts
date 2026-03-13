@@ -421,6 +421,16 @@ function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionW
   if (!name || !note || !focus || (state !== 'working' && state !== 'watching' && state !== 'quiet' && state !== 'offline')) {
     return null
   }
+  const signalTruthRaw = asString(raw.signal_truth)
+  const signalTruth =
+    signalTruthRaw === 'live' || signalTruthRaw === 'stale' || signalTruthRaw === 'absent'
+      ? signalTruthRaw
+      : undefined
+  const evidenceSourceRaw = asString(raw.evidence_source)
+  const evidenceSource =
+    evidenceSourceRaw === 'message' || evidenceSourceRaw === 'presence' || evidenceSourceRaw === 'none'
+      ? evidenceSourceRaw
+      : undefined
   return {
     name,
     agent_name: asString(raw.agent_name),
@@ -431,8 +441,8 @@ function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionW
     focus,
     last_signal_at: asString(raw.last_signal_at) ?? null,
     last_signal_age_sec: asNumber(raw.last_signal_age_sec) ?? null,
-    signal_truth: asString(raw.signal_truth) ?? undefined,
-    evidence_source: asString(raw.evidence_source) ?? undefined,
+    signal_truth: signalTruth,
+    evidence_source: evidenceSource,
     active_task_count: asNumber(raw.active_task_count),
     related_session_id: asString(raw.related_session_id) ?? null,
     related_operation_id: asString(raw.related_operation_id) ?? null,

@@ -105,8 +105,8 @@ function agentStateLabel(state: DashboardExecutionWorkerSupportBrief['state']): 
 
 function signalTruthLabel(value?: DashboardExecutionWorkerSupportBrief['signal_truth'] | null): string {
   switch (value) {
-    case 'live': return 'live signal'
-    case 'stale': return 'stale signal'
+    case 'live': return '최근 신호(≤5m)'
+    case 'stale': return '오래된 신호(>5m)'
     case 'absent': return 'signal 없음'
     default: return value ?? 'signal 미상'
   }
@@ -115,7 +115,7 @@ function signalTruthLabel(value?: DashboardExecutionWorkerSupportBrief['signal_t
 function evidenceSourceLabel(value?: DashboardExecutionWorkerSupportBrief['evidence_source'] | null): string {
   switch (value) {
     case 'message': return '최근 출력'
-    case 'presence': return 'presence'
+    case 'presence': return 'presence/하트비트'
     case 'none': return '근거 없음'
     default: return value ?? '근거 미상'
   }

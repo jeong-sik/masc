@@ -1075,8 +1075,8 @@ export interface DashboardExecutionWorkerSupportBrief {
   focus: string
   last_signal_at?: string | null
   last_signal_age_sec?: number | null
-  signal_truth?: 'live' | 'stale' | 'absent' | string
-  evidence_source?: 'message' | 'presence' | 'none' | string
+  signal_truth?: 'live' | 'stale' | 'absent'
+  evidence_source?: 'message' | 'presence' | 'none'
   active_task_count?: number
   related_session_id?: string | null
   related_operation_id?: string | null

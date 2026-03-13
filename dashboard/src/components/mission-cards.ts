@@ -354,7 +354,7 @@ export function SessionBriefCard({
           <div class="mission-fact-tile">
             <span>충원 상태</span>
             <strong>${brief.active_count ?? 0}/${brief.required_count || 1}</strong>
-            <small>live / 필요</small>
+            <small>최근 활동 / 필요</small>
           </div>
         </div>
       </button>

@@ -934,10 +934,15 @@ let load_worker_meta ~base_path ~team_session_id ~worker_name =
 
 let save_worker_meta ~base_path ~team_session_id ~worker_name
     (meta : worker_container_meta) =
-  ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
-  Team_session_store.write_text_file
-    (worker_meta_path ~base_path ~team_session_id ~worker_name)
-    (meta |> worker_meta_to_yojson |> Yojson.Safe.pretty_to_string)
+  try
+    ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
+    Team_session_store.write_text_file
+      (worker_meta_path ~base_path ~team_session_id ~worker_name)
+      (meta |> worker_meta_to_yojson |> Yojson.Safe.pretty_to_string);
+    Ok ()
+  with Sys_error msg ->
+    Error
+      (sprintf "failed to save worker meta for %s: %s" worker_name msg)
 
 let load_worker_checkpoint ~base_path ~team_session_id ~worker_name =
   let path =
@@ -952,16 +957,26 @@ let load_worker_checkpoint ~base_path ~team_session_id ~worker_name =
     None
 
 let save_worker_checkpoint ~base_path ~team_session_id ~worker_name checkpoint =
-  ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
-  Team_session_store.write_text_file
-    (worker_checkpoint_path ~base_path ~team_session_id ~worker_name)
-    (Oas.Checkpoint.to_string checkpoint)
+  try
+    ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
+    Team_session_store.write_text_file
+      (worker_checkpoint_path ~base_path ~team_session_id ~worker_name)
+      (Oas.Checkpoint.to_string checkpoint);
+    Ok ()
+  with Sys_error msg ->
+    Error
+      (sprintf "failed to save worker checkpoint for %s: %s" worker_name msg)
 
 let append_worker_turn_log ~base_path ~team_session_id ~worker_name json =
-  ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
-  Team_session_store.append_text_file
-    (worker_turn_log_path ~base_path ~team_session_id ~worker_name)
-    (Yojson.Safe.to_string json ^ "\n")
+  try
+    ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
+    Team_session_store.append_text_file
+      (worker_turn_log_path ~base_path ~team_session_id ~worker_name)
+      (Yojson.Safe.to_string json ^ "\n");
+    Ok ()
+  with Sys_error msg ->
+    Error
+      (sprintf "failed to append worker turn log for %s: %s" worker_name msg)
 
 let resolved_mcp_session_id ~base_path ~team_session_id ~worker_name =
   match load_worker_meta ~base_path ~team_session_id ~worker_name with
@@ -1237,16 +1252,22 @@ let run_worker_oas ~sw ~base_path ~worker_name
           let tool_names =
             List.rev !tool_names_ref |> unique_preserve_order
           in
-          save_worker_checkpoint ~base_path ~team_session_id ~worker_name
-            checkpoint;
-          save_worker_meta ~base_path ~team_session_id ~worker_name
-            { meta with last_run_at = Some (Time_compat.now ()) };
+          let* () =
+            save_worker_checkpoint ~base_path ~team_session_id ~worker_name
+              checkpoint
+          in
+          let* () =
+            save_worker_meta ~base_path ~team_session_id ~worker_name
+              { meta with last_run_at = Some (Time_compat.now ()) }
+          in
           Oas.Agent.close agent;
           match result with
           | Ok response ->
               let output = oas_extract_text response in
-              append_worker_completion_log ~base_path ~team_session_id
-                ~worker_name ~prompt ~tool_names ~status:"ok" ~output ();
+              let* () =
+                append_worker_completion_log ~base_path ~team_session_id
+                  ~worker_name ~prompt ~tool_names ~status:"ok" ~output ()
+              in
               Ok
                 {
                   output;
@@ -1264,9 +1285,11 @@ let run_worker_oas ~sw ~base_path ~worker_name
                 }
           | Error err ->
               let detail = Agent_sdk__Error.to_string err in
-              append_worker_completion_log ~base_path ~team_session_id
-                ~worker_name ~prompt ~tool_names ~status:"error"
-                ~output:detail ~error:detail ();
+              let* () =
+                append_worker_completion_log ~base_path ~team_session_id
+                  ~worker_name ~prompt ~tool_names ~status:"error"
+                  ~output:detail ~error:detail ()
+              in
               Error detail)
 
 let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
@@ -1365,16 +1388,22 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
               let tool_names =
                 List.rev !tool_names_ref |> unique_preserve_order
               in
-              save_worker_checkpoint ~base_path ~team_session_id ~worker_name
-                next_checkpoint;
-              save_worker_meta ~base_path ~team_session_id ~worker_name
-                { meta with last_run_at = Some (Time_compat.now ()) };
+              let* () =
+                save_worker_checkpoint ~base_path ~team_session_id ~worker_name
+                  next_checkpoint
+              in
+              let* () =
+                save_worker_meta ~base_path ~team_session_id ~worker_name
+                  { meta with last_run_at = Some (Time_compat.now ()) }
+              in
               Oas.Agent.close agent;
               match result with
               | Ok response ->
                   let output = oas_extract_text response in
-                  append_worker_completion_log ~base_path ~team_session_id
-                    ~worker_name ~prompt ~tool_names ~status:"ok" ~output ();
+                  let* () =
+                    append_worker_completion_log ~base_path ~team_session_id
+                      ~worker_name ~prompt ~tool_names ~status:"ok" ~output ()
+                  in
                   Ok
                     {
                       output;
@@ -1393,12 +1422,14 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
                       tool_names;
                       session_id = meta.mcp_session_id;
                     }
-          | Error err ->
-              let detail = Agent_sdk__Error.to_string err in
-              append_worker_completion_log ~base_path ~team_session_id
-                ~worker_name ~prompt ~tool_names ~status:"error"
-                ~output:detail ~error:detail ();
-              Error detail))
+              | Error err ->
+                  let detail = Agent_sdk__Error.to_string err in
+                  let* () =
+                    append_worker_completion_log ~base_path ~team_session_id
+                      ~worker_name ~prompt ~tool_names ~status:"error"
+                      ~output:detail ~error:detail ()
+                  in
+                  Error detail))
 
 let run_worker_legacy ~sw ~base_path ~worker_name
     ~(model : Llm_client.model_spec) ~team_session_id ~role

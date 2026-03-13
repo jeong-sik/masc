@@ -27,6 +27,9 @@ jobs:
           chmod +x scripts/opam-pin-external-deps.sh
           scripts/opam-pin-external-deps.sh --with-compact-protocol
 
+      - name: Pin agent_sdk to latest OAS
+        run: opam pin add -y agent_sdk git+https://github.com/jeong-sik/oas.git#main
+
       - name: Refresh apt index
         run: sudo apt-get update
 

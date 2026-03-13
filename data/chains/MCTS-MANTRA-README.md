@@ -32,9 +32,11 @@ Monte Carlo Tree Search 기반 MANTRA 코드 리뷰 체인 시스템.
 
 ### 사용법
 
+`masc-mcp` is the canonical chain runtime. Run the native chain server on port `8935`; old `llm-mcp` `8932` examples are retired.
+
 ```bash
 # MCP tool call
-curl -X POST http://localhost:8932/mcp -d '{
+curl -X POST http://localhost:8935/mcp -d '{
   "jsonrpc": "2.0",
   "method": "tools/call",
   "params": {

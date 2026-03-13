@@ -2,10 +2,12 @@
 
 ## 🚀 Quick Start
 
+`masc-mcp` is now the canonical chain runtime. These examples target the native chain server on port `8935`; older `llm-mcp` `8932` references are retired.
+
 ### 1. Mermaid DSL로 바로 실행
 ```bash
 # 터미널에서
-curl -X POST http://localhost:8932/mcp \
+curl -X POST http://localhost:8935/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"chain.run","arguments":{"mermaid":"graph LR\n    A[LLM:ollama \"Hello\"]"}}}'
 ```

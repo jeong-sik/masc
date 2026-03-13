@@ -72,8 +72,8 @@ let test_parallel_range () =
   assert_in_range Parallel ~low:200 ~high:305
 
 let test_coding_range () =
-  (* Coding = [Core; Worktree; Code; Health; Plan] — baseline ~166 *)
-  assert_in_range Coding ~low:130 ~high:200
+  (* Coding = [Core; Worktree; Code; Health; Plan; Consensus] *)
+  assert_in_range Coding ~low:135 ~high:215
 
 let test_full_range () =
   (* Full = all 19 categories = all visible tools — baseline ~362 *)
@@ -155,6 +155,13 @@ let test_coding_has_code_tools () =
   check bool "coding has masc_code_search" true (List.mem "masc_code_search" names);
   check bool "coding has masc_code_symbols" true (List.mem "masc_code_symbols" names)
 
+let test_coding_has_consensus_tools () =
+  let names = tool_names_for_mode Coding in
+  check bool "coding has masc_consensus_start" true
+    (List.mem "masc_consensus_start" names);
+  check bool "coding has masc_debate_start" true
+    (List.mem "masc_debate_start" names)
+
 let test_solo_lacks_comm_tools () =
   let names = tool_names_for_mode Solo in
   check bool "solo lacks masc_broadcast" true
@@ -230,6 +237,8 @@ let () =
       test_case "minimal lacks board" `Quick test_minimal_lacks_board_tools;
       test_case "standard has board" `Quick test_standard_has_board_tools;
       test_case "coding has code tools" `Quick test_coding_has_code_tools;
+      test_case "coding has consensus tools" `Quick
+        test_coding_has_consensus_tools;
       test_case "solo lacks comm" `Quick test_solo_lacks_comm_tools;
       test_case "parallel has consensus" `Quick test_parallel_has_consensus;
       test_case "custom empty" `Quick test_custom_empty;

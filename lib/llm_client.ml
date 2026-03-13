@@ -108,6 +108,16 @@ type completion_response = {
   latency_ms : int;
 }
 
+let clamp_llama_max_tokens max_tokens =
+  max 1 (min max_tokens Env_config.Llama.max_tokens)
+
+let normalize_request (req : completion_request) =
+  match req.model.provider with
+  | Llama ->
+      let max_tokens = clamp_llama_max_tokens req.max_tokens in
+      if max_tokens = req.max_tokens then req else { req with max_tokens }
+  | _ -> req
+
 (* ================================================================ *)
 (* Provider Helpers                                                 *)
 (* ================================================================ *)
@@ -264,11 +274,7 @@ let message_fingerprint_json (m : message) : Yojson.Safe.t =
     ]
 
 let completion_request_fingerprint_json (req : completion_request) : Yojson.Safe.t =
-  let req =
-    if req.model.provider = Llama && req.max_tokens <> Env_config.Llama.max_tokens
-    then { req with max_tokens = Env_config.Llama.max_tokens }
-    else req
-  in
+  let req = normalize_request req in
   `Assoc
     [
       ("schema_version", `String completion_cache_schema_version);
@@ -447,11 +453,7 @@ let tool_def_to_openai_json (td : tool_def) : Yojson.Safe.t =
     Gemini's OpenAI-compat endpoint uses [max_completion_tokens] (thinking models
     consume internal tokens from this budget, so [max_tokens] alone under-allocates). *)
 let build_openai_body (req : completion_request) : string =
-  let req =
-    if req.model.provider = Llama && req.max_tokens <> Env_config.Llama.max_tokens
-    then { req with max_tokens = Env_config.Llama.max_tokens }
-    else req
-  in
+  let req = normalize_request req in
   let messages_json =
     req.messages |> sanitize_messages_utf8 |> List.map message_to_openai_json
   in
@@ -483,11 +485,7 @@ let build_openai_body (req : completion_request) : string =
 
 (** Build Anthropic Messages API request body. *)
 let build_claude_body (req : completion_request) : string =
-  let req =
-    if req.model.provider = Llama && req.max_tokens <> Env_config.Llama.max_tokens
-    then { req with max_tokens = Env_config.Llama.max_tokens }
-    else req
-  in
+  let req = normalize_request req in
   let sanitized_messages = sanitize_messages_utf8 req.messages in
   (* Claude uses separate system parameter *)
   let system_text = List.fold_left (fun acc m ->
@@ -834,11 +832,7 @@ let call_claude ?timeout_sec (req : completion_request) : (completion_response, 
     | Ok raw -> parse_claude_response raw
 
 let call_openai_compatible ?timeout_sec (req : completion_request) : (completion_response, string) result =
-  let effective_req =
-    if req.model.provider = Llama && req.max_tokens <> Env_config.Llama.max_tokens
-    then { req with max_tokens = Env_config.Llama.max_tokens }
-    else req
-  in
+  let effective_req = normalize_request req in
   match resolve_openai_compatible_endpoint req.model with
   | Error e -> Error e
   | Ok (base_url, path, auth_headers) ->
@@ -890,11 +884,7 @@ let call_glm_cloud_with_pool ?timeout_sec (req : completion_request) : (completi
 
 let complete ?timeout_sec (req : completion_request) : (completion_response, string) result =
   let t0 = Time_compat.now () in
-  let req =
-    if req.model.provider = Llama && req.max_tokens <> Env_config.Llama.max_tokens
-    then { req with max_tokens = Env_config.Llama.max_tokens }
-    else req
-  in
+  let req = normalize_request req in
   let cache_key =
     match cache_bypass_reason req with
     | Some reason ->

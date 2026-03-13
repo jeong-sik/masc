@@ -976,15 +976,19 @@ let keeper_stream_timeout_sec arguments =
       let raw_sec = int_of_float (Float.ceil raw) in
       float_of_int (max 5 (min 300 raw_sec))
 
-let execute_keeper_stream_tool ~sw ~clock ?auth_token state ~agent_name ~arguments =
+let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~arguments =
   let timeout_sec = keeper_stream_timeout_sec arguments in
   let start_time = Eio.Time.now clock in
   let timeout_hit = ref false in
   let success, body =
     try
       Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
-          Mcp_eio.execute_tool_eio ~sw ~clock ?auth_token state
-            ~name:"masc_keeper_msg" ~arguments)
+          let keeper_ctx : _ Tool_keeper.context =
+            { config = state.Mcp_server.room_config; sw; clock }
+          in
+          match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
+          | Some result -> result
+          | None -> (false, "masc_keeper_msg dispatch unavailable"))
     with
     | Eio.Time.Timeout ->
         timeout_hit := true;

@@ -299,6 +299,15 @@ let test_is_tool_enabled_standard () =
   check bool "worktree_create enabled" true (Mode.is_tool_enabled cats "masc_worktree_create");
   check bool "portal_open disabled" false (Mode.is_tool_enabled cats "masc_portal_open")
 
+let test_is_tool_enabled_coding () =
+  let cats = Mode.categories_for_mode Mode.Coding in
+  check bool "code_search enabled" true
+    (Mode.is_tool_enabled cats "masc_code_search");
+  check bool "debate_start enabled" true
+    (Mode.is_tool_enabled cats "masc_debate_start");
+  check bool "broadcast disabled" false
+    (Mode.is_tool_enabled cats "masc_broadcast")
+
 let test_is_tool_enabled_coding_keeper_status () =
   let cats = Mode.categories_for_mode Mode.Coding in
   check bool "keeper status enabled" true
@@ -307,7 +316,6 @@ let test_is_tool_enabled_coding_keeper_status () =
     (Mode.is_tool_enabled cats "masc_persistent_agent_status");
   check bool "keeper up disabled" false
     (Mode.is_tool_enabled cats "masc_keeper_up")
-
 let test_is_tool_enabled_full () =
   let cats = Mode.categories_for_mode Mode.Full in
   check bool "join enabled" true (Mode.is_tool_enabled cats "masc_join");
@@ -439,6 +447,9 @@ let () =
     "is_tool_enabled", [
       test_case "minimal mode" `Quick test_is_tool_enabled_minimal;
       test_case "standard mode" `Quick test_is_tool_enabled_standard;
+      test_case "coding mode" `Quick test_is_tool_enabled_coding;
+      test_case "coding keeper status" `Quick test_is_tool_enabled_coding_keeper_status;
+      test_case "coding mode" `Quick test_is_tool_enabled_coding;
       test_case "coding keeper status" `Quick test_is_tool_enabled_coding_keeper_status;
       test_case "full mode" `Quick test_is_tool_enabled_full;
       test_case "unknown tool disabled" `Quick test_is_tool_enabled_unknown;

@@ -58,23 +58,12 @@ type continuity_context = {
   json : Yojson.Safe.t;
 }
 
-type lodge_checkin_context = {
-  outcome_rank : int;
-  checked_ts : float;
-  json : Yojson.Safe.t;
-}
-
 type tool_audit_snapshot = {
   allowed_tool_names : string list;
   latest_tool_names : string list;
   latest_tool_call_count : int option;
   tool_audit_source : string option;
   tool_audit_at : string option;
-  latest_status : string option;
-  latest_summary : string option;
-  latest_failure_reason : string option;
-  latest_decision_reason : string option;
-  latest_worker_name : string option;
 }
 
 let json_string_option value =
@@ -136,13 +125,6 @@ let string_list_json values =
 let string_list_of_field key json =
   member_assoc key json |> string_list_of_json
 
-let iso_of_unix ts =
-  let open Unix in
-  let tm = gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-    tm.tm_hour tm.tm_min tm.tm_sec
-
 let tool_audit_snapshot agent_name =
   let task_snapshot = A2a_tools.latest_heartbeat_task agent_name in
   let result_snapshot = A2a_tools.latest_heartbeat_result agent_name in
@@ -154,11 +136,6 @@ let tool_audit_snapshot agent_name =
         latest_tool_call_count = None;
         tool_audit_source = Some "heartbeat_task";
         tool_audit_at = Some task.created_at;
-        latest_status = None;
-        latest_summary = None;
-        latest_failure_reason = None;
-        latest_decision_reason = task.decision_reason;
-        latest_worker_name = None;
       }
   | Some task, Some result ->
       {
@@ -167,11 +144,6 @@ let tool_audit_snapshot agent_name =
         latest_tool_call_count = Some result.tool_call_count;
         tool_audit_source = Some "heartbeat_result";
         tool_audit_at = Some result.updated_at;
-        latest_status = Some result.status;
-        latest_summary = Some result.summary;
-        latest_failure_reason = result.failure_reason;
-        latest_decision_reason = Some result.decision_reason;
-        latest_worker_name = Some result.worker_name;
       }
   | Some task, None ->
       {
@@ -180,11 +152,6 @@ let tool_audit_snapshot agent_name =
         latest_tool_call_count = None;
         tool_audit_source = Some "heartbeat_task";
         tool_audit_at = Some task.created_at;
-        latest_status = None;
-        latest_summary = None;
-        latest_failure_reason = None;
-        latest_decision_reason = task.decision_reason;
-        latest_worker_name = None;
       }
   | None, Some result ->
       {
@@ -193,11 +160,6 @@ let tool_audit_snapshot agent_name =
         latest_tool_call_count = Some result.tool_call_count;
         tool_audit_source = Some "heartbeat_result";
         tool_audit_at = Some result.updated_at;
-        latest_status = Some result.status;
-        latest_summary = Some result.summary;
-        latest_failure_reason = result.failure_reason;
-        latest_decision_reason = Some result.decision_reason;
-        latest_worker_name = Some result.worker_name;
       }
   | None, None ->
       {
@@ -206,45 +168,7 @@ let tool_audit_snapshot agent_name =
         latest_tool_call_count = None;
         tool_audit_source = None;
         tool_audit_at = None;
-        latest_status = None;
-        latest_summary = None;
-        latest_failure_reason = None;
-        latest_decision_reason = None;
-        latest_worker_name = None;
       }
-
-let action_kind_of_tool_names tool_names =
-  if List.mem "masc_board_post" tool_names then "post"
-  else if List.mem "masc_board_comment" tool_names then "comment"
-  else if List.mem "masc_board_vote" tool_names || List.mem "masc_board_comment_vote" tool_names then
-    "vote"
-  else
-    "none"
-
-let lodge_outcome_rank = function
-  | "failed" -> 3
-  | "acted" -> 2
-  | "passed" | "skipped" -> 1
-  | _ -> 0
-
-let lodge_tick_last_pass_reason (result : Lodge_heartbeat.heartbeat_result) =
-  let rec first_reason = function
-    | [] -> None
-    | (_, _, Lodge_heartbeat.Passed reason) :: _ -> Some reason
-    | _ :: tl -> first_reason tl
-  in
-  first_reason result.checkins
-
-let lodge_tick_last_system_skip_reason (result : Lodge_heartbeat.heartbeat_result) =
-  if result.agents_checked = 0 then
-    Some "no agents selected for this tick"
-  else
-    let rec first_reason = function
-      | [] -> None
-      | (_, _, Lodge_heartbeat.Skipped reason) :: _ -> Some reason
-      | _ :: tl -> first_reason tl
-    in
-    first_reason result.checkins
 
 let skill_route_summary_of_keeper keeper =
   let route = member_assoc "skill_route" keeper in
@@ -389,7 +313,90 @@ let execution_smoke_fixture_json () =
             ("tempo_interval_s", `Float 300.0);
             ("paused", `Bool false);
             ("lodge", `Assoc []);
+            ( "social_runtime",
+              `Assoc
+                [
+                  ("enabled", `Bool true);
+                  ("strategy", `String "event_driven");
+                  ("queue_depth", `Int 0);
+                  ("active_keepers", `Int 2);
+                  ("last_pass_reason", `String "stayed read-only after evaluating the board");
+                  ("last_system_skip_reason", `String "rate-limited after a recent board action");
+                ] );
             ("version", `String Version.version);
+          ] );
+      ( "social_tick",
+        `Assoc
+          [
+            ("checked", `Int 3);
+            ("acted", `Int 1);
+            ("passed", `Int 1);
+            ("skipped", `Int 1);
+            ("failed", `Int 0);
+            ("last_tick_at", `String generated_at);
+            ("last_pass_reason", `String "stayed read-only after evaluating the board");
+            ("last_system_skip_reason", `String "rate-limited after a recent board action");
+            ("strategy", `String "event_driven");
+            ("queue_depth", `Int 0);
+            ("activity_report", `String "alpha acted, beta passed, gamma skipped");
+          ] );
+      ( "social_checkins",
+        `List
+          [
+            `Assoc
+              [
+                ("agent_name", `String "dreamer");
+                ("trigger", `String "scheduled");
+                ("outcome", `String "acted");
+                ("summary", `String "posted a runtime note to the board");
+                ("reason", `String "runtime pressure on the board justified a post");
+                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_list"; `String "masc_board_post"; `String "lodge_search" ]);
+                ("used_tool_names", `List [ `String "masc_board_post" ]);
+                ("used_tool_call_count", `Int 1);
+                ("action_kind", `String "post");
+                ("tool_audit_source", `String "heartbeat_result");
+                ("tool_audit_at", `String generated_at);
+                ("checked_at", `String generated_at);
+                ("decision_reason", `String "critical board state required intervention");
+                ("worker_name", `String "llama-local-dreamer");
+                ("failure_reason", `Null);
+              ];
+            `Assoc
+              [
+                ("agent_name", `String "historian");
+                ("trigger", `String "scheduled");
+                ("outcome", `String "passed");
+                ("summary", `Null);
+                ("reason", `String "stayed read-only after evaluating the board");
+                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_list"; `String "lodge_profile"; `String "lodge_research" ]);
+                ("used_tool_names", `List []);
+                ("used_tool_call_count", `Null);
+                ("action_kind", `String "none");
+                ("tool_audit_source", `String "heartbeat_task");
+                ("tool_audit_at", `String generated_at);
+                ("checked_at", `String generated_at);
+                ("decision_reason", `String "not enough evidence to post");
+                ("worker_name", `Null);
+                ("failure_reason", `Null);
+              ];
+            `Assoc
+              [
+                ("agent_name", `String "connector");
+                ("trigger", `String "scheduled");
+                ("outcome", `String "skipped");
+                ("summary", `Null);
+                ("reason", `String "rate-limited after a recent board action");
+                ("allowed_tool_names", `List []);
+                ("used_tool_names", `List []);
+                ("used_tool_call_count", `Null);
+                ("action_kind", `String "none");
+                ("tool_audit_source", `Null);
+                ("tool_audit_at", `Null);
+                ("checked_at", `String generated_at);
+                ("decision_reason", `Null);
+                ("worker_name", `Null);
+                ("failure_reason", `Null);
+              ];
           ] );
       ( "lodge_tick",
         `Assoc
@@ -403,6 +410,8 @@ let execution_smoke_fixture_json () =
             ("last_skip_reason", `String "rate-limited after a recent board action");
             ("last_pass_reason", `String "stayed read-only after evaluating the board");
             ("last_system_skip_reason", `String "rate-limited after a recent board action");
+            ("strategy", `String "event_driven");
+            ("queue_depth", `Int 0);
             ("activity_report", `String "alpha acted, beta passed, gamma skipped");
           ] );
       ( "lodge_checkins",
@@ -927,6 +936,7 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
   in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let social_runtime_json = Social_runtime.status_json ~config in
   `Assoc
     [
       ("room", `String current_room);
@@ -937,6 +947,7 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool paused);
       ("lodge", lodge_json);
+      ("social_runtime", social_runtime_json);
       ("version", `String Version.version);
     ]
 
@@ -1265,98 +1276,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
           ("skill_reason", json_string_option (trim_to_option (string_field "goal" keeper)));
         ];
   }
-
-let build_lodge_checkins (status : Lodge_heartbeat.lodge_status) :
-    Yojson.Safe.t option * lodge_checkin_context list =
-  match status.ls_last_result with
-  | None -> (None, [])
-  | Some result ->
-      let checked_at =
-        if result.timestamp > 0.0 then Some (iso_of_unix result.timestamp) else None
-      in
-      let rows =
-        result.checkins
-        |> List.map (fun (name, trigger, checkin_result) ->
-               let audit = tool_audit_snapshot name in
-               let base_outcome, summary, reason, action_kind =
-                 match checkin_result with
-                 | Lodge_heartbeat.Acted { action; summary } ->
-                     let action_kind =
-                       match action with
-                       | Lodge_heartbeat.ActionPost _ -> "post"
-                       | Lodge_heartbeat.ActionComment _ -> "comment"
-                       | Lodge_heartbeat.ActionUpvote _ -> "vote"
-                       | Lodge_heartbeat.ActionSkip -> action_kind_of_tool_names audit.latest_tool_names
-                     in
-                     ("acted", Some summary, audit.latest_decision_reason, action_kind)
-                 | Lodge_heartbeat.Passed pass_reason ->
-                     ("passed", audit.latest_summary, Some pass_reason, action_kind_of_tool_names audit.latest_tool_names)
-                 | Lodge_heartbeat.Skipped skip_reason ->
-                     ("skipped", audit.latest_summary, Some skip_reason, action_kind_of_tool_names audit.latest_tool_names)
-               in
-               let outcome =
-                 match audit.latest_status |> Option.map String.lowercase_ascii with
-                 | Some ("failed" | "error" | "rejected") -> "failed"
-                 | _ -> base_outcome
-               in
-               {
-                 outcome_rank = lodge_outcome_rank outcome;
-                 checked_ts = result.timestamp;
-                 json =
-                   `Assoc
-                     [
-                       ("agent_name", `String name);
-                       ("trigger", `String (Lodge_heartbeat.string_of_trigger trigger));
-                       ("outcome", `String outcome);
-                       ("summary", json_string_option summary);
-                       ("reason", json_string_option reason);
-                       ("allowed_tool_names", string_list_json audit.allowed_tool_names);
-                       ("used_tool_names", string_list_json audit.latest_tool_names);
-                       ("used_tool_call_count", option_to_json (fun value -> `Int value) audit.latest_tool_call_count);
-                       ("action_kind", `String action_kind);
-                       ("tool_audit_source", json_string_option audit.tool_audit_source);
-                       ("tool_audit_at", json_string_option audit.tool_audit_at);
-                       ("checked_at", json_string_option checked_at);
-                       ("decision_reason", json_string_option audit.latest_decision_reason);
-                       ("worker_name", json_string_option audit.latest_worker_name);
-                       ("failure_reason", json_string_option audit.latest_failure_reason);
-                     ];
-               })
-        |> List.sort (fun left right ->
-               let by_outcome = Int.compare right.outcome_rank left.outcome_rank in
-               if by_outcome <> 0 then by_outcome
-               else Float.compare right.checked_ts left.checked_ts)
-      in
-      let counts =
-        List.fold_left
-          (fun (acted, passed, skipped, failed) (row : lodge_checkin_context) ->
-            match string_field "outcome" row.json with
-            | "acted" -> (acted + 1, passed, skipped, failed)
-            | "passed" -> (acted, passed + 1, skipped, failed)
-            | "skipped" -> (acted, passed, skipped + 1, failed)
-            | "failed" -> (acted, passed, skipped, failed + 1)
-            | _ -> (acted, passed, skipped, failed))
-          (0, 0, 0, 0)
-          rows
-      in
-      let (acted, passed, skipped, failed) = counts in
-      let summary_json =
-        Some
-          (`Assoc
-             [
-               ("checked", `Int result.agents_checked);
-               ("acted", `Int acted);
-               ("passed", `Int passed);
-               ("skipped", `Int skipped);
-               ("failed", `Int failed);
-               ("last_tick_at", json_string_option checked_at);
-               ("last_skip_reason", json_string_option (lodge_tick_last_system_skip_reason result));
-               ("last_pass_reason", json_string_option (lodge_tick_last_pass_reason result));
-               ("last_system_skip_reason", json_string_option (lodge_tick_last_system_skip_reason result));
-               ("activity_report", `String result.activity_report);
-             ])
-      in
-      (summary_json, rows)
 
 let session_payload_json session_json =
   match member_assoc "status" session_json with
@@ -2018,15 +1937,20 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
       let continuity_rows =
         build_continuity_briefs ~now_ts keepers session_contexts
       in
-      let lodge_tick_summary, lodge_checkins =
-        build_lodge_checkins (Lodge_heartbeat.lodge_status ())
+      let social_tick_json, social_checkins =
+        Social_runtime.execution_json ~config
+      in
+      let social_tick_summary =
+        social_tick_json |> member_assoc "summary"
       in
       `Assoc
         [
           ("generated_at", `String (Types.now_iso ()));
           ("status", room_status_json config);
-          ("lodge_tick", option_to_json (fun value -> value) lodge_tick_summary);
-          ("lodge_checkins", `List (List.map (fun (row : lodge_checkin_context) -> row.json) lodge_checkins));
+          ("social_tick", social_tick_summary);
+          ("social_checkins", `List social_checkins);
+          ("lodge_tick", social_tick_summary);
+          ("lodge_checkins", `List social_checkins);
           ("execution_queue", `List (List.map (fun (row : queue_context) -> row.json) execution_queue));
           ("priority_queue", `List (List.map (fun (row : queue_context) -> row.json) execution_queue));
           ("session_briefs", `List (List.map (fun (row : session_context) -> row.json) session_contexts));

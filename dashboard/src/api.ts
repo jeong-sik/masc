@@ -836,6 +836,7 @@ function operatorActionTimeoutMs(body: OperatorActionRequest): number {
       return 120_000
     case 'swarm_run_abandon':
       return 30_000
+    case 'social_sweep':
     case 'lodge_tick':
       return 45_000
     default:

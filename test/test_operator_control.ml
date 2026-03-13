@@ -62,8 +62,8 @@ let () =
           Alcotest.test_case "digest recommends worker spawn batch" `Quick
             Test_operator_control_judgment
             .test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn;
-          Alcotest.test_case "snapshot exposes keeper and lodge actions" `Quick
-            Test_operator_control_keeper.test_snapshot_exposes_keeper_and_lodge_actions;
+          Alcotest.test_case "snapshot exposes keeper and social actions" `Quick
+            Test_operator_control_keeper.test_snapshot_exposes_keeper_and_social_actions;
           Alcotest.test_case "manual selection overrides quiet hours" `Quick
             Test_operator_control_keeper
             .test_select_checkin_agents_manual_override_quiet_hours;

@@ -45,6 +45,11 @@ let print_summary () =
     Env_config_governance.LodgeV2.use_planner
     Env_config_governance.LodgeV2.reflection_threshold;
   Printf.eprintf
+    "[env_config] SocialRuntime: enabled=%b strategy=%s\n%!"
+    Env_config_governance.SocialRuntime.enabled
+    (Env_config_governance.SocialRuntime.strategy
+     |> Env_config_governance.SocialRuntime.strategy_to_string);
+  Printf.eprintf
     "[env_config] LodgeSelection: max_starvation=%d thompson_weight=%.2f decay=%.2f\n%!"
     Env_config_governance.LodgeSelection.max_starvation_ticks
     Env_config_governance.LodgeSelection.thompson_weight

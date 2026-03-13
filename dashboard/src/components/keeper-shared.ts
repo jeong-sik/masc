@@ -44,7 +44,7 @@ function quietReasonLabel(reason?: string | null): string {
 function nextActionLabel(path: string): string {
   switch (path) {
     case 'manual_lodge_poke':
-      return 'Poke Lodge'
+      return 'Run Social Sweep'
     case 'probe':
       return 'Probe'
     case 'recover':
@@ -238,7 +238,7 @@ export function KeeperRuntimeActions({
         class=${`control-btn ghost ${recommended === 'manual_lodge_poke' ? 'is-active' : ''}`}
         onClick=${onPokeLodge}
       >
-        Poke Lodge
+        Run Social Sweep
       </button>
     </div>
   `

@@ -112,7 +112,7 @@ function quietReasonSummary(healthState: KeeperDiagnostic['health_state'], quiet
     return 'Keeper is not in a healthy reply state. Probe or recover before relying on automation.'
   }
   if (quietReason === 'quiet_hours') {
-    return 'Lodge quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep.'
+    return 'Social quiet hours are active. Direct messages still work, but scheduled public-square reactions may look asleep.'
   }
   if (quietReason === 'min_gap') {
     return 'Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait.'

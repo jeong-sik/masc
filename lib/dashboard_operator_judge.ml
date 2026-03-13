@@ -111,7 +111,7 @@ let parse_string_list json key =
   | _ -> []
 
 let allowed_action_type = function
-  | "broadcast" | "room_pause" | "room_resume" | "lodge_tick"
+  | "broadcast" | "room_pause" | "room_resume" | "social_sweep" | "lodge_tick"
   | "team_note" | "team_broadcast" | "team_task_inject"
   | "team_worker_spawn_batch" | "team_stop"
   | "keeper_message" | "keeper_probe" | "keeper_recover"
@@ -178,7 +178,7 @@ let prompt_for_facts facts_json =
      Read only the factual operator snapshot JSON below.\n\
      Produce concise, operational judgments for the room and any team sessions that need attention.\n\
      Do not repeat raw facts. Do not invent evidence, ids, or actions. Omit entries when you are not confident.\n\
-     Allowed action_type values: broadcast, room_pause, room_resume, lodge_tick, team_note, team_broadcast, team_task_inject, team_worker_spawn_batch, team_stop, keeper_message, keeper_probe, keeper_recover, swarm_run_continue, swarm_run_rerun, swarm_run_abandon.\n\
+     Allowed action_type values: broadcast, room_pause, room_resume, social_sweep, lodge_tick, team_note, team_broadcast, team_task_inject, team_worker_spawn_batch, team_stop, keeper_message, keeper_probe, keeper_recover, swarm_run_continue, swarm_run_rerun, swarm_run_abandon.\n\
      Output strict JSON only with this shape:\n\
      {\n\
        \"room\": {\n\

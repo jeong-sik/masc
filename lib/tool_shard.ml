@@ -87,6 +87,18 @@ let board_tools : Llm_client.tool_def list = [
       ("required", `List [`String "post_id"; `String "content"]);
     ];
   };
+  {
+    tool_name = "keeper_board_vote";
+    tool_description = "Vote on an existing Board post to signal support or disagreement.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to vote on")]);
+        ("direction", `Assoc [("type", `String "string"); ("description", `String "up or down (default: up)")]);
+      ]);
+      ("required", `List [`String "post_id"]);
+    ];
+  };
 ]
 
 let filesystem_tools : Llm_client.tool_def list = [

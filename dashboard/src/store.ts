@@ -29,6 +29,7 @@ import type {
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionLodgeTick,
   DashboardExecutionLodgeCheckin,
+  SocialRuntimeStatus,
   DashboardExecutionContinuityBrief,
 } from './types'
 import {
@@ -467,6 +468,8 @@ function normalizeExecutionLodgeTick(raw: unknown): DashboardExecutionLodgeTick 
     last_skip_reason: lastSystemSkipReason,
     last_pass_reason: asString(raw.last_pass_reason) ?? null,
     last_system_skip_reason: lastSystemSkipReason,
+    strategy: asString(raw.strategy) ?? null,
+    queue_depth: asNumber(raw.queue_depth) ?? null,
     activity_report: asString(raw.activity_report) ?? null,
   }
 }
@@ -667,6 +670,51 @@ function normalizeSentinelRuntimeStatus(raw: unknown): ServerStatus['sentinel'] 
   }
 }
 
+function normalizeSocialRuntimeStatus(raw: unknown): SocialRuntimeStatus | undefined {
+  if (!isRecord(raw)) return undefined
+  const lastResult = isRecord(raw.last_result) ? raw.last_result : null
+  return {
+    enabled: raw.enabled === true,
+    strategy: asString(raw.strategy) ?? undefined,
+    queue_depth: asNumber(raw.queue_depth) ?? undefined,
+    processed_events: asNumber(raw.processed_events) ?? undefined,
+    active_keepers: asNumber(raw.active_keepers) ?? undefined,
+    last_event_at: toIsoTimestamp(raw.last_event_at) ?? asString(raw.last_event_at) ?? null,
+    last_social_action_at:
+      toIsoTimestamp(raw.last_social_action_at) ?? asString(raw.last_social_action_at) ?? null,
+    last_pass_reason: asString(raw.last_pass_reason) ?? null,
+    last_system_skip_reason: asString(raw.last_system_skip_reason) ?? null,
+    total_checks: asNumber(raw.total_checks) ?? undefined,
+    total_acted: asNumber(raw.total_acted) ?? undefined,
+    total_passed: asNumber(raw.total_passed) ?? undefined,
+    total_skipped: asNumber(raw.total_skipped) ?? undefined,
+    total_failed: asNumber(raw.total_failed) ?? undefined,
+    last_result: lastResult
+      ? {
+          checked: asNumber(lastResult.checked) ?? undefined,
+          acted: asNumber(lastResult.acted) ?? undefined,
+          passed: asNumber(lastResult.passed) ?? undefined,
+          skipped: asNumber(lastResult.skipped) ?? undefined,
+          failed: asNumber(lastResult.failed) ?? undefined,
+          last_tick_at:
+            toIsoTimestamp(lastResult.last_tick_at) ?? asString(lastResult.last_tick_at) ?? null,
+          last_pass_reason: asString(lastResult.last_pass_reason) ?? null,
+          last_system_skip_reason: asString(lastResult.last_system_skip_reason) ?? null,
+          activity_report: asString(lastResult.activity_report) ?? null,
+          checkins: Array.isArray(lastResult.checkins)
+            ? lastResult.checkins.map((item) => ({
+                name: asString((item as Record<string, unknown>).agent_name) ?? '',
+                trigger: asString((item as Record<string, unknown>).trigger) ?? undefined,
+                outcome: asString((item as Record<string, unknown>).outcome) ?? undefined,
+                summary: asString((item as Record<string, unknown>).summary) ?? undefined,
+                reason: asString((item as Record<string, unknown>).reason) ?? undefined,
+              })).filter((item) => item.name !== '')
+            : [],
+        }
+      : null,
+  }
+}
+
 function normalizeServerStatus(raw: unknown, generatedAt?: string): ServerStatus | null {
   if (!isRecord(raw)) return null
   return {
@@ -674,6 +722,7 @@ function normalizeServerStatus(raw: unknown, generatedAt?: string): ServerStatus
     generated_at: generatedAt ?? toIsoTimestamp(raw.generated_at) ?? undefined,
     build: normalizeBuildIdentity(raw.build),
     lodge: normalizeLodgeRuntimeStatus(raw.lodge) ?? undefined,
+    social_runtime: normalizeSocialRuntimeStatus(raw.social_runtime),
     gardener: normalizeGardenerRuntimeStatus(raw.gardener) ?? undefined,
     guardian: normalizeGuardianRuntimeStatus(raw.guardian) ?? undefined,
     sentinel: normalizeSentinelRuntimeStatus(raw.sentinel) ?? undefined,
@@ -917,8 +966,10 @@ export async function refreshExecution(): Promise<void> {
     messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
     keepers.value = normalizeKeepers(data.keepers)
     executionSummary.value = normalizeExecutionSummary(data.summary)
-    executionLodgeTick.value = normalizeExecutionLodgeTick(data.lodge_tick)
-    executionLodgeCheckins.value = (Array.isArray(data.lodge_checkins) ? data.lodge_checkins : [])
+    const socialCheckinsRaw = Array.isArray(data.social_checkins) ? data.social_checkins : []
+    const lodgeCheckinsRaw = Array.isArray(data.lodge_checkins) ? data.lodge_checkins : []
+    executionLodgeTick.value = normalizeExecutionLodgeTick(data.social_tick ?? data.lodge_tick)
+    executionLodgeCheckins.value = (socialCheckinsRaw.length > 0 ? socialCheckinsRaw : lodgeCheckinsRaw)
       .map(normalizeExecutionLodgeCheckin)
       .filter((row): row is DashboardExecutionLodgeCheckin => row !== null)
     executionQueue.value = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])

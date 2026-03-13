@@ -102,6 +102,37 @@ let generate_trace_id () =
   let rnd = Random.int 99999 in
   Printf.sprintf "trace-%d-%05d" ts rnd
 
+let keeper_board_write_tool_names =
+  [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
+
+let keeper_write_done tool_names =
+  List.exists (fun name -> List.mem name keeper_board_write_tool_names) tool_names
+
+let keeper_action_kind_of_tool_names tool_names =
+  if List.mem "keeper_board_post" tool_names then "post"
+  else if List.mem "keeper_board_comment" tool_names then "comment"
+  else if List.mem "keeper_board_vote" tool_names then "vote"
+  else "none"
+
+type social_board_event = {
+  kind : [ `Board_post | `Board_comment ];
+  post_id : string;
+  comment_id : string option;
+  author : string;
+  content : string;
+  created_at : float;
+}
+
+type social_turn_outcome = {
+  outcome : [ `Acted | `Passed ];
+  summary : string;
+  reason : string;
+  action_kind : string;
+  tools_used : string list;
+  decision_reason : string option;
+  failure_reason : string option;
+}
+
 let effective_model_labels_for_turn
     (m : keeper_meta)
     ~(inline_models : string list) : string list =
@@ -759,16 +790,10 @@ let run_proactive_generation
                   ~already_executed:all_tools_so_far
               in
               let write_done =
-                List.exists
-                  (fun n ->
-                     List.mem n
-                       [
-                         "keeper_board_post";
-                         "keeper_board_comment";
-                         "keeper_fs_edit";
-                         "keeper_edit";
-                       ])
-                  all_tools_so_far
+                keeper_write_done all_tools_so_far
+                || List.exists
+                     (fun n -> List.mem n [ "keeper_fs_edit"; "keeper_edit" ])
+                     all_tools_so_far
               in
               let next_tools =
                 keeper_allowed_llm_tools ~write_done meta
@@ -914,7 +939,7 @@ let keeper_autonomy_enabled () =
 let autonomous_gate_config
     ~(autonomy_level : Keeper_autonomy.autonomy_level) : Eval_gate.gate_config =
   let base_allowed = [
-    "keeper_board_post"; "keeper_board_comment"; "keeper_board_list";
+    "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
     "keeper_read"; "keeper_fs_read";
     "keeper_memory_search";
     "keeper_time_now"; "keeper_context_status";
@@ -1086,9 +1111,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
           in
           (* Stop providing tools after write operations *)
           let write_done =
-            List.exists (fun n ->
-              List.mem n ["keeper_board_post"; "keeper_board_comment"])
-              all_tools
+            keeper_write_done all_tools
           in
           let next_tools = keeper_allowed_llm_tools ~write_done meta in
           let followup_requests = List.map (fun (spec : Llm_client.model_spec) ->
@@ -1846,6 +1869,285 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                 }
               in
               Ok (updated, reply))
+
+let social_board_event_prompt ~(meta : keeper_meta) (event : social_board_event) : string =
+  let event_kind =
+    match event.kind with
+    | `Board_post -> "board_post"
+    | `Board_comment -> "board_comment"
+  in
+  let comment_hint =
+    match event.comment_id with
+    | Some id -> Printf.sprintf "\nComment ID: %s" id
+    | None -> ""
+  in
+  Printf.sprintf
+    "You are resident keeper %s acting in the room's public square.\n\
+     A new board event requires triage.\n\n\
+     Event type: %s\n\
+     Post ID: %s%s\n\
+     Author: %s\n\
+     Content preview:\n%s\n\n\
+     If you act, use tools directly.\n\
+     Preferred action order:\n\
+     1. `keeper_board_comment` when a direct reply is sufficient.\n\
+     2. `keeper_board_vote` when a lightweight signal is enough.\n\
+     3. `keeper_board_post` only for broader escalation or synthesis.\n\
+     If no action is warranted, explain briefly why you passed.\n\
+     Never respond to your own board event.\n\
+     Stay in character and keep any final text concise."
+    meta.name
+    event_kind
+    event.post_id
+    comment_hint
+    event.author
+    event.content
+
+let run_social_board_event_turn
+    (ctx : _ context)
+    ~(meta : keeper_meta)
+    ~(event : social_board_event) : (keeper_meta * social_turn_outcome, string) result =
+  let model_labels = effective_model_labels_for_turn meta ~inline_models:[] in
+  match model_specs_of_strings model_labels with
+  | Error e -> Error e
+  | Ok specs -> (
+      match ensure_api_keys specs with
+      | Error e -> Error e
+      | Ok () ->
+          let primary =
+            match specs with
+            | model :: _ -> model
+            | [] -> Llm_client.default_local_model_spec ()
+          in
+          let base_dir = session_base_dir ctx.config in
+          let session, ctx_opt =
+            load_context_from_checkpoint
+              ~trace_id:meta.trace_id
+              ~primary_model_max_tokens:primary.max_context
+              ~base_dir
+          in
+          let base_ctx =
+            match ctx_opt with
+            | Some current -> current
+            | None ->
+                Context_manager.create
+                  ~system_prompt:
+                    (build_keeper_system_prompt
+                       ~goal:meta.goal
+                       ~short_goal:meta.short_goal
+                       ~mid_goal:meta.mid_goal
+                       ~long_goal:meta.long_goal
+                       ~soul_profile:meta.soul_profile
+                       ~will:meta.will
+                       ~needs:meta.needs
+                       ~desires:meta.desires
+                       ~instructions:meta.instructions)
+                  ~max_tokens:primary.max_context
+          in
+          let ctx_work =
+            Context_manager.set_system_prompt base_ctx
+              ~system_prompt:
+                (build_keeper_system_prompt
+                   ~goal:meta.goal
+                   ~short_goal:meta.short_goal
+                   ~mid_goal:meta.mid_goal
+                   ~long_goal:meta.long_goal
+                   ~soul_profile:meta.soul_profile
+                   ~will:meta.will
+                   ~needs:meta.needs
+                   ~desires:meta.desires
+                   ~instructions:meta.instructions)
+          in
+          let prompt = social_board_event_prompt ~meta event in
+          let user_message = Llm_client.user_msg prompt in
+          let ctx_work = Context_manager.append ctx_work user_message in
+          Context_manager.persist_message session user_message;
+          let execute_tool_calls
+              ~(ctx_work : Context_manager.working_context)
+              (tcs : Llm_client.tool_call list) : (Llm_client.tool_call * string) list =
+            List.map
+              (fun (tc : Llm_client.tool_call) ->
+                 let output =
+                   try execute_keeper_tool_call ~config:ctx.config ~meta ~ctx_work tc
+                   with exn ->
+                     Yojson.Safe.to_string
+                       (`Assoc
+                         [
+                           ("error", `String (Printexc.to_string exn));
+                           ("tool", `String tc.call_name);
+                         ])
+                 in
+                 (tc, output))
+              tcs
+          in
+          let requests =
+            List.map
+              (fun (model : Llm_client.model_spec) ->
+                 ({
+                    Llm_client.model;
+                    messages =
+                      (Llm_client.system_msg ctx_work.system_prompt)
+                      :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
+                    temperature = 0.35;
+                    max_tokens = 768;
+                    tools = keeper_allowed_llm_tools meta;
+                    response_format = `Text;
+                  }
+                   : Llm_client.completion_request))
+              specs
+          in
+          match Llm_client.cascade requests with
+          | Error e -> Error e
+          | Ok resp0 ->
+              let max_tool_rounds = 3 in
+              let used_model0 =
+                model_spec_for_used specs resp0.model_used
+                |> Option.value ~default:primary
+              in
+              let cost0 = cost_usd_of_usage resp0.usage used_model0 in
+              let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
+                  ~acc_tools_used ~last_resp =
+                if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
+                  let content =
+                    let trimmed = String.trim last_resp.Llm_client.content in
+                    if trimmed = "" && acc_tools_used <> [] then
+                      Printf.sprintf "(tools executed: %s)"
+                        (String.concat ", " acc_tools_used)
+                    else
+                      last_resp.Llm_client.content
+                  in
+                  ( content,
+                    acc_usage,
+                    last_resp.Llm_client.model_used,
+                    acc_latency,
+                    acc_cost,
+                    acc_tools_used )
+                else
+                  let round_tools =
+                    List.map
+                      (fun (tc : Llm_client.tool_call) -> tc.call_name)
+                      last_resp.Llm_client.tool_calls
+                  in
+                  let all_tools_so_far = acc_tools_used @ round_tools in
+                  let tool_outputs =
+                    execute_tool_calls ~ctx_work last_resp.Llm_client.tool_calls
+                  in
+                  let followup_prompt =
+                    keeper_tool_followup_prompt
+                      ~user_message:prompt
+                      ~draft_reply:last_resp.Llm_client.content
+                      ~tool_outputs
+                      ~already_executed:all_tools_so_far
+                  in
+                  let next_tools =
+                    keeper_allowed_llm_tools
+                      ~write_done:(keeper_write_done all_tools_so_far)
+                      meta
+                  in
+                  let followup_requests =
+                    List.map
+                      (fun (model : Llm_client.model_spec) ->
+                         ({
+                            Llm_client.model;
+                            messages = [
+                              Llm_client.system_msg
+                                (keeper_tool_loop_system_prompt
+                                   ~character_context:ctx_work.system_prompt);
+                              Llm_client.user_msg followup_prompt;
+                            ];
+                            temperature = 0.3;
+                            max_tokens = 512;
+                            tools = next_tools;
+                            response_format = `Text;
+                          }
+                           : Llm_client.completion_request))
+                      specs
+                  in
+                  match Llm_client.cascade followup_requests with
+                  | Error _ ->
+                      ( last_resp.Llm_client.content,
+                        acc_usage,
+                        last_resp.Llm_client.model_used,
+                        acc_latency,
+                        acc_cost,
+                        acc_tools_used @ round_tools )
+                  | Ok resp_next ->
+                      let used_model_next =
+                        model_spec_for_used specs resp_next.model_used
+                        |> Option.value ~default:primary
+                      in
+                      let cost_next = cost_usd_of_usage resp_next.usage used_model_next in
+                      tool_loop
+                        ~round:(round + 1)
+                        ~acc_usage:(merge_usage acc_usage resp_next.usage)
+                        ~acc_latency:(acc_latency + resp_next.latency_ms)
+                        ~acc_cost:(acc_cost +. cost_next)
+                        ~acc_tools_used:(acc_tools_used @ round_tools)
+                        ~last_resp:resp_next
+              in
+              let final_content, final_usage, final_model_used, final_latency_ms,
+                  final_cost_usd, final_tools_used =
+                tool_loop
+                  ~round:1
+                  ~acc_usage:resp0.usage
+                  ~acc_latency:resp0.latency_ms
+                  ~acc_cost:cost0
+                  ~acc_tools_used:[]
+                  ~last_resp:resp0
+              in
+              let assistant_text =
+                let trimmed = String.trim final_content in
+                if trimmed = "" && final_tools_used = [] then
+                  "Inspected the board event and chose not to act."
+                else if trimmed = "" then
+                  Printf.sprintf "(tools executed: %s)" (String.concat ", " final_tools_used)
+                else
+                  trimmed
+              in
+              let assistant_message = Llm_client.assistant_msg assistant_text in
+              let ctx_work = Context_manager.append ctx_work assistant_message in
+              Context_manager.persist_message session assistant_message;
+              (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
+               with exn ->
+                 Printf.eprintf "[keeper] save_checkpoint (social board turn) failed: %s\n%!"
+                   (Printexc.to_string exn));
+              let now_ts = Time_compat.now () in
+              let action_kind = keeper_action_kind_of_tool_names final_tools_used in
+              let outcome =
+                if action_kind = "none" then `Passed else `Acted
+              in
+              let updated_meta =
+                {
+                  meta with
+                  updated_at = now_iso ();
+                  total_turns = meta.total_turns + 1;
+                  total_input_tokens = meta.total_input_tokens + final_usage.input_tokens;
+                  total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
+                  total_tokens = meta.total_tokens + final_usage.total_tokens;
+                  total_cost_usd = meta.total_cost_usd +. final_cost_usd;
+                  last_turn_ts = now_ts;
+                  last_model_used = final_model_used;
+                  last_input_tokens = final_usage.input_tokens;
+                  last_output_tokens = final_usage.output_tokens;
+                  last_total_tokens = final_usage.total_tokens;
+                  last_latency_ms = final_latency_ms;
+                  last_autonomous_action_at =
+                    (if action_kind = "none" then meta.last_autonomous_action_at else now_iso ());
+                  autonomous_action_count =
+                    meta.autonomous_action_count + if action_kind = "none" then 0 else 1;
+                }
+              in
+              Ok
+                ( updated_meta,
+                  {
+                    outcome;
+                    summary = assistant_text;
+                    reason = assistant_text;
+                    action_kind;
+                    tools_used = final_tools_used;
+                    decision_reason = Some assistant_text;
+                    failure_reason = None;
+                  } ))
 
 let run_learned_policy_room_event
     (ctx : _ context)

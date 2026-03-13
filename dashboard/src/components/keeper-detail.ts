@@ -123,8 +123,9 @@ function actionDescriptorLabel(actionType?: string): string {
       return 'pause'
     case 'room_resume':
       return 'resume'
+    case 'social_sweep':
     case 'lodge_tick':
-      return 'lodge'
+      return 'social'
     default:
       return actionType?.trim() || 'action'
   }
@@ -601,23 +602,24 @@ async function pokeLodgeNow(): Promise<void> {
   try {
     const response = await runOperatorAction({
       actor: currentOperatorActor(),
-      action_type: 'lodge_tick',
+      action_type: 'social_sweep',
       target_type: 'room',
       payload: {},
     })
     const result = normalizeLodgeTickResult(response.result)
     invalidateDashboardCache()
     await refreshDashboard()
-    if (result?.skipped_reason) {
-      showToast(result.skipped_reason, 'warning')
+    const skipReason = result?.last_system_skip_reason ?? result?.skipped_reason
+    if (skipReason) {
+      showToast(skipReason, 'warning')
     } else {
       showToast(
-        result ? `Poke finished: ${result.acted}/${result.checked} acted` : 'Poke finished',
+        result ? `Social sweep finished: ${result.acted}/${result.checked} acted` : 'Social sweep finished',
         result && result.acted > 0 ? 'success' : 'warning',
       )
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to run Lodge poke'
+    const message = err instanceof Error ? err.message : 'Failed to run social sweep'
     showToast(message, 'error')
   }
 }

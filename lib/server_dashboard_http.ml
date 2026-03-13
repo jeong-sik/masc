@@ -2254,6 +2254,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   let agents = Room.get_agents_raw config in
   let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let social_runtime_json = Social_runtime.status_json ~config in
   let now_ts = Time_compat.now () in
   let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
   let (governance_monitor_json, governance_feed_ok) =
@@ -2319,6 +2320,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ("governance", governance_monitor_json);
       ]);
       ("lodge", lodge_json);
+      ("social_runtime", social_runtime_json);
       ("data_quality", `Assoc [
         ("board_contract_ok", `Bool board_contract_ok);
         ("governance_feed_ok", `Bool governance_feed_ok);
@@ -2486,6 +2488,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let social_runtime_json = Social_runtime.status_json ~config in
   let gardener_json = Gardener.status_json () in
   let guardian_json = Guardian.status_json () in
   let sentinel_json = Sentinel.status_json () in
@@ -2502,6 +2505,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
       ("lodge", lodge_json);
+      ("social_runtime", social_runtime_json);
       ("gardener", gardener_json);
       ("guardian", guardian_json);
       ("sentinel", sentinel_json);

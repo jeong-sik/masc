@@ -54,6 +54,13 @@ let option_to_json f = function
 
 let string_option_to_json = option_to_json (fun value -> `String value)
 
+let merge_json_objects left right =
+  match (left, right) with
+  | `Assoc left_fields, `Assoc right_fields -> `Assoc (left_fields @ right_fields)
+  | `Assoc left_fields, _ -> `Assoc left_fields
+  | _, `Assoc right_fields -> `Assoc right_fields
+  | _, _ -> `Assoc []
+
 let normalized_actor ~context_actor = function
   | Some raw when String.trim raw <> "" -> String.trim raw
   | _ ->
@@ -424,9 +431,9 @@ let available_actions : available_action list =
       confirm_required = false;
     };
     {
-      action_type = "lodge_tick";
+      action_type = "social_sweep";
       target_type = "room";
-      description = "Use this when you need to run one immediate Lodge tick and inspect which agents acted or were skipped.";
+      description = "Use this when you need to run one immediate public-square social sweep and inspect which keepers acted, passed, or were system-skipped.";
       confirm_required = false;
     };
     {
@@ -2729,8 +2736,9 @@ type action_request = {
 
 let canonical_action_type action_type =
   match action_type with
-  | "lodge_poke" -> "lodge_tick"
-  | "lodge_tick" -> "lodge_tick"
+  | "lodge_poke" -> "social_sweep"
+  | "lodge_tick" -> "social_sweep"
+  | "social_sweep" -> "social_sweep"
   | "team_turn" -> "team_turn"
   | "team_note" -> "team_note"
   | "team_broadcast" -> "team_broadcast"
@@ -2747,7 +2755,7 @@ let canonical_action_type action_type =
 
 let default_target_type_for action_type =
   match action_type with
-  | "broadcast" | "room_pause" | "room_resume" | "task_inject" | "lodge_tick" -> "room"
+  | "broadcast" | "room_pause" | "room_resume" | "task_inject" | "social_sweep" -> "room"
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject"
   | "team_worker_spawn_batch" | "team_stop" ->
       "team_session"
@@ -2819,7 +2827,7 @@ let delegated_tool_for action_type =
   | "broadcast" -> "masc_broadcast"
   | "room_pause" -> "masc_pause"
   | "room_resume" -> "masc_resume"
-  | "lodge_tick" -> "lodge_tick"
+  | "social_sweep" -> "social_sweep"
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" ->
       "masc_team_session_step"
   | "team_worker_spawn_batch" -> "masc_team_session_step"
@@ -3007,101 +3015,6 @@ let swarm_run_chain_preview (request : action_request) swarm_json =
 
 let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-
-let string_of_trigger = function
-  | Lodge_heartbeat.Scheduled -> "scheduled"
-  | Lodge_heartbeat.ContentAlert _ -> "content_alert"
-  | Lodge_heartbeat.Mentioned _ -> "mentioned"
-  | Lodge_heartbeat.ManualTrigger -> "manual"
-
-let checkin_json (name, trigger, result) =
-  let outcome_fields =
-    match result with
-    | Lodge_heartbeat.Acted { summary; _ } ->
-        [ ("outcome", `String "acted"); ("summary", `String summary) ]
-    | Lodge_heartbeat.Passed reason ->
-        [ ("outcome", `String "passed"); ("reason", `String reason) ]
-    | Lodge_heartbeat.Skipped reason ->
-        [ ("outcome", `String "skipped"); ("reason", `String reason) ]
-  in
-  `Assoc
-    ([
-       ("name", `String name);
-       ("trigger", `String (string_of_trigger trigger));
-     ]
-    @ outcome_fields)
-
-let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
-  let pass_reason =
-    let rec first_reason = function
-      | [] -> None
-      | (_, _, Lodge_heartbeat.Passed reason) :: _ -> Some reason
-      | _ :: tl -> first_reason tl
-    in
-    first_reason result.checkins
-  in
-  let skipped_reason =
-    if result.agents_checked = 0 then Some "no agents selected for this tick"
-    else
-      let rec first_reason = function
-        | [] -> None
-        | (_, _, Lodge_heartbeat.Skipped reason) :: _ -> Some reason
-        | _ :: tl -> first_reason tl
-      in
-      first_reason result.checkins
-  in
-  let acted =
-    result.checkins
-    |> List.filter_map (fun (name, _, checkin) ->
-           match checkin with
-           | Lodge_heartbeat.Acted { summary; _ } ->
-               Some (`Assoc [ ("name", `String name); ("summary", `String summary) ])
-           | Lodge_heartbeat.Passed _ | Lodge_heartbeat.Skipped _ -> None)
-  in
-  let skipped =
-    result.checkins
-    |> List.filter_map (fun (name, _, checkin) ->
-           match checkin with
-           | Lodge_heartbeat.Skipped reason ->
-               Some (`Assoc [ ("name", `String name); ("reason", `String reason) ])
-           | Lodge_heartbeat.Acted _ | Lodge_heartbeat.Passed _ -> None)
-  in
-  let passed =
-    result.checkins
-    |> List.filter_map (fun (name, _, checkin) ->
-           match checkin with
-           | Lodge_heartbeat.Passed reason ->
-               Some (`Assoc [ ("name", `String name); ("reason", `String reason) ])
-           | Lodge_heartbeat.Acted _ | Lodge_heartbeat.Skipped _ -> None)
-  in
-  `Assoc
-    [
-      ("hour", `Int result.current_hour);
-      ("checked", `Int result.agents_checked);
-      ("acted", `Int (List.length acted));
-      ("acted_names", `List (List.map (fun row -> row |> U.member "name") acted));
-      ("activity_report", `String result.activity_report);
-      ("quiet_hours_overridden", `Bool true);
-      ( "skipped_reason",
-        match skipped_reason with Some reason -> `String reason | None -> `Null );
-      ( "last_pass_reason",
-        match pass_reason with Some reason -> `String reason | None -> `Null );
-      ( "last_system_skip_reason",
-        match skipped_reason with Some reason -> `String reason | None -> `Null );
-      ("acted_rows", `List acted);
-      ("passed_rows", `List passed);
-      ("skipped_rows", `List skipped);
-      ("checkins", `List (List.map checkin_json result.checkins));
-    ]
-
-let lodge_tick_ack_json ~mode ~status ~manual_tick_running =
-  `Assoc
-    [
-      ("status", `String status);
-      ("mode", `String mode);
-      ("quiet_hours_overridden", `Bool true);
-      ("manual_tick_running", `Bool manual_tick_running);
-    ]
 
 let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
   { config = ctx.config; sw = ctx.sw; clock = ctx.clock }
@@ -3298,59 +3211,40 @@ let execute_action (ctx : 'a context) (request : action_request) :
             ("delegated_tool", `String "masc_resume");
             ("result", `Assoc [ ("status", `String status) ]);
           ])
-  | "lodge_tick" ->
+  | "social_sweep" ->
       let* () = validate_target_type "room" request in
-      if not Env_config.LodgeV2.enabled then
+      if not Env_config.SocialRuntime.enabled then
         Ok
           (`Assoc
             [
-              ("delegated_tool", `String "lodge_tick");
+              ("delegated_tool", `String "social_sweep");
               ( "result",
                 `Assoc
                   [
                     ("checked", `Int 0);
                     ("acted", `Int 0);
-                    ("acted_names", `List []);
-                    ("quiet_hours_overridden", `Bool true);
-                    ("activity_report", `String "Lodge heartbeat is disabled");
-                    ("skipped_reason", `String "lodge heartbeat disabled");
+                    ("passed", `Int 0);
+                    ("skipped", `Int 1);
+                    ("failed", `Int 0);
+                    ("strategy", `String "event_driven");
+                    ("queue_depth", `Int 0);
+                    ("activity_report", `String "Social runtime is disabled");
+                    ("last_system_skip_reason", `String "social runtime disabled");
                     ("checkins", `List []);
                   ] );
             ])
       else
-        let wait_for_result = get_bool request.payload "wait" false in
-        if wait_for_result then
-          if (Lodge_heartbeat.lodge_status ()).ls_manual_tick_running then
-            Ok
-              (`Assoc
-                [
-                  ("delegated_tool", `String "lodge_tick");
-                  ( "result",
-                    lodge_tick_ack_json ~mode:"sync" ~status:"already_running"
-                      ~manual_tick_running:true );
-                ])
-          else
-            let result = Lodge_heartbeat.trigger_heartbeat ctx.config in
-            Ok
-              (`Assoc
-                [
-                  ("delegated_tool", `String "lodge_tick");
-                  ("result", lodge_tick_result_json result);
-                ])
-        else
-          let status =
-            match Lodge_heartbeat.trigger_heartbeat_async ~sw:ctx.sw ctx.config with
-            | `Started -> "accepted"
-            | `Already_running -> "already_running"
-          in
-          Ok
-            (`Assoc
-              [
-                ("delegated_tool", `String "lodge_tick");
-                ( "result",
-                  lodge_tick_ack_json ~mode:"async" ~status
-                    ~manual_tick_running:(status = "accepted" || status = "already_running") );
-              ])
+        let summary_json, rows =
+          Social_runtime.manual_sweep ~sw:ctx.sw ~clock:ctx.clock ~config:ctx.config
+        in
+        Ok
+          (`Assoc
+            [
+              ("delegated_tool", `String "social_sweep");
+              ( "result",
+                merge_json_objects summary_json
+                  (`Assoc [ ("checkins", `List rows) ]) );
+            ])
   | "team_turn" ->
       let* () = validate_target_type "team_session" request in
       let* session_id = require_target_id request in
@@ -3757,7 +3651,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
 
 let validate_request request =
   match request.action_type with
-  | "broadcast" | "room_pause" | "room_resume" | "lodge_tick"
+  | "broadcast" | "room_pause" | "room_resume" | "social_sweep" | "lodge_tick"
   | "team_turn" | "team_note"
   | "team_broadcast" | "team_task_inject" | "team_worker_spawn_batch"
   | "team_stop"

@@ -166,8 +166,12 @@ let make_request_handler ~sw ~clock ~server_start_time =
             else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
             else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
           in
+          let state = get_server_state () in
           let build = Build_identity.current () in
           let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+          let social_runtime_json =
+            Social_runtime.status_json ~config:state.Mcp_server.room_config
+          in
           let gardener_json = Gardener.status_json () in
           let guardian_json = Guardian.status_json () in
           let sentinel_json = Sentinel.status_json () in
@@ -181,6 +185,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
             ("uptime", `String uptime_str);
             ("sse_clients", `Int (Sse.client_count ()));
             ("lodge", lodge_json);
+            ("social_runtime", social_runtime_json);
             ("gardener", gardener_json);
             ("guardian", guardian_json);
             ("sentinel", sentinel_json);

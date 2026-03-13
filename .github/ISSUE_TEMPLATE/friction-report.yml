@@ -1,0 +1,63 @@
+name: Friction report
+description: Report something that works but is annoying, confusing, slow, or sharp-edged.
+title: "[Friction] "
+labels:
+  - "type:friction"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for dogfooding discomfort.
+        Human reporters, Codex, and internal agents may all file this form.
+        If the fix is small, it should land in the current patch lane.
+        If the fix needs workflow redesign, it should be promoted into the next feature train.
+  - type: input
+    id: version
+    attributes:
+      label: Observed version
+      description: "Example: v2.86.0, main HEAD, local branch"
+      placeholder: v2.86.0
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Friction category
+      options:
+        - UX confusion
+        - too many steps
+        - slow feedback
+        - noisy output
+        - missing affordance
+        - naming or discoverability
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What were you trying to do?
+      placeholder: Describe the workflow in one short paragraph.
+    validations:
+      required: true
+  - type: textarea
+    id: pain
+    attributes:
+      label: What felt bad?
+      placeholder: Explain the annoying part, wasted steps, or confusion point.
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: What would feel better?
+      description: A rough expectation is enough. It does not need a perfect solution.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Screenshots, logs, command transcript, or paths
+    validations:
+      required: false

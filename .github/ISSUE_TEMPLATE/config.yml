@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Versioned roadmap
+    url: https://github.com/jeong-sik/masc-mcp/blob/main/docs/VERSIONED-ROADMAP.md
+    about: Check the active feature train and target versioning rules before filing.

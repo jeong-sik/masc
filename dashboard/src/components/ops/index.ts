@@ -39,6 +39,7 @@ import {
   type OpsPriorityCardData,
   type OpsPriorityTone,
 } from './helpers'
+import { selectPendingConfirmState } from '../../pending-confirm'
 import { OpsRoomColumn } from './ops-room-column'
 import { OpsSessionColumn } from './ops-session-column'
 import { OpsKeeperColumn } from './ops-keeper-column'
@@ -50,12 +51,11 @@ export function Ops() {
   const room = snapshot?.room ?? {}
   const sessions = snapshot?.sessions ?? []
   const keepers = snapshot?.keepers ?? []
-  const pendingConfirms = snapshot?.pending_confirms ?? []
-  const pendingSummary = snapshot?.pending_confirm_summary
-  const visiblePendingCount = pendingSummary?.visible_count ?? pendingConfirms.length
-  const totalPendingCount = pendingSummary?.total_count ?? pendingConfirms.length
-  const hiddenPendingCount = pendingSummary?.hidden_count ?? 0
-  const pendingActorFilter = pendingSummary?.actor_filter?.trim() || null
+  const pendingState = selectPendingConfirmState(snapshot)
+  const visiblePendingCount = pendingState.visible_count
+  const totalPendingCount = pendingState.total_count
+  const hiddenPendingCount = pendingState.hidden_count
+  const pendingActorFilter = pendingState.actor_filter
   const selectedSession = sessions.find(session => session.session_id === selectedSessionId.value) ?? sessions[0] ?? null
   const roomAttention = roomDigest?.attention_items ?? []
   const sessionAttention = roomAttention.filter(isSessionAttention)

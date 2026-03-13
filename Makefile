@@ -34,7 +34,7 @@ test-all: test-unit test-contract
 
 # Clean build artifacts
 clean:
-	dune clean
+	dune clean --root .
 
 # Run tests with coverage instrumentation
 coverage:

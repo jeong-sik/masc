@@ -60,11 +60,17 @@ let action_logs base_path =
   | `List items -> items
   | _ -> []
 
-let pending_confirms base_path =
+let pending_confirm_envelope base_path =
   let config = Room.default_config base_path in
-  match Operator_control.pending_confirms_json config with
-  | `List items -> items
-  | _ -> []
+  match Operator_control.pending_confirm_envelope_json config with
+  | `Assoc _ as envelope -> envelope
+  | _ -> `Assoc [ ("items", `List []); ("summary", Operator_control.pending_confirm_summary_json config) ]
+
+let pending_confirms base_path =
+  pending_confirm_envelope base_path |> member "items" |> to_list
+
+let pending_confirm_summary base_path =
+  pending_confirm_envelope base_path |> member "summary"
 
 let judge_runtime_json base_path =
   let runtime = Dashboard_governance_judge.runtime_status base_path in
@@ -405,7 +411,9 @@ let factual_snapshot_json ~base_path =
            Council.DebateApi.status ~config ~debate_id:debate.id |> Result.to_option)
   in
   let sessions = Council.ConsensusApi.list_all () in
-  let pending_confirms = pending_confirms base_path in
+  let pending_envelope = pending_confirm_envelope base_path in
+  let pending_confirms = pending_envelope |> member "items" |> to_list in
+  let pending_summary = pending_envelope |> member "summary" in
   let recent_action_logs = action_logs base_path in
   let items =
     let debate_items =
@@ -422,6 +430,8 @@ let factual_snapshot_json ~base_path =
                  ("context", debate_context_json debate);
                  ("related_agents", list_string_json (related_agents_of_debate debate));
                  ("evidence_refs", list_string_json (evidence_refs_of_debate debate));
+                 ("pending_confirm_envelope", pending_envelope);
+                 ("pending_confirm_summary", pending_summary);
                  ("pending_confirms", `List pending_confirms);
                  ("recent_actions", `List recent_action_logs);
                ])
@@ -439,6 +449,8 @@ let factual_snapshot_json ~base_path =
                  ("context", consensus_context_json session);
                  ("related_agents", list_string_json (related_agents_of_session session));
                  ("evidence_refs", list_string_json (evidence_refs_of_session session));
+                 ("pending_confirm_envelope", pending_envelope);
+                 ("pending_confirm_summary", pending_summary);
                  ("pending_confirms", `List pending_confirms);
                  ("recent_actions", `List recent_action_logs);
                ])
@@ -470,7 +482,9 @@ let dashboard_json ~base_path ~limit ~offset ~status_filter =
   in
   let sessions = Council.ConsensusApi.list_all () |> drop offset |> take limit in
   let judgments = latest_judgment_map base_path in
-  let pending_items = pending_confirms base_path in
+  let pending_envelope = pending_confirm_envelope base_path in
+  let pending_summary = pending_envelope |> member "summary" in
+  let pending_items = pending_envelope |> member "items" |> to_list in
   let recent_action_logs = action_logs base_path in
   let items =
     (debate_summaries
@@ -532,6 +546,8 @@ let dashboard_json ~base_path ~limit ~offset ~status_filter =
       ("items", `List items);
       ("activity", factual_snapshot_json ~base_path |> member "activity");
       ("judge", judge);
+      ("pending_confirm_envelope", pending_envelope);
+      ("pending_confirm_summary", pending_summary);
       ( "pending_actions",
         `List
           (List.map

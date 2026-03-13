@@ -47,7 +47,7 @@ wait_port_free() {
 if [ "$SKIP_BUILD" = false ]; then
     echo "==> Building MASC MCP..." >&2
     cd "$REPO_DIR"
-    dune build bin/main_eio.exe 2>&1
+    dune build --root "$REPO_DIR" bin/main_eio.exe 2>&1
     echo "    Build complete." >&2
 fi
 

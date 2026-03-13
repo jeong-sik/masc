@@ -18,9 +18,9 @@ OCaml 5.x + Eio로 만든 개인용 MCP 서버입니다.
 chmod +x scripts/opam-pin-external-deps.sh
 scripts/opam-pin-external-deps.sh
 
-# 빌드
+# 빌드 (`.worktrees/...`에서도 동일하게 동작)
 opam install . --deps-only
-dune build
+dune build --root .
 
 # 실행
 ./start-masc-mcp.sh --http --port 8935

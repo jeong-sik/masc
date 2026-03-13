@@ -46,6 +46,7 @@ import {
   surfaceRouteParams,
   toneClass,
 } from './helpers'
+import { selectPendingConfirmState } from '../../pending-confirm'
 import {
   guidanceFreshnessLabel,
   guidanceLayerLabel,
@@ -639,7 +640,11 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
     .sort((left, right) => timestampSortValue(right.last_heartbeat) - timestampSortValue(left.last_heartbeat))
   const hasLiveRun = swarmHasEvidence
   const pendingApprovals = summary?.decisions.summary?.pending ?? 0
-  const pendingConfirms = snapshot?.pending_confirms ?? []
+  const pendingState = selectPendingConfirmState(snapshot)
+  const pendingConfirms = pendingState.items
+  const pendingConfirmTotal = pendingState.total_count
+  const pendingConfirmVisible = pendingState.visible_count
+  const pendingConfirmHidden = pendingState.hidden_count
   const blockers = swarmHasEvidence ? (swarm?.blockers ?? []) : []
   const recommendedActions = sessionDigest?.recommended_actions ?? []
   const activeRecommendedActions =
@@ -664,7 +669,7 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
     ?? (typeof sessionSummary?.active_agent_count === 'number' ? sessionSummary.active_agent_count : undefined)
     ?? workers.length
   const stickyTone =
-    blockers.length > 0 || pendingApprovals > 0 || pendingConfirms.length > 0
+    blockers.length > 0 || pendingApprovals > 0 || pendingConfirmTotal > 0
       ? 'warn'
       : hasLiveRun || selectedSession
         ? 'ok'
@@ -850,10 +855,10 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
             <strong>${swarmHasEvidence ? (swarm?.provider?.runtime_blocker ? '막힘' : swarm?.provider?.provider_reachable ? '준비됨' : selectedSession ? displayStatus(selectedSession.status) : '확인 필요') : (selectedSession ? displayStatus(selectedSession.status) : '확인 필요')}</strong>
             <small>${swarmHasEvidence ? `설정 ${swarm?.provider?.configured_capacity ?? 'n/a'} · 실제 ${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · hot ${swarm?.summary?.peak_hot_slots ?? swarm?.provider?.peak_active_slots ?? 0}` : `세션 워커 ${sessionDigest?.worker_cards.length ?? 0}`}</small>
           </div>
-          <div class="monitor-stat-card ${toneClass(blockers.length > 0 || pendingApprovals > 0 ? 'warn' : 'ok')}">
+          <div class="monitor-stat-card ${toneClass(blockers.length > 0 || pendingApprovals > 0 || pendingConfirmTotal > 0 ? 'warn' : 'ok')}">
             <span>압력</span>
-            <strong>${blockers.length + pendingApprovals + pendingConfirms.length}</strong>
-            <small>막힘 ${blockers.length} · 승인 ${pendingApprovals} · 확인 ${pendingConfirms.length}</small>
+            <strong>${blockers.length + pendingApprovals + pendingConfirmTotal}</strong>
+            <small>막힘 ${blockers.length} · 승인 ${pendingApprovals} · 확인 ${pendingConfirmVisible}${pendingConfirmHidden > 0 ? `/${pendingConfirmTotal}` : ''}</small>
           </div>
           <div class="monitor-stat-card ${toneClass(guidanceLayerTone(guidanceLayer))}">
             <span>상주 판정기</span>
@@ -991,14 +996,17 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
                     </article>
                   `
                 : null}
-              ${pendingConfirms.length > 0
+              ${pendingConfirmTotal > 0
                 ? html`
                     <article class="command-guide-card warn">
                       <div class="command-guide-head">
                         <strong>확인 대기</strong>
-                        <span class="command-chip warn">${pendingConfirms.length}</span>
+                        <span class="command-chip warn">${pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal}</span>
                       </div>
-                      <p>운영자 미리보기가 사람 확인을 기다리고 있습니다.</p>
+                      <p>
+                        운영자 미리보기가 사람 확인을 기다리고 있습니다.
+                        ${pendingConfirmHidden > 0 ? ` 현재 actor 기준으로는 ${pendingConfirmVisible}건만 보입니다.` : ''}
+                      </p>
                       <div class="command-tag-row">
                         ${pendingConfirms.slice(0, 3).map((item: PendingConfirmation) => html`<span class="command-tag">${item.confirm_token}</span>`)}
                       </div>

@@ -304,24 +304,48 @@ let remove_pending_confirm config token =
   in
   write_pending_confirms config remaining
 
-let pending_confirms_json ?actor config =
+type pending_confirm_scope = {
+  actor_filter : string option;
+  all_entries : pending_confirm list;
+  visible_entries : pending_confirm list;
+  hidden_entries : pending_confirm list;
+}
+
+let normalize_pending_confirm_actor_filter = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let pending_confirm_scope_of_entries ?actor entries =
   let actor_filter =
-    match actor with
-    | Some raw ->
-        let trimmed = String.trim raw in
-        if trimmed = "" then None else Some trimmed
-    | None -> None
+    normalize_pending_confirm_actor_filter actor
   in
-  let rows : pending_confirm list =
-    read_pending_confirms config
-    |> List.filter (fun (entry : pending_confirm) ->
-           match actor_filter with
-           | None -> true
-           | Some value -> String.equal value entry.actor)
+  let all_entries =
+    entries
     |> List.sort (fun (a : pending_confirm) (b : pending_confirm) ->
            String.compare b.created_at a.created_at)
   in
-  `List (List.map pending_confirm_to_yojson rows)
+  let visible_entries =
+    match actor_filter with
+    | None -> all_entries
+    | Some value ->
+        List.filter (fun (entry : pending_confirm) -> String.equal value entry.actor) all_entries
+  in
+  let hidden_entries =
+    match actor_filter with
+    | None -> []
+    | Some value ->
+        List.filter (fun (entry : pending_confirm) -> not (String.equal value entry.actor)) all_entries
+  in
+  { actor_filter; all_entries; visible_entries; hidden_entries }
+
+let pending_confirm_scope ?actor config =
+  pending_confirm_scope_of_entries ?actor (read_pending_confirms config)
+
+let pending_confirms_json ?actor config =
+  let scope = pending_confirm_scope ?actor config in
+  `List (List.map pending_confirm_to_yojson scope.visible_entries)
 
 let action_log_entry_to_yojson (entry : action_log_entry) =
   `Assoc
@@ -489,33 +513,9 @@ let available_action_to_yojson (entry : available_action) =
 let available_actions_json =
   `List (List.map available_action_to_yojson available_actions)
 
-let pending_confirm_summary_json ?actor config =
-  let actor_filter =
-    match actor with
-    | Some raw ->
-        let trimmed = String.trim raw in
-        if trimmed = "" then None else Some trimmed
-    | None -> None
-  in
-  let all_entries =
-    read_pending_confirms config
-    |> List.sort (fun (a : pending_confirm) (b : pending_confirm) ->
-           String.compare b.created_at a.created_at)
-  in
-  let visible_entries =
-    match actor_filter with
-    | None -> all_entries
-    | Some value ->
-        List.filter (fun (entry : pending_confirm) -> String.equal value entry.actor) all_entries
-  in
-  let hidden_entries =
-    match actor_filter with
-    | None -> []
-    | Some value ->
-        List.filter (fun (entry : pending_confirm) -> not (String.equal value entry.actor)) all_entries
-  in
+let pending_confirm_summary_json_of_scope scope =
   let hidden_actors =
-    hidden_entries
+    scope.hidden_entries
     |> List.map (fun (entry : pending_confirm) -> entry.actor)
     |> List.sort_uniq String.compare
     |> List.map (fun value -> `String value)
@@ -527,13 +527,24 @@ let pending_confirm_summary_json ?actor config =
   in
   `Assoc
     [
-      ("actor_filter", string_option_to_json actor_filter);
-      ("filter_active", `Bool (Option.is_some actor_filter));
-      ("visible_count", `Int (List.length visible_entries));
-      ("total_count", `Int (List.length all_entries));
-      ("hidden_count", `Int (List.length hidden_entries));
+      ("actor_filter", string_option_to_json scope.actor_filter);
+      ("filter_active", `Bool (Option.is_some scope.actor_filter));
+      ("visible_count", `Int (List.length scope.visible_entries));
+      ("total_count", `Int (List.length scope.all_entries));
+      ("hidden_count", `Int (List.length scope.hidden_entries));
       ("hidden_actors", `List hidden_actors);
       ("confirm_required_actions", `List confirm_required_actions);
+    ]
+
+let pending_confirm_summary_json ?actor config =
+  pending_confirm_summary_json_of_scope (pending_confirm_scope ?actor config)
+
+let pending_confirm_envelope_json ?actor config =
+  let scope = pending_confirm_scope ?actor config in
+  `Assoc
+    [
+      ("items", `List (List.map pending_confirm_to_yojson scope.visible_entries));
+      ("summary", pending_confirm_summary_json_of_scope scope);
     ]
 
 let recent_messages_json config =
@@ -2386,6 +2397,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
        ("local_runtime", aggregated_local_runtime_json tracked_sessions);
        ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
        ("pending_confirms", pending_confirms_json ?actor config);
+       ("pending_confirm_envelope", pending_confirm_envelope_json ?actor config);
        ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
        ("available_actions", available_actions_json);
        ("recent_actions", recent_actions_json config);
@@ -2412,6 +2424,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
           ("swarm_status", Swarm_status.empty_json);
           ("attention_items", `List []);
           ("attention_summary", summary_of_attention_items []);
+          ("pending_confirm_summary", pending_confirm_summary_json_of_scope (pending_confirm_scope_of_entries ?actor []));
           ("recommended_actions", `List []);
           ("recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
           ("active_guidance_layer", `String "fallback");
@@ -2484,6 +2497,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
               ("local_runtime", aggregated_local_runtime_json tracked_sessions);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ("attention_summary", summary_of_attention_items attention_items);
+              ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
               ( "recommended_actions",
                 `List
                   (List.map (recommended_action_to_yojson ~actor:actor_name)

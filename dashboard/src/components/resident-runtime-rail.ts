@@ -14,6 +14,7 @@ import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import { navigate } from '../router'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from '../operator-store'
+import { selectPendingConfirmState } from '../pending-confirm'
 
 function shortCommit(commit: string | null | undefined): string {
   const value = commit?.trim()
@@ -223,7 +224,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
 
 export function InterveneRailCard() {
   const snapshot = operatorSnapshot.value
-  const pendingConfirms = snapshot?.pending_confirms.length ?? 0
+  const pendingConfirms = selectPendingConfirmState(snapshot).total_count
   const sessionCount = snapshot?.sessions.length ?? 0
   const keeperCount = snapshot?.keepers.length ?? 0
 

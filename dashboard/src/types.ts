@@ -1197,6 +1197,8 @@ export interface DashboardGovernanceResponse {
   activity?: GovernanceTimelineEvent[]
   judge?: GovernanceJudgeSummary
   pending_actions?: PendingConfirmation[]
+  pending_confirm_summary?: PendingConfirmSummary | null
+  pending_confirm_envelope?: PendingConfirmEnvelope | null
 }
 
 export interface DashboardPlanningResponse {
@@ -1639,6 +1641,11 @@ export interface PendingConfirmSummary {
   confirm_required_actions: OperatorActionDescriptor[]
 }
 
+export interface PendingConfirmEnvelope {
+  items: PendingConfirmation[]
+  summary: PendingConfirmSummary
+}
+
 export interface OperatorAttentionItem {
   kind: string
   severity: string
@@ -1792,6 +1799,7 @@ export interface OperatorSnapshot {
   swarm_status?: CommandPlaneSwarmStatus
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]
+  pending_confirm_envelope?: PendingConfirmEnvelope
   pending_confirm_summary?: PendingConfirmSummary
   available_actions: OperatorActionDescriptor[]
 }

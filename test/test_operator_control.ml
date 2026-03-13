@@ -222,7 +222,12 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       inject_task "operator-a" "alpha preview";
       inject_task "operator-b" "beta preview";
       let snapshot = Operator_control.snapshot_json ~actor:"operator-a" ctx in
+      let envelope = Yojson.Safe.Util.(snapshot |> member "pending_confirm_envelope") in
       let summary = Yojson.Safe.Util.(snapshot |> member "pending_confirm_summary") in
+      Alcotest.(check int) "envelope item count" 1
+        Yojson.Safe.Util.(envelope |> member "items" |> to_list |> List.length);
+      Alcotest.(check int) "envelope summary visible count" 1
+        Yojson.Safe.Util.(envelope |> member "summary" |> member "visible_count" |> to_int);
       Alcotest.(check string) "actor filter" "operator-a"
         Yojson.Safe.Util.(summary |> member "actor_filter" |> to_string);
       Alcotest.(check bool) "filter active" true
@@ -371,6 +376,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
          <> `Null);
       Alcotest.(check bool) "swarm_status present" true
         (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
+      Alcotest.(check int) "pending confirm summary count" 1
+        Yojson.Safe.Util.(digest |> member "pending_confirm_summary" |> member "total_count" |> to_int);
       let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
       Alcotest.(check bool) "pending confirm attention present" true
         (List.exists

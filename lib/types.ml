@@ -108,14 +108,9 @@ let now_iso () =
 
 (** Parse ISO8601 timestamp to Unix float. Returns default_time on parse failure. *)
 let parse_iso8601 ?(default_time = Time_compat.now () -. 60.0) timestamp =
-  try
-    Scanf.sscanf timestamp "%d-%d-%dT%d:%d:%d"
-      (fun y m d h mi s ->
-        let tm = Unix.{ tm_sec=s; tm_min=mi; tm_hour=h;
-          tm_mday=d; tm_mon=m-1; tm_year=y-1900;
-          tm_wday=0; tm_yday=0; tm_isdst=false } in
-        fst (Unix.mktime tm))
-  with Scanf.Scan_failure _ | Failure _ | End_of_file -> default_time
+  match Resilience.Time.parse_iso8601_opt timestamp with
+  | Some unix_ts -> unix_ts
+  | None -> default_time
 
 (** Agent status - compile-time state machine *)
 type agent_status =

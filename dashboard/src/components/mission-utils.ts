@@ -3,7 +3,9 @@ import { navigate } from '../router'
 import { missionSnapshot } from '../mission-store'
 import { keepers } from '../store'
 import type {
+  Agent,
   DashboardMissionAttentionQueueItem,
+  DashboardMissionAgentBrief,
   DashboardMissionKeeperBrief,
   DashboardMissionSessionBrief,
   Keeper,
@@ -22,6 +24,20 @@ export type EnrichedKeeperRow = {
   brief: DashboardMissionKeeperBrief
   keeper: Keeper | null
   currentWork: string
+  recentInput: string | null
+  recentOutput: string | null
+  recentEvent: string | null
+  recentTools: string[]
+}
+
+export type EnrichedAgentRow = {
+  brief: DashboardMissionAgentBrief
+  agent: Agent | null
+  keeper: Keeper | null
+  where: string
+  withWhom: string[]
+  currentWork: string
+  how: string | null
   recentInput: string | null
   recentOutput: string | null
   recentEvent: string | null

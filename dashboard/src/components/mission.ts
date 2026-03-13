@@ -32,6 +32,7 @@ import {
   KeeperBriefCard,
   InternalSignalCard,
 } from './mission-cards'
+import { ProvenanceStrip } from './common/provenance-strip'
 
 export function Mission() {
   const mission = missionSnapshot.value
@@ -132,9 +133,7 @@ export function Mission() {
         <div class="mission-section-head">
           <h3>지금 진행중인 일</h3>
           <p>세션을 기준으로 목표, 최근 흐름, 막힘, 연결된 작전을 먼저 읽고 사회의 현재 상태를 파악합니다.</p>
-          <div class="mission-briefing-meta">
-            <span class="command-chip ok">truth</span>
-          </div>
+          <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
         </div>
         <div class="mission-list-stack">
           ${sessionRows.length > 0
@@ -153,9 +152,7 @@ export function Mission() {
         <div class="mission-section-head">
           <h3>세션 밖에서 움직이는 행위자</h3>
           <p>키퍼는 세션과 별개로 보고, 사회의 연속성과 장기 행위자 상태를 먼저 읽습니다.</p>
-          <div class="mission-briefing-meta">
-            <span class="command-chip ok">truth</span>
-          </div>
+          <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
         </div>
         <div class="mission-activity-list">
           ${keeperRows.length > 0
@@ -172,9 +169,7 @@ export function Mission() {
         <div class="mission-section-head">
           <h3>누가 방금 무엇을 했나</h3>
           <p>선택된 세션과 연결된 행위자의 최근 출력만 모아 읽고, 해석은 뒤로 미룹니다.</p>
-          <div class="mission-briefing-meta">
-            <span class="command-chip ok">truth</span>
-          </div>
+          <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
         </div>
         <div class="mission-list-stack">
           ${focusSessionOutputs.length > 0
@@ -202,9 +197,7 @@ export function Mission() {
         <div class="mission-section-head">
           <h3>어느 세션을 먼저 봐야 하나</h3>
           <p>주의 신호는 truth를 훑은 다음에만 읽고, 세션 집중 순서를 정하는 용도로만 씁니다.</p>
-          <div class="mission-briefing-meta">
-            <span class="command-chip warn">derived</span>
-          </div>
+          <${ProvenanceStrip} items=${[{ kind: 'derived' }]} />
         </div>
         <div class="mission-lane-stack">
           ${attentionQueue.length > 0
@@ -220,9 +213,7 @@ export function Mission() {
           <div class="mission-section-head">
             <h3>시스템 진단</h3>
             <p>artifact scope drift 같은 내부 신호는 사회 흐름을 읽은 뒤에만 참고하도록 아래 보조 면으로 둡니다.</p>
-            <div class="mission-briefing-meta">
-              <span class="command-chip warn">derived</span>
-            </div>
+            <${ProvenanceStrip} items=${[{ kind: 'derived' }]} />
           </div>
           <details class="mission-card-disclosure">
             <summary>내부 신호 ${internalSignals.length}</summary>

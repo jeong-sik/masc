@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { navigate } from '../../router'
 import { roomTruth, roomTruthError, roomTruthLoading } from '../../room-truth-store'
+import { ProvenanceChip } from './provenance-strip'
 
 function toneClass(value?: string | null): string {
   const normalized = (value ?? '').trim().toLowerCase()
@@ -52,7 +53,7 @@ export function RoomTruthStrip() {
         <div class="room-truth-chip-row">
           <span class="command-chip ${status?.paused ? 'warn' : 'ok'}">${status?.paused ? '일시정지' : '열림'}</span>
           <span class="command-chip">${status?.cluster ?? 'cluster:unknown'}</span>
-          <span class="command-chip">${snapshot.room.provenance ?? 'truth'}</span>
+          <${ProvenanceChip} item=${{ kind: snapshot.room.provenance ?? 'truth' }} />
         </div>
       </article>
 
@@ -62,7 +63,7 @@ export function RoomTruthStrip() {
         <p>${topQueue?.summary ?? '지금은 실행 대기열 최상단 항목이 없습니다.'}</p>
         <div class="room-truth-chip-row">
           <span class="command-chip ${toneClass((execution?.blocked_sessions ?? 0) > 0 ? 'warn' : 'ok')}">priority ${execution?.priority_items ?? 0}</span>
-          <span class="command-chip">${snapshot.execution?.provenance ?? 'derived'}</span>
+          <${ProvenanceChip} item=${{ kind: snapshot.execution?.provenance ?? 'derived' }} />
         </div>
       </article>
 
@@ -74,7 +75,7 @@ export function RoomTruthStrip() {
           <span class="command-chip ${toneClass((command?.bad_alerts ?? 0) > 0 ? 'bad' : (command?.warn_alerts ?? 0) > 0 || (command?.pending_approvals ?? 0) > 0 ? 'warn' : 'ok')}">
             health ${operator?.health ?? 'ok'}
           </span>
-          <span class="command-chip">${command?.provenance ?? 'truth'}</span>
+          <${ProvenanceChip} item=${{ kind: command?.provenance ?? 'truth' }} />
         </div>
       </article>
 
@@ -84,7 +85,7 @@ export function RoomTruthStrip() {
         <p>${focus?.reason ?? (operator?.attention_summary?.top_item?.summary ?? topQueue?.summary ?? '다음 drill-down 대상이 아직 없습니다.')}</p>
         <div class="room-truth-chip-row">
           <span class="command-chip ${toneClass(focus?.provenance === 'fallback' ? 'warn' : 'ok')}">${focus?.source ?? 'steady'}</span>
-          <span class="command-chip">${focus?.provenance ?? operator?.recommendation_summary?.provenance ?? 'derived'}</span>
+          <${ProvenanceChip} item=${{ kind: focus?.provenance ?? operator?.recommendation_summary?.provenance ?? 'derived' }} />
         </div>
         ${focus?.suggested_tab
           ? html`

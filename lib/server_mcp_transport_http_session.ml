@@ -168,7 +168,11 @@ let validate_protocol_version_continuity ~session_id request =
   | Some expected -> (
       let ( let* ) = Result.bind in
       match provided with
-      | None -> Ok ()
+      | None ->
+          Error
+            (Printf.sprintf
+               "MCP-Protocol-Version header required for session %s."
+               session_id)
       | Some version ->
           let* () = validate_supported version in
           if String.equal version expected then

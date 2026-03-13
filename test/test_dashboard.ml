@@ -146,6 +146,8 @@ let test_lodge_status_json_has_runtime_fields () =
   Alcotest.(check bool) "last_tick_result present" true (has_key "last_tick_result");
   Alcotest.(check bool) "manual_tick_running present" true (has_key "manual_tick_running");
   Alcotest.(check bool) "last_skip_reason present" true (has_key "last_skip_reason");
+  Alcotest.(check bool) "last_pass_reason present" true (has_key "last_pass_reason");
+  Alcotest.(check bool) "last_system_skip_reason present" true (has_key "last_system_skip_reason");
   Alcotest.(check bool) "last_tick_ago string" true (member "last_tick_ago" json <> `Null)
 
 let test_dashboard_semantics_has_required_surfaces () =

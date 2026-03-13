@@ -1022,13 +1022,21 @@ let checkin_json (name, trigger, result) =
      ]
     @ outcome_fields)
 
-let heartbeat_last_skip_reason (result : heartbeat_result) =
+let heartbeat_last_pass_reason (result : heartbeat_result) =
+  let rec first_reason = function
+    | [] -> None
+    | (_, _, Passed reason) :: _ -> Some reason
+    | _ :: tl -> first_reason tl
+  in
+  first_reason result.checkins
+
+let heartbeat_last_system_skip_reason (result : heartbeat_result) =
   if result.agents_checked = 0 then
     Some "no agents selected for this tick"
   else
     let rec first_reason = function
       | [] -> None
-      | (_, _, Passed reason) :: _ | (_, _, Skipped reason) :: _ -> Some reason
+      | (_, _, Skipped reason) :: _ -> Some reason
       | _ :: tl -> first_reason tl
     in
     first_reason result.checkins
@@ -1087,7 +1095,15 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
         ("acted_names", `List (List.map (fun row -> row |> Yojson.Safe.Util.member "name") acted));
         ("activity_report", `String r.activity_report);
         ( "skipped_reason",
-          match heartbeat_last_skip_reason r with
+          match heartbeat_last_system_skip_reason r with
+          | Some reason -> `String reason
+          | None -> `Null );
+        ( "last_pass_reason",
+          match heartbeat_last_pass_reason r with
+          | Some reason -> `String reason
+          | None -> `Null );
+        ( "last_system_skip_reason",
+          match heartbeat_last_system_skip_reason r with
           | Some reason -> `String reason
           | None -> `Null );
         ("acted_rows", `List acted);
@@ -1096,9 +1112,14 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
         ("checkins", `List (List.map checkin_json r.checkins));
       ]
   in
-  let last_skip_reason =
+  let last_pass_reason =
     match s.ls_last_result with
-    | Some result -> heartbeat_last_skip_reason result
+    | Some result -> heartbeat_last_pass_reason result
+    | None -> None
+  in
+  let last_system_skip_reason =
+    match s.ls_last_result with
+    | Some result -> heartbeat_last_system_skip_reason result
     | None -> None
   in
   `Assoc [
@@ -1118,7 +1139,11 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
     ("last_tick_result", last_result_json);
     ("manual_tick_running", `Bool s.ls_manual_tick_running);
     ( "last_skip_reason",
-      match last_skip_reason with Some reason -> `String reason | None -> `Null );
+      match last_system_skip_reason with Some reason -> `String reason | None -> `Null );
+    ( "last_pass_reason",
+      match last_pass_reason with Some reason -> `String reason | None -> `Null );
+    ( "last_system_skip_reason",
+      match last_system_skip_reason with Some reason -> `String reason | None -> `Null );
     ("active_self_heartbeats", `List (List.map (fun n -> `String n) s.ls_active_self_heartbeats));
   ]
 

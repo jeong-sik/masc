@@ -804,6 +804,8 @@ export interface LodgeTickResult {
   activity_report?: string
   quiet_hours_overridden?: boolean
   skipped_reason?: string
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
   acted_rows?: Array<{ name: string; summary?: string }>
   passed_rows?: Array<{ name: string; reason?: string }>
   skipped_rows?: Array<{ name: string; reason?: string }>
@@ -825,6 +827,8 @@ export interface LodgeRuntimeStatus {
   total_ticks?: number
   total_checkins?: number
   last_skip_reason?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
   last_tick_result?: LodgeTickResult | null
   active_self_heartbeats?: string[]
 }
@@ -1089,6 +1093,8 @@ export interface DashboardExecutionLodgeTick {
   failed?: number
   last_tick_at?: string | null
   last_skip_reason?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
   activity_report?: string | null
 }
 

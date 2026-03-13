@@ -2975,9 +2975,23 @@ let checkin_json (name, trigger, result) =
     @ outcome_fields)
 
 let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
+  let pass_reason =
+    let rec first_reason = function
+      | [] -> None
+      | (_, _, Lodge_heartbeat.Passed reason) :: _ -> Some reason
+      | _ :: tl -> first_reason tl
+    in
+    first_reason result.checkins
+  in
   let skipped_reason =
     if result.agents_checked = 0 then Some "no agents selected for this tick"
-    else None
+    else
+      let rec first_reason = function
+        | [] -> None
+        | (_, _, Lodge_heartbeat.Skipped reason) :: _ -> Some reason
+        | _ :: tl -> first_reason tl
+      in
+      first_reason result.checkins
   in
   let acted =
     result.checkins
@@ -3012,6 +3026,10 @@ let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
       ("activity_report", `String result.activity_report);
       ("quiet_hours_overridden", `Bool true);
       ( "skipped_reason",
+        match skipped_reason with Some reason -> `String reason | None -> `Null );
+      ( "last_pass_reason",
+        match pass_reason with Some reason -> `String reason | None -> `Null );
+      ( "last_system_skip_reason",
         match skipped_reason with Some reason -> `String reason | None -> `Null );
       ("acted_rows", `List acted);
       ("passed_rows", `List passed);

@@ -34,6 +34,15 @@ import {
 } from './mission-cards'
 import { ProvenanceStrip } from './common/provenance-strip'
 
+const RECENT_SESSION_CHANGE_WINDOW_MS = 15 * 60 * 1000
+const QUIET_KEEPER_TURN_WINDOW_SEC = 30 * 60
+
+function isRecentTimestamp(iso?: string | null, windowMs = RECENT_SESSION_CHANGE_WINDOW_MS): boolean {
+  if (!iso) return false
+  const timestamp = Date.parse(iso)
+  return !Number.isNaN(timestamp) && Date.now() - timestamp <= windowMs
+}
+
 export function Mission() {
   const mission = missionSnapshot.value
   if (missionLoading.value && !mission) {
@@ -66,17 +75,43 @@ export function Mission() {
     .filter(item => item.related_session_ids.length > 0)
     .slice(0, 6)
   const internalSignals = mission.internal_signals.slice(0, 3)
-  const blockedSessions = sessionRows.filter(row => {
+  const urgentSessions = sessionRows.filter(row => {
     const tone = row.top_attention?.severity ?? row.health ?? row.status
-    return toneClass(tone) !== 'ok' || Boolean(row.blocker_summary)
+    return Boolean(row.blocker_summary)
+      || row.top_recommendation != null
+      || toneClass(tone) !== 'ok'
   }).length
-  const recentEventSessions = sessionRows.filter(row => row.last_event_summary || row.last_event_at).length
-  const activeParticipants = new Set(
-    sessionRows.flatMap(row => row.member_names),
-  ).size
-  const liveOutputs =
-    sessionRows.flatMap(row => row.member_previews ?? []).filter(row => row.recent_output_preview).length
-    + keeperRows.filter(row => row.recentOutput).length
+  const criticalSessions = sessionRows.filter(row => {
+    const tone = row.top_attention?.severity ?? row.health ?? row.status
+    return toneClass(tone) === 'bad'
+  }).length
+  const recentlyChangedSessions = sessionRows.filter(row =>
+    isRecentTimestamp(row.last_event_at) || isRecentTimestamp(row.started_at)
+  ).length
+  const participantSignals = new Map<string, { responded: boolean }>()
+  for (const session of sessionRows) {
+    for (const preview of session.member_previews ?? []) {
+      const existing = participantSignals.get(preview.agent_name) ?? { responded: false }
+      participantSignals.set(preview.agent_name, {
+        responded: existing.responded || Boolean(preview.recent_output_preview),
+      })
+    }
+  }
+  const observedParticipants = participantSignals.size
+  const respondingParticipants =
+    [...participantSignals.values()].filter(item => item.responded).length
+  const unansweredParticipants = Math.max(observedParticipants - respondingParticipants, 0)
+  const quietKeepers = keeperRows.filter(row => {
+    const statusTone = toneClass(row.brief.status ?? row.keeper?.status)
+    const staleTurn =
+      typeof row.brief.last_turn_ago_s === 'number'
+      && row.brief.last_turn_ago_s >= QUIET_KEEPER_TURN_WINDOW_SEC
+    return statusTone !== 'ok' || (staleTurn && !row.recentOutput)
+  }).length
+  const responseSilentSessions = sessionRows.filter(row =>
+    row.member_previews.length === 0
+    || row.member_previews.every(member => !member.recent_output_preview)
+  ).length
   const focusSessionOutputs = ((focusSession?.member_previews ?? []) as Array<{
     agent_name?: string | null
     role?: string | null
@@ -112,12 +147,42 @@ export function Mission() {
       />
 
       <div class="mission-stat-grid">
-        <${SummaryStat} label="활성 세션" value=${sessionRows.length} detail="지금 진행중인 협업 단위" tone=${focusSession?.top_attention?.severity ?? focusSession?.health ?? 'ok'} />
-        <${SummaryStat} label="막힌 세션" value=${blockedSessions} detail="주의가 필요한 흐름" tone=${blockedSessions > 0 ? 'warn' : 'ok'} />
-        <${SummaryStat} label="최근 사건 세션" value=${recentEventSessions} detail="최근 사건이 관측된 세션" tone=${recentEventSessions > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="참여자" value=${activeParticipants} detail="현재 세션에 연결된 주체" tone=${activeParticipants > 0 ? 'ok' : 'warn'} />
-        <${SummaryStat} label="키퍼 관찰" value=${keeperRows.length} detail="연속성 확인 대상" tone=${keeperRows[0]?.brief.status ?? 'ok'} />
-        <${SummaryStat} label="최근 응답" value=${liveOutputs} detail="메인에서 바로 읽을 수 있는 응답 수" tone=${liveOutputs > 0 ? 'ok' : 'warn'} />
+        <${SummaryStat}
+          label="활성 세션"
+          value=${sessionRows.length}
+          detail=${urgentSessions > 0 ? `${Math.max(sessionRows.length - urgentSessions, 0)}개 안정 흐름` : '지금 진행중인 협업 단위'}
+          tone=${criticalSessions > 0 ? 'warn' : focusSession?.top_attention?.severity ?? focusSession?.health ?? 'ok'}
+        />
+        <${SummaryStat}
+          label="즉시 개입 필요"
+          value=${urgentSessions}
+          detail="blocker·주의 신호·추천 액션"
+          tone=${criticalSessions > 0 ? 'bad' : urgentSessions > 0 ? 'warn' : 'ok'}
+        />
+        <${SummaryStat}
+          label="무응답 참여자"
+          value=${unansweredParticipants}
+          detail=${observedParticipants > 0 ? `응답 흔적 ${respondingParticipants}/${observedParticipants}명` : '참여자 preview 없음'}
+          tone=${unansweredParticipants > 0 ? 'warn' : 'ok'}
+        />
+        <${SummaryStat}
+          label="최근 변화 세션"
+          value=${recentlyChangedSessions}
+          detail="최근 15분 내 사건 또는 시작"
+          tone=${recentlyChangedSessions > 0 ? 'ok' : 'warn'}
+        />
+        <${SummaryStat}
+          label="조용한 키퍼"
+          value=${quietKeepers}
+          detail=${keeperRows.length > 0 ? `관찰 대상 ${keeperRows.length}명 중` : '연속성 확인 대상 없음'}
+          tone=${quietKeepers > 0 ? 'warn' : 'ok'}
+        />
+        <${SummaryStat}
+          label="최근 응답 없는 세션"
+          value=${responseSilentSessions}
+          detail="활성 세션 중 출력 미관측"
+          tone=${responseSilentSessions > 0 ? 'warn' : 'ok'}
+        />
       </div>
 
       ${activeSessionId

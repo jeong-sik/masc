@@ -102,16 +102,17 @@ export function Mission() {
     [...participantSignals.values()].filter(item => item.responded).length
   const unansweredParticipants = Math.max(observedParticipants - respondingParticipants, 0)
   const quietKeepers = keeperRows.filter(row => {
-    const statusTone = toneClass(row.brief.status ?? row.keeper?.status)
+    const statusTone = toneClass(row.brief.status ?? row.keeper?.status ?? 'ok')
     const staleTurn =
       typeof row.brief.last_turn_ago_s === 'number'
       && row.brief.last_turn_ago_s >= QUIET_KEEPER_TURN_WINDOW_SEC
     return statusTone !== 'ok' || (staleTurn && !row.recentOutput)
   }).length
-  const responseSilentSessions = sessionRows.filter(row =>
-    row.member_previews.length === 0
-    || row.member_previews.every(member => !member.recent_output_preview)
-  ).length
+  const responseSilentSessions = sessionRows.filter(row => {
+    const memberPreviews = row.member_previews ?? []
+    return memberPreviews.length === 0
+      || memberPreviews.every(member => !member.recent_output_preview)
+  }).length
   const focusSessionOutputs = ((focusSession?.member_previews ?? []) as Array<{
     agent_name?: string | null
     role?: string | null

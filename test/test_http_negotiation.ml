@@ -98,7 +98,7 @@ let test_request_body_stays_strict () =
   let headers = Httpun.Headers.of_list [("accept", "application/json")] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
   let body =
-    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}|}
+    {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|}
   in
   let mode = Transport.classify_mcp_accept_for_body request body in
   check bool "request still rejected" true

@@ -193,9 +193,7 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
 let test_keeper_model_set_persists_active_model () =
-  let provider_model =
-    Printf.sprintf "glm:%s" Masc_mcp.Env_config.Llm.default_model
-  in
+  let provider_model = "custom:test-model@http://127.0.0.1:9999" in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in

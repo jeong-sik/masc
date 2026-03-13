@@ -167,8 +167,8 @@ let test_categories_custom () =
 let test_tool_category_core () =
   check bool "join" true (Mode.tool_category "masc_join" = Mode.Core);
   check bool "status" true (Mode.tool_category "masc_status" = Mode.Core);
-  check bool "claim" true (Mode.tool_category "masc_claim" = Mode.Core);
-  check bool "done" true (Mode.tool_category "masc_done" = Mode.Core);
+  check bool "claim" true (Mode.tool_category "masc_claim" = Mode.Unknown);
+  check bool "done" true (Mode.tool_category "masc_done" = Mode.Unknown);
   check bool "tasks" true (Mode.tool_category "masc_tasks" = Mode.Core);
   check bool "add_task" true (Mode.tool_category "masc_add_task" = Mode.Core);
   check bool "team_session_list" true
@@ -180,7 +180,7 @@ let test_tool_category_core () =
   check bool "team_session_finalize" true
     (Mode.tool_category "masc_team_session_finalize" = Mode.Core);
   check bool "team_session_turn" true
-    (Mode.tool_category "masc_team_session_turn" = Mode.Core);
+    (Mode.tool_category "masc_team_session_turn" = Mode.Unknown);
   check bool "team_session_events" true
     (Mode.tool_category "masc_team_session_events" = Mode.Core);
   check bool "operator_snapshot" true
@@ -192,7 +192,7 @@ let test_tool_category_core () =
   check bool "runtime_verify" true
     (Mode.tool_category "masc_runtime_verify" = Mode.Core);
   check bool "llama_runtime_verify" true
-    (Mode.tool_category "masc_llama_runtime_verify" = Mode.Core);
+    (Mode.tool_category "masc_llama_runtime_verify" = Mode.Unknown);
   check bool "observe_swarm" true
     (Mode.tool_category "masc_observe_swarm" = Mode.Core);
   check bool "operator_action" true

@@ -24,7 +24,7 @@ let test_shard_board_exists () =
   match Tool_shard.get_shard "board" with
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    Alcotest.(check bool) "has 3 tools" true (List.length s.Tool_shard.tools = 3)
+    Alcotest.(check bool) "has 4 tools" true (List.length s.Tool_shard.tools = 4)
   | None -> Alcotest.fail "board shard not found"
 
 let test_shard_filesystem_exists () =
@@ -89,17 +89,17 @@ let test_tools_of_shards_single () =
 
 let test_tools_of_shards_multiple () =
   let tools = Tool_shard.tools_of_shards ["base"; "board"] in
-  (* base=3, board=3 → 6 *)
-  Alcotest.(check int) "base+board = 6" 6 (List.length tools)
+  (* base=3, board=4 → 7 *)
+  Alcotest.(check int) "base+board = 7" 7 (List.length tools)
 
 let test_tools_of_shards_unknown_ignored () =
   let tools = Tool_shard.tools_of_shards ["base"; "doesnt_exist"; "board"] in
-  Alcotest.(check int) "unknown shard ignored" 6 (List.length tools)
+  Alcotest.(check int) "unknown shard ignored" 7 (List.length tools)
 
 let test_keeper_llm_tools_count () =
   let tools = Tool_shard.keeper_llm_tools in
-  (* base=3 + board=3 + filesystem=2 + shell=3 + weather=1 + voice=1 = 13 *)
-  Alcotest.(check int) "13 total tools" 13 (List.length tools)
+  (* base=3 + board=4 + filesystem=2 + shell=3 + weather=1 + voice=1 = 14 *)
+  Alcotest.(check int) "14 total tools" 14 (List.length tools)
 
 (* ============================================================
    grant_shard tests
@@ -279,7 +279,8 @@ let test_board_tools_names () =
     Tool_shard.board_tools in
   Alcotest.(check bool) "has board_post" true (List.mem "keeper_board_post" names);
   Alcotest.(check bool) "has board_list" true (List.mem "keeper_board_list" names);
-  Alcotest.(check bool) "has board_comment" true (List.mem "keeper_board_comment" names)
+  Alcotest.(check bool) "has board_comment" true (List.mem "keeper_board_comment" names);
+  Alcotest.(check bool) "has board_vote" true (List.mem "keeper_board_vote" names)
 
 (* ============================================================
    Test runner

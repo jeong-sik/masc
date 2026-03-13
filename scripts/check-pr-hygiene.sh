@@ -13,6 +13,7 @@ Usage: scripts/check-pr-hygiene.sh --base <git-ref> [--head <git-ref>] [--recent
 Checks:
   - fails on empty commits in the PR range
   - warns or fails on duplicate patch-ids already present in recent base history
+  - fails when dashboard source/config changes without refreshed assets/dashboard output
 EOF
 }
 
@@ -72,6 +73,7 @@ fi
 
 empty_failures=0
 duplicate_hits=0
+asset_contract_failures=0
 
 BASE_PATCH_FILE="$(mktemp)"
 SEEN_PATCH_FILE="$(mktemp)"
@@ -127,8 +129,32 @@ for commit in "${RANGE_COMMITS[@]}"; do
   fi
 done
 
+dashboard_source_changed=0
+dashboard_assets_changed=0
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  case "$path" in
+    dashboard/src/*|dashboard/vite.config.ts|dashboard/package.json|dashboard/tsconfig.json)
+      dashboard_source_changed=1
+      ;;
+    assets/dashboard/*)
+      dashboard_assets_changed=1
+      ;;
+  esac
+done < <(git diff --name-only "$RANGE")
+
+if [[ "$dashboard_source_changed" -eq 1 && "$dashboard_assets_changed" -eq 0 ]]; then
+  echo "::error title=Dashboard assets missing::dashboard source or Vite config changed but assets/dashboard was not updated"
+  asset_contract_failures=1
+fi
+
 if [[ "$empty_failures" -ne 0 ]]; then
   echo "PR hygiene check failed: empty commits detected." >&2
+  exit 1
+fi
+
+if [[ "$asset_contract_failures" -ne 0 ]]; then
+  echo "PR hygiene check failed: dashboard assets are out of sync." >&2
   exit 1
 fi
 

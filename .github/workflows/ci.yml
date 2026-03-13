@@ -23,6 +23,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify PR sync
+        if: github.event_name == 'pull_request'
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          chmod +x scripts/check-pr-sync.sh
+          scripts/check-pr-sync.sh \
+            --head-branch "$PR_HEAD_REF" \
+            --expected-head-sha "$PR_HEAD_SHA"
+
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
         with:
@@ -91,10 +102,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify PR sync
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          chmod +x scripts/check-pr-sync.sh
+          scripts/check-pr-sync.sh \
+            --head-branch "$PR_HEAD_REF" \
+            --expected-head-sha "$PR_HEAD_SHA"
+
       - name: Run PR hygiene guards
         env:
           BASE_REF: origin/${{ github.base_ref }}
-          HEAD_REF: ${{ github.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-pr-hygiene.sh
           git fetch origin "${{ github.base_ref }}" --depth=100
@@ -103,7 +124,6 @@ jobs:
             --head "$HEAD_REF" \
             --recent-main 50 \
             --duplicate-policy warn
-
   build:
     name: Build and Test
     runs-on: ubuntu-latest
@@ -112,6 +132,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify PR sync
+        if: github.event_name == 'pull_request'
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          chmod +x scripts/check-pr-sync.sh
+          scripts/check-pr-sync.sh \
+            --head-branch "$PR_HEAD_REF" \
+            --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
@@ -183,6 +214,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify PR sync
+        if: github.event_name == 'pull_request'
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          chmod +x scripts/check-pr-sync.sh
+          scripts/check-pr-sync.sh \
+            --head-branch "$PR_HEAD_REF" \
+            --expected-head-sha "$PR_HEAD_SHA"
+
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
         with:
@@ -238,6 +280,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify PR sync
+        if: github.event_name == 'pull_request'
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          chmod +x scripts/check-pr-sync.sh
+          scripts/check-pr-sync.sh \
+            --head-branch "$PR_HEAD_REF" \
+            --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3

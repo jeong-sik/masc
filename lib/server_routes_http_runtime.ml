@@ -150,15 +150,6 @@ let governance_case_detail_json ~base_path ~case_id =
   in
   (http_status, json)
 
-let removed_council_surface_json =
-  `Assoc
-    [
-      ("error", `String "Removed in Governance V2");
-      ( "message",
-        `String
-          "Legacy /api/v1/council/* surfaces were removed. Use /api/v1/governance/cases, /api/v1/governance/cases/:id, or /api/v1/dashboard/governance." );
-    ]
-
 (** CORS preflight handler *)
 let options_handler request reqd =
   let origin = get_origin request in

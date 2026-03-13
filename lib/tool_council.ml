@@ -675,7 +675,7 @@ let handle_execution_orders ctx args =
   | _, other ->
       (false, Printf.sprintf "unsupported decision: %s" other)
 
-let handle_council_status ctx _args =
+let handle_governance_status ctx _args =
   let cases : GV2.case_record list = GV2.list_cases ctx.base_path in
   let counts =
     List.fold_left
@@ -766,7 +766,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_case_status" -> Some (handle_case_status ctx args)
   | "masc_ruling_status" -> Some (handle_ruling_status ctx args)
   | "masc_execution_orders" -> Some (handle_execution_orders ctx args)
-  | "masc_council_status" -> Some (handle_council_status ctx args)
+  | "masc_governance_status" -> Some (handle_governance_status ctx args)
   | "masc_route" -> Some (handle_route ctx args)
   | "masc_execute" -> Some (handle_execute ctx args)
   | "masc_execute_dry_run" -> Some (handle_execute_dry_run ctx args)
@@ -897,14 +897,14 @@ let definitions =
       ];
     `Assoc
       [
-        ("name", `String "masc_council_status");
+        ("name", `String "masc_governance_status");
         ("description", `String "Read a compact Governance V2 status summary.");
         ("inputSchema", `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ]);
       ];
     `Assoc
       [
         ("name", `String "masc_route");
-        ("description", `String "Route a query to appropriate agents using the legacy council router.");
+        ("description", `String "Route a query to appropriate agents using the governance router.");
         ( "inputSchema",
           `Assoc
             [
@@ -916,7 +916,7 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_execute");
-        ("description", `String "Execute a legacy council decision topic via the executor API.");
+        ("description", `String "Execute a governance decision topic via the executor API.");
         ( "inputSchema",
           `Assoc
             [
@@ -933,7 +933,7 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_execute_dry_run");
-        ("description", `String "Dry-run the legacy council executor for a topic and result.");
+        ("description", `String "Dry-run the governance executor for a topic and result.");
         ( "inputSchema",
           `Assoc
             [

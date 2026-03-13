@@ -356,6 +356,39 @@ let dashboard_json ~base_path ~limit ~offset ~status_filter =
     |> List.length
   in
   let ready_auto_execute = count_by GV2.Ready_auto_execute in
+  let cases_open =
+    count_by GV2.Pending_ruling + ready_auto_execute + count_by GV2.Needs_human_gate
+  in
+  let now_ts = Time_compat.now () in
+  let age_of_ts ts =
+    let delta = now_ts -. ts in
+    if Float.is_nan delta || Float.is_infinite delta then `Null
+    else `Int (int_of_float (max 0.0 (min delta (float_of_int max_int))))
+  in
+  let oldest_open_case_ts_opt =
+    bundles
+    |> List.filter (fun bundle ->
+           match bundle.GV2.case_.GV2.status with
+           | GV2.Pending_ruling | GV2.Ready_auto_execute | GV2.Needs_human_gate -> true
+           | GV2.Executed | GV2.Blocked | GV2.Closed -> false)
+    |> List.fold_left
+         (fun acc bundle ->
+           let ts = bundle.GV2.case_.GV2.updated_at in
+           match acc with
+           | None -> Some ts
+           | Some prev -> Some (min prev ts))
+         None
+  in
+  let latest_case_ts_opt =
+    bundles
+    |> List.fold_left
+         (fun acc bundle ->
+           let ts = bundle.GV2.case_.GV2.updated_at in
+           match acc with
+           | None -> Some ts
+           | Some prev -> Some (max prev ts))
+         None
+  in
   let judge = judge_runtime_json base_path in
   `Assoc
     [
@@ -363,18 +396,21 @@ let dashboard_json ~base_path ~limit ~offset ~status_filter =
       ( "summary",
         `Assoc
           [
-            ("cases_open", `Int (List.length bundles));
+            ("cases_open", `Int cases_open);
             ("pending_ruling", `Int (count_by GV2.Pending_ruling));
             ("ready_auto_execute", `Int ready_auto_execute);
             ("needs_human_gate", `Int (count_by GV2.Needs_human_gate));
             ("executed", `Int (count_by GV2.Executed));
             ("blocked", `Int (count_by GV2.Blocked));
-            ("debates_open", `Int 0);
-            ("sessions_active", `Int 0);
-            ("sessions_without_quorum", `Int 0);
             ("ready_to_execute", `Int ready_auto_execute);
-            ("oldest_open_debate_age_s", `Null);
-            ("last_activity_age_s", `Null);
+            ( "oldest_open_case_age_s",
+              match oldest_open_case_ts_opt with
+              | Some ts -> age_of_ts ts
+              | None -> `Null );
+            ( "last_activity_age_s",
+              match latest_case_ts_opt with
+              | Some ts -> age_of_ts ts
+              | None -> `Null );
             ("judge_online", judge |> member "judge_online");
             ("judge_last_seen_at", judge |> member "generated_at");
           ] );
@@ -383,8 +419,6 @@ let dashboard_json ~base_path ~limit ~offset ~status_filter =
       ("judge", judge);
       ("pending_actions", `List pending_actions);
       ("cases", `List items);
-      ("debates", `List []);
-      ("sessions", `List []);
     ]
 
 let cases_json ~base_path ~limit ~offset ~status_filter ~include_test =

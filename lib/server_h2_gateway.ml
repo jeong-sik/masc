@@ -1779,14 +1779,6 @@ let make_request_handler ~sw ~clock ~server_start_time =
           h2_respond_json h2_reqd (Yojson.Safe.to_string json)
             ~status ~extra_headers:cors
 
-      | `GET, "/api/v1/council/debates" ->
-          h2_respond_json h2_reqd (Yojson.Safe.to_string removed_council_surface_json)
-            ~status:`Bad_request ~extra_headers:cors
-
-      | `GET, "/api/v1/council/sessions" ->
-          h2_respond_json h2_reqd (Yojson.Safe.to_string removed_council_surface_json)
-            ~status:`Bad_request ~extra_headers:cors
-
       | `GET, "/api/v1/board" ->
           let hearth = query_param httpun_request "hearth" in
           let sort_by = board_sort_order_of_request httpun_request in
@@ -1826,22 +1818,6 @@ let make_request_handler ~sw ~clock ~server_start_time =
           let flairs = List.map Board.flair_to_yojson Board.available_flairs in
           let json = `Assoc [("flairs", `List flairs)] in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, p
-        when String.length p > 32
-             && String.length p >= 24 + 8
-             && String.sub p 0 24 = "/api/v1/council/debates/"
-             && String.ends_with ~suffix:"/summary" p ->
-          h2_respond_json h2_reqd (Yojson.Safe.to_string removed_council_surface_json)
-            ~status:`Bad_request ~extra_headers:cors
-
-      | `GET, p
-        when String.length p > 33
-             && String.length p >= 25 + 8
-             && String.sub p 0 25 = "/api/v1/council/sessions/"
-             && String.ends_with ~suffix:"/summary" p ->
-          h2_respond_json h2_reqd (Yojson.Safe.to_string removed_council_surface_json)
-            ~status:`Bad_request ~extra_headers:cors
 
       | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
           let post_id = String.sub p 14 (String.length p - 14) in

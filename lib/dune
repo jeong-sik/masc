@@ -228,6 +228,13 @@
    streamable_http
    subscriptions
    swarm_status
+   swarm_status_types
+   swarm_status_json
+   swarm_status_parse
+   swarm_status_classify
+   swarm_status_inputs
+   swarm_status_lanes
+   swarm_status_build
    swarm_behaviors_eio
    swarm_checkpoint
    swarm_eio
@@ -407,6 +414,13 @@
  server_routes_http_routes_command_plane_read
  server_routes_http_routes_command_plane_write
  server_routes_http_routes_social
+ swarm_status_types
+ swarm_status_json
+ swarm_status_parse
+ swarm_status_classify
+ swarm_status_inputs
+ swarm_status_lanes
+ swarm_status_build
   env_config_core
   env_config_runtime
   env_config_governance

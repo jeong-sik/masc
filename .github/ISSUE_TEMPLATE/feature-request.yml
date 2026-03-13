@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a new capability, workflow, or public surface.
+title: "[Feature] "
+labels:
+  - "type:feature"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for net-new capability work.
+        Human reporters, Codex, and internal agents may all file this form.
+        Every accepted feature should be assigned to exactly one `target:*` release train.
+  - type: input
+    id: outcome
+    attributes:
+      label: Desired outcome
+      placeholder: What becomes possible if this exists?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      placeholder: What is currently missing or too expensive?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Rough ideas are enough. This can stay incomplete.
+    validations:
+      required: false
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What should this request explicitly not try to solve?
+    validations:
+      required: false

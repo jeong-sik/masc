@@ -158,7 +158,7 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
 
 export function normalizeLodgeTickResult(raw: unknown): LodgeTickResult | null {
   if (!isRecord(raw)) return null
-  const lastSystemSkipReason = asString(raw.last_system_skip_reason) ?? asString(raw.skipped_reason) ?? null
+  const lastSystemSkipReason = asString(raw.last_system_skip_reason) ?? asString(raw.skipped_reason)
   return {
     hour: asNumber(raw.hour),
     checked: asNumber(raw.checked) ?? 0,

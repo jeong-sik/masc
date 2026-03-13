@@ -52,6 +52,10 @@ let test_message_roundtrip () =
       Alcotest.(check (option string)) "mention" (Some "gemini") parsed.mention
   | Error e -> Alcotest.fail e
 
+let test_parse_iso8601_epoch_utc () =
+  let parsed = parse_iso8601 "1970-01-01T00:00:00Z" in
+  Alcotest.(check (float 0.001)) "utc epoch" 0.0 parsed
+
 let () =
   Alcotest.run "Types" [
     "agent_status", [
@@ -64,5 +68,8 @@ let () =
     ];
     "message", [
       Alcotest.test_case "roundtrip" `Quick test_message_roundtrip;
+    ];
+    "timestamp", [
+      Alcotest.test_case "parse utc epoch" `Quick test_parse_iso8601_epoch_utc;
     ];
   ]

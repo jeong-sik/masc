@@ -177,8 +177,39 @@ let test_dashboard_shell_current_room_status () =
       let status = json |> member "status" in
       check string "shell room follows current room" "focus-room"
         (status |> member "room" |> to_string);
-      check string "shell current_room exposed" "focus-room"
-        (status |> member "current_room" |> to_string))
+        check string "shell current_room exposed" "focus-room"
+          (status |> member "current_room" |> to_string))
+
+let test_dashboard_execution_fresh_join_not_marked_stale () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Room.join config ~agent_name:"sentinel-kind-fox" ~capabilities:["sentinel"; "housekeeping"] ());
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Dashboard_execution.json
+            ~config
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~proc_mgr:None
+            ()
+        in
+        let open Yojson.Safe.Util in
+        let worker_briefs = json |> member "worker_support_briefs" |> to_list in
+        let offline_worker_briefs = json |> member "offline_worker_briefs" |> to_list in
+        let has_sentinel =
+          List.exists
+            (fun row ->
+              row |> member "name" |> to_string = "sentinel-kind-fox")
+            (worker_briefs @ offline_worker_briefs)
+        in
+        check bool "freshly joined agent should not appear stale in execution worker briefs"
+          false has_sentinel
+      ))
 
 let () =
   Alcotest.run "Dashboard Execution"
@@ -191,5 +222,7 @@ let () =
             test_dashboard_execution_current_room_status;
           Alcotest.test_case "shell follows current room" `Quick
             test_dashboard_shell_current_room_status;
+          Alcotest.test_case "fresh join is not stale" `Quick
+            test_dashboard_execution_fresh_join_not_marked_stale;
         ] );
     ]

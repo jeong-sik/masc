@@ -128,6 +128,7 @@ let command_plane_orchestra_http_json ~deps ~state request =
   let actor = command_plane_actor deps request in
   let run_id = deps.query_param request "run_id" in
   let operation_id = deps.query_param request "operation_id" in
+  let summary_only = deps.query_param request "summary_only" = Some "true" in
   let ctx : _ Operator_control.context =
     {
       config = state.Mcp_server.room_config;
@@ -138,7 +139,18 @@ let command_plane_orchestra_http_json ~deps ~state request =
       mcp_session_id = deps.get_session_id_any request;
     }
   in
-  Command_plane_orchestra.json ?run_id ?operation_id ctx
+  let full = Command_plane_orchestra.json ?run_id ?operation_id ctx in
+  if summary_only then
+    (* Strip heavy nodes/edges for lightweight summary response *)
+    match full with
+    | `Assoc fields ->
+        `Assoc (List.filter_map (fun (k, v) ->
+          match k with
+          | "nodes" | "edges" | "truth_notes" -> None
+          | _ -> Some (k, v)
+        ) fields)
+    | other -> other
+  else full
 
 let command_plane_unit_define_http_json ~deps ~state request ~args =
   Command_plane_v2.unit_update_json state.Mcp_server.room_config

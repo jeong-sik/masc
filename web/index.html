@@ -432,55 +432,49 @@
       }
     }
 
-    // Load agents via masc_who
+    // Load agents via REST API
     async function loadAgents() {
       try {
-        const result = await mcpCall('masc_who', {});
-        if (result.result?.content?.[0]?.text) {
-          const text = result.result.content[0].text;
-          // Parse: "💤/🔨/🎧 agent-name  (idle Xs)"
-          const agentMatches = text.match(/(💤|🔨|🎧) (\S+)\s+\((\w+ \d+s?)\)/g) || [];
-          const agentsList = document.getElementById('agents');
-          if (agentMatches.length > 0) {
-            agentsList.innerHTML = agentMatches.map(a => {
-              const m = a.match(/(💤|🔨|🎧) (\S+)\s+\((\w+ \d+s?)\)/);
-              const icon = m ? m[1] : '💤';
-              const name = m ? m[2] : a;
-              const status = m ? m[3] : '';
-              return `<div class="agent" onclick="openModal('${name}')">
-                <span class="icon">${icon}</span>
-                <span class="name">${name}</span>
-                <span class="idle-time">${status}</span>
-              </div>`;
-            }).join('');
-          } else {
-            agentsList.innerHTML = '<div class="agent"><span class="icon">💤</span><span class="name">No agents</span></div>';
-          }
+        const resp = await fetch(`${BASE_URL}/api/v1/agents?limit=100`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const agentsList = document.getElementById('agents');
+        if (data.agents && data.agents.length > 0) {
+          const statusIcons = { idle: '\uD83D\uDCA4', working: '\uD83D\uDD28', listening: '\uD83C\uDFA7' };
+          agentsList.innerHTML = data.agents.map(a => {
+            const icon = statusIcons[a.status] || '\uD83D\uDCA4';
+            const task = a.current_task ? `(${a.current_task})` : `(${a.status})`;
+            const safeName = a.name.replace(/'/g, "\\'");
+            return `<div class="agent" onclick="openModal('${safeName}')">
+              <span class="icon">${icon}</span>
+              <span class="name">${a.name}</span>
+              <span class="idle-time">${task}</span>
+            </div>`;
+          }).join('');
+        } else {
+          agentsList.innerHTML = '<div class="agent"><span class="icon">\uD83D\uDCA4</span><span class="name">No agents</span></div>';
         }
       } catch (e) {
         console.error('Failed to load agents:', e);
       }
     }
 
-    // Load tasks via masc_status
+    // Load tasks via REST API
     async function loadTasks() {
       try {
-        const result = await mcpCall('masc_status', {});
-        if (result.result?.content?.[0]?.text) {
-          const text = result.result.content[0].text;
-          // Parse tasks: "✅/🔄/⏸️ task-XXX: description (owner)"
-          const taskMatches = text.match(/(✅|🔄|⏸️|○) task-\d+: .+/g) || [];
-          const tasksList = document.getElementById('tasks');
-          if (taskMatches.length > 0) {
-            tasksList.innerHTML = taskMatches.slice(0, 15).map(t => {
-              const m = t.match(/^(✅|🔄|⏸️|○) (.+)$/);
-              const icon = m ? m[1] : '○';
-              const desc = m ? m[2] : t;
-              return `<div class="task"><span style="margin-right:0.5rem">${icon}</span>${desc}</div>`;
-            }).join('');
-          } else {
-            tasksList.innerHTML = '<div class="task">📋 No tasks</div>';
-          }
+        const resp = await fetch(`${BASE_URL}/api/v1/tasks?limit=15`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const tasksList = document.getElementById('tasks');
+        if (data.tasks && data.tasks.length > 0) {
+          const statusIcons = { done: '\u2705', in_progress: '\uD83D\uDD04', claimed: '\uD83D\uDD04', paused: '\u23F8\uFE0F', open: '\u25CB' };
+          tasksList.innerHTML = data.tasks.map(t => {
+            const icon = statusIcons[t.status] || '\u25CB';
+            const assignee = t.assignee ? ` (${t.assignee})` : '';
+            return `<div class="task"><span style="margin-right:0.5rem">${icon}</span>${t.id}: ${t.title}${assignee}</div>`;
+          }).join('');
+        } else {
+          tasksList.innerHTML = '<div class="task">\uD83D\uDCCB No tasks</div>';
         }
       } catch (e) {
         console.error('Failed to load tasks:', e);
@@ -538,18 +532,31 @@
         addLocalEvent('✅ SSE connected');
       };
 
-      evtSource.addEventListener('broadcast', (e) => {
+      // Route all SSE events via onmessage (server sends event: message)
+      evtSource.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          addLocalEvent(`${data.agent || 'system'}: ${data.message || data}`);
+          const type = data.type || '';
+          if (type === 'masc/broadcast') {
+            addLocalEvent(`${data.from || 'system'}: ${data.content || data.message || JSON.stringify(data)}`);
+          } else if (type === 'masc/agent_joined') {
+            addLocalEvent(`👋 ${data.agent_name} joined`);
+            loadStatus();
+          } else if (type === 'masc/agent_left') {
+            addLocalEvent(`🚪 ${data.agent_name} left`);
+            loadStatus();
+          } else if (type === 'task_update' || type === 'masc/task_update') {
+            loadStatus();
+          } else if (type === 'heartbeat' || type === 'ping') {
+            // keep-alive, ignore
+          } else {
+            addLocalEvent(`${type || 'event'}: ${data.message || data.content || JSON.stringify(data)}`);
+          }
         } catch (err) {
-          addLocalEvent(e.data);
+          // Non-JSON data (e.g. plain text)
+          if (e.data && e.data.trim()) addLocalEvent(e.data);
         }
-      });
-
-      evtSource.addEventListener('agent_update', () => loadStatus());
-      evtSource.addEventListener('task_update', () => loadStatus());
-      evtSource.addEventListener('heartbeat', () => {});  // keep-alive, ignore
+      };
 
       evtSource.onerror = (err) => {
         updateSSEStatus('🔴');  // disconnected

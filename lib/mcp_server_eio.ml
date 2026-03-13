@@ -1752,26 +1752,28 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       in
       let final_result = if institution_welcome = "" then result
         else result ^ institution_welcome in
-      (* Notification harness: push join event to all active sessions *)
-      let _pushed = Session.push_notification_to_active_agents registry
-        ~event:(`Assoc [
-          ("type", `String "masc/agent_joined");
-          ("agent_name", `String nickname);
-          ("timestamp", `Float (Time_compat.now ()));
-        ]) in
+      (* Notification harness: push join event to all active sessions + SSE *)
+      let join_event = `Assoc [
+        ("type", `String "masc/agent_joined");
+        ("agent_name", `String nickname);
+        ("timestamp", `Float (Time_compat.now ()));
+      ] in
+      let _pushed = Session.push_notification_to_active_agents registry ~event:join_event in
+      Mcp_server.sse_broadcast state join_event;
       (* Audit: log join event *)
       Audit_log.log_join config ~agent_id:nickname
         ~room_id:(Filename.basename config.base_path) ();
       (true, final_result)
 
   | "masc_leave" ->
-      (* Notification harness: push leave event BEFORE unregistering *)
-      let _pushed = Session.push_notification_to_active_agents registry
-        ~event:(`Assoc [
-          ("type", `String "masc/agent_left");
-          ("agent_name", `String agent_name);
-          ("timestamp", `Float (Time_compat.now ()));
-        ]) in
+      (* Notification harness: push leave event BEFORE unregistering + SSE *)
+      let leave_event = `Assoc [
+        ("type", `String "masc/agent_left");
+        ("agent_name", `String agent_name);
+        ("timestamp", `Float (Time_compat.now ()));
+      ] in
+      let _pushed = Session.push_notification_to_active_agents registry ~event:leave_event in
+      Mcp_server.sse_broadcast state leave_event;
       let result = Room.leave config ~agent_name in
       unregister_sync registry ~agent_name;
       (* Clean up self-echo filter file *)

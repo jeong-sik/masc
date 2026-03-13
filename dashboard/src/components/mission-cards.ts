@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { extractAgentInfo } from './common/agent-info'
 import { linkedRecentToolsEmptyState, observedToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'
+import { ProvenanceStrip } from './common/provenance-strip'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import {
@@ -110,10 +111,12 @@ export function MissionBriefingCard() {
       <div class="mission-section-head">
         <h3>왜 그렇게 보이나</h3>
         <p>사회 truth를 읽은 뒤에만 별도 판단 결과를 참고하고, 근거는 접어서 둡니다.</p>
-        <div class="mission-briefing-meta">
-          <span class="command-chip">narrative</span>
-          <span class="command-chip warn">fallback on failure</span>
-        </div>
+        <${ProvenanceStrip}
+          items=${[
+            { kind: 'narrative' },
+            { kind: 'fallback', label: 'fallback on failure' },
+          ]}
+        />
       </div>
 
       <div class="mission-briefing-meta">

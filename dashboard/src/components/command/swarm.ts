@@ -26,6 +26,7 @@ import {
 import { route } from '../../router'
 import { PanelSemanticDetails } from '../common/semantic-layer'
 import { workflowContextForRoute } from '../../workflow-context'
+import { ProvenanceChip } from '../common/provenance-strip'
 import {
   currentCommandPlaneSummary,
   dashboardActorName,
@@ -121,7 +122,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
       </p>
       <div class="command-card-grid">
         <span>Run</span><span>${runId}</span>
-        <span>Provenance</span><span>${recommendation?.provenance ?? 'recorded'}</span>
+        <span>Provenance</span><span><${ProvenanceChip} item=${{ kind: recommendation?.provenance ?? 'recorded' }} /></span>
         <span>Engine</span><span>${recommendation?.decision_engine ?? 'operator_record'}</span>
         <span>Authoritative</span><span>${recommendation?.authoritative ? 'yes' : 'no'}</span>
       </div>
@@ -573,7 +574,7 @@ export function SwarmSurface() {
                 ? html`
                     <div class="command-tag-row">
                       <span class="command-tag">experimental</span>
-                      <span class="command-tag">derived read-model</span>
+                      <${ProvenanceChip} item=${{ kind: 'derived', label: 'derived read-model' }} />
                       <span class="command-tag ${swarm.run_resolution || swarm.resolution_recommendation ? 'warn' : 'ok'}">
                         ${swarm.run_resolution || swarm.resolution_recommendation ? 'operator resolution aware' : 'no resolution advice'}
                       </span>

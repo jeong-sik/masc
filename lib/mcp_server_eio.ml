@@ -54,6 +54,7 @@ let is_valid_request_id = Mcp_server.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_server.jsonrpc_request_of_yojson
 let protocol_version_from_params = Mcp_server.protocol_version_from_params
 let normalize_protocol_version = Mcp_server.normalize_protocol_version
+let validate_protocol_version = Mcp_server.validate_protocol_version
 let validate_initialize_params = Mcp_server.validate_initialize_params
 let make_response = Mcp_server.make_response
 let make_error = Mcp_server.make_error
@@ -3736,19 +3737,22 @@ let handle_initialize_eio ?(profile = Full) id params =
   | Error msg -> make_error ~id (-32602) msg
   | Ok () ->
       let protocol_version =
-        params |> protocol_version_from_params |> normalize_protocol_version
+        params |> protocol_version_from_params
       in
-      make_response ~id (`Assoc [
-        ("protocolVersion", `String protocol_version);
-        ("serverInfo", Mcp_server.server_info);
-        ("capabilities", Mcp_server.capabilities);
-        ( "instructions",
-          `String
-            (match profile with
-            | Full -> default_instructions
-            | Managed_agent -> managed_agent_instructions
-            | Operator_remote -> operator_remote_instructions) );
-      ])
+      (match validate_protocol_version protocol_version with
+       | Error msg -> make_error ~id (-32602) msg
+       | Ok protocol_version ->
+           make_response ~id (`Assoc [
+             ("protocolVersion", `String protocol_version);
+             ("serverInfo", Mcp_server.server_info);
+             ("capabilities", Mcp_server.capabilities);
+             ( "instructions",
+               `String
+                 (match profile with
+                 | Full -> default_instructions
+                 | Managed_agent -> managed_agent_instructions
+                 | Operator_remote -> operator_remote_instructions) );
+           ]))
 
 let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
     ?(include_deprecated = false) ?(include_usage = false) ?mode ?tier ?cursor

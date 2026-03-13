@@ -103,6 +103,24 @@ function agentStateLabel(state: DashboardExecutionWorkerSupportBrief['state']): 
   }
 }
 
+function signalTruthLabel(value?: DashboardExecutionWorkerSupportBrief['signal_truth'] | null): string {
+  switch (value) {
+    case 'live': return '최근 신호(≤5m)'
+    case 'stale': return '오래된 신호(>5m)'
+    case 'absent': return 'signal 없음'
+    default: return value ?? 'signal 미상'
+  }
+}
+
+function evidenceSourceLabel(value?: DashboardExecutionWorkerSupportBrief['evidence_source'] | null): string {
+  switch (value) {
+    case 'message': return '최근 출력'
+    case 'presence': return 'presence/하트비트'
+    case 'none': return '근거 없음'
+    default: return value ?? '근거 미상'
+  }
+}
+
 function continuityStateLabel(state: DashboardExecutionContinuityBrief['state']): string {
   switch (state) {
     case 'critical': return '위험'
@@ -114,8 +132,8 @@ function continuityStateLabel(state: DashboardExecutionContinuityBrief['state'])
 function lodgeOutcomeLabel(outcome: DashboardExecutionLodgeCheckin['outcome']): string {
   switch (outcome) {
     case 'acted': return '행동'
-    case 'passed': return '판단 패스'
-    case 'skipped': return '시스템 스킵'
+    case 'passed': return '통과'
+    case 'skipped': return '건너뜀'
     case 'failed': return '실패'
     default: return outcome
   }
@@ -129,7 +147,7 @@ function lodgeActionKindLabel(value?: DashboardExecutionLodgeCheckin['action_kin
     case 'none':
     case null:
     case undefined:
-      return '없음'
+      return 'none'
     default:
       return value
   }
@@ -245,6 +263,9 @@ function QueueCard({ item, selected }: { item: DashboardExecutionQueueItem; sele
 }
 
 function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrief; selected: boolean }) {
+  const liveCount = brief.active_count ?? 0
+  const seenCount = brief.seen_count ?? liveCount
+  const plannedCount = brief.planned_count ?? brief.member_names.length
   return html`
     <button
       class="mission-card-select ${selected ? 'active' : ''}"
@@ -263,6 +284,7 @@ function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrie
       </div>
       <div class="mission-card-meta">
         <span>건강도 · ${statusLabel(brief.health ?? 'ok')}</span>
+        <span>live ${liveCount} · seen ${seenCount} · planned ${plannedCount}</span>
         ${brief.linked_operation_id ? html`<span>연결 작전 · ${brief.linked_operation_id}</span>` : null}
         ${brief.last_activity_at ? html`<span><${TimeAgo} timestamp=${brief.last_activity_at} /></span>` : null}
       </div>
@@ -271,7 +293,9 @@ function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrie
         : brief.last_activity_summary
           ? html`<div class="mission-card-detail">${brief.last_activity_summary}</div>`
           : null}
-      ${brief.worker_gap_summary ? html`<div class="monitor-footnote">${brief.worker_gap_summary}</div>` : null}
+      <div class="monitor-footnote">
+        ${brief.worker_gap_summary ?? `관측 기준 · ${brief.counts_basis ?? 'recent_turns'}`}
+      </div>
       <${HandoffButtons} intervene=${brief.intervene_handoff} command=${brief.command_handoff} />
     </button>
   `
@@ -313,16 +337,15 @@ function LodgeTickCard({ tick }: { tick: DashboardExecutionLodgeTick | null }) {
   return html`
     <div class="monitor-nested-card">
       <div class="stats-grid">
-        <${MonitorStat} label="검토" value=${tick.checked ?? 0} color="#22d3ee" />
-        <${MonitorStat} label="행동" value=${tick.acted ?? 0} color="#4ade80" />
-        <${MonitorStat} label="판단 패스" value=${tick.passed ?? 0} color="#94a3b8" />
-        <${MonitorStat} label="시스템 스킵" value=${tick.skipped ?? 0} color="#fbbf24" />
-        <${MonitorStat} label="실패" value=${tick.failed ?? 0} color="#fb7185" />
+        <${MonitorStat} label="checked" value=${tick.checked ?? 0} color="#22d3ee" />
+        <${MonitorStat} label="acted" value=${tick.acted ?? 0} color="#4ade80" />
+        <${MonitorStat} label="passed" value=${tick.passed ?? 0} color="#94a3b8" />
+        <${MonitorStat} label="skipped" value=${tick.skipped ?? 0} color="#fbbf24" />
+        <${MonitorStat} label="failed" value=${tick.failed ?? 0} color="#fb7185" />
       </div>
       <div class="monitor-meta">
         ${tick.last_tick_at ? html`<span>마지막 tick <${TimeAgo} timestamp=${tick.last_tick_at} /></span>` : html`<span>마지막 tick 없음</span>`}
-        ${tick.last_pass_reason ? html`<span>대표 패스 이유 · ${tick.last_pass_reason}</span>` : null}
-        ${tick.last_system_skip_reason ? html`<span>대표 시스템 스킵 이유 · ${tick.last_system_skip_reason}</span>` : null}
+        ${tick.last_skip_reason ? html`<span>대표 skip 이유 · ${tick.last_skip_reason}</span>` : null}
       </div>
       ${tick.activity_report ? html`<div class="monitor-footnote">${tick.activity_report}</div>` : null}
     </div>
@@ -387,6 +410,8 @@ function WorkerSupportRow({
 
       <div class="monitor-meta">
         ${row.last_signal_at ? html`<span>신호 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 신호 없음</span>`}
+        <span>${signalTruthLabel(row.signal_truth)} · ${evidenceSourceLabel(row.evidence_source)}</span>
+        ${typeof row.last_signal_age_sec === 'number' ? html`<span>${row.last_signal_age_sec}s ago</span>` : null}
         <span>${(row.active_task_count ?? 0) > 0 ? `활성 작업 ${row.active_task_count}개` : '활성 작업 없음'}</span>
         ${row.related_session_id ? html`<span>세션 · ${row.related_session_id}</span>` : null}
         ${row.related_operation_id ? html`<span>작전 · ${row.related_operation_id}</span>` : null}
@@ -585,7 +610,7 @@ export function Execution() {
         >
           <div class="monitor-section-head">
             <h2 class="monitor-headline">Lodge Check-ins</h2>
-            <p class="monitor-subheadline">최근 lodge tick에서 누가 실제로 행동했고, 누가 판단상 패스했고, 누가 시스템에 의해 스킵됐는지 먼저 보여줍니다.</p>
+            <p class="monitor-subheadline">최근 lodge tick에서 누가 무엇을 허용받았고, 실제로 어떻게 행동했는지 먼저 보여줍니다.</p>
           </div>
           <${LodgeTickCard} tick=${lodgeTick} />
           <div class="monitor-list">

@@ -862,7 +862,7 @@ export interface LodgeTickResult {
   acted_names: string[]
   activity_report?: string
   quiet_hours_overridden?: boolean
-  skipped_reason?: string
+  skipped_reason?: string | null
   last_pass_reason?: string | null
   last_system_skip_reason?: string | null
   acted_rows?: Array<{ name: string; summary?: string }>
@@ -1102,7 +1102,10 @@ export interface DashboardExecutionSessionBrief {
   last_activity_summary?: string | null
   communication_summary?: string | null
   active_count?: number
+  seen_count?: number
+  planned_count?: number
   required_count?: number
+  counts_basis?: string | null
   top_handoff?: DashboardExecutionHandoff | null
   intervene_handoff?: DashboardExecutionHandoff | null
   command_handoff?: DashboardExecutionHandoff | null
@@ -1134,6 +1137,9 @@ export interface DashboardExecutionWorkerSupportBrief {
   note: string
   focus: string
   last_signal_at?: string | null
+  last_signal_age_sec?: number | null
+  signal_truth?: 'live' | 'stale' | 'absent'
+  evidence_source?: 'message' | 'presence' | 'none'
   active_task_count?: number
   related_session_id?: string | null
   related_operation_id?: string | null
@@ -1152,8 +1158,6 @@ export interface DashboardExecutionLodgeTick {
   failed?: number
   last_tick_at?: string | null
   last_skip_reason?: string | null
-  last_pass_reason?: string | null
-  last_system_skip_reason?: string | null
   activity_report?: string | null
 }
 
@@ -1350,7 +1354,10 @@ export interface DashboardMissionSessionBrief {
   last_event_summary?: string | null
   communication_summary?: string | null
   active_count?: number
+  seen_count?: number
+  planned_count?: number
   required_count?: number
+  counts_basis?: string | null
   related_attention_count: number
   top_attention?: OperatorAttentionItem | null
   top_recommendation?: OperatorRecommendedAction | null
@@ -1405,6 +1412,9 @@ export interface DashboardMissionAgentBrief {
   related_session_id?: string | null
   related_attention_count: number
   last_activity_at?: string | null
+  last_activity_age_sec?: number | null
+  signal_truth?: 'live' | 'stale' | 'archived' | 'unknown'
+  evidence_source?: 'message' | 'presence' | 'session' | 'none'
   recent_output_preview?: string | null
   recent_input_preview?: string | null
   recent_event?: string | null

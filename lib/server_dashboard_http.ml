@@ -282,7 +282,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       ("bad_age_s", `Int bad_age_s);
     ], false)
 
-let council_monitoring_json ~(now_ts : float) ~(base_path : string)
+let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
   : Yojson.Safe.t * bool =
   let warn_age_s =
     int_of_env_default
@@ -305,59 +305,52 @@ let council_monitoring_json ~(now_ts : float) ~(base_path : string)
       ~min_v:30
       ~max_v:86400
   in
+  let module GV2 = Council.Governance_v2 in
   try
-    let cfg = Council.make_config ~base_path in
-    let debates = Council.DebateApi.list_all ~config:cfg ~status_filter:None ~limit:200 () in
-    let sessions = Council.ConsensusApi.list_active () in
-    let debates_open =
+    let cases : GV2.case_record list = GV2.list_cases base_path in
+    let count status =
       List.fold_left
-        (fun acc (d : Council.Debate.debate) ->
-          if d.status = Council.Debate.Open then acc + 1 else acc)
-        0 debates
+        (fun acc (case_ : GV2.case_record) ->
+          if case_.GV2.status = status then acc + 1 else acc)
+        0 cases
     in
-    let debates_pending =
+    let pending_ruling = count GV2.Pending_ruling in
+    let ready_auto_execute = count GV2.Ready_auto_execute in
+    let needs_human_gate = count GV2.Needs_human_gate in
+    let executed = count GV2.Executed in
+    let blocked =
       List.fold_left
-        (fun acc (d : Council.Debate.debate) ->
-          if d.status = Council.Debate.Pending then acc + 1 else acc)
-        0 debates
+        (fun acc (case_ : GV2.case_record) ->
+          match case_.GV2.status with
+          | GV2.Blocked | GV2.Closed -> acc + 1
+          | GV2.Pending_ruling | GV2.Ready_auto_execute
+          | GV2.Needs_human_gate | GV2.Executed -> acc)
+        0 cases
     in
-    let sessions_active = List.length sessions in
-    let sessions_without_quorum =
+    let cases_open = pending_ruling + ready_auto_execute + needs_human_gate in
+    let oldest_open_case_ts_opt =
       List.fold_left
-        (fun acc (s : Council.Consensus.session) ->
-          if List.length s.votes < s.quorum then acc + 1 else acc)
-        0 sessions
+        (fun acc (case_ : GV2.case_record) ->
+          match case_.GV2.status with
+          | GV2.Pending_ruling | GV2.Ready_auto_execute | GV2.Needs_human_gate ->
+              (match acc with
+              | None -> Some case_.GV2.updated_at
+              | Some prev -> Some (min prev case_.GV2.updated_at))
+          | GV2.Executed | GV2.Blocked | GV2.Closed -> acc)
+        None cases
     in
-    let oldest_open_debate_ts_opt =
-      List.fold_left
-        (fun acc (d : Council.Debate.debate) ->
-          if d.status <> Council.Debate.Open then acc
-          else
-            match acc with
-            | None -> Some d.created_at
-            | Some prev -> Some (min prev d.created_at))
-        None debates
-    in
-    let oldest_open_debate_age_s =
-      match oldest_open_debate_ts_opt with
+    let oldest_open_case_age_s =
+      match oldest_open_case_ts_opt with
       | None -> None
       | Some ts -> safe_age_seconds_opt ~now_ts ~event_ts:ts
     in
     let latest_activity_ts_opt =
-      let from_debates =
-        List.fold_left
-          (fun acc (d : Council.Debate.debate) ->
-            match acc with
-            | None -> Some d.created_at
-            | Some prev -> Some (max prev d.created_at))
-          None debates
-      in
       List.fold_left
-        (fun acc (s : Council.Consensus.session) ->
+        (fun acc (case_ : GV2.case_record) ->
           match acc with
-          | None -> Some s.created_at
-          | Some prev -> Some (max prev s.created_at))
-        from_debates sessions
+          | None -> Some case_.GV2.updated_at
+          | Some prev -> Some (max prev case_.GV2.updated_at))
+        None cases
     in
     let last_activity_age_s =
       match latest_activity_ts_opt with
@@ -366,54 +359,61 @@ let council_monitoring_json ~(now_ts : float) ~(base_path : string)
     in
     let base_alert =
       match last_activity_age_s with
-      | None -> "warn"
+      | None -> if cases_open > 0 then "warn" else "ok"
       | Some age when age >= bad_age_s -> "bad"
       | Some age when age >= warn_age_s -> "warn"
       | Some _ -> "ok"
     in
     let slo_breached =
-      if sessions_without_quorum > 0 then
-        match oldest_open_debate_age_s with
-        | Some age -> age >= slo_target_quorum_age_s
-        | None -> false
-      else
-        match last_activity_age_s with
-        | Some age -> age >= slo_target_quorum_age_s
-        | None -> false
+      match oldest_open_case_age_s with
+      | Some age -> cases_open > 0 && age >= slo_target_quorum_age_s
+      | None -> false
+    in
+    let judge_json = Dashboard_governance.judge_runtime_json base_path in
+    let judge_online =
+      match Yojson.Safe.Util.member "judge_online" judge_json with
+      | `Bool value -> value
+      | _ -> false
     in
     let alert_level =
-      if sessions_without_quorum <= 0 then base_alert
-      else
-        match oldest_open_debate_age_s with
+      if needs_human_gate > 0 then
+        match oldest_open_case_age_s with
         | Some age when age >= bad_age_s -> "bad"
         | _ -> "warn"
+      else base_alert
     in
     (`Assoc [
       ("alert_level", `String alert_level);
-      ("debates_open", `Int debates_open);
-      ("debates_pending", `Int debates_pending);
-      ("sessions_active", `Int sessions_active);
-      ("sessions_without_quorum", `Int sessions_without_quorum);
-      ("oldest_open_debate_age_s", json_int_opt oldest_open_debate_age_s);
+      ("cases_open", `Int cases_open);
+      ("pending_ruling", `Int pending_ruling);
+      ("ready_auto_execute", `Int ready_auto_execute);
+      ("needs_human_gate", `Int needs_human_gate);
+      ("executed", `Int executed);
+      ("blocked", `Int blocked);
+      ("oldest_open_case_age_s", json_int_opt oldest_open_case_age_s);
       ("last_activity_age_s", json_int_opt last_activity_age_s);
-      ("slo_target_quorum_age_s", `Int slo_target_quorum_age_s);
+      ("slo_target_case_age_s", `Int slo_target_quorum_age_s);
       ("slo_breached", `Bool slo_breached);
+      ("judge_online", `Bool judge_online);
       ("warn_age_s", `Int warn_age_s);
       ("bad_age_s", `Int bad_age_s);
     ], true)
   with exn ->
-    Printf.eprintf "[dashboard] council_monitoring_json failed: %s\n%!"
+    Printf.eprintf "[dashboard] governance_monitoring_json failed: %s\n%!"
       (Printexc.to_string exn);
     (`Assoc [
       ("alert_level", `String "bad");
-      ("debates_open", `Int 0);
-      ("debates_pending", `Int 0);
-      ("sessions_active", `Int 0);
-      ("sessions_without_quorum", `Int 0);
-      ("oldest_open_debate_age_s", `Null);
+      ("cases_open", `Int 0);
+      ("pending_ruling", `Int 0);
+      ("ready_auto_execute", `Int 0);
+      ("needs_human_gate", `Int 0);
+      ("executed", `Int 0);
+      ("blocked", `Int 0);
+      ("oldest_open_case_age_s", `Null);
       ("last_activity_age_s", `Null);
-      ("slo_target_quorum_age_s", `Int slo_target_quorum_age_s);
+      ("slo_target_case_age_s", `Int slo_target_quorum_age_s);
       ("slo_breached", `Bool false);
+      ("judge_online", `Bool false);
       ("warn_age_s", `Int warn_age_s);
       ("bad_age_s", `Int bad_age_s);
     ], false)
@@ -2256,8 +2256,8 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let now_ts = Time_compat.now () in
   let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
-  let (council_monitor_json, council_feed_ok) =
-    council_monitoring_json ~now_ts ~base_path:config.base_path
+  let (governance_monitor_json, governance_feed_ok) =
+    governance_monitoring_json ~now_ts ~base_path:config.base_path
   in
 
   let proactive_fallback_warn =
@@ -2316,12 +2316,12 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
       ]);
       ("monitoring", `Assoc [
         ("board", board_monitor_json);
-        ("council", council_monitor_json);
+        ("governance", governance_monitor_json);
       ]);
       ("lodge", lodge_json);
       ("data_quality", `Assoc [
         ("board_contract_ok", `Bool board_contract_ok);
-        ("council_feed_ok", `Bool council_feed_ok);
+        ("governance_feed_ok", `Bool governance_feed_ok);
         ("last_sync_at", `String (Types.now_iso ()));
       ]);
     ]

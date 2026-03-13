@@ -26,6 +26,25 @@ val reset_runtime_state_for_tests : unit -> unit
 (** Test helper: marks sentinel as started without spawning runtime fibers. *)
 val mark_started_for_tests : unit -> unit
 
+(** Parsed board-patrol decision from the sentinel LLM. *)
+type board_patrol_decision = {
+  needs_attention : bool;
+  reason : string option;
+  board_post : string option;
+}
+
+(** Parse the sentinel board-patrol LLM JSON contract. *)
+val board_patrol_decision_of_llm_json : Yojson.Safe.t -> board_patrol_decision
+
+(** Test helper: records the latest board patrol outcome for status_json. *)
+val note_board_patrol_result_for_tests :
+  ?checked_at:float ->
+  action:string ->
+  ?reason:string ->
+  ?stale_count:int ->
+  unit ->
+  unit
+
 (** Ensures the room root/current room state exists before sentinel joins. *)
 val ensure_room_initialized_for_start : Room_utils.config -> unit
 

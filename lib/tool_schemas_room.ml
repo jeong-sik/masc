@@ -736,7 +736,7 @@ Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pu
     ];
   };
   {
-    name = "masc_council_status";
+    name = "masc_governance_status";
     description = "Get Governance V2 status (pending rulings, auto-executable cases, human-gated orders, executed cases).";
     input_schema = `Assoc [
       ("type", `String "object");

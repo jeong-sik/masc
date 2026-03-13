@@ -27,10 +27,6 @@ import type {
   Agent,
   MdalIterationRecord,
   MdalLoop,
-  CouncilDebate,
-  CouncilDebateSummary,
-  CouncilSession,
-  CouncilSessionSummary,
   GovernanceCaseBrief,
   GovernanceCaseBundle,
   GovernanceContextRef,
@@ -578,15 +574,10 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
             needs_human_gate: asInt(raw.summary.needs_human_gate) ?? undefined,
             executed: asInt(raw.summary.executed) ?? undefined,
             blocked: asInt(raw.summary.blocked) ?? undefined,
-            debates: asInt(raw.summary.debates) ?? undefined,
-            voting_sessions: asInt(raw.summary.voting_sessions) ?? undefined,
-            debates_open: asInt(raw.summary.debates_open) ?? undefined,
-            sessions_active: asInt(raw.summary.sessions_active) ?? undefined,
-            sessions_without_quorum: asInt(raw.summary.sessions_without_quorum) ?? undefined,
             ready_to_execute: asInt(raw.summary.ready_to_execute) ?? undefined,
-            oldest_open_debate_age_s:
-              typeof raw.summary.oldest_open_debate_age_s === 'number'
-                ? raw.summary.oldest_open_debate_age_s
+            oldest_open_case_age_s:
+              typeof raw.summary.oldest_open_case_age_s === 'number'
+                ? raw.summary.oldest_open_case_age_s
                 : null,
             last_activity_age_s:
               typeof raw.summary.last_activity_age_s === 'number'
@@ -2254,7 +2245,7 @@ export function fetchKarma(): Promise<unknown> {
   return get('/api/v1/karma')
 }
 
-// --- Control Dock + Council (MCP tools) ---
+// --- Control Dock + Governance (MCP tools) ---
 
 export async function sendBroadcast(agentName: string, message: string): Promise<void> {
   await callMcpTool('masc_broadcast', {
@@ -2378,153 +2369,6 @@ export async function decideGovernanceExecutionOrder(
   } catch {
     return null
   }
-}
-
-export async function fetchDebates(): Promise<CouncilDebate[]> {
-  return withRetries('fetchDebates', async () => {
-    const raw = await get<{ debates?: unknown[] }>('/api/v1/council/debates?limit=100')
-    if (!Array.isArray(raw.debates)) return []
-    return raw.debates
-      .map((item): CouncilDebate | null => {
-        if (!isRecord(item)) return null
-        const id = asString(item.id, '').trim()
-        const topic = asString(item.topic, '').trim()
-        if (!id || !topic) return null
-        return {
-          id,
-          topic,
-          status: asString(item.status, 'open'),
-          argument_count: asNumber(item.argument_count, 0),
-          created_at: toIsoTimestamp(item.created_at_iso ?? item.created_at),
-        }
-      })
-      .filter((row): row is CouncilDebate => row !== null)
-  })
-}
-
-export async function fetchCouncilSessions(): Promise<CouncilSession[]> {
-  return withRetries('fetchCouncilSessions', async () => {
-    const raw = await get<{ sessions?: unknown[] }>('/api/v1/council/sessions?limit=100')
-    if (!Array.isArray(raw.sessions)) return []
-    return raw.sessions
-      .map((item): CouncilSession | null => {
-        if (!isRecord(item)) return null
-        const id = asString(item.id, '').trim()
-        const topic = asString(item.topic, '').trim()
-        if (!id || !topic) return null
-        return {
-          id,
-          topic,
-          initiator: asString(item.initiator, 'system'),
-          votes: asNumber(item.votes, 0),
-          quorum: asNumber(item.quorum, 0),
-          state: asString(item.state, 'open'),
-          created_at: toIsoTimestamp(item.created_at_iso ?? item.created_at),
-        }
-      })
-      .filter((row): row is CouncilSession => row !== null)
-  })
-}
-
-export async function startDebate(topic: string): Promise<CouncilDebate | null> {
-  const text = await callMcpTool('masc_debate_start', { topic })
-  try {
-    return JSON.parse(text) as CouncilDebate
-  } catch {
-    return null
-  }
-}
-
-export async function fetchDebateStatus(debateId: string): Promise<CouncilDebateSummary | null> {
-  return withRetries('fetchDebateStatus', async () => {
-    const safeId = encodeURIComponent(debateId)
-    const raw = await get<Record<string, unknown>>(`/api/v1/council/debates/${safeId}/summary`)
-    if (!isRecord(raw)) return null
-    const debateRaw = isRecord(raw.debate) ? raw.debate : raw
-    const debateIdValue = asString(debateRaw.id, '').trim()
-    const topic = asString(debateRaw.topic, '').trim()
-    if (!debateIdValue || !topic) return null
-    return {
-      debate: {
-        id: debateIdValue,
-        topic,
-        status: asString(debateRaw.status, 'open'),
-        created_at: asNullableIsoTimestamp(debateRaw.created_at_iso ?? debateRaw.created_at),
-        closed_at: asNullableIsoTimestamp(debateRaw.closed_at),
-      },
-      arguments: Array.isArray(raw.arguments)
-        ? raw.arguments.flatMap(item => {
-            if (!isRecord(item)) return []
-            return [{
-              index: asNumber(item.index, 0),
-              agent: asString(item.agent, 'unknown'),
-              position: asString(item.position, 'neutral'),
-              content: asString(item.content, ''),
-              evidence: asStringList(item.evidence),
-              reply_to: asInt(item.reply_to) ?? null,
-              mentions: asStringList(item.mentions),
-              archetype: asNullableString(item.archetype),
-              created_at: asNullableIsoTimestamp(item.created_at),
-            }]
-          })
-        : [],
-      summary: {
-        support_count: isRecord(raw.summary) ? asNumber(raw.summary.support_count, 0) : asNumber(raw.support_count, 0),
-        oppose_count: isRecord(raw.summary) ? asNumber(raw.summary.oppose_count, 0) : asNumber(raw.oppose_count, 0),
-        neutral_count: isRecord(raw.summary) ? asNumber(raw.summary.neutral_count, 0) : asNumber(raw.neutral_count, 0),
-        total_arguments: isRecord(raw.summary) ? asNumber(raw.summary.total_arguments, 0) : asNumber(raw.total_arguments, 0),
-        summary_text: isRecord(raw.summary) ? asString(raw.summary.summary_text, '') : asString(raw.summary_text, ''),
-      },
-      context: normalizeGovernanceContextRef(raw.context),
-      judgment: normalizeGovernanceJudgment(raw.judgment),
-    }
-  })
-}
-
-export async function fetchConsensusSessionSummary(sessionId: string): Promise<CouncilSessionSummary | null> {
-  return withRetries('fetchConsensusSessionSummary', async () => {
-    const safeId = encodeURIComponent(sessionId)
-    const raw = await get<Record<string, unknown>>(`/api/v1/council/sessions/${safeId}/summary`)
-    if (!isRecord(raw) || !isRecord(raw.session)) return null
-    const session = raw.session
-    const id = asString(session.id, '').trim()
-    const topic = asString(session.topic, '').trim()
-    if (!id || !topic) return null
-    return {
-      session: {
-        id,
-        topic,
-        state: asString(session.state, 'open'),
-        initiator: asString(session.initiator, 'system'),
-        quorum: asNumber(session.quorum, 0),
-        threshold: asNumber(session.threshold, 0),
-        created_at: asNullableIsoTimestamp(session.created_at),
-        closed_at: asNullableIsoTimestamp(session.closed_at),
-      },
-      votes: Array.isArray(raw.votes)
-        ? raw.votes.flatMap(item => {
-            if (!isRecord(item)) return []
-            return [{
-              agent: asString(item.agent, 'unknown'),
-              decision: asString(item.decision, 'abstain'),
-              reason: asString(item.reason, ''),
-              timestamp: asNullableIsoTimestamp(item.timestamp),
-              weight: typeof item.weight === 'number' ? item.weight : undefined,
-              archetype: asNullableString(item.archetype),
-            }]
-          })
-        : [],
-      summary: {
-        approve_count: isRecord(raw.summary) ? asNumber(raw.summary.approve_count, 0) : 0,
-        reject_count: isRecord(raw.summary) ? asNumber(raw.summary.reject_count, 0) : 0,
-        abstain_count: isRecord(raw.summary) ? asNumber(raw.summary.abstain_count, 0) : 0,
-        quorum_met: isRecord(raw.summary) ? asBoolean(raw.summary.quorum_met, false) : false,
-        result: isRecord(raw.summary) ? asNullableString(raw.summary.result) : null,
-      },
-      context: normalizeGovernanceContextRef(raw.context),
-      judgment: normalizeGovernanceJudgment(raw.judgment),
-    }
-  })
 }
 
 function normalizeMdalStatus(raw: unknown): MdalLoop['status'] {

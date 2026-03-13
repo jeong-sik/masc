@@ -3,7 +3,7 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_execute";
-    description = "Execute an action based on council decision. \
+    description = "Execute an action based on governance decision. \
 Matches topic pattern (e.g., 'Merge PR #123') and runs corresponding action.";
     input_schema = `Assoc [
       ("type", `String "object");

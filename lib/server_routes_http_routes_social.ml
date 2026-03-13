@@ -74,18 +74,6 @@ let add_routes router =
          respond_json_with_cors ~status request reqd (Yojson.Safe.to_string json)
        ) request reqd)
 
-  |> Http.Router.get "/api/v1/council/debates" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
-         respond_json_with_cors ~status:`Bad_request request reqd
-           (Yojson.Safe.to_string removed_council_surface_json)
-       ) request reqd)
-
-  |> Http.Router.get "/api/v1/council/sessions" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
-         respond_json_with_cors ~status:`Bad_request request reqd
-           (Yojson.Safe.to_string removed_council_surface_json)
-       ) request reqd)
-
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let hearth = query_param req "hearth" in

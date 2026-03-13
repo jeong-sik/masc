@@ -54,6 +54,33 @@ let test_sentinel_status_reports_embedded_guardian_runtime () =
   check string "guardian status owner follows sentinel" "sentinel"
     (guardian |> U.member "runtime_owner" |> U.to_string)
 
+let test_sentinel_board_patrol_status_defaults_to_silent () =
+  reset_runtime_state ();
+  Sentinel.mark_started_for_tests ();
+  Sentinel.note_board_patrol_result_for_tests ~checked_at:1234567890.0
+    ~action:"silent" ~reason:"no stale posts over 7d" ~stale_count:0 ();
+  let sentinel = Sentinel.status_json () in
+  let patrol = sentinel |> U.member "board_patrol" in
+  check string "last action" "silent" (patrol |> U.member "last_action" |> U.to_string);
+  check string "last reason" "no stale posts over 7d"
+    (patrol |> U.member "last_reason" |> U.to_string);
+  check int "last stale count" 0 (patrol |> U.member "last_stale_count" |> U.to_int)
+
+let test_board_patrol_decision_parser () =
+  let decision =
+    Sentinel.board_patrol_decision_of_llm_json
+      (`Assoc
+        [
+          ("needs_attention", `Bool true);
+          ("reason", `String "2 stale posts need review");
+          ("board_post", `String "Two stale sentinel-board posts need review.");
+        ])
+  in
+  check bool "needs attention" true decision.needs_attention;
+  check (option string) "reason" (Some "2 stale posts need review") decision.reason;
+  check (option string) "board post"
+    (Some "Two stale sentinel-board posts need review.") decision.board_post
+
 let () =
   run "Guardian/Sentinel"
     [
@@ -62,5 +89,7 @@ let () =
         test_case "guardian status defaults" `Quick test_guardian_status_defaults;
         test_case "guardian embedded loops ignore master switch" `Quick test_guardian_embedded_loops_ignore_master_switch;
         test_case "sentinel reports embedded guardian runtime" `Quick test_sentinel_status_reports_embedded_guardian_runtime;
+        test_case "sentinel board patrol status defaults to silent" `Quick test_sentinel_board_patrol_status_defaults_to_silent;
+        test_case "board patrol decision parser" `Quick test_board_patrol_decision_parser;
       ]);
     ]

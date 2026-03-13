@@ -178,20 +178,6 @@ let make_extended_handler routes =
                  let base_path = state.Mcp_server.room_config.base_path in
                  let (status, json) = governance_case_detail_json ~base_path ~case_id in
                  Http.Response.json ~status (Yojson.Safe.to_string json) reqd)
-        | `GET, p
-          when String.length p > 32
-               && String.length p >= 24 + 8
-               && String.sub p 0 24 = "/api/v1/council/debates/"
-               && String.ends_with ~suffix:"/summary" p ->
-            Http.Response.json ~status:`Bad_request
-              (Yojson.Safe.to_string removed_council_surface_json) reqd
-        | `GET, p
-          when String.length p > 33
-               && String.length p >= 25 + 8
-               && String.sub p 0 25 = "/api/v1/council/sessions/"
-               && String.ends_with ~suffix:"/summary" p ->
-            Http.Response.json ~status:`Bad_request
-              (Yojson.Safe.to_string removed_council_surface_json) reqd
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
             let post_id = String.sub p 14 (String.length p - 14) in
             let format = Option.value ~default:"nested" (query_param request "format") in

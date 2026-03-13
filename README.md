@@ -114,6 +114,10 @@ proof/read path notes:
 - benchmark harness truth comes from MCP tools first: `masc_observe_swarm`, `masc_runtime_verify`
 - provider HTTP endpoints remain backend/runtime substrate, not canonical operator/harness read paths
 
+## Release Governance
+
+`v2.86.1` stabilization 기준과 patch lane 운영 규칙은 [RELEASE-ROADMAP.md](./docs/RELEASE-ROADMAP.md)를 따른다.
+
 ## 기본 사용 흐름
 
 ```text

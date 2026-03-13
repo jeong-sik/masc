@@ -306,6 +306,27 @@ let authorize_permission_request ~base_path ~permission request :
 let authorize_read_request ~base_path request : (unit, Types.masc_error) result =
   authorize_permission_request ~base_path ~permission:Types.CanReadState request
 
+let authorize_tool_request ~base_path ~tool_name request :
+    (unit, Types.masc_error) result =
+  let auth_cfg = Auth.load_auth_config base_path in
+  let token = auth_token_from_request request in
+  match ensure_strict_http_token_auth ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg with
+  | Error msg -> Error (Types.Unauthorized msg)
+  | Ok auth_cfg -> (
+      match resolve_agent_name_for_auth ~base_path request ~token with
+      | Error err -> Error err
+      | Ok agent_name_opt ->
+          let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+          if
+            auth_cfg.enabled && auth_cfg.require_token && token <> None
+            && agent_name_opt = None
+          then
+            Error
+              (Types.Unauthorized
+                 "Agent name required (X-MASC-Agent or token-bound credential)")
+          else
+            Auth.authorize_tool base_path ~agent_name ~token ~tool_name)
+
 let rec with_public_read handler request reqd =
   let strict = http_auth_strict_enabled () in
   let path = Http_server_eio.Request.path request in
@@ -331,6 +352,15 @@ and with_permission_auth ~permission handler request reqd =
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       match authorize_permission_request ~base_path ~permission request with
+      | Ok () -> handler state request reqd
+      | Error err -> respond_auth_error request reqd err
+
+and with_tool_auth ~tool_name handler request reqd =
+  match !server_state with
+  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state ->
+      let base_path = state.Mcp_server.room_config.base_path in
+      match authorize_tool_request ~base_path ~tool_name request with
       | Ok () -> handler state request reqd
       | Error err -> respond_auth_error request reqd err
 

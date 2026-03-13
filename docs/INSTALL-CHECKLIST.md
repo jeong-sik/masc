@@ -18,6 +18,7 @@
 curl http://127.0.0.1:8935/health
 
 curl -sS http://127.0.0.1:8935/mcp \
+  -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```

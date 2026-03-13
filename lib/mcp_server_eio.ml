@@ -3135,7 +3135,7 @@ let execute_with_timeout () =
   if !local_timeout_hit then timeout_hit := true;
   result
 in
-    let (success, message, attempts) =
+    let (success, message, _attempts) =
     if is_read_only then
     call_tool_with_readonly_retry
       ~clock
@@ -3176,30 +3176,6 @@ in
   (* Track in-memory call counter only for declared tool names. *)
   Tool_registry.record_call_if_known ~tool_name:name ~success ~duration_ms;
 
-  let trace_id =
-    match id with
-    | `String s -> s
-    | `Int i -> string_of_int i
-    | `Intlit s -> s
-    | `Float f -> Printf.sprintf "%0.0f" f
-    | _ -> "unknown"
-  in
-  let (status, required_follow_up) = parse_status_from_message ~success ~message in
-  let quality = quality_from_result ~success ~message ~attempts in
-  let envelope =
-    `Assoc [
-      ("kind", `String "tool_call");
-      ("summary", `String message);
-      ("status", `String status);
-      ("tool", `String name);
-      ("required_follow_up",
-       (match required_follow_up with
-        | None -> `Null
-        | Some value -> `String value));
-      ("trace_id", `String trace_id);
-      ("quality", quality);
-    ]
-  in
   let content_items =
     [
       `Assoc
@@ -3219,7 +3195,6 @@ in
   in
   let result_fields =
     [
-      ("resultEnvelope", envelope);
       ("content", `List content_items);
       ("isError", `Bool (not success));
     ]
@@ -3289,7 +3264,7 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
 
 let tool_allowed_in_profile profile tool_name =
   match profile with
-  | Full -> true
+  | Full -> Tool_catalog.is_default_mcp_callable tool_name
   | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
 
 let is_destructive_tool_name name =
@@ -3405,7 +3380,7 @@ let tool_output_schema_field = function
            ])
   | _ -> None
 
-let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
+let tool_json_for_profile ?usage_summary:_ profile (schema : Types.tool_schema) =
   let base =
     [
       ("name", `String schema.name);
@@ -3416,27 +3391,12 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
     ]
-    @ Tool_catalog.metadata_to_fields schema.name
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
-    @
-    match usage_summary with
-    | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
-    | None -> []
   in
   `Assoc base
 
 type cursor_params = { cursor : string option }
-
-type tools_list_params = {
-  names : string list option;
-  include_hidden : bool;
-  include_deprecated : bool;
-  include_usage : bool;
-  mode : string option;
-  tier : string option;
-  cursor : string option;
-}
 
 let ( let* ) = Result.bind
 
@@ -3457,13 +3417,6 @@ let cursor_param payload =
       else
         Ok (Some trimmed)
   | _ -> Error "Invalid params: cursor must be a string"
-
-let bool_param payload key =
-  let open Yojson.Safe.Util in
-  match payload |> member key with
-  | `Null -> Ok false
-  | `Bool value -> Ok value
-  | _ -> Error (Printf.sprintf "Invalid params: %s must be a boolean" key)
 
 let decode_cursor_offset = function
   | None -> Ok 0
@@ -3508,90 +3461,12 @@ let cursor_only_params params =
   | Some (`Assoc _ as payload) -> cursor_param payload
   | Some _ -> Error "Invalid params: expected object"
 
-let requested_tool_list_params params =
-  let open Yojson.Safe.Util in
-  match params with
-  | None ->
-      Ok {
-        names = None;
-        include_hidden = false;
-        include_deprecated = false;
-        include_usage = false;
-        mode = None;
-        tier = None;
-        cursor = None;
-      }
-  | Some (`Assoc _ as payload) -> (
-      let names_result =
-        match payload |> member "names" with
-        | `Null -> Ok None
-        | `List items ->
-            items
-            |> List.fold_left
-                 (fun acc item ->
-                   match (acc, item) with
-                   | Error _ as err, _ -> err
-                   | Ok names, `String value -> Ok (value :: names)
-                   | Ok _, _ ->
-                       Error "Invalid params: names must be an array of strings")
-                 (Ok [])
-            |> Result.map (fun names -> Some (List.rev names))
-        | _ -> Error "Invalid params: names must be an array of strings"
-      in
-      let mode_result =
-        match payload |> member "mode" with
-        | `Null -> Ok None
-        | `String s -> Ok (Some s)
-        | _ -> Error "Invalid params: mode must be a string"
-      in
-      let tier_result =
-        match payload |> member "tier" with
-        | `Null -> Ok None
-        | `String s -> (
-            match Tool_catalog.tier_of_string (String.lowercase_ascii s) with
-            | Some _ -> Ok (Some s)
-            | None -> Error "Invalid params: tier must be one of: essential, standard, full")
-        | _ -> Error "Invalid params: tier must be a string"
-      in
-      match names_result with
-      | Error _ as err -> err
-      | Ok names -> (
-          match cursor_param payload with
-          | Error _ as err -> err
-          | Ok cursor -> (
-          match mode_result with
-          | Error _ as err -> err
-          | Ok mode -> (
-          match tier_result with
-          | Error _ as err -> err
-          | Ok tier -> (
-          match bool_param payload "include_hidden" with
-          | Error _ as err -> err
-          | Ok include_hidden -> (
-              match bool_param payload "include_deprecated" with
-              | Error _ as err -> err
-              | Ok include_deprecated -> (
-                  match bool_param payload "include_usage" with
-                  | Error _ as err -> err
-                  | Ok include_usage ->
-                      Ok {
-                        names;
-                        include_hidden;
-                        include_deprecated;
-                        include_usage;
-                        mode;
-                        tier;
-                        cursor;
-                      })))))))
-  | Some _ -> Error "Invalid params: expected object"
-
 let validate_optional_meta payload =
   match Yojson.Safe.Util.member "_meta" payload with
   | `Null
   | `Assoc _ -> Ok ()
   | _ -> Error "Invalid params: _meta must be an object"
 let parse_cursor_only_params params =
-  let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
   let allowed = [ "_meta"; "cursor" ] in
   let unknown =
@@ -3606,10 +3481,9 @@ let parse_cursor_only_params params =
   else
     let payload = `Assoc fields in
     let* () = validate_optional_meta payload in
-    match payload |> member "cursor" with
-    | `Null -> Ok { cursor = None }
-    | `String cursor -> Ok { cursor = Some cursor }
-    | _ -> Error "Invalid params: cursor must be a string"
+    match cursor_param payload with
+    | Ok cursor -> Ok { cursor }
+    | Error msg -> Error msg
 
 let list_page_size = 128
 
@@ -3663,44 +3537,21 @@ let page_items_with_cursor ~kind items cursor =
 let handle_initialize_eio ?(profile = Full) id params =
   match validate_initialize_params params with
   | Error msg -> make_error ~id (-32602) msg
-  | Ok () ->
-      let protocol_version =
-        params |> protocol_version_from_params |> normalize_protocol_version
-      in
-      make_response ~id (`Assoc [
-        ("protocolVersion", `String protocol_version);
-        ("serverInfo", Mcp_server.server_info);
-        ("capabilities", Mcp_server.capabilities);
-        ("instructions", `String (match profile with Full -> default_instructions | Operator_remote -> operator_remote_instructions));
-      ])
+  | Ok () -> (
+      let protocol_version = params |> protocol_version_from_params in
+      match Mcp_server.validate_protocol_version protocol_version with
+      | Error msg -> make_error ~id (-32602) msg
+      | Ok protocol_version ->
+          make_response ~id (`Assoc [
+            ("protocolVersion", `String protocol_version);
+            ("serverInfo", Mcp_server.server_info);
+            ("capabilities", Mcp_server.capabilities);
+            ("instructions", `String (match profile with Full -> default_instructions | Operator_remote -> operator_remote_instructions));
+          ]))
 
-let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_usage = false) ?mode ?tier ?cursor
-    state id =
-  let usage_summary =
-    if include_usage then
-      Some (Telemetry_eio.summarize_tool_usage ?fs:state.Mcp_server.fs state.Mcp_server.room_config)
-    else
-      None
-  in
-  let tier_filter =
-    match tier with
-    | None -> None
-    | Some s -> Tool_catalog.tier_of_string (String.lowercase_ascii s)
-  in
+let handle_list_tools_eio ?(profile = Full) ?cursor state id =
   let tools =
-    tool_schemas_for_profile ~include_hidden ~include_deprecated
-      ?mode_override:mode state profile
-    |> (match names with
-       | None -> Fun.id
-       | Some wanted ->
-           List.filter (fun (schema : Types.tool_schema) ->
-             List.mem schema.name wanted))
-    |> (match tier_filter with
-       | None -> Fun.id
-       | Some t ->
-           List.filter (fun (schema : Types.tool_schema) ->
-             Tool_catalog.is_in_tier t schema.name))
+    tool_schemas_for_profile state profile
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
            String.compare a.name b.name)
   in
@@ -3710,23 +3561,13 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
       let result_fields =
         [
           ( "tools",
-            `List
-              (List.map (tool_json_for_profile ?usage_summary profile) page) );
+            `List (List.map (tool_json_for_profile profile) page) );
         ]
         @ maybe_assoc_field "nextCursor"
             (Option.map (fun value -> `String value) next_cursor)
       in
       let result_fields =
         result_fields
-        @
-        match usage_summary with
-        | Some summary ->
-            [
-              ("usageTelemetryAvailable", `Bool summary.telemetry_available);
-              ("usageTelemetryPath", `String summary.telemetry_path);
-              ("usageTotalCalls", `Int summary.total_calls);
-            ]
-        | None -> []
       in
       make_response ~id (`Assoc result_fields)
 
@@ -3914,12 +3755,10 @@ let handle_request
                        | Ok { cursor } -> handle_list_prompts_eio id cursor)
                    | "prompts/get" -> handle_get_prompt_eio state id req.params
                    | "tools/list" -> (
-                       match requested_tool_list_params req.params with
+                       match parse_cursor_only_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier; cursor } ->
-                           handle_list_tools_eio ~profile ?names ~include_hidden
-                             ~include_deprecated ~include_usage ?mode ?tier ?cursor
-                             state id)
+                       | Ok { cursor } ->
+                           handle_list_tools_eio ~profile ?cursor state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

@@ -55,6 +55,32 @@ let classify_mcp_accept (request : Httpun.Request.t) =
   Http_negotiation.classify_mcp_accept ~allow_legacy:allow_legacy_accept
     (Httpun.Headers.get request.headers "accept")
 
+let body_notification_method body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc fields -> (
+        match List.assoc_opt "method" fields with
+        | Some (`String method_) when not (List.mem_assoc "id" fields) ->
+            Some method_
+        | _ -> None)
+    | _ -> None
+  with Yojson.Json_error _ -> None
+
+let is_notification_method method_ =
+  let prefix = "notifications/" in
+  let prefix_len = String.length prefix in
+  String.length method_ >= prefix_len
+  && String.sub method_ 0 prefix_len = prefix
+
+let classify_mcp_accept_for_body request body_str =
+  match classify_mcp_accept request with
+  | Http_negotiation.Rejected -> (
+      match body_notification_method body_str with
+      | Some method_ when is_notification_method method_ ->
+          Http_negotiation.Legacy_accepted
+      | _ -> Http_negotiation.Rejected)
+  | accept_mode -> accept_mode
+
 let legacy_accept_warning_headers = function
   | Http_negotiation.Legacy_accepted ->
       [

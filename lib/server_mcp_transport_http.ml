@@ -182,11 +182,7 @@ let validate_protocol_version_continuity ~session_id request =
   | Some expected -> (
       let ( let* ) = Result.bind in
       match provided with
-      | None ->
-          Error
-            (Printf.sprintf
-               "MCP-Protocol-Version header required for existing session %s (expected %s)."
-               session_id expected)
+      | None -> Ok ()
       | Some version ->
           let* () = validate_supported version in
           if String.equal version expected then
@@ -261,6 +257,10 @@ let allow_legacy_accept = env_flag "MASC_ALLOW_LEGACY_ACCEPT"
 let classify_mcp_accept (request : Httpun.Request.t) =
   Http_negotiation.classify_mcp_accept ~allow_legacy:allow_legacy_accept
     (Httpun.Headers.get request.headers "accept")
+
+let classify_mcp_accept_for_body request body_str =
+  Server_mcp_transport_http_headers.classify_mcp_accept_for_body request
+    body_str
 
 let legacy_accept_warning_headers = function
   | Http_negotiation.Legacy_accepted ->
@@ -589,35 +589,39 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
               respond_mcp_auth_error ~deps request reqd ~session_id
                 ~protocol_version msg
           | Ok () ->
-              match classify_mcp_accept request with
-              | Http_negotiation.Rejected ->
-                  let body =
-                    Yojson.Safe.to_string
-                      (`Assoc
-                        [
-                          ("jsonrpc", `String "2.0");
-                          ( "error",
-                            `Assoc
-                              [
-                                ("code", `Int (-32600));
-                                ( "message",
-                                  `String
-                                    "Invalid Accept header: must include application/json and text/event-stream. Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility." );
-                              ] );
-                        ])
+              Http.Request.read_body_async reqd (fun body_str ->
+                  let accept_mode =
+                    Server_mcp_transport_http_headers.classify_mcp_accept_for_body
+                      request body_str
                   in
-                  let headers =
-                    Httpun.Headers.of_list
-                      (("content-length", string_of_int (String.length body))
-                      :: json_headers ~deps session_id protocol_version origin)
-                  in
-                  let response = Httpun.Response.create ~headers `Bad_request in
-                  Httpun.Reqd.respond_with_string reqd response body
-              | accept_mode ->
-                  let accept_warn_headers =
-                    legacy_accept_warning_headers accept_mode
-                  in
-                  Http.Request.read_body_async reqd (fun body_str ->
+                  match accept_mode with
+                  | Http_negotiation.Rejected ->
+                      let body =
+                        Yojson.Safe.to_string
+                          (`Assoc
+                            [
+                              ("jsonrpc", `String "2.0");
+                              ( "error",
+                                `Assoc
+                                  [
+                                    ("code", `Int (-32600));
+                                    ( "message",
+                                      `String
+                                        "Invalid Accept header: must include application/json and text/event-stream. Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility." );
+                                  ] );
+                            ])
+                      in
+                      let headers =
+                        Httpun.Headers.of_list
+                          (("content-length", string_of_int (String.length body))
+                          :: json_headers ~deps session_id protocol_version origin)
+                      in
+                      let response = Httpun.Response.create ~headers `Bad_request in
+                      Httpun.Reqd.respond_with_string reqd response body
+                  | accept_mode ->
+                      let accept_warn_headers =
+                        legacy_accept_warning_headers accept_mode
+                      in
                       try
                         match request_runtime_result deps with
                         | Error msg ->
@@ -635,8 +639,9 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                               get_protocol_version_for_session ~session_id request
                             in
                             let wants_sse =
-                              Http_negotiation.accepts_sse_header
-                                (Httpun.Headers.get request.headers "accept")
+                              accept_mode = Http_negotiation.Streamable
+                              && Http_negotiation.accepts_sse_header
+                                   (Httpun.Headers.get request.headers "accept")
                               && not force_json_response
                               && not (request_force_json_response request)
                             in

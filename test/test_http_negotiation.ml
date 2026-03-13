@@ -49,10 +49,75 @@ let test_classify_mcp_accept () =
     (classify_mcp_accept ~allow_legacy:false (Some "text/event-stream"));
   ()
 
+let test_protocol_continuity_allows_missing_header () =
+  let module Session = Masc_mcp.Server_mcp_transport_http in
+  let session_id = "compat-session-missing-header" in
+  let headers = Httpun.Headers.of_list [] in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  Session.remember_protocol_version session_id "2025-11-25";
+  Fun.protect
+    ~finally:(fun () -> Session.forget_mcp_session session_id)
+    (fun () ->
+      match Session.validate_protocol_version_continuity ~session_id request with
+      | Ok () -> ()
+      | Error msg -> failf "expected missing protocol header to be accepted, got %s" msg)
+
+let test_protocol_continuity_rejects_mismatch () =
+  let module Session = Masc_mcp.Server_mcp_transport_http in
+  let session_id = "compat-session-mismatch" in
+  let headers =
+    Httpun.Headers.of_list [("mcp-protocol-version", "2025-03-26")]
+  in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  Session.remember_protocol_version session_id "2025-11-25";
+  Fun.protect
+    ~finally:(fun () -> Session.forget_mcp_session session_id)
+    (fun () ->
+      match Session.validate_protocol_version_continuity ~session_id request with
+      | Ok () -> fail "expected mismatched protocol version to be rejected"
+      | Error msg ->
+          check bool "mentions mismatch" true
+            (String.length msg > 0
+            && String.contains msg ':'))
+
+let test_notification_body_relaxes_accept () =
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let headers = Httpun.Headers.of_list [("accept", "application/json")] in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  let body =
+    {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|}
+  in
+  let mode = Transport.classify_mcp_accept_for_body request body in
+  check bool "notification legacy accepted" true
+    (match mode with
+    | Masc_mcp.Mcp_protocol.Http_negotiation.Legacy_accepted -> true
+    | _ -> false)
+
+let test_request_body_stays_strict () =
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let headers = Httpun.Headers.of_list [("accept", "application/json")] in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  let body =
+    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}|}
+  in
+  let mode = Transport.classify_mcp_accept_for_body request body in
+  check bool "request still rejected" true
+    (match mode with
+    | Masc_mcp.Mcp_protocol.Http_negotiation.Rejected -> true
+    | _ -> false)
+
 let () =
   run "http_negotiation"
     [
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
       ("classify_mcp_accept", [test_case "strict vs legacy fallback" `Quick test_classify_mcp_accept]);
+      ("protocol_continuity", [
+        test_case "missing header falls back to session" `Quick test_protocol_continuity_allows_missing_header;
+        test_case "mismatch still rejects" `Quick test_protocol_continuity_rejects_mismatch;
+      ]);
+      ("body_aware_accept", [
+        test_case "notification relaxes accept" `Quick test_notification_body_relaxes_accept;
+        test_case "request remains strict" `Quick test_request_body_stays_strict;
+      ]);
     ]

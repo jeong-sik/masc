@@ -264,21 +264,25 @@ let make_request_handler ~sw ~clock ~server_start_time =
                      | Error msg ->
                          let body = Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg in
                          h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
-                     | Ok _cred_opt -> (
-                         match classify_mcp_accept httpun_request with
-                         | Http_negotiation.Rejected ->
-                             let body =
-                               json_rpc_error (-32600)
-                                 "Invalid Accept header: must include application/json and text/event-stream. \
-                                  Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility."
+                     | Ok _cred_opt ->
+                         h2_read_body h2_reqd (fun body_str ->
+                             let accept_mode =
+                               Server_mcp_transport_http_headers
+                               .classify_mcp_accept_for_body httpun_request body_str
                              in
-                             h2_respond_json h2_reqd body ~status:`Bad_request
-                               ~extra_headers:(cors @ mcp_headers session_id protocol_version)
-                         | accept_mode ->
-                             let accept_warn_headers =
-                               legacy_accept_warning_headers accept_mode
-                             in
-                             h2_read_body h2_reqd (fun body_str ->
+                             match accept_mode with
+                             | Http_negotiation.Rejected ->
+                                 let body =
+                                   json_rpc_error (-32600)
+                                     "Invalid Accept header: must include application/json and text/event-stream. \
+                                      Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility."
+                                 in
+                                 h2_respond_json h2_reqd body ~status:`Bad_request
+                                   ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                             | accept_mode ->
+                                 let accept_warn_headers =
+                                   legacy_accept_warning_headers accept_mode
+                                 in
                                  let state = get_server_state ()
                                  in
                                  let response_json =
@@ -306,7 +310,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
                                        ~extra_headers:mcp_hdrs
                                  | json ->
                                      let body = Yojson.Safe.to_string json in
-                                     h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs)))))
+                                     h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs))))
 
       | `DELETE, "/mcp" | `DELETE, "/mcp/managed" | `DELETE, "/mcp/operator" ->
           let profile =

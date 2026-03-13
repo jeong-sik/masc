@@ -187,6 +187,9 @@ let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
     "   DELETE /mcp/operator → Remote operator session termination\n%!";
   Printf.printf "   POST /graphql → GraphQL (read-only)\n%!";
   Printf.printf "   GET  /sse → legacy SSE stream (deprecated; use /mcp)\n%!";
+  Printf.printf "   GET  /api/v1/events → Social motion replay API\n%!";
+  Printf.printf "   GET  /api/v1/events/stream → Social motion SSE stream\n%!";
+  Printf.printf "   GET  /api/v1/social-graph → Social graph snapshot\n%!";
   Printf.printf
     "   POST /messages → legacy client->server messages (deprecated)\n%!";
   Printf.printf "   GET  /health → Health check\n%!"

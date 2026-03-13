@@ -74,6 +74,7 @@
    server_command_plane_http_stream
    server_command_plane_http_mutations
    server_command_plane_http_help
+   server_social_http
    server_mcp_transport_http
    server_mcp_transport_http_types
    server_mcp_transport_http_session
@@ -95,6 +96,7 @@
    glm_pool
    graphql_endpoint
    graphql_api
+   social_motion
    handover_eio
    hat
    heartbeat

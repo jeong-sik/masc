@@ -34,15 +34,6 @@ import {
 } from './mission-cards'
 import { ProvenanceStrip } from './common/provenance-strip'
 
-const RECENT_SESSION_CHANGE_WINDOW_MS = 15 * 60 * 1000
-const QUIET_KEEPER_TURN_WINDOW_SEC = 30 * 60
-
-function isRecentTimestamp(iso?: string | null, windowMs = RECENT_SESSION_CHANGE_WINDOW_MS): boolean {
-  if (!iso) return false
-  const timestamp = Date.parse(iso)
-  return !Number.isNaN(timestamp) && Date.now() - timestamp <= windowMs
-}
-
 export function Mission() {
   const mission = missionSnapshot.value
   if (missionLoading.value && !mission) {
@@ -75,40 +66,28 @@ export function Mission() {
     .filter(item => item.related_session_ids.length > 0)
     .slice(0, 6)
   const internalSignals = mission.internal_signals.slice(0, 3)
-  const urgentSessions = sessionRows.filter(row => {
-    const tone = row.top_attention?.severity ?? row.health ?? row.status
-    return Boolean(row.blocker_summary)
-      || row.top_recommendation != null
-      || toneClass(tone) !== 'ok'
-  }).length
-  const criticalSessions = sessionRows.filter(row => {
-    const tone = row.top_attention?.severity ?? row.health ?? row.status
-    return toneClass(tone) === 'bad'
-  }).length
-  const recentlyChangedSessions = sessionRows.filter(row =>
-    isRecentTimestamp(row.last_event_at) || isRecentTimestamp(row.started_at)
+  const attentionSessions = sessionRows.filter(row =>
+    row.top_attention != null || row.related_attention_count > 0
   ).length
-  const participantSignals = new Map<string, { responded: boolean }>()
+  const blockerSessions = sessionRows.filter(row => Boolean(row.blocker_summary)).length
+  const eventRecordedSessions = sessionRows.filter(row =>
+    Boolean(row.last_event_summary) || Boolean(row.last_event_at)
+  ).length
+  const participantPreviewNames = new Set<string>()
+  const outputPreviewNames = new Set<string>()
   for (const session of sessionRows) {
     for (const preview of session.member_previews ?? []) {
-      const existing = participantSignals.get(preview.agent_name) ?? { responded: false }
-      participantSignals.set(preview.agent_name, {
-        responded: existing.responded || Boolean(preview.recent_output_preview),
-      })
+      participantPreviewNames.add(preview.agent_name)
+      if (preview.recent_output_preview) outputPreviewNames.add(preview.agent_name)
     }
   }
-  const observedParticipants = participantSignals.size
-  const respondingParticipants =
-    [...participantSignals.values()].filter(item => item.responded).length
-  const unansweredParticipants = Math.max(observedParticipants - respondingParticipants, 0)
-  const quietKeepers = keeperRows.filter(row => {
-    const statusTone = toneClass(row.brief.status ?? row.keeper?.status ?? 'ok')
-    const staleTurn =
-      typeof row.brief.last_turn_ago_s === 'number'
-      && row.brief.last_turn_ago_s >= QUIET_KEEPER_TURN_WINDOW_SEC
-    return statusTone !== 'ok' || (staleTurn && !row.recentOutput)
+  const participantPreviewCount = participantPreviewNames.size
+  const outputPreviewParticipantCount = outputPreviewNames.size
+  const keeperStatusWarnings = keeperRows.filter(row => {
+    const status = (row.brief.status ?? '').trim().toLowerCase()
+    return status !== '' && status !== 'ok'
   }).length
-  const responseSilentSessions = sessionRows.filter(row => {
+  const outputPreviewSilentSessions = sessionRows.filter(row => {
     const memberPreviews = row.member_previews ?? []
     return memberPreviews.length === 0
       || memberPreviews.every(member => !member.recent_output_preview)
@@ -151,38 +130,44 @@ export function Mission() {
         <${SummaryStat}
           label="활성 세션"
           value=${sessionRows.length}
-          detail=${urgentSessions > 0 ? `${Math.max(sessionRows.length - urgentSessions, 0)}개 안정 흐름` : '지금 진행중인 협업 단위'}
-          tone=${criticalSessions > 0 ? 'warn' : focusSession?.top_attention?.severity ?? focusSession?.health ?? 'ok'}
+          detail="session card에 표시된 협업 단위"
+          tone=${focusSession?.top_attention?.severity ?? focusSession?.health ?? 'ok'}
         />
         <${SummaryStat}
-          label="즉시 개입 필요"
-          value=${urgentSessions}
-          detail="blocker·주의 신호·추천 액션"
-          tone=${criticalSessions > 0 ? 'bad' : urgentSessions > 0 ? 'warn' : 'ok'}
+          label="attention 세션"
+          value=${attentionSessions}
+          detail="top_attention 또는 related_attention_count"
+          tone=${attentionSessions > 0 ? 'warn' : 'ok'}
         />
         <${SummaryStat}
-          label="무응답 참여자"
-          value=${unansweredParticipants}
-          detail=${observedParticipants > 0 ? `응답 흔적 ${respondingParticipants}/${observedParticipants}명` : '참여자 preview 없음'}
-          tone=${unansweredParticipants > 0 ? 'warn' : 'ok'}
+          label="blocker 세션"
+          value=${blockerSessions}
+          detail="blocker_summary가 있는 세션"
+          tone=${blockerSessions > 0 ? 'warn' : 'ok'}
         />
         <${SummaryStat}
-          label="최근 변화 세션"
-          value=${recentlyChangedSessions}
-          detail="최근 15분 내 사건 또는 시작"
-          tone=${recentlyChangedSessions > 0 ? 'ok' : 'warn'}
+          label="사건 기록 세션"
+          value=${eventRecordedSessions}
+          detail="last_event_at 또는 last_event_summary"
+          tone=${eventRecordedSessions > 0 ? 'ok' : 'warn'}
         />
         <${SummaryStat}
-          label="조용한 키퍼"
-          value=${quietKeepers}
-          detail=${keeperRows.length > 0 ? `관찰 대상 ${keeperRows.length}명 중` : '연속성 확인 대상 없음'}
-          tone=${quietKeepers > 0 ? 'warn' : 'ok'}
+          label="출력 preview 참여자"
+          value=${outputPreviewParticipantCount}
+          detail=${participantPreviewCount > 0 ? `participant preview ${participantPreviewCount}명 중` : 'participant preview 없음'}
+          tone=${outputPreviewParticipantCount > 0 ? 'ok' : 'warn'}
         />
         <${SummaryStat}
-          label="최근 응답 없는 세션"
-          value=${responseSilentSessions}
-          detail="활성 세션 중 출력 미관측"
-          tone=${responseSilentSessions > 0 ? 'warn' : 'ok'}
+          label="비-ok 키퍼"
+          value=${keeperStatusWarnings}
+          detail=${keeperRows.length > 0 ? `keeper brief ${keeperRows.length}명 중` : 'keeper brief 없음'}
+          tone=${keeperStatusWarnings > 0 ? 'warn' : 'ok'}
+        />
+        <${SummaryStat}
+          label="출력 preview 없는 세션"
+          value=${outputPreviewSilentSessions}
+          detail="recent_output_preview가 없는 세션"
+          tone=${outputPreviewSilentSessions > 0 ? 'warn' : 'ok'}
         />
       </div>
 

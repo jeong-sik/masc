@@ -56,6 +56,7 @@ let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
     let keeper_ctx : _ Tool_keeper.context =
       {
         config = state.room_config;
+        agent_name = "keeper-bootstrap";
         sw;
         clock;
         proc_mgr = state.Mcp_server.proc_mgr;

@@ -3019,6 +3019,7 @@ let json_of_dispatch_output body =
 let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
   {
     config = ctx.config;
+    agent_name = ctx.agent_name;
     sw = ctx.sw;
     clock = ctx.clock;
     proc_mgr = ctx.proc_mgr;
@@ -3498,6 +3499,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
       let keeper_ctx : _ Tool_keeper.context =
         {
           config = ctx.config;
+          agent_name = ctx.agent_name;
           sw = ctx.sw;
           clock = ctx.clock;
           proc_mgr = ctx.proc_mgr;

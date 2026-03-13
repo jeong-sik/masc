@@ -1381,7 +1381,7 @@ let detachment_semantic_equal (left : detachment_record) (right : detachment_rec
 let make_detachment_runtime config (target_unit : unit_record) (operation : operation_record)
     ~target_count ~base =
   let session_id =
-    if target_count = 1 then option_first_some operation.detachment_session_id base.session_id
+    if target_count = 1 then operation.detachment_session_id
     else None
   in
   let session_last_event =
@@ -1393,8 +1393,17 @@ let make_detachment_runtime config (target_unit : unit_record) (operation : oper
     | None -> None
   in
   let last_progress_at =
-    option_first_some session_last_event
-      (option_first_some base.last_progress_at (Some operation.updated_at))
+    match session_last_event, session_id with
+    | Some ts, _ -> Some ts
+    | None, Some _ ->
+        option_first_some base.last_progress_at (Some operation.updated_at)
+    | None, None -> Some operation.updated_at
+  in
+  let last_event_at =
+    match session_last_event, session_id with
+    | Some ts, _ -> Some ts
+    | None, Some _ -> base.last_event_at
+    | None, None -> Some operation.updated_at
   in
   let heartbeat_deadline =
     if operation.status = Active || operation.status = Planned then
@@ -1420,7 +1429,7 @@ let make_detachment_runtime config (target_unit : unit_record) (operation : oper
          else Some target_unit.unit_id);
       source = "managed";
       status = string_of_operation_status operation.status;
-      last_event_at = option_first_some session_last_event base.last_event_at;
+      last_event_at;
       last_progress_at;
       heartbeat_deadline;
       created_at = base.created_at;

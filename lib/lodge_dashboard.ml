@@ -63,7 +63,7 @@ let agent_list_items () =
       else if ticks >= 6 then "status-warning"
       else "status-ok" in
     let selection_text = if s.selections = 1 then "1 selection" else Printf.sprintf "%d selections" s.selections in
-    let emoji = try List.assoc s.name emoji_map with Not_found -> "🤖" in
+    let emoji = Option.value ~default:"🤖" (List.assoc_opt s.name emoji_map) in
     let bar_width = int_of_float (100.0 *. float s.selections /. float max_selections) in
     let last_selected =
       if s.last_selected_at > 0.0 then format_time_ago (now -. s.last_selected_at)

@@ -1,7 +1,7 @@
 # masc-mcp Versioned Roadmap — Feature Trains First
 
 > Last updated: 2026-03-13
-> Baseline: v2.86.0
+> Baseline: v2.87.0
 
 ## Why This Document Exists
 
@@ -31,6 +31,11 @@ Release lane rules:
 
 Cross-check: `scripts/bump-version.sh` already treats these as distinct layers.
 
+Current numbering note:
+
+- `v2.87.0` has already been used as the merged release-bookkeeping bump on `main` (PR #978).
+- Feature-train execution therefore starts at `v2.88.0`.
+
 ## Intake and Triage
 
 The user remains the primary dogfooding reporter, but Codex and internal agents are also allowed to file issues when they observe a concrete problem.
@@ -57,43 +62,41 @@ The detailed design documents remain the implementation references.
 
 | Source document | Role in this roadmap |
 |-----------------|----------------------|
-| `docs/RELEASE-ROADMAP.md` | Patch stabilization policy for `v2.86.1` |
+| `docs/RELEASE-ROADMAP.md` | Patch stabilization policy that led into the `v2.87.0` closeout lane |
 | `docs/IMPROVEMENT-PLAN-2026-01.md` | Swarm reliability and recovery improvements |
 | `docs/IMMORTAL-SERVER-ROADMAP.md` | Server HA and self-healing follow-up |
 
-## Milestone 1: v2.86.1 — Green Main
+## Milestone 1: v2.87.0 — Release Closeout
 
-**Release promise**: main is releasable again.
+**Release promise**: the merged `v2.87.0` release story is internally consistent again.
 
-This is the only active patch lane right now.
-It is not a feature release.
+This is a bookkeeping closeout lane, not a new feature train.
+Tracking issue: `#1017 v2.87.0 closeout: release bookkeeping`
 
 Includes:
 
-- CI failure fixes on `main`
-- release metadata cleanup
-- changelog completion
-- worktree cleanup that reduces operational drag
-- compatibility fixes that do not widen the public contract
+- restore required `main` CI to green after the merged `v2.87.0` bump
+- replace top-level `CHANGELOG.md` `TBD` placeholders with actual merged release notes
+- reduce `masc-mcp` worktree count to an operational baseline or explicitly track the remainder
 
 Stays out:
 
-- new public MCP tools or schemas
-- dashboard IA redesign
-- migration-heavy alias cleanup
-- future-train feature work
+- new feature-train work that belongs in `v2.88.0+`
+- public MCP surface expansion
+- migration-heavy cleanup unrelated to release honesty
 
 Exit criteria:
 
 - required CI on `main` is green
-- `CHANGELOG.md` has no `TBD` entries for `2.86.0` and `2.86.1`
-- worktree count is back to an operational baseline
+- `CHANGELOG.md` has no `TBD` entries for `2.86.0` and `2.87.0`
+- worktree inventory is reduced or the remainder is explicitly tracked
 
-## Milestone 2: v2.87.0 — Reliable Swarm
+## Milestone 2: v2.88.0 — Reliable Swarm
 
 **Release promise**: a live swarm keeps progressing when one runtime path fails.
 
 This train turns the most urgent Swarm fragility into explicit product behavior.
+Tracking issue: `#1008 v2.88.0 closeout: Reliable Swarm`
 
 Includes:
 
@@ -116,9 +119,10 @@ Exit criteria:
 - concurrent tick race is serialized with one rejected attempt
 - malformed artifact fails with an explicit error
 
-## Milestone 3: v2.88.0 — Visible Swarm
+## Milestone 3: v2.89.0 — Visible Swarm
 
 **Release promise**: operators can see swarm health before failure becomes silent.
+Tracking issue: `#1009 v2.89.0 closeout: Visible Swarm`
 
 Includes:
 
@@ -139,9 +143,10 @@ Exit criteria:
 - marker anomalies are broadcast and summarized
 - coverage report is produced in CI for Swarm-critical modules
 
-## Milestone 4: v2.89.0 — Recoverable Swarm
+## Milestone 4: v2.90.0 — Recoverable Swarm
 
 **Release promise**: long-running swarm work can resume instead of restarting from zero.
+Tracking issue: `#1010 v2.90.0 closeout: Recoverable Swarm`
 
 Includes:
 
@@ -162,9 +167,10 @@ Exit criteria:
 - schema-invalid messages fail with explicit contract errors
 - ordering inversions are detected and reported
 
-## Milestone 5: v2.90.0 — Immortal Base
+## Milestone 5: v2.91.0 — Immortal Base
 
 **Release promise**: the server survives component failure and shuts down cleanly.
+Tracking issue: `#1011 v2.91.0 closeout: Immortal Base`
 
 Includes:
 
@@ -179,9 +185,10 @@ Exit criteria:
 - `SIGTERM` drains active work instead of dropping it
 - supervised child crash triggers controlled restart behavior
 
-## Milestone 6: v2.91.0 — Product Portfolio Trim
+## Milestone 6: v2.92.0 — Product Portfolio Trim
 
 **Release promise**: experimental surfaces have explicit keep, graduate, or archive decisions.
+Tracking issue: `#1012 v2.92.0 closeout: Product Portfolio Trim`
 
 Includes:
 
@@ -194,9 +201,10 @@ Exit criteria:
 - each experimental category has a written keep / graduate / archive decision
 - deprecated or archived surfaces are reflected in docs and labels
 
-## Milestone 7: v2.92.0+ — Immortal P2
+## Milestone 7: v2.93.0+ — Immortal P2
 
 **Release promise**: recovery becomes automatic instead of merely supervised.
+Tracking issue: `#1013 v2.93.0+ closeout: Immortal P2`
 
 Includes:
 
@@ -209,13 +217,13 @@ Includes:
 
 | Version | Train | Primary promise |
 |---------|-------|-----------------|
-| `v2.86.1` | Green Main | main is releasable again |
-| `v2.87.0` | Reliable Swarm | Swarm keeps going when one runtime path fails |
-| `v2.88.0` | Visible Swarm | Swarm health becomes visible before silent failure |
-| `v2.89.0` | Recoverable Swarm | Swarm work can resume after interruption |
-| `v2.90.0` | Immortal Base | server survives component failure cleanly |
-| `v2.91.0` | Product Portfolio Trim | experimental surfaces get explicit decisions |
-| `v2.92.0+` | Immortal P2 | recovery becomes automatic and persistent |
+| `v2.87.0` | Release Closeout | release bookkeeping, CI, changelog, and worktree story are honest again |
+| `v2.88.0` | Reliable Swarm | Swarm keeps going when one runtime path fails |
+| `v2.89.0` | Visible Swarm | Swarm health becomes visible before silent failure |
+| `v2.90.0` | Recoverable Swarm | Swarm work can resume after interruption |
+| `v2.91.0` | Immortal Base | server survives component failure cleanly |
+| `v2.92.0` | Product Portfolio Trim | experimental surfaces get explicit decisions |
+| `v2.93.0+` | Immortal P2 | recovery becomes automatic and persistent |
 
 ## Planning Rules to Keep
 

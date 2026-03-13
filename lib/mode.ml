@@ -118,7 +118,7 @@ let categories_for_mode = function
   | Standard -> [Core; Comm; Worktree; Health; Plan; Board]
   | Parallel -> [Core; Comm; Portal; Worktree; Health; Discovery;
                  Plan; Board; Consensus; Voting; Interrupt]
-  | Coding -> [Core; Worktree; Code; Health; Plan]
+  | Coding -> [Core; Worktree; Code; Health; Plan; Consensus]
   | Full -> all_categories
   | Solo -> [Core; Worktree]
   | Custom -> [] (* Will be loaded from config *)
@@ -303,7 +303,10 @@ let tool_category tool_name =
   | "masc_intent_create" | "masc_intent_status"
   | "masc_intent_forecast" | "masc_intent_update" -> Plan
 
-  (* ── Consensus: debate, consensus, WALPH, convo, decision ── *)
+  (* ── Consensus / Governance V2: petitions, rulings, WALPH, convo, decision ── *)
+  | "masc_petition_submit" | "masc_case_brief_submit"
+  | "masc_cases" | "masc_case_status"
+  | "masc_ruling_status" | "masc_execution_orders"
   | "masc_consensus_start" | "masc_consensus_vote"
   | "masc_consensus_close" | "masc_consensus_result"
   | "masc_debate_start" | "masc_debate_argue"
@@ -428,7 +431,7 @@ let mode_description = function
   | Minimal -> "Core task management + health checks only"
   | Standard -> "Core, communication, worktree, health, plan, and board"
   | Parallel -> "Multi-agent: adds portal, discovery, plan, board, consensus, voting, and interrupt"
-  | Coding -> "Core, worktree, code navigation, health, and plan for agent development"
+  | Coding -> "Core, worktree, code navigation, health, plan, and consensus for agent development"
   | Full -> "All categories enabled"
   | Solo -> "Single-agent work: core and worktree only"
   | Custom -> "User-defined category set"

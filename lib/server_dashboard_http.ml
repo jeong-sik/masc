@@ -2925,9 +2925,12 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
     | None -> None
     | Some raw -> (
         match String.lowercase_ascii (String.trim raw) with
-        | "open" -> Some Council.Debate.Open
-        | "closed" -> Some Council.Debate.Closed
-        | "pending" -> Some Council.Debate.Pending
+        | "pending_ruling" -> Some Council.Governance_v2.Pending_ruling
+        | "ready_auto_execute" -> Some Council.Governance_v2.Ready_auto_execute
+        | "needs_human_gate" -> Some Council.Governance_v2.Needs_human_gate
+        | "executed" -> Some Council.Governance_v2.Executed
+        | "blocked" -> Some Council.Governance_v2.Blocked
+        | "closed" -> Some Council.Governance_v2.Closed
         | _ -> None)
   in
   Dashboard_governance.dashboard_json ~base_path ~limit ~offset

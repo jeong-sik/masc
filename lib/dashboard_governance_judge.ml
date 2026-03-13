@@ -287,12 +287,7 @@ let compute_judgments ~base_path:_ ~factual_json =
   let specs = Lodge_cascade.get_cascade ~cascade_name:"governance_judge" () in
   if specs = [] then Error "No governance_judge model is available."
   else
-    let timeout_sec =
-      match Sys.getenv_opt "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC" with
-      | Some raw -> (
-          try max 5 (int_of_string (String.trim raw)) with Failure _ -> 20)
-      | None -> 20
-    in
+    let timeout_sec = Env_config.Llm.dashboard_governance_judge_timeout_seconds in
     let prompt = prompt_for_facts factual_json in
     match
       Llm_client.run_prompt_cascade ~temperature:0.2 ~timeout_sec

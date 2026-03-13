@@ -3520,12 +3520,24 @@ let execute_action (ctx : 'a context) (request : action_request) :
         | None -> Error "payload.message is required"
       in
       let* message = message in
+      let models =
+        match request.payload |> U.member "models" with
+        | `List items ->
+            items
+            |> List.filter_map (function
+                   | `String value ->
+                       let trimmed = String.trim value in
+                       if trimmed = "" then None else Some (`String trimmed)
+                   | _ -> None)
+        | _ -> []
+      in
       let args =
         `Assoc
-          [
-            ("name", `String name);
-            ("message", `String message);
-          ]
+          ([
+             ("name", `String name);
+             ("message", `String message);
+           ]
+          @ if models = [] then [] else [ ("models", `List models) ])
       in
       let keeper_ctx : _ Tool_keeper.context =
         { config = ctx.config; sw = ctx.sw; clock = ctx.clock }

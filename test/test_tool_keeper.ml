@@ -193,7 +193,9 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
 let test_keeper_model_set_persists_active_model () =
-  let provider_model = "custom:test-model" in
+  let provider_model =
+    Printf.sprintf "glm:%s" Masc_mcp.Env_config.Llm.default_model
+  in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -239,16 +241,15 @@ let test_keeper_model_set_persists_active_model () =
       in
       check bool "model set ok" true ok;
       let json = Yojson.Safe.from_string body in
-      let allowed_models =
-        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> List.map to_string)
-      in
       check string "active model updated" provider_model
         Yojson.Safe.Util.(json |> member "active_model" |> to_string);
-      check bool "allowed models include active model" true
+      let allowed_models =
+        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> filter_string)
+      in
+      check bool "allowed models contains target model" true
         (List.mem provider_model allowed_models);
-      check int "allowed models stay deduped"
-        (List.length (List.sort_uniq String.compare allowed_models))
-        (List.length allowed_models);
+      check int "allowed models are deduped" (List.length allowed_models)
+        (List.sort_uniq String.compare allowed_models |> List.length);
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc
@@ -310,6 +311,18 @@ let write_reward_model path =
     }
   }
 }|})
+
+let write_jsonl_lines path lines =
+  mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+          output_string oc line;
+          output_char oc '\n')
+        lines)
 
 let test_persona_list_and_create_from_persona () =
   Eio_main.run @@ fun env ->
@@ -838,6 +851,100 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
       check bool "resident registration removed" false
         (Masc_mcp.Keeper_types.is_resident_keeper config "resident-demo"))
 
+let test_keeper_status_detailed_reads_metrics_history_and_memory () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; sw; clock = Eio.Stdenv.clock env }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "detail-demo");
+              ("goal", `String "Inspect detailed status");
+              ("models", `List [ `String "custom:test-model" ]);
+              ("presence_keepalive", `Bool false);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "detail-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta"
+        | Error e -> fail e
+      in
+      let metrics_path = Masc_mcp.Keeper_types.keeper_metrics_path config meta.name in
+      let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.trace_id in
+      let memory_bank_path = Masc_mcp.Keeper_types.keeper_memory_bank_path config meta.name in
+      write_jsonl_lines metrics_path
+        [
+          {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment"}|};
+          {|{"channel":"proactive","generation":0,"trace_id":"trace-1","compacted":true,"compaction_before_tokens":180,"compaction_after_tokens":120,"memory_compaction_performed":true,"memory_compaction_before_notes":4,"memory_compaction_after_notes":2,"memory_compaction_dropped_notes":2,"memory_compaction_invalid_dropped":1,"memory_compaction_reason":"dedupe"}|};
+        ];
+      write_jsonl_lines history_path
+        [
+          {|{"role":"user","content":"Can you summarize the plan?","ts_unix":10.0}|};
+          {|{"role":"assistant","content":"thinking","ts_unix":20.0}|};
+          {|{"role":"assistant","content":"All done.","ts_unix":30.0}|};
+        ];
+      write_jsonl_lines memory_bank_path
+        [
+          {|{"kind":"decision","text":"Pinned the branch split.","priority":2,"ts_unix":10.0}|};
+          {|{"kind":"next","text":"Write more keeper tests.","priority":1,"ts_unix":11.0}|};
+        ];
+      let ok, body =
+        dispatch "masc_keeper_status"
+          (`Assoc
+            [
+              ("name", `String "detail-demo");
+              ("fast", `Bool false);
+              ("include_context", `Bool false);
+              ("include_metrics_overview", `Bool true);
+              ("include_memory_bank", `Bool true);
+              ("include_history_tail", `Bool true);
+              ("include_compaction_history", `Bool true);
+            ])
+      in
+      check bool "status ok" true ok;
+      let json = Yojson.Safe.from_string body in
+      check int "history raw count" 3
+        Yojson.Safe.Util.(json |> member "history_raw_count" |> to_int);
+      check int "history fragment count" 1
+        Yojson.Safe.Util.(json |> member "history_fragment_count" |> to_int);
+      check int "history filtered count" 1
+        Yojson.Safe.Util.(json |> member "history_fragment_filtered_count" |> to_int);
+      check int "memory note count" 2
+        Yojson.Safe.Util.(json |> member "memory_bank" |> member "total_notes" |> to_int);
+      check int "compaction history count" 1
+        Yojson.Safe.Util.(json |> member "compaction_history_count" |> to_int);
+      check int "metrics compaction events" 1
+        Yojson.Safe.Util.(json |> member "metrics_overview" |> member "compaction_events" |> to_int);
+      check string "skill route primary" "masc-heartbeat"
+        Yojson.Safe.Util.(json |> member "skill_route" |> member "primary" |> to_string);
+      let ok, list_body =
+        dispatch "masc_keeper_list"
+          (`Assoc [ ("detailed", `Bool true); ("limit", `Int 10) ])
+      in
+      check bool "detailed list ok" true ok;
+      let list_json = Yojson.Safe.from_string list_body in
+      let keeper_row =
+        Yojson.Safe.Util.(list_json |> member "keepers" |> to_list |> List.hd)
+      in
+      check string "detailed list skill route primary" "masc-heartbeat"
+        Yojson.Safe.Util.(keeper_row |> member "skill_route" |> member "primary" |> to_string))
 let test_keeper_policy_tools_roundtrip () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1266,6 +1373,8 @@ let () =
            test_persistent_agent_create_from_persona_and_status;
          test_case "keeper dispatch auxiliary surfaces smoke" `Quick
            test_keeper_dispatch_auxiliary_surfaces_smoke;
+         test_case "keeper status detailed reads metrics/history/memory" `Quick
+           test_keeper_status_detailed_reads_metrics_history_and_memory;
          test_case "policy tools roundtrip" `Quick
            test_keeper_policy_tools_roundtrip;
          test_case "policy set rejects invalid mode" `Quick

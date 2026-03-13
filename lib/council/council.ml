@@ -20,6 +20,7 @@ module Archive = Archive
 module Balance = Balance
 module Executor = Executor
 module Conversation = Conversation
+module Governance_v2 = Governance_v2
 module Loop_guard = Loop_guard
 module Thread_persist = Thread_persist
 

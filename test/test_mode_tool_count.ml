@@ -72,8 +72,8 @@ let test_parallel_range () =
   assert_in_range Parallel ~low:200 ~high:305
 
 let test_coding_range () =
-  (* Coding = [Core; Worktree; Code; Health; Plan] — baseline ~166 *)
-  assert_in_range Coding ~low:130 ~high:200
+  (* Coding = [Core; Worktree; Code; Health; Plan; Consensus] *)
+  assert_in_range Coding ~low:135 ~high:215
 
 let test_full_range () =
   (* Full = all 19 categories = all visible tools — baseline ~362 *)
@@ -162,12 +162,12 @@ let test_solo_lacks_comm_tools () =
   check bool "solo lacks masc_messages" true
     (not (List.mem "masc_messages" names))
 
-let test_parallel_has_consensus () =
+let test_parallel_has_governance () =
   let names = tool_names_for_mode Parallel in
-  check bool "parallel has masc_consensus_start" true
-    (List.mem "masc_consensus_start" names);
-  check bool "parallel has masc_debate_start" true
-    (List.mem "masc_debate_start" names)
+  check bool "parallel has masc_case_status" true
+    (List.mem "masc_case_status" names);
+  check bool "parallel has masc_cases" true
+    (List.mem "masc_cases" names)
 
 (* ============================================================
    Custom mode with empty categories
@@ -231,7 +231,7 @@ let () =
       test_case "standard has board" `Quick test_standard_has_board_tools;
       test_case "coding has code tools" `Quick test_coding_has_code_tools;
       test_case "solo lacks comm" `Quick test_solo_lacks_comm_tools;
-      test_case "parallel has consensus" `Quick test_parallel_has_consensus;
+      test_case "parallel has governance" `Quick test_parallel_has_governance;
       test_case "custom empty" `Quick test_custom_empty;
     ];
     "diagnostics", [

@@ -290,12 +290,7 @@ let compute_judgments ~facts_json =
   let specs = Lodge_cascade.get_cascade ~cascade_name:"operator_judge" () in
   if specs = [] then Error "No operator_judge model is available."
   else
-    let timeout_sec =
-      match Sys.getenv_opt "MASC_OPERATOR_JUDGE_TIMEOUT_SEC" with
-      | Some raw -> (
-          try max 5 (int_of_string (String.trim raw)) with Failure _ -> 20)
-      | None -> 20
-    in
+    let timeout_sec = Env_config.Llm.operator_judge_timeout_seconds in
     let prompt = prompt_for_facts facts_json in
     match
       Llm_client.run_prompt_cascade ~temperature:0.2 ~timeout_sec ~model_specs:specs

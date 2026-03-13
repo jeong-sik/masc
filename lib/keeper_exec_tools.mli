@@ -37,6 +37,22 @@ val memory_forced_grounding_prompt :
   expected_topic:string option ->
   string
 
+val contains_korean_text : string -> bool
+val is_recent_question_query : string -> bool
+val has_weather_keyword : string -> bool
+val select_recall_candidate :
+  user_message:string ->
+  expected_topic:string option ->
+  best_match:string option ->
+  string list ->
+  string option
+val recall_fallback_reply :
+  meta:keeper_meta ->
+  user_message:string ->
+  selected_question:string ->
+  expected_topic:string option ->
+  string
+
 val deterministic_recall_fallback :
   meta:keeper_meta ->
   user_message:string ->

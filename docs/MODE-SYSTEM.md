@@ -25,6 +25,7 @@ Default room mode is `full`. Start there for maximum tool visibility, then reduc
 |------|------------|-------|-----------------|
 | **full** | All 12 | dynamic | varies |
 | **parallel** | core, comm, portal, worktree, health, discovery, voting, interrupt | dynamic | varies |
+| **coding** | core, worktree, code, health, plan, consensus | dynamic | varies |
 | **standard** | core, comm, worktree, health | dynamic | varies |
 | **minimal** | core, health | dynamic | varies |
 | **solo** | core, worktree | dynamic | varies |

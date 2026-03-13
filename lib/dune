@@ -56,10 +56,33 @@
    server_trpg_rest
    server_dashboard_http
    server_routes_http
+   server_routes_http_common
+   server_routes_http_pages
+   server_routes_http_runtime
+   server_routes_http_keeper_stream
+   server_routes_http_routes_frontend
+   server_routes_http_routes_room
+   server_routes_http_routes_trpg
+   server_routes_http_routes_dashboard
+   server_routes_http_routes_command_plane_read
+   server_routes_http_routes_command_plane_write
+   server_routes_http_routes_social
    server_h2_gateway
    server_runtime_bootstrap
    server_command_plane_http
+   server_command_plane_http_support
+   server_command_plane_http_stream
+   server_command_plane_http_mutations
+   server_command_plane_http_help
+   server_social_http
    server_mcp_transport_http
+   server_mcp_transport_http_types
+   server_mcp_transport_http_session
+   server_mcp_transport_http_headers
+   server_mcp_transport_http_sse
+   server_mcp_transport_http_mcp_handlers
+   server_mcp_transport_http_admin
+   server_mcp_transport_http_ag_ui
    web_dashboard
    credits_dashboard
    cp_microarch_summary
@@ -73,6 +96,7 @@
    glm_pool
    graphql_endpoint
    graphql_api
+   social_motion
    handover_eio
    hat
    heartbeat
@@ -194,6 +218,9 @@
    room_git
    room_portal
    room_utils
+   room_utils_backend_setup
+   room_utils_paths_backend
+   room_utils_ops
    room_worktree
    run_eio
    team_session_types
@@ -214,12 +241,30 @@
    streamable_http
    subscriptions
    swarm_status
+   swarm_status_types
+   swarm_status_json
+   swarm_status_parse
+   swarm_status_classify
+   swarm_status_inputs
+   swarm_status_lanes
+   swarm_status_build
    swarm_behaviors_eio
    swarm_checkpoint
    swarm_eio
    telemetry_eio
    tempo
    tools
+   tools_schemas_01
+   tools_schemas_02
+   tools_schemas_03
+   tools_schemas_04
+   tools_schemas_05
+   tools_schemas_06
+   tools_schemas_07
+   tools_schemas_08
+   tools_schemas_09
+   tools_schemas_10
+   tools_schemas_11
    tool_args
    tool_plan
    tool_run
@@ -254,6 +299,15 @@
    tool_llama
    tool_board
    tool_command_plane
+   tool_command_plane_support
+   tool_command_plane_chain_common
+   tool_command_plane_chain_launch
+   tool_command_plane_chain_query
+   tool_command_plane_swarm_live
+   tool_command_plane_mutations
+   tool_command_plane_dispatch
+   tool_command_plane_schemas_01
+   tool_command_plane_schemas_02
    tool_lodge
    tool_mdal
    lodge_daemon
@@ -325,9 +379,22 @@
    verifier
    succession
    perpetual_loop
+   env_config_core
+   env_config_runtime
+   env_config_governance
+   env_config_keeper
    tool_perpetual
    tool_shard
    tool_keeper
+   tool_lodge_config_http
+   tool_lodge_llm_cycle
+   tool_lodge_agents_cache
+   tool_lodge_react_core
+   tool_lodge_discussion_defs
+   tool_lodge_orchestrate
+   tool_lodge_agents_ops
+   tool_lodge_project
+   tool_lodge_autonomous
    trpg_schema
    trpg_types
    trpg_action
@@ -374,7 +441,72 @@
    ;; SWARM-RISC Phase 4: Speculative Execution + MCTS
    mcts_tree
    speculative_engine)
- (private_modules
+(private_modules
+ room_utils_backend_setup
+ room_utils_paths_backend
+ room_utils_ops
+ server_routes_http_common
+ server_routes_http_pages
+ server_routes_http_runtime
+ server_routes_http_keeper_stream
+ server_routes_http_routes_frontend
+ server_routes_http_routes_room
+ server_routes_http_routes_trpg
+ server_routes_http_routes_dashboard
+ server_routes_http_routes_command_plane_read
+ server_routes_http_routes_command_plane_write
+ server_routes_http_routes_social
+ swarm_status_types
+ swarm_status_json
+ swarm_status_parse
+ swarm_status_classify
+ swarm_status_inputs
+ swarm_status_lanes
+ swarm_status_build
+ server_mcp_transport_http_types
+ server_mcp_transport_http_session
+ server_mcp_transport_http_headers
+ server_mcp_transport_http_sse
+ server_mcp_transport_http_mcp_handlers
+ server_mcp_transport_http_admin
+ server_mcp_transport_http_ag_ui
+ server_command_plane_http_support
+ server_command_plane_http_stream
+ server_command_plane_http_mutations
+ server_command_plane_http_help
+ tool_command_plane_support
+ tool_command_plane_chain_common
+ tool_command_plane_chain_launch
+ tool_command_plane_chain_query
+ tool_command_plane_swarm_live
+ tool_command_plane_mutations
+ tool_command_plane_dispatch
+ tool_command_plane_schemas_01
+ tool_command_plane_schemas_02
+ tool_lodge_config_http
+ tool_lodge_llm_cycle
+ tool_lodge_agents_cache
+ tool_lodge_react_core
+ tool_lodge_discussion_defs
+ tool_lodge_orchestrate
+ tool_lodge_agents_ops
+ tool_lodge_project
+ tool_lodge_autonomous
+ tools_schemas_01
+ tools_schemas_02
+ tools_schemas_03
+ tools_schemas_04
+ tools_schemas_05
+ tools_schemas_06
+ tools_schemas_07
+ tools_schemas_08
+ tools_schemas_09
+ tools_schemas_10
+ tools_schemas_11
+ env_config_core
+ env_config_runtime
+ env_config_governance
+ env_config_keeper
   keeper_exec_tools
   keeper_exec_status
   keeper_exec_persona)

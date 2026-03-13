@@ -106,6 +106,33 @@ let test_request_body_stays_strict () =
     | Masc_mcp.Mcp_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
 
+let test_initialize_body_relaxes_json_accept () =
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let headers = Httpun.Headers.of_list [("accept", "application/json")] in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  let body =
+    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}|}
+  in
+  let mode = Transport.classify_mcp_accept_for_body request body in
+  check bool "initialize legacy accepted" true
+    (match mode with
+    | Masc_mcp.Mcp_protocol.Http_negotiation.Legacy_accepted -> true
+    | _ -> false)
+
+let test_initialize_never_uses_sse () =
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let headers =
+    Httpun.Headers.of_list
+      [("accept", "application/json, text/event-stream")]
+  in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  let body =
+    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}|}
+  in
+  check bool "initialize disables sse" false
+    (Transport.should_use_sse_for_body request body
+       Masc_mcp.Mcp_protocol.Http_negotiation.Streamable)
+
 let () =
   run "http_negotiation"
     [
@@ -119,5 +146,7 @@ let () =
       ("body_aware_accept", [
         test_case "notification relaxes accept" `Quick test_notification_body_relaxes_accept;
         test_case "request remains strict" `Quick test_request_body_stays_strict;
+        test_case "initialize relaxes json accept" `Quick test_initialize_body_relaxes_json_accept;
+        test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
       ]);
     ]

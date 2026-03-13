@@ -262,6 +262,10 @@ let classify_mcp_accept_for_body request body_str =
   Server_mcp_transport_http_headers.classify_mcp_accept_for_body request
     body_str
 
+let should_use_sse_for_body request body_str accept_mode =
+  Server_mcp_transport_http_headers.should_use_sse_for_body request body_str
+    accept_mode
+
 let legacy_accept_warning_headers = function
   | Http_negotiation.Legacy_accepted ->
       [
@@ -639,9 +643,7 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                               get_protocol_version_for_session ~session_id request
                             in
                             let wants_sse =
-                              accept_mode = Http_negotiation.Streamable
-                              && Http_negotiation.accepts_sse_header
-                                   (Httpun.Headers.get request.headers "accept")
+                              should_use_sse_for_body request body_str accept_mode
                               && not force_json_response
                               && not (request_force_json_response request)
                             in

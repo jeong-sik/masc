@@ -55,13 +55,12 @@ let classify_mcp_accept (request : Httpun.Request.t) =
   Http_negotiation.classify_mcp_accept ~allow_legacy:allow_legacy_accept
     (Httpun.Headers.get request.headers "accept")
 
-let body_notification_method body_str =
+let body_jsonrpc_method body_str =
   try
     match Yojson.Safe.from_string body_str with
     | `Assoc fields -> (
         match List.assoc_opt "method" fields with
-        | Some (`String method_) when not (List.mem_assoc "id" fields) ->
-            Some method_
+        | Some (`String method_) -> Some (method_, List.mem_assoc "id" fields)
         | _ -> None)
     | _ -> None
   with Yojson.Json_error _ -> None
@@ -72,14 +71,35 @@ let is_notification_method method_ =
   String.length method_ >= prefix_len
   && String.sub method_ 0 prefix_len = prefix
 
-let classify_mcp_accept_for_body request body_str =
+let is_initialize_method method_ = String.equal method_ "initialize"
+
+let request_accepts_json (request : Httpun.Request.t) =
+  let media_types =
+    Http_negotiation.parse_accept_header
+      (Httpun.Headers.get request.headers "accept")
+  in
+  Http_negotiation.is_media_type_accepted media_types
+    Http_negotiation.json_content_type
+
+let classify_mcp_accept_for_body (request : Httpun.Request.t) body_str =
   match classify_mcp_accept request with
   | Http_negotiation.Rejected -> (
-      match body_notification_method body_str with
-      | Some method_ when is_notification_method method_ ->
+      match body_jsonrpc_method body_str with
+      | Some (method_, true) when request_accepts_json request
+                               && is_initialize_method method_ ->
+          Http_negotiation.Legacy_accepted
+      | Some (method_, false) when is_notification_method method_ ->
           Http_negotiation.Legacy_accepted
       | _ -> Http_negotiation.Rejected)
   | accept_mode -> accept_mode
+
+let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =
+  match body_jsonrpc_method body_str with
+  | Some (method_, _) when is_initialize_method method_ -> false
+  | _ ->
+      accept_mode = Http_negotiation.Streamable
+      && Http_negotiation.accepts_sse_header
+           (Httpun.Headers.get request.headers "accept")
 
 let legacy_accept_warning_headers = function
   | Http_negotiation.Legacy_accepted ->

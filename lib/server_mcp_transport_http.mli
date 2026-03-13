@@ -38,6 +38,11 @@ val classify_mcp_accept :
   Httpun.Request.t -> Mcp_protocol.Http_negotiation.accept_mode
 val classify_mcp_accept_for_body :
   Httpun.Request.t -> string -> Mcp_protocol.Http_negotiation.accept_mode
+val should_use_sse_for_body :
+  Httpun.Request.t ->
+  string ->
+  Mcp_protocol.Http_negotiation.accept_mode ->
+  bool
 val legacy_accept_warning_headers :
   Mcp_protocol.Http_negotiation.accept_mode -> (string * string) list
 val legacy_transport_deprecation_headers : (string * string) list

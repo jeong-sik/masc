@@ -261,7 +261,8 @@ let test_tool_category_code () =
   check bool "code_read" true (Mode.tool_category "masc_code_read" = Mode.Code)
 
 let test_tool_category_ecosystem_voice () =
-  check bool "gardener_status" true (Mode.tool_category "masc_gardener_status" = Mode.Ecosystem);
+  check bool "gardener_status health" true
+    (Mode.tool_category "masc_gardener_status" = Mode.Health);
   check bool "voice_speak" true (Mode.tool_category "masc_voice_speak" = Mode.Ecosystem);
   check bool "voice_sessions" true (Mode.tool_category "masc_voice_sessions" = Mode.Ecosystem);
   check bool "voice_conference_start" true
@@ -297,6 +298,15 @@ let test_is_tool_enabled_standard () =
   check bool "broadcast enabled" true (Mode.is_tool_enabled cats "masc_broadcast");
   check bool "worktree_create enabled" true (Mode.is_tool_enabled cats "masc_worktree_create");
   check bool "portal_open disabled" false (Mode.is_tool_enabled cats "masc_portal_open")
+
+let test_is_tool_enabled_coding_keeper_status () =
+  let cats = Mode.categories_for_mode Mode.Coding in
+  check bool "keeper status enabled" true
+    (Mode.is_tool_enabled cats "masc_keeper_status");
+  check bool "persistent agent status enabled" true
+    (Mode.is_tool_enabled cats "masc_persistent_agent_status");
+  check bool "keeper up disabled" false
+    (Mode.is_tool_enabled cats "masc_keeper_up")
 
 let test_is_tool_enabled_full () =
   let cats = Mode.categories_for_mode Mode.Full in
@@ -429,6 +439,7 @@ let () =
     "is_tool_enabled", [
       test_case "minimal mode" `Quick test_is_tool_enabled_minimal;
       test_case "standard mode" `Quick test_is_tool_enabled_standard;
+      test_case "coding keeper status" `Quick test_is_tool_enabled_coding_keeper_status;
       test_case "full mode" `Quick test_is_tool_enabled_full;
       test_case "unknown tool disabled" `Quick test_is_tool_enabled_unknown;
       test_case "mode management always enabled" `Quick test_is_tool_enabled_mode_management_always_on;

@@ -153,11 +153,7 @@ let test_snapshot_has_expected_sections () =
       ignore (Room.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
       ignore (Room.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
-      let room = Yojson.Safe.Util.member "room" json in
       Alcotest.(check bool) "room present" true (Yojson.Safe.Util.member "room" json <> `Null);
-      Alcotest.(check string) "room mirrors current_room"
-        Yojson.Safe.Util.(room |> member "current_room" |> to_string)
-        Yojson.Safe.Util.(room |> member "room" |> to_string);
       Alcotest.(check bool) "sessions present" true (Yojson.Safe.Util.member "sessions" json <> `Null);
       Alcotest.(check bool) "keepers present" true (Yojson.Safe.Util.member "keepers" json <> `Null);
       Alcotest.(check bool) "recent_messages present" true

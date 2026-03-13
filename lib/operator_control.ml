@@ -773,14 +773,10 @@ let sessions_json config =
 
 let room_json config =
   let initialized = Room.is_initialized config in
-  let current_room = Room.current_room_id config in
   if not initialized then
     `Assoc
       [
         ("initialized", `Bool false);
-        ("room", `String current_room);
-        ("room_id", `String current_room);
-        ("current_room", `String current_room);
         ("project", `String (Filename.basename config.base_path));
       ]
   else
@@ -791,11 +787,9 @@ let room_json config =
     `Assoc
       [
         ("initialized", `Bool true);
-        ("room", `String current_room);
-        ("room_id", `String current_room);
         ("cluster", `String (Option.value ~default:"default" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
         ("project", `String state.project);
-        ("current_room", `String current_room);
+        ("current_room", string_option_to_json (Room.read_current_room config));
         ("paused", `Bool state.paused);
         ("pause_reason", string_option_to_json state.pause_reason);
         ("paused_by", string_option_to_json state.paused_by);
@@ -2957,23 +2951,6 @@ let swarm_run_chain_preview (request : action_request) swarm_json =
 let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
 
-let first_nonempty_string_field keys json =
-  let rec loop = function
-    | [] -> None
-    | key :: rest -> (
-        match U.member key json with
-        | `String value when String.trim value <> "" -> Some (String.trim value)
-        | _ -> loop rest)
-  in
-  loop keys
-
-let keeper_reply_text dispatched_json =
-  match dispatched_json with
-  | `String value when String.trim value <> "" -> Some (String.trim value)
-  | `Assoc _ ->
-      first_nonempty_string_field [ "reply"; "content"; "text"; "message" ] dispatched_json
-  | _ -> None
-
 let string_of_trigger = function
   | Lodge_heartbeat.Scheduled -> "scheduled"
   | Lodge_heartbeat.ContentAlert _ -> "content_alert"
@@ -3542,13 +3519,11 @@ let execute_action (ctx : 'a context) (request : action_request) :
         | None -> Error "masc_keeper_msg dispatch unavailable"
       in
       let _ = ok in
-      let dispatched_json = json_of_dispatch_output body in
       Ok
         (`Assoc
           [
             ("delegated_tool", `String "masc_keeper_msg");
-            ("result", dispatched_json);
-            ("reply", string_option_to_json (keeper_reply_text dispatched_json));
+            ("result", json_of_dispatch_output body);
           ])
   | "swarm_run_continue" ->
       let* () = validate_target_type "swarm_run" request in

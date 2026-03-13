@@ -42,8 +42,8 @@ let test_is_jsonrpc_v2_missing () =
    ============================================================ *)
 
 let test_normalize_protocol_version () =
-  check string "2024-11-05" "2024-11-05"
-    (Mcp_server.normalize_protocol_version "2024-11-05")
+  check string "2025-06-18" "2025-06-18"
+    (Mcp_server.normalize_protocol_version "2025-06-18")
 
 let test_normalize_protocol_version_unknown () =
   let result = Mcp_server.normalize_protocol_version "unknown" in
@@ -58,9 +58,9 @@ let test_protocol_version_from_params_none () =
   check bool "returns default" true (String.length result > 0)
 
 let test_protocol_version_from_params_some () =
-  let params = `Assoc [("protocolVersion", `String "2024-11-05")] in
+  let params = `Assoc [("protocolVersion", `String "2025-06-18")] in
   let result = Mcp_server.protocol_version_from_params (Some params) in
-  check string "extracts version" "2024-11-05" result
+  check string "extracts version" "2025-06-18" result
 
 (* ============================================================
    make_response Tests

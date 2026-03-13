@@ -295,9 +295,14 @@ let test_is_notification () =
    | Error _ -> Alcotest.fail "parse error")
 
 let test_protocol_version () =
-  let params = Some (`Assoc [("protocolVersion", `String "2025-03-26")]) in
+  let params = Some (`Assoc [("protocolVersion", `String "2025-06-18")]) in
   let version = Mcp_eio.protocol_version_from_params params in
-  Alcotest.(check string) "version extracted" "2025-03-26" version;
+  Alcotest.(check string) "version extracted" "2025-06-18" version;
+
+  (match Mcp.validate_protocol_version "2025-06-18" with
+   | Ok version ->
+       Alcotest.(check string) "2025-06-18 is supported" "2025-06-18" version
+   | Error msg -> Alcotest.fail msg);
 
   let normalized = Mcp_eio.normalize_protocol_version "unknown" in
   Alcotest.(check string) "normalized to default" "2025-11-25" normalized;
@@ -348,7 +353,7 @@ let test_handle_request_initialize () =
     ("id", `Int 1);
     ("method", `String "initialize");
     ("params", `Assoc [
-      ("protocolVersion", `String "2025-11-25");
+      ("protocolVersion", `String "2025-06-18");
       ("capabilities", `Assoc []);
       ("clientInfo", `Assoc [
         ("name", `String "test");
@@ -364,6 +369,11 @@ let test_handle_request_initialize () =
        Alcotest.(check bool) "has result" true (List.mem_assoc "result" fields);
        (match List.assoc_opt "result" fields with
         | Some (`Assoc result_fields) ->
+            Alcotest.(check (option string)) "echoes requested protocol version"
+              (Some "2025-06-18")
+              (match List.assoc_opt "protocolVersion" result_fields with
+               | Some (`String version) -> Some version
+               | _ -> None);
             Alcotest.(check bool) "has serverInfo" true
               (List.mem_assoc "serverInfo" result_fields);
             Alcotest.(check bool) "has capabilities" true

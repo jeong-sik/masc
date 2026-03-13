@@ -17,9 +17,10 @@ let test_snapshot_has_expected_sections () =
       let room = Yojson.Safe.Util.member "room" json in
       Alcotest.(check bool) "room present" true
         (Yojson.Safe.Util.member "room" json <> `Null);
-      Alcotest.(check string) "room mirrors current_room"
-        Yojson.Safe.Util.(room |> member "current_room" |> to_string)
-        Yojson.Safe.Util.(room |> member "room" |> to_string);
+      Alcotest.(check bool) "room initialized" true
+        Yojson.Safe.Util.(room |> member "initialized" |> to_bool);
+      Alcotest.(check bool) "project nonempty" true
+        (String.trim Yojson.Safe.Util.(room |> member "project" |> to_string) <> "");
       Alcotest.(check bool) "sessions present" true
         (Yojson.Safe.Util.member "sessions" json <> `Null);
       Alcotest.(check bool) "keepers present" true

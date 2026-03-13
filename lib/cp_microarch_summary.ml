@@ -211,7 +211,8 @@ let signals_json ~(pipeline : Yojson.Safe.t) ~(cache : Yojson.Safe.t)
       ("pipeline_stalls", `Int pipeline_stalls);
     ]);
     ("cache_contention", `Assoc [
-      ("tone", `String (if cache_bus_traffic >= 20 || cache_hit_rate < 0.2 then "bad"
+      ("tone", `String (if cache_bus_traffic = 0 then "ok"  (* no traffic = inactive, not bad *)
+                        else if cache_bus_traffic >= 20 || cache_hit_rate < 0.2 then "bad"
                         else if cache_bus_traffic >= 5 || cache_hit_rate < 0.5 then "warn"
                         else "ok"));
       ("bus_traffic", `Int cache_bus_traffic);

@@ -64,7 +64,7 @@ let base64_decode s =
 let load_key config : (GCM.key, encryption_error) result =
   let key_string = match config.key_source with
     | `Env var_name ->
-        (try Some (Sys.getenv var_name) with Not_found -> None)
+        Sys.getenv_opt var_name
     | `File path ->
         if Sys.file_exists path then
           let ic = open_in path in

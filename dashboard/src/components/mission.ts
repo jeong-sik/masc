@@ -1,7 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
-import { RoomTruthStrip } from './common/room-truth-strip'
 import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { navigate } from '../router'
 import {
@@ -25,6 +24,7 @@ import {
 } from './mission-utils'
 import {
   MissionContextBar,
+  SummaryStat,
   MissionBriefingCard,
   AttentionCard,
   SessionBriefCard,
@@ -65,6 +65,24 @@ export function Mission() {
     .filter(item => item.related_session_ids.length > 0)
     .slice(0, 6)
   const internalSignals = mission.internal_signals.slice(0, 3)
+  const blockedSessions = sessionRows.filter(row => {
+    const tone = row.top_attention?.severity ?? row.health ?? row.status
+    return toneClass(tone) !== 'ok' || Boolean(row.blocker_summary)
+  }).length
+  const recentEventSessions = sessionRows.filter(row => row.last_event_summary || row.last_event_at).length
+  const activeParticipants = new Set(
+    sessionRows.flatMap(row => row.member_names),
+  ).size
+  const liveOutputs =
+    sessionRows.flatMap(row => row.member_previews ?? []).filter(row => row.recent_output_preview).length
+    + keeperRows.filter(row => row.recentOutput).length
+  const focusSessionOutputs = ((focusSession?.member_previews ?? []) as Array<{
+    agent_name?: string | null
+    role?: string | null
+    recent_output_preview?: string | null
+    status?: string | null
+  }>).filter(row => row.recent_output_preview)
+  const keeperOutputRows = keeperRows.filter(row => row.recentOutput).slice(0, 4)
 
   useEffect(() => {
     void refreshMissionSessionDetail(activeSessionId)
@@ -85,8 +103,6 @@ export function Mission() {
         </div>
       </div>
 
-      <${RoomTruthStrip} />
-
       <${MissionContextBar}
         cluster=${mission.summary.cluster}
         project=${mission.summary.project}
@@ -94,7 +110,14 @@ export function Mission() {
         generatedAt=${mission.generated_at}
       />
 
-      <${MissionBriefingCard} />
+      <div class="mission-stat-grid">
+        <${SummaryStat} label="활성 세션" value=${sessionRows.length} detail="지금 진행중인 협업 단위" tone=${focusSession?.top_attention?.severity ?? focusSession?.health ?? 'ok'} />
+        <${SummaryStat} label="막힌 세션" value=${blockedSessions} detail="주의가 필요한 흐름" tone=${blockedSessions > 0 ? 'warn' : 'ok'} />
+        <${SummaryStat} label="최근 사건 세션" value=${recentEventSessions} detail="최근 사건이 관측된 세션" tone=${recentEventSessions > 0 ? 'ok' : 'warn'} />
+        <${SummaryStat} label="참여자" value=${activeParticipants} detail="현재 세션에 연결된 주체" tone=${activeParticipants > 0 ? 'ok' : 'warn'} />
+        <${SummaryStat} label="키퍼 관찰" value=${keeperRows.length} detail="연속성 확인 대상" tone=${keeperRows[0]?.brief.status ?? 'ok'} />
+        <${SummaryStat} label="최근 응답" value=${liveOutputs} detail="메인에서 바로 읽을 수 있는 응답 수" tone=${liveOutputs > 0 ? 'ok' : 'warn'} />
+      </div>
 
       ${activeSessionId
         ? html`
@@ -108,7 +131,10 @@ export function Mission() {
       <${Card} title="진행중인 세션" class="mission-list-card" semanticId="mission.session_briefs">
         <div class="mission-section-head">
           <h3>지금 진행중인 일</h3>
-          <p>세션을 기준으로 목표, 최근 흐름, 막힘, 연결된 작전을 먼저 봅니다.</p>
+          <p>세션을 기준으로 목표, 최근 흐름, 막힘, 연결된 작전을 먼저 읽고 사회의 현재 상태를 파악합니다.</p>
+          <div class="mission-briefing-meta">
+            <span class="command-chip ok">truth</span>
+          </div>
         </div>
         <div class="mission-list-stack">
           ${sessionRows.length > 0
@@ -123,39 +149,13 @@ export function Mission() {
         error=${missionSessionDetailError.value}
       />
 
-      <div class="mission-human-grid">
-        <${Card} title="주의 대기열" class="mission-list-card" semanticId="mission.attention_queue">
-          <div class="mission-section-head">
-            <h3>어느 세션을 먼저 봐야 하나</h3>
-            <p>문제와 경고는 세션에 연결된 것만 먼저 보여주고, 원인 분석은 선택된 세션에서 이어서 봅니다.</p>
-          </div>
-          <div class="mission-lane-stack">
-            ${attentionQueue.length > 0
-              ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${selectedAttentionId.value === item.id} sessionLookup=${sessionLookup} />`)
-              : html`<div class="empty-state">지금 세션 단위 주의 대기열은 비어 있습니다.</div>`}
-          </div>
-        <//>
-
-        <${Card} title="내부 신호" class="mission-list-card" semanticId="mission.internal_signals">
-          <div class="mission-section-head">
-            <h3>시스템 진단</h3>
-            <p>artifact scope drift 같은 내부 신호는 메인 판단을 방해하지 않도록 접어 둔 보조 면에만 둡니다.</p>
-          </div>
-          <details class="mission-card-disclosure">
-            <summary>내부 신호 ${internalSignals.length}</summary>
-            <div class="mission-list-stack">
-              ${internalSignals.length > 0
-                ? internalSignals.map(item => html`<${InternalSignalCard} key=${item.id} item=${item} />`)
-                : html`<div class="empty-state">지금은 내부 진단 경고가 없습니다.</div>`}
-            </div>
-          </details>
-        <//>
-      </div>
-
       <${Card} title="키퍼 연속성" class="mission-list-card" semanticId="mission.keeper_activity">
         <div class="mission-section-head">
-          <h3>키퍼 연속성 요약</h3>
-          <p>카드 제목은 keeper 이름이고, runtime agent 이름은 상세에만 보조 라벨로 보여줍니다.</p>
+          <h3>세션 밖에서 움직이는 행위자</h3>
+          <p>키퍼는 세션과 별개로 보고, 사회의 연속성과 장기 행위자 상태를 먼저 읽습니다.</p>
+          <div class="mission-briefing-meta">
+            <span class="command-chip ok">truth</span>
+          </div>
         </div>
         <div class="mission-activity-list">
           ${keeperRows.length > 0
@@ -167,6 +167,73 @@ export function Mission() {
           <button class="control-btn ghost" onClick=${() => navigate('command')}>지휘 진단면 보기</button>
         </div>
       <//>
+
+      <${Card} title="최근 사회 활동" class="mission-list-card" semanticId="mission.session_activity">
+        <div class="mission-section-head">
+          <h3>누가 방금 무엇을 했나</h3>
+          <p>선택된 세션과 연결된 행위자의 최근 출력만 모아 읽고, 해석은 뒤로 미룹니다.</p>
+          <div class="mission-briefing-meta">
+            <span class="command-chip ok">truth</span>
+          </div>
+        </div>
+        <div class="mission-list-stack">
+          ${focusSessionOutputs.length > 0
+            ? focusSessionOutputs.slice(0, 4).map(row => html`
+                <div class="mission-inline-note">
+                  <strong>${row.agent_name ?? 'unknown actor'}</strong>
+                  ${row.role ? html` · ${row.role}` : null}
+                  ${row.status ? html` · ${statusLabel(row.status)}` : null}
+                  <div>${row.recent_output_preview}</div>
+                </div>
+              `)
+            : html`<div class="empty-state">선택된 세션에서 바로 읽을 최근 출력이 없습니다.</div>`}
+          ${keeperOutputRows.length > 0
+            ? keeperOutputRows.map(row => html`
+                <div class="mission-inline-note">
+                  <strong>${row.brief.name}</strong>
+                  <div>${row.recentOutput}</div>
+                </div>
+              `)
+            : null}
+        </div>
+      <//>
+
+      <${Card} title="세션 우선순위" class="mission-list-card" semanticId="mission.attention_queue">
+        <div class="mission-section-head">
+          <h3>어느 세션을 먼저 봐야 하나</h3>
+          <p>주의 신호는 truth를 훑은 다음에만 읽고, 세션 집중 순서를 정하는 용도로만 씁니다.</p>
+          <div class="mission-briefing-meta">
+            <span class="command-chip warn">derived</span>
+          </div>
+        </div>
+        <div class="mission-lane-stack">
+          ${attentionQueue.length > 0
+            ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${selectedAttentionId.value === item.id} sessionLookup=${sessionLookup} />`)
+            : html`<div class="empty-state">지금 세션 단위 주의 대기열은 비어 있습니다.</div>`}
+        </div>
+      <//>
+
+      <div class="mission-human-grid">
+        <${MissionBriefingCard} />
+
+        <${Card} title="운영 보조 진단" class="mission-list-card" semanticId="mission.internal_signals">
+          <div class="mission-section-head">
+            <h3>시스템 진단</h3>
+            <p>artifact scope drift 같은 내부 신호는 사회 흐름을 읽은 뒤에만 참고하도록 아래 보조 면으로 둡니다.</p>
+            <div class="mission-briefing-meta">
+              <span class="command-chip warn">derived</span>
+            </div>
+          </div>
+          <details class="mission-card-disclosure">
+            <summary>내부 신호 ${internalSignals.length}</summary>
+            <div class="mission-list-stack">
+              ${internalSignals.length > 0
+                ? internalSignals.map(item => html`<${InternalSignalCard} key=${item.id} item=${item} />`)
+                : html`<div class="empty-state">지금은 내부 진단 경고가 없습니다.</div>`}
+            </div>
+          </details>
+        <//>
+      </div>
     </section>
   `
 }

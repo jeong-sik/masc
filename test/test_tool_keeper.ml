@@ -70,17 +70,6 @@ let with_env name value f =
       Unix.putenv name value;
       f ())
 
-let stop_keeper_via_tool env sw base_dir keeper_name =
-  let config = Masc_mcp.Room.default_config base_dir in
-  let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-    { config; sw; clock = Eio.Stdenv.clock env }
-  in
-  match
-    Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_down"
-      ~args:(`Assoc [ ("name", `String keeper_name) ])
-  with
-  | Some _ | None -> ()
-
 let parse_json_exn body =
   try Yojson.Safe.from_string body
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
@@ -210,7 +199,7 @@ let test_keeper_model_set_persists_active_model () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      stop_keeper_via_tool env sw base_dir "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -329,7 +318,7 @@ let test_persona_list_and_create_from_persona () =
   let me_root = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      stop_keeper_via_tool env sw base_dir "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir;
       rm_rf me_root)
     (fun () ->
@@ -855,7 +844,7 @@ let test_keeper_policy_tools_roundtrip () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      stop_keeper_via_tool env sw base_dir "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir)
     (fun () ->
       let reward_model_path = Filename.concat base_dir "reward-model.json" in
@@ -1038,7 +1027,7 @@ let test_keeper_policy_set_rejects_invalid_mode () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      stop_keeper_via_tool env sw base_dir "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -1174,7 +1163,7 @@ let test_resident_bootstrap_recovers_stale_explicit_keeper () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      stop_keeper_via_tool env sw base_dir "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -1199,7 +1188,7 @@ let test_resident_bootstrap_recovers_stale_explicit_keeper () =
             ])
       in
       check bool "keeper up ok" true ok;
-      stop_keeper_via_tool env sw base_dir "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       let meta =
         match Masc_mcp.Keeper_types.read_meta config "sangsu" with
         | Ok (Some meta) -> meta

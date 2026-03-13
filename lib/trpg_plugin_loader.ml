@@ -117,8 +117,7 @@ let load ?(config = empty_plugin_config) () =
     (* Initialize each enabled slot *)
     List.iter (fun slot_id ->
       let slot_config =
-        try List.assoc slot_id config.slot_configs
-        with Not_found -> `Assoc []
+        Option.value ~default:(`Assoc []) (List.assoc_opt slot_id config.slot_configs)
       in
       match load_slot_module slot_id with
       | Ok (module Slot) ->

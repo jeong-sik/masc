@@ -2742,7 +2742,7 @@ let vote_cast config ~agent_name ~vote_id ~choice =
               (* Count votes per option *)
               let counts = List.fold_left (fun acc (_, v) ->
                 let opt = to_string v in
-                let curr = try List.assoc opt acc with Not_found -> 0 in
+                let curr = Option.value ~default:0 (List.assoc_opt opt acc) in
                 (opt, curr + 1) :: (List.remove_assoc opt acc)
               ) [] new_votes in
 

@@ -1876,6 +1876,13 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ~keepalive_running
                   ~history_items:conversation_items
                   ~now_ts
+                |> Keeper_exec_status.augment_keeper_diagnostic_json
+                     ~desired:true
+                     ~meta:m
+                     ~keepalive_running
+                     ~keepalive_started_at:
+                       (Keeper_keepalive.keeper_keepalive_started_at m.name)
+                     ~now_ts
               in
               let detail_fields =
                 if compact then []
@@ -1934,6 +1941,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("auto_handoff", `Bool m.auto_handoff);
               ("handoff_threshold", `Float m.handoff_threshold);
               ("agent", agent);
+              ( "status",
+                `String
+                  (Keeper_exec_status.keeper_surface_status ~agent_status:agent
+                     ~diagnostic) );
               ("diagnostic", diagnostic);
               ("keeper_age_s", `Float keeper_age_s);
               ("uptime_hours", `Float (keeper_age_s /. 3600.0));
@@ -2286,7 +2297,10 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   in
   let status_json =
     `Assoc [
-      ("room", `String room_state.project);
+      ( "room",
+        `String
+          (if Room.is_initialized config then Room.current_room_id config
+           else Filename.basename config.base_path) );
       ("room_base_path", `String config.base_path);
       ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
       ("project", `String room_state.project);
@@ -2467,7 +2481,9 @@ let dashboard_proof_http_json ~state request =
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
-  let current_room = Room.current_room_id config in
+  let current_room =
+    Room.read_current_room config |> Option.value ~default:"default"
+  in
   let tempo = Tempo.get_tempo config in
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let gardener_json = Gardener.status_json () in
@@ -2874,7 +2890,7 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
   let posts = filter_board_posts ~exclude_system posts in
   let karma_map = Board_dispatch.get_all_karma () in
   let get_karma author =
-    try List.assoc author karma_map with Not_found -> 0
+    Option.value ~default:0 (List.assoc_opt author karma_map)
   in
   let paged = posts |> drop offset |> take limit in
   let posts_json =

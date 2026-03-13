@@ -97,13 +97,18 @@ export function KeeperDiagnosticSummary({
   return html`
     <div class="control-result-box">
       <div class="control-inline-meta">
+        ${continuityStateLabel(diagnostic?.continuity_state)
+          ? html`<span class="pill">${continuityStateLabel(diagnostic?.continuity_state)}</span>`
+          : null}
         <span class="pill">${diagnostic?.health_state ?? 'unknown'}</span>
         <span class="pill">${quietReasonLabel(diagnostic?.quiet_reason)}</span>
         <span class="pill">next ${nextActionLabel(diagnostic?.next_action_path ?? 'direct_message')}</span>
         ${busy ? html`<span class="pill">refreshing</span>` : null}
       </div>
       <div class="control-status-copy">
-        ${diagnostic?.summary ?? 'Keeper diagnostic summary is not available yet. Probe or open the detail overlay to inspect current runtime state.'}
+        ${diagnostic?.continuity_summary
+          ?? diagnostic?.summary
+          ?? 'Keeper diagnostic summary is not available yet. Probe or open the detail overlay to inspect current runtime state.'}
       </div>
       <div class="control-status-copy">
         Reply: ${diagnostic?.last_reply_status ?? 'unknown'}

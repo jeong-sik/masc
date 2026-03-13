@@ -2,7 +2,9 @@
     path resolution, and model-selection utilities. *)
 
 let keeper_debug =
-  try Sys.getenv "MASC_KEEPER_DEBUG" = "1" with Not_found -> false
+  match Sys.getenv_opt "MASC_KEEPER_DEBUG" with
+  | Some "1" -> true
+  | _ -> false
 
 type 'a context = {
   config: Room.config;

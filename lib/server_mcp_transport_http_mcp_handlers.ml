@@ -72,38 +72,42 @@ let handle_post_mcp ~(deps : deps) ?(profile = Mcp_eio.Full) request reqd =
           | Error msg ->
               Server_mcp_transport_http_headers.respond_mcp_auth_error ~deps
                 request reqd ~session_id ~protocol_version msg
-          | Ok () -> (
-              match Server_mcp_transport_http_headers.classify_mcp_accept request with
-              | Http_negotiation.Rejected ->
-                  let body =
-                    Yojson.Safe.to_string
-                      (`Assoc
-                        [
-                          ("jsonrpc", `String "2.0");
-                          ( "error",
-                            `Assoc
-                              [
-                                ("code", `Int (-32600));
-                                ( "message",
-                                  `String
-                                    "Invalid Accept header: must include application/json and text/event-stream. Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility." );
-                              ] );
-                        ])
+          | Ok () ->
+              Http.Request.read_body_async reqd (fun body_str ->
+                  let accept_mode =
+                    Server_mcp_transport_http_headers.classify_mcp_accept_for_body
+                      request body_str
                   in
-                  let headers =
-                    Httpun.Headers.of_list
-                      (("content-length", string_of_int (String.length body))
-                      :: Server_mcp_transport_http_headers.json_headers ~deps
-                           session_id protocol_version origin)
-                  in
-                  let response = Httpun.Response.create ~headers `Bad_request in
-                  Httpun.Reqd.respond_with_string reqd response body
-              | accept_mode ->
-                  let accept_warn_headers =
-                    Server_mcp_transport_http_headers.legacy_accept_warning_headers
-                      accept_mode
-                  in
-                  Http.Request.read_body_async reqd (fun body_str ->
+                  match accept_mode with
+                  | Http_negotiation.Rejected ->
+                      let body =
+                        Yojson.Safe.to_string
+                          (`Assoc
+                            [
+                              ("jsonrpc", `String "2.0");
+                              ( "error",
+                                `Assoc
+                                  [
+                                    ("code", `Int (-32600));
+                                    ( "message",
+                                      `String
+                                        "Invalid Accept header: must include application/json and text/event-stream. Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility." );
+                                  ] );
+                            ])
+                      in
+                      let headers =
+                        Httpun.Headers.of_list
+                          (("content-length", string_of_int (String.length body))
+                          :: Server_mcp_transport_http_headers.json_headers
+                               ~deps session_id protocol_version origin)
+                      in
+                      let response = Httpun.Response.create ~headers `Bad_request in
+                      Httpun.Reqd.respond_with_string reqd response body
+                  | accept_mode ->
+                      let accept_warn_headers =
+                        Server_mcp_transport_http_headers.legacy_accept_warning_headers
+                          accept_mode
+                      in
                       try
                         match
                           Server_mcp_transport_http_headers.request_runtime_result
@@ -133,8 +137,9 @@ let handle_post_mcp ~(deps : deps) ?(profile = Mcp_eio.Full) request reqd =
                                 request
                             in
                             let wants_sse =
-                              Http_negotiation.accepts_sse_header
-                                (Httpun.Headers.get request.headers "accept")
+                              accept_mode = Http_negotiation.Streamable
+                              && Http_negotiation.accepts_sse_header
+                                   (Httpun.Headers.get request.headers "accept")
                               && not
                                    Server_mcp_transport_http_headers
                                    .force_json_response
@@ -225,7 +230,7 @@ let handle_post_mcp ~(deps : deps) ?(profile = Mcp_eio.Full) request reqd =
                         in
                         Server_mcp_transport_http_headers.respond_mcp_internal_error
                           ~deps request reqd ~session_id ~protocol_version
-                          ("Internal error: " ^ Printexc.to_string exn)))))
+                          ("Internal error: " ^ Printexc.to_string exn))))
 
 let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
     ?(profile = Mcp_eio.Full)

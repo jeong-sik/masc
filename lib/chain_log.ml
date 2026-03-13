@@ -4,7 +4,7 @@
 
     Usage:
     {[
-      let () = Log.info "mcp_server" "Starting server on port %d" 8932
+      let () = Log.info "mcp_server" "Starting server on port %d" 8935
       let () = Log.warn "chain" "Node %s timed out" node_id
       let () = Log.error "gemini" ~ctx:[("model", model)] "Rate limit exceeded"
     ]}

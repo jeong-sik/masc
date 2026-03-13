@@ -85,9 +85,6 @@ let classify_mcp_accept_for_body (request : Httpun.Request.t) body_str =
   match classify_mcp_accept request with
   | Http_negotiation.Rejected -> (
       match body_jsonrpc_method body_str with
-      | Some (method_, true) when request_accepts_json request
-                               && is_initialize_method method_ ->
-          Http_negotiation.Legacy_accepted
       | Some (method_, false) when is_notification_method method_ ->
           Http_negotiation.Legacy_accepted
       | _ -> Http_negotiation.Rejected)

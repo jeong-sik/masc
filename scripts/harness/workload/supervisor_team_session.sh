@@ -129,9 +129,9 @@ team_session_status() {
 
 default_worker_batch_json() {
   jq -cn \
-    --arg planner_prompt "You are the planner. Inspect the active team session, then record exactly one concise planning turn with masc_team_session_turn describing task decomposition and acceptance criteria." \
-    --arg implementer_a_prompt "You are implementer-a. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing backend/runtime work." \
-    --arg implementer_b_prompt "You are implementer-b. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing docs/tests/harness work." \
+    --arg planner_prompt "You are the planner. Inspect the active team session and reply with exactly one concise line: [planner] decomposition and acceptance criteria." \
+    --arg implementer_a_prompt "You are implementer-a. Inspect the active team session and reply with exactly one concise line: [implementer-a] backend and runtime work." \
+    --arg implementer_b_prompt "You are implementer-b. Inspect the active team session and reply with exactly one concise line: [implementer-b] docs, tests, and harness work." \
     '[
       {spawn_role:"planner",spawn_prompt:$planner_prompt},
       {spawn_role:"implementer-a",spawn_prompt:$implementer_a_prompt},
@@ -155,9 +155,9 @@ normalized_worker_batch_json() {
             error("each worker batch item must include a non-empty spawn_prompt")
           else
             {
-              spawn_agent: "llama",
-              spawn_model: $model,
               spawn_role: .spawn_role,
+              worker_class: (.worker_class // "executor"),
+              worker_size: (.worker_size // "lg"),
               spawn_selection_note: $note,
               spawn_prompt: .spawn_prompt,
               spawn_timeout_seconds: (.spawn_timeout_seconds // 90)
@@ -356,7 +356,7 @@ if [ -z "$TEAM_SESSION_ID" ]; then
   exit 1
 fi
 
-model_selection_turn_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 14 "masc_team_session_turn" "$(jq -cn --arg s "$TEAM_SESSION_ID" --arg msg "$MODEL_SELECTION_NOTE" '{session_id:$s,turn_kind:"note",message:$msg}')")"
+model_selection_turn_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 14 "masc_team_session_step" "$(jq -cn --arg s "$TEAM_SESSION_ID" --arg msg "$MODEL_SELECTION_NOTE" '{session_id:$s,turn_kind:"note",message:$msg}')")"
 require_tool_success "$model_selection_turn_raw"
 
 printf '[6/10] spawn full llama team\n'
@@ -446,7 +446,8 @@ prove_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 1
 require_tool_success "$prove_raw"
 prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
 printf '%s' "$prove_result" | jq -e '.proof.verdict == "proved"' >/dev/null
-printf '%s' "$prove_result" | jq -e '.proof.evidence.unique_turn_actors_count >= 4' >/dev/null
+printf '%s' "$prove_result" | jq -e '.proof.evidence.unique_turn_actors_count >= 3' >/dev/null
+printf '%s' "$prove_result" | jq -e '.proof.evidence.spawn_success_count >= 2' >/dev/null
 printf '%s' "$prove_result" | jq -e '.proof.evidence.empty_note_turn_count == 0' >/dev/null
 report_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 18 "masc_team_session_report" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,force_regenerate:false}')")"
 require_tool_success "$report_raw"

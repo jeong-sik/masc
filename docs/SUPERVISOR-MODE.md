@@ -34,7 +34,7 @@ This keeps supervision and implementation separate:
 
 - the supervisor reads state and issues guided interventions
 - planner and implementer workers do the normal work through the full MCP surface
-- local `llama.cpp` workers join the same session through `spawn_agent="llama"`
+- local workers join the same session through `worker_class` / `worker_size`
 
 ## Runtime Model
 
@@ -50,28 +50,25 @@ Codex / Claude TUI
 Use `/mcp/operator` when you want a small, deterministic control surface.
 Use `/mcp` when an agent needs the full room and team-session tool inventory.
 
-## Llama Worker Runtime
+## Local Worker Runtime
 
-`masc-mcp` can run a worker directly against a local `llama.cpp` OpenAI-compatible server.
+`masc-mcp` can run a worker directly on the hidden local worker backend.
 
-- internal reasoning model string: `llama:<model>`
-- model inventory tool: `masc_llama_models`
-- spawned worker runtime: `masc_spawn(agent_name="llama", model="...")`
-- team-session spawn path: `masc_team_session_step(spawn_agent="llama", spawn_model="...", spawn_role="...", spawn_prompt="...")`
+- canonical team-session spawn path: `masc_team_session_step(spawn_role="...", worker_class="...", worker_size="...", spawn_prompt="...")`
+- implementation detail: local OAS worker on the configured local runtime
 
 Environment:
 
 - `LLAMA_SERVER_URL`
   - default: `http://127.0.0.1:8085`
 
-Selection policy for this slice is explicit:
+Selection policy for this slice is size-based:
 
-1. call `masc_llama_models`
-2. the leader chooses one returned model id explicitly
-3. record that choice in the session with `masc_team_session_step(turn_kind="note", message="...")` before spawning workers
-4. pass that exact id through `model=` or `spawn_model=`
-5. pass the same selection rationale through `spawn_selection_note=`
-6. there is no automatic fallback for spawned `llama` workers
+1. choose `worker_class`
+2. choose `worker_size` (`sm` | `lg` | `xlg`) if you need an override
+3. record selection rationale in the session with `masc_team_session_step(turn_kind="note", message="...")` when helpful
+4. spawn through `spawn_prompt` / `spawn_batch`
+5. backend model/provider selection stays internal to MASC
 
 ## Intervention Policy
 

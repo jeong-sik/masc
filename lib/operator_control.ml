@@ -946,25 +946,21 @@ let spawn_batch_stub_of_cards (cards : worker_card list) =
   let items =
     cards
     |> List.filter_map (fun (card : worker_card) ->
-           match card.spawn_agent with
-           | None -> None
-           | Some spawn_agent ->
-               let label =
-                 match (card.spawn_role, card.actor) with
-                 | Some role, _ when String.trim role <> "" -> role
-                 | _, Some actor when String.trim actor <> "" -> actor
-                 | _ -> spawn_agent
-               in
-               let fields =
-                 [
-                   ("spawn_agent", `String spawn_agent);
-                   ( "spawn_prompt",
-                     `String
-                       (Printf.sprintf
-                          "REQUIRED: provide explicit spawn_prompt for replacement worker %s"
-                          label) );
-                 ]
-               in
+           let label =
+             match (card.spawn_role, card.actor) with
+             | Some role, _ when String.trim role <> "" -> role
+             | _, Some actor when String.trim actor <> "" -> actor
+             | _ -> "worker"
+           in
+           let fields =
+             [
+               ( "spawn_prompt",
+                 `String
+                   (Printf.sprintf
+                      "REQUIRED: provide explicit spawn_prompt for replacement worker %s"
+                      label) );
+             ]
+           in
                let fields =
                  match card.spawn_role with
                  | Some role when String.trim role <> "" ->
@@ -972,9 +968,19 @@ let spawn_batch_stub_of_cards (cards : worker_card list) =
                  | _ -> fields
                in
                let fields =
-                 match card.spawn_model with
-                 | Some model when String.trim model <> "" ->
-                     ("spawn_model", `String model) :: fields
+                 match
+                   Option.bind card.model_tier
+                     (fun raw ->
+                       Team_session_types.model_tier_of_string
+                         (String.lowercase_ascii (String.trim raw)))
+                   |> Option.map Team_session_types.worker_size_of_model_tier
+                   |> Option.join
+                 with
+                 | Some worker_size ->
+                     ( "worker_size",
+                       `String
+                         (Team_session_types.worker_size_to_string worker_size) )
+                     :: fields
                  | _ -> fields
                in
                let fields =
@@ -1020,24 +1026,18 @@ let spawn_batch_stub_of_cards (cards : worker_card list) =
                  | _ -> fields
                in
                let fields =
-                 match card.model_tier with
-                 | Some model_tier when String.trim model_tier <> "" ->
-                     ("model_tier", `String model_tier) :: fields
-                 | _ -> fields
-               in
-               let fields =
                  match card.task_profile with
                  | Some task_profile when String.trim task_profile <> "" ->
                      ("task_profile", `String task_profile) :: fields
                  | _ -> fields
                in
-               let fields =
-                 match card.risk_level with
-                 | Some risk_level when String.trim risk_level <> "" ->
-                     ("risk_level", `String risk_level) :: fields
-                 | _ -> fields
-               in
-               Some (`Assoc (List.rev fields)))
+           let fields =
+             match card.risk_level with
+             | Some risk_level when String.trim risk_level <> "" ->
+                 ("risk_level", `String risk_level) :: fields
+             | _ -> fields
+           in
+           Some (`Assoc (List.rev fields)))
   in
   `Assoc [ ("spawn_batch", `List items) ]
 
@@ -1870,7 +1870,6 @@ let session_recommendations ~(session : Team_session_types.session)
 	                        in
 	                        `Assoc
 	                          [
-	                            ("spawn_agent", `String "llama");
 	                            ( "spawn_prompt",
 	                              `String
 	                                (Printf.sprintf

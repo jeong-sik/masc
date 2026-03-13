@@ -264,7 +264,6 @@ let test_team_worker_spawn_batch_requires_confirm_then_executes () =
                         [
                           `Assoc
                             [
-                              ("spawn_agent", `String "not-a-real-agent");
                               ("spawn_prompt", `String "record one worker turn");
                               ("spawn_role", `String "replacement");
                               ("spawn_timeout_seconds", `Int 1);

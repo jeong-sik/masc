@@ -53,11 +53,9 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
                     [
                       `Assoc
                         [
-                          ("spawn_agent", `String "llama");
                           ("spawn_role", `String "explicit-manager");
                           ("worker_class", `String "manager");
-                          ("spawn_model", `String "manager-explicit");
-                          ("model_tier", `String "35b");
+                          ("worker_size", `String "xlg");
                           ("lane_id", `String "lane-z");
                           ("control_domain", `String "quality");
                           ("supervisor_actor", `String "ctrl-custom");
@@ -66,11 +64,9 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
                         ];
                       `Assoc
                         [
-                          ("spawn_agent", `String "llama");
                           ("spawn_role", `String "explicit-worker");
                           ("worker_class", `String "executor");
-                          ("spawn_model", `String "worker-explicit");
-                          ("model_tier", `String "9b");
+                          ("worker_size", `String "sm");
                           ("lane_id", `String "lane-q");
                           ("control_domain", `String "execution");
                           ("supervisor_actor", `String "ctrl-worker-custom");
@@ -89,9 +85,7 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
             worker.Team_session_types.spawn_role = Some "explicit-manager")
           session.planned_workers
       in
-      Alcotest.(check (option string)) "manager keeps explicit model"
-        (Some "manager-explicit") explicit_manager.spawn_model;
-      Alcotest.(check (option string)) "manager keeps explicit tier"
+      Alcotest.(check (option string)) "manager tier follows worker size"
         (Some "35b")
         (Option.map Team_session_types.model_tier_to_string
            explicit_manager.model_tier);
@@ -105,9 +99,7 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
             worker.Team_session_types.spawn_role = Some "explicit-worker")
           session.planned_workers
       in
-      Alcotest.(check (option string)) "worker keeps explicit model"
-        (Some "worker-explicit") explicit_worker.spawn_model;
-      Alcotest.(check (option string)) "worker keeps explicit tier"
+      Alcotest.(check (option string)) "worker tier follows worker size"
         (Some "9b")
         (Option.map Team_session_types.model_tier_to_string
            explicit_worker.model_tier);
@@ -461,4 +453,3 @@ let test_report_and_proof_expose_empty_note_turn_evidence () =
        true
      with Not_found -> false);
   cleanup_dir base_dir
-

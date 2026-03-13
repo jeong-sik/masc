@@ -290,9 +290,9 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
       in
       Alcotest.(check int) "single worker stub" 1 (List.length spawn_batch);
       let worker = List.hd spawn_batch in
-      Alcotest.(check string) "spawn_agent" "llama"
-        Yojson.Safe.Util.(worker |> member "spawn_agent" |> to_string);
       Alcotest.(check string) "spawn_role" "implementer-a"
         Yojson.Safe.Util.(worker |> member "spawn_role" |> to_string);
+      Alcotest.(check string) "worker_size" "sm"
+        Yojson.Safe.Util.(worker |> member "worker_size" |> to_string);
       Alcotest.(check string) "recommendation provenance" "fallback"
         Yojson.Safe.Util.(recommendation |> member "provenance" |> to_string))

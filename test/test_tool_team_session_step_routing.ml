@@ -22,23 +22,19 @@ let test_step_spawn_batch_records_planned_workers () =
           [
             ("session_id", `String session_id);
             ( "spawn_batch",
-              `List
-                [
-                  `Assoc
+                  `List
                     [
-                      ("spawn_agent", `String "llama");
-                      ("spawn_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
-                      ("spawn_role", `String "planner");
-                      ("spawn_selection_note", `String selection_note);
-                      ("spawn_prompt", `String "planner prompt");
-                    ];
-                  `Assoc
-                    [
-                      ("spawn_agent", `String "llama");
-                      ("spawn_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
-                      ("spawn_role", `String "implementer-a");
-                      ("spawn_selection_note", `String selection_note);
-                      ("spawn_prompt", `String "implementer prompt");
+                      `Assoc
+                        [
+                          ("spawn_role", `String "planner");
+                          ("spawn_selection_note", `String selection_note);
+                          ("spawn_prompt", `String "planner prompt");
+                        ];
+                      `Assoc
+                        [
+                          ("spawn_role", `String "implementer-a");
+                          ("spawn_selection_note", `String selection_note);
+                          ("spawn_prompt", `String "implementer prompt");
                     ];
                 ] );
           ])
@@ -114,13 +110,11 @@ let test_step_spawn_batch_applies_hybrid_routing () =
                     [
                       `Assoc
                         [
-                          ("spawn_agent", `String "llama");
                           ("spawn_role", `String "normalizer");
                           ("spawn_prompt", `String "normalize evidence into strict JSON schema");
                         ];
                       `Assoc
                         [
-                          ("spawn_agent", `String "llama");
                           ("spawn_role", `String "final-writer");
                           ("spawn_prompt", `String "final architecture decision and synthesize the proposal");
                         ];
@@ -203,12 +197,10 @@ let test_parse_step_spawn_specs_applies_top_level_batch_timeout () =
             [
               `Assoc
                 [
-                  ("spawn_agent", `String "llama");
                   ("spawn_prompt", `String "first prompt");
                 ];
               `Assoc
                 [
-                  ("spawn_agent", `String "llama");
                   ("spawn_prompt", `String "second prompt");
                   ("spawn_timeout_seconds", `Int 45);
                 ];
@@ -265,18 +257,16 @@ let test_step_spawn_batch_infers_exact_env_model_tiers () =
                     [
                       `Assoc
                         [
-                          ("spawn_agent", `String "llama");
                           ("spawn_role", `String "exact-lead");
-                          ("spawn_model", `String "lead-model-exact");
+                          ("worker_size", `String "xlg");
                           ( "spawn_prompt",
                             `String
                               "final architecture decision and synthesize the proposal" );
                         ];
                       `Assoc
                         [
-                          ("spawn_agent", `String "llama");
                           ("spawn_role", `String "exact-middle");
-                          ("spawn_model", `String "middle-model-exact");
+                          ("worker_size", `String "lg");
                           ( "spawn_prompt",
                             `String
                               "verify the retrieved evidence and highlight contradictions" );
@@ -309,4 +299,3 @@ let test_step_spawn_batch_infers_exact_env_model_tiers () =
         (Some "27b")
         (Option.map Team_session_types.model_tier_to_string
            exact_middle.model_tier))
-

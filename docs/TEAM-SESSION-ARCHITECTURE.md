@@ -38,7 +38,7 @@ Per session under `.masc/team-sessions/<session_id>/`:
 
 1. `start`: creates session state and runtime loop.
 2. `step`: canonical write entrypoint for one orchestration turn.
-   - Optional spawned-agent execution (`spawn_agent` + `spawn_prompt`).
+   - Optional worker execution (`spawn_prompt`, `worker_class`, `worker_size`, or `spawn_batch`).
    - Optional vote evidence (`vote_topic`, `vote_options`, `vote_choice`).
    - Optional run evidence (`run_task_id`, `run_note`, `run_deliverable`).
 

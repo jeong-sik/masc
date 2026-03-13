@@ -115,7 +115,6 @@ let test_step_spawn_requires_proc_mgr () =
         (`Assoc
           [
             ("session_id", `String session_id);
-            ("spawn_agent", `String "glm");
             ("spawn_prompt", `String "hello");
           ])
   in
@@ -263,6 +262,75 @@ let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
        in
        true
      with Not_found -> false);
+  cleanup_dir base_dir
+
+let test_step_rejects_legacy_spawn_fields () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"step-rejects-legacy-spawn-fields"
+    |> get_session_id
+  in
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("spawn_agent", `String "llama");
+            ("spawn_prompt", `String "normalize evidence into strict JSON schema");
+          ])
+  in
+  Alcotest.(check bool) "legacy spawn field rejected" false ok;
+  let json = parse_json_exn body in
+  Alcotest.(check string) "legacy spawn error"
+    "spawn_agent is no longer supported in masc_team_session_step; use spawn_prompt, spawn_role, worker_class, and worker_size"
+    (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
+  cleanup_dir base_dir
+
+let test_step_rejects_legacy_batch_spawn_fields () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"step-rejects-legacy-batch-fields"
+    |> get_session_id
+  in
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ( "spawn_batch",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("spawn_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
+                      ("spawn_prompt", `String "normalize evidence into strict JSON schema");
+                    ];
+                ] );
+          ])
+  in
+  Alcotest.(check bool) "legacy batch field rejected" false ok;
+  let json = parse_json_exn body in
+  Alcotest.(check string) "legacy batch error"
+    "spawn_batch[0].spawn_model is no longer supported in masc_team_session_step; use spawn_prompt, spawn_role, worker_class, and worker_size"
+    (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
   cleanup_dir base_dir
 
 let test_step_delegate_requires_target_agent () =

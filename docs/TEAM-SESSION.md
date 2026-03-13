@@ -104,8 +104,9 @@ linked autoresearch가 연결된 session이면 stop 응답에 `linked_autoresear
 - `actor` (optional explicit turn actor; default caller)
 - `message` (note/broadcast/portal에서 사용)
 - `target_agent` (portal에서 사용)
+- `delegate_prompt` (existing worker에 후속 턴을 줄 때 사용)
 - `task_title`/`task_description`/`task_priority` (task에서 사용)
-- `spawn_agent`/`spawn_prompt` 또는 `spawn_batch`
+- `spawn_prompt`/`spawn_role`/`worker_class`/`worker_size` 또는 `spawn_batch`
 - `vote_topic`/`vote_options`/`vote_choice`
 - `run_task_id`/`run_note`/`run_deliverable`
 

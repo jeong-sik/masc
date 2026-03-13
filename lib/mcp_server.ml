@@ -105,6 +105,7 @@ let make_error ?data ~id code message =
 let supported_protocol_versions = [
   "2024-11-05";
   "2025-03-26";
+  "2025-06-18";
   "2025-11-25";
 ]
 

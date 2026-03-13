@@ -2297,7 +2297,10 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   in
   let status_json =
     `Assoc [
-      ("room", `String room_state.project);
+      ( "room",
+        `String
+          (if Room.is_initialized config then Room.current_room_id config
+           else Filename.basename config.base_path) );
       ("room_base_path", `String config.base_path);
       ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
       ("project", `String room_state.project);

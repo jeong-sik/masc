@@ -263,11 +263,17 @@ let resolve_error (config : Room.config) ~task_id ~index : (planning_context, st
         end
   with e -> Error (Printexc.to_string e)
 
-(** Set deliverable *)
+(** Set deliverable. Auto-creates planning context if none exists. *)
 let set_deliverable (config : Room.config) ~task_id ~content : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
-    match load config ~task_id with
+    let ctx = match load config ~task_id with
+      | Ok ctx -> Ok ctx
+      | Error _ ->
+          (* Auto-init planning context so deliver works without prior plan_init *)
+          init config ~task_id
+    in
+    match ctx with
     | Error e -> Error e
     | Ok ctx ->
         let updated = { ctx with deliverable = content; updated_at = now_iso () } in

@@ -213,10 +213,14 @@ let make_extended_handler routes =
 
 (** Main server loop *)
 let run_server ~sw ~env ~host ~port ~base_path =
-  Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path ~make_routes
-    ~make_request_handler:make_extended_handler
-    ~make_h2_request_handler:Server_h2_gateway.make_request_handler
-    ~make_h2_error_handler:Server_h2_gateway.make_error_handler
+  try
+    Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path ~make_routes
+      ~make_request_handler:make_extended_handler
+      ~make_h2_request_handler:Server_h2_gateway.make_request_handler
+      ~make_h2_error_handler:Server_h2_gateway.make_error_handler
+  with exn ->
+    Printf.eprintf "[main] keeper bootstrap failed: %s\n%!" (Printexc.to_string exn);
+    raise exn
 
 (** CLI options *)
 let port =

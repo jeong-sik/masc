@@ -153,7 +153,7 @@ let test_step_spawn_requires_proc_mgr () =
   ignore (wait_until_terminal ctx session_id);
   cleanup_dir base_dir
 
-let test_step_spawn_llama_requires_spawn_model () =
+let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -173,20 +173,25 @@ let test_step_spawn_llama_requires_spawn_model () =
         (`Assoc
           [
             ("session_id", `String session_id);
-            ("spawn_agent", `String "llama");
-            ("spawn_prompt", `String "inspect and report");
-            ("spawn_role", `String "planner");
+            ("spawn_prompt", `String "normalize evidence into strict JSON schema");
+            ("spawn_role", `String "normalizer");
+            ("worker_class", `String "executor");
+            ("worker_size", `String "lg");
             ("spawn_selection_note", `String selection_note);
           ])
   in
-  Alcotest.(check bool) "step should fail without spawn_model for llama" false step_ok;
+  Alcotest.(check bool) "step fails later because proc_mgr is missing" false step_ok;
   let body = parse_json_exn step_body in
   let message =
     body |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
   in
-  Alcotest.(check bool) "error mentions spawn_model" true
+  Alcotest.(check bool) "error mentions proc manager" true
     (try
-       let _ = Str.search_forward (Str.regexp_string "spawn_model") message 0 in
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "process manager unavailable")
+           message 0
+       in
        true
      with Not_found -> false);
   let events_ok, events_body =
@@ -200,20 +205,39 @@ let test_step_spawn_llama_requires_spawn_model () =
   in
   Alcotest.(check bool) "events query ok" true events_ok;
   let events = events_list_of_body events_body in
-  Alcotest.(check int) "spawn failure event recorded" 1 (List.length events);
+  Alcotest.(check int) "spawn event recorded" 1 (List.length events);
   let detail = Yojson.Safe.Util.member "detail" (List.hd events) in
-  let spawn_model =
-    detail |> Yojson.Safe.Util.member "spawn_model"
+  let worker_backend =
+    detail |> Yojson.Safe.Util.member "worker_backend"
+    |> Yojson.Safe.Util.to_string_option
   in
-  Alcotest.(check bool) "spawn_model absent in failure event" true (spawn_model = `Null);
+  Alcotest.(check (option string)) "worker backend" (Some "oas-local")
+    worker_backend;
+  let worker_size =
+    detail |> Yojson.Safe.Util.member "worker_size"
+    |> Yojson.Safe.Util.to_string_option
+  in
+  Alcotest.(check (option string)) "worker size in event" (Some "lg")
+    worker_size;
   let attached_events =
     Team_session_store.read_events config session_id
     |> List.filter (fun json ->
            Yojson.Safe.Util.member "event_type" json
            = `String "session_agent_attached")
   in
-  Alcotest.(check int) "no phantom attachment on validation failure" 0
+  Alcotest.(check int) "no phantom attachment before execution" 0
     (List.length attached_events);
+  let session =
+    Team_session_store.load_session config session_id |> Option.get
+  in
+  Alcotest.(check int) "planned worker recorded" 1
+    (List.length session.planned_workers);
+  let worker = List.hd session.planned_workers in
+  Alcotest.(check string) "spawn agent normalized" "default"
+    worker.Team_session_types.spawn_agent;
+  Alcotest.(check (option string)) "tier falls back when middle model is unavailable"
+    (Some "35b")
+    (Option.map Team_session_types.model_tier_to_string worker.model_tier);
   let recorded_selection_note =
     detail |> Yojson.Safe.Util.member "spawn_selection_note"
     |> Yojson.Safe.Util.to_string_option
@@ -241,3 +265,63 @@ let test_step_spawn_llama_requires_spawn_model () =
      with Not_found -> false);
   cleanup_dir base_dir
 
+let test_step_delegate_requires_target_agent () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"step-delegate-requires-target-agent"
+    |> get_session_id
+  in
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("delegate_prompt", `String "continue from previous work");
+          ])
+  in
+  Alcotest.(check bool) "delegate without target fails" false ok;
+  let json = parse_json_exn body in
+  Alcotest.(check string) "delegate target message"
+    "target_agent is required when delegate_prompt is provided"
+    (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
+  cleanup_dir base_dir
+
+let test_step_delegate_unknown_worker_rejected () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"step-delegate-unknown-worker"
+    |> get_session_id
+  in
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("target_agent", `String "llama-local-missing");
+            ("delegate_prompt", `String "continue from previous work");
+          ])
+  in
+  Alcotest.(check bool) "delegate unknown worker fails" false ok;
+  let json = parse_json_exn body in
+  Alcotest.(check string) "delegate unknown worker message"
+    "target_agent did not match a known worker container"
+    (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
+  cleanup_dir base_dir

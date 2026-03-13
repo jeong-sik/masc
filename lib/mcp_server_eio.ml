@@ -4068,33 +4068,90 @@ let run_stdio ~sw ~env state =
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
   Log.Mcp.info "Default room: %s" Mcp_server.(state.room_config.Room.base_path);
 
-  (* Buffer for reading - framed mode (Content-Length) only for now *)
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in
 
-  Log.Mcp.debug "Transport mode: framed (Content-Length)";
+  let read_framed_message_after_first_line first_line =
+    let rec read_headers acc =
+      let line = Eio.Buf_read.line buf in
+      if String.length line = 0 || line = "\r" then
+        List.rev acc
+      else
+        read_headers (line :: acc)
+    in
+    let headers = read_headers [ first_line ] in
+    let content_length =
+      headers
+      |> List.find_map (fun header ->
+             let header = String.trim header in
+             if String.length header > 16
+                && String.lowercase_ascii (String.sub header 0 15)
+                   = "content-length:"
+             then
+               let len_str =
+                 String.trim
+                   (String.sub header 15 (String.length header - 15))
+               in
+               int_of_string_opt len_str
+             else
+               None)
+      |> Option.value ~default:0
+    in
+    if content_length > 0 then Some (Eio.Buf_read.take content_length buf)
+    else None
+  in
 
-  (* Main loop - framed mode only *)
-  let rec loop () =
-    match read_framed_message buf with
+  let respond ~mode response =
+    match response with
+    | `Null -> ()
+    | json -> (
+        match mode with
+        | Framed -> write_framed_message stdout json
+        | LineDelimited -> write_line_message stdout json)
+  in
+
+  let rec loop mode_opt =
+    match read_line_message buf with
     | None ->
         Log.Mcp.info "EOF received, shutting down";
         ()
-    | Some "" ->
-        (* Empty body, skip *)
-        loop ()
-    | Some request_str ->
-        (* Handle request with Eio clock - use "stdio" as session ID for agent persistence *)
-        let response = handle_request ~clock ~sw ~mcp_session_id:"stdio" state request_str in
-
-        (* Write response if not null *)
-        (match response with
-         | `Null -> ()
-         | json -> write_framed_message stdout json);
-
-        loop ()
+    | Some first_line ->
+        let first_line = String.trim first_line in
+        if first_line = "" then
+          loop mode_opt
+        else
+          let mode =
+            match mode_opt with
+            | Some mode -> mode
+            | None ->
+                let detected = detect_mode first_line in
+                let mode_name =
+                  match detected with
+                  | Framed -> "framed (Content-Length)"
+                  | LineDelimited -> "line-delimited JSON"
+                in
+                Log.Mcp.debug "Transport mode: %s" mode_name;
+                detected
+          in
+          let request_opt =
+            match mode with
+            | Framed -> read_framed_message_after_first_line first_line
+            | LineDelimited -> Some first_line
+          in
+          (match request_opt with
+          | None ->
+              Log.Mcp.info "EOF received, shutting down";
+              ()
+          | Some "" -> loop (Some mode)
+          | Some request_str ->
+              let response =
+                handle_request ~clock ~sw ~mcp_session_id:"stdio" state
+                  request_str
+              in
+              respond ~mode response;
+              loop (Some mode))
   in
 
-  try loop ()
+  try loop None
   with
   | End_of_file ->
       Log.Mcp.info "Connection closed"

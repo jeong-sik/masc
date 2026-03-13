@@ -362,7 +362,7 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
             | Ok response ->
                 ensure_expected_final_marker response
                   ~expected_final_marker:spec.expected_final_marker
-            | Error _ as error -> error
+            | Error err -> Error (Agent_sdk__Error.to_string err)
           in
           let result =
             match result, managed_task with

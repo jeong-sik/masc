@@ -170,7 +170,7 @@ let run ~(sw : Eio.Switch.t) ~(config : Room.config) (state : Mdal.loop_state)
       ~worker_name ~model:model_spec ~team_session_id:None ~role:(Some "mdal")
       ~selection_note:(Some "strict-mdal-worker")
       ~prompt ~allowed_tools:state.profile.tools_allow
-      ~timeout_sec:(timeout_seconds state)
+      ~timeout_sec:(timeout_seconds state) ()
   with
   | Error message -> Error (Worker_failed message)
   | Ok result ->

@@ -26,6 +26,15 @@ let test_tool_names () =
   let expected = ["file_read"; "file_write"; "shell_exec"] in
   Alcotest.(check (list string)) "tool names match" expected names
 
+let test_readonly_tool_names () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let tools = Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock () in
+  let names = List.map (fun (t : Tool.t) -> t.schema.name) tools in
+  let expected = ["file_read"; "shell_exec"] in
+  Alcotest.(check (list string)) "readonly tool names match" expected names
+
 (* --- file_read tests --- *)
 
 let test_file_read_existing () =
@@ -281,6 +290,18 @@ let test_shell_exec_missing_param () =
        (String.length msg > 0)
    | Ok _ -> Alcotest.fail "should fail without command param")
 
+let test_readonly_shell_exec_blocks_git () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let tools = Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock () in
+  let tool = find_tool "shell_exec" tools in
+  let result = Tool.execute tool
+    (`Assoc [("command", `String "git status")]) in
+  match result with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "readonly shell should block git"
+
 let test_workdir_enforcement () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -316,6 +337,7 @@ let () =
     "structure", [
       Alcotest.test_case "tool count" `Quick test_tool_count;
       Alcotest.test_case "tool names" `Quick test_tool_names;
+      Alcotest.test_case "readonly tool names" `Quick test_readonly_tool_names;
     ];
     "file_read", [
       Alcotest.test_case "read existing file" `Quick test_file_read_existing;
@@ -342,6 +364,8 @@ let () =
         test_shell_exec_rejects_shell_metacharacters;
       Alcotest.test_case "nonexistent command" `Quick test_shell_exec_nonexistent_cmd;
       Alcotest.test_case "missing param" `Quick test_shell_exec_missing_param;
+      Alcotest.test_case "readonly shell blocks git" `Quick
+        test_readonly_shell_exec_blocks_git;
     ];
     "workdir", [
       Alcotest.test_case "workdir enforcement" `Quick test_workdir_enforcement;

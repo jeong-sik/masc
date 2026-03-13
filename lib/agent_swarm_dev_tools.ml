@@ -70,7 +70,7 @@ let validate_path ?workdir path =
 
 (** shell_exec intentionally supports only a narrow allowlist of dev/test
     commands and rejects shell control syntax to keep execution predictable. *)
-let allowed_commands =
+let dev_allowed_commands =
   [
     "cat"; "cargo"; "cmake"; "cut"; "dune"; "echo"; "env"; "file"; "find";
     "git"; "go"; "gofmt"; "gradle"; "grep"; "head"; "java"; "javac"; "ls";
@@ -78,6 +78,13 @@ let allowed_commands =
     "printf"; "pwd"; "pyright"; "pytest"; "python"; "python3"; "rg"; "ruff";
     "rustc"; "sed"; "sort"; "stat"; "tail"; "tr"; "uniq"; "uv"; "wc";
     "which"; "yarn";
+  ]
+
+let readonly_allowed_commands =
+  [
+    "cat"; "cut"; "echo"; "env"; "file"; "find"; "grep"; "head"; "ls";
+    "printf"; "pwd"; "rg"; "sed"; "sort"; "stat"; "tail"; "tr"; "uniq";
+    "wc"; "which";
   ]
 
 let forbidden_shell_chars =
@@ -101,7 +108,7 @@ let extract_command_name cmd =
     let token = String.sub trimmed 0 (find_sep 0) in
     Some (Filename.basename token)
 
-let validate_command cmd =
+let validate_command_with_allowlist ~allowed_commands cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then Error "command must not be empty"
   else if contains_forbidden_shell_chars trimmed then
@@ -115,6 +122,9 @@ let validate_command cmd =
         (Printf.sprintf
            "Command blocked: %s is not in the approved dev command allowlist"
            name)
+
+let validate_command cmd =
+  validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
 
 (* --- Recursive mkdir --- *)
 
@@ -189,14 +199,11 @@ let make_file_write ?workdir () =
            with Sys_error msg ->
              Error (Printf.sprintf "Cannot write: %s" msg))
 
-let make_shell_exec ~proc_mgr ~clock =
+let make_shell_exec_with_allowlist ~proc_mgr ~clock ~allowed_commands
+    ~description =
   Agent_sdk.Tool.create
     ~name:"shell_exec"
-    ~description:"Execute a shell command and return stdout+stderr. \
-      Timeout: 30s default, max 120s. \
-      Use for: running tests, git commands, build tools, directory listing. \
-      Unlike file_read (single file), this handles approved CLI operations. \
-      Commands run in /bin/sh but shell control syntax is rejected."
+    ~description
     ~parameters:[
       { name = "command";
         description = "Shell command to execute";
@@ -209,7 +216,7 @@ let make_shell_exec ~proc_mgr ~clock =
        match Agent_swarm_tool_input.extract_string "command" input with
        | Error e -> Error e
        | Ok command ->
-         (match validate_command command with
+         (match validate_command_with_allowlist ~allowed_commands command with
           | Error e -> Error e
           | Ok () ->
            let timeout =
@@ -240,9 +247,32 @@ let make_shell_exec ~proc_mgr ~clock =
            with exn ->
              Error (Printf.sprintf "Command failed: %s" (Printexc.to_string exn))))
 
+let make_shell_exec ~proc_mgr ~clock =
+  make_shell_exec_with_allowlist ~proc_mgr ~clock
+    ~allowed_commands:dev_allowed_commands
+    ~description:
+      "Execute a shell command and return stdout+stderr. \
+       Timeout: 30s default, max 120s. \
+       Use for: running tests, git commands, build tools, directory listing. \
+       Unlike file_read (single file), this handles approved CLI operations. \
+       Commands run in /bin/sh but shell control syntax is rejected."
+
+let make_shell_exec_readonly ~proc_mgr ~clock =
+  make_shell_exec_with_allowlist ~proc_mgr ~clock
+    ~allowed_commands:readonly_allowed_commands
+    ~description:
+      "Execute a read-only shell command and return stdout+stderr. \
+       Timeout: 30s default, max 120s. \
+       Use for search, inspection, and verification only. \
+       Write-oriented commands are intentionally excluded."
+
 (** Create dev tools that close over Eio capabilities.
     Returns [file_read; file_write; shell_exec]. *)
 let make_tools ~proc_mgr ~clock ?workdir () : Agent_sdk.Tool.t list =
   [ make_file_read ?workdir ();
     make_file_write ?workdir ();
     make_shell_exec ~proc_mgr ~clock ]
+
+let make_readonly_tools ~proc_mgr ~clock ?workdir () : Agent_sdk.Tool.t list =
+  [ make_file_read ?workdir ();
+    make_shell_exec_readonly ~proc_mgr ~clock ]

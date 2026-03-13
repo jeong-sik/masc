@@ -58,8 +58,18 @@ let test_dashboard_execution_fixture () =
         check string "top queue handoff surface" "intervene"
           (execution_queue |> List.hd |> member "top_handoff" |> member "surface" |> to_string);
         check int "session briefs" 2 (List.length session_briefs);
+        check int "fixture seen count" 3
+          (session_briefs |> List.hd |> member "seen_count" |> to_int);
+        check int "fixture planned count" 4
+          (session_briefs |> List.hd |> member "planned_count" |> to_int);
+        check string "fixture counts basis" "recent_turns"
+          (session_briefs |> List.hd |> member "counts_basis" |> to_string);
         check int "operation briefs" 2 (List.length operation_briefs);
         check int "worker briefs" 3 (List.length worker_briefs);
+        check string "worker signal truth" "live"
+          (worker_briefs |> List.hd |> member "signal_truth" |> to_string);
+        check string "worker evidence source" "message"
+          (worker_briefs |> List.hd |> member "evidence_source" |> to_string);
         check int "continuity briefs" 1 (List.length continuity_briefs);
         check int "offline worker briefs" 1 (List.length offline_worker_briefs);
         check string "continuity skill route summary" "scene-director · +1 · judgment"

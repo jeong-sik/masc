@@ -1039,7 +1039,10 @@ export interface DashboardExecutionSessionBrief {
   last_activity_summary?: string | null
   communication_summary?: string | null
   active_count?: number
+  seen_count?: number
+  planned_count?: number
   required_count?: number
+  counts_basis?: string | null
   top_handoff?: DashboardExecutionHandoff | null
   intervene_handoff?: DashboardExecutionHandoff | null
   command_handoff?: DashboardExecutionHandoff | null
@@ -1071,6 +1074,9 @@ export interface DashboardExecutionWorkerSupportBrief {
   note: string
   focus: string
   last_signal_at?: string | null
+  last_signal_age_sec?: number | null
+  signal_truth?: 'live' | 'stale' | 'absent' | string
+  evidence_source?: 'message' | 'presence' | 'none' | string
   active_task_count?: number
   related_session_id?: string | null
   related_operation_id?: string | null

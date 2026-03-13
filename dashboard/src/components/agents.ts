@@ -103,6 +103,24 @@ function agentStateLabel(state: DashboardExecutionWorkerSupportBrief['state']): 
   }
 }
 
+function signalTruthLabel(value?: DashboardExecutionWorkerSupportBrief['signal_truth'] | null): string {
+  switch (value) {
+    case 'live': return 'live signal'
+    case 'stale': return 'stale signal'
+    case 'absent': return 'signal 없음'
+    default: return value ?? 'signal 미상'
+  }
+}
+
+function evidenceSourceLabel(value?: DashboardExecutionWorkerSupportBrief['evidence_source'] | null): string {
+  switch (value) {
+    case 'message': return '최근 출력'
+    case 'presence': return 'presence'
+    case 'none': return '근거 없음'
+    default: return value ?? '근거 미상'
+  }
+}
+
 function continuityStateLabel(state: DashboardExecutionContinuityBrief['state']): string {
   switch (state) {
     case 'critical': return '위험'
@@ -245,6 +263,9 @@ function QueueCard({ item, selected }: { item: DashboardExecutionQueueItem; sele
 }
 
 function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrief; selected: boolean }) {
+  const liveCount = brief.active_count ?? 0
+  const seenCount = brief.seen_count ?? liveCount
+  const plannedCount = brief.planned_count ?? brief.member_names.length
   return html`
     <button
       class="mission-card-select ${selected ? 'active' : ''}"
@@ -263,6 +284,7 @@ function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrie
       </div>
       <div class="mission-card-meta">
         <span>건강도 · ${statusLabel(brief.health ?? 'ok')}</span>
+        <span>live ${liveCount} · seen ${seenCount} · planned ${plannedCount}</span>
         ${brief.linked_operation_id ? html`<span>연결 작전 · ${brief.linked_operation_id}</span>` : null}
         ${brief.last_activity_at ? html`<span><${TimeAgo} timestamp=${brief.last_activity_at} /></span>` : null}
       </div>
@@ -271,7 +293,9 @@ function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrie
         : brief.last_activity_summary
           ? html`<div class="mission-card-detail">${brief.last_activity_summary}</div>`
           : null}
-      ${brief.worker_gap_summary ? html`<div class="monitor-footnote">${brief.worker_gap_summary}</div>` : null}
+      <div class="monitor-footnote">
+        ${brief.worker_gap_summary ?? `관측 기준 · ${brief.counts_basis ?? 'recent_turns'}`}
+      </div>
       <${HandoffButtons} intervene=${brief.intervene_handoff} command=${brief.command_handoff} />
     </button>
   `
@@ -386,6 +410,8 @@ function WorkerSupportRow({
 
       <div class="monitor-meta">
         ${row.last_signal_at ? html`<span>신호 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 신호 없음</span>`}
+        <span>${signalTruthLabel(row.signal_truth)} · ${evidenceSourceLabel(row.evidence_source)}</span>
+        ${typeof row.last_signal_age_sec === 'number' ? html`<span>${row.last_signal_age_sec}s ago</span>` : null}
         <span>${(row.active_task_count ?? 0) > 0 ? `활성 작업 ${row.active_task_count}개` : '활성 작업 없음'}</span>
         ${row.related_session_id ? html`<span>세션 · ${row.related_session_id}</span>` : null}
         ${row.related_operation_id ? html`<span>작전 · ${row.related_operation_id}</span>` : null}

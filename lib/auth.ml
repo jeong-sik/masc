@@ -236,7 +236,7 @@ let permission_for_tool = function
   | "masc_persistent_agent_autonomy" | "masc_persistent_agent_goals"
   | "masc_persistent_agent_trajectory" | "masc_persistent_agent_eval"
   | "masc_llama_models" | "masc_llama_runtime_status"
-  | "masc_runtime_verify"
+  | "masc_runtime_verify" | "masc_llama_runtime_verify"
   | "masc_llama_runtime_bench"
   | "masc_unit_list" | "masc_operation_status"
   | "masc_policy_status" | "masc_dispatch_plan" | "masc_dispatch_route"
@@ -250,8 +250,9 @@ let permission_for_tool = function
       Some CanReadState
   | "masc_autoresearch_status" -> Some CanReadState
   | "masc_add_task" -> Some CanAddTask
-  | "masc_claim_next" -> Some CanClaimTask
-  | "masc_update_priority" | "masc_transition" -> Some CanCompleteTask
+  | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
+  | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" ->
+      Some CanCompleteTask
   | "masc_keeper_action_explain"
   | "masc_keeper_eval_replay" ->
       Some CanReadState
@@ -326,7 +327,7 @@ let is_tool_auth_strict_enabled () =
   | Some raw ->
       let v = String.trim raw |> String.lowercase_ascii in
       v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
-  | None -> false
+  | None -> true
 
 let is_masc_tool_name tool_name =
   String.starts_with ~prefix:"masc_" tool_name

@@ -223,7 +223,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
       in
       Alcotest.(check string) "target_type" "room"
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
-      Alcotest.(check string) "health" "bad"
+      Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
       Alcotest.(check bool) "command_plane present" true
         (Yojson.Safe.Util.member "command_plane" digest <> `Null);

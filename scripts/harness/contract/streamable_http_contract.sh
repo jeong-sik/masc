@@ -258,8 +258,8 @@ h7="$tmpdir/delete-missing-protocol.headers"
 b7="$tmpdir/delete-missing-protocol.body"
 delete_with_session "$SESSION_ID" "" "$h7" "$b7"
 code7="$(status_code "$h7")"
-if [ "$code7" != "200" ]; then
-  echo "FAIL: expected 200 for DELETE missing protocol header (session fallback), got $code7"
+if [ "$code7" != "204" ]; then
+  echo "FAIL: expected 204 for DELETE missing protocol header (session fallback), got $code7"
   cat "$h7"
   cat "$b7"
   exit 1

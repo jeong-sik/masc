@@ -3,7 +3,7 @@
     Ensures at least one agent is always alive when the server runs.
     Integrates Guardian's zombie/gc consumers and adds:
     - Self-heartbeat (room presence)
-    - Board patrol (stale post detection, daily status) — LLM-driven
+    - Board patrol (stale post detection, action-only notices) — LLM-driven
     - Task hygiene (orphaned/stuck task warnings) — LLM-driven
     - Keeper health monitoring — LLM-driven
 
@@ -19,6 +19,17 @@ let agent_name = "sentinel"
 
 let log msg =
   eprintf "[sentinel] %s\n%!" msg
+
+type board_patrol_decision = {
+  needs_attention : bool;
+  reason : string option;
+  board_post : string option;
+}
+
+let last_board_patrol_checked_at : float ref = ref 0.0
+let last_board_patrol_action : string ref = ref "none"
+let last_board_patrol_reason : string ref = ref ""
+let last_board_patrol_stale_count : int ref = ref 0
 
 (** Parse ISO 8601 timestamp to float; returns epoch (0.0) on failure
     so that unparseable timestamps are treated as maximally stale. *)
@@ -62,6 +73,40 @@ let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
             log (sprintf "LLM cascade %s failed: %s" cascade_name err);
             None)
 
+let trimmed_string_option = function
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let iso_of_unix ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let json_string_of_nonempty value =
+  let trimmed = String.trim value in
+  if trimmed = "" then `Null else `String trimmed
+
+let board_patrol_decision_of_llm_json (json : Yojson.Safe.t) : board_patrol_decision =
+  let open Yojson.Safe.Util in
+  {
+    needs_attention =
+      (json |> member "needs_attention" |> to_bool_option)
+      |> Option.value ~default:false;
+    reason =
+      json |> member "reason" |> to_string_option |> trimmed_string_option;
+    board_post =
+      json |> member "board_post" |> to_string_option |> trimmed_string_option;
+  }
+
+let note_board_patrol_result_for_tests ?checked_at ~action ?reason ?(stale_count = 0) () =
+  last_board_patrol_checked_at := Option.value ~default:(Time_compat.now ()) checked_at;
+  last_board_patrol_action := action;
+  last_board_patrol_reason := Option.value ~default:"" reason;
+  last_board_patrol_stale_count := stale_count
+
 (* ── Sentinel-specific Pulse Consumers ─────────────────────── *)
 
 (** Heartbeat consumer: keeps sentinel visible in the room. *)
@@ -83,6 +128,9 @@ let make_heartbeat_consumer config : (module Pulse.Consumer) =
     Skips posting when LLM is unavailable. *)
 let make_board_patrol_consumer config : (module Pulse.Consumer) =
   let last_daily_post = ref 0 in (* day-of-year of last post *)
+  let record_result ~checked_at ~action ?reason ~stale_count () =
+    note_board_patrol_result_for_tests ~checked_at ~action ?reason ~stale_count ()
+  in
   (module struct
     let name = "sentinel-board-patrol"
     let should_act _beat = true
@@ -105,32 +153,55 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
             | p :: _ -> sprintf "%.0fs" (now_f -. p.created_at)
             | [] -> "no posts"
           in
-          let llm_content = call_sentinel_llm
-            ~cascade_name:"sentinel_board"
-            ~prompt_id:"sentinel-board-patrol"
-            ~vars:[
-              ("total_posts", string_of_int post_count);
-              ("stale_count", string_of_int stale_posts);
-              ("latest_post_age", latest_age);
-              ("active_agents", agent_names);
-            ] () in
-          match llm_content with
-          | Some json ->
-              let open Yojson.Safe.Util in
-              let summary = json |> member "daily_summary" |> to_string_option
-                            |> Option.value ~default:"" in
-              if String.length summary > 10 then begin
-                let content = sprintf "[Sentinel Daily] %s" summary in
-                (match Board_dispatch.create_post
-                         ~author:agent_name ~content
-                         ~visibility:Board.Internal
-                         ~hearth:"sentinel" () with
-                 | Ok _post -> log "daily status posted"
-                 | Error e -> log (sprintf "daily post failed: %s" (Board.show_board_error e)))
-              end else
-                log "LLM summary too short, skipping daily post"
-          | None ->
-              log "LLM unavailable, skipping daily post"
+          if stale_posts = 0 then begin
+            record_result ~checked_at:now_f ~action:"silent"
+              ?reason:(Some "no stale posts over 7d") ~stale_count:stale_posts ();
+            log "no stale posts, skipping board patrol post"
+          end else begin
+            let llm_content = call_sentinel_llm
+              ~cascade_name:"sentinel_board"
+              ~prompt_id:"sentinel-board-patrol"
+              ~vars:[
+                ("total_posts", string_of_int post_count);
+                ("stale_count", string_of_int stale_posts);
+                ("latest_post_age", latest_age);
+                ("active_agents", agent_names);
+              ] () in
+            match llm_content with
+            | Some json ->
+                let decision = board_patrol_decision_of_llm_json json in
+                if not decision.needs_attention then begin
+                  record_result ~checked_at:now_f ~action:"silent"
+                    ?reason:decision.reason ~stale_count:stale_posts ();
+                  log "board patrol decided no operator-visible action is needed"
+                end else
+                  (match decision.board_post with
+                   | Some summary when String.length summary > 10 ->
+                       let content = sprintf "[Sentinel] %s" summary in
+                       (match Board_dispatch.create_post
+                                ~author:agent_name ~content
+                                ~post_kind:Board.System_post
+                                ~visibility:Board.Internal
+                                ~hearth:"sentinel" () with
+                        | Ok _post ->
+                            record_result ~checked_at:now_f ~action:"posted"
+                              ?reason:decision.reason ~stale_count:stale_posts ();
+                            log "board patrol attention posted"
+                        | Error e ->
+                            let reason = Board.show_board_error e in
+                            record_result ~checked_at:now_f ~action:"post_failed"
+                              ?reason:(Some reason) ~stale_count:stale_posts ();
+                            log (sprintf "board patrol post failed: %s" reason))
+                   | _ ->
+                       record_result ~checked_at:now_f ~action:"suppressed"
+                         ?reason:(Some "needs_attention=true but board_post was empty")
+                         ~stale_count:stale_posts ();
+                       log "board patrol attention requested but board_post was empty; suppressing")
+            | None ->
+                record_result ~checked_at:now_f ~action:"llm_unavailable"
+                  ?reason:(Some "sentinel_board cascade unavailable") ~stale_count:stale_posts ();
+                log "LLM unavailable, skipping board patrol post"
+          end
         end;
         Ok ()
       with exn ->
@@ -304,7 +375,11 @@ let start_ts : float ref = ref 0.0
 
 let reset_runtime_state_for_tests () =
   started := false;
-  start_ts := 0.0
+  start_ts := 0.0;
+  last_board_patrol_checked_at := 0.0;
+  last_board_patrol_action := "none";
+  last_board_patrol_reason := "";
+  last_board_patrol_stale_count := 0
 
 let mark_started_for_tests () =
   started := true;
@@ -339,6 +414,14 @@ let status_json () : Yojson.Safe.t =
     ("uptime_s", `Float (if !started then Time_compat.now () -. !start_ts else 0.0));
     ("embedded_guardian_loops_running", `Bool embedded_guardian_loops_running);
     ("guardian_runtime_owner", `String (Guardian.masc_runtime_owner_label ()));
+    ( "board_patrol",
+      `Assoc
+        [
+          ("last_checked_at", if !last_board_patrol_checked_at > 0.0 then `String (iso_of_unix !last_board_patrol_checked_at) else `Null);
+          ("last_action", `String !last_board_patrol_action);
+          ("last_reason", json_string_of_nonempty !last_board_patrol_reason);
+          ("last_stale_count", `Int !last_board_patrol_stale_count);
+        ] );
     ("consumers", `List consumers);
   ]
 

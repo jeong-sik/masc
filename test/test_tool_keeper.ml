@@ -191,15 +191,13 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
 let test_keeper_model_set_persists_active_model () =
-  let provider_model =
-    Printf.sprintf "glm:%s" Masc_mcp.Env_config.Llm.default_model
-  in
+  let provider_model = "custom:test-model" in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      stop_keeper_via_tool env sw base_dir "sangsu";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -239,15 +237,16 @@ let test_keeper_model_set_persists_active_model () =
       in
       check bool "model set ok" true ok;
       let json = Yojson.Safe.from_string body in
+      let allowed_models =
+        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> List.map to_string)
+      in
       check string "active model updated" provider_model
         Yojson.Safe.Util.(json |> member "active_model" |> to_string);
-      let allowed_models =
-        Yojson.Safe.Util.(json |> member "allowed_models" |> to_list |> filter_string)
-      in
-      check bool "allowed models contains target model" true
+      check bool "allowed models include active model" true
         (List.mem provider_model allowed_models);
-      check int "allowed models are deduped" (List.length allowed_models)
-        (List.sort_uniq String.compare allowed_models |> List.length);
+      check int "allowed models stay deduped"
+        (List.length (List.sort_uniq String.compare allowed_models))
+        (List.length allowed_models);
       let ok, status_body =
         dispatch "masc_keeper_status"
           (`Assoc

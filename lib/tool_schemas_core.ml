@@ -82,14 +82,6 @@ let schemas : tool_schema list = [
     ];
   };
   {
-    name = "masc_sessions";
-    description = "List active voting sessions.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-  {
     name = "masc_route";
     description = "Route a query to appropriate agents using MoE-style selection. \
 Returns: selected agents, estimated cost, complexity score.";

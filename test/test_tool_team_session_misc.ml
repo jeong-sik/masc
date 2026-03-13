@@ -1,0 +1,318 @@
+open Masc_mcp
+open Test_tool_team_session_support
+
+let test_prove_strong_requires_additional_evidence () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"prove-strong-check" |> get_session_id in
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_turn"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("turn_kind", `String "note");
+             ("message", `String "single-turn");
+           ]));
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "proof-check");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("proof_level", `String "strong");
+          ])
+  in
+  Alcotest.(check bool) "prove strong call succeeds" true prove_ok;
+  let verdict =
+    prove_body |> parse_json_exn |> result_field |> Yojson.Safe.Util.member "proof"
+    |> Yojson.Safe.Util.member "verdict" |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "strong proof needs stronger evidence"
+    "insufficient_evidence_strong" verdict;
+  cleanup_dir base_dir
+
+let test_dispatch_unknown () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  Alcotest.(check bool) "dispatch none" true
+    (Tool_team_session.dispatch ctx ~name:"masc_team_session_unknown"
+       ~args:(`Assoc [])
+    = None);
+  cleanup_dir base_dir
+
+let test_unauthorized_session_access () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let owner_ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let intruder_ctx : _ Tool_team_session.context =
+    { config; agent_name = "intruder"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn owner_ctx ~goal:"authz-check" |> get_session_id in
+
+  let status_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "unauthorized status denied" false status_ok;
+
+  let report_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_report"
+      ~args:
+        (`Assoc
+          [ ("session_id", `String session_id); ("force_regenerate", `Bool false) ])
+  in
+  Alcotest.(check bool) "unauthorized report denied" false report_ok;
+
+  let stop_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_stop"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "unauthorized stop denied" false stop_ok;
+
+  let list_ok, list_body =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_list"
+      ~args:(`Assoc [ ("limit", `Int 10) ])
+  in
+  Alcotest.(check bool) "unauthorized list filtered" true list_ok;
+  let listed_sessions =
+    parse_json_exn list_body |> result_field |> Yojson.Safe.Util.member "sessions"
+    |> Yojson.Safe.Util.to_list
+  in
+  Alcotest.(check int) "unauthorized list empty" 0 (List.length listed_sessions);
+
+  let compare_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_compare"
+      ~args:
+        (`Assoc
+          [
+            ("base_session_id", `String session_id);
+            ("target_session_id", `String session_id);
+          ])
+  in
+  Alcotest.(check bool) "unauthorized compare denied" false compare_ok;
+
+  let turn_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_turn"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "intruder");
+          ])
+  in
+  Alcotest.(check bool) "unauthorized turn denied" false turn_ok;
+
+  let events_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_events"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "unauthorized events denied" false events_ok;
+
+  let prove_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_prove"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "unauthorized prove denied" false prove_ok;
+
+  let owner_stop_ok, _ =
+    dispatch_exn owner_ctx ~name:"masc_team_session_stop"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("reason", `String "owner_cleanup");
+            ("generate_report", `Bool false);
+          ])
+  in
+  Alcotest.(check bool) "owner stop allowed" true owner_stop_ok;
+  ignore (wait_until_terminal owner_ctx session_id);
+  cleanup_dir base_dir
+
+let test_final_done_delta_snapshot_stable () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"snapshot-stability" |> get_session_id in
+
+  let task_before = add_task_id config ~title:"before-finalize" in
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:"claim";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:"start";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:"done";
+
+  let stop_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_stop"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("reason", `String "snapshot_finalize");
+            ("generate_report", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "stop accepted" true stop_ok;
+  ignore (wait_until_terminal ctx session_id);
+
+  let status_ok_before, status_body_before =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status before stable check" true status_ok_before;
+  let done_before = done_delta_total_of_status_body status_body_before in
+  Alcotest.(check int) "done delta before finalize snapshot" 1 done_before;
+
+  let task_after = add_task_id config ~title:"after-finalize" in
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:"claim";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:"start";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:"done";
+
+  let status_ok_after, status_body_after =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status after stable check" true status_ok_after;
+  let done_after = done_delta_total_of_status_body status_body_after in
+  Alcotest.(check int) "done delta should stay frozen after finalize" done_before
+    done_after;
+
+  let report_ok, report_body =
+    dispatch_exn ctx ~name:"masc_team_session_report"
+      ~args:
+        (`Assoc
+          [ ("session_id", `String session_id); ("force_regenerate", `Bool true) ])
+  in
+  Alcotest.(check bool) "report regenerate" true report_ok;
+  let report_json = parse_json_exn report_body |> result_field in
+  let report_json_path =
+    report_json |> Yojson.Safe.Util.member "json_path" |> Yojson.Safe.Util.to_string
+  in
+  let report_doc = Room_utils.read_json config report_json_path in
+  let done_in_report =
+    report_doc |> Yojson.Safe.Util.member "summary"
+    |> Yojson.Safe.Util.member "done_delta_total"
+    |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check int) "report uses frozen done delta" done_before done_in_report;
+  cleanup_dir base_dir
+
+let test_status_and_stop_linked_autoresearch () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "tester"));
+      ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+      let ctx : _ Tool_team_session.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = None;
+        }
+      in
+      let start_json =
+        start_session_exn ctx ~goal:"linked autoresearch visibility"
+      in
+      let session_id = get_session_id start_json in
+      Mirage_crypto_rng_unix.use_default ();
+      let target_path = Filename.concat base_dir "target.py" in
+      let oc = open_out target_path in
+      output_string oc "print('hello')\n";
+      close_out oc;
+      let state =
+        Autoresearch.create_state ~goal:"improve test metric"
+          ~metric_fn:"echo 1.0" ~target_file:"target.py" ~cycle_timeout_s:60.0
+          ~max_cycles:5 ~workdir:base_dir ()
+      in
+      state.baseline <- 1.0;
+      state.best_score <- 1.0;
+      Hashtbl.replace Autoresearch.active_loops state.loop_id state;
+      Autoresearch.latest_loop_id := Some state.loop_id;
+      Autoresearch.save_state ~base_path:base_dir state;
+      Autoresearch.save_swarm_link ~base_path:base_dir
+        {
+          Autoresearch.loop_id = state.loop_id;
+          session_id;
+          operation_id = None;
+          target_file = "target.py";
+          program_note = Some "Prefer simple edits";
+          created_by = Some "tester";
+          linked_at = Time_compat.now ();
+        };
+
+      let status_ok, status_body =
+        dispatch_exn ctx ~name:"masc_team_session_status"
+          ~args:(`Assoc [ ("session_id", `String session_id) ])
+      in
+      Alcotest.(check bool) "linked status ok" true status_ok;
+      let linked_status =
+        parse_json_exn status_body |> result_field
+        |> Yojson.Safe.Util.member "linked_autoresearch"
+      in
+      Alcotest.(check string) "linked loop id" state.loop_id
+        (linked_status |> Yojson.Safe.Util.member "loop_id"
+       |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "linked loop status" "running"
+        (linked_status |> Yojson.Safe.Util.member "status"
+       |> Yojson.Safe.Util.to_string);
+
+      let stop_ok, stop_body =
+        dispatch_exn ctx ~name:"masc_team_session_stop"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String session_id);
+                ("reason", `String "linked-stop");
+                ("generate_report", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "stop linked session ok" true stop_ok;
+      let linked_stop =
+        parse_json_exn stop_body |> result_field
+        |> Yojson.Safe.Util.member "linked_autoresearch"
+      in
+      Alcotest.(check string) "linked stop status" "stopped"
+        (linked_stop |> Yojson.Safe.Util.member "status"
+       |> Yojson.Safe.Util.to_string);
+      Alcotest.(check bool) "loop registry updated" true
+        (state.status = Autoresearch.Stopped))

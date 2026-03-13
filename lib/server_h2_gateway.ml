@@ -1722,15 +1722,29 @@ let make_request_handler ~sw ~clock ~server_start_time =
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~status
             ~extra_headers:cors
 
-      | `GET, "/api/v1/council/debates" ->
+      | `GET, "/api/v1/governance/cases" ->
           let state = get_server_state () in
           let base_path = state.Mcp_server.room_config.base_path in
-          let json = council_debates_json httpun_request ~base_path in
+          let json = governance_cases_json httpun_request ~base_path in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, p
+        when String.length p > 23
+             && String.sub p 0 23 = "/api/v1/governance/cases/" ->
+          let state = get_server_state () in
+          let case_id = String.sub p 23 (String.length p - 23) in
+          let base_path = state.Mcp_server.room_config.base_path in
+          let (status, json) = governance_case_detail_json ~base_path ~case_id in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            ~status ~extra_headers:cors
+
+      | `GET, "/api/v1/council/debates" ->
+          h2_respond_json h2_reqd (Yojson.Safe.to_string removed_council_surface_json)
+            ~status:`Bad_request ~extra_headers:cors
+
       | `GET, "/api/v1/council/sessions" ->
-          let json = council_sessions_json httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          h2_respond_json h2_reqd (Yojson.Safe.to_string removed_council_surface_json)
+            ~status:`Bad_request ~extra_headers:cors
 
       | `GET, "/api/v1/board" ->
           let hearth = query_param httpun_request "hearth" in
@@ -1777,38 +1791,16 @@ let make_request_handler ~sw ~clock ~server_start_time =
              && String.length p >= 24 + 8
              && String.sub p 0 24 = "/api/v1/council/debates/"
              && String.ends_with ~suffix:"/summary" p ->
-          let prefix_len = 24 in
-          let suffix_len = 8 in
-          let debate_id_len = String.length p - prefix_len - suffix_len in
-          if debate_id_len <= 0 then
-            h2_respond_json h2_reqd {|{"error":"debate_id missing"}|}
-              ~status:`Bad_request ~extra_headers:cors
-          else
-            let debate_id = String.sub p prefix_len debate_id_len in
-            let state = get_server_state () in
-            let base_path = state.Mcp_server.room_config.base_path in
-            let (status, json) = council_debate_summary_json ~base_path ~debate_id in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
-              ~status ~extra_headers:cors
+          h2_respond_json h2_reqd (Yojson.Safe.to_string removed_council_surface_json)
+            ~status:`Bad_request ~extra_headers:cors
 
       | `GET, p
         when String.length p > 33
              && String.length p >= 25 + 8
              && String.sub p 0 25 = "/api/v1/council/sessions/"
              && String.ends_with ~suffix:"/summary" p ->
-          let prefix_len = 25 in
-          let suffix_len = 8 in
-          let session_id_len = String.length p - prefix_len - suffix_len in
-          if session_id_len <= 0 then
-            h2_respond_json h2_reqd {|{"error":"session_id missing"}|}
-              ~status:`Bad_request ~extra_headers:cors
-          else
-            let session_id = String.sub p prefix_len session_id_len in
-            let state = get_server_state () in
-            let base_path = state.Mcp_server.room_config.base_path in
-            let (status, json) = council_session_summary_json ~base_path ~session_id in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
-              ~status ~extra_headers:cors
+          h2_respond_json h2_reqd (Yojson.Safe.to_string removed_council_surface_json)
+            ~status:`Bad_request ~extra_headers:cors
 
       | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
           let post_id = String.sub p 14 (String.length p - 14) in

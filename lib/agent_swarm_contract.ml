@@ -325,10 +325,12 @@ let core_remote_operation_names =
         "decision_create";
         "decision_finalize";
         "decision_status";
-        "masc_consensus_start";
-        "masc_consensus_vote";
-        "masc_consensus_result";
-        "masc_consensus_close";
+        "masc_petition_submit";
+        "masc_case_brief_submit";
+        "masc_cases";
+        "masc_case_status";
+        "masc_ruling_status";
+        "masc_execution_orders";
       ])
 
 let find_property properties key =

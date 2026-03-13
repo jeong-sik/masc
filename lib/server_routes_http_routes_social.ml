@@ -13,24 +13,77 @@ open Server_routes_http_keeper_stream
 
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
+module Server_social_http = Server_social_http
 module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
+let social_http_deps : Server_social_http.deps =
+  {
+    query_param;
+    int_query_param;
+    get_origin;
+    cors_headers;
+    get_switch = (fun () -> Some (Eio_context.get_switch ()));
+    get_clock = (fun () -> Some (Eio_context.get_clock ()));
+    get_session_id_any = Server_mcp_transport_http.get_session_id_any;
+  }
+
+let social_events_http_json ~state request =
+  Server_social_http.events_http_json ~deps:social_http_deps ~state request
+
+let social_graph_http_json ~state request =
+  Server_social_http.graph_http_json ~deps:social_http_deps ~state request
+
+let social_events_stream_http ~state request reqd =
+  Server_social_http.handle_stream ~deps:social_http_deps ~state request reqd
+
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/council/debates" (fun request reqd ->
+  |> Http.Router.get "/api/v1/events" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = social_events_http_json ~state req in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/events/stream" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         social_events_stream_http ~state request reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/social-graph" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = social_graph_http_json ~state req in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/governance/cases" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in
-         let json = council_debates_json req ~base_path in
+         let json = governance_cases_json req ~base_path in
          Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.prefix_get "/api/v1/governance/cases/" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let path = Http.Request.path request in
+         let prefix = "/api/v1/governance/cases/" in
+         let case_id =
+           String.sub path (String.length prefix)
+             (String.length path - String.length prefix)
+         in
+         let (status, json) = governance_case_detail_json ~base_path ~case_id in
+         respond_json_with_cors ~status request reqd (Yojson.Safe.to_string json)
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/council/debates" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         respond_json_with_cors ~status:`Bad_request request reqd
+           (Yojson.Safe.to_string removed_council_surface_json)
        ) request reqd)
 
   |> Http.Router.get "/api/v1/council/sessions" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = council_sessions_json req in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+       with_public_read (fun _state _req reqd ->
+         respond_json_with_cors ~status:`Bad_request request reqd
+           (Yojson.Safe.to_string removed_council_surface_json)
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board" (fun request reqd ->

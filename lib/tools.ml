@@ -3,8 +3,18 @@
 open Types
 
 (** All MASC tool schemas *)
-let raw_schemas : tool_schema list = 
-  Tool_schemas_auth.schemas @ Tool_schemas_board.schemas @ Tool_schemas_worktree.schemas @ Tool_schemas_agent.schemas @ Tool_schemas_plan.schemas @ Tool_schemas_debate.schemas @ Tool_schemas_consensus.schemas @ Tool_schemas_execution.schemas @ Tool_schemas_room.schemas @ Tool_schemas_portal.schemas @ Tool_schemas_core.schemas
+let raw_schemas : tool_schema list =
+  Tools_schemas_01.schemas
+  @ Tools_schemas_02.schemas
+  @ Tools_schemas_03.schemas
+  @ Tools_schemas_04.schemas
+  @ Tools_schemas_05.schemas
+  @ Tools_schemas_06.schemas
+  @ Tools_schemas_07.schemas
+  @ Tools_schemas_08.schemas
+  @ Tools_schemas_09.schemas
+  @ Tools_schemas_10.schemas
+  @ Tools_schemas_11.schemas
 
 let all_schemas : tool_schema list = raw_schemas
 

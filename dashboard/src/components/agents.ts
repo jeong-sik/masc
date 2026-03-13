@@ -332,7 +332,7 @@ function OperationCard({ brief, selected }: { brief: DashboardExecutionOperation
 
 function LodgeTickCard({ tick }: { tick: DashboardExecutionLodgeTick | null }) {
   if (!tick) {
-    return html`<div class="empty-state">최근 lodge tick 기록이 없습니다.</div>`
+    return html`<div class="empty-state">최근 social activity 기록이 없습니다.</div>`
   }
   return html`
     <div class="monitor-nested-card">
@@ -345,8 +345,14 @@ function LodgeTickCard({ tick }: { tick: DashboardExecutionLodgeTick | null }) {
       </div>
       <div class="monitor-meta">
         ${tick.last_tick_at ? html`<span>마지막 tick <${TimeAgo} timestamp=${tick.last_tick_at} /></span>` : html`<span>마지막 tick 없음</span>`}
+        ${tick.strategy ? html`<span>전략 · ${tick.strategy}</span>` : null}
+        ${tick.queue_depth != null ? html`<span>큐 · ${tick.queue_depth}</span>` : null}
         ${tick.last_pass_reason ? html`<span>대표 패스 이유 · ${tick.last_pass_reason}</span>` : null}
-        ${tick.last_system_skip_reason ? html`<span>대표 시스템 스킵 이유 · ${tick.last_system_skip_reason}</span>` : null}
+        ${tick.last_system_skip_reason
+          ? html`<span>대표 시스템 스킵 이유 · ${tick.last_system_skip_reason}</span>`
+          : tick.last_skip_reason
+            ? html`<span>대표 시스템 스킵 이유 · ${tick.last_skip_reason}</span>`
+            : null}
       </div>
       ${tick.activity_report ? html`<div class="monitor-footnote">${tick.activity_report}</div>` : null}
     </div>
@@ -604,19 +610,19 @@ export function Execution() {
         <//>
 
         <${Card}
-          title="Lodge Check-ins"
+          title="Social Activity"
           class="section"
           semanticId="execution.lodge"
           testId="execution.lodge-checkins"
         >
-      <div class="monitor-section-head">
-        <h2 class="monitor-headline">Lodge Check-ins</h2>
-        <p class="monitor-subheadline">최근 lodge tick에서 누가 실제로 행동했고, 누가 판단상 패스했고, 누가 시스템에 의해 스킵됐는지 먼저 보여줍니다.</p>
-      </div>
+          <div class="monitor-section-head">
+            <h2 class="monitor-headline">Social Activity</h2>
+            <p class="monitor-subheadline">최근 public-square 이벤트에서 어떤 keeper가 행동했고, 어떤 keeper가 판단상 패스했으며, 어떤 경우가 시스템에 의해 스킵됐는지 먼저 보여줍니다.</p>
+          </div>
           <${LodgeTickCard} tick=${lodgeTick} />
           <div class="monitor-list">
             ${lodgeCheckins.length === 0
-              ? html`<div class="empty-state">최근 lodge check-in 기록이 없습니다.</div>`
+              ? html`<div class="empty-state">최근 social activity 기록이 없습니다.</div>`
               : lodgeCheckins.map(row => html`<${LodgeCheckinRow} key=${`${row.agent_name}-${row.checked_at ?? row.outcome}`} row=${row} />`)}
           </div>
         <//>

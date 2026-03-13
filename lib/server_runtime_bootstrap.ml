@@ -83,7 +83,7 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config
   in
   Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator;
-  Lodge_heartbeat.start ~sw ~clock state.room_config;
+  Social_runtime.start ~sw ~clock ~config:state.room_config;
   Gardener.start ~sw ~clock ~room_config:state.room_config;
   if Env_config.Sentinel.enabled then begin
     Sentinel.start ~sw ~clock ~net state.room_config;

@@ -30,7 +30,7 @@ let keeper_read_tool_names =
   ]
 
 let keeper_board_tool_names =
-  [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_list" ]
+  [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list" ]
 
 let keeper_voice_tool_names = [ "keeper_voice_speak" ]
 
@@ -208,6 +208,18 @@ let execute_keeper_tool_call
         | other -> other
       in
       let ok, msg = Tool_board.handle_tool "masc_board_comment" board_args in
+      if ok then msg
+      else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+  | "keeper_board_vote" ->
+      let voter = meta.name in
+      let board_args =
+        match args with
+        | `Assoc fields ->
+            let fields' = List.filter (fun (k, _) -> k <> "voter") fields in
+            `Assoc (("voter", `String voter) :: fields')
+        | other -> other
+      in
+      let ok, msg = Tool_board.handle_tool "masc_board_vote" board_args in
       if ok then msg
       else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
   | "keeper_fs_read" | "keeper_read" ->
@@ -622,6 +634,7 @@ let keeper_tool_followup_prompt
       [
         "keeper_board_post";
         "keeper_board_comment";
+        "keeper_board_vote";
         "keeper_fs_edit";
         "keeper_edit";
         "keeper_task_force_release";

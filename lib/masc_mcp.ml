@@ -90,6 +90,7 @@ module Board_listener = Board_listener
 module Council = Council
 module Social = Social
 module Social_motion = Social_motion
+module Social_runtime = Social_runtime
 module Task_pg = Task_pg
 module Task_dispatch = Task_dispatch
 module Web_dashboard = Web_dashboard

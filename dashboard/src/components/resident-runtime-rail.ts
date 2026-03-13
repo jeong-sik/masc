@@ -23,7 +23,7 @@ function shortCommit(commit: string | null | undefined): string {
 }
 
 function residentStatusLabel(
-  kind: 'lodge' | 'gardener' | 'guardian' | 'sentinel',
+  kind: 'social' | 'lodge' | 'gardener' | 'guardian' | 'sentinel',
   status: 'live' | 'quiet' | 'starting' | 'idle' | 'disabled',
 ) {
   if (status === 'live') return '가동 중'
@@ -64,28 +64,44 @@ function renderResidentRuntimeCard(
 export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
   const build = serverStatus.value?.build
+  const socialRuntime = serverStatus.value?.social_runtime
   const lodge = serverStatus.value?.lodge
   const gardener = serverStatus.value?.gardener
   const guardian = serverStatus.value?.guardian
   const sentinel = serverStatus.value?.sentinel
   const residentCards: ComponentChildren[] = []
 
-  if (lodge) {
+  if (socialRuntime || lodge) {
+    const runtime = socialRuntime
+    const fallback = lodge
     residentCards.push(
       renderResidentRuntimeCard(
-        'Lodge',
-        lodge.enabled
-          ? residentStatusLabel('lodge', lodge.quiet_active ? 'quiet' : 'live')
-          : residentStatusLabel('lodge', 'disabled'),
-        lodge.enabled ? (lodge.quiet_active ? 'warn' : 'ok') : 'bad',
+        'Social Runtime',
+        runtime
+          ? (runtime.enabled
+              ? residentStatusLabel('social', 'live')
+              : residentStatusLabel('social', 'disabled'))
+          : fallback?.enabled
+            ? residentStatusLabel('lodge', fallback.quiet_active ? 'quiet' : 'live')
+            : residentStatusLabel('social', 'disabled'),
+        runtime
+          ? (runtime.enabled ? 'ok' : 'bad')
+          : fallback?.enabled
+            ? (fallback.quiet_active ? 'warn' : 'ok')
+            : 'bad',
         [
-          renderRuntimeStat('틱', lodge.total_ticks ?? 0),
-          renderRuntimeStat('체크인', lodge.total_checkins ?? 0),
+          renderRuntimeStat('전략', runtime?.strategy ?? 'legacy_fallback'),
+          renderRuntimeStat('대상 keeper', runtime?.active_keepers ?? fallback?.agent_count ?? 0),
+          renderRuntimeStat('큐', runtime?.queue_depth ?? 0),
           renderRuntimeStat(
             '최근 결과',
-            lodge.last_tick_result?.activity_report
-              ?? (lodge.last_pass_reason ? `판단 패스: ${lodge.last_pass_reason}` : null)
-              ?? (lodge.last_system_skip_reason ? `시스템 스킵: ${lodge.last_system_skip_reason}` : null)
+            runtime?.last_result?.activity_report
+              ?? (runtime?.last_pass_reason ? `판단 패스: ${runtime.last_pass_reason}` : null)
+              ?? (runtime?.last_system_skip_reason ? `시스템 스킵: ${runtime.last_system_skip_reason}` : null)
+              ?? fallback?.last_tick_result?.activity_report
+              ?? (fallback?.last_pass_reason ? `판단 패스: ${fallback.last_pass_reason}` : null)
+              ?? (fallback?.last_system_skip_reason ? `시스템 스킵: ${fallback.last_system_skip_reason}` : null)
+              ?? fallback?.last_skip_reason
               ?? '없음',
           ),
         ],

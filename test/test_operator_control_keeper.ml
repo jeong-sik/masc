@@ -1,7 +1,7 @@
 open Masc_mcp
 open Test_operator_control_support
 
-let test_snapshot_exposes_keeper_and_lodge_actions () =
+let test_snapshot_exposes_keeper_and_social_actions () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -22,13 +22,15 @@ let test_snapshot_exposes_keeper_and_lodge_actions () =
             Yojson.Safe.Util.(row |> member "action_type" |> to_string = action_type))
           available_actions
       in
-      match find_action "lodge_tick" with
-      | None -> Alcotest.fail "expected lodge_tick in available_actions"
+      match find_action "social_sweep" with
+      | None -> Alcotest.fail "expected social_sweep in available_actions"
       | Some row ->
           Alcotest.(check string) "target_type" "room"
             Yojson.Safe.Util.(row |> member "target_type" |> to_string);
           Alcotest.(check bool) "confirm_required false" false
             Yojson.Safe.Util.(row |> member "confirm_required" |> to_bool);
+          Alcotest.(check bool) "lodge_tick hidden from available actions" true
+            (Option.is_none (find_action "lodge_tick"));
           let keeper_probe =
             match find_action "keeper_probe" with
             | Some row -> row

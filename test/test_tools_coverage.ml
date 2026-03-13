@@ -260,7 +260,9 @@ let test_masc_operator_action_schema () =
             | Some (`Assoc action_props) ->
                 (match List.assoc_opt "enum" action_props with
                  | Some (`List enums) ->
-                     Alcotest.(check bool) "has lodge_tick" true
+                     Alcotest.(check bool) "has social_sweep" true
+                       (List.mem (`String "social_sweep") enums);
+                     Alcotest.(check bool) "has lodge_tick alias" true
                        (List.mem (`String "lodge_tick") enums);
                      Alcotest.(check bool) "has keeper_probe" true
                        (List.mem (`String "keeper_probe") enums);
@@ -310,7 +312,9 @@ let test_remote_operator_action_schema_is_strict () =
                   (List.mem (`String "team_note") enums);
                 Alcotest.(check bool) "remote includes team_worker_spawn_batch" true
                   (List.mem (`String "team_worker_spawn_batch") enums);
-                Alcotest.(check bool) "remote includes lodge_tick" true
+                Alcotest.(check bool) "remote includes social_sweep" true
+                  (List.mem (`String "social_sweep") enums);
+                Alcotest.(check bool) "remote includes lodge_tick alias" true
                   (List.mem (`String "lodge_tick") enums);
                 Alcotest.(check bool) "remote includes keeper_probe" true
                   (List.mem (`String "keeper_probe") enums);

@@ -78,7 +78,7 @@ val base_tools : Llm_client.tool_def list
 (** Core tools: time_now, context_status, memory_search. *)
 
 val board_tools : Llm_client.tool_def list
-(** Board tools: board_post, board_list, board_comment. *)
+(** Board tools: board_post, board_list, board_comment, board_vote. *)
 
 (** {1 MCP Interface} *)
 

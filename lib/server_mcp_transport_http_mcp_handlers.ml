@@ -137,9 +137,9 @@ let handle_post_mcp ~(deps : deps) ?(profile = Mcp_eio.Full) request reqd =
                                 request
                             in
                             let wants_sse =
-                              accept_mode = Http_negotiation.Streamable
-                              && Http_negotiation.accepts_sse_header
-                                   (Httpun.Headers.get request.headers "accept")
+                              Server_mcp_transport_http_headers
+                              .should_use_sse_for_body request body_str
+                                accept_mode
                               && not
                                    Server_mcp_transport_http_headers
                                    .force_json_response

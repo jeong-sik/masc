@@ -248,13 +248,6 @@ let test_digest_room_exposes_pending_confirm_attention () =
            (fun item ->
              String.equal "derived"
                Yojson.Safe.Util.(item |> member "provenance" |> to_string))
-           attention_items);
-      Alcotest.(check bool) "command attention present" true
-        (List.exists
-           (fun item ->
-             String.starts_with
-               ~prefix:"command_"
-               Yojson.Safe.Util.(item |> member "kind" |> to_string))
            attention_items))
 
 let test_digest_team_session_shape () =

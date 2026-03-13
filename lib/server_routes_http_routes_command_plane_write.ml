@@ -18,10 +18,10 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
-let add_routes ~sw ~clock router =
+  let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/command-plane/units" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_unit_define" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -39,7 +39,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/units/reparent" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_unit_reparent" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -56,7 +56,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/units/reassign" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_unit_reassign" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -73,7 +73,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/operations" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_operation_start" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -92,7 +92,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/operations/pause" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_operation_pause" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -109,7 +109,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/operations/resume" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_operation_resume" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -126,7 +126,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/operations/stop" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_operation_stop" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -143,7 +143,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/operations/finalize" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_operation_finalize" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -160,7 +160,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/operations/checkpoint" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_operation_checkpoint" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -180,7 +180,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/dispatch/plan" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_dispatch_plan" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -197,7 +197,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/dispatch/assign" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_dispatch_assign" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -214,7 +214,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/dispatch/rebalance" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_dispatch_rebalance" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -231,7 +231,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/dispatch/escalate" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_dispatch_escalate" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -248,7 +248,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/dispatch/recall" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_dispatch_recall" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -265,7 +265,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/dispatch/tick" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_dispatch_tick" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -288,7 +288,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/policy/approve" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_policy_approve" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -305,7 +305,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/policy/deny" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_policy_deny" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -322,7 +322,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/command-plane/policy/update" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_policy_update" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in

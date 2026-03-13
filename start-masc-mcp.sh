@@ -112,7 +112,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Fast preflight: fail before build/init if requested port is already occupied.
-if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_REUSE:-0}" != "1" ]; then
+if [ "$HTTP_MODE" = "true" ] && lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_REUSE:-0}" != "1" ]; then
     listener_pid="$(lsof -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1)"
     listener_cmd=""
     if [ -n "$listener_pid" ]; then
@@ -263,7 +263,7 @@ wait_for_port() {
         waited=$((waited + 1))
     done
 }
-if ! wait_for_port "$PORT"; then
+if [ "$HTTP_MODE" = "true" ] && ! wait_for_port "$PORT"; then
     exit 1
 fi
 
@@ -292,8 +292,8 @@ if [ "$EIO_MODE" = "true" ]; then
     SELECTED_EXE="$MASC_EIO_EXE"
 fi
 
-# Eio server has different CLI format and is HTTP-only
-if [ "$EIO_MODE" = "true" ]; then
+# Eio server supports both HTTP and stdio transports.
+if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
     echo "  Host: $HOST" >&2
     echo "  Port: $PORT" >&2
@@ -310,6 +310,14 @@ if [ "$EIO_MODE" = "true" ]; then
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
     exec "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$BASE_PATH"
+elif [ "$EIO_MODE" = "true" ]; then
+    echo "Starting MASC MCP server (stdio mode, $RUNTIME_NAME)..." >&2
+    echo "  Base path: $RESOLVED_BASE_PATH" >&2
+    if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then
+        echo "  Base path (input): $BASE_PATH" >&2
+    fi
+    echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
+    exec "$SELECTED_EXE" --stdio --base-path="$BASE_PATH"
 elif [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
     echo "  Host: $HOST" >&2

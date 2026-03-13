@@ -495,6 +495,32 @@ let read_framed_message buf =
   end else
     None
 
+let read_framed_message_from_first_line first_line buf =
+  let rec read_headers acc =
+    let line = Eio.Buf_read.line buf in
+    if String.length line = 0 || line = "\r" then
+      acc
+    else
+      read_headers (line :: acc)
+  in
+  let headers = read_headers [first_line] in
+  let content_length =
+    List.find_map (fun header ->
+      let header = String.trim header in
+      if String.length header > 16 &&
+         String.lowercase_ascii (String.sub header 0 15) = "content-length:" then
+        let len_str = String.trim (String.sub header 15 (String.length header - 15)) in
+        int_of_string_opt len_str
+      else
+        None
+    ) headers
+    |> Option.value ~default:0
+  in
+  if content_length > 0 then
+    Some (Eio.Buf_read.take content_length buf)
+  else
+    None
+
 (** Write Content-Length prefixed message to Eio flow *)
 let write_framed_message flow json =
   let body = Yojson.Safe.to_string json in
@@ -3484,23 +3510,15 @@ let tool_output_schema_field = function
   | _ -> None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
+  let _ = usage_summary in
   let base =
     [
       ("name", `String schema.name);
       ("title", `String (tool_title_of_name schema.name));
       ("description", `String schema.description);
-      ( "icons",
-        `List
-          (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
     ]
-    @ Tool_catalog.metadata_to_fields schema.name
-    @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
-    @
-    match usage_summary with
-    | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
-    | None -> []
   in
   `Assoc base
 
@@ -4052,39 +4070,94 @@ let run_stdio ~sw ~env state =
   let stdin = Eio.Stdenv.stdin env in
   let stdout = Eio.Stdenv.stdout env in
   let clock = Eio.Stdenv.clock env in
+  let stdio_debug =
+    match Sys.getenv_opt "MASC_STDIO_DEBUG" with
+    | Some ("1" | "true" | "TRUE" | "yes" | "YES") -> true
+    | _ -> false
+  in
 
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
   Log.Mcp.info "Default room: %s" Mcp_server.(state.room_config.Room.base_path);
 
-  (* Buffer for reading - framed mode (Content-Length) only for now *)
+  (* Buffer for reading - support both framed MCP stdio and NDJSON clients. *)
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in
 
-  Log.Mcp.debug "Transport mode: framed (Content-Length)";
-
-  (* Main loop - framed mode only *)
-  let rec loop () =
-    match read_framed_message buf with
-    | None ->
-        Log.Mcp.info "EOF received, shutting down";
-        ()
-    | Some "" ->
-        (* Empty body, skip *)
-        loop ()
-    | Some request_str ->
-        (* Handle request with Eio clock - use "stdio" as session ID for agent persistence *)
-        let response = handle_request ~clock ~sw ~mcp_session_id:"stdio" state request_str in
-
-        (* Write response if not null *)
-        (match response with
-         | `Null -> ()
-         | json -> write_framed_message stdout json);
-
-        loop ()
+  let rec read_first_nonblank_line () =
+    let line = Eio.Buf_read.line buf in
+    if String.trim line = "" then read_first_nonblank_line () else line
   in
 
-  try loop ()
-  with
-  | End_of_file ->
-      Log.Mcp.info "Connection closed"
-  | exn ->
-      Log.Mcp.error "Server error: %s" (Printexc.to_string exn)
+  let initial_line =
+    try Some (read_first_nonblank_line ())
+    with End_of_file -> None
+  in
+
+  match initial_line with
+  | None ->
+      Log.Mcp.info "EOF received before first stdio request, shutting down"
+  | Some first_line ->
+      let mode = detect_mode first_line in
+      let read_next =
+        let pending = ref (Some first_line) in
+        match mode with
+        | Framed ->
+            fun () ->
+              (match !pending with
+               | Some line ->
+                   pending := None;
+                   read_framed_message_from_first_line line buf
+               | None -> read_framed_message buf)
+        | LineDelimited ->
+            fun () ->
+              (match !pending with
+               | Some line ->
+                   pending := None;
+                   Some line
+               | None -> read_line_message buf)
+      in
+
+      (match mode with
+       | Framed -> Log.Mcp.debug "Transport mode: framed (Content-Length)"
+       | LineDelimited -> Log.Mcp.debug "Transport mode: line-delimited JSON");
+
+      let write_response json =
+        match mode with
+        | Framed -> write_framed_message stdout json
+        | LineDelimited -> write_line_message stdout json
+      in
+
+      (* Main loop *)
+      let rec loop () =
+        match read_next () with
+        | None ->
+            Log.Mcp.info "EOF received, shutting down";
+            ()
+        | Some "" ->
+            (* Empty body, skip *)
+            loop ()
+        | Some request_str ->
+            if stdio_debug then
+              Printf.eprintf "[stdio] received request (%d bytes)\n%!"
+                (String.length request_str);
+            (* Handle request with Eio clock - use "stdio" as session ID for agent persistence *)
+            let response = handle_request ~clock ~sw ~mcp_session_id:"stdio" state request_str in
+
+            (* Write response if not null *)
+            (match response with
+             | `Null ->
+                 if stdio_debug then
+                   Printf.eprintf "[stdio] response=null\n%!"
+             | json ->
+                 if stdio_debug then
+                   Printf.eprintf "[stdio] sending response\n%!";
+                 write_response json);
+
+            loop ()
+      in
+
+      try loop ()
+      with
+      | End_of_file ->
+          Log.Mcp.info "Connection closed"
+      | exn ->
+          Log.Mcp.error "Server error: %s" (Printexc.to_string exn)

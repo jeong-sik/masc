@@ -189,13 +189,7 @@ let server_info =
   `Assoc
     [
       ("name", `String "masc-mcp");
-      ("title", `String "MASC MCP Server");
       ("version", `String Version.version);
-      ( "description",
-        `String
-          "Multi-agent MCP server exposing MASC room coordination, tools, prompts, and resources." );
-      ("websiteUrl", `String "https://github.com/yousleepwhen/masc-mcp");
-      ("icons", `List (List.map icon_to_json server_icons));
     ]
 
 let capabilities =

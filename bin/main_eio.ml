@@ -219,10 +219,37 @@ let base_path =
   let doc = "Base path for MASC data (.masc folder location)" in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
+let stdio =
+  let doc =
+    "Run MCP over stdio (Content-Length framed transport) instead of streamable HTTP."
+  in
+  Arg.(value & flag & info ["stdio"] ~doc)
+
 (** Graceful shutdown exception *)
 exception Shutdown
 
-let run_cmd host port base_path =
+let run_stdio_server ~sw ~env ~base_path =
+  let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+    Server_runtime_bootstrap.init_runtime_context env
+  in
+  let state =
+    Server_runtime_bootstrap.create_server_state ~sw ~base_path ~clock ~mono_clock
+      ~net ~proc_mgr ~fs
+  in
+  (* Stdio should become MCP-ready quickly; skip resident loops that can
+     trigger extra network traffic before the protocol loop starts. *)
+  Server_runtime_bootstrap.bootstrap_server_state state;
+  Server_runtime_bootstrap.init_task_backend ();
+  let resolved_base = state.Mcp_server.room_config.Room.base_path in
+  let masc_dir = Filename.concat resolved_base ".masc" in
+  Printf.eprintf "🚀 MASC MCP Server (Eio stdio mode)\n%!";
+  Printf.eprintf "   Base path: %s\n%!" resolved_base;
+  if resolved_base <> base_path then
+    Printf.eprintf "   Base path (input): %s\n%!" base_path;
+  Printf.eprintf "   MASC dir: %s\n%!" masc_dir;
+  Mcp_eio.run_stdio ~sw ~env state
+
+let run_cmd host port base_path use_stdio =
   Eio_main.run @@ fun env ->
   (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
   Mirage_crypto_rng_unix.use_default ();
@@ -282,7 +309,8 @@ let run_cmd host port base_path =
     (try
       Eio.Switch.run @@ fun sw ->
       switch_ref := Some sw;
-      run_server ~sw ~env ~host ~port ~base_path
+      if use_stdio then run_stdio_server ~sw ~env ~base_path
+      else run_server ~sw ~env ~host ~port ~base_path
     with
     | Shutdown ->
         Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
@@ -308,6 +336,6 @@ let run_cmd host port base_path =
 let cmd =
   let doc = "MASC MCP Server" in
   let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
-  Cmd.v info Term.(const run_cmd $ host $ port $ base_path)
+  Cmd.v info Term.(const run_cmd $ host $ port $ base_path $ stdio)
 
 let () = exit (Cmd.eval cmd)

@@ -41,7 +41,7 @@ The key split is intentional:
 | Group | Public Discovery Path | Canonical Examples | Notes |
 |------|------------------------|--------------------|-------|
 | Canonical MCP tools | `tools/list` | `masc_transition`, `masc_team_session_step`, `decision.create`, `experiment.start`, `trpg.dice.roll` | Default surface for normal clients |
-| Compatibility aliases | Hidden from `tools/list` | `masc_claim`, `experiment_start`, `masc_trpg_dice_roll` | Still callable for compatibility; not part of the truthful default inventory |
+| Compatibility aliases | Not part of default `/mcp` discovery/call | `masc_claim`, `experiment_start`, `masc_trpg_dice_roll` | Legacy names are not part of the strict default MCP surface |
 | MCP prompts | `prompts/list`, `prompts/get` | `tool_help`, `team_session_proof`, `command_truth` | Explanation/proof layer, not runtime prompt registry |
 | MCP resources | `resources/list/read` | `masc://status`, `masc://tasks`, `masc://tool-help-index` | Snapshot/read layer |
 | Remote operator | `/mcp/operator` | `masc_operator_snapshot`, `masc_operator_digest` | Separate 4-tool remote-safe profile |

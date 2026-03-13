@@ -75,6 +75,20 @@ let event_ts_of_json json =
       | `String iso -> Resilience.Time.parse_iso8601_opt iso
       | _ -> None)
 
+let bootstrap_present_agent_names (config : Room.config)
+    (session : Team_session_types.session) ~now =
+  let bootstrap_grace =
+    float_of_int (session.checkpoint_interval_sec * max 1 session.min_agents)
+  in
+  if now -. session.started_at >= bootstrap_grace then
+    []
+  else
+    let room_active = room_active_agent_names config in
+    Team_session_types.planned_participant_names session
+    |> List.filter (fun agent -> List.mem agent room_active)
+    |> Team_session_types.dedup_strings
+    |> List.sort String.compare
+
 let session_seen_and_live_agent_names (config : Room.config)
     (session : Team_session_types.session) ~now =
   let events =
@@ -93,8 +107,13 @@ let session_seen_and_live_agent_names (config : Room.config)
         | _ -> (seen_acc, live_acc))
       ([], []) events
   in
-  ( seen_agents |> Team_session_types.dedup_strings |> List.sort String.compare,
-    live_agents |> Team_session_types.dedup_strings |> List.sort String.compare )
+  let bootstrap_agents = bootstrap_present_agent_names config session ~now in
+  ( (seen_agents @ bootstrap_agents)
+    |> Team_session_types.dedup_strings
+    |> List.sort String.compare,
+    (live_agents @ bootstrap_agents)
+    |> Team_session_types.dedup_strings
+    |> List.sort String.compare )
 
 let session_active_agent_names config session ~now =
   session_seen_and_live_agent_names config session ~now |> snd

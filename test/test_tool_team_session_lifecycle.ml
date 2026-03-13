@@ -30,6 +30,15 @@ let test_start_status_report_stop () =
   let status_result = result_field status_json in
   Alcotest.(check string) "status wrapper" "ok"
     (Yojson.Safe.Util.member "status" status_json |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string) "fresh session health is not critical" "healthy"
+    (status_result |> Yojson.Safe.Util.member "team_health"
+     |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool) "fresh session has visible active participants" true
+    ((status_result |> Yojson.Safe.Util.member "summary"
+      |> Yojson.Safe.Util.member "active_agents_count" |> Yojson.Safe.Util.to_int) > 0);
+  Alcotest.(check bool) "fresh session has visible seen participants" true
+    ((status_result |> Yojson.Safe.Util.member "summary"
+      |> Yojson.Safe.Util.member "seen_agents_count" |> Yojson.Safe.Util.to_int) > 0);
   Alcotest.(check bool) "team_health present" true
     (Yojson.Safe.Util.member "team_health" status_result <> `Null);
   Alcotest.(check bool) "communication_metrics present" true

@@ -83,7 +83,10 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
           renderRuntimeStat('체크인', lodge.total_checkins ?? 0),
           renderRuntimeStat(
             '최근 결과',
-            lodge.last_tick_result?.activity_report ?? lodge.last_skip_reason ?? '없음',
+            lodge.last_tick_result?.activity_report
+              ?? (lodge.last_pass_reason ? `판단 패스: ${lodge.last_pass_reason}` : null)
+              ?? (lodge.last_system_skip_reason ? `시스템 스킵: ${lodge.last_system_skip_reason}` : null)
+              ?? '없음',
           ),
         ],
       ),

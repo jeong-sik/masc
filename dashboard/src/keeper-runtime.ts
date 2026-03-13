@@ -158,6 +158,7 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
 
 export function normalizeLodgeTickResult(raw: unknown): LodgeTickResult | null {
   if (!isRecord(raw)) return null
+  const lastSystemSkipReason = asString(raw.last_system_skip_reason) ?? asString(raw.skipped_reason)
   return {
     hour: asNumber(raw.hour),
     checked: asNumber(raw.checked) ?? 0,
@@ -165,7 +166,9 @@ export function normalizeLodgeTickResult(raw: unknown): LodgeTickResult | null {
     acted_names: asStringArray(raw.acted_names),
     activity_report: asString(raw.activity_report),
     quiet_hours_overridden: asBoolean(raw.quiet_hours_overridden),
-    skipped_reason: asString(raw.skipped_reason),
+    skipped_reason: lastSystemSkipReason,
+    last_pass_reason: asString(raw.last_pass_reason) ?? null,
+    last_system_skip_reason: lastSystemSkipReason,
     acted_rows: normalizeNameRows(raw.acted_rows, 'summary').map(row => ({ name: row.name, summary: row.summary })),
     passed_rows: normalizeNameRows(raw.passed_rows, 'reason').map(row => ({ name: row.name, reason: row.reason })),
     skipped_rows: normalizeNameRows(raw.skipped_rows, 'reason').map(row => ({ name: row.name, reason: row.reason })),
@@ -177,6 +180,7 @@ export function normalizeLodgeTickResult(raw: unknown): LodgeTickResult | null {
 
 export function normalizeLodgeRuntimeStatus(raw: unknown): LodgeRuntimeStatus | null {
   if (!isRecord(raw)) return null
+  const lastSystemSkipReason = asString(raw.last_system_skip_reason) ?? asString(raw.last_skip_reason) ?? null
   return {
     enabled: asBoolean(raw.enabled) ?? false,
     interval_s: asNumber(raw.interval_s) ?? 0,
@@ -191,7 +195,9 @@ export function normalizeLodgeRuntimeStatus(raw: unknown): LodgeRuntimeStatus | 
     last_tick_ago: asString(raw.last_tick_ago),
     total_ticks: asNumber(raw.total_ticks),
     total_checkins: asNumber(raw.total_checkins),
-    last_skip_reason: asString(raw.last_skip_reason) ?? null,
+    last_skip_reason: lastSystemSkipReason,
+    last_pass_reason: asString(raw.last_pass_reason) ?? null,
+    last_system_skip_reason: lastSystemSkipReason,
     last_tick_result: normalizeLodgeTickResult(raw.last_tick_result),
     active_self_heartbeats: asStringArray(raw.active_self_heartbeats),
   }

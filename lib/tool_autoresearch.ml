@@ -280,11 +280,11 @@ type start_params = {
   goal : string;
   metric_fn : string;
   target_file : string;
-  workdir : string;
+  source_workdir : string;
   max_cycles : int;
   cycle_timeout_s : float;
   llm_model : string;
-  baseline : float;
+  baseline_override : float option;
 }
 
 let normalize_string_opt = function
@@ -306,13 +306,19 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
       ("baseline", `Float summary.baseline);
       ("best_score", `Float summary.best_score);
       ("best_cycle", `Int summary.best_cycle);
+      ( "queued_hypothesis",
+        match summary.queued_hypothesis with Some value -> `String value | None -> `Null );
       ("total_keeps", `Int summary.total_keeps);
       ("total_discards", `Int summary.total_discards);
       ("max_cycles", `Int summary.max_cycles);
       ("cycle_timeout_s", `Float summary.cycle_timeout_s);
       ("workdir", `String summary.workdir);
+      ("source_workdir", `String summary.source_workdir);
       ("elapsed_s", `Float summary.elapsed_s);
       ("recent_cycles", `List []);
+      ( "program_note",
+        match summary.program_note with Some value -> `String value | None -> `Null );
+      ("warnings", `List (List.map (fun value -> `String value) summary.warnings));
       ("error", match summary.error_message with Some e -> `String e | None -> `Null);
     ]
 
@@ -325,7 +331,7 @@ let prepare_start_params ctx args =
   let goal = get_string args "goal" "" in
   let metric_fn = get_string args "metric_fn" "" in
   let target_file = get_string args "target_file" "" in
-  let workdir = get_string args "workdir" ctx.base_path in
+  let source_workdir = get_string args "workdir" ctx.base_path in
   let max_cycles = get_int args "max_cycles" 100 in
   let cycle_timeout_s = get_float args "cycle_timeout_s" 300.0 in
   let llm_model = get_string args "llm_model" "glm" in
@@ -336,57 +342,98 @@ let prepare_start_params ctx args =
   else if target_file = "" then
     Error "target_file is required"
   else
-    match Autoresearch.validate_target_file ~workdir target_file with
-    | Error e ->
-        Error (Printf.sprintf "Invalid target_file: %s" e)
-    | Ok _abs_path -> (
-        match get_float_opt args "baseline" with
-        | Some baseline ->
-            Ok
-              {
-                goal;
-                metric_fn;
-                target_file;
-                workdir;
-                max_cycles;
-                cycle_timeout_s;
-                llm_model;
-                baseline;
-              }
-        | None -> (
-            match
-              Autoresearch.measure_metric ~workdir ~timeout_s:cycle_timeout_s
-                metric_fn
-            with
-            | Ok (baseline, _ms) ->
-                Ok
-                  {
-                    goal;
-                    metric_fn;
-                    target_file;
-                    workdir;
-                    max_cycles;
-                    cycle_timeout_s;
-                    llm_model;
-                    baseline;
-                  }
-            | Error e ->
-                Error
-                  (Printf.sprintf "Failed to measure baseline: %s" e)))
+    Ok
+      {
+        goal;
+        metric_fn;
+        target_file;
+        source_workdir;
+        max_cycles;
+        cycle_timeout_s;
+        llm_model;
+        baseline_override = get_float_opt args "baseline";
+      }
 
-let register_loop ctx (params : start_params) =
-  let state =
-    Autoresearch.create_state ~goal:params.goal ~metric_fn:params.metric_fn
-      ~llm_model:params.llm_model ~target_file:params.target_file
-      ~cycle_timeout_s:params.cycle_timeout_s ~max_cycles:params.max_cycles
-      ~workdir:params.workdir ()
-  in
-  state.baseline <- params.baseline;
-  state.best_score <- params.baseline;
+let register_loop ctx state =
   Autoresearch.save_state ~base_path:ctx.base_path state;
   Hashtbl.replace active_loops state.loop_id state;
   latest_loop_id := Some state.loop_id;
   state
+
+let setup_running_loop ctx (params : start_params) =
+  let state =
+    Autoresearch.create_state ~goal:params.goal ~metric_fn:params.metric_fn
+      ~llm_model:params.llm_model ~target_file:params.target_file
+      ~cycle_timeout_s:params.cycle_timeout_s ~max_cycles:params.max_cycles
+      ~workdir:params.source_workdir ()
+  in
+  match
+    Autoresearch.prepare_managed_worktree ~base_path:ctx.base_path
+      ~source_workdir:params.source_workdir ~loop_id:state.loop_id
+  with
+  | Error message -> Error message
+  | Ok (managed_workdir, source_workdir, warnings) -> (
+      state.workdir <- managed_workdir;
+      state.warnings <- warnings;
+      let baseline_result =
+        match Autoresearch.validate_target_file ~workdir:managed_workdir params.target_file with
+        | Error e ->
+            Error (Printf.sprintf "Invalid target_file: %s" e)
+        | Ok _ -> (
+            match params.baseline_override with
+            | Some baseline -> Ok baseline
+            | None -> (
+                match
+                  Autoresearch.measure_metric ~workdir:managed_workdir
+                    ~timeout_s:params.cycle_timeout_s params.metric_fn
+                with
+                | Ok (baseline, _ms) -> Ok baseline
+                | Error e ->
+                    Error
+                      (Printf.sprintf "Failed to measure baseline: %s" e)))
+      in
+      match baseline_result with
+      | Error message -> Error message
+      | Ok baseline ->
+          state.baseline <- baseline;
+          state.best_score <- baseline;
+          let state =
+            { state with source_workdir }
+          in
+          Ok (register_loop ctx state))
+
+let status_json ctx ~loop_id json_fields =
+  let strip_keys keys fields =
+    List.filter (fun (key, _value) -> not (List.mem key keys)) fields
+  in
+  let base_fields =
+    match json_fields with
+    | `Assoc fields ->
+        strip_keys [ "session_id"; "operation_id"; "program_note"; "queued_hypothesis" ] fields
+    | _ -> [ ("error", `String "invalid status payload") ]
+  in
+  let link =
+    Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path loop_id
+  in
+  let queued_hypothesis = Hashtbl.find_opt pending_hypotheses loop_id in
+  let link_fields =
+    match link with
+    | Some link ->
+        [
+          ("session_id", `String link.session_id);
+          ( "operation_id",
+            match link.operation_id with Some value -> `String value | None -> `Null );
+        ]
+    | None ->
+        [ ("session_id", `Null); ("operation_id", `Null) ]
+  in
+  `Assoc
+    (base_fields
+    @ link_fields
+    @ [
+        ( "queued_hypothesis",
+          match queued_hypothesis with Some value -> `String value | None -> `Null );
+      ])
 
 let build_swarm_goal ~goal ~target_file ~program_note =
   match program_note with
@@ -422,8 +469,10 @@ let parse_session_launch ctx json =
 let handle_start ctx args =
   match prepare_start_params ctx args with
   | Error message -> `Assoc [ ("error", `String message) ]
-  | Ok params ->
-      let state = register_loop ctx params in
+  | Ok params -> (
+      match setup_running_loop ctx params with
+      | Error message -> `Assoc [ ("error", `String message) ]
+      | Ok state ->
       `Assoc [
         ("loop_id", `String state.loop_id);
         ("status", `String "running");
@@ -431,11 +480,14 @@ let handle_start ctx args =
         ("metric_fn", `String params.metric_fn);
         ("target_file", `String params.target_file);
         ("llm_model", `String params.llm_model);
-        ("baseline", `Float params.baseline);
+        ("baseline", `Float state.baseline);
         ("max_cycles", `Int params.max_cycles);
         ("cycle_timeout_s", `Float params.cycle_timeout_s);
-        ("workdir", `String params.workdir);
-      ]
+        ("workdir", `String state.workdir);
+        ("source_workdir", `String state.source_workdir);
+        ("queued_hypothesis", `Null);
+        ("warnings", `List (List.map (fun value -> `String value) state.warnings));
+      ])
 
 let handle_swarm_start ctx args =
   match ctx.start_team_session, ctx.agent_name with
@@ -456,8 +508,11 @@ let handle_swarm_start ctx args =
       | Error message -> `Assoc [ ("error", `String message) ]
       | Ok params ->
           let program_note = normalize_string_opt (get_string_opt args "program_note") in
-          let state = register_loop ctx params in
-          let warnings = ref [] in
+          (match setup_running_loop ctx params with
+          | Error message -> `Assoc [ ("error", `String message) ]
+          | Ok state ->
+          state.program_note <- program_note;
+          let warnings = ref state.warnings in
           let operation_id =
             match ctx.start_operation with
             | None -> None
@@ -470,6 +525,8 @@ let handle_swarm_start ctx args =
                     warnings := message :: !warnings;
                     None)
           in
+          state.warnings <- List.rev !warnings;
+          Autoresearch.save_state ~base_path:ctx.base_path state;
           let session_goal =
             build_swarm_goal ~goal:params.goal ~target_file:params.target_file
               ~program_note
@@ -529,16 +586,17 @@ let handle_swarm_start ctx args =
                         | Some value -> `String value
                         | None -> `Null );
                     ]))
+          )
 
 let handle_status ctx args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
   | Some id ->
     match Hashtbl.find_opt active_loops id with
-    | Some state -> Autoresearch.summary state
+    | Some state -> status_json ctx ~loop_id:id (Autoresearch.summary state)
     | None -> (
         match Autoresearch.load_state ~base_path:ctx.base_path id with
-        | Some summary -> persisted_summary_json summary
+        | Some summary -> status_json ctx ~loop_id:id (persisted_summary_json summary)
         | None ->
             `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))])
 
@@ -550,6 +608,21 @@ let handle_stop ctx args =
     match Autoresearch.stop_loop ~base_path:ctx.base_path ~reason id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->
+        let config = Room.default_config ctx.base_path in
+        (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
+        | Some link ->
+            (try
+               Team_session_store.append_event config link.session_id
+                 ~event_type:"linked_autoresearch_stopped"
+                 ~detail:
+                   (`Assoc
+                     [
+                       ("loop_id", `String id);
+                       ("reason", `String reason);
+                       ("status", `String (Autoresearch.status_to_string state.status));
+                     ])
+             with _ -> ())
+        | None -> ());
         `Assoc [
           ("loop_id", `String id);
           ("status", `String "stopped");
@@ -575,6 +648,8 @@ let handle_inject _ctx args =
         if state.status <> Autoresearch.Running then
           `Assoc [("error", `String "Loop is not running")]
         else begin
+          state.queued_hypothesis <- Some hypothesis;
+          Autoresearch.save_state ~base_path:_ctx.base_path state;
           Hashtbl.replace pending_hypotheses id hypothesis;
           `Assoc [
             ("loop_id", `String id);
@@ -623,7 +698,11 @@ let handle_cycle ctx args =
         let code_result =
           let forced_hypothesis =
             match Hashtbl.find_opt pending_hypotheses id with
-            | Some h -> Hashtbl.remove pending_hypotheses id; Some h
+            | Some h ->
+                Hashtbl.remove pending_hypotheses id;
+                state.queued_hypothesis <- None;
+                Autoresearch.save_state ~base_path:ctx.base_path state;
+                Some h
             | None -> get_string_opt args "hypothesis"
           in
           let generate = get_generator id in
@@ -673,10 +752,10 @@ let handle_cycle ctx args =
                let commit_result = Autoresearch.git_commit_cycle
                  ~workdir ~cycle:state.current_cycle ~hypothesis ~baseline:score_before in
                (match commit_result with
-                | Error git_err ->
+               | Error git_err ->
                   (* Git commit failed (e.g. missing identity, hooks).
                      Revert file change to keep working tree clean. *)
-                  Autoresearch.git_reset_last ~workdir;
+                  Autoresearch.git_restore_head ~workdir;
                   `Assoc [
                     ("error", `String (Printf.sprintf "git commit failed: %s" git_err));
                     ("loop_id", `String id);
@@ -745,6 +824,25 @@ let handle_cycle ctx args =
                        state.baseline <- score_after);
                     state.current_cycle <- state.current_cycle + 1;
                     Autoresearch.save_state ~base_path:ctx.base_path state;
+                    let config = Room.default_config ctx.base_path in
+                    (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
+                    | Some link ->
+                        (try
+                           Team_session_store.append_event config link.session_id
+                             ~event_type:"linked_autoresearch_cycle"
+                             ~detail:
+                               (`Assoc
+                                 [
+                                   ("loop_id", `String id);
+                                   ("cycle", `Int record.cycle);
+                                   ("hypothesis", `String hypothesis);
+                                   ("decision", `String (Autoresearch.decision_to_string record.decision));
+                                   ("delta", `Float record.delta);
+                                   ("baseline", `Float state.baseline);
+                                   ("best_score", `Float state.best_score);
+                                 ])
+                         with _ -> ())
+                    | None -> ());
                     (* 10. SSE broadcast *)
                     broadcast_cycle_result state record;
                     (* 11. Return result *)

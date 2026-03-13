@@ -118,7 +118,7 @@ let categories_for_mode = function
   | Standard -> [Core; Comm; Worktree; Health; Plan; Board]
   | Parallel -> [Core; Comm; Portal; Worktree; Health; Discovery;
                  Plan; Board; Consensus; Voting; Interrupt]
-  | Coding -> [Core; Worktree; Code; Health; Plan]
+  | Coding -> [Core; Worktree; Code; Health; Plan; Consensus]
   | Full -> all_categories
   | Solo -> [Core; Worktree]
   | Custom -> [] (* Will be loaded from config *)
@@ -431,7 +431,7 @@ let mode_description = function
   | Minimal -> "Core task management + health checks only"
   | Standard -> "Core, communication, worktree, health, plan, and board"
   | Parallel -> "Multi-agent: adds portal, discovery, plan, board, consensus, voting, and interrupt"
-  | Coding -> "Core, worktree, code navigation, health, and plan for agent development"
+  | Coding -> "Core, worktree, code navigation, health, plan, and consensus for agent development"
   | Full -> "All categories enabled"
   | Solo -> "Single-agent work: core and worktree only"
   | Custom -> "User-defined category set"

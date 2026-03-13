@@ -56,6 +56,17 @@
    server_trpg_rest
    server_dashboard_http
    server_routes_http
+   server_routes_http_common
+   server_routes_http_pages
+   server_routes_http_runtime
+   server_routes_http_keeper_stream
+   server_routes_http_routes_frontend
+   server_routes_http_routes_room
+   server_routes_http_routes_trpg
+   server_routes_http_routes_dashboard
+   server_routes_http_routes_command_plane_read
+   server_routes_http_routes_command_plane_write
+   server_routes_http_routes_social
    server_h2_gateway
    server_runtime_bootstrap
    server_command_plane_http
@@ -194,6 +205,9 @@
    room_git
    room_portal
    room_utils
+   room_utils_backend_setup
+   room_utils_paths_backend
+   room_utils_ops
    room_worktree
    run_eio
    team_session_types
@@ -214,11 +228,30 @@
    streamable_http
    subscriptions
    swarm_status
+   swarm_status_types
+   swarm_status_json
+   swarm_status_parse
+   swarm_status_classify
+   swarm_status_inputs
+   swarm_status_lanes
+   swarm_status_build
    swarm_behaviors_eio
    swarm_checkpoint
    swarm_eio
    telemetry_eio
    tempo
+   tool_schemas_auth
+   tool_schemas_board
+   tool_schemas_worktree
+   tool_schemas_agent
+   tool_schemas_plan
+   tool_schemas_debate
+   tool_schemas_consensus
+   tool_schemas_execution
+   tool_schemas_room
+   tool_schemas_portal
+   tool_schemas_core
+
    tools
    tool_args
    tool_plan
@@ -325,6 +358,10 @@
    verifier
    succession
    perpetual_loop
+   env_config_core
+   env_config_runtime
+   env_config_governance
+   env_config_keeper
    tool_perpetual
    tool_shard
    tool_keeper
@@ -374,7 +411,32 @@
    ;; SWARM-RISC Phase 4: Speculative Execution + MCTS
    mcts_tree
    speculative_engine)
- (private_modules
+(private_modules
+ room_utils_backend_setup
+ room_utils_paths_backend
+ room_utils_ops
+ server_routes_http_common
+ server_routes_http_pages
+ server_routes_http_runtime
+ server_routes_http_keeper_stream
+ server_routes_http_routes_frontend
+ server_routes_http_routes_room
+ server_routes_http_routes_trpg
+ server_routes_http_routes_dashboard
+ server_routes_http_routes_command_plane_read
+ server_routes_http_routes_command_plane_write
+ server_routes_http_routes_social
+ swarm_status_types
+ swarm_status_json
+ swarm_status_parse
+ swarm_status_classify
+ swarm_status_inputs
+ swarm_status_lanes
+ swarm_status_build
+  env_config_core
+  env_config_runtime
+  env_config_governance
+  env_config_keeper
   keeper_exec_tools
   keeper_exec_status
   keeper_exec_persona)

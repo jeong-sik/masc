@@ -1,6 +1,7 @@
 open Alcotest
 
 module Cache = Masc_mcp.Llm_response_cache
+module Env_config = Masc_mcp.Env_config
 module Llm_client = Masc_mcp.Llm_client
 
 let rec rm_rf path =
@@ -214,7 +215,7 @@ let test_run_prompt_cascade_uses_same_request_shape () =
           check string "winner" "run-prompt-2" resp.model_used
       | Error e -> fail ("unexpected run_prompt_cascade error: " ^ e))
 
-let test_llama_cache_key_uses_global_output_budget () =
+let test_llama_cache_key_preserves_requested_budget_below_global_cap () =
   let llama_model =
     { Llm_client.llama_default with model_id = "qwen3.5-35b-a3b-ud-q8-xl" }
   in
@@ -224,9 +225,26 @@ let test_llama_cache_key_uses_global_output_budget () =
   let req_long =
     make_request_for_model ~model:llama_model ~prompt:"same prompt" ~max_tokens:8192 ()
   in
-  check string "same cache key"
-    (Llm_client.cache_key_of_request req_short)
-    (Llm_client.cache_key_of_request req_long)
+  check bool "different cache key"
+    true
+    (Llm_client.cache_key_of_request req_short
+     <> Llm_client.cache_key_of_request req_long)
+
+let test_llama_cache_key_caps_requests_above_global_limit () =
+  let llama_model =
+    { Llm_client.llama_default with model_id = "qwen3.5-35b-a3b-ud-q8-xl" }
+  in
+  let req_near_cap =
+    make_request_for_model ~model:llama_model ~prompt:"same prompt"
+      ~max_tokens:(Env_config.Llama.max_tokens + 1) ()
+  in
+  let req_far_above_cap =
+    make_request_for_model ~model:llama_model ~prompt:"same prompt"
+      ~max_tokens:(Env_config.Llama.max_tokens * 2) ()
+  in
+  check string "same capped cache key"
+    (Llm_client.cache_key_of_request req_near_cap)
+    (Llm_client.cache_key_of_request req_far_above_cap)
 
 let test_non_llama_cache_key_preserves_requested_budget () =
   let model : Llm_client.model_spec =
@@ -275,8 +293,10 @@ let () =
             test_model_spec_of_string_resolves_default_override;
           test_case "run_prompt_cascade request shape" `Quick
             test_run_prompt_cascade_uses_same_request_shape;
-          test_case "llama cache key uses global output budget" `Quick
-            test_llama_cache_key_uses_global_output_budget;
+          test_case "llama cache key preserves requested budget below cap" `Quick
+            test_llama_cache_key_preserves_requested_budget_below_global_cap;
+          test_case "llama cache key caps requests above global limit" `Quick
+            test_llama_cache_key_caps_requests_above_global_limit;
           test_case "non-llama cache key preserves requested budget" `Quick
             test_non_llama_cache_key_preserves_requested_budget;
         ] );

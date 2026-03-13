@@ -72,8 +72,8 @@ let test_parallel_range () =
   assert_in_range Parallel ~low:200 ~high:305
 
 let test_coding_range () =
-  (* Coding = [Core; Worktree; Code; Health; Plan] — baseline ~166 *)
-  assert_in_range Coding ~low:130 ~high:200
+  (* Coding = [Core; Worktree; Code; Health; Plan; Consensus] *)
+  assert_in_range Coding ~low:135 ~high:215
 
 let test_full_range () =
   (* Full = all 19 categories = all visible tools — baseline ~362 *)

@@ -1638,8 +1638,12 @@ export interface OperatorLinkedAutoresearch {
   best_score?: number | null
   last_decision?: string | null
   target_file?: string | null
+  workdir?: string | null
+  source_workdir?: string | null
   program_note?: string | null
   operation_id?: string | null
+  queued_hypothesis?: string | null
+  warnings?: string[]
   error?: string | null
 }
 

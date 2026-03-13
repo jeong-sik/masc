@@ -23,6 +23,7 @@ let make_state
     ?(baseline = 1.0)
     ?(best_score = 1.0)
     ?(best_cycle = 0)
+    ?(queued_hypothesis = None)
     ?(history = [])
     ?(total_keeps = 0)
     ?(total_discards = 0)
@@ -30,6 +31,9 @@ let make_state
     ?(cycle_timeout_s = 60.0)
     ?(max_cycles = 10)
     ?(workdir = "/tmp/autoresearch-test")
+    ?(source_workdir = "/tmp/autoresearch-test")
+    ?(program_note = None)
+    ?(warnings = [])
     () : AR.loop_state =
   let now = 1000000.0 in
   {
@@ -44,6 +48,7 @@ let make_state
     baseline;
     best_score;
     best_cycle;
+    queued_hypothesis;
     history;
     total_keeps;
     total_discards;
@@ -53,6 +58,9 @@ let make_state
     cycle_timeout_s;
     max_cycles;
     workdir;
+    source_workdir;
+    program_note;
+    warnings;
   }
 
 (* ============================================ *)
@@ -383,6 +391,26 @@ let with_tmpdir f =
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
   ) (fun () -> f dir)
 
+let setup_git_repo () =
+  let workdir = Filename.temp_dir "autoresearch_git_" "" in
+  ignore
+    (Sys.command
+       (Printf.sprintf
+          "cd %s && git init -q -b main && git config user.email 'test@test.com' && git config user.name 'Test'"
+          (Filename.quote workdir)));
+  let target = Filename.concat workdir "target.py" in
+  let oc = open_out target in
+  output_string oc "print('hello')\n";
+  close_out oc;
+  ignore
+    (Sys.command
+       (Printf.sprintf "cd %s && git add -A && git commit -q -m 'initial'"
+          (Filename.quote workdir)));
+  workdir
+
+let cleanup_git_repo workdir =
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote workdir)))
+
 let test_append_cycle_creates_file () =
   with_tmpdir (fun base_path ->
     let record = make_cycle () in
@@ -553,6 +581,36 @@ let test_dispatch_start_missing_metric () =
   | Some (true, _) -> fail "expected error for missing metric_fn"
   | None -> fail "expected Some for start tool"
 
+let test_dispatch_start_success_uses_managed_worktree () =
+  let base_path = setup_git_repo () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_git_repo base_path)
+    (fun () ->
+      let ctx = make_tool_ctx ~base_path () in
+      let args =
+        `Assoc
+          [
+            ("goal", `String "improve throughput");
+            ("metric_fn", `String "echo 1.0");
+            ("target_file", `String "target.py");
+            ("baseline", `Float 1.0);
+          ]
+      in
+      match Tool.dispatch ctx ~name:"masc_autoresearch_start" ~args with
+      | Some (true, json_str) ->
+          let json = Yojson.Safe.from_string json_str in
+          let open Yojson.Safe.Util in
+          let workdir = json |> member "workdir" |> to_string in
+          let source_workdir = json |> member "source_workdir" |> to_string in
+          check bool "managed worktree path" true
+            (AR.contains_substring workdir "/.masc/autoresearch/");
+          check string "source workdir" (Unix.realpath base_path)
+            (Unix.realpath source_workdir);
+          check bool "target file present in managed worktree" true
+            (Sys.file_exists (Filename.concat workdir "target.py"))
+      | Some (false, s) -> fail ("unexpected error: " ^ s)
+      | None -> fail "expected Some for start tool")
+
 let test_dispatch_swarm_start_requires_runtime () =
   let ctx = make_tool_ctx () in
   let args =
@@ -573,11 +631,10 @@ let test_dispatch_swarm_start_requires_runtime () =
   | _ -> fail "expected runtime error for wrapper without callbacks"
 
 let test_dispatch_swarm_start_success () =
-  with_tmpdir (fun base_path ->
-      let target_path = Filename.concat base_path "target.py" in
-      let oc = open_out target_path in
-      output_string oc "print('hello')\n";
-      close_out oc;
+  let base_path = setup_git_repo () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_git_repo base_path)
+    (fun () ->
       let start_operation ~goal:_ ~target_file:_ =
         Ok (`Assoc [ ("operation_id", `String "op-autoresearch") ])
       in
@@ -620,6 +677,10 @@ let test_dispatch_swarm_start_success () =
             (json |> member "operation_id" |> to_string);
           check string "linked loop status" "running"
             (json |> member "linked_status" |> member "status" |> to_string);
+          check string "linked source workdir" (Unix.realpath base_path)
+            (Unix.realpath (json |> member "linked_status" |> member "source_workdir" |> to_string));
+          check string "linked program note" "Prefer simple edits"
+            (json |> member "linked_status" |> member "program_note" |> to_string);
           check bool "session link persisted" true
             (Option.is_some
                (AR.load_swarm_link_by_session ~base_path
@@ -668,12 +729,14 @@ let test_dispatch_inject_success () =
   let args = `Assoc [("hypothesis", `String "try dropout=0.3")] in
   match Tool.dispatch ctx ~name:"masc_autoresearch_inject" ~args with
   | Some (true, json_str) ->
-    let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    check string "status" "hypothesis_queued"
-      (json |> member "status" |> to_string);
-    check bool "pending stored" true
-      (Hashtbl.mem Tool.pending_hypotheses "ar-inject")
+      let json = Yojson.Safe.from_string json_str in
+      let open Yojson.Safe.Util in
+      check string "status" "hypothesis_queued"
+        (json |> member "status" |> to_string);
+      check (option string) "state queued hypothesis"
+        (Some "try dropout=0.3") state.queued_hypothesis;
+      check bool "pending stored" true
+        (Hashtbl.mem Tool.pending_hypotheses "ar-inject")
   | Some (false, s) -> fail ("unexpected error: " ^ s)
   | None -> fail "expected Some for inject tool"
 
@@ -1043,6 +1106,48 @@ let test_full_cycle_discard () =
     | None -> fail "expected Some for cycle"
   )
 
+let test_cycle_commit_failure_restores_head () =
+  let workdir = setup_integration_repo () in
+  Fun.protect ~finally:(fun () -> cleanup_integration_repo workdir) (fun () ->
+    ignore (Sys.command (Printf.sprintf
+      "cd %s && printf '#!/bin/sh\\nexit 1\\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
+      (Filename.quote workdir)));
+    let state = make_state
+      ~loop_id:"ar-integ-commit-fail"
+      ~goal:"Maximize line count"
+      ~metric_fn:"sh metric.sh"
+      ~target_file:"target.py"
+      ~workdir
+      ~baseline:3.0
+      ~best_score:3.0
+      () in
+    Hashtbl.replace Tool.active_loops "ar-integ-commit-fail" state;
+    Tool.latest_loop_id := Some "ar-integ-commit-fail";
+    Tool.set_generator "ar-integ-commit-fail"
+      (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_
+           ~target_file:_ ~file_content ~llm_model:_ ->
+        Ok ("Add a line", file_content ^ "line4\n"));
+    let ctx = make_tool_ctx ~base_path:workdir () in
+    match Tool.dispatch ctx ~name:"masc_autoresearch_cycle" ~args:(`Assoc []) with
+    | Some (false, json_str) ->
+      let json = Yojson.Safe.from_string json_str in
+      let open Yojson.Safe.Util in
+      check bool "git commit failure surfaced" true
+        (AR.contains_substring (json |> member "error" |> to_string) "git commit failed");
+      let content = AR.read_file (Filename.concat workdir "target.py") in
+      check bool "file restored to HEAD" true
+        (AR.contains_substring content "line3" && not (AR.contains_substring content "line4"));
+      let ic = Unix.open_process_in
+        (Printf.sprintf "cd %s && git log --oneline | wc -l | tr -d ' '"
+          (Filename.quote workdir)) in
+      let count = Fun.protect ~finally:(fun () ->
+        ignore (Unix.close_process_in ic)
+      ) (fun () -> try int_of_string (String.trim (input_line ic)) with _ -> 0) in
+      check int "HEAD commit preserved" 1 count
+    | Some (true, s) -> fail ("expected git commit failure, got success: " ^ s)
+    | None -> fail "expected Some for cycle"
+  )
+
 (* ============================================ *)
 (* Test runner                                  *)
 (* ============================================ *)
@@ -1118,6 +1223,8 @@ let () =
       test_case "unknown tool" `Quick test_dispatch_unknown_returns_none;
       test_case "start missing goal" `Quick test_dispatch_start_missing_goal;
       test_case "start missing metric" `Quick test_dispatch_start_missing_metric;
+      test_case "start success uses managed worktree" `Quick
+        test_dispatch_start_success_uses_managed_worktree;
       test_case "swarm start requires runtime" `Quick test_dispatch_swarm_start_requires_runtime;
       test_case "swarm start success" `Quick test_dispatch_swarm_start_success;
       test_case "status no loop" `Quick test_dispatch_status_no_loop;
@@ -1161,5 +1268,7 @@ let () =
     ("integration", [
       test_case "full cycle keep" `Quick test_full_cycle_keep;
       test_case "full cycle discard" `Quick test_full_cycle_discard;
+      test_case "commit failure restores HEAD" `Quick
+        test_cycle_commit_failure_restores_head;
     ]);
   ]

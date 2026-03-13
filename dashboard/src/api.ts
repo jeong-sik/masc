@@ -3,6 +3,8 @@
 
 import { isRecord } from './components/common/normalize'
 import {
+  formatKeeperVisibleReply,
+  normalizeKeeperConversationDetails,
   normalizeKeeperToolResponse,
 } from './keeper-message'
 import type {
@@ -338,6 +340,44 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   return extractMcpText(parsed)
 }
 
+function parseMcpJsonText(text: string): Record<string, unknown> {
+  const trimmed = text.trim()
+  if (!trimmed) return {}
+  return JSON.parse(trimmed) as Record<string, unknown>
+}
+
+export async function fetchAutoresearchStatus(loopId: string): Promise<Record<string, unknown>> {
+  return parseMcpJsonText(await callMcpTool('masc_autoresearch_status', { loop_id: loopId }))
+}
+
+export async function injectAutoresearchHypothesis(
+  loopId: string,
+  hypothesis: string,
+): Promise<Record<string, unknown>> {
+  return parseMcpJsonText(
+    await callMcpTool('masc_autoresearch_inject', {
+      loop_id: loopId,
+      hypothesis,
+    }),
+  )
+}
+
+export async function runAutoresearchCycle(loopId: string): Promise<Record<string, unknown>> {
+  return parseMcpJsonText(await callMcpTool('masc_autoresearch_cycle', { loop_id: loopId }))
+}
+
+export async function stopAutoresearchLoop(
+  loopId: string,
+  reason?: string,
+): Promise<Record<string, unknown>> {
+  return parseMcpJsonText(
+    await callMcpTool('masc_autoresearch_stop', {
+      loop_id: loopId,
+      ...(reason ? { reason } : {}),
+    }),
+  )
+}
+
 async function callKeeperMessageRaw(
   name: string,
   message: string,
@@ -348,13 +388,45 @@ async function callKeeperMessageRaw(
   return callMcpTool('masc_keeper_msg', args)
 }
 
+async function callKeeperMessageViaOperator(
+  name: string,
+  message: string,
+  models?: string[],
+): Promise<KeeperToolReply> {
+  const payload: Record<string, unknown> = { message }
+  if (models && models.length > 0) payload.models = models
+  const response = await runOperatorAction({
+    actor: currentDashboardActor(),
+    action_type: 'keeper_message',
+    target_type: 'keeper',
+    target_id: name,
+    payload,
+  })
+
+  const resultPayload = isRecord(response.result) ? response.result : null
+  const rawReply =
+    resultPayload && typeof resultPayload.reply === 'string'
+      ? resultPayload.reply
+      : ''
+  const detailsRaw =
+    resultPayload && isRecord(resultPayload.result)
+      ? resultPayload.result
+      : resultPayload
+  const details = normalizeKeeperConversationDetails(detailsRaw)
+  const text = formatKeeperVisibleReply(rawReply || '(empty reply)')
+  return { text, details }
+}
+
 export async function sendKeeperMessageDetailed(
   name: string,
   message: string,
   models?: string[],
 ): Promise<KeeperToolReply> {
-  const raw = await callKeeperMessageRaw(name, message, models)
-  return normalizeKeeperToolResponse(raw)
+  if (models && models.length > 0) {
+    const raw = await callKeeperMessageRaw(name, message, models)
+    return normalizeKeeperToolResponse(raw)
+  }
+  return callKeeperMessageViaOperator(name, message)
 }
 
 export function sendKeeperMessage(name: string, message: string, models?: string[]): Promise<string> {

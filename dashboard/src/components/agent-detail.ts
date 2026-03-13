@@ -184,6 +184,17 @@ export function AgentDetailOverlay() {
     agent?.last_seen
     ?? missionBrief?.last_activity_at
     ?? null
+  const signalTruth =
+    missionBrief?.signal_truth === 'live'
+      ? 'live'
+      : missionBrief?.signal_truth === 'stale'
+        ? 'stale'
+        : missionBrief?.signal_truth === 'archived'
+          ? 'archived'
+          : missionBrief?.signal_truth === 'unknown'
+            ? 'unknown'
+            : null
+  const evidenceSource = missionBrief?.evidence_source ?? null
   const agentEmoji = agent?.emoji ?? keeper?.emoji
   const koreanName = agent?.koreanName ?? keeper?.koreanName
   const continuitySummary =
@@ -218,6 +229,8 @@ export function AgentDetailOverlay() {
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span style="font-size:0.75rem;color:#888">${missionBrief.archived_reason}</span>`
                     : null}
+                  ${signalTruth ? html`<span class="pill">signal · ${signalTruth}</span>` : null}
+                  ${evidenceSource ? html`<span class="pill">source · ${evidenceSource}</span>` : null}
                 </div>
               </div>
             </div>

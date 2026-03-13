@@ -16,7 +16,10 @@ type session_context = {
   last_event_summary : string;
   communication_summary : string;
   active_count : int;
+  seen_count : int;
+  planned_count : int;
   required_count : int;
+  counts_basis : string;
   top_attention : Yojson.Safe.t option;
   top_recommendation : Yojson.Safe.t option;
 }
@@ -313,6 +316,18 @@ let build_session_context session_json session_cards =
         @ string_list_of_json (member_assoc "active_agents" summary)
         @ string_list_of_json (member_assoc "planned_participants" summary))
     in
+    let seen_count = int_field "seen_agents_count" summary in
+    let planned_count =
+      let planned = string_list_of_json (member_assoc "planned_participants" summary) in
+      let explicit = List.length planned in
+      if explicit > 0 then explicit else List.length member_names
+    in
+    let counts_basis =
+      if List.length (string_list_of_json (member_assoc "planned_participants" summary)) > 0 then
+        "live=recent_turns · planned=planned_participants"
+      else
+        "live=recent_turns · planned=known_members"
+    in
     let blocker_summary =
       match top_attention with
       | Some attention ->
@@ -364,7 +379,10 @@ let build_session_context session_json session_cards =
           Printf.sprintf "%s · broadcast %d · portal %d" mode broadcast_count
             portal_count;
         active_count = int_field "active_agents_count" team_health;
+        seen_count;
+        planned_count;
         required_count = int_field ~default:1 "required_agents" team_health;
+        counts_basis;
         top_attention;
         top_recommendation;
       }
@@ -639,7 +657,10 @@ let build_session_briefs sessions attention_queue actions =
                ("last_event_summary", `String session.last_event_summary);
                ("communication_summary", `String session.communication_summary);
                ("active_count", `Int session.active_count);
+               ("seen_count", `Int session.seen_count);
+               ("planned_count", `Int session.planned_count);
                ("required_count", `Int session.required_count);
+               ("counts_basis", `String session.counts_basis);
                ("related_attention_count", `Int related_attention_count);
                ("top_attention", option_to_json (fun value -> value) top_attention_json);
                ("top_recommendation", option_to_json (fun value -> value) top_recommendation_json);
@@ -821,6 +842,7 @@ let keeper_alias_by_agent_name snapshot_json =
   table
 
 let build_agent_briefs config sessions attention_queue _room_json snapshot_json =
+  let now_ts = Time_compat.now () in
   let task_lookup = build_task_lookup config in
   let messages =
     if Room.is_initialized config then
@@ -910,6 +932,27 @@ let build_agent_briefs config sessions attention_queue _room_json snapshot_json 
                 | Some session -> session.last_event_ts
                 | None -> 0.0)
          in
+         let last_activity_age_sec =
+           if last_seen_ts > 0.0 then Some (max 0 (int_of_float (now_ts -. last_seen_ts)))
+           else None
+         in
+         let signal_truth =
+           match agent, last_activity_age_sec with
+           | None, _ -> "archived"
+           | Some _, Some age when age <= 300 -> "live"
+           | Some _, Some _ -> "stale"
+           | Some _, None -> "unknown"
+         in
+         let evidence_source =
+           if Option.is_some latest_out || Option.is_some latest_in then
+             "message"
+           else if Option.is_some agent then
+             "presence"
+           else if Option.is_some related_session then
+             "session"
+           else
+             "none"
+         in
          ({
            status_rank = status_rank status;
            related_attention_count;
@@ -929,6 +972,9 @@ let build_agent_briefs config sessions attention_queue _room_json snapshot_json 
                   ("current_work", json_string_option current_work);
                   ("related_session_id", json_string_option (Option.map (fun s -> s.session_id) related_session));
                   ("last_activity_at", json_string_option last_activity_at);
+                  ("last_activity_age_sec", option_to_json (fun value -> `Int value) last_activity_age_sec);
+                  ("signal_truth", `String signal_truth);
+                  ("evidence_source", `String evidence_source);
                   ("recent_output_preview", json_string_option recent_output_preview);
                   ("recent_input_preview", json_string_option recent_input_preview);
                 ]);
@@ -1242,7 +1288,10 @@ let build_sessions sessions attention_queue agent_briefs keeper_briefs command_p
                ("last_event_summary", `String session.last_event_summary);
                ("communication_summary", `String session.communication_summary);
                ("active_count", `Int session.active_count);
+               ("seen_count", `Int session.seen_count);
+               ("planned_count", `Int session.planned_count);
                ("required_count", `Int session.required_count);
+               ("counts_basis", `String session.counts_basis);
                ("related_attention_count", `Int attention_count);
                ("top_attention", top_attention);
                ("top_recommendation", top_recommendation);

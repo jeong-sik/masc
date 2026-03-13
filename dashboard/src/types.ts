@@ -1287,7 +1287,10 @@ export interface DashboardMissionSessionBrief {
   last_event_summary?: string | null
   communication_summary?: string | null
   active_count?: number
+  seen_count?: number
+  planned_count?: number
   required_count?: number
+  counts_basis?: string | null
   related_attention_count: number
   top_attention?: OperatorAttentionItem | null
   top_recommendation?: OperatorRecommendedAction | null
@@ -1342,6 +1345,9 @@ export interface DashboardMissionAgentBrief {
   related_session_id?: string | null
   related_attention_count: number
   last_activity_at?: string | null
+  last_activity_age_sec?: number | null
+  signal_truth?: 'live' | 'stale' | 'archived' | 'unknown'
+  evidence_source?: 'message' | 'presence' | 'session' | 'none'
   recent_output_preview?: string | null
   recent_input_preview?: string | null
   recent_event?: string | null

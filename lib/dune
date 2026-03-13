@@ -439,8 +439,6 @@
    ;; SWARM-RISC Phase 4: Speculative Execution + MCTS
    mcts_tree
    speculative_engine)
-<<<<<<< HEAD
-<<<<<<< HEAD
 (private_modules
  room_utils_backend_setup
  room_utils_paths_backend

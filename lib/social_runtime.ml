@@ -236,7 +236,15 @@ let process_event ~sw ~clock ~config (event : board_event) =
       set_last_result summary [];
       total_skipped := !total_skipped + 1
     end else begin
-      let ctx : _ Tool_keeper.context = { config; sw; clock; proc_mgr = None } in
+      let ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "social-runtime";
+          sw;
+          clock;
+          proc_mgr = None;
+        }
+      in
       let row_pairs =
         keepers
         |> List.map (fun meta ->

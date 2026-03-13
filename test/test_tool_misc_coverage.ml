@@ -268,6 +268,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
   let keeper_ctx : _ Tool_keeper.context =
     {
       config = ctx.config;
+      agent_name = "tester";
       sw;
       clock = Eio.Stdenv.clock env;
       proc_mgr = Some (Eio.Stdenv.process_mgr env);

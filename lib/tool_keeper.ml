@@ -15,6 +15,7 @@ module Persona = Keeper_persona
 
 type 'a context = 'a Keeper_types.context = {
   config : Room.config;
+  agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;

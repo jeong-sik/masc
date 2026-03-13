@@ -1146,7 +1146,13 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Some
           (fun keeper_args ->
             let keeper_ctx : _ Tool_keeper.context =
-              { config; sw; clock; proc_mgr = state.Mcp_server.proc_mgr }
+              {
+                config;
+                agent_name;
+                sw;
+                clock;
+                proc_mgr = state.Mcp_server.proc_mgr;
+              }
             in
             match
               Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg"
@@ -1342,7 +1348,13 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     proc_mgr = state.Mcp_server.proc_mgr;
   } in
   let simple_ctx_keeper : _ Tool_keeper.context =
-    { config; sw; clock; proc_mgr = state.Mcp_server.proc_mgr }
+    {
+      config;
+      agent_name;
+      sw;
+      clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
+    }
   in
   let trpg_keeper_call ~name:keeper_name ~message ~timeout_sec :
       Tool_trpg.keeper_call_result =

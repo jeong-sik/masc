@@ -61,6 +61,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
           let keeper_ctx : _ Tool_keeper.context =
             {
               config = state.Mcp_server.room_config;
+              agent_name;
               sw;
               clock;
               proc_mgr = state.Mcp_server.proc_mgr;

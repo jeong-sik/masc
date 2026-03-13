@@ -927,17 +927,17 @@ let auto_team_session_spawn_batch (meta : keeper_meta) (message : string) =
         ];
     ]
 
-let team_session_ctx_of_keeper ctx (meta : keeper_meta) : _ Tool_team_session.context =
+let team_session_ctx_of_keeper (ctx : _ context) : _ Tool_team_session.context =
   {
     Tool_team_session.config = ctx.config;
-    agent_name = meta.agent_name;
+    agent_name = ctx.agent_name;
     sw = ctx.sw;
     clock = ctx.clock;
     proc_mgr = ctx.proc_mgr;
   }
 
-let dispatch_team_session ctx meta ~name ~args =
-  match Tool_team_session.dispatch (team_session_ctx_of_keeper ctx meta) ~name ~args with
+let dispatch_team_session (ctx : _ context) ~name ~args =
+  match Tool_team_session.dispatch (team_session_ctx_of_keeper ctx) ~name ~args with
   | Some result -> result
   | None -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String "team session dispatch unavailable") ]))
 
@@ -988,6 +988,11 @@ let keeper_auto_team_session_response_json
     () =
   `Assoc
     [
+      ( "reply",
+        `String
+          (Printf.sprintf
+             "Team session %s is ready. Use masc_team_session_status or masc_team_session_step."
+             session.session_id) );
       ("mode", `String "team_session");
       ("keeper_name", `String meta.name);
       ("session_id", `String session.session_id);
@@ -1004,7 +1009,8 @@ let keeper_auto_team_session_response_json
       ("next_write_tool", `String "masc_team_session_step");
     ]
 
-let start_keeper_auto_team_session ctx (meta : keeper_meta) (message : string) :
+let start_keeper_auto_team_session (ctx : _ context) (meta : keeper_meta)
+    (message : string) :
     (keeper_meta * Team_session_types.session * string option, string) result =
   let start_args =
     `Assoc
@@ -1021,11 +1027,15 @@ let start_keeper_auto_team_session ctx (meta : keeper_meta) (message : string) :
         ("instruction_profile", `String "strict");
         ("alert_channel", `String "both");
         ("model_cascade", `List (List.map (fun model -> `String model) meta.models));
-        ("agents", `List [ `String meta.agent_name ]);
+        ( "agents",
+          `List
+            (Team_session_types.dedup_strings
+               [ ctx.agent_name; meta.agent_name ]
+            |> List.map (fun agent -> `String agent)) );
       ]
   in
   let start_ok, start_body =
-    dispatch_team_session ctx meta ~name:"masc_team_session_start" ~args:start_args
+    dispatch_team_session ctx ~name:"masc_team_session_start" ~args:start_args
   in
   if not start_ok then
     Error ("team session start failed: " ^ start_body)
@@ -1059,7 +1069,7 @@ let start_keeper_auto_team_session ctx (meta : keeper_meta) (message : string) :
                     ]
                 in
                 let note_ok, note_body =
-                  dispatch_team_session ctx updated_meta ~name:"masc_team_session_step"
+                  dispatch_team_session ctx ~name:"masc_team_session_step"
                     ~args:note_args
                 in
                 if not note_ok then
@@ -1073,7 +1083,7 @@ let start_keeper_auto_team_session ctx (meta : keeper_meta) (message : string) :
                       ]
                   in
                   let spawn_ok, spawn_body =
-                    dispatch_team_session ctx updated_meta ~name:"masc_team_session_step"
+                    dispatch_team_session ctx ~name:"masc_team_session_step"
                       ~args:spawn_args
                   in
                   let spawn_error =
@@ -1081,7 +1091,7 @@ let start_keeper_auto_team_session ctx (meta : keeper_meta) (message : string) :
                   in
                   Ok (updated_meta, session, spawn_error)))
 
-let append_keeper_auto_team_session_note ctx (meta : keeper_meta)
+let append_keeper_auto_team_session_note (ctx : _ context) (meta : keeper_meta)
     (session : Team_session_types.session) (message : string) :
     (Team_session_types.session, string) result =
   let note_args =
@@ -1093,7 +1103,7 @@ let append_keeper_auto_team_session_note ctx (meta : keeper_meta)
       ]
   in
   let ok, body =
-    dispatch_team_session ctx meta ~name:"masc_team_session_step" ~args:note_args
+    dispatch_team_session ctx ~name:"masc_team_session_step" ~args:note_args
   in
   if not ok then
     Error ("team session note failed: " ^ body)
@@ -1102,7 +1112,8 @@ let append_keeper_auto_team_session_note ctx (meta : keeper_meta)
     | Some refreshed -> Ok refreshed
     | None -> Error ("team session disappeared after note: " ^ session.session_id)
 
-let maybe_handle_auto_team_session ctx (meta : keeper_meta) (message : string) :
+let maybe_handle_auto_team_session (ctx : _ context) (meta : keeper_meta)
+    (message : string) :
     ((tool_result option * keeper_meta), string) result =
   if not meta.auto_team_session_enabled then
     Ok (None, meta)
@@ -1128,7 +1139,6 @@ let maybe_handle_auto_team_session ctx (meta : keeper_meta) (message : string) :
                 ?spawn_error ()
             in
             Ok (Some (true, Yojson.Safe.pretty_to_string json), updated_meta))
-
 
 let handle_keeper_msg ctx args : tool_result =
   let name = get_string args "name" "" in
@@ -2855,6 +2865,17 @@ let handle_keeper_down ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (true, Printf.sprintf "keeper already absent: %s" name)
     | Ok (Some m) ->
+      let stop_linked_session session_id =
+        match
+          Team_session_engine_eio.stop_session ~config:ctx.config ~session_id
+            ~reason:"keeper_down" ~generate_report:false
+        with
+        | Ok _ -> ()
+        | Error err ->
+            Printf.eprintf "[keeper] linked team session stop failed: %s\n%!"
+              err
+      in
+      Option.iter stop_linked_session m.active_team_session_id;
       (if remove_meta then
          Safe_ops.remove_file_logged ~context:"keeper_down"
            (keeper_meta_path ctx.config name)

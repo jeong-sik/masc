@@ -2220,7 +2220,9 @@ let trpg_keeper_call_with_runtime
     ~message
     ~timeout_sec
   : Tool_trpg.keeper_call_result =
-  let keeper_ctx : _ Tool_keeper.context = { config; sw; clock; proc_mgr = None } in
+  let keeper_ctx : _ Tool_keeper.context =
+    { config; agent_name = "trpg-rest"; sw; clock; proc_mgr = None }
+  in
   let forced_models = trpg_keeper_models_for_round () in
   let forced_models_field =
     if forced_models = [] then []
@@ -2281,7 +2283,9 @@ let trpg_keeper_probe_with_runtime
     ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
     ~name:keeper_name
   : Tool_trpg.keeper_probe_result =
-  let keeper_ctx : _ Tool_keeper.context = { config; sw; clock; proc_mgr = None } in
+  let keeper_ctx : _ Tool_keeper.context =
+    { config; agent_name = "trpg-rest"; sw; clock; proc_mgr = None }
+  in
   let keeper_args =
     `Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ]
   in

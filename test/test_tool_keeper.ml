@@ -205,7 +205,7 @@ let test_keeper_model_set_persists_active_model () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -368,7 +368,7 @@ let test_persona_list_and_create_from_persona () =
         let config = Masc_mcp.Room.default_config base_dir in
         ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
         let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-          { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+          { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
         in
         let dispatch name args =
           match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -451,7 +451,7 @@ let test_resident_keeper_and_persistent_agent_lists_split () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -520,7 +520,7 @@ let test_resident_and_persistent_detailed_lists_annotate_runtime_class () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -596,7 +596,7 @@ let test_resident_keeper_msg_bootstraps_then_requires_message () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -632,7 +632,7 @@ let test_persistent_agent_msg_rejects_missing_message () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -697,7 +697,7 @@ let test_persistent_agent_create_from_persona_and_status () =
         let config = Masc_mcp.Room.default_config base_dir in
         ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
         let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-          { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+          { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
         in
         let dispatch name args =
           match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -748,7 +748,7 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -859,7 +859,7 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -957,7 +957,7 @@ let test_keeper_policy_tools_roundtrip () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -1138,7 +1138,7 @@ let test_keeper_policy_set_rejects_invalid_mode () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -1182,7 +1182,7 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -1230,7 +1230,7 @@ let test_keeper_policy_set_accepts_explicit_event_v1 () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
@@ -1274,7 +1274,7 @@ let test_resident_bootstrap_marks_stale_explicit_keeper () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
       let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
       in
       let dispatch name args =
         match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with

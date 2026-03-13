@@ -108,6 +108,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
+          agent_name = "operator";
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -179,6 +180,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
+          agent_name = "operator";
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -233,6 +235,7 @@ let test_keeper_msg_auto_team_session_bridge () =
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
+          agent_name = "operator";
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
@@ -281,6 +284,21 @@ let test_keeper_msg_auto_team_session_bridge () =
       Alcotest.(check string) "session goal" first_message session.goal;
       Alcotest.(check string) "session status" "running"
         (Team_session_types.status_to_string session.status);
+      let team_ctx : _ Tool_team_session.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = None;
+        }
+      in
+      let team_status_ok, _ =
+        dispatch_team_exn team_ctx ~name:"masc_team_session_status"
+          ~args:(`Assoc [ ("session_id", `String session_id) ])
+      in
+      Alcotest.(check bool) "caller can access suggested team session tools" true
+        team_status_ok;
       Alcotest.(check bool) "spawn_error surfaced" true
         (first_json |> member "spawn_error" <> `Null);
       let meta =
@@ -364,12 +382,20 @@ let test_keeper_msg_auto_team_session_bridge () =
         | Ok None -> Alcotest.fail "keeper meta removed unexpectedly"
         | Error err -> Alcotest.fail ("meta read after down failed: " ^ err)
       in
+      let session_after_down =
+        match Team_session_store.load_session config session_id with
+        | Some session -> session
+        | None -> Alcotest.fail "team session removed unexpectedly on down"
+      in
+      Alcotest.(check string) "linked session interrupted on down" "interrupted"
+        (Team_session_types.status_to_string session_after_down.status);
       Alcotest.(check (option string)) "linked session cleared on down" None
         meta_after_down.active_team_session_id;
       Alcotest.(check string) "last started cleared on down" ""
         meta_after_down.last_team_session_started_at;
       Alcotest.(check int) "start count retained on down" 1
         meta_after_down.team_session_start_count_total)
+
 
 let test_manual_lodge_tick_updates_observable_state () =
   let base_dir = temp_dir () in

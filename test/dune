@@ -92,6 +92,11 @@
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
+ (name test_social_motion)
+ (modules test_social_motion)
+ (libraries masc_mcp alcotest unix yojson))
+
+(test
  (name test_ci_hardening_source)
  (modules test_ci_hardening_source)
  (libraries alcotest unix))
@@ -348,7 +353,15 @@
 
 (test
  (name test_command_plane_v2)
- (modules test_command_plane_v2)
+ (modules test_command_plane_v2
+          test_command_plane_v2_support
+          test_command_plane_v2_scheduler_core_a
+          test_command_plane_v2_scheduler_core_b
+          test_command_plane_v2_scheduler_policy
+          test_command_plane_v2_swarm_history
+          test_command_plane_v2_swarm_summary
+          test_command_plane_v2_search
+          test_command_plane_v2_wrapper)
  (libraries masc_mcp alcotest yojson unix))
 
 (test
@@ -373,7 +386,15 @@
 
 (test
  (name test_tool_team_session)
- (modules test_tool_team_session)
+ (modules test_tool_team_session
+          test_tool_team_session_support
+          test_tool_team_session_lifecycle
+          test_tool_team_session_flow
+          test_tool_team_session_proof
+          test_tool_team_session_step_validation
+          test_tool_team_session_step_routing
+          test_tool_team_session_step_followup
+          test_tool_team_session_misc)
  (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test
@@ -388,7 +409,13 @@
 
 (test
  (name test_operator_control)
- (modules test_operator_control)
+ (modules test_operator_control
+          test_operator_control_support
+          test_operator_control_snapshot
+          test_operator_control_actions
+          test_operator_control_judgment
+          test_operator_control_swarm
+          test_operator_control_keeper)
  (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test
@@ -782,11 +809,6 @@
  (name test_anti_fake)
  (modules test_anti_fake)
  (libraries masc_mcp alcotest yojson))
-
-(test
- (name test_keeper_exec_helpers)
- (modules test_keeper_exec_helpers)
- (libraries masc_mcp alcotest yojson unix))
 
 ; P3 Phase 5: Tool_board coverage tests
 (test

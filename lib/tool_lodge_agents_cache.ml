@@ -1,0 +1,423 @@
+open Tool_lodge_config_http
+open Tool_lodge_llm_cycle
+
+(** {1 Dynamic Agent Loading from Neo4j (SOUL Layer - Tier 3)} *)
+
+(** Cached agent data from Neo4j *)
+type agent_config = {
+  name: string;
+  primary_value: string option;
+  value_weights: string option;    (* JSON string *)
+  prompt_template: string option;
+  generation: int;
+  status: string;
+  (* Dynamic Lodge identity from Neo4j *)
+  emoji: string;
+  korean_name: string;
+  model: string;
+  interests: string list;
+}
+
+let default_model () =
+  match Sys.getenv_opt "MASC_DEFAULT_MODEL" with
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> "default-model"
+
+let builtin_core_agent_configs () =
+  [
+    {
+      name = "dreamer";
+      primary_value = Some "imagination";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "🌙";
+      korean_name = "몽상가";
+      model = default_model ();
+      interests = [ "vision"; "future"; "art"; "possibility" ];
+    };
+    {
+      name = "skeptic";
+      primary_value = Some "verification";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "🧐";
+      korean_name = "회의론자";
+      model = default_model ();
+      interests = [ "evidence"; "risk"; "debugging"; "correctness" ];
+    };
+    {
+      name = "historian";
+      primary_value = Some "memory";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "📚";
+      korean_name = "역사가";
+      model = default_model ();
+      interests = [ "context"; "history"; "continuity"; "archives" ];
+    };
+    {
+      name = "pragmatist";
+      primary_value = Some "utility";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "🔧";
+      korean_name = "실용주의자";
+      model = default_model ();
+      interests = [ "operations"; "execution"; "delivery"; "practicality" ];
+    };
+    {
+      name = "connector";
+      primary_value = Some "synthesis";
+      value_weights = None;
+      prompt_template = None;
+      generation = 0;
+      status = "active";
+      emoji = "🕸️";
+      korean_name = "연결자";
+      model = default_model ();
+      interests = [ "relationships"; "coordination"; "bridges"; "community" ];
+    };
+  ]
+
+(** In-memory cache for dynamic agents (protected by mutex for concurrent access) *)
+let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
+let agent_cache_mu = Mutex.create ()
+
+(** {2 File-based cache for offline fallback} *)
+
+(** Get .masc directory path *)
+let get_masc_dir () =
+  Filename.concat (Env_config.me_root ()) ".masc"
+
+(** Agent cache file path *)
+let agent_file_cache_path () =
+  get_masc_dir () ^ "/agent_cache.json"
+
+(** Cache TTL in hours (configurable via env) *)
+let agent_cache_ttl_hours () =
+  match Sys.getenv_opt "MASC_AGENT_CACHE_TTL_HOURS" with
+  | Some s -> (try float_of_string s with Failure _ -> 24.0)
+  | None -> 24.0
+
+(** Convert agent_config to JSON *)
+let agent_config_to_yojson (a : agent_config) : Yojson.Safe.t =
+  `Assoc [
+    ("name", `String a.name);
+    ("primary_value", match a.primary_value with Some v -> `String v | None -> `Null);
+    ("value_weights", match a.value_weights with Some v -> `String v | None -> `Null);
+    ("prompt_template", match a.prompt_template with Some v -> `String v | None -> `Null);
+    ("generation", `Int a.generation);
+    ("status", `String a.status);
+    ("emoji", `String a.emoji);
+    ("korean_name", `String a.korean_name);
+    ("model", `String a.model);
+    ("interests", `List (List.map (fun s -> `String s) a.interests));
+  ]
+
+(** Parse agent_config from JSON *)
+let agent_config_of_yojson (json : Yojson.Safe.t) : agent_config option =
+  try
+    let open Yojson.Safe.Util in
+    Some {
+      name = json |> member "name" |> to_string;
+      primary_value = json |> member "primary_value" |> to_string_option;
+      value_weights = json |> member "value_weights" |> to_string_option;
+      prompt_template = json |> member "prompt_template" |> to_string_option;
+      generation = json |> member "generation" |> to_int_option |> Option.value ~default:0;
+      status = json |> member "status" |> to_string_option |> Option.value ~default:"active";
+      emoji = json |> member "emoji" |> to_string_option |> Option.value ~default:"🤖";
+      korean_name = json |> member "korean_name" |> to_string_option |> Option.value ~default:"";
+      model = json |> member "model" |> to_string_option |> Option.value ~default:(default_model ());
+      interests = json |> member "interests" |> to_list |> List.filter_map to_string_option;
+    }
+  with Yojson.Safe.Util.Type_error (_, _) -> None
+
+(** Save in-memory agent cache to file *)
+let save_agents_to_file_cache () =
+  Mutex.lock agent_cache_mu;
+  let agents = Hashtbl.fold (fun _ v acc -> v :: acc) agent_cache [] in
+  Mutex.unlock agent_cache_mu;
+  if agents = [] then ()
+  else begin
+    let cache_json = `Assoc [
+      ("updated_at", `Float (Time_compat.now ()));
+      ("agents", `List (List.map agent_config_to_yojson agents));
+    ] in
+    try
+      let path = agent_file_cache_path () in
+      let dir = Filename.dirname path in
+      if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
+      let oc = open_out path in
+      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+        output_string oc (Yojson.Safe.pretty_to_string cache_json))
+    with e ->
+      Printf.eprintf "[Lodge] Failed to save agent cache: %s\n%!" (Printexc.to_string e)
+  end
+
+(** Load agents from file cache (returns true if loaded, false otherwise) *)
+let load_agents_from_file_cache () : bool =
+  let path = agent_file_cache_path () in
+  if not (Sys.file_exists path) then begin
+    Printf.eprintf "[Lodge] No file cache at %s\n%!" path;
+    false
+  end else begin
+    try
+      let ic = open_in path in
+      let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
+        (fun () -> really_input_string ic (in_channel_length ic)) in
+      let json = Yojson.Safe.from_string content in
+      let open Yojson.Safe.Util in
+      let updated_at = json |> member "updated_at" |> to_float in
+      let age_hours = (Time_compat.now () -. updated_at) /. 3600.0 in
+      let ttl = agent_cache_ttl_hours () in
+      if age_hours > ttl then begin
+        Printf.eprintf "[Lodge] Cache expired (%.1f hours old, TTL=%.0f)\n%!" age_hours ttl;
+        false
+      end else begin
+        let agents_json = json |> member "agents" |> to_list in
+        let loaded = List.filter_map agent_config_of_yojson agents_json in
+        Mutex.lock agent_cache_mu;
+        List.iter (fun a -> Hashtbl.replace agent_cache a.name a) loaded;
+        Mutex.unlock agent_cache_mu;
+        Printf.eprintf "[Lodge] Loaded %d agents from file cache (%.1f hours old)\n%!" (List.length loaded) age_hours;
+        true
+      end
+    with e ->
+      Printf.eprintf "[Lodge] Failed to load file cache: %s\n%!" (Printexc.to_string e);
+      false
+  end
+
+let has_cached_agents_in_memory () =
+  Mutex.lock agent_cache_mu;
+  let n = Hashtbl.length agent_cache in
+  Mutex.unlock agent_cache_mu;
+  n > 0
+
+let load_agents_from_cache_if_available () =
+  if load_agents_from_file_cache () then
+    has_cached_agents_in_memory ()
+  else
+    false
+
+(** Load agents from Neo4j via GraphQL API with file cache fallback *)
+let load_agents_config () =
+  if load_agents_from_cache_if_available () then begin
+    Printf.eprintf "[Lodge] Using cached agents (skipping GraphQL bootstrap)\n%!";
+  end else begin
+    Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
+    (* Query all Lodge identity fields for dynamic agent system *)
+    (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
+    let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
+    let graphql_success = ref false in
+    begin try
+      match graphql_request ~timeout_sec:5.0 query with
+      | Error err ->
+          Printf.eprintf "[Lodge] GraphQL request failed: %s\n%!" err
+      | Ok json_str ->
+          Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
+          (* Parse JSON response *)
+          let json = Yojson.Safe.from_string json_str in
+          (match graphql_agents_edges json with
+           | Error msg ->
+               Printf.eprintf "[Lodge] GraphQL agent parse failed: %s\n%!" msg
+           | Ok edges ->
+               List.iter (fun edge ->
+                 try
+                   let node = Yojson.Safe.Util.member "node" edge in
+                   let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+                   let interests_json = Yojson.Safe.Util.(member "interests" node) in
+                   let interests = match interests_json with
+                     | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
+                     | _ -> []
+                   in
+                   let config = {
+                     name;
+                     primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
+                     value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
+                     prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
+                     generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
+                     status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
+                     emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
+                     korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
+                     model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:(default_model ());
+                     interests;
+                   } in
+                   Mutex.lock agent_cache_mu;
+                   Hashtbl.replace agent_cache config.name config;
+                   Mutex.unlock agent_cache_mu
+                 with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
+               ) edges;
+               Mutex.lock agent_cache_mu;
+               let n = Hashtbl.length agent_cache in
+               Mutex.unlock agent_cache_mu;
+               if n > 0 then begin
+                 graphql_success := true;
+                 Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n;
+                 save_agents_to_file_cache ()
+               end)
+    with e ->
+      Printf.eprintf "[Lodge] ❌ GraphQL failed: %s\n%!" (Printexc.to_string e)
+    end;
+    (* Fallback to file cache if GraphQL failed *)
+    if not !graphql_success then begin
+      Printf.eprintf "[Lodge] Trying file cache fallback...\n%!";
+      if not (load_agents_from_file_cache ()) then begin
+        Printf.eprintf "[Lodge] Falling back to builtin core identities\n%!";
+        Mutex.lock agent_cache_mu;
+        List.iter (fun cfg -> Hashtbl.replace agent_cache cfg.name cfg) (builtin_core_agent_configs ());
+        Mutex.unlock agent_cache_mu;
+      end;
+      if not (has_cached_agents_in_memory ()) then
+        Printf.eprintf "[Lodge] ⚠ No agents available (GraphQL failed, no valid cache)\n%!"
+    end
+  end
+
+(** Get cached agent config, or None if not loaded *)
+let get_cached_agent name =
+  Mutex.lock agent_cache_mu;
+  let r = Hashtbl.find_opt agent_cache name in
+  Mutex.unlock agent_cache_mu;
+  r
+
+(** Get primary value from cached agent (for SOUL-based decisions) *)
+let get_agent_primary_value name =
+  match get_cached_agent name with
+  | Some config -> config.primary_value
+  | None -> None
+
+(** {1 SOUL Evolution - Feedback-driven weight adjustment} *)
+
+(** Feedback type for evolution *)
+type feedback_outcome = Positive | Negative | Neutral
+
+(** Learning rate for weight adjustments (small steps) *)
+let learning_rate = 0.01
+
+(** Clamp value between min and max *)
+let clamp min_v max_v v =
+  if v < min_v then min_v
+  else if v > max_v then max_v
+  else v
+
+(** Parse value_weights JSON string to association list *)
+let parse_value_weights json_str =
+  try
+    let json = Yojson.Safe.from_string json_str in
+    match json with
+    | `Assoc pairs ->
+      List.filter_map (fun (k, v) ->
+        match v with
+        | `Float f -> Some (k, f)
+        | `Int i -> Some (k, float_of_int i)
+        | _ -> None
+      ) pairs
+    | _ -> []
+  with Yojson.Json_error _ -> []
+
+(** Serialize value_weights back to JSON string *)
+let serialize_value_weights weights =
+  let pairs = List.map (fun (k, v) -> (k, `Float v)) weights in
+  Yojson.Safe.to_string (`Assoc pairs)
+
+(** Evolve agent's value_weights based on feedback
+    - Adjusts weights by learning_rate
+    - Ensures primary_value never drops below 0.5
+    - Increments generation
+    - Updates Neo4j
+*)
+let evolve_agent ~name ~dimension ~outcome =
+  match get_cached_agent name with
+  | None ->
+    Printf.eprintf "[Evolution] Agent %s not found in cache\n%!" name;
+    false
+  | Some config ->
+    let weights = match config.value_weights with
+      | Some json -> parse_value_weights json
+      | None -> []
+    in
+    if weights = [] then begin
+      Printf.eprintf "[Evolution] No value_weights for %s\n%!" name;
+      false
+    end else begin
+      (* Calculate delta based on outcome *)
+      let delta = match outcome with
+        | Positive -> learning_rate
+        | Negative -> -. learning_rate
+        | Neutral -> 0.0
+      in
+      (* Update the specific dimension *)
+      let new_weights = List.map (fun (dim, weight) ->
+        if dim = dimension then
+          let new_weight = clamp 0.0 1.0 (weight +. delta) in
+          (* Constraint: primary_value can't go below 0.5 *)
+          let final_weight =
+            match config.primary_value with
+            | Some pv when pv = dim && new_weight < 0.5 -> 0.5
+            | _ -> new_weight
+          in
+          (dim, final_weight)
+        else (dim, weight)
+      ) weights in
+      let new_weights_json = serialize_value_weights new_weights in
+      let new_gen = config.generation + 1 in
+      (* Update Neo4j via cypher-shell *)
+      let esc = cypher_escape in
+      let cypher = Printf.sprintf
+        "MATCH (a:Agent {name: '%s'}) SET a.value_weights = '%s', a.generation = %d, a.last_updated = datetime() RETURN a.name"
+        (esc name) (esc new_weights_json) new_gen
+      in
+      let neo4j_uri = Sys.getenv_opt "NEO4J_URI" |> Option.value ~default:"" in
+      let neo4j_pw = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
+      try
+        let argv =
+          ["cypher-shell"; "-a"; neo4j_uri;
+           "-u"; "neo4j"; "-p"; neo4j_pw;
+           "--format"; "plain";
+           cypher]
+        in
+        let (status, _output) = run_cmd_with_status ~timeout_sec:60.0 argv in
+        (match status with Unix.WEXITED 0 -> () | _ -> raise (Failure "cypher-shell failed"));
+        (* Update cache *)
+        Mutex.lock agent_cache_mu;
+        Hashtbl.replace agent_cache name {
+          config with
+          value_weights = Some new_weights_json;
+          generation = new_gen;
+        };
+        Mutex.unlock agent_cache_mu;
+        Printf.eprintf "[Evolution] %s evolved: %s %s%.2f -> gen %d\n%!"
+          name dimension
+          (if delta >= 0.0 then "+" else "") delta new_gen;
+        true
+      with e ->
+        Printf.eprintf "[Evolution] Failed to update %s: %s\n%!" name (Printexc.to_string e);
+        false
+    end
+
+(** Record feedback for an agent's decision (by name) *)
+let record_feedback ~name ~dimension ~is_positive =
+  let outcome = if is_positive then Positive else Negative in
+  evolve_agent ~name ~dimension ~outcome
+
+(** Initialize Lodge module after Eio context is ready.
+    Call from main_eio.ml after Eio_context.set_net *)
+let init () =
+  (* Load agents for evolution triggers *)
+  load_agents_config ()
+
+(** Module initialization - only register callbacks (no network calls) *)
+let () =
+  (* Register SOUL Evolution callback with Tool_board (breaks dependency cycle) *)
+  Tool_board.register_evolution_callback {
+    Tool_board.get_primary_value = get_agent_primary_value;
+    record_feedback = (fun ~name ~dimension ~is_positive ->
+      let _ = record_feedback ~name ~dimension ~is_positive in ());
+  }

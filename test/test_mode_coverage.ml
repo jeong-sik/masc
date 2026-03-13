@@ -303,8 +303,8 @@ let test_is_tool_enabled_coding () =
   let cats = Mode.categories_for_mode Mode.Coding in
   check bool "code_search enabled" true
     (Mode.is_tool_enabled cats "masc_code_search");
-  check bool "debate_start enabled" true
-    (Mode.is_tool_enabled cats "masc_debate_start");
+  check bool "case_status enabled" true
+    (Mode.is_tool_enabled cats "masc_case_status");
   check bool "broadcast disabled" false
     (Mode.is_tool_enabled cats "masc_broadcast")
 

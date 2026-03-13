@@ -49,13 +49,13 @@ let () =
               check bool "masc_team_session_step" true
                 (Tool_catalog.is_in_tier Tool_catalog.Standard
                    "masc_team_session_step"));
-          test_case "includes consensus tools" `Quick (fun () ->
-              check bool "masc_consensus_start" true
+          test_case "includes governance v2 tools" `Quick (fun () ->
+              check bool "masc_cases" true
                 (Tool_catalog.is_in_tier Tool_catalog.Standard
-                   "masc_consensus_start");
-              check bool "masc_consensus_vote" true
+                   "masc_cases");
+              check bool "masc_case_status" true
                 (Tool_catalog.is_in_tier Tool_catalog.Standard
-                   "masc_consensus_vote"));
+                   "masc_case_status"));
           test_case "includes decision tools" `Quick (fun () ->
               check bool "decision_create" true
                 (Tool_catalog.is_in_tier Tool_catalog.Standard "decision_create");

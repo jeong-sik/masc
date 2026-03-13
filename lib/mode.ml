@@ -303,7 +303,10 @@ let tool_category tool_name =
   | "masc_intent_create" | "masc_intent_status"
   | "masc_intent_forecast" | "masc_intent_update" -> Plan
 
-  (* ── Consensus: debate, consensus, WALPH, convo, decision ── *)
+  (* ── Consensus / Governance V2: petitions, rulings, WALPH, convo, decision ── *)
+  | "masc_petition_submit" | "masc_case_brief_submit"
+  | "masc_cases" | "masc_case_status"
+  | "masc_ruling_status" | "masc_execution_orders"
   | "masc_consensus_start" | "masc_consensus_vote"
   | "masc_consensus_close" | "masc_consensus_result"
   | "masc_debate_start" | "masc_debate_argue"

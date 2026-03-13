@@ -1,9 +1,12 @@
 open Yojson.Safe.Util
 
+module GV2 = Council.Governance_v2
+
 type detail_status = [ `OK | `Not_found ]
 
 let option_to_yojson f = function Some value -> f value | None -> `Null
 let string_opt_json = option_to_yojson (fun value -> `String value)
+let iso_of_unix = Dashboard_utils.iso_of_unix
 
 let rec take n items =
   match items with
@@ -17,286 +20,254 @@ let rec drop n items =
   | rows when n <= 0 -> rows
   | _ :: rest -> drop (n - 1) rest
 
-let iso_of_unix = Dashboard_utils.iso_of_unix
-
-let max_opt left right =
-  match left, right with
-  | None, value | value, None -> value
-  | Some a, Some b -> Some (max a b)
-
-let dedup_strings values =
-  values
-  |> List.filter_map (fun raw ->
-         let trimmed = String.trim raw in
-         if trimmed = "" then None else Some trimmed)
-  |> List.sort_uniq String.compare
-
-let list_string_json values =
+let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
-let debate_context_json (debate : Council.Debate.debate) =
-  let context = debate.context in
+let truth_summary_of_bundle (bundle : GV2.case_bundle) =
+  let petition_count = List.length bundle.GV2.petitions in
+  let brief_count = List.length bundle.GV2.case_.GV2.briefs in
+  let ref_count =
+    bundle.GV2.petitions
+    |> List.fold_left
+         (fun acc (petition : GV2.petition) ->
+           acc + List.length petition.GV2.source_refs)
+         0
+  in
+  Printf.sprintf "petitions %d · briefs %d · refs %d" petition_count brief_count ref_count
+
+let related_agents_of_bundle (bundle : GV2.case_bundle) =
+  let petition_agents =
+    bundle.GV2.petitions |> List.map (fun (petition : GV2.petition) -> petition.GV2.created_by)
+  in
+  let brief_agents =
+    bundle.GV2.case_.GV2.briefs |> List.map (fun (brief : GV2.case_brief) -> brief.GV2.author)
+  in
+  List.sort_uniq String.compare (petition_agents @ brief_agents)
+
+let evidence_refs_of_bundle (bundle : GV2.case_bundle) =
+  let petition_refs =
+    bundle.GV2.petitions |> List.concat_map (fun (petition : GV2.petition) -> petition.GV2.source_refs)
+  in
+  let brief_refs =
+    bundle.GV2.case_.GV2.briefs
+    |> List.concat_map (fun (brief : GV2.case_brief) -> brief.GV2.evidence_refs)
+  in
+  List.sort_uniq String.compare (petition_refs @ brief_refs)
+
+let action_request_json (request : GV2.action_request) =
   `Assoc
     [
-      ("board_post_id", string_opt_json context.board_post_id);
-      ("task_id", string_opt_json context.task_id);
-      ("operation_id", string_opt_json context.operation_id);
-      ("team_session_id", string_opt_json context.team_session_id);
+      ("action_type", `String request.GV2.action_type);
+      ("target_type", string_opt_json request.GV2.target_type);
+      ("target_id", string_opt_json request.GV2.target_id);
+      ( "payload_preview",
+        match request.GV2.payload with
+        | Some payload -> payload
+        | None -> `Null );
     ]
 
-let consensus_context_json (session : Council.Consensus.session) =
-  let context = session.context in
+let recommended_action_json (bundle : GV2.case_bundle) =
+  match bundle.GV2.ruling with
+  | None -> `Null
+  | Some ruling -> (
+      match ruling.GV2.recommended_action with
+      | None -> `Null
+      | Some request ->
+          `Assoc
+            [
+              ("action_kind", `String request.GV2.action_type);
+              ("resolved_tool", `Null);
+              ("target_type", string_opt_json request.GV2.target_type);
+              ("target_id", string_opt_json request.GV2.target_id);
+              ("reason", `String ruling.GV2.summary);
+              ("payload_preview", match request.GV2.payload with Some payload -> payload | None -> `Null);
+            ])
+
+let executed_route_json (bundle : GV2.case_bundle) =
+  match bundle.GV2.execution_order with
+  | None -> `Null
+  | Some order ->
+      `Assoc
+        [
+          ( "action_type",
+            match order.GV2.action_request with
+            | Some request -> `String request.GV2.action_type
+            | None -> `Null );
+          ( "delegated_tool",
+            match order.GV2.action_request with
+            | Some request -> `String request.GV2.action_type
+            | None -> `Null );
+          ("confirmation_state", `String (GV2.order_status_to_string order.GV2.status));
+          ("created_at", `String (iso_of_unix order.GV2.updated_at));
+        ]
+
+let guardrail_state_json (bundle : GV2.case_bundle) =
+  let requires_human_gate, ready_to_execute =
+    match bundle.GV2.execution_order with
+    | Some order -> (
+        match order.GV2.status with
+        | GV2.Needs_human_gate_order -> (true, false)
+        | GV2.Queued_auto -> (false, true)
+        | GV2.Auto_executed | GV2.Done | GV2.Denied | GV2.Blocked_order -> (false, false))
+    | None -> (false, false)
+  in
   `Assoc
     [
-      ("board_post_id", string_opt_json context.board_post_id);
-      ("task_id", string_opt_json context.task_id);
-      ("operation_id", string_opt_json context.operation_id);
-      ("team_session_id", string_opt_json context.team_session_id);
+      ("requires_human_gate", `Bool requires_human_gate);
+      ("pending_confirm", `Null);
+      ("pending_confirm_token", `Null);
+      ("ready_to_execute", `Bool ready_to_execute);
     ]
 
-let action_logs base_path =
-  let config = Room.default_config base_path in
-  match Operator_control.recent_actions_json config with
-  | `List items -> items
-  | _ -> []
-
-let pending_confirm_envelope base_path =
-  let config = Room.default_config base_path in
-  match Operator_control.pending_confirm_envelope_json config with
-  | `Assoc _ as envelope -> envelope
-  | _ -> `Assoc [ ("items", `List []); ("summary", Operator_control.pending_confirm_summary_json config) ]
-
-let pending_confirms base_path =
-  pending_confirm_envelope base_path |> member "items" |> to_list
-
-let pending_confirm_summary base_path =
-  pending_confirm_envelope base_path |> member "summary"
-
-let judge_runtime_json base_path =
-  let runtime = Dashboard_governance_judge.runtime_status base_path in
-  `Assoc
-    [
-      ("judge_online", `Bool runtime.judge_online);
-      ("refreshing", `Bool runtime.refreshing);
-      ("generated_at", string_opt_json runtime.generated_at);
-      ("expires_at", string_opt_json runtime.expires_at);
-      ("model_used", string_opt_json runtime.model_used);
-      ("keeper_name", `String runtime.keeper_name);
-      ("last_error", string_opt_json runtime.last_error);
-    ]
-
-let latest_judgment_map base_path =
-  Dashboard_governance_judge.latest_judgments base_path
-  |> List.fold_left
-       (fun acc json ->
-         let kind = json |> member "target_kind" |> to_string in
-         let id = json |> member "target_id" |> to_string in
-         let key = kind ^ ":" ^ id in
-         Hashtbl.replace acc key json;
-         acc)
-       (Hashtbl.create 32)
-
-let judgment_for judgments ~kind ~id =
-  Hashtbl.find_opt judgments (kind ^ ":" ^ id)
-
-let judgment_recommended_action json =
-  match json |> member "recommended_action" with
-  | `Assoc _ as value -> Some value
-  | _ -> None
-
-let related_agents_of_debate (debate : Council.Debate.debate) =
-  debate.arguments
-  |> List.concat_map (fun (arg : Council.Debate.argument) -> arg.agent :: arg.mentions)
-  |> dedup_strings
-
-let last_activity_of_debate (debate : Council.Debate.debate) =
-  let arg_last =
-    debate.arguments
-    |> List.filter_map (fun (arg : Council.Debate.argument) -> arg.created_at)
-    |> List.sort Float.compare |> List.rev |> function
-    | latest :: _ -> Some latest
-    | [] -> None
-  in
-  debate.closed_at |> max_opt arg_last |> max_opt (Some debate.created_at)
-
-let truth_summary_of_debate (summary : Council.Debate.debate_summary) =
-  Printf.sprintf "support %d · oppose %d · neutral %d · arguments %d"
-    summary.support_count summary.oppose_count summary.neutral_count
-    summary.total_arguments
-
-let vote_counts (session : Council.Consensus.session) =
-  let approves, rejects, abstains = Council.Consensus.tally_votes session in
-  (approves, rejects, abstains)
-
-let related_agents_of_session (session : Council.Consensus.session) =
-  let vote_agents = session.votes |> List.map (fun (vote : Council.Consensus.vote) -> vote.agent) in
-  dedup_strings (session.initiator :: vote_agents)
-
-let last_activity_of_session (session : Council.Consensus.session) =
-  let vote_last =
-    session.votes
-    |> List.map (fun (vote : Council.Consensus.vote) -> vote.timestamp)
-    |> List.sort Float.compare |> List.rev |> function
-    | latest :: _ -> Some latest
-    | [] -> None
-  in
-  session.closed_at |> max_opt vote_last |> max_opt (Some session.created_at)
-
-let truth_summary_of_session (session : Council.Consensus.session) =
-  let approves, rejects, abstains = vote_counts session in
-  Printf.sprintf "approve %d · reject %d · abstain %d · quorum %d"
-    approves rejects abstains session.quorum
-
-let matching_confirm pending_items action_json =
-  let resolved_tool = action_json |> member "resolved_tool" |> to_string_option in
-  let target_type = action_json |> member "target_type" |> to_string_option in
-  let target_id = action_json |> member "target_id" |> to_string_option in
-  match resolved_tool, target_type with
-  | Some resolved_tool, Some target_type ->
-      List.find_opt
-        (fun confirm ->
-          confirm |> member "delegated_tool" |> to_string = resolved_tool
-          && confirm |> member "target_type" |> to_string = target_type
-          &&
-          match target_id, confirm |> member "target_id" |> to_string_option with
-          | Some left, Some right -> String.equal left right
-          | None, None -> true
-          | _ -> false)
-        pending_items
-  | _ -> None
-
-let executed_route_for logs ~target_type ~target_id =
-  let matches log =
-    log |> member "target_type" |> to_string = target_type
-    &&
-    match target_id, log |> member "target_id" |> to_string_option with
-    | Some left, Some right -> String.equal left right
-    | None, None -> true
-    | _ -> false
-  in
-  match List.find_opt matches logs with
-  | Some log ->
-      Some
-        (`Assoc
-          [
-            ("action_type", log |> member "action_type");
-            ("delegated_tool", log |> member "delegated_tool");
-            ("confirmation_state", log |> member "confirmation_state");
-            ("created_at", log |> member "created_at");
-          ])
+let linked_task_id_of_bundle (bundle : GV2.case_bundle) =
+  match bundle.GV2.execution_order with
+  | Some order -> (
+      match order.GV2.execution_ref, order.GV2.action_request with
+      | Some execution_ref, Some request
+        when String.equal (String.lowercase_ascii request.GV2.action_type) "add_task" ->
+          Some execution_ref
+      | _ -> None)
   | None -> None
 
-let evidence_refs_of_debate (debate : Council.Debate.debate) =
-  debate.arguments
-  |> List.mapi (fun index (arg : Council.Debate.argument) ->
-         Printf.sprintf "debate:%s:arg:%d:%s" debate.id index arg.agent)
+let linked_operation_id_of_bundle (bundle : GV2.case_bundle) =
+  match bundle.GV2.execution_order with
+  | Some order -> (
+      match order.GV2.execution_ref, order.GV2.action_request with
+      | Some execution_ref, Some request
+        when String.equal
+               (String.lowercase_ascii request.GV2.action_type)
+               "start_operation" ->
+          Some execution_ref
+      | _ -> None)
+  | None -> None
 
-let evidence_refs_of_session (session : Council.Consensus.session) =
-  session.votes
-  |> List.mapi (fun index (vote : Council.Consensus.vote) ->
-         Printf.sprintf "consensus:%s:vote:%d:%s" session.id index vote.agent)
-
-let governance_item_of_debate judgments pending_items recent_action_logs
-    (summary : Council.Debate.debate_summary) =
-  let debate = summary.debate in
-  let judgment = judgment_for judgments ~kind:"debate" ~id:debate.id in
-  let recommended_action = Option.bind judgment judgment_recommended_action in
-  let context = debate_context_json debate in
-  let executed_route =
-    executed_route_for recent_action_logs ~target_type:"team_session"
-      ~target_id:debate.context.team_session_id
+let governance_item_of_bundle (bundle : GV2.case_bundle) =
+  let ruling_summary =
+    match bundle.GV2.ruling with
+    | Some ruling -> Some ruling.GV2.summary
+    | None -> None
   in
-  let pending_confirm = Option.bind recommended_action (matching_confirm pending_items) in
-  let guardrail_state =
-    `Assoc
-      [
-        ("requires_human_gate", `Bool (Option.is_some pending_confirm));
-        ("pending_confirm", option_to_yojson (fun value -> value) pending_confirm);
-        ( "ready_to_execute",
-          `Bool
-            (match judgment with
-            | Some row -> (
-                match row |> member "guardrail_state" |> member "ready_to_execute" with
-                | `Bool value -> value
-                | _ -> false)
-            | None -> false) );
-      ]
+  let confidence =
+    match bundle.GV2.ruling with
+    | Some ruling -> Some ruling.GV2.confidence
+    | None -> None
+  in
+  let provenance =
+    match bundle.GV2.ruling with
+    | Some ruling -> ruling.GV2.provenance
+    | None -> "truth"
+  in
+  let auto_execution_state =
+    match bundle.GV2.execution_order with
+    | Some order -> GV2.order_status_to_string order.GV2.status
+    | None -> (
+        match bundle.GV2.ruling with
+        | Some ruling -> ruling.GV2.auto_execution_state
+        | None -> "pending_ruling")
   in
   `Assoc
     [
-      ("kind", `String "debate");
-      ("id", `String debate.id);
-      ("topic", `String debate.topic);
-      ("status", `String (Council.Debate.status_to_string debate.status));
-      ("last_activity_at", string_opt_json (Option.map iso_of_unix (last_activity_of_debate debate)));
-      ("truth_summary", `String (truth_summary_of_debate summary));
-      ("judgment_summary", option_to_yojson (fun row -> row |> member "summary") judgment);
-      ("confidence", option_to_yojson (fun row -> row |> member "confidence") judgment);
-      ("related_agents", list_string_json (related_agents_of_debate debate));
-      ("context", context);
-      ("linked_board_post_id", context |> member "board_post_id");
-      ("linked_task_id", context |> member "task_id");
-      ("linked_operation_id", context |> member "operation_id");
-      ("linked_session_id", context |> member "team_session_id");
-      ("recommended_action", option_to_yojson (fun value -> value) recommended_action);
-      ("executed_route", option_to_yojson (fun value -> value) executed_route);
-      ("guardrail_state", guardrail_state);
-      ("evidence_refs", list_string_json (evidence_refs_of_debate debate));
+      ("kind", `String "case");
+      ("id", `String bundle.GV2.case_.GV2.id);
+      ("topic", `String bundle.GV2.case_.GV2.title);
+      ("status", `String (GV2.case_status_to_string bundle.GV2.case_.GV2.status));
+      ("last_activity_at", `String (iso_of_unix bundle.GV2.case_.GV2.updated_at));
+      ("truth_summary", `String (truth_summary_of_bundle bundle));
+      ("judgment_summary", option_to_yojson (fun value -> `String value) ruling_summary);
+      ("confidence", option_to_yojson (fun value -> `Float value) confidence);
+      ("related_agents", json_string_list (related_agents_of_bundle bundle));
+      ( "context",
+        `Assoc
+          [
+            ("board_post_id", `Null);
+            ("task_id", string_opt_json (linked_task_id_of_bundle bundle));
+            ("operation_id", string_opt_json (linked_operation_id_of_bundle bundle));
+            ("team_session_id", `Null);
+          ] );
+      ("linked_board_post_id", `Null);
+      ("linked_task_id", string_opt_json (linked_task_id_of_bundle bundle));
+      ("linked_operation_id", string_opt_json (linked_operation_id_of_bundle bundle));
+      ("linked_session_id", `Null);
+      ("recommended_action", recommended_action_json bundle);
+      ("executed_route", executed_route_json bundle);
+      ("guardrail_state", guardrail_state_json bundle);
+      ("evidence_refs", json_string_list (evidence_refs_of_bundle bundle));
+      ("origin", `String bundle.GV2.case_.GV2.origin);
+      ("risk_class", `String (GV2.risk_class_to_string bundle.GV2.case_.GV2.risk_class));
+      ("provenance", `String provenance);
+      ("auto_execution_state", `String auto_execution_state);
+      ("petition_count", `Int (List.length bundle.GV2.petitions));
+      ("brief_count", `Int (List.length bundle.GV2.case_.GV2.briefs));
     ]
 
-let governance_item_of_session judgments pending_items recent_action_logs
-    (session : Council.Consensus.session) =
-  let judgment = judgment_for judgments ~kind:"consensus" ~id:session.id in
-  let recommended_action = Option.bind judgment judgment_recommended_action in
-  let context = consensus_context_json session in
-  let executed_route =
-    executed_route_for recent_action_logs ~target_type:"team_session"
-      ~target_id:session.context.team_session_id
+let activity_of_bundle (bundle : GV2.case_bundle) =
+  let petition_events =
+    bundle.GV2.petitions
+    |> List.map (fun (petition : GV2.petition) ->
+           `Assoc
+             [
+               ("kind", `String "petition_submitted");
+               ("item_kind", `String "petition");
+               ("item_id", `String petition.GV2.id);
+               ("topic", `String petition.GV2.title);
+               ("created_at", `String (iso_of_unix petition.GV2.created_at));
+               ("summary", `String "Petition submitted");
+               ("actor", `String petition.GV2.created_by);
+             ])
   in
-  let pending_confirm = Option.bind recommended_action (matching_confirm pending_items) in
-  let guardrail_state =
-    `Assoc
-      [
-        ("requires_human_gate", `Bool (Option.is_some pending_confirm));
-        ("pending_confirm", option_to_yojson (fun value -> value) pending_confirm);
-        ( "ready_to_execute",
-          `Bool
-            (match judgment with
-            | Some row -> (
-                match row |> member "guardrail_state" |> member "ready_to_execute" with
-                | `Bool value -> value
-                | _ -> false)
-            | None -> false) );
-      ]
+  let brief_events =
+    bundle.GV2.case_.GV2.briefs
+    |> List.map (fun (brief : GV2.case_brief) ->
+           `Assoc
+             [
+               ("kind", `String "brief_submitted");
+               ("item_kind", `String "brief");
+               ("item_id", `String brief.GV2.id);
+               ("topic", `String bundle.GV2.case_.GV2.title);
+               ("created_at", `String (iso_of_unix brief.GV2.created_at));
+               ("summary", `String brief.GV2.summary);
+               ("actor", `String brief.GV2.author);
+             ])
   in
-  let approves, rejects, abstains = vote_counts session in
-  `Assoc
-    [
-      ("kind", `String "consensus");
-      ("id", `String session.id);
-      ("topic", `String session.topic);
-      ("status", Council.Consensus.voting_state_to_yojson session.state);
-      ("last_activity_at", string_opt_json (Option.map iso_of_unix (last_activity_of_session session)));
-      ("truth_summary", `String (truth_summary_of_session session));
-      ("judgment_summary", option_to_yojson (fun row -> row |> member "summary") judgment);
-      ("confidence", option_to_yojson (fun row -> row |> member "confidence") judgment);
-      ("related_agents", list_string_json (related_agents_of_session session));
-      ("context", context);
-      ("linked_board_post_id", context |> member "board_post_id");
-      ("linked_task_id", context |> member "task_id");
-      ("linked_operation_id", context |> member "operation_id");
-      ("linked_session_id", context |> member "team_session_id");
-      ("recommended_action", option_to_yojson (fun value -> value) recommended_action);
-      ("executed_route", option_to_yojson (fun value -> value) executed_route);
-      ("guardrail_state", guardrail_state);
-      ("approve_count", `Int approves);
-      ("reject_count", `Int rejects);
-      ("abstain_count", `Int abstains);
-      ("votes", `Int (List.length session.votes));
-      ("quorum", `Int session.quorum);
-      ("threshold", `Float session.threshold);
-      ("evidence_refs", list_string_json (evidence_refs_of_session session));
-    ]
+  let ruling_events =
+    match bundle.GV2.ruling with
+    | None -> []
+    | Some ruling ->
+        [
+          `Assoc
+            [
+              ("kind", `String "ruling_issued");
+              ("item_kind", `String "ruling");
+              ("item_id", `String ruling.GV2.id);
+              ("topic", `String bundle.GV2.case_.GV2.title);
+              ("created_at", `String (iso_of_unix ruling.GV2.generated_at));
+              ("summary", `String ruling.GV2.summary);
+              ("actor", `String ruling.GV2.keeper_name);
+            ];
+        ]
+  in
+  let order_events =
+    match bundle.GV2.execution_order with
+    | None -> []
+    | Some order ->
+        [
+          `Assoc
+            [
+              ("kind", `String "execution_order");
+              ("item_kind", `String "execution_order");
+              ("item_id", `String order.GV2.id);
+              ("topic", `String bundle.GV2.case_.GV2.title);
+              ("created_at", `String (iso_of_unix order.GV2.updated_at));
+              ( "summary",
+                `String
+                  (Option.value
+                     ~default:(GV2.order_status_to_string order.GV2.status)
+                     order.GV2.result_summary) );
+              ("actor", string_opt_json order.GV2.actor);
+            ];
+        ]
+  in
+  petition_events @ brief_events @ ruling_events @ order_events
 
 let compare_activity left right =
   let left_ts =
@@ -311,156 +282,32 @@ let compare_activity left right =
   in
   Float.compare right_ts left_ts
 
-let activity_of_debate (debate : Council.Debate.debate) =
-  let started =
-    `Assoc
-      [
-        ("kind", `String "debate_started");
-        ("item_kind", `String "debate");
-        ("item_id", `String debate.id);
-        ("topic", `String debate.topic);
-        ("created_at", `String (iso_of_unix debate.created_at));
-        ("summary", `String "Debate started");
-      ]
-  in
-  let arguments =
-    debate.arguments
-    |> List.mapi (fun index (arg : Council.Debate.argument) ->
-           match arg.created_at with
-           | None -> None
-           | Some ts ->
-               Some
-                 (`Assoc
-                   [
-                     ("kind", `String "argument_added");
-                     ("item_kind", `String "debate");
-                     ("item_id", `String debate.id);
-                     ("created_at", `String (iso_of_unix ts));
-                     ("summary", `String arg.content);
-                     ("actor", `String arg.agent);
-                     ("index", `Int index);
-                   ]))
-    |> List.filter_map (fun item -> item)
-  in
-  let closed =
-    match debate.closed_at with
-    | None -> []
-    | Some ts ->
-        [
-          `Assoc
-            [
-              ("kind", `String "debate_closed");
-              ("item_kind", `String "debate");
-              ("item_id", `String debate.id);
-              ("created_at", `String (iso_of_unix ts));
-              ("summary", `String "Debate closed");
-            ];
-        ]
-  in
-  started :: arguments @ closed
-
-let activity_of_session (session : Council.Consensus.session) =
-  let started =
-    `Assoc
-      [
-        ("kind", `String "consensus_started");
-        ("item_kind", `String "consensus");
-        ("item_id", `String session.id);
-        ("topic", `String session.topic);
-        ("created_at", `String (iso_of_unix session.created_at));
-        ("summary", `String "Consensus session started");
-      ]
-  in
-  let votes =
-    session.votes
-    |> List.map (fun (vote : Council.Consensus.vote) ->
-           `Assoc
-             [
-               ("kind", `String "vote_cast");
-               ("item_kind", `String "consensus");
-               ("item_id", `String session.id);
-               ("created_at", `String (iso_of_unix vote.timestamp));
-               ("summary", `String vote.reason);
-               ("actor", `String vote.agent);
-               ("decision", Council.Consensus.decision_to_yojson vote.decision);
-             ])
-  in
-  let closed =
-    match session.closed_at with
-    | None -> []
-    | Some ts ->
-        [
-          `Assoc
-            [
-              ("kind", `String "consensus_closed");
-              ("item_kind", `String "consensus");
-              ("item_id", `String session.id);
-              ("created_at", `String (iso_of_unix ts));
-              ("summary", `String "Consensus session closed");
-            ];
-        ]
-  in
-  started :: votes @ closed
+let judge_runtime_json base_path =
+  let latest_ts = GV2.latest_generated_at base_path in
+  `Assoc
+    [
+      ("judge_online", `Bool true);
+      ("refreshing", `Bool false);
+      ( "generated_at",
+        if latest_ts > 0.0 then `String (iso_of_unix latest_ts) else `Null );
+      ("expires_at", `Null);
+      ("model_used", `String "heuristic:governance_v2");
+      ("keeper_name", `String "governance-judge");
+      ("last_error", `Null);
+    ]
 
 let factual_snapshot_json ~base_path =
-  let config = Council.make_config ~base_path in
-  let debates = Council.DebateApi.list_all ~config ~limit:100 () in
-  let debate_summaries =
-    debates
-    |> List.filter_map (fun (debate : Council.Debate.debate) ->
-           Council.DebateApi.status ~config ~debate_id:debate.id |> Result.to_option)
+  let cases = GV2.list_cases ~include_test:true base_path in
+  let bundles =
+    cases
+    |> List.filter_map (fun (case_ : GV2.case_record) ->
+           match GV2.get_case_bundle base_path case_.GV2.id with
+           | Ok bundle -> Some bundle
+           | Error _ -> None)
   in
-  let sessions = Council.ConsensusApi.list_all () in
-  let pending_envelope = pending_confirm_envelope base_path in
-  let pending_confirms = pending_envelope |> member "items" |> to_list in
-  let pending_summary = pending_envelope |> member "summary" in
-  let recent_action_logs = action_logs base_path in
-  let items =
-    let debate_items =
-      debate_summaries
-      |> List.map (fun (summary : Council.Debate.debate_summary) ->
-             let debate = summary.debate in
-             `Assoc
-               [
-                 ("kind", `String "debate");
-                 ("id", `String debate.id);
-                 ("topic", `String debate.topic);
-                 ("status", `String (Council.Debate.status_to_string debate.status));
-                 ("truth_summary", `String (truth_summary_of_debate summary));
-                 ("context", debate_context_json debate);
-                 ("related_agents", list_string_json (related_agents_of_debate debate));
-                 ("evidence_refs", list_string_json (evidence_refs_of_debate debate));
-                 ("pending_confirm_envelope", pending_envelope);
-                 ("pending_confirm_summary", pending_summary);
-                 ("pending_confirms", `List pending_confirms);
-                 ("recent_actions", `List recent_action_logs);
-               ])
-    in
-    let session_items =
-      sessions
-      |> List.map (fun (session : Council.Consensus.session) ->
-             `Assoc
-               [
-                 ("kind", `String "consensus");
-                 ("id", `String session.id);
-                 ("topic", `String session.topic);
-                 ("status", Council.Consensus.voting_state_to_yojson session.state);
-                 ("truth_summary", `String (truth_summary_of_session session));
-                 ("context", consensus_context_json session);
-                 ("related_agents", list_string_json (related_agents_of_session session));
-                 ("evidence_refs", list_string_json (evidence_refs_of_session session));
-                 ("pending_confirm_envelope", pending_envelope);
-                 ("pending_confirm_summary", pending_summary);
-                 ("pending_confirms", `List pending_confirms);
-                 ("recent_actions", `List recent_action_logs);
-               ])
-    in
-    debate_items @ session_items
-  in
+  let items = bundles |> List.map governance_item_of_bundle in
   let activity =
-    (List.concat_map activity_of_debate debates)
-    @ (List.concat_map activity_of_session sessions)
-    |> List.sort compare_activity |> fun events -> take 50 events
+    bundles |> List.concat_map activity_of_bundle |> List.sort compare_activity |> take 50
   in
   `Assoc
     [
@@ -470,212 +317,202 @@ let factual_snapshot_json ~base_path =
     ]
 
 let dashboard_json ~base_path ~limit ~offset ~status_filter =
-  let config = Council.make_config ~base_path in
-  let debates =
-    Council.DebateApi.list_all ~config ~status_filter ~limit:(limit + offset) ()
-    |> drop offset |> take limit
+  let cases = GV2.list_cases ?status_filter base_path |> drop offset |> take limit in
+  let bundles =
+    cases
+    |> List.filter_map (fun (case_ : GV2.case_record) ->
+           match GV2.get_case_bundle base_path case_.GV2.id with
+           | Ok bundle -> Some bundle
+           | Error _ -> None)
   in
-  let debate_summaries =
-    debates
-    |> List.filter_map (fun (debate : Council.Debate.debate) ->
-           Council.DebateApi.status ~config ~debate_id:debate.id |> Result.to_option)
+  let items = List.map governance_item_of_bundle bundles in
+  let activity =
+    bundles |> List.concat_map activity_of_bundle |> List.sort compare_activity |> take 50
   in
-  let sessions = Council.ConsensusApi.list_all () |> drop offset |> take limit in
-  let judgments = latest_judgment_map base_path in
-  let pending_envelope = pending_confirm_envelope base_path in
-  let pending_summary = pending_envelope |> member "summary" in
-  let pending_items = pending_envelope |> member "items" |> to_list in
-  let recent_action_logs = action_logs base_path in
-  let items =
-    (debate_summaries
-    |> List.map (governance_item_of_debate judgments pending_items recent_action_logs))
-    @ (sessions |> List.map (governance_item_of_session judgments pending_items recent_action_logs))
+  let pending_actions =
+    bundles
+    |> List.filter_map (fun bundle ->
+           match bundle.GV2.execution_order with
+           | Some order when order.GV2.status = GV2.Needs_human_gate_order ->
+               Some
+                 (`Assoc
+                   [
+                     ("confirm_token", `String bundle.GV2.case_.GV2.id);
+                     ("action_type", `String "human_gate");
+                     ("target_type", `String "case");
+                     ("target_id", `String bundle.GV2.case_.GV2.id);
+                     ( "reason",
+                       `String
+                         (match bundle.GV2.ruling with
+                         | Some ruling -> ruling.GV2.summary
+                         | None -> "Human gate required") );
+                     ("created_at", `String (iso_of_unix order.GV2.created_at));
+                   ])
+           | _ -> None)
   in
-  let items =
-    List.sort compare_activity
-      (List.map
-         (fun item -> `Assoc [ ("created_at", item |> member "last_activity_at"); ("payload", item) ])
-         items)
-    |> List.map (fun row -> row |> member "payload")
+  let count_by status =
+    bundles
+    |> List.filter (fun bundle -> bundle.GV2.case_.GV2.status = status)
+    |> List.length
   in
+  let ready_auto_execute = count_by GV2.Ready_auto_execute in
   let judge = judge_runtime_json base_path in
-  let ready_to_execute =
-    items
-    |> List.fold_left
-         (fun acc item ->
-           match item |> member "guardrail_state" |> member "ready_to_execute" with
-           | `Bool true -> acc + 1
-           | _ -> acc)
-         0
-  in
-  let sessions_without_quorum =
-    sessions
-    |> List.fold_left
-         (fun acc (session : Council.Consensus.session) ->
-           if List.length session.votes < session.quorum then acc + 1 else acc)
-         0
-  in
-  let oldest_open_debate_age_s =
-    match debate_summaries with
-    | [] -> `Null
-    | summaries ->
-        let oldest =
-          summaries
-          |> List.map (fun (summary : Council.Debate.debate_summary) -> summary.debate.created_at)
-          |> List.sort Float.compare |> function
-          | first :: _ -> Some first
-          | [] -> None
-        in
-        option_to_yojson (fun ts -> `Float (Unix.gettimeofday () -. ts)) oldest
-  in
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
       ( "summary",
         `Assoc
           [
-            ("debates_open", `Int (List.length debate_summaries));
-            ("sessions_active", `Int (List.length sessions));
-            ("sessions_without_quorum", `Int sessions_without_quorum);
-            ("ready_to_execute", `Int ready_to_execute);
-            ("oldest_open_debate_age_s", oldest_open_debate_age_s);
+            ("cases_open", `Int (List.length bundles));
+            ("pending_ruling", `Int (count_by GV2.Pending_ruling));
+            ("ready_auto_execute", `Int ready_auto_execute);
+            ("needs_human_gate", `Int (count_by GV2.Needs_human_gate));
+            ("executed", `Int (count_by GV2.Executed));
+            ("blocked", `Int (count_by GV2.Blocked));
+            ("debates_open", `Int 0);
+            ("sessions_active", `Int 0);
+            ("sessions_without_quorum", `Int 0);
+            ("ready_to_execute", `Int ready_auto_execute);
+            ("oldest_open_debate_age_s", `Null);
             ("last_activity_age_s", `Null);
             ("judge_online", judge |> member "judge_online");
             ("judge_last_seen_at", judge |> member "generated_at");
           ] );
       ("items", `List items);
-      ("activity", factual_snapshot_json ~base_path |> member "activity");
+      ("activity", `List activity);
       ("judge", judge);
-      ("pending_confirm_envelope", pending_envelope);
-      ("pending_confirm_summary", pending_summary);
-      ( "pending_actions",
-        `List
-          (List.map
-             (fun item ->
-               `Assoc
-                 [
-                   ("confirm_token", item |> member "confirm_token");
-                   ("action_type", item |> member "action_type");
-                   ("target_type", item |> member "target_type");
-                   ("target_id", item |> member "target_id");
-                   ("reason", item |> member "delegated_tool");
-                   ("created_at", item |> member "created_at");
-                 ])
-             pending_items) );
-      ( "debates",
-        `List
-          (List.map
-             (fun (summary : Council.Debate.debate_summary) ->
-               governance_item_of_debate judgments pending_items recent_action_logs summary)
-             debate_summaries) );
-      ( "sessions",
-        `List
-          (List.map
-             (governance_item_of_session judgments pending_items recent_action_logs)
-             sessions) );
+      ("pending_actions", `List pending_actions);
+      ("cases", `List items);
+      ("debates", `List []);
+      ("sessions", `List []);
     ]
 
-let debate_detail_json ~base_path ~debate_id : detail_status * Yojson.Safe.t =
-  let config = Council.make_config ~base_path in
-  match Council.DebateApi.status ~config ~debate_id with
-  | Error _ -> (`Not_found, `Assoc [ ("error", `String "Debate not found") ])
-  | Ok (summary : Council.Debate.debate_summary) ->
-      let debate = summary.debate in
-      let judgments = latest_judgment_map base_path in
-      let judgment = judgment_for judgments ~kind:"debate" ~id:debate.id in
-      let arguments =
-        debate.arguments
-        |> List.mapi (fun index (arg : Council.Debate.argument) ->
-               `Assoc
-                 [
-                   ("index", `Int index);
-                   ("agent", `String arg.agent);
-                   ("position", `String (Council.Debate.position_to_string arg.position));
-                   ("content", `String arg.content);
-                   ("evidence", list_string_json arg.evidence);
-                   ("reply_to", option_to_yojson (fun value -> `Int value) arg.reply_to);
-                   ("mentions", list_string_json arg.mentions);
-                   ("archetype", string_opt_json arg.archetype);
-                   ("created_at", option_to_yojson (fun ts -> `String (iso_of_unix ts)) arg.created_at);
-                 ])
-      in
+let cases_json ~base_path ~limit ~offset ~status_filter ~include_test =
+  let cases =
+    GV2.list_cases ?status_filter ~include_test base_path |> drop offset |> take limit
+  in
+  let items =
+    cases
+    |> List.map (fun (case_ : GV2.case_record) ->
+           `Assoc
+             [
+               ("id", `String case_.GV2.id);
+               ("title", `String case_.GV2.title);
+               ("origin", `String case_.GV2.origin);
+               ("risk_class", `String (GV2.risk_class_to_string case_.GV2.risk_class));
+               ("status", `String (GV2.case_status_to_string case_.GV2.status));
+               ("updated_at", `String (iso_of_unix case_.GV2.updated_at));
+             ])
+  in
+  `Assoc
+    [
+      ("cases", `List items);
+      ("count", `Int (List.length items));
+      ("limit", `Int limit);
+      ("offset", `Int offset);
+    ]
+
+let rec case_detail_json ~base_path ~case_id : detail_status * Yojson.Safe.t =
+  match GV2.get_case_bundle base_path case_id with
+  | Error _ -> (`Not_found, `Assoc [ ("error", `String "Case not found") ])
+  | Ok bundle ->
       ( `OK,
         `Assoc
           [
-            ( "debate",
-              `Assoc
-                [
-                  ("id", `String debate.id);
-                  ("topic", `String debate.topic);
-                  ("status", `String (Council.Debate.status_to_string debate.status));
-                  ("created_at", `String (iso_of_unix debate.created_at));
-                  ("closed_at", option_to_yojson (fun ts -> `String (iso_of_unix ts)) debate.closed_at);
-                ] );
-            ("arguments", `List arguments);
-            ( "summary",
-              `Assoc
-                [
-                  ("support_count", `Int summary.support_count);
-                  ("oppose_count", `Int summary.oppose_count);
-                  ("neutral_count", `Int summary.neutral_count);
-                  ("total_arguments", `Int summary.total_arguments);
-                  ("summary_text", `String (Council.Debate.render_summary summary));
-                ] );
-            ("context", debate_context_json debate);
-            ("judgment", option_to_yojson (fun value -> value) judgment);
+            ("case", case_json bundle.GV2.case_);
+            ("petitions", `List (List.map petition_json bundle.GV2.petitions));
+            ("briefs", `List (List.map brief_json bundle.GV2.case_.GV2.briefs));
+            ("ruling", option_to_yojson ruling_json bundle.GV2.ruling);
+            ("execution_order", option_to_yojson execution_order_json bundle.GV2.execution_order);
           ] )
 
-let consensus_detail_json ~base_path ~session_id : detail_status * Yojson.Safe.t =
-  let _config = Council.make_config ~base_path in
-  match Council.ConsensusApi.get ~session_id with
-  | None -> (`Not_found, `Assoc [ ("error", `String "Consensus session not found") ])
-  | Some session ->
-      let judgments = latest_judgment_map base_path in
-      let judgment = judgment_for judgments ~kind:"consensus" ~id:session.id in
-      let approves, rejects, abstains = vote_counts session in
-      let result =
-        match Council.ConsensusApi.result ~session_id with
-        | Ok value -> Some (Council.Consensus.voting_result_to_string value)
-        | Error _ -> None
-      in
-      let votes =
-        session.votes
-        |> List.map (fun (vote : Council.Consensus.vote) ->
-               `Assoc
-                 [
-                   ("agent", `String vote.agent);
-                   ("decision", Council.Consensus.decision_to_yojson vote.decision);
-                   ("reason", `String vote.reason);
-                   ("timestamp", `String (iso_of_unix vote.timestamp));
-                   ("weight", `Float vote.weight);
-                   ("archetype", string_opt_json vote.archetype);
-                 ])
-      in
-      ( `OK,
-        `Assoc
-          [
-            ( "session",
-              `Assoc
-                [
-                  ("id", `String session.id);
-                  ("topic", `String session.topic);
-                  ("state", Council.Consensus.voting_state_to_yojson session.state);
-                  ("initiator", `String session.initiator);
-                  ("quorum", `Int session.quorum);
-                  ("threshold", `Float session.threshold);
-                  ("created_at", `String (iso_of_unix session.created_at));
-                  ("closed_at", option_to_yojson (fun ts -> `String (iso_of_unix ts)) session.closed_at);
-                ] );
-            ("votes", `List votes);
-            ( "summary",
-              `Assoc
-                [
-                  ("approve_count", `Int approves);
-                  ("reject_count", `Int rejects);
-                  ("abstain_count", `Int abstains);
-                  ("quorum_met", `Bool (List.length session.votes >= session.quorum));
-                  ("result", option_to_yojson (fun value -> `String value) result);
-                ] );
-            ("context", consensus_context_json session);
-            ("judgment", option_to_yojson (fun value -> value) judgment);
-          ] )
+and petition_json (petition : GV2.petition) =
+  `Assoc
+    [
+      ("id", `String petition.GV2.id);
+      ("case_id", `String petition.GV2.case_id);
+      ("title", `String petition.GV2.title);
+      ("origin", `String petition.GV2.origin);
+      ("subject_type", `String petition.GV2.subject_type);
+      ("risk_class", `String (GV2.risk_class_to_string petition.GV2.risk_class));
+      ("source_refs", json_string_list petition.GV2.source_refs);
+      ("created_by", `String petition.GV2.created_by);
+      ("created_at", `String (iso_of_unix petition.GV2.created_at));
+      ( "requested_action",
+        match petition.GV2.requested_action with
+        | Some request -> action_request_json request
+        | None -> `Null );
+    ]
+
+and brief_json (brief : GV2.case_brief) =
+  `Assoc
+    [
+      ("id", `String brief.GV2.id);
+      ("author", `String brief.GV2.author);
+      ("stance", `String (GV2.brief_stance_to_string brief.GV2.stance));
+      ("summary", `String brief.GV2.summary);
+      ("evidence_refs", json_string_list brief.GV2.evidence_refs);
+      ("created_at", `String (iso_of_unix brief.GV2.created_at));
+    ]
+
+and case_json (case_ : GV2.case_record) =
+  `Assoc
+    [
+      ("id", `String case_.GV2.id);
+      ("petition_ids", json_string_list case_.GV2.petition_ids);
+      ("title", `String case_.GV2.title);
+      ("origin", `String case_.GV2.origin);
+      ("subject_type", `String case_.GV2.subject_type);
+      ("risk_class", `String (GV2.risk_class_to_string case_.GV2.risk_class));
+      ("status", `String (GV2.case_status_to_string case_.GV2.status));
+      ("created_at", `String (iso_of_unix case_.GV2.created_at));
+      ("updated_at", `String (iso_of_unix case_.GV2.updated_at));
+      ("source_refs", json_string_list case_.GV2.source_refs);
+      ( "requested_action",
+        match case_.GV2.requested_action with
+        | Some request -> action_request_json request
+        | None -> `Null );
+    ]
+
+and ruling_json (ruling : GV2.ruling) =
+  `Assoc
+    [
+      ("id", `String ruling.GV2.id);
+      ("case_id", `String ruling.GV2.case_id);
+      ("status", `String ruling.GV2.status);
+      ("summary", `String ruling.GV2.summary);
+      ("confidence", `Float ruling.GV2.confidence);
+      ("provenance", `String ruling.GV2.provenance);
+      ("generated_at", `String (iso_of_unix ruling.GV2.generated_at));
+      ( "expires_at",
+        match ruling.GV2.expires_at with
+        | Some value -> `String (iso_of_unix value)
+        | None -> `Null );
+      ("keeper_name", `String ruling.GV2.keeper_name);
+      ("model_used", string_opt_json ruling.GV2.model_used);
+      ("risk_class", `String (GV2.risk_class_to_string ruling.GV2.risk_class));
+      ("evidence_refs", json_string_list ruling.GV2.evidence_refs);
+      ("auto_execution_state", `String ruling.GV2.auto_execution_state);
+      ( "recommended_action",
+        match ruling.GV2.recommended_action with
+        | Some request -> action_request_json request
+        | None -> `Null );
+    ]
+
+and execution_order_json (order : GV2.execution_order) =
+  `Assoc
+    [
+      ("id", `String order.GV2.id);
+      ("case_id", `String order.GV2.case_id);
+      ("status", `String (GV2.order_status_to_string order.GV2.status));
+      ("risk_class", `String (GV2.risk_class_to_string order.GV2.risk_class));
+      ("created_at", `String (iso_of_unix order.GV2.created_at));
+      ("updated_at", `String (iso_of_unix order.GV2.updated_at));
+      ("execution_ref", string_opt_json order.GV2.execution_ref);
+      ("result_summary", string_opt_json order.GV2.result_summary);
+      ("actor", string_opt_json order.GV2.actor);
+      ( "action_request",
+        match order.GV2.action_request with
+        | Some request -> action_request_json request
+        | None -> `Null );
+    ]

@@ -1171,186 +1171,148 @@ Use masc_vote_cast to participate, masc_vote_create to start new vote.";
   };
 
   (* ============================================ *)
-  (* Council - Multi-agent Debate & Consensus     *)
+  (* Governance V2 - Petition / Case / Ruling     *)
   (* ============================================ *)
 
   {
-    name = "masc_debate_start";
-    description = "Start a structured debate on a topic. Agents can take positions (support/oppose/neutral) \
-and provide arguments with evidence. Use for: complex decisions, design discussions, technical debates.";
+    name = "masc_petition_submit";
+    description = "Submit a Governance V2 petition. \
+Creates or merges a case, records requested action metadata, and files the item into the petition inbox.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("topic", `Assoc [
+        ("title", `Assoc [
           ("type", `String "string");
-          ("description", `String "The topic to debate");
+          ("description", `String "Petition title or agenda item");
+        ]);
+        ("origin", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Origin tag such as human, automation, test, or harness");
+        ]);
+        ("subject_type", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Subject classification such as task, operation, policy, or dispute");
+        ]);
+        ("risk_class", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "low"; `String "high"]);
+          ("description", `String "Explicit risk classification. If omitted, the runtime derives it from the requested action.");
+        ]);
+        ("requested_action", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Action metadata to execute when the case is adopted");
+          ("properties", `Assoc [
+            ("action_type", `Assoc [("type", `String "string")]);
+            ("target_type", `Assoc [("type", `String "string")]);
+            ("target_id", `Assoc [("type", `String "string")]);
+            ("payload", `Assoc [("type", `String "object")]);
+          ]);
+        ]);
+        ("source_refs", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Evidence or source references attached to the petition");
         ]);
       ]);
-      ("required", `List [`String "topic"]);
+      ("required", `List [`String "title"]);
     ];
   };
 
   {
-    name = "masc_debate_argue";
-    description = "Add an argument to an ongoing debate. Take a position and provide your reasoning. \
-Use reply_to to respond to a specific argument (ping-pong style).";
+    name = "masc_case_brief_submit";
+    description = "Add a support/oppose/neutral brief to a Governance V2 case. \
+Brief submission can trigger a ruling and execution order.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("debate_id", `Assoc [
+        ("case_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "The debate ID");
+          ("description", `String "Governance V2 case ID");
         ]);
-        ("position", `Assoc [
+        ("stance", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "support"; `String "oppose"; `String "neutral"]);
-          ("description", `String "Your position on the topic");
+          ("description", `String "Brief stance for the case");
         ]);
-        ("content", `Assoc [
+        ("summary", `Assoc [
           ("type", `String "string");
-          ("description", `String "Your argument");
+          ("description", `String "Short brief text");
         ]);
-        ("evidence", `Assoc [
+        ("evidence_refs", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Supporting evidence (optional)");
-        ]);
-        ("reply_to", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Index of argument to reply to (for ping-pong debate)");
-        ]);
-        ("mentions", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Agent names to mention/notify");
+          ("description", `String "Evidence references supporting the brief");
         ]);
       ]);
-      ("required", `List [`String "debate_id"; `String "content"]);
+      ("required", `List [`String "case_id"; `String "summary"]);
     ];
   };
 
   {
-    name = "masc_debate_close";
-    description = "Close a debate. No more arguments can be added.";
+    name = "masc_cases";
+    description = "List Governance V2 cases. \
+Use this instead of the legacy debate/session listing tools.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("debate_id", `Assoc [
+        ("status", `Assoc [
           ("type", `String "string");
-          ("description", `String "The debate ID to close");
+          ("description", `String "Optional case status filter");
+        ]);
+        ("include_test", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include test/harness cases that are hidden by default");
         ]);
       ]);
-      ("required", `List [`String "debate_id"]);
     ];
   };
 
   {
-    name = "masc_debate_status";
-    description = "Get status and summary of a debate.";
+    name = "masc_case_status";
+    description = "Read a single Governance V2 case bundle including petitions, briefs, ruling, and execution order.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("debate_id", `Assoc [
+        ("case_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "The debate ID");
+          ("description", `String "Governance V2 case ID");
         ]);
       ]);
-      ("required", `List [`String "debate_id"]);
+      ("required", `List [`String "case_id"]);
     ];
   };
 
   {
-    name = "masc_debates";
-    description = "List all debates (open and closed).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-
-  {
-    name = "masc_consensus_start";
-    description = "Start a voting session for consensus. Agents vote approve/reject/abstain with reasons.";
+    name = "masc_ruling_status";
+    description = "Read the latest Governance V2 ruling for a case.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("topic", `Assoc [
+        ("case_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "The topic to vote on");
-        ]);
-        ("quorum", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum votes required (default: 2)");
-        ]);
-        ("threshold", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Majority threshold 0.0-1.0 (default: 0.5)");
+          ("description", `String "Governance V2 case ID");
         ]);
       ]);
-      ("required", `List [`String "topic"]);
+      ("required", `List [`String "case_id"]);
     ];
   };
 
   {
-    name = "masc_consensus_vote";
-    description = "Cast a vote in a consensus session.";
+    name = "masc_execution_orders";
+    description = "List Governance V2 execution orders, inspect one case order, or confirm/deny a human gate.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("session_id", `Assoc [
+        ("case_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "The voting session ID");
+          ("description", `String "Governance V2 case ID");
         ]);
         ("decision", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "approve"; `String "reject"; `String "abstain"]);
-          ("description", `String "Your vote");
-        ]);
-        ("reason", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Reason for your vote");
+          ("enum", `List [`String "confirm"; `String "deny"]);
+          ("description", `String "Optional human-gate decision for a high-risk execution order");
         ]);
       ]);
-      ("required", `List [`String "session_id"; `String "decision"]);
-    ];
-  };
-
-  {
-    name = "masc_consensus_close";
-    description = "Close a voting session and get the result.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("session_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "The voting session ID");
-        ]);
-      ]);
-      ("required", `List [`String "session_id"]);
-    ];
-  };
-
-  {
-    name = "masc_consensus_result";
-    description = "Get the result of a voting session (Unanimous/Majority/Deadlock/Escalate).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("session_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "The voting session ID");
-        ]);
-      ]);
-      ("required", `List [`String "session_id"]);
-    ];
-  };
-
-  {
-    name = "masc_sessions";
-    description = "List active voting sessions.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
     ];
   };
 
@@ -1376,7 +1338,7 @@ Returns: selected agents, estimated cost, complexity score.";
 
   {
     name = "masc_council_status";
-    description = "Get council system status (active debates, voting sessions).";
+    description = "Get Governance V2 status (pending rulings, auto-executable cases, human-gated orders, executed cases).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

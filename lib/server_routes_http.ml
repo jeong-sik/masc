@@ -736,79 +736,28 @@ let board_post_detail_json ~response_format ~post_id =
       in
       (`OK, Yojson.Safe.to_string json)
 
-let debate_status_filter_of_request request =
+let governance_case_status_filter_of_request request =
   match query_param request "status" with
   | None -> None
   | Some raw -> (
       match String.lowercase_ascii (String.trim raw) with
-      | "open" -> Some Council.Debate.Open
-      | "closed" -> Some Council.Debate.Closed
-      | "pending" -> Some Council.Debate.Pending
+      | "pending_ruling" -> Some Council.Governance_v2.Pending_ruling
+      | "ready_auto_execute" -> Some Council.Governance_v2.Ready_auto_execute
+      | "needs_human_gate" -> Some Council.Governance_v2.Needs_human_gate
+      | "executed" -> Some Council.Governance_v2.Executed
+      | "blocked" -> Some Council.Governance_v2.Blocked
+      | "closed" -> Some Council.Governance_v2.Closed
       | _ -> None)
 
-let council_debates_json request ~base_path =
-  let config = Council.make_config ~base_path in
+let governance_cases_json request ~base_path =
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-  let fetch_limit = limit + offset in
-  let status_filter = debate_status_filter_of_request request in
-  let debates = Council.DebateApi.list_all ~config ~status_filter ~limit:fetch_limit () in
-  let paged = debates |> drop offset |> take limit in
-  let items =
-    List.map
-      (fun (d : Council.Debate.debate) ->
-        `Assoc
-          [
-            ("id", `String d.id);
-            ("topic", `String d.topic);
-            ("status", `String (Council.Debate.status_to_string d.status));
-            ("argument_count", `Int (List.length d.arguments));
-            ("created_at", `Float d.created_at);
-            ("created_at_iso", `String (iso8601_of_unix d.created_at));
-          ])
-      paged
-  in
-  `Assoc
-    [
-      ("debates", `List items);
-      ("count", `Int (List.length items));
-      ("limit", `Int limit);
-      ("offset", `Int offset);
-    ]
+  let include_test = bool_query_param request "include_test" ~default:false in
+  let status_filter = governance_case_status_filter_of_request request in
+  Dashboard_governance.cases_json ~base_path ~limit ~offset ~status_filter ~include_test
 
-let council_sessions_json request =
-  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-  let sessions = Council.ConsensusApi.list_active () |> drop offset |> take limit in
-  let items =
-    List.map
-      (fun (s : Council.Consensus.session) ->
-        `Assoc
-          [
-            ("id", `String s.id);
-            ("topic", `String s.topic);
-            ("initiator", `String s.initiator);
-            ("votes", `Int (List.length s.votes));
-            ("quorum", `Int s.quorum);
-            ("threshold", `Float s.threshold);
-            ("state", Council.Consensus.voting_state_to_yojson s.state);
-            ("created_at", `Float s.created_at);
-            ("created_at_iso", `String (iso8601_of_unix s.created_at));
-          ])
-      sessions
-  in
-  `Assoc
-    [
-      ("sessions", `List items);
-      ("count", `Int (List.length items));
-      ("limit", `Int limit);
-      ("offset", `Int offset);
-    ]
-
-let council_debate_summary_json ~base_path ~debate_id =
-  let (status, json) =
-    Dashboard_governance.debate_detail_json ~base_path ~debate_id
-  in
+let governance_case_detail_json ~base_path ~case_id =
+  let (status, json) = Dashboard_governance.case_detail_json ~base_path ~case_id in
   let http_status =
     match status with
     | `OK -> `OK
@@ -816,16 +765,14 @@ let council_debate_summary_json ~base_path ~debate_id =
   in
   (http_status, json)
 
-let council_session_summary_json ~base_path ~session_id =
-  let (status, json) =
-    Dashboard_governance.consensus_detail_json ~base_path ~session_id
-  in
-  let http_status =
-    match status with
-    | `OK -> `OK
-    | `Not_found -> `Not_found
-  in
-  (http_status, json)
+let removed_council_surface_json =
+  `Assoc
+    [
+      ("error", `String "Removed in Governance V2");
+      ( "message",
+        `String
+          "Legacy /api/v1/council/* surfaces were removed. Use /api/v1/governance/cases, /api/v1/governance/cases/:id, or /api/v1/dashboard/governance." );
+    ]
 
 (** CORS preflight handler *)
 let options_handler request reqd =
@@ -2556,17 +2503,23 @@ let make_routes ~port ~host ~sw ~clock =
                (Yojson.Safe.to_string (operator_error_json ("invalid json: " ^ e)))
          )
        ) request reqd)
-  |> Http.Router.get "/api/v1/council/debates" (fun request reqd ->
+  |> Http.Router.get "/api/v1/governance/cases" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in
-         let json = council_debates_json req ~base_path in
+         let json = governance_cases_json req ~base_path in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/council/debates" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         respond_json_with_cors ~status:`Bad_request request reqd
+           (Yojson.Safe.to_string removed_council_surface_json)
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/council/sessions" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = council_sessions_json req in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+       with_public_read (fun _state _req reqd ->
+         respond_json_with_cors ~status:`Bad_request request reqd
+           (Yojson.Safe.to_string removed_council_surface_json)
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board" (fun request reqd ->

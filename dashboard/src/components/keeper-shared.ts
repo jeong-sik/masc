@@ -54,6 +54,21 @@ function nextActionLabel(path: string): string {
   }
 }
 
+function continuityStateLabel(state?: KeeperDiagnostic['continuity_state']): string | null {
+  switch (state) {
+    case 'healthy':
+      return '정상'
+    case 'recovering':
+      return '복구 중'
+    case 'desired_offline':
+      return '의도적 오프라인'
+    case 'offline':
+      return '오프라인'
+    default:
+      return null
+  }
+}
+
 function formatTime(timestamp?: string | null): string | null {
   if (!timestamp) return null
   const value = new Date(timestamp)

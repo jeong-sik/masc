@@ -110,9 +110,20 @@ let supported_protocol_versions = [
 
 let default_protocol_version = "2025-11-25"
 
+let is_supported_protocol_version version =
+  List.mem version supported_protocol_versions
+
+let validate_protocol_version version =
+  if is_supported_protocol_version version then
+    Ok version
+  else
+    Error
+      (Printf.sprintf
+         "Unsupported protocolVersion '%s' (supported: %s)" version
+         (String.concat ", " supported_protocol_versions))
+
 let normalize_protocol_version version =
-  if List.mem version supported_protocol_versions then version
-  else default_protocol_version
+  if is_supported_protocol_version version then version else default_protocol_version
 
 let protocol_version_from_params params =
   match params with

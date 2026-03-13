@@ -647,19 +647,10 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
       ("names", `List [ `String "masc_messages"; `String "masc_status" ]);
     ]);
   ]) in
-  let response =
-    Mcp_eio.handle_request ~clock ~sw state request
-  in
-  let tools = tools_from_response response in
-  let names =
-    tools
-    |> List.filter_map (function
-         | `Assoc fields -> List.assoc_opt "name" fields
-         | _ -> None)
-    |> List.filter_map (function `String s -> Some s | _ -> None)
-  in
-  Alcotest.(check (list string)) "requested tools only"
-    [ "masc_messages"; "masc_status" ] names;
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
+  Alcotest.(check bool) "names field rejected" true
+    (contains_substring (error_message_exn response) "unsupported field");
   cleanup_dir base_path
 
 let test_handle_request_tools_list_with_placeholder_flag () =
@@ -700,10 +691,10 @@ let test_handle_request_tools_list_include_hidden_metadata () =
     (Yojson.Safe.Util.member "icons" status_tool <> `Null);
   Alcotest.(check bool) "standard tools expose annotations" true
     (Yojson.Safe.Util.member "annotations" status_tool <> `Null);
-  Alcotest.(check bool) "visibility metadata exposed" true
-    (Yojson.Safe.Util.member "visibility" status_tool <> `Null);
-  Alcotest.(check bool) "implementation status exposed" true
-    (Yojson.Safe.Util.member "implementationStatus" status_tool <> `Null);
+  Alcotest.(check bool) "visibility metadata hidden" true
+    (Yojson.Safe.Util.member "visibility" status_tool = `Null);
+  Alcotest.(check bool) "implementation status hidden" true
+    (Yojson.Safe.Util.member "implementationStatus" status_tool = `Null);
   Alcotest.(check bool) "hidden utility omitted" false
     (List.exists
        (function
@@ -755,21 +746,9 @@ let test_handle_request_tools_list_include_usage_metadata () =
     ("params", `Assoc [ ("include_usage", `Bool true) ]);
   ]) in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
-  let result_fields = result_fields_exn response in
-  Alcotest.(check bool) "usage telemetry availability exposed" true
-    (List.mem_assoc "usageTelemetryAvailable" result_fields);
-  Alcotest.(check bool) "usage total exposed" true
-    (List.mem_assoc "usageTotalCalls" result_fields);
-  let first_tool =
-    match tools_from_response response with
-    | tool :: _ -> tool
-    | [] -> Alcotest.fail "tools list empty"
-  in
-  Alcotest.(check bool) "per-tool usage count exposed" true
-    (Yojson.Safe.Util.member "usageCount" first_tool <> `Null);
-  Alcotest.(check bool) "per-tool last-used field present" true
-    (List.mem_assoc "usageLastUsedAt"
-       (match first_tool with `Assoc fields -> fields | _ -> []));
+  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
+  Alcotest.(check bool) "usage field rejected" true
+    (contains_substring (error_message_exn response) "unsupported field");
   cleanup_dir base_path
 
 let test_execute_tool_trpg_flow () =
@@ -1279,7 +1258,7 @@ let test_handle_request_tools_call_trpg () =
     ("id", `Int 9);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "masc_trpg_dice_roll");
+      ("name", `String "trpg.dice.roll");
       ("arguments", `Assoc [
         ("room_id", `String "room-mcp-call");
         ("actor_id", `String "pc-1");
@@ -1430,8 +1409,8 @@ let test_handle_request_tools_list_rejects_invalid_tier () =
   in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check bool) "invalid tier error" true
-    (contains_substring (error_message_exn response) "tier must be one of");
+  Alcotest.(check bool) "unsupported field error" true
+    (contains_substring (error_message_exn response) "unsupported field");
   cleanup_dir base_path
 
 let test_handle_request_resources_list_rejects_unknown_field () =

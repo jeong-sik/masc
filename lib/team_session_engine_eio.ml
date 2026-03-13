@@ -51,8 +51,53 @@ let room_active_agent_names (config : Room.config) =
   |> Team_session_types.dedup_strings
   |> List.sort String.compare
 
-let session_active_agent_names (session : Team_session_types.session) =
-  Team_session_types.participant_names session
+let session_live_turn_window_sec = 300.0
+
+let event_type_of_json json =
+  match Yojson.Safe.Util.member "event_type" json with
+  | `String value -> Some value
+  | _ -> None
+
+let event_detail_actor_of_json json =
+  match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "actor" with
+  | `String actor ->
+      let trimmed = String.trim actor in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let event_ts_of_json json =
+  match Yojson.Safe.Util.member "ts" json with
+  | `Float value -> Some value
+  | `Int value -> Some (float_of_int value)
+  | `Intlit raw -> float_of_string_opt raw
+  | _ -> (
+      match Yojson.Safe.Util.member "ts_iso" json with
+      | `String iso -> Resilience.Time.parse_iso8601_opt iso
+      | _ -> None)
+
+let session_seen_and_live_agent_names (config : Room.config)
+    (session : Team_session_types.session) ~now =
+  let events =
+    Team_session_store.read_events ~max_events:2000 config session.session_id
+  in
+  let seen_agents, live_agents =
+    List.fold_left
+      (fun (seen_acc, live_acc) json ->
+        match (event_type_of_json json, event_detail_actor_of_json json) with
+        | Some "team_turn", Some actor -> (
+            let seen_acc = actor :: seen_acc in
+            match event_ts_of_json json with
+            | Some ts when now -. ts <= session_live_turn_window_sec ->
+                (seen_acc, actor :: live_acc)
+            | _ -> (seen_acc, live_acc))
+        | _ -> (seen_acc, live_acc))
+      ([], []) events
+  in
+  ( seen_agents |> Team_session_types.dedup_strings |> List.sort String.compare,
+    live_agents |> Team_session_types.dedup_strings |> List.sort String.compare )
+
+let session_active_agent_names config session ~now =
+  session_seen_and_live_agent_names config session ~now |> snd
 
 let bootstrap_grace_seconds (session : Team_session_types.session) =
   float_of_int (session.checkpoint_interval_sec * max 1 session.min_agents)
@@ -441,7 +486,9 @@ let summary_json_of_session (config : Room.config)
       min 100.0 (100.0 *. (elapsed /. float_of_int session.duration_seconds))
   in
   let deltas, done_total = done_delta_metrics config session in
-  let active_agents = session_active_agent_names session in
+  let seen_agents, active_agents =
+    session_seen_and_live_agent_names config session ~now
+  in
   let planned_runtime_actors = Team_session_types.planned_worker_actor_names session in
   let planned_participants = Team_session_types.planned_participant_names session in
   let room_active_agents = room_active_agent_names config in
@@ -491,6 +538,9 @@ let summary_json_of_session (config : Room.config)
       ("scale_profile", `String (Team_session_types.scale_profile_to_string session.scale_profile));
       ("control_profile", `String (Team_session_types.control_profile_to_string session.control_profile));
       ("active_agents", `List (List.map (fun a -> `String a) active_agents));
+      ("seen_agents", `List (List.map (fun a -> `String a) seen_agents));
+      ("active_agents_count", `Int (List.length active_agents));
+      ("seen_agents_count", `Int (List.length seen_agents));
       ("planned_worker_count", `Int (List.length session.planned_workers));
       ( "planned_workers",
         `List
@@ -524,7 +574,10 @@ let summary_json_of_session (config : Room.config)
 
 let status_sections (config : Room.config) (session : Team_session_types.session) =
   let summary = summary_json_of_session config session in
-  let active_agents = session_active_agent_names session in
+  let active_agents =
+    let now = Time_compat.now () in
+    session_active_agent_names config session ~now
+  in
   let team_health = team_health_json session active_agents in
   let communication_metrics = communication_metrics_json session in
   let orchestration_state = orchestration_state_json session in
@@ -612,7 +665,7 @@ let write_checkpoint (config : Room.config) (session : Team_session_types.sessio
     else
       min 100.0 (100.0 *. (elapsed /. float_of_int session.duration_seconds))
   in
-  let active_agents = session_active_agent_names session in
+  let active_agents = session_active_agent_names config session ~now in
   let checkpoint : Team_session_types.checkpoint =
     {
       ts = now;
@@ -867,10 +920,10 @@ let apply_runtime_policy ~(config : Room.config)
     else
       session
   in
-  let active_agents = session_active_agent_names session in
+  let now = Time_compat.now () in
+  let active_agents = session_active_agent_names config session ~now in
   let active_count = List.length active_agents in
   let under_min_agents = active_count < session.min_agents in
-  let now = Time_compat.now () in
   let within_bootstrap_grace =
     now -. session.started_at < bootstrap_grace_seconds session
   in

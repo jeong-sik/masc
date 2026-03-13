@@ -76,11 +76,10 @@ let protocol_version_from_body body_str =
     let json = Yojson.Safe.from_string body_str in
     match Mcp_server.jsonrpc_request_of_yojson json with
     | Ok req when String.equal req.method_ "initialize" ->
-        let version =
-          Mcp_server.protocol_version_from_params req.params
-          |> Mcp_server.normalize_protocol_version
-        in
-        Some version
+        let version = Mcp_server.protocol_version_from_params req.params in
+        (match Mcp_server.validate_protocol_version version with
+        | Ok valid -> Some valid
+        | Error _ -> None)
     | _ -> None
   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 

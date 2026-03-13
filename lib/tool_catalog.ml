@@ -189,6 +189,13 @@ let is_visible ?(include_hidden = false) ?(include_deprecated = false) name =
   | Default, Deprecated -> include_deprecated
   | Default, Active -> implementation_allows_public_visibility meta.implementation_status
 
+let is_default_mcp_callable name =
+  let meta = metadata name in
+  match (meta.lifecycle, meta.implementation_status) with
+  | Deprecated, _ -> false
+  | _, Placeholder -> false
+  | _ -> true
+
 let visibility_to_string = function
   | Default -> "default"
   | Hidden -> "hidden"

@@ -326,7 +326,7 @@ let is_tool_auth_strict_enabled () =
   | Some raw ->
       let v = String.trim raw |> String.lowercase_ascii in
       v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
-  | None -> false
+  | None -> true
 
 let is_masc_tool_name tool_name =
   String.starts_with ~prefix:"masc_" tool_name
@@ -340,14 +340,14 @@ let is_protocol_canonical_tool_name tool_name =
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match permission_for_tool tool_name with
+  | None when not (is_tool_auth_strict_enabled ()) -> Ok ()
   | None ->
-      if not (is_tool_auth_strict_enabled ()) then
-        Ok ()  (* Legacy fail-open *)
-      else if is_masc_tool_name tool_name || is_protocol_canonical_tool_name tool_name then
-        (* Conservative default in strict mode for unmapped internal tools. *)
-        check_permission config ~agent_name ~token ~permission:CanBroadcast
-      else
-        Error (Forbidden { agent = agent_name; action = "use unknown non-masc tool" })
+      Error
+        (Forbidden
+           {
+             agent = agent_name;
+             action = Printf.sprintf "use unmapped tool %s" tool_name;
+           })
   | Some perm -> check_permission config ~agent_name ~token ~permission:perm
 
 (* ============================================ *)

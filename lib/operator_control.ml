@@ -164,8 +164,6 @@ type worker_card = {
   turn_count : int;
   empty_note_turn_count : int;
   has_turn : bool;
-  last_turn_age_sec : int option;
-  evidence_source : string;
   last_turn_ts_iso : string option;
 }
 
@@ -928,8 +926,6 @@ let worker_card_to_yojson (card : worker_card) =
       ("turn_count", `Int card.turn_count);
       ("empty_note_turn_count", `Int card.empty_note_turn_count);
       ("has_turn", `Bool card.has_turn);
-      ("last_turn_age_sec", option_to_json (fun value -> `Int value) card.last_turn_age_sec);
-      ("evidence_source", `String card.evidence_source);
       ("last_turn_ts_iso", string_option_to_json card.last_turn_ts_iso);
       ("provenance", `String "truth");
       ("authoritative", `Bool true);
@@ -1274,16 +1270,6 @@ let active_guidance_fields ~config ~actor ~target_type ~target_id
 let event_ts_iso json =
   match U.member "ts_iso" json with `String value -> Some value | _ -> None
 
-let event_ts_unix json =
-  match U.member "ts" json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | `Intlit raw -> float_of_string_opt raw
-  | _ -> (
-      match event_ts_iso json with
-      | Some iso -> Resilience.Time.parse_iso8601_opt iso
-      | None -> None)
-
 let event_type json =
   match U.member "event_type" json with `String value -> Some value | _ -> None
 
@@ -1358,18 +1344,6 @@ let last_turn_ts_iso_for_actor events actor_name =
              event_ts_iso json
          | _ -> None)
   |> List.rev |> function value :: _ -> Some value | [] -> None
-
-let last_turn_age_sec_for_actor events actor_name ~now =
-  events
-  |> List.filter_map (fun json ->
-         match (event_type json, event_detail_actor json) with
-         | Some "team_turn", Some actor when String.equal actor actor_name ->
-             event_ts_unix json
-         | _ -> None)
-  |> List.rev
-  |> function
-  | ts :: _ -> Some (max 0 (int_of_float (now -. ts)))
-  | [] -> None
 
 let normalize_digest_target_type value =
   match value with
@@ -1467,33 +1441,14 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            | Some value -> last_turn_ts_iso_for_actor events value
            | None -> None
         in
-        let last_turn_age_sec =
-          match actor with
-          | Some value -> last_turn_age_sec_for_actor events value ~now
-          | None -> None
-        in
         let status =
           match actor with
           | Some _ ->
-              let bootstrap_age_sec = now -. session.started_at in
-              if has_turn then (
-                match last_turn_age_sec with
-                | Some age when age <= int_of_float stalled_session_threshold_sec ->
-                    "live"
-                | Some _ -> "stale_turn"
-                | None -> "seen_no_timestamp")
-              else if bootstrap_age_sec >= planned_worker_turn_grace_sec then
-                "planned_no_turn"
-              else "grace_period"
+              let age_sec = now -. session.started_at in
+              if has_turn then "active"
+               else if age_sec >= planned_worker_turn_grace_sec then "planned_no_turn"
+               else "grace_period"
            | None -> "planned"
-         in
-         let evidence_source =
-           match (has_turn, last_turn_age_sec) with
-           | false, _ -> "spawn_only"
-           | true, Some age when age <= int_of_float stalled_session_threshold_sec ->
-               "turn_live"
-           | true, Some _ -> "turn_stale"
-           | true, None -> "turn_seen"
          in
          {
            actor;
@@ -1517,8 +1472,6 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            turn_count;
            empty_note_turn_count;
            has_turn;
-           last_turn_age_sec;
-           evidence_source;
            last_turn_ts_iso;
          })
   |> List.sort compare_worker_card
@@ -2780,20 +2733,6 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
   in
   loop 0
 
-let resolved_actor_for_args ?actor_hint ctx args =
-  let payload_actor = get_string_opt args "actor" |> Option.map String.trim in
-  let hinted_actor = actor_hint |> Option.map String.trim in
-  match (payload_actor, hinted_actor) with
-  | Some payload, Some hinted
-    when payload <> "" && hinted <> "" && not (String.equal payload hinted) ->
-      Error "actor mismatch: payload actor must match authenticated actor"
-  | _ ->
-      Ok
-        (normalized_actor ~context_actor:ctx.agent_name
-           (match hinted_actor with
-           | Some actor when actor <> "" -> Some actor
-           | _ -> payload_actor))
-
 let action_request_of_args ?actor_hint ctx args =
   let action_type =
     get_string args "action_type" "" |> String.trim |> String.lowercase_ascii
@@ -2802,17 +2741,21 @@ let action_request_of_args ?actor_hint ctx args =
   let raw_target_type =
     get_string args "target_type" "" |> String.trim |> String.lowercase_ascii
   in
-  let* actor = resolved_actor_for_args ?actor_hint ctx args in
-  Ok
-    {
-      actor;
-      action_type;
-      target_type =
-        if raw_target_type <> "" then raw_target_type
-        else default_target_type_for action_type;
-      target_id = get_string_opt args "target_id";
-      payload = get_payload args;
-    }
+  let actor =
+    normalized_actor ~context_actor:ctx.agent_name
+      (match get_string_opt args "actor" with
+      | Some actor -> Some actor
+      | None -> actor_hint)
+  in
+  {
+    actor;
+    action_type;
+    target_type =
+      if raw_target_type <> "" then raw_target_type
+      else default_target_type_for action_type;
+    target_id = get_string_opt args "target_id";
+    payload = get_payload args;
+  }
 
 let delegated_tool_for action_type =
   match action_type with
@@ -3032,9 +2975,23 @@ let checkin_json (name, trigger, result) =
     @ outcome_fields)
 
 let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
+  let pass_reason =
+    let rec first_reason = function
+      | [] -> None
+      | (_, _, Lodge_heartbeat.Passed reason) :: _ -> Some reason
+      | _ :: tl -> first_reason tl
+    in
+    first_reason result.checkins
+  in
   let skipped_reason =
     if result.agents_checked = 0 then Some "no agents selected for this tick"
-    else None
+    else
+      let rec first_reason = function
+        | [] -> None
+        | (_, _, Lodge_heartbeat.Skipped reason) :: _ -> Some reason
+        | _ :: tl -> first_reason tl
+      in
+      first_reason result.checkins
   in
   let acted =
     result.checkins
@@ -3069,6 +3026,10 @@ let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
       ("activity_report", `String result.activity_report);
       ("quiet_hours_overridden", `Bool true);
       ( "skipped_reason",
+        match skipped_reason with Some reason -> `String reason | None -> `Null );
+      ( "last_pass_reason",
+        match pass_reason with Some reason -> `String reason | None -> `Null );
+      ( "last_system_skip_reason",
         match skipped_reason with Some reason -> `String reason | None -> `Null );
       ("acted_rows", `List acted);
       ("passed_rows", `List passed);
@@ -3559,24 +3520,12 @@ let execute_action (ctx : 'a context) (request : action_request) :
         | None -> Error "payload.message is required"
       in
       let* message = message in
-      let models =
-        match request.payload |> U.member "models" with
-        | `List items ->
-            items
-            |> List.filter_map (function
-                   | `String value ->
-                       let trimmed = String.trim value in
-                       if trimmed = "" then None else Some (`String trimmed)
-                   | _ -> None)
-        | _ -> []
-      in
       let args =
         `Assoc
-          ([
-             ("name", `String name);
-             ("message", `String message);
-           ]
-          @ if models = [] then [] else [ ("models", `List models) ])
+          [
+            ("name", `String name);
+            ("message", `String message);
+          ]
       in
       let keeper_ctx : _ Tool_keeper.context =
         { config = ctx.config; sw = ctx.sw; clock = ctx.clock }
@@ -3752,7 +3701,7 @@ let validate_request request =
 
 let action_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
-  let* request = action_request_of_args ?actor_hint ctx args in
+  let request = action_request_of_args ?actor_hint ctx args in
   let* () = validate_request request in
   let delegated_tool = delegated_tool_for request.action_type in
   let trace_id = trace_id "ops" in
@@ -3837,7 +3786,12 @@ let action_json ?actor_hint (ctx : _ context) args :
 
 let confirm_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
-  let* actor = resolved_actor_for_args ?actor_hint ctx args in
+  let actor =
+    normalized_actor ~context_actor:ctx.agent_name
+      (match get_string_opt args "actor" with
+      | Some actor -> Some actor
+      | None -> actor_hint)
+  in
   let decision =
     match get_string_opt args "decision" with
     | Some raw ->

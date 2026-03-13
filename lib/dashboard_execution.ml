@@ -16,10 +16,7 @@ type session_seed = {
   last_activity_summary : string;
   communication_summary : string;
   active_count : int;
-  seen_count : int;
-  planned_count : int;
   required_count : int;
-  counts_basis : string;
   runtime_blocker : string option;
   worker_gap_summary : string option;
   top_attention : Yojson.Safe.t option;
@@ -227,15 +224,21 @@ let lodge_outcome_rank = function
   | "passed" | "skipped" -> 1
   | _ -> 0
 
-let lodge_tick_last_reason (result : Lodge_heartbeat.heartbeat_result) =
+let lodge_tick_last_pass_reason (result : Lodge_heartbeat.heartbeat_result) =
+  let rec first_reason = function
+    | [] -> None
+    | (_, _, Lodge_heartbeat.Passed reason) :: _ -> Some reason
+    | _ :: tl -> first_reason tl
+  in
+  first_reason result.checkins
+
+let lodge_tick_last_system_skip_reason (result : Lodge_heartbeat.heartbeat_result) =
   if result.agents_checked = 0 then
     Some "no agents selected for this tick"
   else
     let rec first_reason = function
       | [] -> None
-      | (_, _, Lodge_heartbeat.Passed reason) :: _
-      | (_, _, Lodge_heartbeat.Skipped reason) :: _ ->
-          Some reason
+      | (_, _, Lodge_heartbeat.Skipped reason) :: _ -> Some reason
       | _ :: tl -> first_reason tl
     in
     first_reason result.checkins
@@ -394,7 +397,9 @@ let execution_smoke_fixture_json () =
             ("skipped", `Int 1);
             ("failed", `Int 0);
             ("last_tick_at", `String generated_at);
-            ("last_skip_reason", `String "delegated_tool_loop: watcher stayed read-only");
+            ("last_skip_reason", `String "rate-limited after a recent board action");
+            ("last_pass_reason", `String "stayed read-only after evaluating the board");
+            ("last_system_skip_reason", `String "rate-limited after a recent board action");
             ("activity_report", `String "alpha acted, beta passed, gamma skipped");
           ] );
       ( "lodge_checkins",
@@ -536,10 +541,7 @@ let execution_smoke_fixture_json () =
                 ("last_activity_summary", `String "local64 smoke cleanup");
                 ("communication_summary", `String "hybrid · broadcast 0 · portal 0");
                 ("active_count", `Int 3);
-                ("seen_count", `Int 3);
-                ("planned_count", `Int 4);
                 ("required_count", `Int 1);
-                ("counts_basis", `String "live=recent_turns · planned=roster");
                 ("top_handoff", intervene_handoff);
                 ("intervene_handoff", intervene_handoff);
                 ("command_handoff", command_handoff);
@@ -560,10 +562,7 @@ let execution_smoke_fixture_json () =
                 ("last_activity_summary", `String "healthy runtime census");
                 ("communication_summary", `String "hybrid · broadcast 1 · portal 0");
                 ("active_count", `Int 1);
-                ("seen_count", `Int 1);
-                ("planned_count", `Int 1);
                 ("required_count", `Int 1);
-                ("counts_basis", `String "live=recent_turns · planned=roster");
                 ("top_handoff", command_handoff);
                 ("intervene_handoff", intervene_handoff);
                 ("command_handoff", command_handoff);
@@ -620,9 +619,6 @@ let execution_smoke_fixture_json () =
                 ("note", `String "Task and live signal aligned");
                 ("focus", `String "Validate local64 swarm role coverage");
                 ("last_signal_at", `String generated_at);
-                ("last_signal_age_sec", `Int 18);
-                ("signal_truth", `String "live");
-                ("evidence_source", `String "message");
                 ("active_task_count", `Int 1);
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
@@ -642,9 +638,6 @@ let execution_smoke_fixture_json () =
                 ("note", `String "Execution looks quiet for too long");
                 ("focus", `String "Inspect secondary runtime health");
                 ("last_signal_at", `String "2026-03-11T09:15:00Z");
-                ("last_signal_age_sec", `Int 780);
-                ("signal_truth", `String "stale");
-                ("evidence_source", `String "message");
                 ("active_task_count", `Int 1);
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
@@ -664,9 +657,6 @@ let execution_smoke_fixture_json () =
                 ("note", `String "Standing by for the next task");
                 ("focus", `String "Idle / waiting for assignment");
                 ("last_signal_at", `String generated_at);
-                ("last_signal_age_sec", `Int 12);
-                ("signal_truth", `String "live");
-                ("evidence_source", `String "presence");
                 ("active_task_count", `Int 0);
                 ("related_session_id", `String "ts-execution-fixture-002");
                 ("related_operation_id", `String "op-runtime-003");
@@ -690,9 +680,6 @@ let execution_smoke_fixture_json () =
                 ("note", `String "Task and live signal aligned");
                 ("focus", `String "Validate local64 swarm role coverage");
                 ("last_signal_at", `String generated_at);
-                ("last_signal_age_sec", `Int 18);
-                ("signal_truth", `String "live");
-                ("evidence_source", `String "message");
                 ("active_task_count", `Int 1);
               ];
             `Assoc
@@ -705,9 +692,6 @@ let execution_smoke_fixture_json () =
                 ("note", `String "Execution looks quiet for too long");
                 ("focus", `String "Inspect secondary runtime health");
                 ("last_signal_at", `String "2026-03-11T09:15:00Z");
-                ("last_signal_age_sec", `Int 780);
-                ("signal_truth", `String "stale");
-                ("evidence_source", `String "message");
                 ("active_task_count", `Int 1);
               ];
           ] );
@@ -760,9 +744,6 @@ let execution_smoke_fixture_json () =
                 ("note", `String "Offline or inactive");
                 ("focus", `String "Recover worker before reassigning");
                 ("last_signal_at", `String "2026-03-11T08:55:00Z");
-                ("last_signal_age_sec", `Int 1200);
-                ("signal_truth", `String "absent");
-                ("evidence_source", `String "none");
                 ("active_task_count", `Int 0);
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
@@ -1045,22 +1026,6 @@ let worker_state_of_agent
     if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
     else infinity
   in
-  let signal_truth =
-    if last_signal_ts <= 0.0 then
-      "absent"
-    else if signal_age_s <= 300.0 then
-      "live"
-    else
-      "stale"
-  in
-  let evidence_source =
-    if last_message_ts > 0.0 && last_message_ts >= last_seen_ts then
-      "message"
-    else if last_seen_ts > 0.0 then
-      "presence"
-    else
-      "none"
-  in
   let active_task_count = active_task_count tasks agent.name in
   let recent_output_preview =
     match message_opt with
@@ -1119,9 +1084,6 @@ let worker_state_of_agent
           ("note", `String note);
           ("focus", `String focus);
           ("last_signal_at", json_string_option last_signal_at);
-          ("last_signal_age_sec", if Float.is_finite signal_age_s then `Int (int_of_float signal_age_s) else `Null);
-          ("signal_truth", `String signal_truth);
-          ("evidence_source", `String evidence_source);
           ("active_task_count", `Int active_task_count);
           ("related_session_id", json_string_option related_session_id);
           ("related_operation_id", json_string_option related_operation_id);
@@ -1342,7 +1304,9 @@ let build_lodge_checkins (status : Lodge_heartbeat.lodge_status) :
                ("skipped", `Int skipped);
                ("failed", `Int failed);
                ("last_tick_at", json_string_option checked_at);
-               ("last_skip_reason", json_string_option (lodge_tick_last_reason result));
+               ("last_skip_reason", json_string_option (lodge_tick_last_system_skip_reason result));
+               ("last_pass_reason", json_string_option (lodge_tick_last_pass_reason result));
+               ("last_system_skip_reason", json_string_option (lodge_tick_last_system_skip_reason result));
                ("activity_report", `String result.activity_report);
              ])
       in
@@ -1491,25 +1455,11 @@ let build_session_seed session_json session_cards =
     in
     let broadcast_count = int_field "broadcast_count" communication in
     let portal_count = int_field "portal_count" communication in
-    let seen_count = int_field "seen_agents_count" summary in
     let member_names =
       dedup_strings
         (string_list_of_json (member_assoc "agent_names" meta)
         @ string_list_of_json (member_assoc "active_agents" summary)
         @ string_list_of_json (member_assoc "planned_participants" summary))
-    in
-    let planned_count =
-      let planned =
-        string_list_of_json (member_assoc "planned_participants" summary)
-      in
-      let explicit = List.length planned in
-      if explicit > 0 then explicit else List.length member_names
-    in
-    let counts_basis =
-      if List.length (string_list_of_json (member_assoc "planned_participants" summary)) > 0 then
-        "live=recent_turns · planned=planned_participants"
-      else
-        "live=recent_turns · planned=known_members"
     in
     Some
       {
@@ -1543,10 +1493,7 @@ let build_session_seed session_json session_cards =
           Printf.sprintf "%s · broadcast %d · portal %d" mode broadcast_count
             portal_count;
         active_count = int_field "active_agents_count" team_health;
-        seen_count;
-        planned_count;
         required_count = int_field ~default:1 "required_agents" team_health;
-        counts_basis;
         runtime_blocker;
         worker_gap_summary;
         top_attention;
@@ -1753,10 +1700,7 @@ let build_session_contexts seeds operation_contexts : session_context list =
                  ("last_activity_summary", `String seed.last_activity_summary);
                  ("communication_summary", `String seed.communication_summary);
                  ("active_count", `Int seed.active_count);
-                 ("seen_count", `Int seed.seen_count);
-                 ("planned_count", `Int seed.planned_count);
                  ("required_count", `Int seed.required_count);
-                 ("counts_basis", `String seed.counts_basis);
                  ("top_handoff", top_handoff);
                  ("intervene_handoff", intervene_handoff);
                  ("command_handoff", command_handoff);

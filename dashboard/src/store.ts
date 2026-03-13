@@ -379,10 +379,7 @@ function normalizeExecutionSessionBrief(raw: unknown): DashboardExecutionSession
     last_activity_summary: asString(raw.last_activity_summary) ?? null,
     communication_summary: asString(raw.communication_summary) ?? null,
     active_count: asNumber(raw.active_count),
-    seen_count: asNumber(raw.seen_count),
-    planned_count: asNumber(raw.planned_count),
     required_count: asNumber(raw.required_count),
-    counts_basis: asString(raw.counts_basis) ?? null,
     top_handoff: normalizeExecutionHandoff(raw.top_handoff),
     intervene_handoff: normalizeExecutionHandoff(raw.intervene_handoff),
     command_handoff: normalizeExecutionHandoff(raw.command_handoff),
@@ -421,16 +418,6 @@ function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionW
   if (!name || !note || !focus || (state !== 'working' && state !== 'watching' && state !== 'quiet' && state !== 'offline')) {
     return null
   }
-  const signalTruthRaw = asString(raw.signal_truth)
-  const signalTruth =
-    signalTruthRaw === 'live' || signalTruthRaw === 'stale' || signalTruthRaw === 'absent'
-      ? signalTruthRaw
-      : undefined
-  const evidenceSourceRaw = asString(raw.evidence_source)
-  const evidenceSource =
-    evidenceSourceRaw === 'message' || evidenceSourceRaw === 'presence' || evidenceSourceRaw === 'none'
-      ? evidenceSourceRaw
-      : undefined
   return {
     name,
     agent_name: asString(raw.agent_name),
@@ -440,9 +427,6 @@ function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionW
     note,
     focus,
     last_signal_at: asString(raw.last_signal_at) ?? null,
-    last_signal_age_sec: asNumber(raw.last_signal_age_sec) ?? null,
-    signal_truth: signalTruth,
-    evidence_source: evidenceSource,
     active_task_count: asNumber(raw.active_task_count),
     related_session_id: asString(raw.related_session_id) ?? null,
     related_operation_id: asString(raw.related_operation_id) ?? null,
@@ -456,6 +440,7 @@ function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionW
 
 function normalizeExecutionLodgeTick(raw: unknown): DashboardExecutionLodgeTick | null {
   if (!isRecord(raw)) return null
+  const lastSystemSkipReason = asString(raw.last_system_skip_reason) ?? asString(raw.last_skip_reason) ?? null
   return {
     checked: asNumber(raw.checked),
     acted: asNumber(raw.acted),
@@ -463,7 +448,9 @@ function normalizeExecutionLodgeTick(raw: unknown): DashboardExecutionLodgeTick 
     skipped: asNumber(raw.skipped),
     failed: asNumber(raw.failed),
     last_tick_at: asString(raw.last_tick_at) ?? null,
-    last_skip_reason: asString(raw.last_skip_reason) ?? null,
+    last_skip_reason: lastSystemSkipReason,
+    last_pass_reason: asString(raw.last_pass_reason) ?? null,
+    last_system_skip_reason: lastSystemSkipReason,
     activity_report: asString(raw.activity_report) ?? null,
   }
 }

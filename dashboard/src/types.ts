@@ -632,11 +632,6 @@ export interface GovernanceGuardrailState {
   ready_to_execute?: boolean
 }
 
-export interface PendingConfirmEnvelope {
-  items: PendingConfirmation[]
-  summary: PendingConfirmSummary
-}
-
 export interface GovernanceJudgment {
   judgment_id?: string
   target_kind?: string
@@ -655,7 +650,7 @@ export interface GovernanceJudgment {
 }
 
 export interface GovernanceDecisionItem {
-  kind: 'case' | string
+  kind: 'debate' | 'consensus' | string
   id: string
   topic: string
   status: string
@@ -680,6 +675,12 @@ export interface GovernanceDecisionItem {
   executed_route?: GovernanceExecutedRoute | null
   guardrail_state?: GovernanceGuardrailState | null
   evidence_refs: string[]
+  approve_count?: number
+  reject_count?: number
+  abstain_count?: number
+  votes?: number
+  quorum?: number
+  threshold?: number
 }
 
 export interface GovernancePetition {
@@ -706,7 +707,14 @@ export interface GovernanceCaseBrief {
 export interface GovernanceExecutionOrder {
   id: string
   case_id: string
-  status: 'queued_auto' | 'needs_human_gate' | 'auto_executed' | 'done' | 'denied' | 'blocked' | string
+  status:
+    | 'queued_auto'
+    | 'needs_human_gate'
+    | 'auto_executed'
+    | 'done'
+    | 'denied'
+    | 'blocked'
+    | string
   risk_class?: 'low' | 'high' | string | null
   action_request?: GovernanceResolvedAction | null
   created_at?: string | null
@@ -862,7 +870,9 @@ export interface LodgeTickResult {
   acted_names: string[]
   activity_report?: string
   quiet_hours_overridden?: boolean
-  skipped_reason?: string
+  skipped_reason?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
   acted_rows?: Array<{ name: string; summary?: string }>
   passed_rows?: Array<{ name: string; reason?: string }>
   skipped_rows?: Array<{ name: string; reason?: string }>
@@ -884,6 +894,8 @@ export interface LodgeRuntimeStatus {
   total_ticks?: number
   total_checkins?: number
   last_skip_reason?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
   last_tick_result?: LodgeTickResult | null
   active_self_heartbeats?: string[]
 }
@@ -1098,10 +1110,7 @@ export interface DashboardExecutionSessionBrief {
   last_activity_summary?: string | null
   communication_summary?: string | null
   active_count?: number
-  seen_count?: number
-  planned_count?: number
   required_count?: number
-  counts_basis?: string | null
   top_handoff?: DashboardExecutionHandoff | null
   intervene_handoff?: DashboardExecutionHandoff | null
   command_handoff?: DashboardExecutionHandoff | null
@@ -1133,9 +1142,6 @@ export interface DashboardExecutionWorkerSupportBrief {
   note: string
   focus: string
   last_signal_at?: string | null
-  last_signal_age_sec?: number | null
-  signal_truth?: 'live' | 'stale' | 'absent'
-  evidence_source?: 'message' | 'presence' | 'none'
   active_task_count?: number
   related_session_id?: string | null
   related_operation_id?: string | null
@@ -1154,6 +1160,8 @@ export interface DashboardExecutionLodgeTick {
   failed?: number
   last_tick_at?: string | null
   last_skip_reason?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
   activity_report?: string | null
 }
 
@@ -1268,6 +1276,8 @@ export interface DashboardGovernanceResponse {
   activity?: GovernanceTimelineEvent[]
   judge?: GovernanceJudgeSummary
   pending_actions?: PendingConfirmation[]
+  pending_confirm_summary?: PendingConfirmSummary | null
+  pending_confirm_envelope?: PendingConfirmEnvelope | null
 }
 
 export interface DashboardPlanningResponse {
@@ -1723,6 +1733,11 @@ export interface PendingConfirmSummary {
   confirm_required_actions: OperatorActionDescriptor[]
 }
 
+export interface PendingConfirmEnvelope {
+  items: PendingConfirmation[]
+  summary: PendingConfirmSummary
+}
+
 export interface OperatorAttentionItem {
   kind: string
   severity: string
@@ -1876,7 +1891,7 @@ export interface OperatorSnapshot {
   swarm_status?: CommandPlaneSwarmStatus
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]
-  pending_confirm_envelope?: PendingConfirmEnvelope | null
+  pending_confirm_envelope?: PendingConfirmEnvelope
   pending_confirm_summary?: PendingConfirmSummary
   available_actions: OperatorActionDescriptor[]
 }

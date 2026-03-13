@@ -78,13 +78,12 @@ let test_all_names_start_with_masc () =
 
 let test_find_tool_existing () =
   let tools = ["masc_init"; "masc_join"; "masc_leave"; "masc_status";
-               "masc_broadcast"; "masc_claim"; "masc_done";
+               "masc_broadcast"; "masc_transition";
                "masc_team_session_step"; "masc_team_session_finalize";
                "masc_team_session_list"; "masc_team_session_compare";
-               "masc_team_session_turn"; "masc_team_session_events";
+               "masc_team_session_events";
                "masc_team_session_prove"; "masc_llama_models";
-               "masc_runtime_verify";
-               "masc_llama_runtime_verify"; "masc_observe_swarm";
+               "masc_runtime_verify"; "masc_observe_swarm";
                "masc_operator_snapshot"; "masc_operator_digest";
                "masc_operator_action"; "masc_operator_confirm";
                "masc_voice_speak"; "masc_voice_agent";
@@ -193,15 +192,16 @@ let test_masc_broadcast_schema () =
           Alcotest.(check bool) "has message" true (List.mem_assoc "message" props)
       | None -> Alcotest.fail "masc_broadcast missing properties"
 
-let test_masc_claim_schema () =
-  match find_tool "masc_claim" with
-  | None -> Alcotest.fail "masc_claim not found"
+let test_masc_transition_schema () =
+  match find_tool "masc_transition" with
+  | None -> Alcotest.fail "masc_transition not found"
   | Some schema ->
       match get_json_list "required" schema.input_schema with
       | Some reqs ->
           Alcotest.(check bool) "agent_name required" true (List.mem (`String "agent_name") reqs);
-          Alcotest.(check bool) "task_id required" true (List.mem (`String "task_id") reqs)
-      | None -> Alcotest.fail "masc_claim missing required field"
+          Alcotest.(check bool) "task_id required" true (List.mem (`String "task_id") reqs);
+          Alcotest.(check bool) "action required" true (List.mem (`String "action") reqs)
+      | None -> Alcotest.fail "masc_transition missing required field"
 
 let test_masc_add_task_schema () =
   match find_tool "masc_add_task" with
@@ -213,16 +213,6 @@ let test_masc_add_task_schema () =
           Alcotest.(check bool) "has priority" true (List.mem_assoc "priority" props);
           Alcotest.(check bool) "has description" true (List.mem_assoc "description" props)
       | None -> Alcotest.fail "masc_add_task missing properties"
-
-let test_masc_done_schema () =
-  match find_tool "masc_done" with
-  | None -> Alcotest.fail "masc_done not found"
-  | Some schema ->
-      match get_json_list "required" schema.input_schema with
-      | Some reqs ->
-          Alcotest.(check bool) "agent_name required" true (List.mem (`String "agent_name") reqs);
-          Alcotest.(check bool) "task_id required" true (List.mem (`String "task_id") reqs)
-      | None -> Alcotest.fail "masc_done missing required field"
 
 let test_masc_operator_snapshot_schema () =
   match find_tool "masc_operator_snapshot" with
@@ -641,22 +631,6 @@ let test_masc_llama_models_schema () =
       | Some props ->
           Alcotest.(check int) "no required params" 0 (List.length props)
       | None -> Alcotest.fail "masc_llama_models missing properties"
-
-let test_masc_llama_runtime_verify_schema () =
-  match find_tool "masc_llama_runtime_verify" with
-  | None -> Alcotest.fail "masc_llama_runtime_verify not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has runtime_pool" true
-            (List.mem_assoc "runtime_pool" props);
-          Alcotest.(check bool) "has expected_model" true
-            (List.mem_assoc "expected_model" props);
-          Alcotest.(check bool) "has expected_slots" true
-            (List.mem_assoc "expected_slots" props);
-          Alcotest.(check bool) "has expected_ctx" true
-            (List.mem_assoc "expected_ctx" props)
-      | None -> Alcotest.fail "masc_llama_runtime_verify missing properties"
 
 let test_masc_runtime_verify_schema () =
   match find_tool "masc_runtime_verify" with
@@ -1160,9 +1134,8 @@ let () =
       Alcotest.test_case "masc_leave" `Quick test_masc_leave_schema;
       Alcotest.test_case "masc_status" `Quick test_masc_status_schema;
       Alcotest.test_case "masc_broadcast" `Quick test_masc_broadcast_schema;
-      Alcotest.test_case "masc_claim" `Quick test_masc_claim_schema;
+      Alcotest.test_case "masc_transition" `Quick test_masc_transition_schema;
       Alcotest.test_case "masc_add_task" `Quick test_masc_add_task_schema;
-      Alcotest.test_case "masc_done" `Quick test_masc_done_schema;
       Alcotest.test_case "masc_operator_snapshot" `Quick test_masc_operator_snapshot_schema;
       Alcotest.test_case "masc_operator_digest" `Quick test_masc_operator_digest_schema;
       Alcotest.test_case "masc_operator_action" `Quick test_masc_operator_action_schema;
@@ -1241,7 +1214,7 @@ let () =
       Alcotest.test_case "runtime-verify" `Quick
         test_masc_runtime_verify_schema;
       Alcotest.test_case "llama-runtime-verify" `Quick
-        test_masc_llama_runtime_verify_schema;
+        test_masc_runtime_verify_schema;
       Alcotest.test_case "team-session-step-spawn-selection-note" `Quick
         test_masc_team_session_step_spawn_selection_note_schema;
       Alcotest.test_case "team-session-step-spawn-batch" `Quick

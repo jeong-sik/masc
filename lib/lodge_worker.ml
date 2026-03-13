@@ -38,19 +38,7 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
 
 let default_allowed_tools ~allow_post =
-  let base =
-    [
-      "masc_board_get";
-      "masc_board_list";
-      "masc_board_search";
-      "masc_board_comment";
-      "masc_board_vote";
-      "lodge_search";
-      "lodge_profile";
-      "lodge_research";
-    ]
-  in
-  if allow_post then "masc_board_post" :: base else base
+  Agent_tool_surfaces.lodge_worker_base_tool_names ~allow_post ()
 
 let uniq items =
   let rec loop seen = function

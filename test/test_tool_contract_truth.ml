@@ -1,7 +1,9 @@
 open Alcotest
 
 module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Tool_catalog = Masc_mcp.Tool_catalog
+module Config = Masc_mcp.Config
+module Mode = Masc_mcp.Mode
+module Room = Masc_mcp.Room
 
 let temp_dir () =
   let dir = Filename.temp_file "test_tool_contract_truth_" "" in
@@ -32,7 +34,25 @@ let tool_string_field tool field =
       | _ -> fail ("missing string field: " ^ field))
   | _ -> fail "tool must be object"
 
-let tools_list_response ~clock ~sw state =
+let find_tool_exn tools name =
+  List.find
+    (function
+      | `Assoc fields -> (
+          match List.assoc_opt "name" fields with
+          | Some (`String tool_name) -> String.equal tool_name name
+          | _ -> false)
+      | _ -> false)
+    tools
+
+let tools_list_response ~clock ~sw ?(include_hidden = false) ?names state =
+  let names_json =
+    match names with
+    | Some values -> [ ("names", `List (List.map (fun value -> `String value) values)) ]
+    | None -> []
+  in
+  let hidden_json =
+    if include_hidden then [ ("include_hidden", `Bool true) ] else []
+  in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -40,17 +60,12 @@ let tools_list_response ~clock ~sw state =
           ("jsonrpc", `String "2.0");
           ("id", `Int 1);
           ("method", `String "tools/list");
-          ("params", `Assoc []);
+          ("params", `Assoc (names_json @ hidden_json));
         ])
   in
   Mcp_eio.handle_request ~clock ~sw state request
 
-let tool_has_field tool field =
-  match tool with
-  | `Assoc fields -> List.mem_assoc field fields
-  | _ -> false
-
-let test_visible_tools_hide_internal_metadata () =
+let test_visible_tools_expose_only_truthful_statuses () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -58,52 +73,61 @@ let test_visible_tools_hide_internal_metadata () =
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let tools = tools_list_response ~clock ~sw state |> response_tools in
-      let status_tool =
-        match tools with
-        | tool :: _ -> tool
-        | [] -> fail "expected visible tools on default /mcp surface"
-      in
-      check bool "standard tools expose title" true
-        (tool_string_field status_tool "title" <> "");
-      check bool "standard tools expose annotations" true
-        (Yojson.Safe.Util.member "annotations" status_tool <> `Null);
-      check bool "visibility metadata hidden" false
-        (tool_has_field status_tool "visibility");
-      check bool "implementationStatus hidden" false
-        (tool_has_field status_tool "implementationStatus");
-      check bool "hidden utility omitted" false
-        (List.exists
-           (function
-             | `Assoc fields ->
-                 List.assoc_opt "name" fields = Some (`String "masc_post_create")
-             | _ -> false)
-           tools))
+      List.iter
+        (fun tool ->
+          let status = tool_string_field tool "implementationStatus" in
+          check bool ("truthful visible status: " ^ tool_string_field tool "name")
+            true
+            (String.equal status "real" || String.equal status "adapter"))
+        tools)
 
-let test_tool_catalog_retains_contract_truth () =
-  let archive_meta = Tool_catalog.metadata "masc_archive_save" in
-  let claim_meta = Tool_catalog.metadata "masc_claim" in
-  let runtime_meta = Tool_catalog.metadata "masc_runtime_verify" in
-  let runtime_alias_meta = Tool_catalog.metadata "masc_llama_runtime_verify" in
-  check string "archive_save placeholder" "placeholder"
-    (Tool_catalog.implementation_status_to_string archive_meta.implementation_status);
-  check bool "archive_save not callable on default mcp" false
-    (Tool_catalog.is_default_mcp_callable "masc_archive_save");
-  check string "claim deprecated" "deprecated"
-    (Tool_catalog.lifecycle_to_string claim_meta.lifecycle);
-  check bool "claim not callable on default mcp" false
-    (Tool_catalog.is_default_mcp_callable "masc_claim");
-  check string "runtime verify active" "active"
-    (Tool_catalog.lifecycle_to_string runtime_meta.lifecycle);
-  check bool "runtime verify callable" true
-    (Tool_catalog.is_default_mcp_callable "masc_runtime_verify");
-  check string "runtime alias deprecated" "deprecated"
-    (Tool_catalog.lifecycle_to_string runtime_alias_meta.lifecycle);
-  check bool "runtime alias not callable" false
-    (Tool_catalog.is_default_mcp_callable "masc_llama_runtime_verify")
+let test_hidden_tools_report_contract_status () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let room_path = Room.masc_dir state.room_config in
+      ignore (Config.switch_mode room_path Mode.Full);
+      let tools =
+        tools_list_response ~clock ~sw ~include_hidden:true
+          ~names:
+            [
+              "masc_archive_save";
+              "masc_dispatch_route";
+              "masc_dispatch_plan";
+              "masc_transition";
+              "masc_runtime_verify";
+              "masc_verify_handoff";
+            ]
+          state
+        |> response_tools
+      in
+      let placeholder = find_tool_exn tools "masc_archive_save" in
+      check string "archive_save placeholder" "placeholder"
+        (tool_string_field placeholder "implementationStatus");
+      let alias = find_tool_exn tools "masc_dispatch_route" in
+      check string "dispatch_route adapter" "adapter"
+        (tool_string_field alias "implementationStatus");
+      check string "dispatch_route canonical" "masc_dispatch_plan"
+        (tool_string_field alias "canonicalName");
+      let dispatch_plan = find_tool_exn tools "masc_dispatch_plan" in
+      check string "dispatch_plan real" "real"
+        (tool_string_field dispatch_plan "implementationStatus");
+      let canonical = find_tool_exn tools "masc_transition" in
+      check string "transition real" "real"
+        (tool_string_field canonical "implementationStatus");
+      let runtime_verify = find_tool_exn tools "masc_runtime_verify" in
+      check string "runtime verify real" "real"
+        (tool_string_field runtime_verify "implementationStatus");
+      let verify_handoff = find_tool_exn tools "masc_verify_handoff" in
+      check string "verify_handoff real" "real"
+        (tool_string_field verify_handoff "implementationStatus"))
 
 let () =
   run "tool contract truth"
     [
-      ("visible", [ test_case "visible tools hide internal metadata" `Quick test_visible_tools_hide_internal_metadata ]);
-      ("catalog", [ test_case "tool catalog retains contract truth" `Quick test_tool_catalog_retains_contract_truth ]);
+      ("visible", [ test_case "visible tools stay truthful" `Quick test_visible_tools_expose_only_truthful_statuses ]);
+      ("hidden", [ test_case "hidden metadata exposes implementation status" `Quick test_hidden_tools_report_contract_status ]);
     ]

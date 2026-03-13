@@ -28,81 +28,9 @@ type spawn_result = {
 }
 
 (** MASC MCP tools available for spawned agents *)
-let masc_mcp_tools = [
-  "mcp__masc__masc_status";
-  "mcp__masc__masc_tasks";
-  "mcp__masc__masc_claim";
-  "mcp__masc__masc_claim_next";
-  "mcp__masc__masc_transition";
-  "mcp__masc__masc_release";
-  "mcp__masc__masc_task_history";
-  "mcp__masc__masc_done";
-  "mcp__masc__masc_broadcast";
-  "mcp__masc__masc_join";
-  "mcp__masc__masc_leave";
-  "mcp__masc__masc_who";
-  "mcp__masc__masc_agent_update";
-  "mcp__masc__masc_add_task";
-  "mcp__masc__masc_heartbeat";
-  "mcp__masc__masc_messages";
-  "mcp__masc__masc_worktree_create";
-  "mcp__masc__masc_worktree_remove";
-  "mcp__masc__masc_worktree_list";
-  "mcp__masc__masc_handover_create";
-  "mcp__masc__masc_handover_list";
-  "mcp__masc__masc_handover_claim";
-  "mcp__masc__masc_handover_get";
-  "mcp__masc__masc_memento_mori";
-  "mcp__masc__masc_relay_status";
-  "mcp__masc__masc_relay_checkpoint";
-  "mcp__masc__masc_board_list";
-  "mcp__masc__masc_board_post";
-  "mcp__masc__masc_board_comment";
-  "mcp__masc__masc_board_vote";
-  "mcp__masc__masc_board_get";
-  "mcp__masc__masc_tool_stats";
-  "mcp__masc__masc_tool_help";
-  "mcp__masc__masc_tool_admin_snapshot";
-  "mcp__masc__masc_keeper_tool_catalog";
-  "mcp__masc__masc_tool_list";
-  "mcp__masc__masc_tool_grant";
-  "mcp__masc__masc_tool_revoke";
-  "mcp__masc__masc_portal_open";
-  "mcp__masc__masc_portal_send";
-  "mcp__masc__masc_portal_status";
-  "mcp__masc__masc_team_session_start";
-  "mcp__masc__masc_team_session_step";
-  "mcp__masc__masc_team_session_status";
-  "mcp__masc__masc_team_session_events";
-  "mcp__masc__masc_team_session_finalize";
-  "mcp__masc__masc_team_session_stop";
-  "mcp__masc__masc_team_session_report";
-  "mcp__masc__masc_team_session_prove";
-  "mcp__masc__masc_team_session_list";
-  "mcp__masc__masc_team_session_compare";
-  "mcp__masc__masc_operator_snapshot";
-  "mcp__masc__masc_operator_action";
-  "mcp__masc__masc_operator_confirm";
-  "mcp__masc__masc_a2a_delegate";
-  "mcp__masc__masc_a2a_subscribe";
-  "mcp__masc__masc_poll_events";
-  "mcp__masc__masc_vote_create";
-  "mcp__masc__masc_vote_cast";
-  "mcp__masc__masc_vote_status";
-  "mcp__masc__masc_run_init";
-  "mcp__masc__masc_run_log";
-  "mcp__masc__masc_run_deliverable";
-  "mcp__masc__masc_run_get";
-  "mcp__masc__masc_spawn";
-  "mcp__masc__masc_heartbeat_list";
-]
+let masc_mcp_tools = Agent_tool_surfaces.spawned_agent_prefixed_tools
 
-let llama_mcp_tools = [
-  "mcp__masc__masc_heartbeat";
-  "mcp__masc__masc_team_session_status";
-  "mcp__masc__masc_team_session_turn";
-  "mcp__masc__masc_memento_mori";
-]
+let llama_mcp_tools = Agent_tool_surfaces.llama_worker_prefixed_tools
 
 let masc_lifecycle_suffix = {| 
 --- 

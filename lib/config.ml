@@ -182,7 +182,9 @@ let validate_schemas (schemas : Types.tool_schema list) =
       List.iter (fun e -> Printf.eprintf "[SCHEMA WARN] %s\n%!" e) errs
 
 let all_tool_schemas : Types.tool_schema list =
-  let schemas = Tool_help_registry.canonicalize_schemas raw_all_tool_schemas in
+  let schemas =
+    Capability_registry.public_tool_schemas_from raw_all_tool_schemas
+  in
   validate_schemas schemas;
   schemas
 
@@ -194,10 +196,8 @@ let is_tool_visible tool_name =
 
 let visible_tool_schemas ?(include_hidden = false) ?(include_deprecated = false) () :
     Types.tool_schema list =
-  List.filter
-    (fun (schema : Types.tool_schema) ->
-      Tool_catalog.is_visible ~include_hidden ~include_deprecated schema.name)
-    all_tool_schemas
+  Capability_registry.visible_public_tool_schemas_from ~include_hidden
+    ~include_deprecated raw_all_tool_schemas
 
 let enabled_tool_schemas ?(include_hidden = false) ?(include_deprecated = false)
     (enabled_categories : Mode.category list) :

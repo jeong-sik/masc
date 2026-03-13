@@ -367,35 +367,6 @@ let test_handle_request_initialize () =
 
   cleanup_dir base_path
 
-let test_handle_request_initialize_rejects_unsupported_protocol_version () =
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 101);
-    ("method", `String "initialize");
-    ("params", `Assoc [
-      ("protocolVersion", `String "2099-01-01");
-      ("capabilities", `Assoc []);
-      ("clientInfo", `Assoc [
-        ("name", `String "test");
-        ("version", `String "1.0");
-      ]);
-    ]);
-  ]) in
-
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check bool) "unsupported protocol message" true
-    (contains_substring (error_message_exn response) "Unsupported protocolVersion");
-
-  cleanup_dir base_path
-
 let test_handle_request_tools_list () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -631,6 +602,132 @@ let test_handle_request_tools_list_operator_profile () =
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
 
+let test_handle_request_initialize_managed_profile () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 111);
+    ("method", `String "initialize");
+    ("params", `Assoc [
+      ("protocolVersion", `String "2025-11-25");
+      ("capabilities", `Assoc []);
+      ("clientInfo", `Assoc [
+        ("name", `String "managed-agent");
+        ("version", `String "1.0");
+      ]);
+    ]);
+  ]) in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
+  in
+  (match response with
+   | `Assoc fields ->
+       (match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) ->
+            let instructions =
+              match List.assoc_opt "instructions" result_fields with
+              | Some (`String value) -> value
+              | _ -> ""
+            in
+            Alcotest.(check bool) "mentions managed profile" true
+              (contains_substring instructions "managed-agent profile");
+            Alcotest.(check bool) "mentions sdk aliases" true
+              (contains_substring instructions "masc_room_status")
+        | _ -> Alcotest.fail "result not an object")
+   | _ -> Alcotest.fail "response not an object");
+  cleanup_dir base_path
+
+let test_handle_request_tools_list_managed_profile () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 112);
+    ("method", `String "tools/list");
+    ("params", `Assoc []);
+  ]) in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
+  in
+  (match response with
+   | `Assoc fields ->
+       (match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) ->
+            (match List.assoc_opt "tools" result_fields with
+             | Some (`List tools) ->
+                 let names =
+                   tools
+                   |> List.filter_map (function
+                        | `Assoc fields -> List.assoc_opt "name" fields
+                        | _ -> None)
+                   |> List.filter_map (function `String s -> Some s | _ -> None)
+                 in
+                 Alcotest.(check bool) "has managed room status alias" true
+                   (List.mem "masc_room_status" names);
+                 Alcotest.(check bool) "has managed list tasks alias" true
+                   (List.mem "masc_list_tasks" names);
+                 Alcotest.(check bool) "has managed claim alias" true
+                   (List.mem "masc_claim_task" names);
+                 Alcotest.(check bool) "omits raw masc_status" false
+                   (List.mem "masc_status" names);
+                 Alcotest.(check bool) "omits raw masc_transition" false
+                   (List.mem "masc_transition" names)
+             | _ -> Alcotest.fail "tools not a list")
+        | _ -> Alcotest.fail "result not an object")
+   | _ -> Alcotest.fail "response not an object");
+  cleanup_dir base_path
+
+let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let sid = "mcp-managed-alias-claim" in
+  let (ok_init, _init_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_init" ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "init success" true ok_init;
+  let (ok_join, _join_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_join"
+      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
+  in
+  Alcotest.(check bool) "join success" true ok_join;
+  let _added =
+    Masc_mcp.Room.add_task state.room_config ~title:"managed-claim"
+      ~priority:2 ~description:""
+  in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 113);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "masc_claim_task");
+      ("arguments", `Assoc [ ("task_id", `String "task-001") ]);
+    ]);
+  ]) in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent
+      ~mcp_session_id:sid state request
+  in
+  let response_text = Yojson.Safe.to_string response in
+  Alcotest.(check bool) "claim response mentions task" true
+    (contains_substring response_text "task-001");
+  Alcotest.(check bool) "claim response mentions claimed" true
+    (contains_substring response_text "claimed");
+  cleanup_dir base_path
+
 let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -676,10 +773,19 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
       ("names", `List [ `String "masc_messages"; `String "masc_status" ]);
     ]);
   ]) in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check bool) "names field rejected" true
-    (contains_substring (error_message_exn response) "unsupported field");
+  let response =
+    Mcp_eio.handle_request ~clock ~sw state request
+  in
+  let tools = tools_from_response response in
+  let names =
+    tools
+    |> List.filter_map (function
+         | `Assoc fields -> List.assoc_opt "name" fields
+         | _ -> None)
+    |> List.filter_map (function `String s -> Some s | _ -> None)
+  in
+  Alcotest.(check (list string)) "requested tools only"
+    [ "masc_messages"; "masc_status" ] names;
   cleanup_dir base_path
 
 let test_handle_request_tools_list_with_placeholder_flag () =
@@ -720,10 +826,10 @@ let test_handle_request_tools_list_include_hidden_metadata () =
     (Yojson.Safe.Util.member "icons" status_tool <> `Null);
   Alcotest.(check bool) "standard tools expose annotations" true
     (Yojson.Safe.Util.member "annotations" status_tool <> `Null);
-  Alcotest.(check bool) "visibility metadata hidden" true
-    (Yojson.Safe.Util.member "visibility" status_tool = `Null);
-  Alcotest.(check bool) "implementation status hidden" true
-    (Yojson.Safe.Util.member "implementationStatus" status_tool = `Null);
+  Alcotest.(check bool) "visibility metadata exposed" true
+    (Yojson.Safe.Util.member "visibility" status_tool <> `Null);
+  Alcotest.(check bool) "implementation status exposed" true
+    (Yojson.Safe.Util.member "implementationStatus" status_tool <> `Null);
   Alcotest.(check bool) "hidden utility omitted" false
     (List.exists
        (function
@@ -775,9 +881,21 @@ let test_handle_request_tools_list_include_usage_metadata () =
     ("params", `Assoc [ ("include_usage", `Bool true) ]);
   ]) in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
-  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check bool) "usage field rejected" true
-    (contains_substring (error_message_exn response) "unsupported field");
+  let result_fields = result_fields_exn response in
+  Alcotest.(check bool) "usage telemetry availability exposed" true
+    (List.mem_assoc "usageTelemetryAvailable" result_fields);
+  Alcotest.(check bool) "usage total exposed" true
+    (List.mem_assoc "usageTotalCalls" result_fields);
+  let first_tool =
+    match tools_from_response response with
+    | tool :: _ -> tool
+    | [] -> Alcotest.fail "tools list empty"
+  in
+  Alcotest.(check bool) "per-tool usage count exposed" true
+    (Yojson.Safe.Util.member "usageCount" first_tool <> `Null);
+  Alcotest.(check bool) "per-tool last-used field present" true
+    (List.mem_assoc "usageLastUsedAt"
+       (match first_tool with `Assoc fields -> fields | _ -> []));
   cleanup_dir base_path
 
 let test_execute_tool_trpg_flow () =
@@ -879,6 +997,30 @@ let test_execute_tool_mode_gate () =
 
   cleanup_dir base_path
 
+let test_execute_tool_coding_mode_allows_governance_status () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Coding in
+
+  let (ok, msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_council_status"
+      ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "governance status tool allowed in coding mode" true ok;
+  let json = Yojson.Safe.from_string msg in
+  Alcotest.(check bool) "has cases_open field" true
+    Yojson.Safe.Util.(member "cases_open" json <> `Null);
+
+  cleanup_dir base_path
+
 let test_execute_tool_hidden_active_utility_direct_call () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -922,7 +1064,7 @@ let test_execute_tool_hidden_active_utility_direct_call () =
 
   cleanup_dir base_path
 
-let test_execute_tool_hidden_deprecated_team_session_turn_direct_call () =
+let test_execute_tool_team_session_step_direct_call () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
@@ -969,20 +1111,20 @@ let test_execute_tool_hidden_deprecated_team_session_turn_direct_call () =
 
   let (ok_turn, turn_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_team_session_turn"
+      ~name:"masc_team_session_step"
       ~arguments:
         (`Assoc
           [
             ("session_id", `String session_id);
             ("turn_kind", `String "note");
-            ("message", `String "legacy direct-call still works");
+            ("message", `String "canonical direct-call works");
           ])
   in
-  Alcotest.(check bool) "hidden deprecated turn still callable" true ok_turn;
+  Alcotest.(check bool) "canonical step direct-call works" true ok_turn;
   let turn_json = extract_json_from_text turn_msg in
-  Alcotest.(check string) "legacy turn kind" "note"
+  Alcotest.(check string) "step turn kind" "note"
     Yojson.Safe.Util.(
-      turn_json |> member "result" |> member "kind" |> to_string);
+      turn_json |> member "result" |> member "turn" |> member "kind" |> to_string);
 
   cleanup_dir base_path
 
@@ -1262,7 +1404,7 @@ let test_handle_request_tools_call_trpg () =
     ("id", `Int 9);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "trpg.dice.roll");
+      ("name", `String "masc_trpg_dice_roll");
       ("arguments", `Assoc [
         ("room_id", `String "room-mcp-call");
         ("actor_id", `String "pc-1");
@@ -1413,8 +1555,8 @@ let test_handle_request_tools_list_rejects_invalid_tier () =
   in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check bool) "unsupported field error" true
-    (contains_substring (error_message_exn response) "unsupported field");
+  Alcotest.(check bool) "invalid tier error" true
+    (contains_substring (error_message_exn response) "tier must be one of");
   cleanup_dir base_path
 
 let test_handle_request_resources_list_rejects_unknown_field () =
@@ -1977,8 +2119,6 @@ let response_tests = [
 
 let eio_tests = [
   "handle initialize", `Quick, test_handle_request_initialize;
-  "handle initialize rejects unsupported protocol version", `Quick,
-    test_handle_request_initialize_rejects_unsupported_protocol_version;
   "handle initialize operator profile", `Quick,
     test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;
@@ -2011,6 +2151,10 @@ let eio_tests = [
     test_handle_request_tools_list_mdal_descriptions;
   "handle tools/list filters requested names", `Quick,
     test_handle_request_tools_list_rejects_nonstandard_names_filter;
+  "handle initialize managed profile", `Quick,
+    test_handle_request_initialize_managed_profile;
+  "handle tools/list managed profile", `Quick,
+    test_handle_request_tools_list_managed_profile;
   "handle tools/list operator profile", `Quick,
     test_handle_request_tools_list_operator_profile;
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
@@ -2026,14 +2170,17 @@ let eio_tests = [
     test_handle_request_jsonrpc_response_returns_null;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
+  "handle tools/call managed profile sdk alias claim", `Quick,
+    test_handle_request_tools_call_managed_profile_sdk_alias_claim;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   "handle tools/call trpg", `Quick, test_handle_request_tools_call_trpg;
   "mode gate", `Quick, test_execute_tool_mode_gate;
+  "coding mode allows governance status", `Quick, test_execute_tool_coding_mode_allows_governance_status;
   "hidden active utility direct call", `Quick,
     test_execute_tool_hidden_active_utility_direct_call;
-  "hidden deprecated team_session_turn direct call", `Quick,
-    test_execute_tool_hidden_deprecated_team_session_turn_direct_call;
+  "canonical team_session_step direct call", `Quick,
+    test_execute_tool_team_session_step_direct_call;
   "execute trpg flow", `Quick, test_execute_tool_trpg_flow;
   "execute trpg validation", `Quick, test_execute_tool_trpg_validation;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;

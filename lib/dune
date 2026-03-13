@@ -8,6 +8,7 @@
    agent_ecosystem
    agent_health
    agent_identity
+   agent_tool_surfaces
    agent_neo4j
    agent_registry_eio
    auto_recall
@@ -17,6 +18,7 @@
    board_pg
    board_dispatch
    board_listener
+   capability_registry
    error
    backend
    backend_eio

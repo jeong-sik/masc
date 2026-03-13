@@ -63,13 +63,13 @@ let () = test "dispatch_tasks" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test dispatch claim *)
-let () = test "dispatch_claim" (fun () ->
+(* Test dispatch transition claim *)
+let () = test "dispatch_transition_claim" (fun () ->
   let ctx = make_test_ctx () in
   (* First add a task *)
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim test")]) in
-  let args = `Assoc [("task_id", `String "task-001")] in
-  match Tool_task.dispatch ctx ~name:"masc_claim" ~args with
+  let args = `Assoc [("task_id", `String "task-001"); ("action", `String "claim")] in
+  match Tool_task.dispatch ctx ~name:"masc_transition" ~args with
   | Some (_success, _result) -> () (* May fail if task doesn't exist *)
   | None -> failwith "dispatch returned None"
 )
@@ -131,11 +131,11 @@ let () = test "handle_done_cancelled_guidance" (fun () ->
   assert (str_contains result "was cancelled by test-agent")
 )
 
-(* Test dispatch release *)
-let () = test "dispatch_release" (fun () ->
+(* Test dispatch transition release *)
+let () = test "dispatch_transition_release" (fun () ->
   let ctx = make_test_ctx () in
-  let args = `Assoc [("task_id", `String "task-001")] in
-  match Tool_task.dispatch ctx ~name:"masc_release" ~args with
+  let args = `Assoc [("task_id", `String "task-001"); ("action", `String "release")] in
+  match Tool_task.dispatch ctx ~name:"masc_transition" ~args with
   | Some (_success, _result) -> ()
   | None -> failwith "dispatch returned None"
 )

@@ -7,7 +7,6 @@ open Tool_command_plane_mutations
 let dispatch (ctx : (_, _) context) ~name ~args : result option =
   match name with
   | "masc_unit_define" -> Some (handle_unit_define ctx args)
-  | "masc_unit_update" -> Some (handle_unit_update ctx args)
   | "masc_unit_list" -> Some (handle_unit_list ctx)
   | "masc_unit_reparent" -> Some (handle_unit_reparent ctx args)
   | "masc_unit_reassign" -> Some (handle_unit_reassign ctx args)

@@ -121,6 +121,7 @@ let make_extended_handler routes =
       let path = Http.Request.path request in
       let is_mcp_like =
         String.equal path "/mcp"
+        || String.equal path "/mcp/managed"
         || String.equal path "/mcp/operator"
         || String.equal path "/sse"
         || String.equal path "/messages"
@@ -151,6 +152,8 @@ let make_extended_handler routes =
         match request.meth, path with
         | `OPTIONS, _ -> options_handler request reqd
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
+        | `DELETE, "/mcp/managed" ->
+            handle_delete_mcp ~profile:Mcp_eio.Managed_agent request reqd
         | `DELETE, "/mcp/operator" ->
             handle_delete_mcp ~profile:Mcp_eio.Operator_remote request reqd
         | `GET, "/api/v1/board/flairs" ->

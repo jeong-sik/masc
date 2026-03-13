@@ -106,7 +106,7 @@ let test_masc_mcp_tools () =
   Alcotest.(check bool) "tools list not empty" true (List.length Spawn.masc_mcp_tools > 0);
   Alcotest.(check bool) "contains masc_status" true
     (List.mem "mcp__masc__masc_status" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains masc_claim" true
+  Alcotest.(check bool) "omits masc_claim" false
     (List.mem "mcp__masc__masc_claim" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits team_session_turn" false
     (List.mem "mcp__masc__masc_team_session_turn" Spawn.masc_mcp_tools);

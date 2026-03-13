@@ -2302,7 +2302,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_team_session_report" -> Some (handle_report ctx args)
   | "masc_team_session_list" -> Some (handle_list ctx args)
   | "masc_team_session_compare" -> Some (handle_compare ctx args)
-  | "masc_team_session_turn" -> Some (handle_turn ctx args)
   | "masc_team_session_events" -> Some (handle_events ctx args)
   | "masc_team_session_prove" -> Some (handle_prove ctx args)
   | _ -> None
@@ -2845,41 +2844,6 @@ let schemas : tool_schema list =
                   ("target_session_id", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "base_session_id"; `String "target_session_id" ]);
-          ];
-    };
-    {
-      name = "masc_team_session_turn";
-      description =
-        "Legacy compatibility entrypoint for plain team-session turn recording only; use masc_team_session_step for all new team-session writes.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("session_id", `Assoc [ ("type", `String "string") ]);
-                  ( "turn_kind",
-                    `Assoc
-                      [
-                        ("type", `String "string");
-                        ( "enum",
-                          `List
-                            [
-                              `String "note";
-                              `String "broadcast";
-                              `String "portal";
-                              `String "task";
-                              `String "checkpoint";
-                            ] );
-                      ] );
-                  ("message", `Assoc [ ("type", `String "string") ]);
-                  ("target_agent", `Assoc [ ("type", `String "string") ]);
-                  ("task_title", `Assoc [ ("type", `String "string") ]);
-                  ("task_description", `Assoc [ ("type", `String "string") ]);
-                  ("task_priority", `Assoc [ ("type", `String "integer") ]);
-                ] );
-            ("required", `List [ `String "session_id" ]);
           ];
     };
     {

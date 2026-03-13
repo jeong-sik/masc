@@ -15,6 +15,7 @@ type server_state = Mcp_server.server_state
 type jsonrpc_request = Mcp_server.jsonrpc_request
 type tool_profile =
   | Full
+  | Managed_agent
   | Operator_remote
 
 (** {1 Network Context for LLM Chain Calls} *)
@@ -669,10 +670,9 @@ let read_only_tools =
 (** Tools that require agent to be joined first.
     Extracted to module level for Tool_dispatch Hashtbl initialization. *)
 let requires_join_tools = [
-  "masc_claim"; "masc_claim_next"; "masc_done"; "masc_transition";
+  "masc_claim_next"; "masc_transition";
   "masc_broadcast"; "masc_add_task"; "masc_batch_add_tasks";
   "masc_worktree_create"; "masc_worktree_remove";
-  "masc_release"; "masc_cancel_task";
   "masc_vote_create"; "masc_vote_cast"; "masc_interrupt"; "masc_approve"; "masc_reject";
   "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
   "masc_deliver"; "masc_note_add"; "masc_error_add"; "masc_error_resolve";
@@ -680,7 +680,7 @@ let requires_join_tools = [
   "masc_goal_upsert"; "masc_goal_snapshot"; "masc_goal_refresh";
   "masc_goal_dispatch"; "masc_goal_review";
   "masc_team_session_start"; "masc_team_session_stop";
-  "masc_team_session_turn"; "masc_operator_action";
+  "masc_operator_action";
   "masc_operator_confirm";
 ]
 
@@ -3085,10 +3085,40 @@ let maybe_emit_resource_notifications ~success ~tool_name =
 let () = Chain_native_eio.set_tool_executor execute_tool_eio
 
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
-let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params =
+let resolve_managed_agent_call ?mcp_session_id params =
   let module U = Yojson.Safe.Util in
-  let name = params |> U.member "name" |> U.to_string in
+  let requested_name = params |> U.member "name" |> U.to_string in
   let arguments = params |> U.member "arguments" in
+  match Agent_swarm_contract.sdk_binding_by_name requested_name with
+  | None -> Ok (requested_name, arguments)
+  | Some binding ->
+      let identity =
+        Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
+      in
+      (match
+         Agent_swarm_contract.build_operation_arguments
+           ~agent_name:identity.Agent_identity.agent_name binding arguments
+       with
+      | Ok translated_arguments ->
+          Ok
+            ( binding.Agent_swarm_contract.canonical_operation,
+              translated_arguments )
+      | Error msg -> Error msg)
+
+let handle_call_tool_eio ~sw ~clock ?(profile = Full) ?mcp_session_id ?auth_token state id params =
+  let module U = Yojson.Safe.Util in
+  let (name, arguments) =
+    match profile with
+    | Managed_agent -> (
+        match resolve_managed_agent_call ?mcp_session_id params with
+        | Ok resolved -> resolved
+        | Error msg ->
+            raise
+              (Invalid_argument
+                 ("managed agent tool translation failed: " ^ msg)))
+    | Full | Operator_remote ->
+        (params |> U.member "name" |> U.to_string, params |> U.member "arguments")
+  in
   let is_read_only = Tool_dispatch.is_read_only name in
 
   (* Measure execution time for telemetry *)
@@ -3135,7 +3165,7 @@ let execute_with_timeout () =
   if !local_timeout_hit then timeout_hit := true;
   result
 in
-    let (success, message, _attempts) =
+    let (success, message, attempts) =
     if is_read_only then
     call_tool_with_readonly_retry
       ~clock
@@ -3176,6 +3206,30 @@ in
   (* Track in-memory call counter only for declared tool names. *)
   Tool_registry.record_call_if_known ~tool_name:name ~success ~duration_ms;
 
+  let trace_id =
+    match id with
+    | `String s -> s
+    | `Int i -> string_of_int i
+    | `Intlit s -> s
+    | `Float f -> Printf.sprintf "%0.0f" f
+    | _ -> "unknown"
+  in
+  let (status, required_follow_up) = parse_status_from_message ~success ~message in
+  let quality = quality_from_result ~success ~message ~attempts in
+  let envelope =
+    `Assoc [
+      ("kind", `String "tool_call");
+      ("summary", `String message);
+      ("status", `String status);
+      ("tool", `String name);
+      ("required_follow_up",
+       (match required_follow_up with
+        | None -> `Null
+        | Some value -> `String value));
+      ("trace_id", `String trace_id);
+      ("quality", quality);
+    ]
+  in
   let content_items =
     [
       `Assoc
@@ -3195,6 +3249,7 @@ in
   in
   let result_fields =
     [
+      ("resultEnvelope", envelope);
       ("content", `List content_items);
       ("isError", `Bool (not success));
     ]
@@ -3231,6 +3286,35 @@ Use masc_operator_action for guided actions only. \
 When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
 Do not assume access to any other MASC tool from this endpoint."
 
+let managed_agent_instructions =
+  "MASC managed-agent profile exposes the internal agent control surface. \
+Prefer SDK-style task and room aliases such as masc_room_status, masc_list_tasks, masc_claim_task, masc_set_current_task, masc_complete_task, masc_release_task, masc_cancel_task, masc_send_direct, masc_add_task, masc_batch_add_tasks, masc_broadcast, and masc_heartbeat. \
+Use canonical passthrough tools only when no managed alias exists on this endpoint. \
+Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
+
+let managed_agent_passthrough_tool_names =
+  Agent_tool_surfaces.spawned_agent_public_tool_names
+  |> List.filter (fun name ->
+         not
+           (List.mem name
+             [
+                "masc_status";
+                "masc_tasks";
+                "masc_transition";
+                "masc_a2a_delegate";
+              ]))
+
+let dedupe_tool_schemas_by_name (schemas : Types.tool_schema list) =
+  let seen = Hashtbl.create (List.length schemas) in
+  List.filter
+    (fun (schema : Types.tool_schema) ->
+      if Hashtbl.mem seen schema.name then
+        false
+      else (
+        Hashtbl.add seen schema.name ();
+        true))
+    schemas
+
 let default_instructions =
   "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
 ROOM: Agents sharing the same base path (.masc/ folder) or PostgreSQL cluster coordinate together. \
@@ -3260,11 +3344,23 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
             config.Config.enabled_categories
       in
       Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
+  | Managed_agent ->
+      let passthrough =
+        Config.visible_tool_schemas ~include_hidden ~include_deprecated ()
+        |> List.filter (fun (schema : Types.tool_schema) ->
+               List.mem schema.name managed_agent_passthrough_tool_names)
+      in
+      dedupe_tool_schemas_by_name
+        (Agent_swarm_contract.sdk_tool_schemas @ passthrough)
   | Operator_remote -> Tool_operator.remote_schemas
 
-let tool_allowed_in_profile profile tool_name =
+let tool_allowed_in_profile state profile tool_name =
   match profile with
-  | Full -> Tool_catalog.is_default_mcp_callable tool_name
+  | Full -> true
+  | Managed_agent ->
+      tool_schemas_for_profile state Managed_agent
+      |> List.exists (fun (schema : Types.tool_schema) ->
+             String.equal schema.name tool_name)
   | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
 
 let is_destructive_tool_name name =
@@ -3380,7 +3476,7 @@ let tool_output_schema_field = function
            ])
   | _ -> None
 
-let tool_json_for_profile ?usage_summary:_ profile (schema : Types.tool_schema) =
+let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
   let base =
     [
       ("name", `String schema.name);
@@ -3391,12 +3487,27 @@ let tool_json_for_profile ?usage_summary:_ profile (schema : Types.tool_schema) 
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
     ]
+    @ Tool_catalog.metadata_to_fields schema.name
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
+    @
+    match usage_summary with
+    | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
+    | None -> []
   in
   `Assoc base
 
 type cursor_params = { cursor : string option }
+
+type tools_list_params = {
+  names : string list option;
+  include_hidden : bool;
+  include_deprecated : bool;
+  include_usage : bool;
+  mode : string option;
+  tier : string option;
+  cursor : string option;
+}
 
 let ( let* ) = Result.bind
 
@@ -3417,6 +3528,13 @@ let cursor_param payload =
       else
         Ok (Some trimmed)
   | _ -> Error "Invalid params: cursor must be a string"
+
+let bool_param payload key =
+  let open Yojson.Safe.Util in
+  match payload |> member key with
+  | `Null -> Ok false
+  | `Bool value -> Ok value
+  | _ -> Error (Printf.sprintf "Invalid params: %s must be a boolean" key)
 
 let decode_cursor_offset = function
   | None -> Ok 0
@@ -3461,12 +3579,90 @@ let cursor_only_params params =
   | Some (`Assoc _ as payload) -> cursor_param payload
   | Some _ -> Error "Invalid params: expected object"
 
+let requested_tool_list_params params =
+  let open Yojson.Safe.Util in
+  match params with
+  | None ->
+      Ok {
+        names = None;
+        include_hidden = false;
+        include_deprecated = false;
+        include_usage = false;
+        mode = None;
+        tier = None;
+        cursor = None;
+      }
+  | Some (`Assoc _ as payload) -> (
+      let names_result =
+        match payload |> member "names" with
+        | `Null -> Ok None
+        | `List items ->
+            items
+            |> List.fold_left
+                 (fun acc item ->
+                   match (acc, item) with
+                   | Error _ as err, _ -> err
+                   | Ok names, `String value -> Ok (value :: names)
+                   | Ok _, _ ->
+                       Error "Invalid params: names must be an array of strings")
+                 (Ok [])
+            |> Result.map (fun names -> Some (List.rev names))
+        | _ -> Error "Invalid params: names must be an array of strings"
+      in
+      let mode_result =
+        match payload |> member "mode" with
+        | `Null -> Ok None
+        | `String s -> Ok (Some s)
+        | _ -> Error "Invalid params: mode must be a string"
+      in
+      let tier_result =
+        match payload |> member "tier" with
+        | `Null -> Ok None
+        | `String s -> (
+            match Tool_catalog.tier_of_string (String.lowercase_ascii s) with
+            | Some _ -> Ok (Some s)
+            | None -> Error "Invalid params: tier must be one of: essential, standard, full")
+        | _ -> Error "Invalid params: tier must be a string"
+      in
+      match names_result with
+      | Error _ as err -> err
+      | Ok names -> (
+          match cursor_param payload with
+          | Error _ as err -> err
+          | Ok cursor -> (
+          match mode_result with
+          | Error _ as err -> err
+          | Ok mode -> (
+          match tier_result with
+          | Error _ as err -> err
+          | Ok tier -> (
+          match bool_param payload "include_hidden" with
+          | Error _ as err -> err
+          | Ok include_hidden -> (
+              match bool_param payload "include_deprecated" with
+              | Error _ as err -> err
+              | Ok include_deprecated -> (
+                  match bool_param payload "include_usage" with
+                  | Error _ as err -> err
+                  | Ok include_usage ->
+                      Ok {
+                        names;
+                        include_hidden;
+                        include_deprecated;
+                        include_usage;
+                        mode;
+                        tier;
+                        cursor;
+                      })))))))
+  | Some _ -> Error "Invalid params: expected object"
+
 let validate_optional_meta payload =
   match Yojson.Safe.Util.member "_meta" payload with
   | `Null
   | `Assoc _ -> Ok ()
   | _ -> Error "Invalid params: _meta must be an object"
 let parse_cursor_only_params params =
+  let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
   let allowed = [ "_meta"; "cursor" ] in
   let unknown =
@@ -3481,9 +3677,10 @@ let parse_cursor_only_params params =
   else
     let payload = `Assoc fields in
     let* () = validate_optional_meta payload in
-    match cursor_param payload with
-    | Ok cursor -> Ok { cursor }
-    | Error msg -> Error msg
+    match payload |> member "cursor" with
+    | `Null -> Ok { cursor = None }
+    | `String cursor -> Ok { cursor = Some cursor }
+    | _ -> Error "Invalid params: cursor must be a string"
 
 let list_page_size = 128
 
@@ -3537,21 +3734,49 @@ let page_items_with_cursor ~kind items cursor =
 let handle_initialize_eio ?(profile = Full) id params =
   match validate_initialize_params params with
   | Error msg -> make_error ~id (-32602) msg
-  | Ok () -> (
-      let protocol_version = params |> protocol_version_from_params in
-      match Mcp_server.validate_protocol_version protocol_version with
-      | Error msg -> make_error ~id (-32602) msg
-      | Ok protocol_version ->
-          make_response ~id (`Assoc [
-            ("protocolVersion", `String protocol_version);
-            ("serverInfo", Mcp_server.server_info);
-            ("capabilities", Mcp_server.capabilities);
-            ("instructions", `String (match profile with Full -> default_instructions | Operator_remote -> operator_remote_instructions));
-          ]))
+  | Ok () ->
+      let protocol_version =
+        params |> protocol_version_from_params |> normalize_protocol_version
+      in
+      make_response ~id (`Assoc [
+        ("protocolVersion", `String protocol_version);
+        ("serverInfo", Mcp_server.server_info);
+        ("capabilities", Mcp_server.capabilities);
+        ( "instructions",
+          `String
+            (match profile with
+            | Full -> default_instructions
+            | Managed_agent -> managed_agent_instructions
+            | Operator_remote -> operator_remote_instructions) );
+      ])
 
-let handle_list_tools_eio ?(profile = Full) ?cursor state id =
+let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
+    ?(include_deprecated = false) ?(include_usage = false) ?mode ?tier ?cursor
+    state id =
+  let usage_summary =
+    if include_usage then
+      Some (Telemetry_eio.summarize_tool_usage ?fs:state.Mcp_server.fs state.Mcp_server.room_config)
+    else
+      None
+  in
+  let tier_filter =
+    match tier with
+    | None -> None
+    | Some s -> Tool_catalog.tier_of_string (String.lowercase_ascii s)
+  in
   let tools =
-    tool_schemas_for_profile state profile
+    tool_schemas_for_profile ~include_hidden ~include_deprecated
+      ?mode_override:mode state profile
+    |> (match names with
+       | None -> Fun.id
+       | Some wanted ->
+           List.filter (fun (schema : Types.tool_schema) ->
+             List.mem schema.name wanted))
+    |> (match tier_filter with
+       | None -> Fun.id
+       | Some t ->
+           List.filter (fun (schema : Types.tool_schema) ->
+             Tool_catalog.is_in_tier t schema.name))
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
            String.compare a.name b.name)
   in
@@ -3561,13 +3786,23 @@ let handle_list_tools_eio ?(profile = Full) ?cursor state id =
       let result_fields =
         [
           ( "tools",
-            `List (List.map (tool_json_for_profile profile) page) );
+            `List
+              (List.map (tool_json_for_profile ?usage_summary profile) page) );
         ]
         @ maybe_assoc_field "nextCursor"
             (Option.map (fun value -> `String value) next_cursor)
       in
       let result_fields =
         result_fields
+        @
+        match usage_summary with
+        | Some summary ->
+            [
+              ("usageTelemetryAvailable", `Bool summary.telemetry_available);
+              ("usageTelemetryPath", `String summary.telemetry_path);
+              ("usageTotalCalls", `Int summary.total_calls);
+            ]
+        | None -> []
       in
       make_response ~id (`Assoc result_fields)
 
@@ -3755,16 +3990,18 @@ let handle_request
                        | Ok { cursor } -> handle_list_prompts_eio id cursor)
                    | "prompts/get" -> handle_get_prompt_eio state id req.params
                    | "tools/list" -> (
-                       match parse_cursor_only_params req.params with
+                       match requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { cursor } ->
-                           handle_list_tools_eio ~profile ?cursor state id)
+                       | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier; cursor } ->
+                           handle_list_tools_eio ~profile ?names ~include_hidden
+                             ~include_deprecated ~include_usage ?mode ?tier ?cursor
+                             state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->
                            (try
                              let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
-                             if not (tool_allowed_in_profile profile name) then
+                             if not (tool_allowed_in_profile state profile name) then
                                make_error ~id (-32601)
                                  (Printf.sprintf
                                     "Tool '%s' is not available on this MCP endpoint."
@@ -3774,7 +4011,7 @@ let handle_request
                                  (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")
                                  (match mcp_session_id with Some s -> s | None -> "none");
                                let result =
-                                 handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params
+                                 handle_call_tool_eio ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params
                                in
                                Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
                                result)

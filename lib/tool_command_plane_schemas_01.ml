@@ -27,24 +27,6 @@ let schemas : tool_schema list = [
       input_schema = object_schema [];
     };
     {
-      name = "masc_unit_update";
-      description =
-        "Alias for masc_unit_define. Create or update a managed unit with explicit policy and budget envelope.";
-      input_schema =
-        object_schema ~required:[ "unit_id"; "kind"; "label" ]
-          [
-            ("unit_id", string_prop "Stable unit identifier.");
-            ("label", string_prop "Human-readable unit label.");
-            ("kind", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "company"; `String "platoon"; `String "squad"; `String "agent" ]) ]);
-            ("parent_unit_id", string_prop "Parent unit id.");
-            ("leader_id", string_prop "Leader agent id.");
-            ("roster", string_array_prop "Explicit roster for this unit.");
-            ("capability_profile", string_array_prop "Capability labels.");
-            ("policy", `Assoc [ ("type", `String "object") ]);
-            ("budget", `Assoc [ ("type", `String "object") ]);
-          ];
-    };
-    {
       name = "masc_unit_reparent";
       description =
         "Move a unit under a new parent unit while preserving its policy and budget envelopes.";

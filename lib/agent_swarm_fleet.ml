@@ -90,7 +90,7 @@ let run_member ~sw ~net ~clock ~proc_mgr ~masc_url member ~goal =
       config ~goal
 
 let run ~sw ~net ~clock ~proc_mgr config ~goal =
-  let leader = Agent_swarm_client.create ~base_url:config.masc_url
+  let leader = Agent_swarm_client.create_managed ~base_url:config.masc_url
     ~agent_name:config.leader_name ~net in
   let _joined = Agent_swarm_client.join ~sw leader in
   Fun.protect ~finally:(fun () ->
@@ -132,7 +132,7 @@ let run_full ~sw ~net ~clock ~proc_mgr ~masc_url ~provider
     ~goal ~num_members ?workdir ~max_turns () =
   if num_members <= 0 then invalid_arg "num_members must be positive";
   let coordinator =
-    Agent_swarm_client.create ~net ~base_url:masc_url
+    Agent_swarm_client.create_managed ~net ~base_url:masc_url
       ~agent_name:"fleet-coordinator"
   in
   let _joined = Agent_swarm_client.join ~sw coordinator in

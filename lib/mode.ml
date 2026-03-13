@@ -134,9 +134,8 @@ let tool_category tool_name =
   (* ── Core: room, tasks, run pipeline, team session, CPv2 orchestration ── *)
   | "masc_set_room" | "masc_init" | "masc_join" | "masc_leave"
   | "masc_status" | "masc_add_task" | "masc_batch_add_tasks"
-  | "masc_claim" | "masc_done" | "masc_cancel_task"
   | "masc_tasks" | "masc_archive_view" | "masc_claim_next"
-  | "masc_update_priority" | "masc_transition" | "masc_release"
+  | "masc_update_priority" | "masc_transition"
   | "masc_task_history" | "masc_dashboard"
   (* Run pipeline *)
   | "masc_run_init" | "masc_run_plan" | "masc_run_log"
@@ -146,15 +145,15 @@ let tool_category tool_name =
   | "masc_team_session_status" | "masc_team_session_finalize"
   | "masc_team_session_stop" | "masc_team_session_report"
   | "masc_team_session_list" | "masc_team_session_compare"
-  | "masc_team_session_turn" | "masc_team_session_events"
+  | "masc_team_session_events"
   | "masc_team_session_prove"
   | "masc_autoresearch_swarm_start"
   (* LLM runtime *)
   | "masc_llama_models" | "masc_llama_runtime_status"
-  | "masc_runtime_verify" | "masc_llama_runtime_verify"
+  | "masc_runtime_verify"
   | "masc_llama_runtime_bench"
   (* Units *)
-  | "masc_unit_define" | "masc_unit_update" | "masc_unit_list"
+  | "masc_unit_define" | "masc_unit_list"
   | "masc_unit_reparent" | "masc_unit_reassign"
   (* Operations *)
   | "masc_operation_start" | "masc_operation_status"

@@ -367,11 +367,7 @@ let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_add_task" -> Some (handle_add_task ctx args)
   | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ctx args)
-  | "masc_claim" -> Some (handle_claim ctx args)
   | "masc_claim_next" -> Some (handle_claim_next ctx args)
-  | "masc_release" -> Some (handle_release ctx args)
-  | "masc_done" -> Some (handle_done ctx args)
-  | "masc_cancel_task" -> Some (handle_cancel_task ctx args)
   | "masc_transition" -> Some (handle_transition ctx args)
   | "masc_update_priority" -> Some (handle_update_priority ctx args)
   | "masc_tasks" -> Some (handle_tasks ctx args)

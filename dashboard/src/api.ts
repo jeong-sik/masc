@@ -31,8 +31,11 @@ import type {
   CouncilDebateSummary,
   CouncilSession,
   CouncilSessionSummary,
+  GovernanceCaseBrief,
+  GovernanceCaseBundle,
   GovernanceContextRef,
   GovernanceDecisionItem,
+  GovernanceExecutionOrder,
   GovernanceExecutedRoute,
   GovernanceGuardrailState,
   GovernanceJudgeSummary,
@@ -55,11 +58,6 @@ import type {
   CommandPlaneOrchestraResponse,
   CommandPlaneSummarySnapshot,
 } from './types'
-import {
-  normalizePendingConfirmation,
-  normalizePendingConfirmEnvelope,
-  normalizePendingConfirmSummary,
-} from './pending-confirm'
 
 // --- Auth ---
 
@@ -570,31 +568,16 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
           .map(item => normalizePendingConfirmation(item))
           .filter((item): item is PendingConfirmation => item !== null)
       : []
-    const debates = items
-      .filter(item => item.kind === 'debate')
-      .map(item => ({
-        id: item.id,
-        topic: item.topic,
-        status: item.status,
-        argument_count: item.evidence_refs.length,
-        created_at: item.last_activity_at ?? undefined,
-      }))
-    const sessions = items
-      .filter(item => item.kind === 'consensus')
-      .map(item => ({
-        id: item.id,
-        topic: item.topic,
-        initiator: item.related_agents[0] || 'system',
-        votes: item.votes ?? 0,
-        quorum: item.quorum ?? 0,
-        threshold: item.threshold,
-        state: item.status,
-        created_at: item.last_activity_at ?? undefined,
-      }))
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
       summary: isRecord(raw.summary)
         ? {
+            cases_open: asInt(raw.summary.cases_open) ?? undefined,
+            pending_ruling: asInt(raw.summary.pending_ruling) ?? undefined,
+            ready_auto_execute: asInt(raw.summary.ready_auto_execute) ?? undefined,
+            needs_human_gate: asInt(raw.summary.needs_human_gate) ?? undefined,
+            executed: asInt(raw.summary.executed) ?? undefined,
+            blocked: asInt(raw.summary.blocked) ?? undefined,
             debates: asInt(raw.summary.debates) ?? undefined,
             voting_sessions: asInt(raw.summary.voting_sessions) ?? undefined,
             debates_open: asInt(raw.summary.debates_open) ?? undefined,
@@ -616,8 +599,6 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
             judge_last_seen_at: asNullableIsoTimestamp(raw.summary.judge_last_seen_at),
           }
         : undefined,
-      debates,
-      sessions,
       items,
       activity: Array.isArray(raw.activity)
         ? raw.activity
@@ -626,8 +607,6 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
         : [],
       judge: normalizeGovernanceJudgeSummary(raw.judge),
       pending_actions: pendingActions,
-      pending_confirm_summary: normalizePendingConfirmSummary(raw.pending_confirm_summary),
-      pending_confirm_envelope: normalizePendingConfirmEnvelope(raw.pending_confirm_envelope),
     }
   })
 }
@@ -916,6 +895,22 @@ function asNullableString(value: unknown): string | null {
   return trimmed ? trimmed : null
 }
 
+function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
+  if (!isRecord(raw)) return null
+  const confirmToken = asString(raw.confirm_token ?? raw.token, '').trim()
+  if (!confirmToken) return null
+  return {
+    confirm_token: confirmToken,
+    actor: asNullableString(raw.actor) ?? undefined,
+    action_type: asNullableString(raw.action_type) ?? undefined,
+    target_type: asNullableString(raw.target_type) ?? undefined,
+    target_id: asNullableString(raw.target_id),
+    delegated_tool: asNullableString(raw.delegated_tool) ?? undefined,
+    created_at: asNullableIsoTimestamp(raw.created_at) ?? undefined,
+    preview: raw.preview,
+  }
+}
+
 function normalizeGovernanceContextRef(raw: unknown): GovernanceContextRef {
   if (!isRecord(raw)) return {}
   return {
@@ -1000,14 +995,21 @@ function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | null {
 function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisionItem | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
-  const topic = asString(raw.topic, '').trim()
+  const topic = asString(raw.topic ?? raw.title, '').trim()
   if (!id || !topic) return null
   const context = normalizeGovernanceContextRef(raw.context)
   return {
-    kind: asString(raw.kind, 'debate'),
+    kind: asString(raw.kind, 'case'),
     id,
     topic,
     status: asString(raw.status ?? raw.state, 'open'),
+    origin: asNullableString(raw.origin),
+    subject_type: asNullableString(raw.subject_type),
+    risk_class: asNullableString(raw.risk_class),
+    provenance: asNullableString(raw.provenance),
+    auto_execution_state: asNullableString(raw.auto_execution_state),
+    petition_count: asInt(raw.petition_count),
+    brief_count: asInt(raw.brief_count),
     last_activity_at: asNullableIsoTimestamp(raw.last_activity_at),
     truth_summary: asNullableString(raw.truth_summary) ?? undefined,
     judgment_summary: asNullableString(raw.judgment_summary),
@@ -1022,12 +1024,90 @@ function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisionItem |
     executed_route: normalizeGovernanceExecutedRoute(raw.executed_route),
     guardrail_state: normalizeGovernanceGuardrailState(raw.guardrail_state),
     evidence_refs: asStringList(raw.evidence_refs),
-    approve_count: asInt(raw.approve_count),
-    reject_count: asInt(raw.reject_count),
-    abstain_count: asInt(raw.abstain_count),
-    votes: asInt(raw.votes),
-    quorum: asInt(raw.quorum),
-    threshold: typeof raw.threshold === 'number' ? raw.threshold : undefined,
+  }
+}
+
+function normalizeGovernanceCaseBrief(raw: unknown): GovernanceCaseBrief | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const author = asString(raw.author, '').trim()
+  const summary = asString(raw.summary, '').trim()
+  if (!id || !author || !summary) return null
+  return {
+    id,
+    author,
+    stance: asString(raw.stance, 'support'),
+    summary,
+    evidence_refs: asStringList(raw.evidence_refs),
+    created_at: asNullableIsoTimestamp(raw.created_at),
+  }
+}
+
+function normalizeGovernanceExecutionOrder(raw: unknown): GovernanceExecutionOrder | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const caseId = asString(raw.case_id, '').trim()
+  if (!id || !caseId) return null
+  return {
+    id,
+    case_id: caseId,
+    status: asString(raw.status, 'blocked'),
+    risk_class: asNullableString(raw.risk_class),
+    action_request: normalizeGovernanceResolvedAction(raw.action_request),
+    created_at: asNullableIsoTimestamp(raw.created_at),
+    updated_at: asNullableIsoTimestamp(raw.updated_at),
+    execution_ref: asNullableString(raw.execution_ref),
+    result_summary: asNullableString(raw.result_summary),
+    actor: asNullableString(raw.actor),
+  }
+}
+
+function normalizeGovernanceCaseBundle(raw: unknown): GovernanceCaseBundle | null {
+  if (!isRecord(raw) || !isRecord(raw.case)) return null
+  const caseRaw = raw.case
+  const id = asString(caseRaw.id, '').trim()
+  const title = asString(caseRaw.title, '').trim()
+  if (!id || !title) return null
+  return {
+    case: {
+      id,
+      petition_ids: asStringList(caseRaw.petition_ids),
+      title,
+      origin: asNullableString(caseRaw.origin),
+      subject_type: asNullableString(caseRaw.subject_type),
+      risk_class: asNullableString(caseRaw.risk_class),
+      status: asString(caseRaw.status, 'pending_ruling'),
+      created_at: asNullableIsoTimestamp(caseRaw.created_at),
+      updated_at: asNullableIsoTimestamp(caseRaw.updated_at),
+      source_refs: asStringList(caseRaw.source_refs),
+      briefs: Array.isArray(caseRaw.briefs)
+        ? caseRaw.briefs
+            .map(item => normalizeGovernanceCaseBrief(item))
+            .filter((item): item is GovernanceCaseBrief => item !== null)
+        : [],
+    },
+    petitions: Array.isArray(raw.petitions)
+      ? raw.petitions.flatMap(item => {
+          if (!isRecord(item)) return []
+          const petitionId = asString(item.id, '').trim()
+          const caseId = asString(item.case_id, '').trim()
+          const petitionTitle = asString(item.title, '').trim()
+          if (!petitionId || !caseId || !petitionTitle) return []
+          return [{
+            id: petitionId,
+            case_id: caseId,
+            title: petitionTitle,
+            origin: asNullableString(item.origin),
+            subject_type: asNullableString(item.subject_type),
+            risk_class: asNullableString(item.risk_class),
+            source_refs: asStringList(item.source_refs),
+            created_by: asNullableString(item.created_by),
+            created_at: asNullableIsoTimestamp(item.created_at),
+          }]
+        })
+      : [],
+    ruling: normalizeGovernanceJudgment(raw.ruling),
+    execution_order: normalizeGovernanceExecutionOrder(raw.execution_order),
   }
 }
 
@@ -2226,6 +2306,78 @@ export async function fetchTaskHistory(taskId: string, limit = 20): Promise<stri
     task_id: taskId,
     limit,
   })
+}
+
+export async function submitGovernancePetition(title: string): Promise<GovernanceCaseBundle | null> {
+  const text = await callMcpTool('masc_petition_submit', {
+    title,
+    origin: 'human',
+    subject_type: 'task',
+    risk_class: 'low',
+    requested_action: {
+      action_type: 'add_task',
+      payload: { title },
+    },
+  })
+  try {
+    const raw = JSON.parse(text) as Record<string, unknown>
+    const caseRaw = isRecord(raw.case) ? raw.case : null
+    const petitionRaw = isRecord(raw.petition) ? raw.petition : null
+    const rulingRaw = isRecord(raw.ruling) ? raw.ruling : null
+    if (!caseRaw || !petitionRaw) return null
+    return normalizeGovernanceCaseBundle({
+      case: caseRaw,
+      petitions: [petitionRaw],
+      ruling: rulingRaw,
+      execution_order: null,
+    })
+  } catch {
+    return null
+  }
+}
+
+export async function submitGovernanceCaseBrief(
+  caseId: string,
+  stance: 'support' | 'oppose' | 'neutral',
+  summary: string,
+): Promise<GovernanceCaseBundle | null> {
+  const text = await callMcpTool('masc_case_brief_submit', {
+    case_id: caseId,
+    stance,
+    summary,
+  })
+  try {
+    const raw = JSON.parse(text) as Record<string, unknown>
+    const existing = normalizeGovernanceCaseBundle(raw)
+    if (existing) return existing
+  } catch {
+    // Fall through to a full status fetch.
+  }
+  return fetchGovernanceCaseStatus(caseId)
+}
+
+export async function fetchGovernanceCaseStatus(caseId: string): Promise<GovernanceCaseBundle | null> {
+  const text = await callMcpTool('masc_case_status', { case_id: caseId })
+  try {
+    return normalizeGovernanceCaseBundle(JSON.parse(text) as Record<string, unknown>)
+  } catch {
+    return null
+  }
+}
+
+export async function decideGovernanceExecutionOrder(
+  caseId: string,
+  decision: 'confirm' | 'deny',
+): Promise<GovernanceExecutionOrder | null> {
+  const text = await callMcpTool('masc_execution_orders', {
+    case_id: caseId,
+    decision,
+  })
+  try {
+    return normalizeGovernanceExecutionOrder(JSON.parse(text) as Record<string, unknown>)
+  } catch {
+    return null
+  }
 }
 
 export async function fetchDebates(): Promise<CouncilDebate[]> {

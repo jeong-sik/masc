@@ -233,9 +233,10 @@ let standard_tools =
     "masc_team_session_status"; "masc_team_session_stop";
     "masc_team_session_list"; "masc_team_session_events";
     "masc_autoresearch_swarm_start";
-    (* Consensus *)
-    "masc_consensus_start"; "masc_consensus_vote";
-    "masc_consensus_result"; "masc_consensus_close";
+    (* Governance V2 *)
+    "masc_petition_submit"; "masc_case_brief_submit";
+    "masc_cases"; "masc_case_status";
+    "masc_ruling_status"; "masc_execution_orders";
     (* Decision *)
     "decision_create"; "decision_finalize"; "decision_status";
     (* Handover *)

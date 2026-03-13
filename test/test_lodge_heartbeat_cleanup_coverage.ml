@@ -59,7 +59,8 @@ let test_lodge_graphql_defaults_and_guards () =
     (file_contains_pattern "lib/lodge_heartbeat.ml" "Graphql_endpoint.graphql_url ()");
   check bool "tool_lodge GraphQL uses shared endpoint helper"
     true
-    (file_contains_pattern "lib/tool_lodge.ml" "Graphql_endpoint.graphql_url ()");
+    (file_contains_pattern "lib/tool_lodge_config_http.ml"
+       "Graphql_endpoint.graphql_url ()");
   check bool "shared helper normalizes Railway env"
     false
     (file_contains_pattern "lib/graphql_endpoint.ml" {|Sys.getenv_opt "MASC_HTTP_PORT"|});
@@ -75,20 +76,21 @@ let test_lodge_graphql_defaults_and_guards () =
     (file_contains_pattern "lib/lodge_heartbeat.ml" "endpoint returned HTML instead of JSON");
   check bool "HTML GraphQL guard present in tool_lodge"
     true
-    (file_contains_pattern "lib/tool_lodge.ml" "endpoint returned HTML instead of JSON");
+    (file_contains_pattern "lib/tool_lodge_config_http.ml"
+       "endpoint returned HTML instead of JSON");
   check bool "null agents guard present in heartbeat"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml" "GraphQL agents is null");
   check bool "null agents guard present in tool_lodge"
     true
-    (file_contains_pattern "lib/tool_lodge.ml" "GraphQL agents is null");
+    (file_contains_pattern "lib/tool_lodge_config_http.ml" "GraphQL agents is null");
   check bool "heartbeat has unix curl fallback"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml"
        "trying Unix curl fallback");
   check bool "tool_lodge has unix curl fallback"
     true
-    (file_contains_pattern "lib/tool_lodge.ml"
+    (file_contains_pattern "lib/tool_lodge_config_http.ml"
        "trying Unix curl fallback")
 
 let test_lodge_heartbeat_updates_self_summary () =

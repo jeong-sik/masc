@@ -632,6 +632,11 @@ export interface GovernanceGuardrailState {
   ready_to_execute?: boolean
 }
 
+export interface PendingConfirmEnvelope {
+  items: PendingConfirmation[]
+  summary: PendingConfirmSummary
+}
+
 export interface GovernanceJudgment {
   judgment_id?: string
   target_kind?: string
@@ -650,10 +655,17 @@ export interface GovernanceJudgment {
 }
 
 export interface GovernanceDecisionItem {
-  kind: 'debate' | 'consensus' | string
+  kind: 'case' | string
   id: string
   topic: string
   status: string
+  origin?: string | null
+  subject_type?: string | null
+  risk_class?: 'low' | 'high' | string | null
+  provenance?: string | null
+  auto_execution_state?: string | null
+  petition_count?: number
+  brief_count?: number
   last_activity_at?: string | null
   truth_summary?: string
   judgment_summary?: string | null
@@ -668,12 +680,59 @@ export interface GovernanceDecisionItem {
   executed_route?: GovernanceExecutedRoute | null
   guardrail_state?: GovernanceGuardrailState | null
   evidence_refs: string[]
-  approve_count?: number
-  reject_count?: number
-  abstain_count?: number
-  votes?: number
-  quorum?: number
-  threshold?: number
+}
+
+export interface GovernancePetition {
+  id: string
+  case_id: string
+  title: string
+  origin?: string | null
+  subject_type?: string | null
+  risk_class?: 'low' | 'high' | string | null
+  source_refs: string[]
+  created_by?: string | null
+  created_at?: string | null
+}
+
+export interface GovernanceCaseBrief {
+  id: string
+  author: string
+  stance: 'support' | 'oppose' | 'neutral' | string
+  summary: string
+  evidence_refs: string[]
+  created_at?: string | null
+}
+
+export interface GovernanceExecutionOrder {
+  id: string
+  case_id: string
+  status: 'queued_auto' | 'needs_human_gate' | 'auto_executed' | 'done' | 'denied' | 'blocked' | string
+  risk_class?: 'low' | 'high' | string | null
+  action_request?: GovernanceResolvedAction | null
+  created_at?: string | null
+  updated_at?: string | null
+  execution_ref?: string | null
+  result_summary?: string | null
+  actor?: string | null
+}
+
+export interface GovernanceCaseBundle {
+  case: {
+    id: string
+    petition_ids: string[]
+    title: string
+    origin?: string | null
+    subject_type?: string | null
+    risk_class?: 'low' | 'high' | string | null
+    status: string
+    created_at?: string | null
+    updated_at?: string | null
+    source_refs: string[]
+    briefs: GovernanceCaseBrief[]
+  }
+  petitions: GovernancePetition[]
+  ruling?: GovernanceJudgment | null
+  execution_order?: GovernanceExecutionOrder | null
 }
 
 export interface GovernanceTimelineEvent {
@@ -1180,6 +1239,12 @@ export interface DashboardMemoryResponse {
 export interface DashboardGovernanceResponse {
   generated_at?: string
   summary?: {
+    cases_open?: number
+    pending_ruling?: number
+    ready_auto_execute?: number
+    needs_human_gate?: number
+    executed?: number
+    blocked?: number
     debates?: number
     voting_sessions?: number
     debates_open?: number
@@ -1197,8 +1262,6 @@ export interface DashboardGovernanceResponse {
   activity?: GovernanceTimelineEvent[]
   judge?: GovernanceJudgeSummary
   pending_actions?: PendingConfirmation[]
-  pending_confirm_summary?: PendingConfirmSummary | null
-  pending_confirm_envelope?: PendingConfirmEnvelope | null
 }
 
 export interface DashboardPlanningResponse {
@@ -1648,11 +1711,6 @@ export interface PendingConfirmSummary {
   confirm_required_actions: OperatorActionDescriptor[]
 }
 
-export interface PendingConfirmEnvelope {
-  items: PendingConfirmation[]
-  summary: PendingConfirmSummary
-}
-
 export interface OperatorAttentionItem {
   kind: string
   severity: string
@@ -1806,7 +1864,7 @@ export interface OperatorSnapshot {
   swarm_status?: CommandPlaneSwarmStatus
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]
-  pending_confirm_envelope?: PendingConfirmEnvelope
+  pending_confirm_envelope?: PendingConfirmEnvelope | null
   pending_confirm_summary?: PendingConfirmSummary
   available_actions: OperatorActionDescriptor[]
 }

@@ -155,13 +155,6 @@ let test_coding_has_code_tools () =
   check bool "coding has masc_code_search" true (List.mem "masc_code_search" names);
   check bool "coding has masc_code_symbols" true (List.mem "masc_code_symbols" names)
 
-let test_coding_has_consensus_tools () =
-  let names = tool_names_for_mode Coding in
-  check bool "coding has masc_consensus_start" true
-    (List.mem "masc_consensus_start" names);
-  check bool "coding has masc_debate_start" true
-    (List.mem "masc_debate_start" names)
-
 let test_solo_lacks_comm_tools () =
   let names = tool_names_for_mode Solo in
   check bool "solo lacks masc_broadcast" true
@@ -169,12 +162,12 @@ let test_solo_lacks_comm_tools () =
   check bool "solo lacks masc_messages" true
     (not (List.mem "masc_messages" names))
 
-let test_parallel_has_consensus () =
+let test_parallel_has_governance () =
   let names = tool_names_for_mode Parallel in
-  check bool "parallel has masc_consensus_start" true
-    (List.mem "masc_consensus_start" names);
-  check bool "parallel has masc_debate_start" true
-    (List.mem "masc_debate_start" names)
+  check bool "parallel has masc_case_status" true
+    (List.mem "masc_case_status" names);
+  check bool "parallel has masc_cases" true
+    (List.mem "masc_cases" names)
 
 (* ============================================================
    Custom mode with empty categories
@@ -237,10 +230,8 @@ let () =
       test_case "minimal lacks board" `Quick test_minimal_lacks_board_tools;
       test_case "standard has board" `Quick test_standard_has_board_tools;
       test_case "coding has code tools" `Quick test_coding_has_code_tools;
-      test_case "coding has consensus tools" `Quick
-        test_coding_has_consensus_tools;
       test_case "solo lacks comm" `Quick test_solo_lacks_comm_tools;
-      test_case "parallel has consensus" `Quick test_parallel_has_consensus;
+      test_case "parallel has governance" `Quick test_parallel_has_governance;
       test_case "custom empty" `Quick test_custom_empty;
     ];
     "diagnostics", [

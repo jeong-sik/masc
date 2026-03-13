@@ -1,8 +1,6 @@
 open Masc_mcp
 open Alcotest
 
-module Consensus = Council.Consensus
-
 let test_counter = ref 0
 
 let temp_dir prefix =
@@ -38,135 +36,185 @@ let contains_substring ~needle haystack =
   in
   needle_len = 0 || loop 0
 
+let make_ctx ~base_path ~agent_name : Tool_council.context =
+  { base_path; agent_name; room_config = None }
+
 let dispatch_exn ctx ~name ~args =
   match Tool_council.dispatch ctx ~name ~args with
   | Some result -> result
   | None -> failwith ("dispatch returned None for " ^ name)
 
-let make_ctx ~base_path ~agent_name : Tool_council.context =
-  { base_path; agent_name; room_config = None }
-
-let session_file base_path session_id =
-  Filename.concat
-    (Filename.concat (Filename.concat base_path ".masc") "consensus")
-    (session_id ^ ".json")
-
-let with_paths f =
-  let target_base = temp_dir "test_tool_council_target" in
-  let stale_base = temp_dir "test_tool_council_stale" in
+let with_base_path f =
+  let base_path = temp_dir "test_tool_council_v2" in
   Fun.protect
-    ~finally:(fun () ->
-      Consensus.clear_sessions ();
-      Consensus.init ~base_path:"/tmp/masc-test-consensus-noop";
-      cleanup_dir target_base;
-      cleanup_dir stale_base)
-    (fun () -> f ~target_base ~stale_base)
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      Council.Governance_v2.reset_legacy_storage base_path;
+      f base_path)
 
-let extract_session_id body =
-  parse_json_exn body |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
+let field key json = Yojson.Safe.Util.member key json
 
-let test_consensus_start_uses_tool_base_path () =
-  with_paths @@ fun ~target_base ~stale_base ->
-  let ctx = make_ctx ~base_path:target_base ~agent_name:"alice" in
-  Consensus.clear_sessions ();
-  Consensus.init ~base_path:stale_base;
+let test_petition_submit_creates_case_and_pending_ruling () =
+  with_base_path @@ fun base_path ->
+  let ctx = make_ctx ~base_path ~agent_name:"alice" in
   let ok, body =
-    dispatch_exn ctx ~name:"masc_consensus_start"
-      ~args:(`Assoc [("topic", `String "Persist via tool"); ("quorum", `Int 2)])
-  in
-  check bool "start ok" true ok;
-  let session_id = extract_session_id body in
-  check bool "persisted to target base" true (Sys.file_exists (session_file target_base session_id));
-  check bool "not persisted to stale base" false (Sys.file_exists (session_file stale_base session_id));
-  Consensus.clear_sessions ();
-  let ok, body = dispatch_exn ctx ~name:"masc_sessions" ~args:(`Assoc []) in
-  check bool "sessions ok" true ok;
-  let sessions = parse_json_exn body |> Yojson.Safe.Util.to_list in
-  let has_session =
-    List.exists
-      (fun json ->
-        Yojson.Safe.Util.member "id" json |> Yojson.Safe.Util.to_string = session_id)
-      sessions
-  in
-  check bool "session restored by tool sessions" true has_session
-
-let test_consensus_vote_reloads_persisted_session () =
-  with_paths @@ fun ~target_base ~stale_base ->
-  let starter = make_ctx ~base_path:target_base ~agent_name:"alice" in
-  let voter = make_ctx ~base_path:target_base ~agent_name:"bob" in
-  Consensus.clear_sessions ();
-  let ok, body =
-    dispatch_exn starter ~name:"masc_consensus_start"
-      ~args:(`Assoc [("topic", `String "Persist vote"); ("quorum", `Int 2)])
-  in
-  check bool "start ok" true ok;
-  let session_id = extract_session_id body in
-  Consensus.clear_sessions ();
-  Consensus.init ~base_path:stale_base;
-  let ok, _body =
-    dispatch_exn voter ~name:"masc_consensus_vote"
+    dispatch_exn ctx ~name:"masc_petition_submit"
       ~args:
         (`Assoc
           [
-            ("session_id", `String session_id);
-            ("decision", `String "approve");
-            ("reason", `String "looks good");
+            ("title", `String "Create onboarding task");
+            ("origin", `String "human");
+            ( "requested_action",
+              `Assoc
+                [
+                  ("action_type", `String "add_task");
+                  ("payload", `Assoc [ ("description", `String "capture onboarding work") ]);
+                ] );
           ])
   in
-  check bool "vote ok" true ok;
-  Consensus.clear_sessions ();
-  Consensus.init ~base_path:target_base;
-  match Consensus.get_session ~session_id with
-  | None -> fail "session not restored from target base"
-  | Some restored ->
-      check int "vote count" 1 (List.length restored.Consensus.votes);
-      let vote = List.hd restored.Consensus.votes in
-      check string "vote agent" "bob" vote.Consensus.agent;
-      check bool "decision approve" true (vote.Consensus.decision = Consensus.Approve)
+  check bool "petition ok" true ok;
+  let json = parse_json_exn body in
+  check string "case pending" "pending_ruling"
+    (json |> field "case" |> field "status" |> Yojson.Safe.Util.to_string);
+  check string "ruling pending" "pending_ruling"
+    (json |> field "ruling" |> field "auto_execution_state" |> Yojson.Safe.Util.to_string)
 
-let test_consensus_close_and_result_reload_persisted_session () =
-  with_paths @@ fun ~target_base ~stale_base ->
-  let starter = make_ctx ~base_path:target_base ~agent_name:"alice" in
-  let voter = make_ctx ~base_path:target_base ~agent_name:"bob" in
-  Consensus.clear_sessions ();
+let test_case_brief_auto_executes_low_risk_task () =
+  with_base_path @@ fun base_path ->
+  let starter = make_ctx ~base_path ~agent_name:"alice" in
+  let briefer = make_ctx ~base_path ~agent_name:"bob" in
   let ok, body =
-    dispatch_exn starter ~name:"masc_consensus_start"
-      ~args:(`Assoc [("topic", `String "Persist close"); ("quorum", `Int 1)])
-  in
-  check bool "start ok" true ok;
-  let session_id = extract_session_id body in
-  let ok, _body =
-    dispatch_exn voter ~name:"masc_consensus_vote"
+    dispatch_exn starter ~name:"masc_petition_submit"
       ~args:
         (`Assoc
           [
-            ("session_id", `String session_id);
-            ("decision", `String "approve");
-            ("reason", `String "ship it");
+            ("title", `String "Ship onboarding task");
+            ("origin", `String "human");
+            ( "requested_action",
+              `Assoc
+                [
+                  ("action_type", `String "add_task");
+                  ("payload", `Assoc [ ("priority", `Int 1); ("description", `String "auto task") ]);
+                ] );
           ])
   in
-  check bool "vote ok" true ok;
-  Consensus.clear_sessions ();
-  Consensus.init ~base_path:stale_base;
-  let ok, _body =
-    dispatch_exn starter ~name:"masc_consensus_close"
-      ~args:(`Assoc [("session_id", `String session_id)])
-  in
-  check bool "close ok" true ok;
-  Consensus.clear_sessions ();
-  Consensus.init ~base_path:stale_base;
+  check bool "petition ok" true ok;
+  let case_id = parse_json_exn body |> field "case" |> field "id" |> Yojson.Safe.Util.to_string in
   let ok, body =
-    dispatch_exn starter ~name:"masc_consensus_result"
-      ~args:(`Assoc [("session_id", `String session_id)])
+    dispatch_exn briefer ~name:"masc_case_brief_submit"
+      ~args:
+        (`Assoc
+          [
+            ("case_id", `String case_id);
+            ("stance", `String "support");
+            ("summary", `String "Low risk and ready");
+            ("evidence_refs", `List [ `String "memo:ready" ]);
+          ])
   in
-  check bool "result ok" true ok;
-  check bool "result mentions approved" true (contains_substring ~needle:"approved" body)
+  check bool "brief ok" true ok;
+  let json = parse_json_exn body in
+  check string "case executed" "executed"
+    (json |> field "case" |> field "status" |> Yojson.Safe.Util.to_string);
+  check string "order auto executed" "auto_executed"
+    (json |> field "execution_order" |> field "status" |> Yojson.Safe.Util.to_string);
+  let tasks = Room.get_tasks_raw (Room.default_config base_path) in
+  check bool "task created" true (List.length tasks = 1)
+
+let test_human_gate_requires_confirm_then_executes () =
+  with_base_path @@ fun base_path ->
+  let starter = make_ctx ~base_path ~agent_name:"alice" in
+  let briefer = make_ctx ~base_path ~agent_name:"judge" in
+  let approver = make_ctx ~base_path ~agent_name:"operator" in
+  let ok, body =
+    dispatch_exn starter ~name:"masc_petition_submit"
+      ~args:
+        (`Assoc
+          [
+            ("title", `String "High risk task gate");
+            ("origin", `String "human");
+            ("risk_class", `String "high");
+            ( "requested_action",
+              `Assoc
+                [
+                  ("action_type", `String "add_task");
+                  ("payload", `Assoc [ ("description", `String "gated task") ]);
+                ] );
+          ])
+  in
+  check bool "petition ok" true ok;
+  let case_id = parse_json_exn body |> field "case" |> field "id" |> Yojson.Safe.Util.to_string in
+  let ok, body =
+    dispatch_exn briefer ~name:"masc_case_brief_submit"
+      ~args:
+        (`Assoc
+          [
+            ("case_id", `String case_id);
+            ("stance", `String "support");
+            ("summary", `String "Needs human gate");
+          ])
+  in
+  check bool "brief ok" true ok;
+  let json = parse_json_exn body in
+  check string "case gated" "needs_human_gate"
+    (json |> field "case" |> field "status" |> Yojson.Safe.Util.to_string);
+  check string "order gated" "needs_human_gate"
+    (json |> field "execution_order" |> field "status" |> Yojson.Safe.Util.to_string);
+  let ok, body =
+    dispatch_exn approver ~name:"masc_execution_orders"
+      ~args:(`Assoc [ ("case_id", `String case_id); ("decision", `String "confirm") ])
+  in
+  check bool "confirm ok" true ok;
+  let order = parse_json_exn body in
+  check string "confirmed order done" "done"
+    (order |> field "status" |> Yojson.Safe.Util.to_string);
+  let tasks = Room.get_tasks_raw (Room.default_config base_path) in
+  check bool "task created after confirm" true (List.length tasks = 1)
+
+let test_legacy_surfaces_return_removed_error () =
+  with_base_path @@ fun base_path ->
+  let ctx = make_ctx ~base_path ~agent_name:"alice" in
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_debate_start"
+      ~args:(`Assoc [ ("topic", `String "legacy") ])
+  in
+  check bool "legacy fails" false ok;
+  check bool "mentions removed" true
+    (contains_substring ~needle:"removed in governance v2" body)
+
+let test_petition_rejects_unsupported_action_type () =
+  with_base_path @@ fun base_path ->
+  let ctx = make_ctx ~base_path ~agent_name:"alice" in
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_petition_submit"
+      ~args:
+        (`Assoc
+          [
+            ("title", `String "Unsupported action");
+            ( "requested_action",
+              `Assoc
+                [
+                  ("action_type", `String "room_pause");
+                ] );
+          ])
+  in
+  check bool "unsupported action rejected" false ok;
+  check bool "mentions unsupported action" true
+    (contains_substring ~needle:"unsupported requested_action.action_type" body)
 
 let () =
-  run "Tool_council" [
-    ("consensus_persistence", [
-      test_case "start uses tool base path" `Quick test_consensus_start_uses_tool_base_path;
-      test_case "vote reloads persisted session" `Quick test_consensus_vote_reloads_persisted_session;
-      test_case "close and result reload persisted session" `Quick test_consensus_close_and_result_reload_persisted_session;
-    ]);
-  ]
+  run "Tool_council_v2"
+    [
+      ( "governance_v2",
+        [
+          test_case "petition submit creates pending ruling" `Quick
+            test_petition_submit_creates_case_and_pending_ruling;
+          test_case "brief auto executes low risk task" `Quick
+            test_case_brief_auto_executes_low_risk_task;
+          test_case "human gate confirm executes" `Quick
+            test_human_gate_requires_confirm_then_executes;
+          test_case "legacy surfaces removed" `Quick
+            test_legacy_surfaces_return_removed_error;
+          test_case "unsupported action type rejected" `Quick
+            test_petition_rejects_unsupported_action_type;
+        ] );
+    ]

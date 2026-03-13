@@ -1,0 +1,2 @@
+# Manual line-cap exceptions for generated code.
+lib/masc_pb.ml

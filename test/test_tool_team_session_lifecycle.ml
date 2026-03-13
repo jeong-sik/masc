@@ -253,6 +253,24 @@ let test_start_attached_operation_session () =
   in
   Alcotest.(check (option string)) "operation detached after finalize" None
     detached_session_id;
+  let detachment_json =
+    match
+      Command_plane_v2.detachment_status_json config
+        (`Assoc [ ("operation_id", `String operation.operation_id) ])
+    with
+    | Ok json -> json |> result_field
+    | Error err -> Alcotest.failf "detachment status failed: %s" err
+  in
+  Alcotest.(check (option string)) "detachment session cleared after finalize"
+    None
+    (detachment_json |> Yojson.Safe.Util.member "detachment"
+    |> Yojson.Safe.Util.member "session_id"
+    |> Yojson.Safe.Util.to_string_option);
+  Alcotest.(check string) "detachment runtime kind falls back to managed"
+    "managed"
+    (detachment_json |> Yojson.Safe.Util.member "detachment"
+    |> Yojson.Safe.Util.member "runtime_kind"
+    |> Yojson.Safe.Util.to_string);
   let reattach_ok, reattach_body =
     dispatch_exn ctx ~name:"masc_team_session_start"
       ~args:
@@ -375,4 +393,3 @@ let test_recover_elapsed_session () =
     (Room_utils.path_exists config
        (Team_session_store.report_json_path config session_id));
   cleanup_dir base_dir
-

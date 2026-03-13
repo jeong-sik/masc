@@ -66,6 +66,10 @@ fi
 now_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 branch="$(git rev-parse --abbrev-ref HEAD)"
 head_sha="$(git rev-parse HEAD)"
+baseline_source="none"
+baseline_ref_used=""
+baseline_file_used="$BASELINE_FILE"
+BASELINE_CONTENT=""
 
 count_pattern() {
   local dir="$1"
@@ -83,65 +87,23 @@ extract_baseline_value() {
   printf '%s' "${value:-0}"
 }
 
-build_baseline_content_from_ref() {
-  local ref="$1"
-  local tmp_dir
-  tmp_dir="$(mktemp -d)"
-  git archive "$ref" lib test >/dev/null 2>&1 || {
-    rm -rf "$tmp_dir"
-    return 1
-  }
-  git archive "$ref" lib test | tar -x -C "$tmp_dir"
-
-  local baseline_lib_failwith baseline_lib_list_hd baseline_lib_list_tl
-  local baseline_lib_option_get baseline_lib_obj_magic
-  local baseline_test_failwith baseline_test_list_hd baseline_test_list_tl
-  local baseline_test_option_get baseline_test_obj_magic
-
-  baseline_lib_failwith="$(count_pattern "$tmp_dir/lib" 'failwith')"
-  baseline_lib_list_hd="$(count_pattern "$tmp_dir/lib" 'List\.hd')"
-  baseline_lib_list_tl="$(count_pattern "$tmp_dir/lib" 'List\.tl')"
-  baseline_lib_option_get="$(count_pattern "$tmp_dir/lib" 'Option\.get')"
-  baseline_lib_obj_magic="$(count_pattern "$tmp_dir/lib" 'Obj\.magic')"
-
-  baseline_test_failwith="$(count_pattern "$tmp_dir/test" 'failwith')"
-  baseline_test_list_hd="$(count_pattern "$tmp_dir/test" 'List\.hd')"
-  baseline_test_list_tl="$(count_pattern "$tmp_dir/test" 'List\.tl')"
-  baseline_test_option_get="$(count_pattern "$tmp_dir/test" 'Option\.get')"
-  baseline_test_obj_magic="$(count_pattern "$tmp_dir/test" 'Obj\.magic')"
-
-  rm -rf "$tmp_dir"
-
-  cat <<EOF
-{
-  "version": 1,
-  "counts": {
-    "lib_failwith": ${baseline_lib_failwith},
-    "lib_list_hd": ${baseline_lib_list_hd},
-    "lib_list_tl": ${baseline_lib_list_tl},
-    "lib_option_get": ${baseline_lib_option_get},
-    "lib_obj_magic": ${baseline_lib_obj_magic},
-    "test_failwith": ${baseline_test_failwith},
-    "test_list_hd": ${baseline_test_list_hd},
-    "test_list_tl": ${baseline_test_list_tl},
-    "test_option_get": ${baseline_test_option_get},
-    "test_obj_magic": ${baseline_test_obj_magic}
-  }
-}
-EOF
-}
-
 load_baseline_content() {
   if [ -n "$BASELINE_REF" ]; then
-    if build_baseline_content_from_ref "$BASELINE_REF" 2>/dev/null; then
+    local ref_content
+    ref_content="$(git show "${BASELINE_REF}:${BASELINE_FILE}" 2>/dev/null || true)"
+    if [ -n "$ref_content" ]; then
+      baseline_source="git_ref"
+      baseline_ref_used="$BASELINE_REF"
+      BASELINE_CONTENT="$ref_content"
       return 0
     fi
   fi
 
   if [ -f "$BASELINE_FILE" ]; then
-    cat "$BASELINE_FILE"
+    baseline_source="file"
+    BASELINE_CONTENT="$(cat "$BASELINE_FILE")"
   else
-    printf ''
+    BASELINE_CONTENT=""
   fi
 }
 
@@ -194,8 +156,15 @@ test_obj_magic="$(count_pattern test 'Obj\.magic')"
 
 ratchet_status="disabled"
 ratchet_message="baseline check not requested"
+regressions=()
+baseline_lib_failwith=0
+baseline_lib_list_hd=0
+baseline_lib_list_tl=0
+baseline_lib_option_get=0
+baseline_lib_obj_magic=0
 if [ "$FAIL_ON_LIB_REGRESSION" -eq 1 ]; then
-  baseline_content="$(load_baseline_content)"
+  load_baseline_content
+  baseline_content="$BASELINE_CONTENT"
   if [ -z "$baseline_content" ]; then
     echo "ERROR: baseline file not found: $BASELINE_FILE" >&2
     exit 2
@@ -207,7 +176,6 @@ if [ "$FAIL_ON_LIB_REGRESSION" -eq 1 ]; then
   baseline_lib_option_get="$(extract_baseline_value "$baseline_content" "lib_option_get")"
   baseline_lib_obj_magic="$(extract_baseline_value "$baseline_content" "lib_obj_magic")"
 
-  regressions=()
   [ "$lib_failwith" -gt "$baseline_lib_failwith" ] && regressions+=("lib_failwith ${baseline_lib_failwith}->${lib_failwith}")
   [ "$lib_list_hd" -gt "$baseline_lib_list_hd" ] && regressions+=("lib_list_hd ${baseline_lib_list_hd}->${lib_list_hd}")
   [ "$lib_list_tl" -gt "$baseline_lib_list_tl" ] && regressions+=("lib_list_tl ${baseline_lib_list_tl}->${lib_list_tl}")
@@ -224,11 +192,31 @@ if [ "$FAIL_ON_LIB_REGRESSION" -eq 1 ]; then
   fi
 fi
 
+baseline_label="disabled"
+if [ "$baseline_source" = "git_ref" ]; then
+  baseline_label="ref:${baseline_ref_used}:${baseline_file_used}"
+elif [ "$baseline_source" = "file" ]; then
+  baseline_label="file:${baseline_file_used}"
+fi
+
+regressions_json="[]"
+if [ "${#regressions[@]}" -gt 0 ]; then
+  regressions_json="["
+  for item in "${regressions[@]}"; do
+    if [ "$regressions_json" != "[" ]; then
+      regressions_json="${regressions_json}, "
+    fi
+    regressions_json="${regressions_json}\"${item}\""
+  done
+  regressions_json="${regressions_json}]"
+fi
+
 echo ""
 echo "Branch: $branch"
 echo "HEAD:   $head_sha"
 echo "At:     $now_iso"
 echo ""
+echo "Baseline: ${baseline_label}"
 echo "Anti-fake: status=${anti_fake_label} good=${anti_fake_good} suspect=${anti_fake_suspect} fake=${anti_fake_fake} total=${anti_fake_total}"
 echo "Unsafe patterns (lib):  failwith=${lib_failwith} list_hd=${lib_list_hd} list_tl=${lib_list_tl} option_get=${lib_option_get} obj_magic=${lib_obj_magic}"
 echo "Unsafe patterns (test): failwith=${test_failwith} list_hd=${test_list_hd} list_tl=${test_list_tl} option_get=${test_option_get} obj_magic=${test_obj_magic}"
@@ -262,9 +250,22 @@ json_payload="$(cat <<EOF
     "test_option_get": ${test_option_get},
     "test_obj_magic": ${test_obj_magic}
   },
+  "baseline": {
+    "source": "${baseline_source}",
+    "ref": "${baseline_ref_used}",
+    "file": "${baseline_file_used}",
+    "counts": {
+      "lib_failwith": ${baseline_lib_failwith},
+      "lib_list_hd": ${baseline_lib_list_hd},
+      "lib_list_tl": ${baseline_lib_list_tl},
+      "lib_option_get": ${baseline_lib_option_get},
+      "lib_obj_magic": ${baseline_lib_obj_magic}
+    }
+  },
   "ratchet": {
     "status": "${ratchet_status}",
-    "message": "${ratchet_message}"
+    "message": "${ratchet_message}",
+    "regressions": ${regressions_json}
   }
 }
 EOF
@@ -282,14 +283,24 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "- Branch: \`$branch\`"
     echo "- Head: \`$head_sha\`"
     echo "- Generated: \`$now_iso\`"
+    echo "- Baseline: \`$baseline_label\`"
     echo ""
     echo "| Surface | failwith | List.hd | List.tl | Option.get | Obj.magic |"
     echo "|---|---:|---:|---:|---:|---:|"
     echo "| lib | $lib_failwith | $lib_list_hd | $lib_list_tl | $lib_option_get | $lib_obj_magic |"
     echo "| test | $test_failwith | $test_list_hd | $test_list_tl | $test_option_get | $test_obj_magic |"
+    if [ "$FAIL_ON_LIB_REGRESSION" -eq 1 ]; then
+      echo "| baseline(lib) | $baseline_lib_failwith | $baseline_lib_list_hd | $baseline_lib_list_tl | $baseline_lib_option_get | $baseline_lib_obj_magic |"
+    fi
     echo ""
     echo "- Anti-fake: \`$anti_fake_label\` (good=$anti_fake_good suspect=$anti_fake_suspect fake=$anti_fake_fake total=$anti_fake_total)"
     echo "- Ratchet: \`$ratchet_status\` ($ratchet_message)"
+    if [ "${#regressions[@]}" -gt 0 ]; then
+      echo "- Regressions:"
+      for item in "${regressions[@]}"; do
+        echo "  - \`${item}\`"
+      done
+    fi
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 

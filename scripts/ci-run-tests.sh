@@ -10,6 +10,7 @@ TEST_CMD="${1:-opam exec -- dune test}"
 TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-1200}"
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 START_EPOCH="$(date +%s)"
+TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp "${TMPDIR:-/tmp}/ci-run-tests.XXXXXX.log")}"
 
 iso_now() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -34,12 +35,24 @@ diag_dump() {
   echo "[ci-diag] timestamp=$(iso_now)"
   echo "[ci-diag] elapsed_sec=$(elapsed_sec)"
   echo "[ci-diag] pwd=$(pwd)"
+  echo "[ci-diag] log_file=${TEST_LOG_FILE}"
 
   echo "[ci-diag] process snapshot (dune/ocaml/test):"
   ps -eo pid,ppid,etime,%cpu,%mem,comm,args \
     | grep -Ei 'dune|ocaml|alcotest|test_' \
     | grep -v grep \
     || true
+
+  if [[ -f "${TEST_LOG_FILE}" ]]; then
+    echo "[ci-diag] started suites (latest 10):"
+    grep -n '^Testing `' "${TEST_LOG_FILE}" | tail -n 10 || true
+
+    echo "[ci-diag] failure markers (latest 20):"
+    grep -En '\[FAIL\]|FAILURE|Test Failed|Fatal error|ASSERT false|Process completed with exit code' "${TEST_LOG_FILE}" | tail -n 20 || true
+
+    echo "[ci-diag] log tail -n 120 ${TEST_LOG_FILE}"
+    tail -n 120 "${TEST_LOG_FILE}" || true
+  fi
 
   local tests_root="_build/default/test/_build/_tests"
   if [[ -d "${tests_root}" ]]; then
@@ -84,13 +97,19 @@ run_with_timeout() {
 
   if [[ -n "${timeout_bin}" ]]; then
     if "${timeout_bin}" --help 2>&1 | grep -q -- '--foreground'; then
-      "${timeout_bin}" --foreground "${TEST_TIMEOUT_SEC}" bash -lc "${TEST_CMD}"
+      "${timeout_bin}" --foreground "${TEST_TIMEOUT_SEC}" bash -lc "${TEST_CMD}" \
+        > >(tee -a "${TEST_LOG_FILE}") \
+        2> >(tee -a "${TEST_LOG_FILE}" >&2)
     else
-      "${timeout_bin}" "${TEST_TIMEOUT_SEC}" bash -lc "${TEST_CMD}"
+      "${timeout_bin}" "${TEST_TIMEOUT_SEC}" bash -lc "${TEST_CMD}" \
+        > >(tee -a "${TEST_LOG_FILE}") \
+        2> >(tee -a "${TEST_LOG_FILE}" >&2)
     fi
   else
     echo "[ci-run] WARN: timeout command not found (timeout/gtimeout); running without enforced timeout"
-    bash -lc "${TEST_CMD}"
+    bash -lc "${TEST_CMD}" \
+      > >(tee -a "${TEST_LOG_FILE}") \
+      2> >(tee -a "${TEST_LOG_FILE}" >&2)
   fi
 }
 
@@ -106,6 +125,7 @@ trap cleanup EXIT
 echo "[ci-run] command: ${TEST_CMD}"
 echo "[ci-run] timeout_sec=${TEST_TIMEOUT_SEC} heartbeat_sec=${HEARTBEAT_SEC}"
 echo "[ci-run] started_at=$(iso_now)"
+echo "[ci-run] log_file=${TEST_LOG_FILE}"
 
 heartbeat &
 hb_pid="$!"

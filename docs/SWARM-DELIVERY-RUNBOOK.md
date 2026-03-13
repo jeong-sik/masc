@@ -178,8 +178,8 @@ LOCAL64_MODEL_MATRIX_FILE=./scripts/harness/local64-model-matrix.example.json \
 
 harness는 각 item에 다음을 자동으로 덧붙인다:
 
-- `spawn_agent="llama"`
-- `spawn_model=LLAMA_SWARM_MODEL`
+- `worker_class`
+- `worker_size`
 - `spawn_selection_note=<leader note>`
 
 local64 worker batch는 추가로 다음 메타데이터를 권장한다:

@@ -1199,6 +1199,13 @@ let run_worker_oas ~sw ~base_path ~worker_name
           default_system_prompt ~worker_name ~model_id:model.model_id
             ?session_id:team_session_id ?role ?selection_note ()
         in
+        let prompt =
+          Printf.sprintf
+            "Tool contract reminder: if you call masc_team_session_step with \
+             turn_kind=\"note\", you must include a non-empty message field. \
+             Calls missing message fail.\n\n%s"
+            prompt
+        in
         let stop_heartbeat =
           start_worker_heartbeat ~sw ~auth_token ~session_id:mcp_session_id
             ~worker_name

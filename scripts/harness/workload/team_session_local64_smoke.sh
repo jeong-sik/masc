@@ -330,7 +330,7 @@ build_spawn_batch() {
         --arg capsule_mode "$capsule_mode" \
         --arg runtime_pool "local64" \
         --arg task_profile "$task_profile" \
-        '{spawn_agent:"llama",spawn_prompt:$prompt,spawn_role:$role,worker_class:$worker_class,capsule_mode:$capsule_mode,runtime_pool:$runtime_pool,task_profile:$task_profile}' \
+        '{spawn_prompt:$prompt,spawn_role:$role,worker_class:$worker_class,capsule_mode:$capsule_mode,runtime_pool:$runtime_pool,task_profile:$task_profile}' \
         >>"$tmp_file"
     elif [ -n "$model" ]; then
       jq -cn \
@@ -340,7 +340,7 @@ build_spawn_batch() {
         --arg capsule_mode "$capsule_mode" \
         --arg runtime_pool "local64" \
         --arg model "$model" \
-        '{spawn_agent:"llama",spawn_prompt:$prompt,spawn_role:$role,worker_class:$worker_class,capsule_mode:$capsule_mode,runtime_pool:$runtime_pool,spawn_model:$model}' \
+        '{spawn_prompt:$prompt,spawn_role:$role,worker_class:$worker_class,capsule_mode:$capsule_mode,runtime_pool:$runtime_pool}' \
         >>"$tmp_file"
     else
       jq -cn \
@@ -349,7 +349,7 @@ build_spawn_batch() {
         --arg worker_class "$role" \
         --arg capsule_mode "$capsule_mode" \
         --arg runtime_pool "local64" \
-        '{spawn_agent:"llama",spawn_prompt:$prompt,spawn_role:$role,worker_class:$worker_class,capsule_mode:$capsule_mode,runtime_pool:$runtime_pool}' \
+        '{spawn_prompt:$prompt,spawn_role:$role,worker_class:$worker_class,capsule_mode:$capsule_mode,runtime_pool:$runtime_pool}' \
         >>"$tmp_file"
     fi
     idx=$((idx + 1))

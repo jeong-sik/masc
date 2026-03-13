@@ -339,8 +339,8 @@ spawn_batch_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 5 "mas
   --arg model "$LLAMA_SWARM_MODEL" \
   --arg note "$FAILURE_NOTE" \
   '{session_id:$s,spawn_batch:[
-    {spawn_agent:"llama",spawn_model:$model,spawn_role:"planner",spawn_selection_note:$note,spawn_prompt:"planner failure replay worker",spawn_timeout_seconds:30},
-    {spawn_agent:"llama",spawn_model:$model,spawn_role:"implementer-a",spawn_selection_note:$note,spawn_prompt:"implementer failure replay worker",spawn_timeout_seconds:30}
+    {spawn_role:"planner",worker_class:"manager",worker_size:"xlg",spawn_selection_note:$note,spawn_prompt:"planner failure replay worker",spawn_timeout_seconds:30},
+    {spawn_role:"implementer-a",worker_class:"executor",worker_size:"lg",spawn_selection_note:$note,spawn_prompt:"implementer failure replay worker",spawn_timeout_seconds:30}
   ]}')")"
 require_tool_success "$spawn_batch_raw"
 spawn_result="$(printf '%s' "$spawn_batch_raw" | extract_tool_result)"

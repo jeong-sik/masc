@@ -374,6 +374,24 @@ let is_local_spawn_agent agent_name =
   | "default" | "llama" -> true
   | _ -> false
 
+let legacy_spawn_fields = [ "spawn_agent"; "spawn_model"; "model_tier" ]
+
+let find_present_json_key keys json =
+  List.find_opt (fun key -> Yojson.Safe.Util.member key json <> `Null) keys
+
+let legacy_spawn_field_error ?batch_index field =
+  match batch_index with
+  | Some index ->
+      Printf.sprintf
+        "spawn_batch[%d].%s is no longer supported in masc_team_session_step; \
+         use spawn_prompt, spawn_role, worker_class, and worker_size"
+        index field
+  | None ->
+      Printf.sprintf
+        "%s is no longer supported in masc_team_session_step; use spawn_prompt, \
+         spawn_role, worker_class, and worker_size"
+        field
+
 type routing_decision = {
   model_tier : Team_session_types.model_tier;
   task_profile : Team_session_types.task_profile;
@@ -1050,9 +1068,13 @@ let annotate_control_hierarchy_for_session
           inferred_supervisor_actor_of_spec ~lane_id ~control_domain spec
         in
         let model_tier =
-          match (spec.model_tier_explicit, spec.model_tier) with
-          | true, (Some _ as explicit) -> explicit
-          | _ -> Some (controller_target_tier_of_spec ~control_domain spec)
+          match spec.worker_size with
+          | Some worker_size ->
+              Team_session_types.model_tier_of_worker_size worker_size
+          | None -> (
+              match (spec.model_tier_explicit, spec.model_tier) with
+              | true, Some explicit -> Some explicit
+              | _ -> Some (controller_target_tier_of_spec ~control_domain spec))
         in
         let spawn_model =
           match (spec.spawn_model_explicit, trim_opt spec.spawn_model) with
@@ -1075,6 +1097,9 @@ let annotate_control_hierarchy_for_session
       specs
 
 let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
+  match find_present_json_key legacy_spawn_fields json with
+  | Some field -> Error (legacy_spawn_field_error ~batch_index field)
+  | None ->
   let open Yojson.Safe.Util in
   let get_required_string key =
     match member key json with
@@ -1088,13 +1113,6 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
     | _ ->
         Error
           (Printf.sprintf "spawn_batch[%d].%s is required" batch_index key)
-  in
-  let get_optional_required_string key =
-    match member key json with
-    | `String s ->
-        let trimmed = String.trim s in
-        if trimmed = "" then None else Some trimmed
-    | _ -> None
   in
   let get_optional_string key =
     match member key json with
@@ -1115,13 +1133,6 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
       (get_optional_string key)
       (fun raw ->
         Team_session_types.worker_size_of_string
-          (String.lowercase_ascii (String.trim raw)))
-  in
-  let get_optional_model_tier key =
-    Option.bind
-      (get_optional_string key)
-      (fun raw ->
-        Team_session_types.model_tier_of_string
           (String.lowercase_ascii (String.trim raw)))
   in
   let get_optional_task_profile key =
@@ -1169,13 +1180,10 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
   | Ok spawn_prompt ->
       Ok
         {
-          spawn_agent =
-            normalize_spawn_agent
-              (Option.value ~default:"default"
-                 (get_optional_required_string "spawn_agent"));
+          spawn_agent = "default";
           spawn_prompt;
-          spawn_model = get_optional_string "spawn_model";
-          spawn_model_explicit = Option.is_some (get_optional_string "spawn_model");
+          spawn_model = None;
+          spawn_model_explicit = false;
           spawn_role = get_optional_string "spawn_role";
           worker_class = get_optional_worker_class "worker_class";
           worker_size = get_optional_worker_size "worker_size";
@@ -1185,8 +1193,8 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
           lane_id = get_optional_string "lane_id";
           control_domain = get_optional_control_domain "control_domain";
           supervisor_actor = get_optional_string "supervisor_actor";
-          model_tier = get_optional_model_tier "model_tier";
-          model_tier_explicit = Option.is_some (get_optional_string "model_tier");
+          model_tier = None;
+          model_tier_explicit = false;
           task_profile = get_optional_task_profile "task_profile";
           risk_level = get_optional_risk_level "risk_level";
           routing_confidence = get_optional_float "routing_confidence";
@@ -1197,9 +1205,11 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
   | Error e -> Error e
 
 let parse_step_spawn_specs args =
-  let singular_agent = get_string_opt args "spawn_agent" in
+  match find_present_json_key legacy_spawn_fields args with
+  | Some field -> Error (legacy_spawn_field_error field)
+  | None ->
   let singular_prompt = get_string_opt args "spawn_prompt" in
-  let singular_present = Option.is_some singular_agent || Option.is_some singular_prompt in
+  let singular_present = Option.is_some singular_prompt in
   let default_batch_timeout =
     match Yojson.Safe.Util.member "spawn_timeout_seconds" args with
     | `Int value -> max 1 value
@@ -1228,20 +1238,20 @@ let parse_step_spawn_specs args =
   | Ok batch_specs ->
       let route_specs specs = Ok (List.map resolve_routing_for_spec specs) in
       if singular_present && batch_specs <> [] then
-        Error "spawn_batch cannot be combined with spawn_agent/spawn_prompt"
+        Error "spawn_batch cannot be combined with top-level spawn_prompt"
       else if batch_specs <> [] then
         route_specs batch_specs
       else
-        match (singular_agent, singular_prompt) with
-        | None, None -> Ok []
-        | None, Some spawn_prompt ->
+        match singular_prompt with
+        | None -> Ok []
+        | Some spawn_prompt ->
             route_specs
               [
                 {
                   spawn_agent = "default";
                   spawn_prompt;
-                  spawn_model = get_string_opt args "spawn_model";
-                  spawn_model_explicit = Option.is_some (get_string_opt args "spawn_model");
+                  spawn_model = None;
+                  spawn_model_explicit = false;
                   spawn_role = get_string_opt args "spawn_role";
                   worker_class =
                     Option.bind
@@ -1271,76 +1281,8 @@ let parse_step_spawn_specs args =
                         Team_session_types.control_domain_of_string
                           (String.lowercase_ascii (String.trim raw)));
                   supervisor_actor = get_string_opt args "supervisor_actor";
-                  model_tier =
-                    Option.bind
-                      (get_string_opt args "model_tier")
-                      (fun raw ->
-                        Team_session_types.model_tier_of_string
-                          (String.lowercase_ascii (String.trim raw)));
-                  model_tier_explicit = Option.is_some (get_string_opt args "model_tier");
-                  task_profile =
-                    Option.bind
-                      (get_string_opt args "task_profile")
-                      (fun raw ->
-                        Team_session_types.task_profile_of_string
-                          (String.lowercase_ascii (String.trim raw)));
-                  risk_level =
-                    Option.bind
-                      (get_string_opt args "risk_level")
-                      (fun raw ->
-                        Team_session_types.risk_level_of_string
-                          (String.lowercase_ascii (String.trim raw)));
-                  routing_confidence = get_float_opt args "routing_confidence";
-                  routing_reason = get_string_opt args "routing_reason";
-                  spawn_selection_note = get_string_opt args "spawn_selection_note";
-                  spawn_timeout_seconds = get_int args "spawn_timeout_seconds" 300;
-                };
-              ]
-        | Some _, None -> Error "spawn_prompt is required when spawning a worker"
-        | Some spawn_agent, Some spawn_prompt ->
-            route_specs
-              [
-                {
-                  spawn_agent = normalize_spawn_agent spawn_agent;
-                  spawn_prompt;
-                  spawn_model = get_string_opt args "spawn_model";
-                  spawn_model_explicit = Option.is_some (get_string_opt args "spawn_model");
-                  spawn_role = get_string_opt args "spawn_role";
-                  worker_class =
-                    Option.bind
-                      (get_string_opt args "worker_class")
-                      (fun raw ->
-                        Team_session_types.worker_class_of_string
-                          (String.lowercase_ascii (String.trim raw)));
-                  worker_size =
-                    Option.bind
-                      (get_string_opt args "worker_size")
-                      (fun raw ->
-                        Team_session_types.worker_size_of_string
-                          (String.lowercase_ascii (String.trim raw)));
-                  parent_actor = get_string_opt args "parent_actor";
-                  capsule_mode =
-                    Option.bind
-                      (get_string_opt args "capsule_mode")
-                      (fun raw ->
-                        Team_session_types.capsule_mode_of_string
-                          (String.lowercase_ascii (String.trim raw)));
-                  runtime_pool = get_string_opt args "runtime_pool";
-                  lane_id = get_string_opt args "lane_id";
-                  control_domain =
-                    Option.bind
-                      (get_string_opt args "control_domain")
-                      (fun raw ->
-                        Team_session_types.control_domain_of_string
-                          (String.lowercase_ascii (String.trim raw)));
-                  supervisor_actor = get_string_opt args "supervisor_actor";
-                  model_tier =
-                    Option.bind
-                      (get_string_opt args "model_tier")
-                      (fun raw ->
-                        Team_session_types.model_tier_of_string
-                          (String.lowercase_ascii (String.trim raw)));
-                  model_tier_explicit = Option.is_some (get_string_opt args "model_tier");
+                  model_tier = None;
+                  model_tier_explicit = false;
                   task_profile =
                     Option.bind
                       (get_string_opt args "task_profile")
@@ -1606,22 +1548,17 @@ let handle_step ctx args : result =
                   ?routing_confidence ?routing_reason ?assigned_runtime
                   ?spawn_selection_note ~success ?exit_code
                   ?elapsed_ms ?output_preview ?error () =
+                let _ = spawn_agent and _ = spawn_model and _ = model_tier in
                 let detail =
                   `Assoc
                     [
                       ("actor", `String actor);
-                      ( "spawn_agent",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          spawn_agent );
                       ( "runtime_actor",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           runtime_actor );
                       ( "spawn_role",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           spawn_role );
-                      ( "spawn_model",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          spawn_model );
                       ( "worker_class",
                         Option.fold ~none:`Null
                           ~some:(fun kind ->
@@ -1669,12 +1606,6 @@ let handle_step ctx args : result =
                       ( "supervisor_actor",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           supervisor_actor );
-                      ( "model_tier",
-                        Option.fold ~none:`Null
-                          ~some:(fun tier ->
-                            `String
-                              (Team_session_types.model_tier_to_string tier))
-                          model_tier );
                       ( "task_profile",
                         Option.fold ~none:`Null
                           ~some:(fun profile ->
@@ -2089,7 +2020,6 @@ let handle_step ctx args : result =
                                           Some
                                             (`Assoc
                                               [
-                                                ("agent", `String prepared.spec.spawn_agent);
                                                 ( "runtime_actor",
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
@@ -2098,10 +2028,6 @@ let handle_step ctx args : result =
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
                                                     prepared.spec.spawn_role );
-                                                ( "spawn_model",
-                                                  Option.fold ~none:`Null
-                                                    ~some:(fun s -> `String s)
-                                                    prepared.spec.spawn_model );
                                                 ( "worker_class",
                                                   Option.fold ~none:`Null
                                                     ~some:(fun kind ->
@@ -2158,13 +2084,6 @@ let handle_step ctx args : result =
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
                                                     prepared.spec.supervisor_actor );
-                                                ( "model_tier",
-                                                  Option.fold ~none:`Null
-                                                    ~some:(fun tier ->
-                                                      `String
-                                                        (Team_session_types.model_tier_to_string
-                                                           tier))
-                                                    prepared.spec.model_tier );
                                                 ( "task_profile",
                                                   Option.fold ~none:`Null
                                                     ~some:(fun profile ->
@@ -2891,8 +2810,6 @@ let schemas : tool_schema list =
                   ("task_title", `Assoc [ ("type", `String "string") ]);
                   ("task_description", `Assoc [ ("type", `String "string") ]);
                   ("task_priority", `Assoc [ ("type", `String "integer") ]);
-	                  ("spawn_agent", `Assoc [ ("type", `String "string") ]);
-	                  ("spawn_model", `Assoc [ ("type", `String "string") ]);
 	                  ("spawn_role", `Assoc [ ("type", `String "string") ]);
 	                  ( "worker_class",
 	                    `Assoc
@@ -2944,12 +2861,6 @@ let schemas : tool_schema list =
 	                            ] );
 	                      ] );
 	                  ("supervisor_actor", `Assoc [ ("type", `String "string") ]);
-	                  ( "model_tier",
-	                    `Assoc
-	                      [
-	                        ("type", `String "string");
-	                        ("enum", `List [ `String "35b"; `String "27b"; `String "9b" ]);
-	                      ] );
 	                  ( "task_profile",
 	                    `Assoc
 	                      [
@@ -2993,8 +2904,6 @@ let schemas : tool_schema list =
                               ( "properties",
                                 `Assoc
 	                                  [
-	                                    ("spawn_agent", `Assoc [ ("type", `String "string") ]);
-	                                    ("spawn_model", `Assoc [ ("type", `String "string") ]);
 	                                    ("spawn_role", `Assoc [ ("type", `String "string") ]);
 	                                    ( "worker_class",
 	                                      `Assoc
@@ -3046,12 +2955,6 @@ let schemas : tool_schema list =
 	                                              ] );
 	                                        ] );
 	                                    ("supervisor_actor", `Assoc [ ("type", `String "string") ]);
-	                                    ( "model_tier",
-	                                      `Assoc
-	                                        [
-	                                          ("type", `String "string");
-	                                          ("enum", `List [ `String "35b"; `String "27b"; `String "9b" ]);
-	                                        ] );
 	                                    ( "task_profile",
 	                                      `Assoc
 	                                        [

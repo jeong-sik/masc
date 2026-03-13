@@ -38,6 +38,10 @@ let () =
             Test_tool_team_session_step_validation.test_step_spawn_requires_proc_mgr;
           Alcotest.test_case "step-spawn-default-local-allows-worker-size" `Quick
             Test_tool_team_session_step_validation.test_step_spawn_default_local_allows_worker_size_without_spawn_model;
+          Alcotest.test_case "step-rejects-legacy-spawn-fields" `Quick
+            Test_tool_team_session_step_validation.test_step_rejects_legacy_spawn_fields;
+          Alcotest.test_case "step-rejects-legacy-batch-spawn-fields" `Quick
+            Test_tool_team_session_step_validation.test_step_rejects_legacy_batch_spawn_fields;
           Alcotest.test_case "step-delegate-requires-target-agent" `Quick
             Test_tool_team_session_step_validation.test_step_delegate_requires_target_agent;
           Alcotest.test_case "step-delegate-unknown-worker-rejected" `Quick

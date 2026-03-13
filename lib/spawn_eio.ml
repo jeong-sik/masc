@@ -408,7 +408,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
      Non-GLM agents need chdir + fork protected by mutex. *)
   if agent_name = "glm" then
     spawn_glm_via_client ~prompt:augmented_prompt ~timeout ~start_time
-  else if agent_name = "llama" then
+  else if normalized_agent = "llama" || normalized_agent = "default" then
     let worker_name =
       match runtime_agent_name with
       | Some name when String.trim name <> "" -> String.trim name
@@ -432,7 +432,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
          {
            success = false;
            output =
-             "Spawn error (llama): explicit runtime_model is required for llama workers";
+             "Spawn error (local worker): explicit runtime_model is required for local workers";
            exit_code = 1;
            elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
            input_tokens = None;
@@ -445,7 +445,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
          {
            success = false;
            output =
-             "Spawn error (llama): runtime_model provider must be llama";
+             "Spawn error (local worker): runtime_model provider must be llama";
            exit_code = 1;
            elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
            input_tokens = None;
@@ -478,7 +478,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
          | Error e ->
              {
                success = false;
-               output = Printf.sprintf "Spawn error (llama): %s" e;
+               output = Printf.sprintf "Spawn error (local worker): %s" e;
                exit_code = 1;
                elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
                input_tokens = None;

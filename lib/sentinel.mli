@@ -45,6 +45,14 @@ val note_board_patrol_result_for_tests :
   unit ->
   unit
 
+(** Test helper: reads the persisted daily-post dedupe key from .masc state. *)
+val read_board_patrol_day_key_for_tests :
+  Room_utils.config -> string option
+
+(** Test helper: persists the daily-post dedupe key into .masc state. *)
+val write_board_patrol_day_key_for_tests :
+  Room_utils.config -> string -> unit
+
 (** Ensures the room root/current room state exists before sentinel joins. *)
 val ensure_room_initialized_for_start : Room_utils.config -> unit
 

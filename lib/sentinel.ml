@@ -107,6 +107,26 @@ let note_board_patrol_result_for_tests ?checked_at ~action ?reason ?(stale_count
   last_board_patrol_reason := Option.value ~default:"" reason;
   last_board_patrol_stale_count := stale_count
 
+let board_patrol_state_path (config : Room_utils.config) =
+  Filename.concat (Filename.concat config.base_path ".masc")
+    "sentinel_board_patrol_state.json"
+
+let board_patrol_day_key_of_unix ts =
+  let tm = Unix.localtime ts in
+  sprintf "%04d-%03d" (tm.Unix.tm_year + 1900) tm.Unix.tm_yday
+
+let read_board_patrol_day_key_for_tests (config : Room_utils.config) =
+  let json = Room_utils.read_json_local (board_patrol_state_path config) in
+  json
+  |> Yojson.Safe.Util.member "last_daily_post_day"
+  |> Yojson.Safe.Util.to_string_option
+  |> trimmed_string_option
+
+let write_board_patrol_day_key_for_tests (config : Room_utils.config) day_key =
+  Room_utils.write_json_local
+    (board_patrol_state_path config)
+    (`Assoc [ ("last_daily_post_day", `String day_key) ])
+
 (* ── Sentinel-specific Pulse Consumers ─────────────────────── *)
 
 (** Heartbeat consumer: keeps sentinel visible in the room. *)
@@ -127,7 +147,7 @@ let make_heartbeat_consumer config : (module Pulse.Consumer) =
 (** Board patrol consumer: posts a daily status summary via LLM.
     Skips posting when LLM is unavailable. *)
 let make_board_patrol_consumer config : (module Pulse.Consumer) =
-  let last_daily_post = ref 0 in (* day-of-year of last post *)
+  let last_daily_post = ref (read_board_patrol_day_key_for_tests config) in
   let record_result ~checked_at ~action ?reason ~stale_count () =
     note_board_patrol_result_for_tests ~checked_at ~action ?reason ~stale_count ()
   in
@@ -137,15 +157,19 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
     let on_beat _beat =
       try
         let state = Room.read_state config in
-        let tm = Unix.localtime (Time_compat.now ()) in
-        let today = tm.Unix.tm_yday in
-        if today <> !last_daily_post then begin
-          last_daily_post := today;
+        let now_f = Time_compat.now () in
+        let today_key = board_patrol_day_key_of_unix now_f in
+        if Some today_key <> !last_daily_post then begin
+          last_daily_post := Some today_key;
+          (try write_board_patrol_day_key_for_tests config today_key
+           with exn ->
+             log
+               (sprintf "board patrol state persist failed: %s"
+                  (Printexc.to_string exn)));
           let agent_names = String.concat ", " state.active_agents in
           let board_posts = (try Board_dispatch.list_posts ~limit:50 ()
                              with _ -> []) in
           let post_count = List.length board_posts in
-          let now_f = Time_compat.now () in
           let stale_posts = List.filter (fun (p : Board.post) ->
             now_f -. p.created_at > 604800.0 (* 7 days *)
           ) board_posts |> List.length in

@@ -81,6 +81,18 @@ let test_board_patrol_decision_parser () =
   check (option string) "board post"
     (Some "Two stale sentinel-board posts need review.") decision.board_post
 
+let test_sentinel_board_patrol_day_key_roundtrip () =
+  with_temp_room_root (fun config ->
+    Sentinel.ensure_room_initialized_for_start config;
+    check (option string) "empty default" None
+      (Sentinel.read_board_patrol_day_key_for_tests config);
+    Sentinel.write_board_patrol_day_key_for_tests config "2026-072";
+    check (option string) "persisted day key" (Some "2026-072")
+      (Sentinel.read_board_patrol_day_key_for_tests config);
+    reset_runtime_state ();
+    check (option string) "persists across runtime reset" (Some "2026-072")
+      (Sentinel.read_board_patrol_day_key_for_tests config))
+
 let () =
   run "Guardian/Sentinel"
     [
@@ -91,5 +103,6 @@ let () =
         test_case "sentinel reports embedded guardian runtime" `Quick test_sentinel_status_reports_embedded_guardian_runtime;
         test_case "sentinel board patrol status defaults to silent" `Quick test_sentinel_board_patrol_status_defaults_to_silent;
         test_case "board patrol decision parser" `Quick test_board_patrol_decision_parser;
+        test_case "board patrol day key roundtrip" `Quick test_sentinel_board_patrol_day_key_roundtrip;
       ]);
     ]

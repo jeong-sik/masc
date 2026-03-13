@@ -39,8 +39,8 @@ let add_routes router =
          let status_filter = query_param req "status" in
          let include_done = bool_query_param req "include_done" ~default:false in
          let include_cancelled = bool_query_param req "include_cancelled" ~default:false in
-         let limit = int_query_param req "limit" ~default:50 in
-         let offset = int_query_param req "offset" ~default:0 in
+         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+         let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let tasks = Room.get_tasks_raw config in
          let filtered =
            match status_filter with
@@ -95,8 +95,8 @@ let add_routes router =
        with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let status_filter = query_param req "status" in
-         let limit = int_query_param req "limit" ~default:50 in
-         let offset = int_query_param req "offset" ~default:0 in
+         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+         let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let agents = Room.get_agents_raw config in
          let filtered =
            match status_filter with

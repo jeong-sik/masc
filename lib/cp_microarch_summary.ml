@@ -137,7 +137,7 @@ let search_fabric_json (rows : search_row list) =
     else
       float_of_int duplicate_count /. float_of_int (List.length rows_with_scope)
   in
-  let artifact_scope_drift =
+  let artifact_scope_drift, artifact_scope_active =
     let scoped_rows =
       coding_rows
       |> List.filter (fun row ->
@@ -145,14 +145,22 @@ let search_fabric_json (rows : search_row list) =
              | Some "decompose" -> false
              | _ -> true)
     in
+    let active =
+      scoped_rows
+      |> List.filter (fun row -> row.artifact_scope_count > 0)
+      |> List.length
+    in
     let drifted =
       scoped_rows
       |> List.filter (fun row -> row.artifact_scope_count = 0)
       |> List.length
     in
-    if scoped_rows = [] then 0.0
-    else
-      float_of_int drifted /. float_of_int (List.length scoped_rows)
+    let drift =
+      if scoped_rows = [] then 0.0
+      else
+        float_of_int drifted /. float_of_int (List.length scoped_rows)
+    in
+    (drift, active)
   in
   let top_stage =
     rows
@@ -174,6 +182,7 @@ let search_fabric_json (rows : search_row list) =
     ("verification_gate_failures", `Int verification_gate_failures);
     ("rework_rate", `Float rework_rate);
     ("artifact_scope_drift", `Float artifact_scope_drift);
+    ("artifact_scope_active", `Int artifact_scope_active);
     ("top_stage", match top_stage with Some stage -> `String stage | None -> `Null);
   ]
 
@@ -199,6 +208,9 @@ let signals_json ~(pipeline : Yojson.Safe.t) ~(cache : Yojson.Safe.t)
   in
   let artifact_scope_drift =
     get_float_opt search_fabric "artifact_scope_drift" |> Option.value ~default:0.0
+  in
+  let artifact_scope_active =
+    get_int_default search_fabric "artifact_scope_active" 0
   in
   let spec_active = get_int_default speculative "active_sessions" 0 in
   let spec_commit_rate = get_float_opt speculative "commit_rate" |> Option.value ~default:0.0 in
@@ -252,8 +264,12 @@ let signals_json ~(pipeline : Yojson.Safe.t) ~(cache : Yojson.Safe.t)
       ("value", `Float rework_rate);
     ]);
     ("artifact_scope_drift", `Assoc [
-      ("tone", `String (if artifact_scope_drift >= 0.5 then "bad" else if artifact_scope_drift >= 0.25 then "warn" else "ok"));
+      ("tone", `String (if artifact_scope_active = 0 then "ok"  (* no tasks use artifact scopes = feature dormant *)
+                        else if artifact_scope_drift >= 0.5 then "bad"
+                        else if artifact_scope_drift >= 0.25 then "warn"
+                        else "ok"));
       ("value", `Float artifact_scope_drift);
+      ("active", `Int artifact_scope_active);
     ]);
     ("speculative_posture", `Assoc [
       ("tone", `String (if spec_active > 0 && spec_commit_rate < 0.5 then "warn" else "ok"));

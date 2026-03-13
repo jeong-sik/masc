@@ -340,7 +340,7 @@ let add_routes router =
          Http.Request.read_body_async reqd (fun body_str ->
            match trpg_actor_release_json ~base_dir ~body_str with
            | Ok json ->
-               respond_json_with_cors request reqd
+               respond_json_with_cors ~status:`Created request reqd
                  (Yojson.Safe.to_string json)
            | Error (`Bad_request, msg) ->
                respond_json_with_cors ~status:`Bad_request request reqd

@@ -1,13 +1,21 @@
 # Changelog
 
 
-## [2.86.0] - 2026-03-13
+## [2.87.0] - 2026-03-13
+
+### Added
+- **Observability Truth on Main** — execution and dashboard truth surfaces now expose the mainline observability-truth lane, including lodge truth compatibility follow-up (#968, #974)
 
 ### Changed
-- TBD
+- **Managed-Agent Surface Cleanup** — split managed-agent/public MCP boundaries and pruned dead hidden tool surfaces from the mainline surface set (#960, #976)
+- **Governance HTTP Read-only** — governance and council HTTP compatibility surfaces were narrowed to the current read-only model (#965)
+- **Upgrade Note Required** — integrations relying on hidden/deprecated tool surfaces or legacy governance HTTP semantics should read the `v2.87.0` release note before upgrading
 
-### Deprecated
-- TBD
+### Fixed
+- **H2 Tool Auth Alignment** — H2 write routes now use tool-level auth instead of coarse broadcast permissions (#966)
+- **Baseline Compatibility** — restored team-session and auth compatibility on the current baseline, including legacy task alias task-op classification (#967, #970)
+- **Sentinel Board Noise** — routine board patrol posts are suppressed to reduce unnecessary baseline chatter (#971)
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),

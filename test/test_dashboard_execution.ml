@@ -50,6 +50,10 @@ let test_dashboard_execution_fixture () =
         check bool "summary removed from execution payload" true
           (json |> member "summary" = `Null);
         check int "lodge checked count" 3 (lodge_tick |> member "checked" |> to_int);
+        check string "lodge pass reason" "stayed read-only after evaluating the board"
+          (lodge_tick |> member "last_pass_reason" |> to_string);
+        check string "lodge system skip reason" "rate-limited after a recent board action"
+          (lodge_tick |> member "last_system_skip_reason" |> to_string);
         check int "lodge checkins" 3 (List.length lodge_checkins);
         check string "top queue kind" "session"
           (execution_queue |> List.hd |> member "kind" |> to_string);

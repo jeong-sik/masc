@@ -456,6 +456,7 @@ function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionW
 
 function normalizeExecutionLodgeTick(raw: unknown): DashboardExecutionLodgeTick | null {
   if (!isRecord(raw)) return null
+  const lastSystemSkipReason = asString(raw.last_system_skip_reason) ?? asString(raw.last_skip_reason) ?? null
   return {
     checked: asNumber(raw.checked),
     acted: asNumber(raw.acted),
@@ -463,7 +464,9 @@ function normalizeExecutionLodgeTick(raw: unknown): DashboardExecutionLodgeTick 
     skipped: asNumber(raw.skipped),
     failed: asNumber(raw.failed),
     last_tick_at: asString(raw.last_tick_at) ?? null,
-    last_skip_reason: asString(raw.last_skip_reason) ?? null,
+    last_skip_reason: lastSystemSkipReason,
+    last_pass_reason: asString(raw.last_pass_reason) ?? null,
+    last_system_skip_reason: lastSystemSkipReason,
     activity_report: asString(raw.activity_report) ?? null,
   }
 }

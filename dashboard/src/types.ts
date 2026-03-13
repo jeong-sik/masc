@@ -1078,6 +1078,8 @@ export interface DashboardExecutionLodgeTick {
   failed?: number
   last_tick_at?: string | null
   last_skip_reason?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
   activity_report?: string | null
 }
 

@@ -132,8 +132,8 @@ function continuityStateLabel(state: DashboardExecutionContinuityBrief['state'])
 function lodgeOutcomeLabel(outcome: DashboardExecutionLodgeCheckin['outcome']): string {
   switch (outcome) {
     case 'acted': return '행동'
-    case 'passed': return '통과'
-    case 'skipped': return '건너뜀'
+    case 'passed': return '판단 패스'
+    case 'skipped': return '시스템 스킵'
     case 'failed': return '실패'
     default: return outcome
   }
@@ -147,7 +147,7 @@ function lodgeActionKindLabel(value?: DashboardExecutionLodgeCheckin['action_kin
     case 'none':
     case null:
     case undefined:
-      return 'none'
+      return '없음'
     default:
       return value
   }
@@ -337,15 +337,16 @@ function LodgeTickCard({ tick }: { tick: DashboardExecutionLodgeTick | null }) {
   return html`
     <div class="monitor-nested-card">
       <div class="stats-grid">
-        <${MonitorStat} label="checked" value=${tick.checked ?? 0} color="#22d3ee" />
-        <${MonitorStat} label="acted" value=${tick.acted ?? 0} color="#4ade80" />
-        <${MonitorStat} label="passed" value=${tick.passed ?? 0} color="#94a3b8" />
-        <${MonitorStat} label="skipped" value=${tick.skipped ?? 0} color="#fbbf24" />
-        <${MonitorStat} label="failed" value=${tick.failed ?? 0} color="#fb7185" />
+        <${MonitorStat} label="검토" value=${tick.checked ?? 0} color="#22d3ee" />
+        <${MonitorStat} label="행동" value=${tick.acted ?? 0} color="#4ade80" />
+        <${MonitorStat} label="판단 패스" value=${tick.passed ?? 0} color="#94a3b8" />
+        <${MonitorStat} label="시스템 스킵" value=${tick.skipped ?? 0} color="#fbbf24" />
+        <${MonitorStat} label="실패" value=${tick.failed ?? 0} color="#fb7185" />
       </div>
       <div class="monitor-meta">
         ${tick.last_tick_at ? html`<span>마지막 tick <${TimeAgo} timestamp=${tick.last_tick_at} /></span>` : html`<span>마지막 tick 없음</span>`}
-        ${tick.last_skip_reason ? html`<span>대표 skip 이유 · ${tick.last_skip_reason}</span>` : null}
+        ${tick.last_pass_reason ? html`<span>대표 패스 이유 · ${tick.last_pass_reason}</span>` : null}
+        ${tick.last_system_skip_reason ? html`<span>대표 시스템 스킵 이유 · ${tick.last_system_skip_reason}</span>` : null}
       </div>
       ${tick.activity_report ? html`<div class="monitor-footnote">${tick.activity_report}</div>` : null}
     </div>
@@ -369,7 +370,7 @@ function LodgeCheckinRow({ row }: { row: DashboardExecutionLodgeCheckin }) {
         </div>
         <span class="monitor-pill ${toneClass(row.outcome === 'failed' ? 'bad' : row.outcome === 'skipped' ? 'warn' : 'ok')}">${lodgeOutcomeLabel(row.outcome)}</span>
       </div>
-      <div class="monitor-meta">
+        <div class="monitor-meta">
         <span>trigger · ${row.trigger ?? 'unknown'}</span>
         ${row.checked_at ? html`<span><${TimeAgo} timestamp=${row.checked_at} /></span>` : null}
         <span>action · ${lodgeActionKindLabel(row.action_kind)}</span>
@@ -608,10 +609,10 @@ export function Execution() {
           semanticId="execution.lodge"
           testId="execution.lodge-checkins"
         >
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">Lodge Check-ins</h2>
-            <p class="monitor-subheadline">최근 lodge tick에서 누가 무엇을 허용받았고, 실제로 어떻게 행동했는지 먼저 보여줍니다.</p>
-          </div>
+      <div class="monitor-section-head">
+        <h2 class="monitor-headline">Lodge Check-ins</h2>
+        <p class="monitor-subheadline">최근 lodge tick에서 누가 실제로 행동했고, 누가 판단상 패스했고, 누가 시스템에 의해 스킵됐는지 먼저 보여줍니다.</p>
+      </div>
           <${LodgeTickCard} tick=${lodgeTick} />
           <div class="monitor-list">
             ${lodgeCheckins.length === 0

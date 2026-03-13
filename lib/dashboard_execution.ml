@@ -227,15 +227,21 @@ let lodge_outcome_rank = function
   | "passed" | "skipped" -> 1
   | _ -> 0
 
-let lodge_tick_last_reason (result : Lodge_heartbeat.heartbeat_result) =
+let lodge_tick_last_pass_reason (result : Lodge_heartbeat.heartbeat_result) =
+  let rec first_reason = function
+    | [] -> None
+    | (_, _, Lodge_heartbeat.Passed reason) :: _ -> Some reason
+    | _ :: tl -> first_reason tl
+  in
+  first_reason result.checkins
+
+let lodge_tick_last_system_skip_reason (result : Lodge_heartbeat.heartbeat_result) =
   if result.agents_checked = 0 then
     Some "no agents selected for this tick"
   else
     let rec first_reason = function
       | [] -> None
-      | (_, _, Lodge_heartbeat.Passed reason) :: _
-      | (_, _, Lodge_heartbeat.Skipped reason) :: _ ->
-          Some reason
+      | (_, _, Lodge_heartbeat.Skipped reason) :: _ -> Some reason
       | _ :: tl -> first_reason tl
     in
     first_reason result.checkins
@@ -394,7 +400,9 @@ let execution_smoke_fixture_json () =
             ("skipped", `Int 1);
             ("failed", `Int 0);
             ("last_tick_at", `String generated_at);
-            ("last_skip_reason", `String "delegated_tool_loop: watcher stayed read-only");
+            ("last_skip_reason", `String "rate-limited after a recent board action");
+            ("last_pass_reason", `String "stayed read-only after evaluating the board");
+            ("last_system_skip_reason", `String "rate-limited after a recent board action");
             ("activity_report", `String "alpha acted, beta passed, gamma skipped");
           ] );
       ( "lodge_checkins",
@@ -1342,7 +1350,9 @@ let build_lodge_checkins (status : Lodge_heartbeat.lodge_status) :
                ("skipped", `Int skipped);
                ("failed", `Int failed);
                ("last_tick_at", json_string_option checked_at);
-               ("last_skip_reason", json_string_option (lodge_tick_last_reason result));
+               ("last_skip_reason", json_string_option (lodge_tick_last_system_skip_reason result));
+               ("last_pass_reason", json_string_option (lodge_tick_last_pass_reason result));
+               ("last_system_skip_reason", json_string_option (lodge_tick_last_system_skip_reason result));
                ("activity_report", `String result.activity_report);
              ])
       in

@@ -266,7 +266,12 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
   Eio.Switch.run @@ fun sw ->
   let ctx = make_test_ctx () in
   let keeper_ctx : _ Tool_keeper.context =
-    { config = ctx.config; sw; clock = Eio.Stdenv.clock env }
+    {
+      config = ctx.config;
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+    }
   in
   match
     Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"

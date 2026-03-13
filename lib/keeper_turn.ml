@@ -40,6 +40,9 @@ let handle_keeper_up ctx args : tool_result =
     let initiative_cooldown_sec_opt = Safe_ops.json_int_opt "initiative_cooldown_sec" args in
     let initiative_context_mode_opt = get_string_opt args "initiative_context_mode" in
     let initiative_post_ttl_hours_opt = Safe_ops.json_int_opt "initiative_post_ttl_hours" args in
+    let auto_team_session_enabled_opt =
+      get_bool_opt args "auto_team_session_enabled"
+    in
     let room_scope_opt = get_string_opt args "room_scope" in
     let scope_kind_opt = get_string_opt args "scope_kind" in
     let trigger_mode_opt = get_string_opt args "trigger_mode" in
@@ -235,6 +238,9 @@ let handle_keeper_up ctx args : tool_result =
       in
       let voice_agent_id =
         Option.value ~default:(default_voice_agent_id_for name) voice_agent_id_opt
+      in
+      let auto_team_session_enabled =
+        Option.value ~default:false auto_team_session_enabled_opt
       in
       let mention_targets =
         let raw =
@@ -478,6 +484,10 @@ let handle_keeper_up ctx args : tool_result =
                 active_goal_ids = [];
                 last_autonomous_action_at = "";
                 autonomous_action_count = 0;
+                auto_team_session_enabled;
+                active_team_session_id = None;
+                last_team_session_started_at = "";
+                team_session_start_count_total = 0;
              } in
              match write_meta ctx.config meta with
              | Error e -> (false, "❌ " ^ e)
@@ -521,6 +531,7 @@ let handle_keeper_up ctx args : tool_result =
                  ("initiative_cooldown_sec", `Int meta.initiative_cooldown_sec);
                  ("initiative_context_mode", `String meta.initiative_context_mode);
                  ("initiative_post_ttl_hours", `Int meta.initiative_post_ttl_hours);
+                 ("auto_team_session_enabled", `Bool meta.auto_team_session_enabled);
                  ("drift_enabled", `Bool meta.drift_enabled);
                  ("drift_min_turn_gap", `Int meta.drift_min_turn_gap);
                  ("compaction_profile", `String meta.compaction_profile);
@@ -828,6 +839,10 @@ let handle_keeper_up ctx args : tool_result =
         handoff_threshold = Option.value ~default:old.handoff_threshold handoff_threshold_opt;
         handoff_cooldown_sec = Option.value ~default:old.handoff_cooldown_sec handoff_cooldown_sec_opt;
         context_budget = Option.value ~default:old.context_budget context_budget_opt;
+        auto_team_session_enabled =
+          Option.value
+            ~default:old.auto_team_session_enabled
+            auto_team_session_enabled_opt;
         updated_at = now_iso ();
       } in
       (match write_meta ctx.config updated with
@@ -836,6 +851,283 @@ let handle_keeper_up ctx args : tool_result =
          stop_keepalive updated.name;
          start_keepalive ctx updated;
          (true, Yojson.Safe.pretty_to_string (meta_to_json updated)))
+
+let auto_team_session_spawn_profile = "generic_pair_v1"
+
+let write_meta_logged config (meta : keeper_meta) =
+  match write_meta config meta with
+  | Ok () -> ()
+  | Error msg ->
+      Printf.eprintf "[keeper] write_meta failed: %s\n%!" msg
+
+let keeper_team_session_model (meta : keeper_meta) =
+  let active_model = String.trim meta.active_model in
+  if active_model <> "" && not (String.equal active_model "default") then
+    active_model
+  else
+    match meta.models with
+    | model :: _ -> model
+    | [] -> "default"
+
+let keeper_team_session_note (meta : keeper_meta) (message : string) =
+  Printf.sprintf
+    "[keeper auto-team-session]\nkeeper=%s\nrequest=%s\nkeeper_goal=%s\ninstructions=%s"
+    meta.name
+    (short_preview ~max_len:240 message)
+    (short_preview ~max_len:180 meta.goal)
+    (short_preview ~max_len:220 meta.instructions)
+
+let planner_spawn_prompt (meta : keeper_meta) (message : string) =
+  Printf.sprintf
+    "You are planner worker for keeper %s.\n\
+     Incoming request:\n%s\n\n\
+     Keeper goal:\n%s\n\n\
+     Keeper instructions:\n%s\n\n\
+     Leave exactly one non-empty planning note via masc_team_session_step that states:\n\
+     - intended scope\n\
+     - concrete success criteria\n\
+     - first work split\n"
+    meta.name message meta.goal
+    (if String.trim meta.instructions = "" then "(none)" else meta.instructions)
+
+let executor_spawn_prompt (meta : keeper_meta) (message : string) =
+  Printf.sprintf
+    "You are executor worker for keeper %s.\n\
+     Incoming request:\n%s\n\n\
+     Keeper goal:\n%s\n\n\
+     Keeper instructions:\n%s\n\n\
+     Leave exactly one non-empty execution note via masc_team_session_step that states:\n\
+     - first concrete action\n\
+     - likely files/surfaces/tools to inspect\n\
+     - immediate blocker if any\n"
+    meta.name message meta.goal
+    (if String.trim meta.instructions = "" then "(none)" else meta.instructions)
+
+let auto_team_session_spawn_batch (meta : keeper_meta) (message : string) =
+  let model = keeper_team_session_model meta in
+  `List
+    [
+      `Assoc
+        [
+          ("spawn_agent", `String "llama");
+          ("spawn_prompt", `String (planner_spawn_prompt meta message));
+          ("spawn_model", `String model);
+          ("spawn_role", `String "planner");
+          ("spawn_timeout_seconds", `Int 120);
+          ("spawn_selection_note", `String "keeper auto-team-session generic_pair_v1 planner");
+        ];
+      `Assoc
+        [
+          ("spawn_agent", `String "llama");
+          ("spawn_prompt", `String (executor_spawn_prompt meta message));
+          ("spawn_model", `String model);
+          ("spawn_role", `String "executor");
+          ("spawn_timeout_seconds", `Int 120);
+          ("spawn_selection_note", `String "keeper auto-team-session generic_pair_v1 executor");
+        ];
+    ]
+
+let team_session_ctx_of_keeper ctx (meta : keeper_meta) : _ Tool_team_session.context =
+  {
+    Tool_team_session.config = ctx.config;
+    agent_name = meta.agent_name;
+    sw = ctx.sw;
+    clock = ctx.clock;
+    proc_mgr = ctx.proc_mgr;
+  }
+
+let dispatch_team_session ctx meta ~name ~args =
+  match Tool_team_session.dispatch (team_session_ctx_of_keeper ctx meta) ~name ~args with
+  | Some result -> result
+  | None -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String "team session dispatch unavailable") ]))
+
+let parse_result_json body =
+  try
+    let open Yojson.Safe.Util in
+    let json = Yojson.Safe.from_string body in
+    Ok (json |> member "result")
+  with Yojson.Json_error err ->
+    Error ("invalid json: " ^ err)
+
+let session_id_of_result_json json =
+  try Some Yojson.Safe.Util.(json |> member "session_id" |> to_string)
+  with Yojson.Safe.Util.Type_error _ -> None
+
+let bool_option_to_json = function
+  | Some value -> `Bool value
+  | None -> `Null
+
+let string_option_to_json = function
+  | Some value -> `String value
+  | None -> `Null
+
+let running_session_for_keeper config (meta : keeper_meta) =
+  match meta.active_team_session_id with
+  | None -> (meta, None)
+  | Some session_id -> (
+      match Team_session_store.load_session config session_id with
+      | Some session when session.status = Team_session_types.Running ->
+          (meta, Some session)
+      | _ ->
+          let updated =
+            {
+              meta with
+              active_team_session_id = None;
+              updated_at = now_iso ();
+            }
+          in
+          write_meta_logged config updated;
+          (updated, None))
+
+let keeper_auto_team_session_response_json
+    ~(meta : keeper_meta)
+    ~(session : Team_session_types.session)
+    ~(created : bool)
+    ~(reused : bool)
+    ?spawn_error
+    () =
+  `Assoc
+    [
+      ("mode", `String "team_session");
+      ("keeper_name", `String meta.name);
+      ("session_id", `String session.session_id);
+      ("created", `Bool created);
+      ("reused", `Bool reused);
+      ("session_status", `String (Team_session_types.status_to_string session.status));
+      ("spawn_profile", `String auto_team_session_spawn_profile);
+      ("spawned_roles", `List [ `String "planner"; `String "executor" ]);
+      ("spawn_error", string_option_to_json spawn_error);
+      ("active_team_session_id", string_option_to_json meta.active_team_session_id);
+      ("last_team_session_started_at", `String meta.last_team_session_started_at);
+      ("team_session_start_count_total", `Int meta.team_session_start_count_total);
+      ("next_read_tool", `String "masc_team_session_status");
+      ("next_write_tool", `String "masc_team_session_step");
+    ]
+
+let start_keeper_auto_team_session ctx (meta : keeper_meta) (message : string) :
+    (keeper_meta * Team_session_types.session * string option, string) result =
+  let start_args =
+    `Assoc
+      [
+        ("goal", `String message);
+        ("duration_seconds", `Int 3600);
+        ("execution_scope", `String "observe_only");
+        ("checkpoint_interval_sec", `Int 60);
+        ("min_agents", `Int 2);
+        ("auto_resume", `Bool true);
+        ("report_formats", `List [ `String "markdown"; `String "json" ]);
+        ("orchestration_mode", `String "assist");
+        ("communication_mode", `String "hybrid");
+        ("instruction_profile", `String "strict");
+        ("alert_channel", `String "both");
+        ("model_cascade", `List (List.map (fun model -> `String model) meta.models));
+        ("agents", `List [ `String meta.agent_name ]);
+      ]
+  in
+  let start_ok, start_body =
+    dispatch_team_session ctx meta ~name:"masc_team_session_start" ~args:start_args
+  in
+  if not start_ok then
+    Error ("team session start failed: " ^ start_body)
+  else
+    match parse_result_json start_body with
+    | Error msg -> Error ("team session start parse failed: " ^ msg)
+    | Ok start_json -> (
+        match session_id_of_result_json start_json with
+        | None -> Error "team session start missing session_id"
+        | Some session_id -> (
+            match Team_session_store.load_session ctx.config session_id with
+            | None -> Error ("team session not found after start: " ^ session_id)
+            | Some session ->
+                let updated_meta =
+                  {
+                    meta with
+                    active_team_session_id = Some session_id;
+                    last_team_session_started_at = now_iso ();
+                    team_session_start_count_total =
+                      meta.team_session_start_count_total + 1;
+                    updated_at = now_iso ();
+                  }
+                in
+                write_meta_logged ctx.config updated_meta;
+                let note_args =
+                  `Assoc
+                    [
+                      ("session_id", `String session_id);
+                      ("turn_kind", `String "note");
+                      ("message", `String (keeper_team_session_note updated_meta message));
+                    ]
+                in
+                let note_ok, note_body =
+                  dispatch_team_session ctx updated_meta ~name:"masc_team_session_step"
+                    ~args:note_args
+                in
+                if not note_ok then
+                  Error ("team session note failed: " ^ note_body)
+                else
+                  let spawn_args =
+                    `Assoc
+                      [
+                        ("session_id", `String session_id);
+                        ("spawn_batch", auto_team_session_spawn_batch updated_meta message);
+                      ]
+                  in
+                  let spawn_ok, spawn_body =
+                    dispatch_team_session ctx updated_meta ~name:"masc_team_session_step"
+                      ~args:spawn_args
+                  in
+                  let spawn_error =
+                    if spawn_ok then None else Some spawn_body
+                  in
+                  Ok (updated_meta, session, spawn_error)))
+
+let append_keeper_auto_team_session_note ctx (meta : keeper_meta)
+    (session : Team_session_types.session) (message : string) :
+    (Team_session_types.session, string) result =
+  let note_args =
+    `Assoc
+      [
+        ("session_id", `String session.session_id);
+        ("turn_kind", `String "note");
+        ("message", `String (keeper_team_session_note meta message));
+      ]
+  in
+  let ok, body =
+    dispatch_team_session ctx meta ~name:"masc_team_session_step" ~args:note_args
+  in
+  if not ok then
+    Error ("team session note failed: " ^ body)
+  else
+    match Team_session_store.load_session ctx.config session.session_id with
+    | Some refreshed -> Ok refreshed
+    | None -> Error ("team session disappeared after note: " ^ session.session_id)
+
+let maybe_handle_auto_team_session ctx (meta : keeper_meta) (message : string) :
+    ((tool_result option * keeper_meta), string) result =
+  if not meta.auto_team_session_enabled then
+    Ok (None, meta)
+  else
+    let linked_meta, running_session = running_session_for_keeper ctx.config meta in
+    match running_session with
+    | Some session -> (
+        match append_keeper_auto_team_session_note ctx linked_meta session message with
+        | Error err -> Error err
+        | Ok session' ->
+            let json =
+              keeper_auto_team_session_response_json
+                ~meta:linked_meta ~session:session' ~created:false ~reused:true ()
+            in
+            Ok (Some (true, Yojson.Safe.pretty_to_string json), linked_meta))
+    | None -> (
+        match start_keeper_auto_team_session ctx linked_meta message with
+        | Error err -> Error err
+        | Ok (updated_meta, session, spawn_error) ->
+            let json =
+              keeper_auto_team_session_response_json
+                ~meta:updated_meta ~session ~created:true ~reused:false
+                ?spawn_error ()
+            in
+            Ok (Some (true, Yojson.Safe.pretty_to_string json), updated_meta))
 
 
 let handle_keeper_msg ctx args : tool_result =
@@ -1141,6 +1433,10 @@ let handle_keeper_msg ctx args : tool_result =
             active_goal_ids = [];
             last_autonomous_action_at = "";
             autonomous_action_count = 0;
+            auto_team_session_enabled = false;
+            active_team_session_id = None;
+            last_team_session_started_at = "";
+            team_session_start_count_total = 0;
           } in
           let base_dir = session_base_dir ctx.config in
           mkdir_p base_dir;
@@ -1267,6 +1563,10 @@ let handle_keeper_msg ctx args : tool_result =
           updated
       in
       start_keepalive ctx meta;
+      match maybe_handle_auto_team_session ctx meta message with
+      | Error err -> (false, "❌ " ^ err)
+      | Ok (Some result, _) -> result
+      | Ok (None, meta) ->
       (* === Harness: trajectory accumulator + eval gate config === *)
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let trajectory_acc =
@@ -2555,9 +2855,20 @@ let handle_keeper_down ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (true, Printf.sprintf "keeper already absent: %s" name)
     | Ok (Some m) ->
-      if remove_meta then
-        Safe_ops.remove_file_logged ~context:"keeper_down" (keeper_meta_path ctx.config name);
-      if remove_session then begin
+      (if remove_meta then
+         Safe_ops.remove_file_logged ~context:"keeper_down"
+           (keeper_meta_path ctx.config name)
+       else
+         let retained =
+           {
+             m with
+             active_team_session_id = None;
+             last_team_session_started_at = "";
+             updated_at = now_iso ();
+           }
+         in
+         write_meta_logged ctx.config retained);
+      if remove_session then (
         let rec rm_rf path =
           if Sys.file_exists path then begin
             if Sys.is_directory path then begin
@@ -2569,11 +2880,11 @@ let handle_keeper_down ctx args : tool_result =
               Sys.remove path
           end
         in
-        if validate_name m.trace_id then
+        if validate_name m.trace_id then (
           let dir = Filename.concat (session_base_dir ctx.config) m.trace_id in
-          (try rm_rf dir with exn ->
-          Printf.eprintf "[keeper] session dir cleanup failed: %s\n%!" (Printexc.to_string exn))
-      end;
+          try rm_rf dir with exn ->
+            Printf.eprintf "[keeper] session dir cleanup failed: %s\n%!"
+              (Printexc.to_string exn)));
       let json = `Assoc [
         ("name", `String name);
         ("stopped", `Bool true);

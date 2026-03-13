@@ -45,6 +45,7 @@ let forget_mcp_session session_id =
 
 let profile_label = function
   | Mcp_eio.Full -> "/mcp"
+  | Mcp_eio.Managed_agent -> "/mcp/managed"
   | Mcp_eio.Operator_remote -> "/mcp/operator"
 
 let validate_mcp_session_profile ~profile session_id =
@@ -69,17 +70,19 @@ let validate_mcp_session_delete_profile ~profile session_id =
           Error
             (Printf.sprintf "Session %s is not registered on %s." session_id
                (profile_label profile)))
-  | Mcp_eio.Full -> validate_mcp_session_profile ~profile session_id
+  | Mcp_eio.Full | Mcp_eio.Managed_agent ->
+      validate_mcp_session_profile ~profile session_id
 
 let protocol_version_from_body body_str =
   try
     let json = Yojson.Safe.from_string body_str in
     match Mcp_server.jsonrpc_request_of_yojson json with
     | Ok req when String.equal req.method_ "initialize" ->
-        let version = Mcp_server.protocol_version_from_params req.params in
-        (match Mcp_server.validate_protocol_version version with
-        | Ok valid -> Some valid
-        | Error _ -> None)
+        let version =
+          Mcp_server.protocol_version_from_params req.params
+          |> Mcp_server.normalize_protocol_version
+        in
+        Some version
     | _ -> None
   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
@@ -529,7 +532,8 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   in
   let auth_result =
     match profile with
-    | Mcp_eio.Full -> deps.verify_mcp_auth ~base_path request
+    | Mcp_eio.Full | Mcp_eio.Managed_agent ->
+        deps.verify_mcp_auth ~base_path request
     | Mcp_eio.Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in
@@ -948,7 +952,7 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   in
   let auth_result =
     match profile with
-    | Mcp_eio.Full -> Ok ()
+    | Mcp_eio.Full | Mcp_eio.Managed_agent -> Ok ()
     | Mcp_eio.Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in

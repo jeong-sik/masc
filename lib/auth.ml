@@ -236,7 +236,7 @@ let permission_for_tool = function
   | "masc_persistent_agent_autonomy" | "masc_persistent_agent_goals"
   | "masc_persistent_agent_trajectory" | "masc_persistent_agent_eval"
   | "masc_llama_models" | "masc_llama_runtime_status"
-  | "masc_runtime_verify" | "masc_llama_runtime_verify"
+  | "masc_runtime_verify"
   | "masc_llama_runtime_bench"
   | "masc_unit_list" | "masc_operation_status"
   | "masc_policy_status" | "masc_dispatch_plan" | "masc_dispatch_route"
@@ -250,8 +250,8 @@ let permission_for_tool = function
       Some CanReadState
   | "masc_autoresearch_status" -> Some CanReadState
   | "masc_add_task" -> Some CanAddTask
-  | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
-  | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" -> Some CanCompleteTask
+  | "masc_claim_next" -> Some CanClaimTask
+  | "masc_update_priority" | "masc_transition" -> Some CanCompleteTask
   | "masc_keeper_action_explain"
   | "masc_keeper_eval_replay" ->
       Some CanReadState
@@ -275,7 +275,7 @@ let permission_for_tool = function
   | "masc_voice_session_end" | "masc_voice_conference_start"
   | "masc_voice_conference_end"
   | "masc_operator_confirm" | "masc_unit_define"
-  | "masc_unit_update" | "masc_unit_reparent"
+  | "masc_unit_reparent"
   | "masc_unit_reassign" | "masc_operation_start"
   | "masc_operation_checkpoint" | "masc_operation_pause"
   | "masc_operation_resume" | "masc_operation_stop"
@@ -326,7 +326,7 @@ let is_tool_auth_strict_enabled () =
   | Some raw ->
       let v = String.trim raw |> String.lowercase_ascii in
       v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
-  | None -> true
+  | None -> false
 
 let is_masc_tool_name tool_name =
   String.starts_with ~prefix:"masc_" tool_name
@@ -340,14 +340,14 @@ let is_protocol_canonical_tool_name tool_name =
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match permission_for_tool tool_name with
-  | None when not (is_tool_auth_strict_enabled ()) -> Ok ()
   | None ->
-      Error
-        (Forbidden
-           {
-             agent = agent_name;
-             action = Printf.sprintf "use unmapped tool %s" tool_name;
-           })
+      if not (is_tool_auth_strict_enabled ()) then
+        Ok ()  (* Legacy fail-open *)
+      else if is_masc_tool_name tool_name || is_protocol_canonical_tool_name tool_name then
+        (* Conservative default in strict mode for unmapped internal tools. *)
+        check_permission config ~agent_name ~token ~permission:CanBroadcast
+      else
+        Error (Forbidden { agent = agent_name; action = "use unknown non-masc tool" })
   | Some perm -> check_permission config ~agent_name ~token ~permission:perm
 
 (* ============================================ *)

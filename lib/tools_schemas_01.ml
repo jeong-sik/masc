@@ -224,25 +224,6 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
   };
 
   {
-    name = "masc_claim";
-    description = "Claim a task from the backlog BEFORE starting work. This prevents other agents from working on the same task (collision avoidance). Prefer masc_transition(action='claim') for CAS-guarded transitions.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID (e.g., 'task-001')");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "task_id"]);
-    ];
-  };
-
-  {
     name = "masc_transition";
     description = "Unified task state transition (single entrypoint). Actions: claim, start, done, cancel, release. Supports CAS via expected_version (backlog.version). Use notes for done, reason for cancel.";
     input_schema = `Assoc [
@@ -274,76 +255,6 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"; `String "action"]);
-    ];
-  };
-
-  {
-    name = "masc_release";
-    description = "Release a claimed or in-progress task back to backlog. Prefer masc_transition(action='release') for a single entrypoint.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID to release");
-        ]);
-        ("expected_version", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Optional CAS guard (current backlog.version). Transition fails if mismatched");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "task_id"]);
-    ];
-  };
-
-  {
-    name = "masc_done";
-    description = "Mark a task as completed. Prefer masc_transition(action='done') for CAS-guarded transitions.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID");
-        ]);
-        ("notes", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Completion notes");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "task_id"]);
-    ];
-  };
-
-  (* A2A CancelTask API *)
-  {
-    name = "masc_cancel_task";
-    description = "Cancel a running or pending task. A2A compatible. Prefer masc_transition(action='cancel') for CAS-guarded transitions.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID to cancel");
-        ]);
-        ("reason", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Cancellation reason (optional)");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "task_id"]);
     ];
   };
 

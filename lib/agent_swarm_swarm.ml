@@ -278,7 +278,10 @@ let finalize_managed_task ~sw masc spec binding =
 (** Run a single agent: join MASC, run LLM loop, leave MASC.
     [extra_tools] are appended after MASC tools (e.g., dev_tools from Fleet). *)
 let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
-  let masc = Agent_swarm_client.create ~net ~base_url:masc_url ~agent_name:spec.name in
+  let masc =
+    Agent_swarm_client.create_managed ~net ~base_url:masc_url
+      ~agent_name:spec.name
+  in
   match Agent_swarm_client.join ~sw masc with
   | Error e ->
     { agent_name = spec.name;
@@ -403,7 +406,7 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
     If the coordinator fails to join MASC, heartbeat and post-run
     broadcast/leave are skipped. *)
 let run ~sw ~net ~clock config ~goal =
-  let masc = Agent_swarm_client.create ~net
+  let masc = Agent_swarm_client.create_managed ~net
     ~base_url:config.masc_url
     ~agent_name:"swarm-coordinator" in
   let coordinator_joined =

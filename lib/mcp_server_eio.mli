@@ -27,6 +27,7 @@ type jsonrpc_request = Mcp_server.jsonrpc_request
 (** Tool exposure profile for streamable HTTP endpoints. *)
 type tool_profile =
   | Full
+  | Managed_agent
   | Operator_remote
 
 (** {1 JSON-RPC Helpers (re-exported)} *)

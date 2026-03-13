@@ -722,8 +722,8 @@ let limit_for_category config = function
 (** Map tool to rate limit category *)
 let category_for_tool = function
   | "masc_broadcast" | "masc_listen" -> BroadcastLimit
-  | "masc_add_task" | "masc_claim" | "masc_claim_next" | "masc_done"
-  | "masc_update_priority" | "masc_transition" | "masc_release" -> TaskOpsLimit
+  | "masc_add_task" | "masc_claim_next"
+  | "masc_update_priority" | "masc_transition" -> TaskOpsLimit
   | _ -> GeneralLimit
 
 (** Rate limit error - returned when limit exceeded *)

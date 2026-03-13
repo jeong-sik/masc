@@ -62,7 +62,7 @@ let run_cli ~sw:_ ~proc_mgr ~clock config ~prompt =
 
 let run_with_masc ~sw ~proc_mgr ~clock ~net ~masc_url config ~goal =
   try
-    let client = Agent_swarm_client.create ~base_url:masc_url
+    let client = Agent_swarm_client.create_managed ~base_url:masc_url
       ~agent_name:config.name ~net in
     let _joined = Agent_swarm_client.join ~sw client in
     Fun.protect ~finally:(fun () ->

@@ -148,12 +148,6 @@ let make_request_handler ~sw ~clock ~server_start_time =
           h2_respond_html h2_reqd "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>" ~extra_headers:cors
     in
 
-    let h2_authorize_tool state ~tool_name =
-      authorize_tool_request
-        ~base_path:state.Mcp_server.room_config.base_path
-        ~tool_name httpun_request
-    in
-
     let dispatch_h2_route () =
       match httpun_meth, path with
       (* ─────────────────────────────────────────────────────────────────────
@@ -218,7 +212,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
       (* ─────────────────────────────────────────────────────────────────────
          MCP Endpoints
          ───────────────────────────────────────────────────────────────────── *)
-      | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/operator" ->
+      | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" | `POST, "/mcp/operator" ->
           let session_id = match session_id_opt with
             | Some id -> id
             | None -> Mcp_session.generate ()
@@ -227,6 +221,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
           let protocol_version = get_protocol_version_for_session ~session_id httpun_request in
           let profile =
             if String.equal path "/mcp/operator" then Mcp_eio.Operator_remote
+            else if String.equal path "/mcp/managed" then Mcp_eio.Managed_agent
             else Mcp_eio.Full
           in
           (* HTTP-level auth check for MCP endpoints *)
@@ -236,7 +231,8 @@ let make_request_handler ~sw ~clock ~server_start_time =
           in
           let auth_result =
             match profile with
-            | Mcp_eio.Full -> verify_mcp_auth ~base_path httpun_request
+            | Mcp_eio.Full | Mcp_eio.Managed_agent ->
+                verify_mcp_auth ~base_path httpun_request
             | Mcp_eio.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
           in
@@ -301,9 +297,10 @@ let make_request_handler ~sw ~clock ~server_start_time =
                                      let body = Yojson.Safe.to_string json in
                                      h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs)))))
 
-      | `DELETE, "/mcp" | `DELETE, "/mcp/operator" ->
+      | `DELETE, "/mcp" | `DELETE, "/mcp/managed" | `DELETE, "/mcp/operator" ->
           let profile =
             if String.equal path "/mcp/operator" then Mcp_eio.Operator_remote
+            else if String.equal path "/mcp/managed" then Mcp_eio.Managed_agent
             else Mcp_eio.Full
           in
           let base_path = match !server_state with
@@ -312,7 +309,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
           in
           let auth_result =
             match profile with
-            | Mcp_eio.Full -> Ok None
+            | Mcp_eio.Full | Mcp_eio.Managed_agent -> Ok None
             | Mcp_eio.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
           in
@@ -717,7 +714,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/operator/action" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_operator_action" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -741,7 +740,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/units" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_unit_define" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -769,7 +770,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/units/reparent" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_unit_reparent" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -794,7 +797,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/units/reassign" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_unit_reassign" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -819,7 +824,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/operations" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_operation_start" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -847,7 +854,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/operations/checkpoint" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_operation_checkpoint" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -875,7 +884,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/operations/pause" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_operation_pause" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -900,7 +911,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/operations/resume" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_operation_resume" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -925,7 +938,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/operations/stop" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_operation_stop" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -950,7 +965,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/operations/finalize" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_operation_finalize" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -975,7 +992,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/dispatch/plan" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_dispatch_plan" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1000,7 +1019,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/dispatch/assign" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_dispatch_assign" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1025,7 +1046,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/dispatch/rebalance" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_dispatch_rebalance" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1050,7 +1073,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/dispatch/escalate" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_dispatch_escalate" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1075,7 +1100,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/dispatch/recall" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_dispatch_recall" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1100,7 +1127,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/dispatch/tick" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_dispatch_tick" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1125,7 +1154,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/policy/approve" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_policy_approve" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1150,7 +1181,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/policy/deny" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_policy_deny" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1175,7 +1208,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/policy/update" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_policy_update" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1200,7 +1235,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/policy/freeze" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_policy_freeze_unit" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1225,7 +1262,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/command-plane/policy/kill-switch" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_policy_kill_switch" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -1250,7 +1289,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `POST, "/api/v1/operator/confirm" ->
           let state = get_server_state () in
-          (match h2_authorize_tool state ~tool_name:"masc_operator_confirm" with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors

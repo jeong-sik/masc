@@ -19,6 +19,7 @@ As of `2026-03-12`, the server shape is broadly sound, but its explanation surfa
   - [mcp_server.ml](../lib/mcp_server.ml)
   - [mcp_server_eio.ml](../lib/mcp_server_eio.ml)
   - [mcp_prompt_surface.ml](../lib/mcp_prompt_surface.ml)
+  - [CAPABILITY-REGISTRY-SSOT.md](./CAPABILITY-REGISTRY-SSOT.md)
 
 ## Inventory Summary
 
@@ -41,7 +42,8 @@ The key split is intentional:
 | Group | Public Discovery Path | Canonical Examples | Notes |
 |------|------------------------|--------------------|-------|
 | Canonical MCP tools | `tools/list` | `masc_transition`, `masc_team_session_step`, `decision.create`, `experiment.start`, `trpg.dice.roll` | Default surface for normal clients |
-| Compatibility aliases | Not part of default `/mcp` discovery/call | `masc_claim`, `experiment_start`, `masc_trpg_dice_roll` | Legacy names are not part of the strict default MCP surface |
+| Managed agent MCP | `/mcp/managed` | `masc_room_status`, `masc_list_tasks`, `masc_claim_task`, `masc_set_current_task` | Internal managed-agent surface with SDK aliases + curated passthrough tools |
+| Compatibility aliases | Hidden from `tools/list` | `masc_claim`, `experiment_start`, `masc_trpg_dice_roll` | Still callable for compatibility; not part of the truthful default inventory |
 | MCP prompts | `prompts/list`, `prompts/get` | `tool_help`, `team_session_proof`, `command_truth` | Explanation/proof layer, not runtime prompt registry |
 | MCP resources | `resources/list/read` | `masc://status`, `masc://tasks`, `masc://tool-help-index` | Snapshot/read layer |
 | Remote operator | `/mcp/operator` | `masc_operator_snapshot`, `masc_operator_digest` | Separate 4-tool remote-safe profile |

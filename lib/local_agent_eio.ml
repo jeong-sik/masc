@@ -289,169 +289,11 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
       in
       Ok { text = extract_tool_text json; is_error }
 
-let local_worker_extra_schemas : Types.tool_schema list =
-  [
-    {
-      Types.name = "masc_heartbeat";
-      description =
-        "Update the worker heartbeat timestamp so long-running local tasks are not reaped as zombies.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ("properties", `Assoc []);
-          ];
-    };
-    {
-      Types.name = "masc_team_session_status";
-      description =
-        "Get the current status and progress summary for a team session.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("session_id", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "session_id" ]);
-          ];
-    };
-    {
-      Types.name = "masc_team_session_turn";
-      description =
-        "Record a team orchestration turn and optionally execute broadcast or checkpoint action.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("session_id", `Assoc [ ("type", `String "string") ]);
-                  ("message", `Assoc [ ("type", `String "string") ]);
-                  ("turn_kind", `Assoc [ ("type", `String "string") ]);
-                  ("target_agent", `Assoc [ ("type", `String "string") ]);
-                  ("task_title", `Assoc [ ("type", `String "string") ]);
-                  ("task_description", `Assoc [ ("type", `String "string") ]);
-                  ("task_priority", `Assoc [ ("type", `String "integer") ]);
-                ] );
-            ("required", `List [ `String "session_id"; `String "turn_kind" ]);
-          ];
-    };
-    {
-      Types.name = "masc_memento_mori";
-      description =
-        "Check context pressure and auto-handle prepare or handoff when thresholds are crossed.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("context_ratio", `Assoc [ ("type", `String "number") ]);
-                  ("full_context", `Assoc [ ("type", `String "string") ]);
-                  ("summary", `Assoc [ ("type", `String "string") ]);
-                  ("current_task", `Assoc [ ("type", `String "string") ]);
-                  ("target_agent", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "context_ratio" ]);
-          ];
-    };
-  ]
-
-let local_worker_lodge_read_schemas : Types.tool_schema list =
-  [
-    {
-      Types.name = "lodge_research";
-      description = "Research a topic using LLM and share findings with the lodge.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("topic", `Assoc [ ("type", `String "string") ]);
-                  ("agent_name", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "topic" ]);
-          ];
-    };
-    {
-      Types.name = "lodge_profile";
-      description = "Get an agent profile with recent lodge activity and stats.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("agent_name", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "agent_name" ]);
-          ];
-    };
-    {
-      Types.name = "lodge_search";
-      description = "Search lodge content and agents by keyword.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("query", `Assoc [ ("type", `String "string") ]);
-                  ("limit", `Assoc [ ("type", `String "integer") ]);
-                ] );
-            ("required", `List [ `String "query" ]);
-          ];
-    };
-  ]
-
-let local_worker_tool_schemas : Types.tool_schema list =
-  let seen = Hashtbl.create 64 in
-  List.filter
-    (fun (schema : Types.tool_schema) ->
-      if Hashtbl.mem seen schema.name then
-        false
-      else (
-        Hashtbl.add seen schema.name ();
-        true))
-    (local_worker_extra_schemas @ Tool_board.tools @ local_worker_lodge_read_schemas)
-
 let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
     ?(names : string list option = None) () :
     (Types.tool_schema list, string) result =
   ignore (_sw, auth_token, session_id);
-  let all_schemas = local_worker_tool_schemas in
-  match names with
-  | None -> Ok all_schemas
-  | Some values ->
-      let requested =
-        values |> List.map String.trim |> List.filter (fun value -> value <> "")
-        |> unique_preserve_order
-      in
-      let schemas =
-        List.filter
-          (fun (schema : Types.tool_schema) -> List.mem schema.name requested)
-          all_schemas
-      in
-      let missing =
-        List.filter
-          (fun tool_name ->
-            not (List.exists (fun (schema : Types.tool_schema) -> String.equal schema.name tool_name) schemas))
-          requested
-      in
-      if missing <> [] then
-        Error
-          (sprintf "unknown tool schema(s): %s"
-             (String.concat ", " missing))
-      else Ok schemas
+  Agent_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let tool_schema_of_name schemas tool_name =
   List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name tool_name) schemas
@@ -778,8 +620,8 @@ Use tools when state inspection, task coordination, work delegation, or room upd
 Keep responses concise and task-focused.
 If a tool schema includes agent_name and you omit it, the runtime will inject %s automatically.
 Do not invent tool names or arguments that are not in schema.
-If you are operating inside a team session, record your own work with masc_team_session_turn as the worker.
-Inside a team session, record at least one note turn with masc_team_session_turn(turn_kind="note", message="...") and a non-empty message that states your concrete contribution.
+If you are operating inside a team session, record your own work with masc_team_session_step as the worker.
+Inside a team session, record at least one note turn with masc_team_session_step(session_id="...", turn_kind="note", message="...") and a non-empty message that states your concrete contribution.
 A note turn without a message is invalid and will be rejected.
 When the task is complete, return a short final result summarizing what you changed or learned.|}
     worker_name model_id session_line role_line selection_line worker_name

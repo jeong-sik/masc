@@ -697,17 +697,10 @@ let handle_keeper_tool_catalog _ctx args =
        :: Tool_catalog.metadata_to_fields schema.name)
   in
   let wrapped_internal_tools =
-    Tool_shard.keeper_llm_tools
-    |> List.map (fun tool -> tool.Llm_client.tool_name)
-    |> List.sort_uniq String.compare
+    Capability_registry.keeper_wrapped_internal_tools
   in
   let wrapped_server_names =
-    [
-      "masc_board_post";
-      "masc_board_comment";
-      "masc_board_list";
-      "masc_voice_speak";
-    ]
+    Capability_registry.keeper_wrapped_server_tools
   in
   let server_only_tools =
     server_tools
@@ -725,6 +718,19 @@ let handle_keeper_tool_catalog _ctx args =
           `List (List.map (fun name -> `String name) wrapped_server_names));
         ("server_only_tools",
           `List (List.map (fun name -> `String name) server_only_tools));
+        ( "keeper_standard_tools",
+          `List
+            (List.map
+               (fun name -> `String name)
+               Capability_registry.keeper_safe_tool_names) );
+        ( "keeper_privileged_tools",
+          `List
+            (List.map
+               (fun name -> `String name)
+               Capability_registry.keeper_privileged_tool_names) );
+        ( "surface_snapshot",
+          Capability_registry.surface_snapshot_json
+            Config.raw_all_tool_schemas );
       ]
   in
   (true, Yojson.Safe.pretty_to_string json)

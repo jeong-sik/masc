@@ -35,21 +35,7 @@ type runner =
   (run_result, run_error) result
 
 let auditable_tool_catalog : string list =
-  [
-    "masc_code_search";
-    "masc_code_symbols";
-    "masc_code_read";
-    "masc_worktree_create";
-    "masc_worktree_list";
-    "masc_worktree_remove";
-    "masc_run_init";
-    "masc_run_plan";
-    "masc_run_log";
-    "masc_run_deliverable";
-    "masc_run_get";
-    "masc_run_list";
-    "masc_spawn";
-  ]
+  Agent_tool_surfaces.mdal_auditable_tool_names
 
 let unique_preserve_order items =
   let rec loop seen = function

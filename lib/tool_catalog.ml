@@ -81,34 +81,10 @@ let explicit_metadata : (string * metadata) list =
             "Placeholder only: requires Eio server context for persistence and is not part of the truthful default tool surface.";
         allow_direct_call_when_hidden = false;
       } );
-    ( "masc_claim",
-      deprecated ~canonical_name:"masc_transition" ~replacement:"masc_transition"
-        "Superseded by the unified masc_transition entrypoint." );
-    ( "masc_done",
-      deprecated ~canonical_name:"masc_transition" ~replacement:"masc_transition"
-        "Superseded by the unified masc_transition entrypoint." );
-    ( "masc_release",
-      deprecated ~canonical_name:"masc_transition" ~replacement:"masc_transition"
-        "Superseded by the unified masc_transition entrypoint." );
-    ( "masc_cancel_task",
-      deprecated ~canonical_name:"masc_transition" ~replacement:"masc_transition"
-        "Superseded by the unified masc_transition entrypoint." );
-    ( "masc_team_session_turn",
-      deprecated ~canonical_name:"masc_team_session_step"
-        ~replacement:"masc_team_session_step" ~allow_direct_call_when_hidden:true
-        "Legacy compatibility entrypoint for plain team-session turn recording; use masc_team_session_step." );
     ( "masc_dispatch_route",
       deprecated ~canonical_name:"masc_dispatch_plan"
         ~replacement:"masc_dispatch_plan"
         "Alias retained for compatibility; use masc_dispatch_plan." );
-    ( "masc_llama_runtime_verify",
-      deprecated ~canonical_name:"masc_runtime_verify"
-        ~replacement:"masc_runtime_verify" ~allow_direct_call_when_hidden:true
-        "Deprecated llama-specific alias retained for compatibility; use masc_runtime_verify." );
-    ( "masc_unit_update",
-      deprecated ~canonical_name:"masc_unit_define"
-        ~replacement:"masc_unit_define"
-        "Alias retained for compatibility; use masc_unit_define." );
     ( "masc_post_create",
       hidden_active
         "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface." );
@@ -188,13 +164,6 @@ let is_visible ?(include_hidden = false) ?(include_deprecated = false) name =
   | Hidden, _ -> false
   | Default, Deprecated -> include_deprecated
   | Default, Active -> implementation_allows_public_visibility meta.implementation_status
-
-let is_default_mcp_callable name =
-  let meta = metadata name in
-  match (meta.lifecycle, meta.implementation_status) with
-  | Deprecated, _ -> false
-  | _, Placeholder -> false
-  | _ -> true
 
 let visibility_to_string = function
   | Default -> "default"

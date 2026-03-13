@@ -167,14 +167,14 @@ let () =
                 (List.assoc_opt "lifecycle" fields = None));
           test_case "public contract keeps canonical alias" `Quick (fun () ->
               let fields =
-                Tool_catalog.public_contract_fields "masc_llama_runtime_verify"
+                Tool_catalog.public_contract_fields "masc_dispatch_route"
               in
               let canonical_val =
                 List.assoc_opt "canonicalName" fields
                 |> Option.map (function `String s -> s | _ -> "")
                 |> Option.value ~default:""
               in
-              check string "canonical field" "masc_runtime_verify"
+              check string "canonical field" "masc_dispatch_plan"
                 canonical_val);
         ] );
     ]

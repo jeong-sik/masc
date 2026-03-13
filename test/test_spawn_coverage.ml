@@ -120,11 +120,13 @@ let test_masc_mcp_tools_has_leave () =
 let test_masc_mcp_tools_has_broadcast () =
   check bool "has broadcast" true (List.mem "mcp__masc__masc_broadcast" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_claim () =
-  check bool "has claim" true (List.mem "mcp__masc__masc_claim" Spawn.masc_mcp_tools)
+let test_masc_mcp_tools_omits_claim () =
+  check bool "omits claim" false
+    (List.mem "mcp__masc__masc_claim" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_done () =
-  check bool "has done" true (List.mem "mcp__masc__masc_done" Spawn.masc_mcp_tools)
+let test_masc_mcp_tools_omits_done () =
+  check bool "omits done" false
+    (List.mem "mcp__masc__masc_done" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_heartbeat () =
   check bool "has heartbeat" true (List.mem "mcp__masc__masc_heartbeat" Spawn.masc_mcp_tools)
@@ -719,8 +721,8 @@ let () =
       test_case "has join" `Quick test_masc_mcp_tools_has_join;
       test_case "has leave" `Quick test_masc_mcp_tools_has_leave;
       test_case "has broadcast" `Quick test_masc_mcp_tools_has_broadcast;
-      test_case "has claim" `Quick test_masc_mcp_tools_has_claim;
-      test_case "has done" `Quick test_masc_mcp_tools_has_done;
+      test_case "omits claim" `Quick test_masc_mcp_tools_omits_claim;
+      test_case "omits done" `Quick test_masc_mcp_tools_omits_done;
       test_case "has heartbeat" `Quick test_masc_mcp_tools_has_heartbeat;
       test_case "has tasks" `Quick test_masc_mcp_tools_has_tasks;
       test_case "has worktree" `Quick test_masc_mcp_tools_has_worktree;

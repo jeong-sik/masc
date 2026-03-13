@@ -4,14 +4,21 @@
 
 type t = {
   base_url: string;
+  mcp_path: string;
   agent_name: string;
   net: [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
   mutable request_id: int;
   mutable session_id: string option;
 }
 
+let create_with_path ~mcp_path ~net ~base_url ~agent_name =
+  { base_url; mcp_path; agent_name; net; request_id = 0; session_id = None }
+
 let create ~net ~base_url ~agent_name =
-  { base_url; agent_name; net; request_id = 0; session_id = None }
+  create_with_path ~mcp_path:"/mcp" ~net ~base_url ~agent_name
+
+let create_managed ~net ~base_url ~agent_name =
+  create_with_path ~mcp_path:"/mcp/managed" ~net ~base_url ~agent_name
 
 (** Build a JSON-RPC 2.0 request envelope for MCP tools/call *)
 let build_request t ~masc_method ~arguments =
@@ -63,7 +70,7 @@ let extract_json_from_sse raw =
 let call_rpc ~sw t ~masc_method ~arguments =
   let body_json = build_request t ~masc_method ~arguments in
   let body_str = Yojson.Safe.to_string body_json in
-  let uri = Uri.of_string (t.base_url ^ "/mcp") in
+  let uri = Uri.of_string (t.base_url ^ t.mcp_path) in
   let headers =
     Http.Header.of_list
       ([

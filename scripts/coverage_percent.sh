@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+coverage_dir="${COVERAGE_DIR:-$root_dir/_coverage}"
+reuse_existing=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --reuse-existing)
+      reuse_existing=true
+      ;;
+    *)
+      echo "unknown argument: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if ! $reuse_existing; then
+  rm -rf "$coverage_dir"
+  mkdir -p "$coverage_dir"
+  (
+    cd "$root_dir"
+    BISECT_FILE="$coverage_dir/bisect" opam exec -- dune test --root . --instrument-with bisect_ppx --force
+  )
+fi
+
+summary="$(
+  opam exec -- bash -lc "cd '$root_dir' && bisect-ppx-report summary --coverage-path '$coverage_dir'"
+)"
+percent="$(
+  printf '%s\n' "$summary" \
+    | sed -nE 's/^Coverage: [0-9]+\/[0-9]+ \(([0-9]+(\.[0-9]+)?)%\)$/\1/p'
+)"
+
+if [ -z "$percent" ]; then
+  echo "failed to parse bisect summary" >&2
+  printf '%s\n' "$summary" >&2
+  exit 1
+fi
+
+printf '%s\n' "$percent"

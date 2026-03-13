@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-all clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check health ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
+.PHONY: build test test-unit test-contract test-contract-live test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
 
 # Default target
 all: build
@@ -45,6 +45,10 @@ coverage:
 # Print coverage summary to stdout
 coverage-summary: coverage
 	bisect-ppx-report summary --coverage-path _coverage
+
+# Print project coverage percentage as a single float
+coverage-percent:
+	scripts/coverage_percent.sh
 
 # Generate HTML coverage report
 coverage-html: coverage

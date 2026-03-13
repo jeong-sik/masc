@@ -3017,7 +3017,12 @@ let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
 
 let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
-  { config = ctx.config; sw = ctx.sw; clock = ctx.clock }
+  {
+    config = ctx.config;
+    sw = ctx.sw;
+    clock = ctx.clock;
+    proc_mgr = ctx.proc_mgr;
+  }
 
 let tool_command_plane_ctx (ctx : 'a context) : _ Tool_command_plane.context =
   {
@@ -3491,7 +3496,12 @@ let execute_action (ctx : 'a context) (request : action_request) :
           @ if models = [] then [] else [ ("models", `List models) ])
       in
       let keeper_ctx : _ Tool_keeper.context =
-        { config = ctx.config; sw = ctx.sw; clock = ctx.clock }
+        {
+          config = ctx.config;
+          sw = ctx.sw;
+          clock = ctx.clock;
+          proc_mgr = ctx.proc_mgr;
+        }
       in
       let* ok, body =
         match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with

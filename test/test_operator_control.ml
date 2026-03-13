@@ -73,6 +73,8 @@ let () =
             .test_keeper_status_exposes_summary_and_recoverable;
           Alcotest.test_case "snapshot keeper tool audit fallback" `Quick
             Test_operator_control_keeper.test_snapshot_keeper_tool_audit_fallback;
+          Alcotest.test_case "keeper msg auto team session bridge" `Quick
+            Test_operator_control_keeper.test_keeper_msg_auto_team_session_bridge;
           Alcotest.test_case "manual lodge tick updates observable state" `Quick
             Test_operator_control_keeper
             .test_manual_lodge_tick_updates_observable_state;

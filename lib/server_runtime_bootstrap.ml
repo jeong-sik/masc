@@ -54,7 +54,12 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
 let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
   try
     let keeper_ctx : _ Tool_keeper.context =
-      { config = state.room_config; sw; clock }
+      {
+        config = state.room_config;
+        sw;
+        clock;
+        proc_mgr = state.Mcp_server.proc_mgr;
+      }
     in
     let stats = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
     if stats.enabled then

@@ -10,6 +10,7 @@ type 'a context = {
   config: Room.config;
   sw: Eio.Switch.t;
   clock: 'a Eio.Time.clock;
+  proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
 }
 
 type tool_result = bool * string
@@ -525,6 +526,10 @@ type keeper_meta = {
   continuity_summary: string;
   autonomy_level: string;
   active_goal_ids: string list;
+  auto_team_session_enabled: bool;
+  active_team_session_id: string option;
+  last_team_session_started_at: string;
+  team_session_start_count_total: int;
   last_autonomous_action_at: string;
   autonomous_action_count: int;
 }
@@ -620,6 +625,13 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("continuity_summary", `String m.continuity_summary);
       ("autonomy_level", `String m.autonomy_level);
       ("active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids));
+      ("auto_team_session_enabled", `Bool m.auto_team_session_enabled);
+      ( "active_team_session_id",
+        match m.active_team_session_id with
+        | Some value -> `String value
+        | None -> `Null );
+      ("last_team_session_started_at", `String m.last_team_session_started_at);
+      ("team_session_start_count_total", `Int m.team_session_start_count_total);
       ("last_autonomous_action_at", `String m.last_autonomous_action_at);
       ("autonomous_action_count", `Int m.autonomous_action_count);
     ]
@@ -843,6 +855,18 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string ~default:"l1_reactive" "autonomy_level" json
     in
     let active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
+    let auto_team_session_enabled =
+      Safe_ops.json_bool ~default:false "auto_team_session_enabled" json
+    in
+    let active_team_session_id =
+      Safe_ops.json_string_opt "active_team_session_id" json
+    in
+    let last_team_session_started_at =
+      Safe_ops.json_string ~default:"" "last_team_session_started_at" json
+    in
+    let team_session_start_count_total =
+      Safe_ops.json_int ~default:0 "team_session_start_count_total" json
+    in
     let last_autonomous_action_at =
       Safe_ops.json_string ~default:"" "last_autonomous_action_at" json
     in
@@ -942,6 +966,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           continuity_summary;
           autonomy_level;
           active_goal_ids;
+          auto_team_session_enabled;
+          active_team_session_id;
+          last_team_session_started_at;
+          team_session_start_count_total;
           last_autonomous_action_at;
           autonomous_action_count;
         }

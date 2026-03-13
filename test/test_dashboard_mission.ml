@@ -448,7 +448,7 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let keeper_ctx : _ Lib.Tool_keeper.context =
-          { config; sw; clock = Eio.Stdenv.clock env }
+          { config; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
         in
         let keeper_name = "audit-keeper" in
         let ok, _ =

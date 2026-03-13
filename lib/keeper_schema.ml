@@ -217,6 +217,10 @@ let resident_schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "TTL for initiative-created internal board posts (default: 24).");
         ]);
+        ("auto_team_session_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, explicit masc_keeper_msg calls may start or reuse a projected Team Session instead of returning only a conversational reply.");
+        ]);
         ("scope_kind", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "local"; `String "global"]);

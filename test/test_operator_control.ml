@@ -1606,7 +1606,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "audit-keeper";
+      Masc_mcp.Keeper_runtime.stop_keepalive "audit-keeper";
       cleanup_dir base_dir)
     (fun () ->
       let config = Room.default_config base_dir in
@@ -1628,7 +1628,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
-      Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
+      Masc_mcp.Keeper_runtime.stop_keepalive keeper_name;
       let snapshot =
         Operator_control.snapshot_json ~include_messages:false ~include_sessions:false
           ~include_keepers:true (operator_ctx env sw config "operator")

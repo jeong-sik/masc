@@ -135,3 +135,6 @@ let start_existing_keepalives ctx =
       existing_keepalive_bootstrap_done := false;
       raise exn
   end
+
+let stop_keepalive name =
+  Keeper_keepalive.stop_keepalive name

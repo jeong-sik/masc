@@ -206,6 +206,7 @@ let standard_tools =
     "masc_petition_submit"; "masc_case_brief_submit";
     "masc_cases"; "masc_case_status";
     "masc_ruling_status"; "masc_execution_orders";
+    "masc_governance_status";
     (* Decision *)
     "decision_create"; "decision_finalize"; "decision_status";
     (* Handover *)

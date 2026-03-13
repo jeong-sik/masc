@@ -162,10 +162,8 @@ let normalize_text raw =
 let allowed_tool tool =
   List.mem tool
     [
-      "masc_debate_start";
-      "masc_debate_close";
-      "masc_consensus_close";
-      "masc_consensus_result";
+      "masc_governance_status";
+      "masc_execution_orders";
       "masc_execute_dry_run";
       "masc_execute";
       "masc_operator_confirm";

@@ -581,26 +581,7 @@ export interface PerpetualStatus {
   cost_usd?: number
 }
 
-// --- Council ---
-
-export interface CouncilDebate {
-  id: string
-  topic: string
-  status: string
-  argument_count: number
-  created_at?: string
-}
-
-export interface CouncilSession {
-  id: string
-  topic: string
-  initiator: string
-  votes: number
-  quorum: number
-  threshold?: number
-  state?: string
-  created_at?: string
-}
+// --- Governance ---
 
 export interface GovernanceContextRef {
   board_post_id?: string | null
@@ -757,70 +738,6 @@ export interface GovernanceJudgeSummary {
   last_error?: string | null
 }
 
-export interface CouncilDebateArgument {
-  index: number
-  agent: string
-  position: string
-  content: string
-  evidence: string[]
-  reply_to?: number | null
-  mentions: string[]
-  archetype?: string | null
-  created_at?: string | null
-}
-
-export interface CouncilDebateSummary {
-  debate: {
-    id: string
-    topic: string
-    status: string
-    created_at?: string | null
-    closed_at?: string | null
-  }
-  arguments: CouncilDebateArgument[]
-  summary: {
-    support_count: number
-    oppose_count: number
-    neutral_count: number
-    total_arguments: number
-    summary_text?: string
-  }
-  context?: GovernanceContextRef
-  judgment?: GovernanceJudgment | null
-}
-
-export interface CouncilSessionVote {
-  agent: string
-  decision: string
-  reason: string
-  timestamp?: string | null
-  weight?: number
-  archetype?: string | null
-}
-
-export interface CouncilSessionSummary {
-  session: {
-    id: string
-    topic: string
-    state: string
-    initiator: string
-    quorum: number
-    threshold: number
-    created_at?: string | null
-    closed_at?: string | null
-  }
-  votes: CouncilSessionVote[]
-  summary: {
-    approve_count: number
-    reject_count: number
-    abstain_count: number
-    quorum_met: boolean
-    result?: string | null
-  }
-  context?: GovernanceContextRef
-  judgment?: GovernanceJudgment | null
-}
-
 export interface BoardMonitoring {
   alert_level?: 'ok' | 'warn' | 'bad' | string
   posts_total?: number
@@ -833,16 +750,19 @@ export interface BoardMonitoring {
   bad_age_s?: number
 }
 
-export interface CouncilMonitoring {
+export interface GovernanceMonitoring {
   alert_level?: 'ok' | 'warn' | 'bad' | string
-  debates_open?: number
-  debates_pending?: number
-  sessions_active?: number
-  sessions_without_quorum?: number
-  oldest_open_debate_age_s?: number | null
+  cases_open?: number
+  pending_ruling?: number
+  ready_auto_execute?: number
+  needs_human_gate?: number
+  executed?: number
+  blocked?: number
+  oldest_open_case_age_s?: number | null
   last_activity_age_s?: number | null
-  slo_target_quorum_age_s?: number
+  slo_target_case_age_s?: number
   slo_breached?: boolean
+  judge_online?: boolean
   warn_age_s?: number
   bad_age_s?: number
 }
@@ -1255,19 +1175,12 @@ export interface DashboardGovernanceResponse {
     needs_human_gate?: number
     executed?: number
     blocked?: number
-    debates?: number
-    voting_sessions?: number
-    debates_open?: number
-    sessions_active?: number
-    sessions_without_quorum?: number
     ready_to_execute?: number
-    oldest_open_debate_age_s?: number | null
+    oldest_open_case_age_s?: number | null
     last_activity_age_s?: number | null
     judge_online?: boolean
     judge_last_seen_at?: string | null
   }
-  debates?: CouncilDebate[]
-  sessions?: CouncilSession[]
   items?: GovernanceDecisionItem[]
   activity?: GovernanceTimelineEvent[]
   judge?: GovernanceJudgeSummary
@@ -2841,7 +2754,7 @@ export interface ServerStatus {
   }
   monitoring?: {
     board?: BoardMonitoring
-    council?: CouncilMonitoring
+    governance?: GovernanceMonitoring
   }
   lodge?: LodgeRuntimeStatus
   gardener?: GardenerRuntimeStatus
@@ -2849,7 +2762,7 @@ export interface ServerStatus {
   sentinel?: SentinelRuntimeStatus
   data_quality?: {
     board_contract_ok?: boolean
-    council_feed_ok?: boolean
+    governance_feed_ok?: boolean
     last_sync_at?: string
   }
 }

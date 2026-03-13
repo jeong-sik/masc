@@ -194,15 +194,15 @@ if [ -z "$SESSION_ID" ] || [ -z "$PROTOCOL_VERSION" ]; then
   exit 1
 fi
 
-echo "[3/8] follow-up POST accepts missing protocol header (falls back to session)"
+echo "[3/8] follow-up POST rejects missing protocol header (strict enforcement)"
 h3="$tmpdir/missing-protocol.headers"
 b3="$tmpdir/missing-protocol.body"
 post_with_session "$SESSION_ID" "" \
   '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}' \
   "$h3" "$b3"
 code3="$(status_code "$h3")"
-if [ "$code3" != "200" ]; then
-  echo "FAIL: expected 200 for missing protocol header (session fallback), got $code3"
+if [ "$code3" != "400" ]; then
+  echo "FAIL: expected 400 for missing protocol header (strict enforcement), got $code3"
   cat "$h3"
   cat "$b3"
   exit 1
@@ -241,25 +241,25 @@ if [ "$code5" != "200" ]; then
   exit 1
 fi
 
-echo "[6/8] follow-up GET accepts missing protocol header (falls back to session)"
+echo "[6/8] follow-up GET rejects missing protocol header (strict enforcement)"
 h6="$tmpdir/get-missing-protocol.headers"
 b6="$tmpdir/get-missing-protocol.body"
 get_with_session "$SESSION_ID" "" "$h6" "$b6"
 code6="$(status_code "$h6")"
-if [ "$code6" != "200" ]; then
-  echo "FAIL: expected 200 for GET missing protocol header (session fallback), got $code6"
+if [ "$code6" != "400" ]; then
+  echo "FAIL: expected 400 for GET missing protocol header (strict enforcement), got $code6"
   cat "$h6"
   cat "$b6"
   exit 1
 fi
 
-echo "[7/8] follow-up DELETE accepts missing protocol header (falls back to session)"
+echo "[7/8] follow-up DELETE rejects missing protocol header (strict enforcement)"
 h7="$tmpdir/delete-missing-protocol.headers"
 b7="$tmpdir/delete-missing-protocol.body"
 delete_with_session "$SESSION_ID" "" "$h7" "$b7"
 code7="$(status_code "$h7")"
-if [ "$code7" != "204" ]; then
-  echo "FAIL: expected 204 for DELETE missing protocol header (session fallback), got $code7"
+if [ "$code7" != "400" ]; then
+  echo "FAIL: expected 400 for DELETE missing protocol header (strict enforcement), got $code7"
   cat "$h7"
   cat "$b7"
   exit 1

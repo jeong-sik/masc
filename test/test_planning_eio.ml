@@ -172,6 +172,21 @@ let test_set_deliverable () =
   | Error e ->
       fail (Printf.sprintf "Set deliverable failed: %s" e)
 
+let test_set_deliverable_auto_init () =
+  let config = make_config () in
+  (* Do NOT call init -- set_deliverable should auto-init *)
+  let content = "# Auto-init Deliverable\n\nDelivered without prior plan_init." in
+  match Planning_eio.set_deliverable config ~task_id:"auto-init-deliver" ~content with
+  | Ok ctx ->
+      check string "deliverable" content ctx.deliverable;
+      check string "task_id" "auto-init-deliver" ctx.task_id;
+      (* Verify planning directory was auto-created *)
+      let dir = Filename.concat !temp_dir "planning/auto-init-deliver" in
+      check bool "context.json exists" true (Sys.file_exists (Filename.concat dir "context.json"));
+      check bool "deliverable.md exists" true (Sys.file_exists (Filename.concat dir "deliverable.md"))
+  | Error e ->
+      fail (Printf.sprintf "Set deliverable (auto-init) failed: %s" e)
+
 (* ===== Error Tracking Tests ===== *)
 
 let test_add_error () =
@@ -295,6 +310,7 @@ let () =
       test_case "update_plan" `Quick test_update_plan;
       test_case "add_note" `Quick test_add_note;
       test_case "set_deliverable" `Quick test_set_deliverable;
+      test_case "set_deliverable_auto_init" `Quick test_set_deliverable_auto_init;
     ];
     "error_tracking", [
       test_case "add_error" `Quick test_add_error;

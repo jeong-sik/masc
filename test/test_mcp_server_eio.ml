@@ -367,6 +367,35 @@ let test_handle_request_initialize () =
 
   cleanup_dir base_path
 
+let test_handle_request_initialize_rejects_unsupported_protocol_version () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 101);
+    ("method", `String "initialize");
+    ("params", `Assoc [
+      ("protocolVersion", `String "2099-01-01");
+      ("capabilities", `Assoc []);
+      ("clientInfo", `Assoc [
+        ("name", `String "test");
+        ("version", `String "1.0");
+      ]);
+    ]);
+  ]) in
+
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
+  Alcotest.(check bool) "unsupported protocol message" true
+    (contains_substring (error_message_exn response) "Unsupported protocolVersion");
+
+  cleanup_dir base_path
+
 let test_handle_request_tools_list () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -1973,6 +2002,8 @@ let response_tests = [
 
 let eio_tests = [
   "handle initialize", `Quick, test_handle_request_initialize;
+  "handle initialize rejects unsupported protocol version", `Quick,
+    test_handle_request_initialize_rejects_unsupported_protocol_version;
   "handle initialize operator profile", `Quick,
     test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;

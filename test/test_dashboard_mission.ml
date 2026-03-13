@@ -335,6 +335,13 @@ let test_dashboard_mission_projection () =
            |> member "top_action" |> member "action_type" |> to_string);
         check string "session brief id" session_id
           (session_briefs |> List.hd |> member "session_id" |> to_string);
+        check int "session brief seen count" 1
+          (session_briefs |> List.hd |> member "seen_count" |> to_int);
+        check int "session brief planned count" 6
+          (session_briefs |> List.hd |> member "planned_count" |> to_int);
+        check string "session brief counts basis"
+          "live=recent_turns · planned=planned_participants"
+          (session_briefs |> List.hd |> member "counts_basis" |> to_string);
         check bool "mission summary trims paused" true
           (summary |> member "paused" = `Null);
         check bool "mission summary trims active_agents" true
@@ -389,6 +396,10 @@ let test_dashboard_mission_projection () =
           (alpha_brief |> member "where" = `Null);
         check string "agent brief keeps session linkage" session_id
           (alpha_brief |> member "related_session_id" |> to_string);
+        check string "agent brief signal truth" "message"
+          (alpha_brief |> member "evidence_source" |> to_string);
+        check string "summary-only participant signal truth" "archived"
+          (delta_brief |> member "signal_truth" |> to_string);
         check bool "internal signal includes pending confirm" true
           (internal_signals
            |> List.exists (fun row ->

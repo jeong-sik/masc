@@ -323,6 +323,9 @@ export function SessionBriefCard({
   const members = brief.member_previews.slice(0, 4)
   const action = brief.top_recommendation ?? null
   const incident = brief.top_attention ?? null
+  const liveCount = brief.active_count ?? 0
+  const seenCount = brief.seen_count ?? liveCount
+  const plannedCount = brief.planned_count ?? brief.member_names.length
 
   return html`
     <article class="mission-crew-card ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)} ${selected ? 'is-selected' : ''}">
@@ -353,13 +356,14 @@ export function SessionBriefCard({
           </div>
           <div class="mission-fact-tile">
             <span>충원 상태</span>
-            <strong>${brief.active_count ?? 0}/${brief.required_count || 1}</strong>
-            <small>최근 활동 / 필요</small>
+            <strong>${liveCount}/${brief.required_count || 1}</strong>
+            <small>live · seen ${seenCount} · planned ${plannedCount}</small>
           </div>
         </div>
       </button>
 
       ${brief.blocker_summary ? html`<div class="mission-inline-note">막힘 · ${brief.blocker_summary}</div>` : null}
+      ${brief.counts_basis ? html`<div class="mission-inline-note">관측 기준 · ${brief.counts_basis}</div>` : null}
 
       <div class="mission-crew-event">
         <span>최근 사건</span>
@@ -385,7 +389,10 @@ export function SessionBriefCard({
               ${members.map(member => html`
                 <button class="mission-member-preview" onClick=${() => openAgentDetail(member.agent_name)}>
                   <strong>${member.agent_name}</strong>
-                  <span>${member.current_work ?? '현재 작업 없음'}</span>
+                  <span>
+                    ${member.current_work ?? '현재 작업 없음'}
+                    ${member.is_live === false ? ' · archived' : member.is_live === true ? ' · live' : ''}
+                  </span>
                   <small>${member.recent_output_preview ?? member.recent_input_preview ?? '최근 입출력 없음'}</small>
                 </button>
               `)}

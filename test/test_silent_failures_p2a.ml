@@ -143,11 +143,10 @@ let keeper_source_files () =
 (* HIGH priority patterns *)
 
 let test_source_main_keeper_bootstrap () =
-  check bool "runtime bootstrap has keeper bootstrap logging"
-    true
-    (any_file_contains_pattern
-       [ "bin/main_eio.ml"; "lib/server_runtime_bootstrap.ml" ]
-       {|[main] keeper bootstrap failed:|})
+  check bool "bootstrap sources have keeper bootstrap logging"
+    true (any_file_contains_pattern
+      [ "bin/main_eio.ml"; "lib/server_runtime_bootstrap.ml" ]
+      {|[main] keeper bootstrap failed:|})
 
 let test_source_metrics_fd_close () =
   check bool "metrics_store_eio.ml has fd close logging"

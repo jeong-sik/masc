@@ -357,7 +357,10 @@ function normalizeSessionBrief(raw: unknown): DashboardMissionSessionBrief | nul
     last_event_summary: asString(raw.last_event_summary) ?? null,
     communication_summary: asString(raw.communication_summary) ?? null,
     active_count: asNumber(raw.active_count),
+    seen_count: asNumber(raw.seen_count),
+    planned_count: asNumber(raw.planned_count),
     required_count: asNumber(raw.required_count),
+    counts_basis: asString(raw.counts_basis) ?? null,
     related_attention_count: asNumber(raw.related_attention_count) ?? 0,
     top_attention: normalizeAttentionItem(raw.top_attention),
     top_recommendation: normalizeRecommendedAction(raw.top_recommendation),
@@ -446,6 +449,21 @@ function normalizeAgentBrief(raw: unknown): DashboardMissionAgentBrief | null {
     related_session_id: asString(raw.related_session_id) ?? null,
     related_attention_count: asNumber(raw.related_attention_count) ?? 0,
     last_activity_at: asString(raw.last_activity_at) ?? null,
+    last_activity_age_sec: asNumber(raw.last_activity_age_sec) ?? null,
+    signal_truth:
+      asString(raw.signal_truth) === 'live'
+      || asString(raw.signal_truth) === 'stale'
+      || asString(raw.signal_truth) === 'archived'
+      || asString(raw.signal_truth) === 'unknown'
+        ? (asString(raw.signal_truth) as DashboardMissionAgentBrief['signal_truth'])
+        : undefined,
+    evidence_source:
+      asString(raw.evidence_source) === 'message'
+      || asString(raw.evidence_source) === 'presence'
+      || asString(raw.evidence_source) === 'session'
+      || asString(raw.evidence_source) === 'none'
+        ? (asString(raw.evidence_source) as DashboardMissionAgentBrief['evidence_source'])
+        : undefined,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
     recent_tool_names: extractArray(raw.recent_tool_names)

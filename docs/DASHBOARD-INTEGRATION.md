@@ -55,7 +55,7 @@ Experimental features such as TRPG live under `lab`.
   - surface and panel semantics registry
 
 ## Raw Domain Endpoints
-- `/api/v1/board*`, `/api/v1/council*`, `/api/v1/operator*`, `/api/v1/command-plane*`
+- `/api/v1/board*`, `/api/v1/governance*`, `/api/v1/operator*`, `/api/v1/command-plane*`
 - These may still exist for domain consumers or drill-down flows.
 - The dashboard client should prefer the canonical projection endpoints above.
 

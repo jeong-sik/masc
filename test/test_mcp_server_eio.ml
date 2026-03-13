@@ -1011,7 +1011,7 @@ let test_execute_tool_coding_mode_allows_governance_status () =
 
   let (ok, msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_council_status"
+      ~name:"masc_governance_status"
       ~arguments:(`Assoc [])
   in
   Alcotest.(check bool) "governance status tool allowed in coding mode" true ok;

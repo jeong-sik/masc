@@ -12,11 +12,11 @@ import {
   refreshMdal,
 } from './store'
 
-// --- Council/CommandPlane/Operator refresh registration (avoids circular import) ---
+// --- Governance/CommandPlane/Operator refresh registration (avoids circular import) ---
 
-let _refreshCouncilFn: (() => void) | null = null
-export function registerCouncilRefresh(fn: () => void): void {
-  _refreshCouncilFn = fn
+let _refreshGovernanceFn: (() => void) | null = null
+export function registerGovernanceRefresh(fn: () => void): void {
+  _refreshGovernanceFn = fn
 }
 
 let _refreshCommandPlaneFn: (() => void) | null = null
@@ -101,9 +101,9 @@ export function setupSSEReaction(): () => void {
       scheduleRefresh('board', refreshBoard)
     }
 
-    // Council events
+    // Governance events
     if (event.type.startsWith('decision_')) {
-      scheduleRefresh('council', () => _refreshCouncilFn?.())
+      scheduleRefresh('governance', () => _refreshGovernanceFn?.())
     }
 
     // MDAL events

@@ -12,7 +12,7 @@ import {
   submitGovernanceCaseBrief,
   submitGovernancePetition,
 } from '../api'
-import { registerCouncilRefresh } from '../sse-store'
+import { registerGovernanceRefresh } from '../sse-store'
 import type {
   DashboardGovernanceResponse,
   GovernanceCaseBrief,
@@ -137,7 +137,7 @@ export async function refreshGovernance() {
   }
 }
 
-registerCouncilRefresh(refreshGovernance)
+registerGovernanceRefresh(refreshGovernance)
 
 async function submitPetition() {
   const title = governanceTopicInput.value.trim()

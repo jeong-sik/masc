@@ -240,6 +240,18 @@
    swarm_eio
    telemetry_eio
    tempo
+   tool_schemas_auth
+   tool_schemas_board
+   tool_schemas_worktree
+   tool_schemas_agent
+   tool_schemas_plan
+   tool_schemas_debate
+   tool_schemas_consensus
+   tool_schemas_execution
+   tool_schemas_room
+   tool_schemas_portal
+   tool_schemas_core
+
    tools
    tool_args
    tool_plan

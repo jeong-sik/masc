@@ -356,7 +356,7 @@ let generate_default ?(port=8935) ?(host="127.0.0.1") () : agent_card =
   let base_url = Printf.sprintf "http://%s:%d" host port in
   {
     name = "MASC-MCP";
-    version = "2.60.0";
+    version = Version.version;
     description = Some "Multi-Agent Streaming Coordination - A2A v0.3 compatible agent coordination system";
     provider = Some {
       organization = "Second Brain";

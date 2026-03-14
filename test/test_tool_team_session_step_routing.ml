@@ -216,6 +216,101 @@ let test_parse_step_spawn_specs_applies_top_level_batch_timeout () =
         second.spawn_timeout_seconds
   | _ -> Alcotest.fail "expected exactly two parsed spawn specs"
 
+let test_parse_step_spawn_specs_applies_worker_policy_fields () =
+  let args =
+    `Assoc
+      [
+        ( "worker_policy",
+          `Assoc
+            [
+              ("thinking", `Bool true);
+              ("timeout_seconds", `Int 42);
+              ("max_turns", `Int 7);
+            ] );
+        ( "spawn_batch",
+          `List
+            [
+              `Assoc [ ("spawn_prompt", `String "planner prompt") ];
+              `Assoc
+                [
+                  ("spawn_prompt", `String "implementer prompt");
+                  ( "worker_policy",
+                    `Assoc
+                      [
+                        ("thinking", `Bool false);
+                        ("timeout_seconds", `Int 9);
+                        ("max_turns", `Int 2);
+                      ] );
+                ];
+            ] );
+      ]
+  in
+  let specs = unwrap_ok (Tool_team_session.parse_step_spawn_specs args) in
+  match specs with
+  | [ first; second ] ->
+      Alcotest.(check (option bool)) "top-level thinking" (Some true)
+        first.thinking_enabled;
+      Alcotest.(check (option int)) "top-level max_turns" (Some 7)
+        first.max_turns;
+      Alcotest.(check int) "top-level timeout applied" 42
+        first.spawn_timeout_seconds;
+      Alcotest.(check (option bool)) "item thinking override" (Some false)
+        second.thinking_enabled;
+      Alcotest.(check (option int)) "item max_turns override" (Some 2)
+        second.max_turns;
+      Alcotest.(check int) "item timeout override" 9
+        second.spawn_timeout_seconds
+  | _ -> Alcotest.fail "expected exactly two parsed spawn specs"
+
+let test_status_reports_worker_run_progress_summary () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"worker-run-summary" |> get_session_id in
+  Team_session_store.append_event config session_id
+    ~event_type:"team_step_spawn_requested"
+    ~detail:(`Assoc [ ("worker_run_id", `String "run-a") ]);
+  Team_session_store.append_event config session_id
+    ~event_type:"team_step_spawn_requested"
+    ~detail:(`Assoc [ ("worker_run_id", `String "run-b") ]);
+  Team_session_store.append_event config session_id
+    ~event_type:"team_step_delegate_requested"
+    ~detail:(`Assoc [ ("worker_run_id", `String "run-c") ]);
+  Team_session_store.append_event config session_id
+    ~event_type:"team_step_spawn"
+    ~detail:
+      (`Assoc [ ("worker_run_id", `String "run-a"); ("success", `Bool true) ]);
+  Team_session_store.append_event config session_id
+    ~event_type:"team_step_delegate"
+    ~detail:
+      (`Assoc [ ("worker_run_id", `String "run-c"); ("success", `Bool false) ]);
+  let status_ok, status_body =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status ok" true status_ok;
+  let worker_runs =
+    parse_json_exn status_body |> result_field |> Yojson.Safe.Util.member "worker_runs"
+  in
+  Alcotest.(check int) "requested count" 3
+    Yojson.Safe.Util.(worker_runs |> member "requested_count" |> to_int);
+  Alcotest.(check int) "completed success count" 1
+    Yojson.Safe.Util.(worker_runs |> member "completed_success_count" |> to_int);
+  Alcotest.(check int) "completed failed count" 1
+    Yojson.Safe.Util.(worker_runs |> member "completed_failed_count" |> to_int);
+  Alcotest.(check int) "in flight count" 1
+    Yojson.Safe.Util.(worker_runs |> member "in_flight_count" |> to_int);
+  Alcotest.(check (list string)) "in flight run ids" [ "run-b" ]
+    Yojson.Safe.Util.(
+      worker_runs |> member "in_flight_run_ids" |> to_list |> List.map to_string);
+  cleanup_dir base_dir
+
 let test_step_spawn_batch_infers_exact_env_model_tiers () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

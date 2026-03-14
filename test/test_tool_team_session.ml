@@ -56,6 +56,10 @@ let () =
             `Quick Test_tool_team_session_step_routing.test_step_spawn_batch_applies_hybrid_routing;
           Alcotest.test_case "parse-step-spawn-specs-applies-top-level-batch-timeout"
             `Quick Test_tool_team_session_step_routing.test_parse_step_spawn_specs_applies_top_level_batch_timeout;
+          Alcotest.test_case "parse-step-spawn-specs-applies-worker-policy-fields"
+            `Quick Test_tool_team_session_step_routing.test_parse_step_spawn_specs_applies_worker_policy_fields;
+          Alcotest.test_case "status-reports-worker-run-progress-summary" `Quick
+            Test_tool_team_session_step_routing.test_status_reports_worker_run_progress_summary;
           Alcotest.test_case "step-spawn-batch-infers-exact-env-model-tiers"
             `Quick Test_tool_team_session_step_routing.test_step_spawn_batch_infers_exact_env_model_tiers;
           Alcotest.test_case
@@ -76,6 +80,12 @@ let () =
             Test_tool_team_session_misc.test_unauthorized_session_access;
           Alcotest.test_case "final-done-delta-snapshot-stable" `Quick
             Test_tool_team_session_misc.test_final_done_delta_snapshot_stable;
+          Alcotest.test_case "verify-trace-uses-worker-run-checkpoint-snapshot"
+            `Quick
+            Test_tool_team_session_misc.test_verify_trace_uses_worker_run_checkpoint_snapshot;
+          Alcotest.test_case
+            "verify-trace-reports-summary-only-without-checkpoint" `Quick
+            Test_tool_team_session_misc.test_verify_trace_reports_summary_only_without_checkpoint;
           Alcotest.test_case "status-and-stop-linked-autoresearch" `Quick
             Test_tool_team_session_misc.test_status_and_stop_linked_autoresearch;
         ] );

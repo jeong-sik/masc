@@ -609,6 +609,46 @@ let status_sections (config : Room.config) (session : Team_session_types.session
   (summary, team_health, communication_metrics, orchestration_state, cascade_metrics)
 
 let session_status_json (config : Room.config) (session : Team_session_types.session) =
+  let worker_run_summary =
+    let events = Team_session_store.read_events ~max_events:2000 config session.session_id in
+    let requested = ref [] in
+    let completed = Hashtbl.create 16 in
+    List.iter
+      (fun json ->
+        let open Yojson.Safe.Util in
+        match member "event_type" json, member "detail" json with
+        | `String ("team_step_spawn_requested" | "team_step_delegate_requested"), `Assoc _ -> (
+            match member "worker_run_id" (member "detail" json) with
+            | `String id -> requested := id :: !requested
+            | _ -> ())
+        | `String ("team_step_spawn" | "team_step_delegate"), `Assoc _ -> (
+            match member "worker_run_id" (member "detail" json),
+                  member "success" (member "detail" json) with
+            | `String id, `Bool success -> Hashtbl.replace completed id success
+            | _ -> ())
+        | _ -> ())
+      events;
+    let requested_ids = Team_session_types.dedup_strings !requested in
+    let completed_ids =
+      Hashtbl.fold (fun id success (done_count, failed_count, ids) ->
+          if success then (done_count + 1, failed_count, id :: ids)
+          else (done_count, failed_count + 1, id :: ids))
+        completed (0, 0, [])
+    in
+    let completed_success, completed_failed, completed_id_list = completed_ids in
+    let in_flight =
+      requested_ids
+      |> List.filter (fun id -> not (List.mem id completed_id_list))
+    in
+    `Assoc
+      [
+        ("requested_count", `Int (List.length requested_ids));
+        ("completed_success_count", `Int completed_success);
+        ("completed_failed_count", `Int completed_failed);
+        ("in_flight_count", `Int (List.length in_flight));
+        ("in_flight_run_ids", `List (List.map (fun id -> `String id) in_flight));
+      ]
+  in
   let runtime_running =
     with_runtimes_lock (fun () -> Hashtbl.mem runtimes session.session_id)
   in
@@ -643,6 +683,7 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
       ("cascade_metrics", cascade_metrics);
       ("local_runtime", local_runtime);
       ("llm_cache_metrics", llm_cache_metrics);
+      ("worker_runs", worker_run_summary);
       ( "command_plane",
         `Assoc
           [

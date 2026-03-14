@@ -359,6 +359,9 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
                     risk_level = Some Team_session_types.Risk_high;
                     routing_confidence = Some 0.94;
                     routing_reason = Some "explicit:lead_manager";
+                    thinking_enabled = None;
+                    max_turns = None;
+                    timeout_seconds = None;
                     routing_escalated = false;
                   };
                   {
@@ -380,6 +383,9 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
                     risk_level = Some Team_session_types.Risk_high;
                     routing_confidence = Some 0.88;
                     routing_reason = Some "policy:metacog_guard";
+                    thinking_enabled = None;
+                    max_turns = None;
+                    timeout_seconds = None;
                     routing_escalated = true;
                   };
                   {
@@ -401,6 +407,9 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
                     risk_level = Some Team_session_types.Risk_low;
                     routing_confidence = Some 0.83;
                     routing_reason = Some "rule:machine_checkable";
+                    thinking_enabled = None;
+                    max_turns = None;
+                    timeout_seconds = None;
                     routing_escalated = false;
                   };
                 ];

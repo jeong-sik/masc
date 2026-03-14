@@ -317,3 +317,85 @@ let test_status_and_stop_linked_autoresearch () =
       Alcotest.(check bool) "loop registry updated" true
         (state.status = Autoresearch.Stopped))
 
+let test_verify_trace_uses_worker_run_checkpoint_snapshot () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"verify-trace-checkpoint" |> get_session_id in
+  let worker_run_id = "run-trace-1" in
+  save_worker_run_checkpoint_exn config ~session_id ~worker_run_id
+    ~worker_name:"llama-local-impl"
+    (make_oas_tool_trace_checkpoint ~session_id
+       ~agent_name:"llama-local-impl" ());
+  let verify_ok, verify_body =
+    dispatch_exn ctx ~name:"masc_team_session_verify_trace"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("worker_run_id", `String worker_run_id);
+          ])
+  in
+  Alcotest.(check bool) "verify trace ok" true verify_ok;
+  let result = parse_json_exn verify_body |> result_field in
+  Alcotest.(check string) "trace capability" "checkpoint_snapshot"
+    Yojson.Safe.Util.(result |> member "trace_capability" |> to_string);
+  let verification = Yojson.Safe.Util.member "verification" result in
+  Alcotest.(check bool) "verification ok" true
+    Yojson.Safe.Util.(verification |> member "ok" |> to_bool);
+  Alcotest.(check bool) "has file_write" true
+    Yojson.Safe.Util.(verification |> member "has_file_write" |> to_bool);
+  Alcotest.(check bool) "verification pass after file_write" true
+    Yojson.Safe.Util.(
+      verification |> member "verification_pass_after_file_write" |> to_bool);
+  Alcotest.(check int) "paired tool result count" 3
+    Yojson.Safe.Util.(verification |> member "paired_tool_result_count" |> to_int);
+  Alcotest.(check (list string)) "tool names"
+    [ "file_read"; "file_write"; "shell_exec" ]
+    Yojson.Safe.Util.(
+      verification |> member "tool_names" |> to_list |> List.map to_string);
+  cleanup_dir base_dir
+
+let test_verify_trace_reports_summary_only_without_checkpoint () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"verify-trace-summary-only" |> get_session_id in
+  let worker_run_id = "run-trace-missing" in
+  Team_session_store.save_worker_run_meta_json config session_id worker_run_id
+    (`Assoc
+      [
+        ("worker_run_id", `String worker_run_id);
+        ("worker_name", `String "llama-local-impl");
+      ]);
+  let verify_ok, verify_body =
+    dispatch_exn ctx ~name:"masc_team_session_verify_trace"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("worker_run_id", `String worker_run_id);
+          ])
+  in
+  Alcotest.(check bool) "verify trace call still succeeds" true verify_ok;
+  let result = parse_json_exn verify_body |> result_field in
+  Alcotest.(check string) "trace capability" "summary_only"
+    Yojson.Safe.Util.(result |> member "trace_capability" |> to_string);
+  Alcotest.(check bool) "summary_only ok=false" false
+    Yojson.Safe.Util.(result |> member "ok" |> to_bool);
+  let error = Yojson.Safe.Util.(result |> member "error" |> to_string) in
+  Alcotest.(check bool) "missing checkpoint surfaced" true
+    (String.length error > 0);
+  cleanup_dir base_dir

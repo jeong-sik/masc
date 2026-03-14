@@ -18,6 +18,7 @@ type run_result = {
   tool_call_count : int;
   tool_names : string list;
   session_id : string;
+  raw_trace_run : Oas.Raw_trace.run_ref option;
 }
 
 type tool_profile =
@@ -38,6 +39,9 @@ type worker_container_meta = {
   role : string option;
   selection_note : string option;
   execution_scope : Team_session_types.execution_scope;
+  thinking_enabled : bool option;
+  max_turns_override : int option;
+  timeout_seconds : int option;
   tool_profile : tool_profile;
   shell_profile : shell_profile;
   worker_class : Team_session_types.worker_class option;
@@ -741,6 +745,11 @@ let worker_turn_log_path ~base_path ~team_session_id ~worker_name =
     (worker_container_dir ~base_path ~team_session_id ~worker_name)
     "turns.jsonl"
 
+let worker_raw_trace_path ~base_path ~team_session_id ~worker_name =
+  Filename.concat
+    (worker_container_dir ~base_path ~team_session_id ~worker_name)
+    "raw-trace.jsonl"
+
 let ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name =
   let dir = worker_container_dir ~base_path ~team_session_id ~worker_name in
   Team_session_store.write_text_file (Filename.concat dir ".keep") "";
@@ -827,6 +836,9 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
       ( "execution_scope",
         `String
           (Team_session_types.execution_scope_to_string meta.execution_scope) );
+      ("thinking_enabled", Option.fold ~none:`Null ~some:(fun v -> `Bool v) meta.thinking_enabled);
+      ("max_turns_override", Option.fold ~none:`Null ~some:(fun n -> `Int n) meta.max_turns_override);
+      ("timeout_seconds", Option.fold ~none:`Null ~some:(fun n -> `Int n) meta.timeout_seconds);
       ("tool_profile", `String (tool_profile_to_string meta.tool_profile));
       ("shell_profile", `String (shell_profile_to_string meta.shell_profile));
       ( "worker_class",
@@ -883,6 +895,12 @@ let worker_meta_of_yojson json =
               selection_note =
                 json |> member "selection_note" |> to_string_option;
               execution_scope;
+              thinking_enabled =
+                json |> member "thinking_enabled" |> to_bool_option;
+              max_turns_override =
+                json |> member "max_turns_override" |> to_int_option;
+              timeout_seconds =
+                json |> member "timeout_seconds" |> to_int_option;
               tool_profile =
                 (match json |> member "tool_profile" |> to_string_option with
                 | Some value -> (
@@ -1070,17 +1088,30 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt
                }))
     listed_schemas
 
-let build_local_shell_tools ~execution_scope ~workdir =
+let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir =
   match Process_eio.get_proc_mgr (), Process_eio.get_clock () with
   | Ok proc_mgr, Ok clock -> (
+      let on_exec ~tool_name ~success ~duration_ms =
+        (match room_config, Fs_compat.get_fs_opt () with
+        | Some config, Some fs -> (
+            try
+              Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
+                ~duration_ms ~agent_id:worker_name ()
+            with exn ->
+              eprintf "[local-worker] telemetry error for %s/%s: %s\n%!"
+                worker_name tool_name (Printexc.to_string exn))
+        | _ -> ());
+        ()
+      in
       match execution_scope with
       | Team_session_types.Observe_only ->
           Ok
             (Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock
-               ~workdir ())
+               ~workdir ~on_exec ())
       | Team_session_types.Limited_code_change ->
           Ok
-            (Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir ()))
+            (Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir
+               ~on_exec ()))
   | Error e, _ | _, Error e -> Error e
 
 let oas_provider_of_model (model : Llm_client.model_spec) : Oas.Provider.config =
@@ -1107,7 +1138,8 @@ let oas_extract_text (response : Oas.Types.api_response) =
 
 let make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
     ~mcp_session_id ~role ~selection_note ~execution_scope ~worker_class
-    ~worker_size ~effective_model =
+    ~worker_size ~effective_model ~thinking_enabled ~max_turns_override
+    ~timeout_seconds =
   let tool_profile, shell_profile = worker_profiles_of_scope execution_scope in
   let effective_tier = derive_effective_tier worker_size effective_model in
   {
@@ -1119,6 +1151,9 @@ let make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
     role;
     selection_note;
     execution_scope;
+    thinking_enabled;
+    max_turns_override;
+    timeout_seconds;
     tool_profile;
     shell_profile;
     worker_class;
@@ -1147,7 +1182,7 @@ let append_worker_completion_log ~base_path ~team_session_id ~worker_name
       ])
 
 let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
-    ~hooks =
+    ~thinking_enabled ~hooks ~raw_trace =
   let config =
     {
       Oas.Types.default_config with
@@ -1160,7 +1195,7 @@ let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
       top_p = Some 0.95;
       top_k = Some 20;
       min_p = Some 0.0;
-      enable_thinking = Some false;
+      enable_thinking = Some thinking_enabled;
       tool_choice = Some Oas.Types.Auto;
     }
   in
@@ -1175,13 +1210,16 @@ let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
             Oas.Guardrails.AllowList (oas_tool_names tools);
           max_tool_calls_per_turn = Some 12;
         };
+      raw_trace = Some raw_trace;
     }
   in
   (config, options)
 
 let run_worker_oas ~sw ~base_path ~worker_name
     ~(model : Llm_client.model_spec) ~team_session_id
-    ?working_dir ?worker_class ?worker_size ?execution_scope ~role
+    ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
+    ?thinking_enabled ?max_turns
+    ~role
     ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
@@ -1201,6 +1239,8 @@ let run_worker_oas ~sw ~base_path ~worker_name
       make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
         ~mcp_session_id ~role ~selection_note ~execution_scope ~worker_class
         ~worker_size ~effective_model:model.model_id
+        ~thinking_enabled ~max_turns_override:max_turns
+        ~timeout_seconds:(Some timeout_sec)
     in
     match worker_auth_token ~base_path ~worker_name with
     | Error e -> Error e
@@ -1256,9 +1296,19 @@ let run_worker_oas ~sw ~base_path ~worker_name
               ~worker_name ~prompt ~allowed_tools
           in
           let* shell_tools =
-            build_local_shell_tools ~execution_scope ~workdir:workspace_path
+            build_local_shell_tools ~room_config ~worker_name ~execution_scope
+              ~workdir:workspace_path
           in
           let tools = mcp_tools @ shell_tools in
+          let* raw_trace =
+            Oas.Raw_trace.create ~session_id:mcp_session_id
+              ~path:
+                (worker_raw_trace_path ~base_path
+                   ~team_session_id
+                   ~worker_name)
+              ()
+            |> Result.map_error Oas.Error.to_string
+          in
           let tool_names_ref = ref [] in
           let hooks =
             {
@@ -1277,15 +1327,23 @@ let run_worker_oas ~sw ~base_path ~worker_name
             | Team_session_types.Limited_code_change -> 20
             | Team_session_types.Observe_only -> 12
           in
-          let max_turns = max 2 (min max_turn_cap (max 2 (timeout_sec / 20))) in
+          let max_turns =
+            match max_turns with
+            | Some value -> max 1 (min max_turn_cap value)
+            | None -> max 2 (min max_turn_cap (max 2 (timeout_sec / 20)))
+          in
+          let thinking_enabled =
+            Option.value ~default:false thinking_enabled
+          in
           let config, options =
             build_oas_agent ~worker_name ~model ~system_prompt ~tools
-              ~max_turns ~hooks
+              ~max_turns ~thinking_enabled ~hooks ~raw_trace
           in
           let agent = Oas.Agent.create ~net ~config ~tools ~options () in
           let result =
             Oas.Agent.run ~sw agent prompt
           in
+          let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
           let checkpoint =
             Oas.Agent.checkpoint ~session_id:mcp_session_id agent
           in
@@ -1322,6 +1380,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
                   tool_call_count = List.length tool_names;
                   tool_names;
                   session_id = mcp_session_id;
+                  raw_trace_run;
                 }
           | Error err ->
               let detail = Agent_sdk__Error.to_string err in
@@ -1332,8 +1391,9 @@ let run_worker_oas ~sw ~base_path ~worker_name
               in
               Error detail)
 
-let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
-    ~(prompt : string) : (run_result, string) result =
+let continue_worker ~sw ~base_path ~room_config ~worker_name
+    ~(team_session_id : string) ~(prompt : string) :
+    (run_result, string) result =
   let team_session_id = Some team_session_id in
   let meta =
     load_worker_meta ~base_path ~team_session_id ~worker_name
@@ -1392,14 +1452,24 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
                 | Shell_none -> Ok []
                 | Shell_readonly ->
                     build_local_shell_tools
+                      ~room_config ~worker_name
                       ~execution_scope:Team_session_types.Observe_only
                       ~workdir:workspace_path
                 | Shell_dev ->
                     build_local_shell_tools
+                      ~room_config ~worker_name
                       ~execution_scope:Team_session_types.Limited_code_change
                       ~workdir:workspace_path
               in
               let* shell_tools = shell_tools in
+              let* raw_trace =
+                Oas.Raw_trace.create ~session_id:meta.mcp_session_id
+                  ~path:
+                    (worker_raw_trace_path ~base_path ~team_session_id
+                       ~worker_name)
+                  ()
+                |> Result.map_error Oas.Error.to_string
+              in
               let tools = mcp_tools @ shell_tools in
               let tool_names_ref = ref [] in
               let hooks =
@@ -1444,9 +1514,15 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
                 String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
               in
               let max_turns =
-                match meta.execution_scope with
-                | Team_session_types.Limited_code_change -> 20
-                | Team_session_types.Observe_only -> 8
+                match meta.max_turns_override with
+                | Some value -> max 1 value
+                | None ->
+                    (match meta.execution_scope with
+                    | Team_session_types.Limited_code_change -> 20
+                    | Team_session_types.Observe_only -> 8)
+              in
+              let thinking_enabled =
+                Option.value ~default:false meta.thinking_enabled
               in
               let config, options =
                 build_oas_agent ~worker_name ~model
@@ -1454,7 +1530,7 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
                     (default_system_prompt ~worker_name ~model_id:model.model_id
                        ?session_id:meta.team_session_id ?role:meta.role
                        ?selection_note:meta.selection_note ())
-                  ~tools ~max_turns ~hooks
+                  ~tools ~max_turns ~thinking_enabled ~hooks ~raw_trace
               in
               let agent =
                 Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()
@@ -1462,6 +1538,7 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
               let result =
                 Oas.Agent.run ~sw agent prompt
               in
+              let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
               let next_checkpoint =
                 Oas.Agent.checkpoint ~session_id:meta.mcp_session_id agent
               in
@@ -1501,6 +1578,7 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
                       tool_call_count = List.length tool_names;
                       tool_names;
                       session_id = meta.mcp_session_id;
+                      raw_trace_run;
                     }
               | Error err ->
                   let detail = Agent_sdk__Error.to_string err in
@@ -1612,6 +1690,7 @@ let run_worker_legacy ~sw ~base_path ~worker_name
                           tool_call_count = List.length tools_used;
                           tool_names = unique_preserve_order tools_used;
                           session_id = mcp_session_id;
+                          raw_trace_run = None;
                         }
                     else
                       let tool_outputs =
@@ -1688,6 +1767,7 @@ let run_worker_legacy ~sw ~base_path ~worker_name
                             tool_call_count = List.length tools_used;
                             tool_names = unique_preserve_order tools_used;
                             session_id = mcp_session_id;
+                            raw_trace_run = None;
                           }
                       else
                         loop ~round:(round + 1) ~usage_acc ~tools_used
@@ -1697,7 +1777,8 @@ let run_worker_legacy ~sw ~base_path ~worker_name
               loop ~round:1 ~usage_acc:zero_usage ~tools_used:[] prompt)
 
 let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
-    ?working_dir ?worker_class ?worker_size ?execution_scope ~role
+    ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
+    ?thinking_enabled ?max_turns ~role
     ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
@@ -1707,5 +1788,6 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
         ~role ~selection_note ~prompt ~allowed_tools ~timeout_sec
   | `Oas ->
       run_worker_oas ~sw ~base_path ~worker_name ~model ~team_session_id
-        ?working_dir ?worker_class ?worker_size ?execution_scope ~role
+        ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
+        ?thinking_enabled ?max_turns ~role
         ~selection_note ~prompt ~allowed_tools ~timeout_sec

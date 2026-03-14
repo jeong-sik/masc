@@ -126,6 +126,9 @@ let seed_room config session_id =
             risk_level = Some Risk_high;
             routing_confidence = Some 0.94;
             routing_reason = Some "manager must hold root synthesis";
+            thinking_enabled = None;
+            max_turns = None;
+            timeout_seconds = None;
             routing_escalated = false;
           };
           {
@@ -147,6 +150,9 @@ let seed_room config session_id =
             risk_level = Some Risk_medium;
             routing_confidence = Some 0.68;
             routing_reason = Some "spawn failures hide runtime census";
+            thinking_enabled = None;
+            max_turns = None;
+            timeout_seconds = None;
             routing_escalated = true;
           };
           {
@@ -168,6 +174,9 @@ let seed_room config session_id =
             risk_level = Some Risk_medium;
             routing_confidence = Some 0.88;
             routing_reason = Some "executor covers direct runtime checks";
+            thinking_enabled = None;
+            max_turns = None;
+            timeout_seconds = None;
             routing_escalated = false;
           };
           {
@@ -189,6 +198,9 @@ let seed_room config session_id =
             risk_level = Some Risk_low;
             routing_confidence = Some 0.72;
             routing_reason = Some "observer preserves room-level runtime census";
+            thinking_enabled = None;
+            max_turns = None;
+            timeout_seconds = None;
             routing_escalated = false;
           };
         ];

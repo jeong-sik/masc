@@ -1,4 +1,5 @@
 open Masc_mcp
+module Oas = Agent_sdk
 
 let temp_dir () =
   let dir = Filename.temp_file "test_tool_team_session_" "" in
@@ -195,3 +196,97 @@ let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
   Team_session_store.save_session config session;
   session
 
+let make_oas_tool_trace_checkpoint ?(session_id = "worker-session")
+    ?(agent_name = "llama-local-test") () : Oas.Checkpoint.t =
+  let msg role content : Oas.Types.message = { role; content } in
+  {
+    version = Oas.Checkpoint.checkpoint_version;
+    session_id;
+    agent_name;
+    model = Oas.Types.Custom "qwen3.5";
+    system_prompt = None;
+    messages =
+      [
+        msg Oas.Types.User [ Oas.Types.Text "inspect calc.py and fix it" ];
+        msg Oas.Types.Assistant
+          [
+            Oas.Types.ToolUse
+              ( "toolu_read",
+                "file_read",
+                `Assoc
+                  [
+                    ( "path",
+                      `String "test/fixtures/coding_worker_repo_smoke/calc.py" );
+                  ] );
+          ];
+        msg Oas.Types.User
+          [
+            Oas.Types.ToolResult
+              ("toolu_read", "def add_two_and_three():\n    return 4", false);
+          ];
+        msg Oas.Types.Assistant
+          [
+            Oas.Types.ToolUse
+              ( "toolu_write",
+                "file_write",
+                `Assoc
+                  [
+                    ( "path",
+                      `String "test/fixtures/coding_worker_repo_smoke/calc.py" );
+                    ( "content",
+                      `String "def add_two_and_three():\n    return 5\n" );
+                  ] );
+          ];
+        msg Oas.Types.User
+          [ Oas.Types.ToolResult ("toolu_write", "Written 37 bytes", false) ];
+        msg Oas.Types.Assistant
+          [
+            Oas.Types.ToolUse
+              ( "toolu_shell",
+                "shell_exec",
+                `Assoc
+                  [
+                    ( "command",
+                      `String
+                        "python3 test/fixtures/coding_worker_repo_smoke/check.py"
+                    );
+                  ] );
+          ];
+        msg Oas.Types.User
+          [ Oas.Types.ToolResult ("toolu_shell", "PASS", false) ];
+        msg Oas.Types.Assistant
+          [ Oas.Types.Text "Patched calc.py and verification passed." ];
+      ];
+    usage = Oas.Types.empty_usage;
+    turn_count = 3;
+    created_at = Time_compat.now ();
+    tools = [];
+    tool_choice = None;
+    temperature = None;
+    top_p = None;
+    top_k = None;
+    min_p = None;
+    enable_thinking = Some false;
+    response_format_json = false;
+    thinking_budget = None;
+    cache_system_prompt = false;
+    max_input_tokens = None;
+    max_total_tokens = None;
+    context = Oas.Context.create ();
+    mcp_sessions = [];
+  }
+
+let save_worker_run_checkpoint_exn config ~session_id ~worker_run_id
+    ~worker_name checkpoint =
+  Team_session_store.save_worker_run_meta_json config session_id worker_run_id
+    (`Assoc
+      [
+        ("worker_run_id", `String worker_run_id);
+        ("worker_name", `String worker_name);
+        ("mode", `String "delegate");
+        ("wait_mode", `String "blocking");
+        ("trace_capability", `String "checkpoint_snapshot");
+      ]);
+  Team_session_store.save_worker_run_checkpoint_text config session_id
+    worker_run_id
+    (Oas.Checkpoint.to_string checkpoint)

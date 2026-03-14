@@ -123,7 +123,7 @@ let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
     { Spawn_eio.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
       tool_call_count = 0; tool_names = [];
       input_tokens = None; output_tokens = None; cache_creation_tokens = None;
-      cache_read_tokens = None; cost_usd = None }
+      cache_read_tokens = None; cost_usd = None; raw_trace_run = None }
   end else begin
   Eio.traceln "🚀 Spawning orchestrator agent: %s (with MCP tools)\n%!" config.orchestrator_agent;
 

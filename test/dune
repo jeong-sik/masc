@@ -400,7 +400,7 @@
           test_tool_team_session_step_routing
           test_tool_team_session_step_followup
           test_tool_team_session_misc)
- (libraries masc_mcp alcotest yojson unix eio eio_main))
+ (libraries masc_mcp agent_sdk alcotest yojson unix eio eio_main))
 
 (test
  (name test_lodge_memory_local)

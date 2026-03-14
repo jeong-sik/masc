@@ -25,6 +25,9 @@ let set_fs fs =
 let clear_fs () =
   global_fs := None
 
+let get_fs_opt () =
+  !global_fs
+
 (** Check if Eio fs is available *)
 let has_fs () =
   Option.is_some !global_fs

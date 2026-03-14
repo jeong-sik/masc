@@ -139,9 +139,12 @@ let rec mkdir_p path perm =
     (try Unix.mkdir path perm with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
   end
 
+type tool_exec_observer =
+  tool_name:string -> success:bool -> duration_ms:int -> unit
+
 (* --- Tool implementations --- *)
 
-let make_file_read ?workdir () =
+let make_file_read ?workdir ?on_exec () =
   Agent_sdk.Tool.create
     ~name:"file_read"
     ~description:"Read file contents by absolute path. Returns file text. \
@@ -156,20 +159,41 @@ let make_file_read ?workdir () =
        match Agent_swarm_tool_input.extract_string "path" input with
        | Error e -> Error e
        | Ok path ->
+         let started = Time_compat.now () in
          let resolved_path = resolve_path ?base_dir:workdir path in
          if not (validate_path ?workdir path) then
-           Error (Printf.sprintf
-             "Path blocked: %s (outside allowed directories)" path)
+           let err =
+             Printf.sprintf "Path blocked: %s (outside allowed directories)" path
+           in
+           let duration_ms =
+             int_of_float ((Time_compat.now () -. started) *. 1000.0)
+           in
+           Option.iter
+             (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
+             on_exec;
+           Error err
          else
            try
              let content = In_channel.with_open_text resolved_path In_channel.input_all in
+             let duration_ms =
+               int_of_float ((Time_compat.now () -. started) *. 1000.0)
+             in
+             Option.iter
+               (fun f -> f ~tool_name:"file_read" ~success:true ~duration_ms)
+               on_exec;
              if String.length content > 100_000 then
                Ok (String.sub content 0 100_000 ^ "\n[TRUNCATED at 100KB]")
              else Ok content
            with Sys_error msg ->
+             let duration_ms =
+               int_of_float ((Time_compat.now () -. started) *. 1000.0)
+             in
+             Option.iter
+               (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
+               on_exec;
              Error (Printf.sprintf "Cannot read: %s" msg))
 
-let make_file_write ?workdir () =
+let make_file_write ?workdir ?on_exec () =
   Agent_sdk.Tool.create
     ~name:"file_write"
     ~description:"Write content to a file by absolute path. Creates the file \
@@ -188,21 +212,42 @@ let make_file_write ?workdir () =
              Agent_swarm_tool_input.extract_string "content" input with
        | Error e, _ | _, Error e -> Error e
        | Ok path, Ok content ->
+         let started = Time_compat.now () in
          let resolved_path = resolve_path ?base_dir:workdir path in
          if not (validate_path ?workdir path) then
-           Error (Printf.sprintf
-             "Path blocked: %s (outside allowed directories)" path)
+           let err =
+             Printf.sprintf "Path blocked: %s (outside allowed directories)" path
+           in
+           let duration_ms =
+             int_of_float ((Time_compat.now () -. started) *. 1000.0)
+           in
+           Option.iter
+             (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
+             on_exec;
+           Error err
          else
            try
              mkdir_p (Filename.dirname resolved_path) 0o755;
              Out_channel.with_open_text resolved_path
                (fun oc -> Out_channel.output_string oc content);
+             let duration_ms =
+               int_of_float ((Time_compat.now () -. started) *. 1000.0)
+             in
+             Option.iter
+               (fun f -> f ~tool_name:"file_write" ~success:true ~duration_ms)
+               on_exec;
              Ok (Printf.sprintf "Written %d bytes to %s"
                (String.length content) resolved_path)
            with Sys_error msg ->
+             let duration_ms =
+               int_of_float ((Time_compat.now () -. started) *. 1000.0)
+             in
+             Option.iter
+               (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
+               on_exec;
              Error (Printf.sprintf "Cannot write: %s" msg))
 
-let make_shell_exec_with_allowlist ~workdir ~proc_mgr ~clock ~allowed_commands
+let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_commands
     ~description =
   Agent_sdk.Tool.create
     ~name:"shell_exec"
@@ -228,7 +273,9 @@ let make_shell_exec_with_allowlist ~workdir ~proc_mgr ~clock ~allowed_commands
              |> Float.min 120.0
            in
            try
-             Eio.Fiber.first
+             let started = Time_compat.now () in
+             let result =
+               Eio.Fiber.first
                (fun () ->
                   Eio.Switch.run @@ fun sw ->
                   let buf = Buffer.create 1024 in
@@ -253,11 +300,25 @@ let make_shell_exec_with_allowlist ~workdir ~proc_mgr ~clock ~allowed_commands
                (fun () ->
                   Eio.Time.sleep clock timeout;
                   Error (Printf.sprintf "Timeout after %.0fs: %s" timeout command))
+             in
+             let duration_ms =
+               int_of_float ((Time_compat.now () -. started) *. 1000.0)
+             in
+             Option.iter
+               (fun f ->
+                 f ~tool_name:"shell_exec"
+                   ~success:(Result.is_ok result) ~duration_ms)
+               on_exec;
+             result
            with exn ->
+             let duration_ms = 0 in
+             Option.iter
+               (fun f -> f ~tool_name:"shell_exec" ~success:false ~duration_ms)
+               on_exec;
              Error (Printf.sprintf "Command failed: %s" (Printexc.to_string exn))))
 
-let make_shell_exec ~workdir ~proc_mgr ~clock =
-  make_shell_exec_with_allowlist ~workdir ~proc_mgr ~clock
+let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
+  make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock
     ~allowed_commands:dev_allowed_commands
     ~description:
       "Execute a shell command and return stdout+stderr. \
@@ -266,8 +327,8 @@ let make_shell_exec ~workdir ~proc_mgr ~clock =
        Unlike file_read (single file), this handles approved CLI operations. \
        Commands run in /bin/sh but shell control syntax is rejected."
 
-let make_shell_exec_readonly ~workdir ~proc_mgr ~clock =
-  make_shell_exec_with_allowlist ~workdir ~proc_mgr ~clock
+let make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock =
+  make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock
     ~allowed_commands:readonly_allowed_commands
     ~description:
       "Execute a read-only shell command and return stdout+stderr. \
@@ -277,11 +338,11 @@ let make_shell_exec_readonly ~workdir ~proc_mgr ~clock =
 
 (** Create dev tools that close over Eio capabilities.
     Returns [file_read; file_write; shell_exec]. *)
-let make_tools ~proc_mgr ~clock ?workdir () : Agent_sdk.Tool.t list =
-  [ make_file_read ?workdir ();
-    make_file_write ?workdir ();
-    make_shell_exec ~workdir ~proc_mgr ~clock ]
+let make_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t list =
+  [ make_file_read ?workdir ?on_exec ();
+    make_file_write ?workdir ?on_exec ();
+    make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock ]
 
-let make_readonly_tools ~proc_mgr ~clock ?workdir () : Agent_sdk.Tool.t list =
-  [ make_file_read ?workdir ();
-    make_shell_exec_readonly ~workdir ~proc_mgr ~clock ]
+let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t list =
+  [ make_file_read ?workdir ?on_exec ();
+    make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock ]

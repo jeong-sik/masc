@@ -49,7 +49,7 @@ let test_classify_mcp_accept () =
     (classify_mcp_accept ~allow_legacy:false (Some "text/event-stream"));
   ()
 
-let test_protocol_continuity_rejects_missing_header () =
+let test_protocol_continuity_allows_missing_header () =
   let module Session = Masc_mcp.Server_mcp_transport_http in
   let session_id = "compat-session-missing-header" in
   let headers = Httpun.Headers.of_list [] in
@@ -59,11 +59,21 @@ let test_protocol_continuity_rejects_missing_header () =
     ~finally:(fun () -> Session.forget_mcp_session session_id)
     (fun () ->
       match Session.validate_protocol_version_continuity ~session_id request with
-      | Ok () -> fail "expected missing protocol header to be rejected"
+      | Ok () -> ()
       | Error msg ->
-          check bool "mentions required header" true
-            (String.length msg > 0
-            && String.starts_with ~prefix:"MCP-Protocol-Version header required" msg))
+          failf "expected missing protocol header to use session continuity, got %s" msg)
+
+let test_protocol_version_for_session_falls_back_to_negotiated_version () =
+  let module Session = Masc_mcp.Server_mcp_transport_http in
+  let session_id = "compat-session-negotiated-version" in
+  let headers = Httpun.Headers.of_list [] in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  Session.remember_protocol_version session_id "2025-03-26";
+  Fun.protect
+    ~finally:(fun () -> Session.forget_mcp_session session_id)
+    (fun () ->
+      check string "falls back to remembered session version" "2025-03-26"
+        (Session.get_protocol_version_for_session ~session_id request))
 
 let test_protocol_continuity_rejects_mismatch () =
   let module Session = Masc_mcp.Server_mcp_transport_http in
@@ -143,7 +153,8 @@ let () =
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
       ("classify_mcp_accept", [test_case "strict vs legacy fallback" `Quick test_classify_mcp_accept]);
       ("protocol_continuity", [
-        test_case "missing header rejected" `Quick test_protocol_continuity_rejects_missing_header;
+        test_case "missing header falls back to session" `Quick test_protocol_continuity_allows_missing_header;
+        test_case "remembered session version is reused" `Quick test_protocol_version_for_session_falls_back_to_negotiated_version;
         test_case "mismatch still rejects" `Quick test_protocol_continuity_rejects_mismatch;
       ]);
       ("body_aware_accept", [

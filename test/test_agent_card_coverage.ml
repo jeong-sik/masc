@@ -285,7 +285,7 @@ let test_signature_of_json_invalid () =
 let test_generate_default () =
   let card = Agent_card.generate_default () in
   check string "name" "MASC-MCP" card.name;
-  check string "version" "2.60.0" card.version;
+  check string "version" Masc_mcp.Version.version card.version;
   check bool "has description" true (Option.is_some card.description);
   check bool "has provider" true (Option.is_some card.provider);
   check bool "streaming capability" true card.capabilities.streaming;

@@ -402,3 +402,80 @@ let test_verify_trace_reports_summary_only_without_checkpoint () =
   Alcotest.(check bool) "missing checkpoint surfaced" true
     (String.length error > 0);
   cleanup_dir base_dir
+
+let test_delegate_rejects_not_ready_worker_with_guidance () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"delegate-not-ready" |> get_session_id in
+  ignore
+    (Team_session_store.update_session config session_id (fun session ->
+         {
+           session with
+           planned_workers =
+             [
+               {
+                 Team_session_types.spawn_agent = "default";
+                 runtime_actor = Some "llama-local-pending";
+                 spawn_role = Some "implementer";
+                 spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
+                 execution_scope = Some Team_session_types.Limited_code_change;
+                 thinking_enabled = None;
+                 max_turns = None;
+                 timeout_seconds = Some 300;
+                 worker_class = Some Team_session_types.Worker_executor;
+                 parent_actor = None;
+                 capsule_mode = None;
+                 runtime_pool = Some "local";
+                 lane_id = None;
+                 controller_level = None;
+                 control_domain = None;
+                 supervisor_actor = None;
+                 model_tier = Some Team_session_types.Tier_35b;
+                 task_profile = Some Team_session_types.Profile_normalize;
+                 risk_level = Some Team_session_types.Risk_low;
+                 routing_confidence = Some 0.9;
+                 routing_reason = Some "test-pending";
+                 routing_escalated = false;
+               };
+             ];
+           updated_at_iso = Types.now_iso ();
+         }));
+  Team_session_store.write_text_file
+    (Team_session_store.worker_container_meta_path config session_id
+       "llama-local-pending")
+    "{}";
+  let delegate_ok, delegate_body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("wait_mode", `String "blocking");
+            ("target_agent", `String "implementer");
+            ("delegate_prompt", `String "continue");
+          ])
+  in
+  Alcotest.(check bool) "delegate denied" false delegate_ok;
+  let message =
+    parse_json_exn delegate_body |> Yojson.Safe.Util.member "message"
+    |> Yojson.Safe.Util.to_string
+  in
+  let normalized = String.lowercase_ascii message in
+  let needle = "not ready for delegation" in
+  let needle_len = String.length needle in
+  let hay_len = String.length normalized in
+  let rec contains idx =
+    if idx + needle_len > hay_len then false
+    else if String.sub normalized idx needle_len = needle then true
+    else contains (idx + 1)
+  in
+  Alcotest.(check bool) "mentions not ready guidance" true
+    (String.length message > 0 && contains 0);
+  cleanup_dir base_dir

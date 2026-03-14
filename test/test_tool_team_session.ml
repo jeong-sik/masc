@@ -84,6 +84,10 @@ let () =
             `Quick
             Test_tool_team_session_misc.test_verify_trace_uses_worker_run_raw_trace;
           Alcotest.test_case
+            "delegate-rejects-not-ready-worker-with-guidance" `Quick
+            Test_tool_team_session_misc
+              .test_delegate_rejects_not_ready_worker_with_guidance;
+          Alcotest.test_case
             "verify-trace-reports-summary-only-without-checkpoint" `Quick
             Test_tool_team_session_misc.test_verify_trace_reports_summary_only_without_checkpoint;
           Alcotest.test_case "status-and-stop-linked-autoresearch" `Quick

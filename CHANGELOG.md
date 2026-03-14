@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [2.88.0] - 2026-03-14
+
+### Added
+- **Worker Readiness Surface** — team-session status now distinguishes pending vs ready local workers and exposes recent worker-run summaries with requested class/size and resolved runtime/model metadata
+- **User-facing Delegate Guidance** — follow-up delegation to accepted-but-not-ready workers now returns an explicit readiness error instead of a generic missing-container failure
+
+### Changed
+- **Agent SDK Floor** — `masc-mcp` now requires `agent_sdk >= 0.19.0`
+- **Runtime Transparency** — dashboard proof and worker-run snapshots surface resolved runtime/model plus routing reason for local worker runs
+- **Shell UX Contract** — `shell_exec` metacharacter rejection now directs users toward `workdir` + single-command usage
+
+### Fixed
+- **False Fallback Pressure** — in-flight worker actors now count toward session activity so team health and fallback-task logic no longer falsely signal idle failure while workers are running
+
 ## [2.87.0] - 2026-03-13
 
 ### Added

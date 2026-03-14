@@ -329,7 +329,18 @@ let test_shell_exec_rejects_shell_metacharacters () =
   let result = Tool.execute tool
     (`Assoc [("command", `String "echo hello; pwd")]) in
   (match result with
-   | Error _ -> ()
+   | Error msg ->
+       let normalized = String.lowercase_ascii msg in
+       let needle = "workdir" in
+       let needle_len = String.length needle in
+       let hay_len = String.length normalized in
+       let rec contains idx =
+         if idx + needle_len > hay_len then false
+         else if String.sub normalized idx needle_len = needle then true
+         else contains (idx + 1)
+       in
+       Alcotest.(check bool) "mentions workdir guidance" true
+         (contains 0)
    | Ok _ -> Alcotest.fail "should reject shell metacharacters")
 
 let test_shell_exec_nonexistent_cmd () =

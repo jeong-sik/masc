@@ -286,6 +286,7 @@ let worker_run_summary_json json =
     [
       ("worker_run_id", U.member "worker_run_id" json);
       ("worker_name", U.member "worker_name" json);
+      ("status", U.member "status" json);
       ("mode", U.member "mode" json);
       ("wait_mode", U.member "wait_mode" json);
       ( "trace_capability",
@@ -300,6 +301,11 @@ let worker_run_summary_json json =
              (worker_run_validation_failures json)) );
       ("success", U.member "success" json);
       ("execution_scope", U.member "execution_scope" json);
+      ("requested_worker_class", U.member "requested_worker_class" json);
+      ("requested_worker_size", U.member "requested_worker_size" json);
+      ("resolved_runtime", U.member "resolved_runtime" json);
+      ("resolved_model", U.member "resolved_model" json);
+      ("routing_reason", U.member "routing_reason" json);
       ("tool_names", U.member "tool_names" json);
       ("tool_call_count", U.member "tool_call_count" json);
       ("output_preview", U.member "output_preview" json);

@@ -253,6 +253,73 @@ let test_shell_exec_blocked_command () =
        (String.length msg > 0)
    | Ok _ -> Alcotest.fail "should reject rm -rf /")
 
+let test_tool_exec_observer_bridges_to_telemetry () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let fs = Eio.Stdenv.fs env in
+  let base_dir = Filename.temp_file "dev_tools_telemetry_" "" in
+  Sys.remove base_dir;
+  Unix.mkdir base_dir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      let rec rm path =
+        if Sys.file_exists path then
+          if Sys.is_directory path then (
+            Array.iter
+              (fun name -> rm (Filename.concat path name))
+              (Sys.readdir path);
+            Unix.rmdir path)
+          else
+            Unix.unlink path
+      in
+      try rm base_dir with _ -> ())
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      let on_exec ~tool_name ~success ~duration_ms =
+        Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
+          ~duration_ms ~agent_id:"llama-local-worker" ()
+      in
+      let tools =
+        Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~on_exec ()
+      in
+      let tmp_path = Filename.concat "/tmp" "dev_tools_observer_bridge.txt" in
+      if Sys.file_exists tmp_path then Sys.remove tmp_path;
+      let write_tool = find_tool "file_write" tools in
+      let read_tool = find_tool "file_read" tools in
+      let shell_tool = find_tool "shell_exec" tools in
+      (match
+         Tool.execute write_tool
+           (`Assoc
+             [ ("path", `String tmp_path); ("content", `String "bridge") ])
+       with
+      | Ok _ -> ()
+      | Error e ->
+          Alcotest.fail (Printf.sprintf "file_write failed: %s" e));
+      (match Tool.execute read_tool (`Assoc [ ("path", `String tmp_path) ]) with
+      | Ok _ -> ()
+      | Error e ->
+          Alcotest.fail (Printf.sprintf "file_read failed: %s" e));
+      (match
+         Tool.execute shell_tool
+           (`Assoc [ ("command", `String "echo telemetry-ok") ])
+       with
+      | Ok _ -> ()
+      | Error e ->
+          Alcotest.fail (Printf.sprintf "shell_exec failed: %s" e));
+      let summary = Telemetry_eio.summarize_tool_usage ~fs config in
+      let stats name =
+        match Hashtbl.find_opt summary.stats_by_tool name with
+        | Some stats -> stats
+        | None -> Alcotest.fail ("missing telemetry stats for " ^ name)
+      in
+      Alcotest.(check int) "telemetry total calls" 3 summary.total_calls;
+      Alcotest.(check int) "file_write count" 1 (stats "file_write").count;
+      Alcotest.(check int) "file_read count" 1 (stats "file_read").count;
+      Alcotest.(check int) "shell_exec count" 1 (stats "shell_exec").count;
+      Sys.remove tmp_path)
+
 let test_shell_exec_rejects_shell_metacharacters () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -360,6 +427,8 @@ let () =
     "shell_exec", [
       Alcotest.test_case "echo hello" `Quick test_shell_exec_echo;
       Alcotest.test_case "blocked command" `Quick test_shell_exec_blocked_command;
+      Alcotest.test_case "observer bridges to telemetry" `Quick
+        test_tool_exec_observer_bridges_to_telemetry;
       Alcotest.test_case "reject shell metacharacters" `Quick
         test_shell_exec_rejects_shell_metacharacters;
       Alcotest.test_case "nonexistent command" `Quick test_shell_exec_nonexistent_cmd;

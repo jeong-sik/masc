@@ -55,7 +55,7 @@ Use `/mcp` when an agent needs the full room and team-session tool inventory.
 `masc-mcp` can run a worker directly on the hidden local worker backend.
 
 - canonical team-session spawn path: `masc_team_session_step(spawn_role="...", worker_class="...", worker_size="...", spawn_prompt="...")`
-- implementation detail: local OAS worker on the configured local runtime
+- implementation detail: local worker on the configured local runtime
 
 Environment:
 

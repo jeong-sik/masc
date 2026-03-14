@@ -210,7 +210,7 @@ let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
     detail |> Yojson.Safe.Util.member "worker_backend"
     |> Yojson.Safe.Util.to_string_option
   in
-  Alcotest.(check (option string)) "worker backend" (Some "oas-local")
+  Alcotest.(check (option string)) "worker backend" (Some "local")
     worker_backend;
   let worker_size =
     detail |> Yojson.Safe.Util.member "worker_size"

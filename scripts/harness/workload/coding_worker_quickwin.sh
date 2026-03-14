@@ -10,6 +10,7 @@ HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-120}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-60}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-qwen3.5-35b-a3b-ud-q8-xl}"
 SMOKE_AGENT="${SMOKE_AGENT:-coding-smoke-supervisor}"
+TEAM_STEP_WAIT_MODE="${TEAM_STEP_WAIT_MODE:-blocking}"
 
 PORT=""
 MCP_URL=""
@@ -180,6 +181,42 @@ wait_until_terminal() {
   done
 }
 
+wait_for_worker_run_event() {
+  local client_session_id="$1"
+  local team_session_id="$2"
+  local worker_run_id="$3"
+  local expected_event="$4"
+  local deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
+  while :; do
+    local raw events_json match
+    raw="$(call_tool "$client_session_id" 91 "masc_team_session_events" "$(jq -cn --arg s "$team_session_id" --arg ev "$expected_event" '{session_id:$s,event_types:[$ev],limit:200}')")"
+    require_tool_success "$raw"
+    events_json="$(printf '%s' "$raw" | extract_tool_result)"
+    match="$(printf '%s' "$events_json" | jq -c --arg id "$worker_run_id" '.events[]? | select(.detail.worker_run_id? == $id) | .detail' | tail -n1)"
+    if [ -n "$match" ]; then
+      printf '%s' "$match"
+      return 0
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "FAIL: worker run ${worker_run_id} did not emit ${expected_event} in time"
+      printf '%s\n' "$events_json"
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+verify_worker_run_trace() {
+  local client_session_id="$1"
+  local team_session_id="$2"
+  local worker_run_id="$3"
+  local raw result
+  raw="$(call_tool "$client_session_id" 92 "masc_team_session_verify_trace" "$(jq -cn --arg s "$team_session_id" --arg r "$worker_run_id" '{session_id:$s,worker_run_id:$r}')")"
+  require_tool_success "$raw"
+  result="$(printf '%s' "$raw" | extract_tool_result)"
+  printf '%s' "$result"
+}
+
 fixture_repo_setup() {
   local fixture_dir
   fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/coding-worker-fixture.XXXXXX")"
@@ -254,24 +291,50 @@ EOF
   raw="$(call_tool "fixture-client" 10 "masc_team_session_step" "$(jq -cn \
     --arg s "$team_session_id" \
     --arg prompt "$inspect_prompt" \
-    '{session_id:$s,spawn_role:"coder",worker_class:"executor",worker_size:"lg",execution_scope:"limited_code_change",spawn_prompt:$prompt}')")"
+    --arg wait_mode "$TEAM_STEP_WAIT_MODE" \
+    '{session_id:$s,spawn_role:"coder",worker_class:"executor",worker_size:"lg",execution_scope:"limited_code_change",wait_mode:$wait_mode,spawn_prompt:$prompt}')")"
   require_tool_success "$raw"
   result="$(printf '%s' "$raw" | extract_tool_result)"
   spawn="$(printf '%s' "$result" | jq -c '.spawn')"
-  printf '%s' "$spawn" | jq -e '.success == true' >/dev/null
-  printf '%s' "$spawn" | jq -e '.tool_call_count > 0' >/dev/null
-  printf '%s' "$spawn" | jq -e '(.tool_names | index("file_read")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+  if [ "$TEAM_STEP_WAIT_MODE" = "background" ]; then
+    local fixture_spawn_run_id fixture_spawn_detail fixture_spawn_verify
+    printf '%s' "$spawn" | jq -e '.status == "accepted"' >/dev/null
+    fixture_spawn_run_id="$(printf '%s' "$spawn" | jq -r '.worker_run_id')"
+    fixture_spawn_detail="$(wait_for_worker_run_event "fixture-client" "$team_session_id" "$fixture_spawn_run_id" "team_step_spawn")"
+    printf '%s' "$fixture_spawn_detail" | jq -e '.success == true' >/dev/null
+    printf '%s' "$fixture_spawn_detail" | jq -e '.tool_call_count > 0' >/dev/null
+    printf '%s' "$fixture_spawn_detail" | jq -e '(.tool_names | index("file_read")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+    fixture_spawn_verify="$(verify_worker_run_trace "fixture-client" "$team_session_id" "$fixture_spawn_run_id")"
+    printf '%s' "$fixture_spawn_verify" | jq -e '.verification.ok == true' >/dev/null
+  else
+    printf '%s' "$spawn" | jq -e '.success == true' >/dev/null
+    printf '%s' "$spawn" | jq -e '.tool_call_count > 0' >/dev/null
+    printf '%s' "$spawn" | jq -e '(.tool_names | index("file_read")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+  fi
   delegate_raw="$(call_tool "fixture-client" 10 "masc_team_session_step" "$(jq -cn \
     --arg s "$team_session_id" \
     --arg prompt "$write_prompt" \
-    '{session_id:$s,target_agent:"coder",delegate_prompt:$prompt}')")"
+    --arg wait_mode "$TEAM_STEP_WAIT_MODE" \
+    '{session_id:$s,target_agent:"coder",wait_mode:$wait_mode,delegate_prompt:$prompt}')")"
   require_tool_success "$delegate_raw"
   delegate_json="$(printf '%s' "$delegate_raw" | extract_tool_result | jq -c '.delegate')"
-  printf '%s' "$delegate_json" | jq -e '.tool_call_count > 0' >/dev/null
-  printf '%s' "$delegate_json" | jq -e '(.tool_names | index("file_write")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+  if [ "$TEAM_STEP_WAIT_MODE" = "background" ]; then
+    local fixture_delegate_run_id fixture_delegate_detail fixture_delegate_verify
+    printf '%s' "$delegate_json" | jq -e '.status == "accepted"' >/dev/null
+    fixture_delegate_run_id="$(printf '%s' "$delegate_json" | jq -r '.worker_run_id')"
+    fixture_delegate_detail="$(wait_for_worker_run_event "fixture-client" "$team_session_id" "$fixture_delegate_run_id" "team_step_delegate")"
+    printf '%s' "$fixture_delegate_detail" | jq -e '.success == true' >/dev/null
+    printf '%s' "$fixture_delegate_detail" | jq -e '.tool_call_count > 0' >/dev/null
+    printf '%s' "$fixture_delegate_detail" | jq -e '(.tool_names | index("file_write")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+    fixture_delegate_verify="$(verify_worker_run_trace "fixture-client" "$team_session_id" "$fixture_delegate_run_id")"
+    printf '%s' "$fixture_delegate_verify" | jq -e '.verification.ok == true and .verification.has_file_write == true' >/dev/null
+  else
+    printf '%s' "$delegate_json" | jq -e '.tool_call_count > 0' >/dev/null
+    printf '%s' "$delegate_json" | jq -e '(.tool_names | index("file_write")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+  fi
   (cd "$fixture_dir" && python3 check.py >/dev/null)
-  if [ -z "$(git -C "$fixture_dir" status --short)" ]; then
-    echo "FAIL: fixture repo has no file changes after coding worker run"
+  if ! grep -q 'return 5' "$fixture_dir/calc.py"; then
+    echo "FAIL: fixture repo calc.py was not patched to return 5"
     exit 1
   fi
   require_tool_success "$(call_tool "fixture-client" 11 "masc_team_session_stop" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,reason:"fixture_done",generate_report:true}')")"
@@ -325,30 +388,60 @@ EOF
     --arg s "$team_session_id" \
     --arg planner "$planner_prompt" \
     --arg implementer "$implementer_prompt" \
+    --arg wait_mode "$TEAM_STEP_WAIT_MODE" \
     '{session_id:$s,spawn_batch:[
-      {spawn_role:"planner",worker_class:"manager",worker_size:"xlg",execution_scope:"observe_only",spawn_prompt:$planner},
-      {spawn_role:"implementer",worker_class:"executor",worker_size:"lg",execution_scope:"limited_code_change",spawn_prompt:$implementer}
+      {spawn_role:"planner",worker_class:"manager",worker_size:"xlg",execution_scope:"observe_only",wait_mode:$wait_mode,spawn_prompt:$planner},
+      {spawn_role:"implementer",worker_class:"executor",worker_size:"lg",execution_scope:"limited_code_change",wait_mode:$wait_mode,spawn_prompt:$implementer}
     ]}')")"
   require_tool_success "$raw"
   result="$(printf '%s' "$raw" | extract_tool_result)"
   printf '%s' "$result" | jq -e '.spawn.mode == "batch" and .spawn.count == 2 and (.spawn.results | length) == 2' >/dev/null
-  printf '%s' "$result" | jq -e '[.spawn.results[] | .execution_scope] | index("limited_code_change") != null' >/dev/null
-  printf '%s' "$result" | jq -e '[.spawn.results[] | .tool_names[]?] | index("file_read") != null and index("shell_exec") != null' >/dev/null
+  if [ "$TEAM_STEP_WAIT_MODE" = "background" ]; then
+    local planner_run_id implementer_run_id planner_detail implementer_detail planner_verify implementer_verify
+    printf '%s' "$result" | jq -e '[.spawn.results[] | .status] | all(. == "accepted")' >/dev/null
+    planner_run_id="$(printf '%s' "$result" | jq -r '.spawn.results[] | select(.spawn_role=="planner") | .worker_run_id')"
+    implementer_run_id="$(printf '%s' "$result" | jq -r '.spawn.results[] | select(.spawn_role=="implementer") | .worker_run_id')"
+    planner_detail="$(wait_for_worker_run_event "repo-client" "$team_session_id" "$planner_run_id" "team_step_spawn")"
+    implementer_detail="$(wait_for_worker_run_event "repo-client" "$team_session_id" "$implementer_run_id" "team_step_spawn")"
+    printf '%s' "$planner_detail" | jq -e '.success == true and .execution_scope == "observe_only"' >/dev/null
+    printf '%s' "$implementer_detail" | jq -e '.success == true and .execution_scope == "limited_code_change"' >/dev/null
+    printf '%s' "$planner_detail" | jq -e '(.tool_names | index("file_read")) != null' >/dev/null
+    printf '%s' "$implementer_detail" | jq -e '(.tool_names | index("shell_exec")) != null' >/dev/null
+    planner_verify="$(verify_worker_run_trace "repo-client" "$team_session_id" "$planner_run_id")"
+    implementer_verify="$(verify_worker_run_trace "repo-client" "$team_session_id" "$implementer_run_id")"
+    printf '%s' "$planner_verify" | jq -e '.verification.ok == true and .verification.has_file_write == false' >/dev/null
+    printf '%s' "$implementer_verify" | jq -e '.verification.ok == true' >/dev/null
+  else
+    printf '%s' "$result" | jq -e '[.spawn.results[] | .execution_scope] | index("limited_code_change") != null' >/dev/null
+    printf '%s' "$result" | jq -e '[.spawn.results[] | .tool_names[]?] | index("file_read") != null and index("shell_exec") != null' >/dev/null
+  fi
   delegate_raw="$(call_tool "repo-client" 21 "masc_team_session_step" "$(jq -cn \
     --arg s "$team_session_id" \
     --arg prompt "$implementer_write_prompt" \
-    '{session_id:$s,target_agent:"implementer",delegate_prompt:$prompt}')")"
+    --arg wait_mode "$TEAM_STEP_WAIT_MODE" \
+    '{session_id:$s,target_agent:"implementer",wait_mode:$wait_mode,delegate_prompt:$prompt}')")"
   require_tool_success "$delegate_raw"
   delegate_json="$(printf '%s' "$delegate_raw" | extract_tool_result | jq -c '.delegate')"
-  printf '%s' "$delegate_json" | jq -e '.tool_call_count > 0' >/dev/null
-  printf '%s' "$delegate_json" | jq -e '(.tool_names | index("file_write")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+  if [ "$TEAM_STEP_WAIT_MODE" = "background" ]; then
+    local repo_delegate_run_id repo_delegate_detail repo_delegate_verify
+    printf '%s' "$delegate_json" | jq -e '.status == "accepted"' >/dev/null
+    repo_delegate_run_id="$(printf '%s' "$delegate_json" | jq -r '.worker_run_id')"
+    repo_delegate_detail="$(wait_for_worker_run_event "repo-client" "$team_session_id" "$repo_delegate_run_id" "team_step_delegate")"
+    printf '%s' "$repo_delegate_detail" | jq -e '.success == true' >/dev/null
+    printf '%s' "$repo_delegate_detail" | jq -e '(.tool_names | index("file_write")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+    repo_delegate_verify="$(verify_worker_run_trace "repo-client" "$team_session_id" "$repo_delegate_run_id")"
+    printf '%s' "$repo_delegate_verify" | jq -e '.verification.ok == true and .verification.has_file_write == true' >/dev/null
+  else
+    printf '%s' "$delegate_json" | jq -e '.tool_call_count > 0' >/dev/null
+    printf '%s' "$delegate_json" | jq -e '(.tool_names | index("file_write")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+  fi
   require_tool_success "$(call_tool "repo-client" 21 "masc_team_session_step" "$(jq -cn \
     --arg s "$team_session_id" \
     --arg message "planner inspected the smoke target and implementer patched calc.py; verification passed" \
     '{session_id:$s,turn_kind:"note",message:$message}')")"
   (cd "$repo_dir" && python3 test/fixtures/coding_worker_repo_smoke/check.py >/dev/null)
-  if [ -z "$(git -C "$repo_dir" status --short --untracked-files=all -- test/fixtures/coding_worker_repo_smoke)" ]; then
-    echo "FAIL: real repo smoke worktree has no status change after coding pair run"
+  if ! grep -q 'return 5' "$repo_dir/test/fixtures/coding_worker_repo_smoke/calc.py"; then
+    echo "FAIL: real repo smoke calc.py was not patched to return 5"
     exit 1
   fi
   require_tool_success "$(call_tool "repo-client" 22 "masc_team_session_stop" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,reason:"repo_done",generate_report:true}')")"
@@ -375,4 +468,4 @@ echo "[1/2] fixture coding worker smoke"
 run_fixture_smoke
 echo "[2/2] real repo coding pair smoke"
 run_real_repo_smoke
-echo "PASS: coding worker quick win"
+echo "PASS: coding worker quick win (${TEAM_STEP_WAIT_MODE})"

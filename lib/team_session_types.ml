@@ -14,6 +14,10 @@ type execution_scope =
   | Observe_only
   | Limited_code_change
 
+type wait_mode =
+  | Wait_background
+  | Wait_blocking
+
 type orchestration_mode =
   | Manual
   | Assist
@@ -116,6 +120,9 @@ type planned_worker = {
   spawn_role : string option;
   spawn_model : string option;
   execution_scope : execution_scope option;
+  thinking_enabled : bool option;
+  max_turns : int option;
+  timeout_seconds : int option;
   worker_class : worker_class option;
   parent_actor : string option;
   capsule_mode : capsule_mode option;
@@ -223,6 +230,14 @@ let execution_scope_to_string = function
 let execution_scope_of_string = function
   | "limited_code_change" -> Limited_code_change
   | _ -> Observe_only
+
+let wait_mode_to_string = function
+  | Wait_background -> "background"
+  | Wait_blocking -> "blocking"
+
+let wait_mode_of_string = function
+  | "blocking" -> Wait_blocking
+  | _ -> Wait_background
 
 let orchestration_mode_to_string = function
   | Manual -> "manual"
@@ -462,6 +477,15 @@ let planned_worker_key (w : planned_worker) =
           "scope:"
           ^ Option.value ~default:""
               (Option.map execution_scope_to_string w.execution_scope);
+          "thinking:"
+          ^ Option.value ~default:""
+              (Option.map string_of_bool w.thinking_enabled);
+          "max_turns:"
+          ^ Option.value ~default:""
+              (Option.map string_of_int w.max_turns);
+          "timeout:"
+          ^ Option.value ~default:""
+              (Option.map string_of_int w.timeout_seconds);
           "class:"
           ^ Option.value ~default:""
               (Option.map worker_class_to_string w.worker_class);
@@ -710,6 +734,9 @@ let planned_worker_to_yojson (w : planned_worker) =
         Option.fold ~none:`Null
           ~some:(fun scope -> `String (execution_scope_to_string scope))
           w.execution_scope );
+      ("thinking_enabled", Option.fold ~none:`Null ~some:(fun v -> `Bool v) w.thinking_enabled);
+      ("max_turns", Option.fold ~none:`Null ~some:(fun n -> `Int n) w.max_turns);
+      ("timeout_seconds", Option.fold ~none:`Null ~some:(fun n -> `Int n) w.timeout_seconds);
       ( "worker_class",
         Option.fold ~none:`Null
           ~some:(fun kind -> `String (worker_class_to_string kind))
@@ -774,6 +801,12 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
               Option.map
                 execution_scope_of_string
                 (member "execution_scope" json |> to_string_option);
+            thinking_enabled =
+              member "thinking_enabled" json |> to_bool_option;
+            max_turns =
+              member "max_turns" json |> to_int_option;
+            timeout_seconds =
+              member "timeout_seconds" json |> to_int_option;
             worker_class =
               Option.bind
                 (member "worker_class" json |> to_string_option)

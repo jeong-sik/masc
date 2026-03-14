@@ -1222,6 +1222,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         risk_level = Some Team_session_types.Risk_medium;
         routing_confidence = Some 0.9;
         routing_reason = Some routing_reason;
+        thinking_enabled = None;
+        max_turns = None;
+        timeout_seconds = None;
         routing_escalated = false;
       }
     in

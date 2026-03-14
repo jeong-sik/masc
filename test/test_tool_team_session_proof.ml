@@ -61,6 +61,9 @@ let test_proof_exposes_spawn_selection_rationale () =
                    risk_level = Some Team_session_types.Risk_high;
                    routing_confidence = Some 0.97;
                    routing_reason = Some "explicit:lead";
+                   thinking_enabled = None;
+                   max_turns = None;
+                   timeout_seconds = None;
                    routing_escalated = false;
                  };
                ];
@@ -180,7 +183,7 @@ let test_report_and_proof_expose_spawn_tool_usage () =
           ("execution_scope", `String "limited_code_change");
           ("worker_class", `String "executor");
           ("worker_size", `String "lg");
-          ("worker_backend", `String "oas-local");
+          ("worker_backend", `String "local");
           ("tool_call_count", `Int 3);
           ("tool_names", `List [ `String "file_read"; `String "file_write"; `String "shell_exec" ]);
           ("success", `Bool true);
@@ -215,6 +218,9 @@ let test_report_and_proof_expose_spawn_tool_usage () =
                    risk_level = Some Team_session_types.Risk_medium;
                    routing_confidence = Some 0.9;
                    routing_reason = Some "coding quick win";
+                   thinking_enabled = None;
+                   max_turns = None;
+                   timeout_seconds = None;
                    routing_escalated = false;
                  };
                ];

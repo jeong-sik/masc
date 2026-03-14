@@ -9,6 +9,9 @@ val set_fs : Eio.Fs.dir_ty Eio.Path.t -> unit
 val clear_fs : unit -> unit
 (** Clear global fs (testing/shutdown). *)
 
+val get_fs_opt : unit -> Eio.Fs.dir_ty Eio.Path.t option
+(** Get the global Eio filesystem if available. *)
+
 val has_fs : unit -> bool
 (** Check if Eio fs is available. *)
 

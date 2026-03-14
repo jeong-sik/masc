@@ -11,6 +11,36 @@ let session_dir config session_id =
 let checkpoints_dir config session_id =
   Filename.concat (session_dir config session_id) "checkpoints"
 
+let worker_runs_dir config session_id =
+  Filename.concat (session_dir config session_id) "worker-runs"
+
+let workers_dir config session_id =
+  Filename.concat (session_dir config session_id) "workers"
+
+let worker_container_dir config session_id worker_name =
+  Filename.concat (workers_dir config session_id) worker_name
+
+let worker_container_meta_path config session_id worker_name =
+  Filename.concat (worker_container_dir config session_id worker_name) "meta.json"
+
+let worker_container_checkpoint_path config session_id worker_name =
+  Filename.concat (worker_container_dir config session_id worker_name) "checkpoint.json"
+
+let worker_container_turn_log_path config session_id worker_name =
+  Filename.concat (worker_container_dir config session_id worker_name) "turns.jsonl"
+
+let worker_run_dir config session_id worker_run_id =
+  Filename.concat (worker_runs_dir config session_id) worker_run_id
+
+let worker_run_json_path config session_id worker_run_id =
+  Filename.concat (worker_run_dir config session_id worker_run_id) "run.json"
+
+let worker_run_checkpoint_path config session_id worker_run_id =
+  Filename.concat (worker_run_dir config session_id worker_run_id) "checkpoint.json"
+
+let worker_run_meta_path config session_id worker_run_id =
+  Filename.concat (worker_run_dir config session_id worker_run_id) "meta.json"
+
 let session_json_path config session_id =
   Filename.concat (session_dir config session_id) "session.json"
 
@@ -33,7 +63,8 @@ let now_iso () = Types.now_iso ()
 
 let ensure_session_dirs config session_id =
   mkdir_p (session_dir config session_id);
-  mkdir_p (checkpoints_dir config session_id)
+  mkdir_p (checkpoints_dir config session_id);
+  mkdir_p (worker_runs_dir config session_id)
 
 let read_text_file path =
   if Sys.file_exists path then
@@ -133,6 +164,27 @@ let write_checkpoint config session_id (checkpoint : Team_session_types.checkpoi
   let filename = Printf.sprintf "%Ld.json" (Int64.of_float (checkpoint.ts *. 1000.0)) in
   let path = Filename.concat (checkpoints_dir config session_id) filename in
   write_json config path (Team_session_types.checkpoint_to_yojson checkpoint)
+
+let save_worker_run_json config session_id worker_run_id json =
+  let path = worker_run_json_path config session_id worker_run_id in
+  write_json config path json
+
+let save_worker_run_checkpoint_text config session_id worker_run_id content =
+  let path = worker_run_checkpoint_path config session_id worker_run_id in
+  write_text_file path content
+
+let save_worker_run_meta_json config session_id worker_run_id json =
+  let path = worker_run_meta_path config session_id worker_run_id in
+  write_json config path json
+
+let list_worker_run_ids config session_id =
+  let dir = worker_runs_dir config session_id in
+  if not (path_exists config dir) then
+    []
+  else
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.sort String.compare
 
 let list_checkpoint_paths config session_id =
   let dir = checkpoints_dir config session_id in

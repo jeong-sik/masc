@@ -254,6 +254,9 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
                     risk_level = Some Team_session_types.Risk_low;
                     routing_confidence = Some 0.82;
                     routing_reason = Some "rule:machine_checkable";
+                    thinking_enabled = None;
+                    max_turns = None;
+                    timeout_seconds = None;
                     routing_escalated = false;
                   };
                 ];

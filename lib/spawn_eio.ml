@@ -1,5 +1,7 @@
 (** MASC Spawn - Eio Native Agent subprocess management *)
 
+module Oas = Agent_sdk
+
 (** Mutex to serialize Sys.chdir + process fork.
     Sys.chdir is process-global; under Eio's fiber concurrency,
     concurrent spawn_agent calls would race on CWD without this. *)
@@ -27,6 +29,7 @@ type spawn_result = {
   cache_creation_tokens: int option;
   cache_read_tokens: int option;
   cost_usd: float option;
+  raw_trace_run: Oas.Raw_trace.run_ref option;
 }
 
 (** MASC MCP tools available for spawned agents *)
@@ -305,6 +308,7 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
       cache_creation_tokens = None;
       cache_read_tokens = None;
       cost_usd = None;
+      raw_trace_run = None;
     }
   else
     match
@@ -328,6 +332,7 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
             (let v = resp.Llm_client.usage.Llm_client.cache_read_input_tokens in
              if v > 0 then Some v else None);
           cost_usd = None;
+          raw_trace_run = None;
         }
     | Error e ->
         {
@@ -342,6 +347,7 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
           cache_creation_tokens = None;
           cache_read_tokens = None;
           cost_usd = None;
+          raw_trace_run = None;
         }
 
 
@@ -355,7 +361,7 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
 let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
     ?room_config ?runtime_agent_name ?runtime_model ?runtime_role
     ?runtime_session_id ?runtime_selection_note ?worker_class ?worker_size
-    ?execution_scope () : spawn_result =
+    ?execution_scope ?thinking_enabled ?max_turns () : spawn_result =
   let start_time = Time_compat.now () in
   let normalized_agent = String.lowercase_ascii (String.trim agent_name) in
   if Provider_adapter.is_bare_ollama_label normalized_agent then
@@ -371,6 +377,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
       cache_creation_tokens = None;
       cache_read_tokens = None;
       cost_usd = None;
+      raw_trace_run = None;
     }
   else
 
@@ -463,6 +470,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
            cache_creation_tokens = None;
            cache_read_tokens = None;
            cost_usd = None;
+           raw_trace_run = None;
          }
      | Some model when model.Llm_client.provider <> Llm_client.Llama ->
          {
@@ -478,13 +486,15 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
            cache_creation_tokens = None;
            cache_read_tokens = None;
            cost_usd = None;
+           raw_trace_run = None;
          }
      | Some model ->
          match
            Local_agent_eio.run_worker ~sw ~base_path ~worker_name ~model
+             ~room_config
              ~team_session_id:runtime_session_id ~role:runtime_role
              ?working_dir:worker_working_dir ?worker_class ?worker_size
-             ?execution_scope
+             ?execution_scope ?thinking_enabled ?max_turns
              ~selection_note:runtime_selection_note
              ~prompt:augmented_prompt
              ~allowed_tools:
@@ -507,6 +517,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
                cache_creation_tokens = None;
                cache_read_tokens = None;
                cost_usd = result.cost_usd;
+               raw_trace_run = result.raw_trace_run;
              }
          | Error e ->
              {
@@ -521,6 +532,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
                cache_creation_tokens = None;
                cache_read_tokens = None;
                cost_usd = None;
+               raw_trace_run = None;
              })
   else
     (* Build command arguments outside the chdir critical section *)
@@ -586,6 +598,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
           cache_creation_tokens = cache_creation;
           cache_read_tokens = cache_read;
           cost_usd;
+          raw_trace_run = None;
         }
       with e ->
         {
@@ -600,6 +613,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
           cache_creation_tokens = None;
           cache_read_tokens = None;
           cost_usd = None;
+          raw_trace_run = None;
         }
     in
     result

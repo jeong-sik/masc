@@ -240,11 +240,13 @@ let check_assertion st assertion =
 
 let handle_check ctx args =
   let st = inspect_state ctx in
+  let default_assertions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ] in
   let assertions =
     match Yojson.Safe.Util.member "assertions" args with
     | `List items ->
-        List.filter_map (function `String s -> Some s | _ -> None) items
-    | _ -> [ "room_set"; "joined"; "task_claimed"; "current_task_set" ]
+        let parsed = List.filter_map (function `String s -> Some s | _ -> None) items in
+        if parsed = [] then default_assertions else parsed
+    | _ -> default_assertions
   in
   let results = List.map (check_assertion st) assertions in
   let all_passed = List.for_all (fun r ->

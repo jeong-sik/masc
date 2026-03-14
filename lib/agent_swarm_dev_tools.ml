@@ -115,7 +115,8 @@ let validate_command_with_allowlist ~allowed_commands cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then Error "command must not be empty"
   else if contains_forbidden_shell_chars trimmed then
-    Error "shell metacharacters are not allowed"
+    Error
+      "Shell chaining/redirection is not allowed. Use the workdir field and run a single command, for example command='python3 check.py'."
   else
     match extract_command_name trimmed with
     | None -> Error "command must not be empty"

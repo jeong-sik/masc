@@ -21,6 +21,11 @@ type run_result = {
   raw_trace_run : Oas.Raw_trace.run_ref option;
 }
 
+type worker_container_state =
+  | Worker_missing
+  | Worker_pending
+  | Worker_ready
+
 type tool_profile =
   | Profile_session_min
   | Profile_session_dev
@@ -970,6 +975,19 @@ let save_worker_meta ~base_path ~team_session_id ~worker_name
     Error
       (sprintf "failed to save worker meta for %s: %s" worker_name msg)
 
+let worker_container_state ~base_path ~team_session_id ~worker_name =
+  let meta_exists =
+    Sys.file_exists (worker_meta_path ~base_path ~team_session_id ~worker_name)
+  in
+  let checkpoint_exists =
+    Sys.file_exists
+      (worker_checkpoint_path ~base_path ~team_session_id ~worker_name)
+  in
+  match meta_exists, checkpoint_exists with
+  | false, false -> Worker_missing
+  | _, true -> Worker_ready
+  | true, false -> Worker_pending
+
 let load_worker_checkpoint ~base_path ~team_session_id ~worker_name =
   let path =
     worker_checkpoint_path ~base_path ~team_session_id ~worker_name
@@ -1277,6 +1295,9 @@ let run_worker_oas ~sw ~base_path ~worker_name
           in
           String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
         in
+        let* () =
+          save_worker_meta ~base_path ~team_session_id ~worker_name meta
+        in
         let stop_heartbeat =
           start_worker_heartbeat ~sw ~auth_token ~session_id:mcp_session_id
             ~worker_name
@@ -1405,16 +1426,38 @@ let continue_worker ~sw ~base_path ~room_config ~worker_name
     ~(team_session_id : string) ~(prompt : string) :
     (run_result, string) result =
   let team_session_id = Some team_session_id in
-  let meta =
-    load_worker_meta ~base_path ~team_session_id ~worker_name
-  in
-  let checkpoint =
-    load_worker_checkpoint ~base_path ~team_session_id ~worker_name
-  in
-  match meta, checkpoint with
-  | None, _ -> Error (sprintf "worker container not found: %s" worker_name)
-  | _, None -> Error (sprintf "worker checkpoint not found: %s" worker_name)
-  | Some meta, Some checkpoint -> (
+  match worker_container_state ~base_path ~team_session_id ~worker_name with
+  | Worker_missing ->
+      Error
+        (sprintf
+           "target worker '%s' was not found. Use status.worker_runs or the \
+            latest team_step_spawn event to find a ready worker name."
+           worker_name)
+  | Worker_pending ->
+      Error
+        (sprintf
+           "target worker '%s' has been accepted but is not ready for \
+            delegation yet. Wait for a successful team_step_spawn event or a \
+            ready worker in status.worker_runs."
+           worker_name)
+  | Worker_ready ->
+      let meta =
+        load_worker_meta ~base_path ~team_session_id ~worker_name
+      in
+      let checkpoint =
+        load_worker_checkpoint ~base_path ~team_session_id ~worker_name
+      in
+      (match meta, checkpoint with
+      | None, _ ->
+          Error
+            (sprintf "worker container metadata disappeared: %s" worker_name)
+      | _, None ->
+          Error
+            (sprintf
+               "worker checkpoint is not available for '%s'; wait for the \
+                worker to finish its first run before delegating."
+               worker_name)
+      | Some meta, Some checkpoint -> (
       let workspace_path =
         if String.trim meta.workspace_path <> "" then meta.workspace_path
         else base_path
@@ -1604,7 +1647,7 @@ let continue_worker ~sw ~base_path ~room_config ~worker_name
                       ~worker_name ~prompt ~tool_names ~status:"error"
                       ~output:detail ~error:detail ()
                   in
-                  Error detail))
+                  Error detail)))
 
 let run_worker_legacy ~sw ~base_path ~worker_name
     ~(model : Llm_client.model_spec) ~team_session_id ~role
@@ -1615,9 +1658,22 @@ let run_worker_legacy ~sw ~base_path ~worker_name
     let mcp_session_id =
       resolved_mcp_session_id ~base_path ~team_session_id ~worker_name
     in
+    let execution_scope =
+      resolve_execution_scope ~base_path ~team_session_id ?execution_scope:None ()
+    in
+    let meta =
+      make_worker_meta ~base_path ~workspace_path:base_path ~team_session_id
+        ~worker_name ~mcp_session_id ~role ~selection_note ~execution_scope
+        ~worker_class:None ~worker_size:None ~effective_model:model.model_id
+        ~thinking_enabled:None ~max_turns_override:None
+        ~timeout_seconds:(Some timeout_sec)
+    in
     match worker_auth_token ~base_path ~worker_name with
     | Error e -> Error e
     | Ok auth_token ->
+        let* () =
+          save_worker_meta ~base_path ~team_session_id ~worker_name meta
+        in
         let stop_heartbeat =
           start_worker_heartbeat ~sw ~auth_token ~session_id:mcp_session_id
             ~worker_name

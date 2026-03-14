@@ -179,11 +179,17 @@ let seed_worker_run_meta config session_id =
       [
         ("worker_run_id", `String "wr-proof-raw");
         ("worker_name", `String "worker-a");
+        ("status", `String "completed");
         ("mode", `String "delegate");
         ("wait_mode", `String "background");
         ("trace_capability", `String "raw");
         ("success", `Bool true);
         ("execution_scope", `String "limited_code_change");
+        ("requested_worker_class", `String "executor");
+        ("requested_worker_size", `String "lg");
+        ("resolved_runtime", `String "llama-8085");
+        ("resolved_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
+        ("routing_reason", `String "explicit_task_profile");
         ("tool_names", `List [ `String "file_write"; `String "shell_exec" ]);
         ("tool_call_count", `Int 2);
         ("output_preview", `String "Patched calc.py and verification passed.");
@@ -262,6 +268,10 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         (worker |> U.member "trace_capability" |> U.to_string);
       check bool "worker run validated" true
         (worker |> U.member "trace_validated" |> U.to_bool);
+      check string "worker resolved runtime" "llama-8085"
+        (worker |> U.member "resolved_runtime" |> U.to_string);
+      check string "worker resolved model" "qwen3.5-35b-a3b-ud-q8-xl"
+        (worker |> U.member "resolved_model" |> U.to_string);
       check string "worker final text" "Patched calc.py and verification passed."
         (worker |> U.member "final_text" |> U.to_string))
 

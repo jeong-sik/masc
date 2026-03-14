@@ -133,6 +133,13 @@ let parse_wait_mode args =
   in
   Team_session_types.wait_mode_of_string raw
 
+let worker_run_status_to_json = function
+  | `Accepted -> `String "accepted"
+  | `Ready -> `String "ready"
+  | `Running -> `String "running"
+  | `Completed -> `String "completed"
+  | `Failed -> `String "failed"
+
 let is_all_digits s =
   let len = String.length s in
   len > 0 && String.for_all (function '0' .. '9' -> true | _ -> false) s
@@ -261,6 +268,8 @@ let raw_trace_summary_to_json
         Option.fold ~none:`Null ~some:(fun s -> `String s) summary.stop_reason
       );
       ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) summary.error);
+      ("started_at", Option.fold ~none:`Null ~some:(fun ts -> `Float ts) summary.started_at);
+      ("finished_at", Option.fold ~none:`Null ~some:(fun ts -> `Float ts) summary.finished_at);
     ]
 
 let raw_trace_validation_to_json
@@ -281,6 +290,18 @@ let raw_trace_validation_to_json
              validation.checks) );
       ( "evidence",
         `List (List.map (fun item -> `String item) validation.evidence) );
+      ("paired_tool_result_count", `Int validation.paired_tool_result_count);
+      ("has_file_write", `Bool validation.has_file_write);
+      ( "verification_pass_after_file_write",
+        `Bool validation.verification_pass_after_file_write );
+      ( "final_text",
+        Option.fold ~none:`Null ~some:(fun s -> `String s) validation.final_text );
+      ("tool_names", `List (List.map (fun name -> `String name) validation.tool_names));
+      ( "stop_reason",
+        Option.fold ~none:`Null ~some:(fun s -> `String s) validation.stop_reason );
+      ( "failure_reason",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          validation.failure_reason );
     ]
 
 let tool_trace_of_raw_records (records : Oas.Raw_trace.record list) =
@@ -415,8 +436,11 @@ let verification_json ~records
     ~(summary : Oas.Sessions.raw_trace_summary)
     ~(validation : Oas.Sessions.raw_trace_validation) =
   let tool_trace = tool_trace_of_raw_records records in
-  let pair_count, tool_names, verification_pass_after_file_write =
+  let pair_count, trace_tool_names, verification_pass_after_file_write =
     verification_rollup_of_trace tool_trace
+  in
+  let tool_names =
+    if validation.tool_names <> [] then validation.tool_names else trace_tool_names
   in
   `Assoc
     [
@@ -427,10 +451,23 @@ let verification_json ~records
       ("tool_names", `List (List.map (fun name -> `String name) tool_names));
       ("tool_use_count", `Int summary.tool_execution_started_count);
       ("tool_result_count", `Int summary.tool_execution_finished_count);
-      ("paired_tool_result_count", `Int pair_count);
+      ("paired_tool_result_count", `Int validation.paired_tool_result_count);
       ("has_file_write", `Bool (List.mem "file_write" tool_names));
       ("has_shell_exec", `Bool (List.mem "shell_exec" tool_names));
-      ("verification_pass_after_file_write", `Bool verification_pass_after_file_write);
+      ( "verification_pass_after_file_write",
+        `Bool validation.verification_pass_after_file_write );
+      ( "final_text",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          validation.final_text );
+      ( "stop_reason",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          validation.stop_reason );
+      ( "failure_reason",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          validation.failure_reason );
+      ("trace_pair_count", `Int pair_count);
+      ( "trace_verification_pass_after_file_write",
+        `Bool verification_pass_after_file_write );
     ]
 
 let raw_trace_session_payloads ~config ~fallback_session_id
@@ -1716,7 +1753,7 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
       | None -> false);
   }
 
-let resolve_target_worker_name (session : Team_session_types.session)
+let resolve_target_worker_name config (session : Team_session_types.session)
     target_agent =
   let trimmed = String.trim target_agent in
   let matches_runtime_actor worker =
@@ -1736,7 +1773,12 @@ let resolve_target_worker_name (session : Team_session_types.session)
         session.planned_workers |> List.filter matches_role
       with
       | [ worker ] -> worker.Team_session_types.runtime_actor
-      | _ -> None)
+      | _ ->
+          let worker_dir =
+            Team_session_store.worker_container_dir config session.session_id
+              trimmed
+          in
+          if Room_utils.path_exists config worker_dir then Some trimmed else None)
 
 let register_planned_workers config session_id workers =
   match Team_session_store.update_session config session_id (fun session ->
@@ -2054,6 +2096,7 @@ let handle_step ctx args : result =
               in
               let append_delegate_event ~worker_run_id ~worker_name ~delegate_prompt ~success
                   ?execution_scope ?wait_mode ?trace_capability
+                  ?resolved_runtime ?resolved_model ?routing_reason
                   ?tool_names ?tool_call_count ?output_preview ?error () =
                 Team_session_store.append_event ctx.config session_id
                   ~event_type:"team_step_delegate"
@@ -2068,6 +2111,9 @@ let handle_step ctx args : result =
                         ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
                         ("wait_mode", Option.fold ~none:`Null ~some:(fun mode -> `String mode) wait_mode);
                         ("trace_capability", Option.fold ~none:`Null ~some:(fun s -> `String s) trace_capability);
+                        ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
+                        ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_model);
+                        ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
                         ("success", `Bool success);
                         ( "tool_names",
                           Option.fold ~none:(`List [])
@@ -2101,6 +2147,9 @@ let handle_step ctx args : result =
                         ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.spawn_role);
                         ("worker_backend", if is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
                         ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
+                        ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
+                        ("resolved_model", `String prepared.runtime_model.model_id);
+                        ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
                         ("ts_iso", `String (Types.now_iso ()));
                       ])
               in
@@ -2121,6 +2170,9 @@ let handle_step ctx args : result =
               in
               let persist_worker_run_snapshot ~worker_run_id ~worker_name
                   ~mode ~wait_mode ?execution_scope ?tool_names ?tool_call_count
+                  ?requested_worker_class ?requested_worker_size
+                  ?resolved_runtime ?resolved_model ?routing_reason
+                  ~status
                   ~success ?output_preview ?error ?trace_capability ?trace_ref
                   ?trace_summary ?trace_validation
                   () =
@@ -2145,10 +2197,16 @@ let handle_step ctx args : result =
                       ("worker_run_id", `String worker_run_id);
                       ("worker_name", `String worker_name);
                       ("mode", `String mode);
+                      ("status", worker_run_status_to_json status);
                       ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
                       ("trace_capability", `String trace_capability);
                       ("success", `Bool success);
                       ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
+                      ("requested_worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) requested_worker_class);
+                      ("requested_worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) requested_worker_size);
+                      ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
+                      ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_model);
+                      ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
                       ("tool_names", Option.fold ~none:(`List []) ~some:(fun names -> `List (List.map (fun name -> `String name) names)) tool_names);
                       ("tool_call_count", Option.fold ~none:`Null ~some:(fun n -> `Int n) tool_call_count);
                       ("output_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) output_preview);
@@ -2468,8 +2526,15 @@ let handle_step ctx args : result =
                                           ~default:(Printf.sprintf "spawn-%d" index)
                                           prepared.runtime_actor_name)
                                      ~mode:"spawn" ~wait_mode
+                                     ~status:
+                                       (if spawn_result.success then `Completed else `Failed)
                                      ?execution_scope:
                                        (effective_execution_scope_of_spec prepared.spec)
+                                     ?requested_worker_class:prepared.spec.worker_class
+                                     ?requested_worker_size:(worker_size_of_spec prepared.spec)
+                                     ?resolved_runtime:prepared.assigned_runtime
+                                     ~resolved_model:prepared.runtime_model.model_id
+                                     ?routing_reason:prepared.spec.routing_reason
                                      ~tool_names:spawn_result.tool_names
                                      ~tool_call_count:spawn_result.tool_call_count
                                      ~success:spawn_result.success
@@ -2562,7 +2627,11 @@ let handle_step ctx args : result =
                                        ("worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) (worker_size_of_spec prepared.spec));
                                        ("worker_backend", if is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
                                        ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
+                                       ("status", `String "completed");
                                        ("trace_capability", `String (if Option.is_some spawn_result.raw_trace_run then "raw" else "summary_only"));
+                                       ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
+                                       ("resolved_model", `String prepared.runtime_model.model_id);
+                                       ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
                                        ("tool_call_count", `Int spawn_result.tool_call_count);
                                        ("tool_names", `List (List.map (fun name -> `String name) spawn_result.tool_names));
                                        ("success", `Bool spawn_result.success);
@@ -2596,6 +2665,10 @@ let handle_step ctx args : result =
                                                   ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.spawn_role);
                                                   ("worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) prepared.spec.worker_class);
                                                   ("worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) (worker_size_of_spec prepared.spec));
+                                                  ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
+                                                  ("resolved_model", `String prepared.runtime_model.model_id);
+                                                  ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
+                                                  ("ready", `Bool false);
                                                 ])
                                      in
                                      Some
@@ -2685,7 +2758,7 @@ let handle_step ctx args : result =
                                     ])
                             | Some session -> (
                                 match
-                                  resolve_target_worker_name session
+                                  resolve_target_worker_name ctx.config session
                                     target_agent
                                 with
                                 | None ->
@@ -2742,6 +2815,9 @@ let handle_step ctx args : result =
                                             ~worker_run_id ~worker_name
                                             ~mode:"delegate"
                                             ~wait_mode ?execution_scope
+                                            ~status:`Completed
+                                            ~resolved_model:run_result.model_used
+                                            ~resolved_runtime:"local"
                                             ~tool_names:run_result.tool_names
                                             ~tool_call_count:
                                               run_result.tool_call_count
@@ -2761,10 +2837,24 @@ let handle_step ctx args : result =
                                               (if Option.is_some run_result.raw_trace_run
                                                then "raw"
                                                else "summary_only")
+                                            ~resolved_runtime:"local"
+                                            ~resolved_model:run_result.model_used
                                             ~success:true
                                             ~tool_names:run_result.tool_names
                                             ~tool_call_count:
                                               run_result.tool_call_count
+                                            ~routing_reason:
+                                              (Option.value ~default:"continued_worker"
+                                                 (List.find_map
+                                                    (fun w ->
+                                                      match
+                                                        w.Team_session_types.runtime_actor
+                                                      with
+                                                      | Some actor
+                                                        when String.equal actor worker_name ->
+                                                            w.routing_reason
+                                                      | _ -> None)
+                                                    session.planned_workers))
                                             ~output_preview ();
                                           `Assoc
                                             [
@@ -2772,7 +2862,10 @@ let handle_step ctx args : result =
                                               ("worker_name", `String worker_name);
                                               ("worker_backend", `String "local");
                                               ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
+                                              ("status", `String "completed");
                                               ("trace_capability", `String (if Option.is_some run_result.raw_trace_run then "raw" else "summary_only"));
+                                              ("resolved_runtime", `String "local");
+                                              ("resolved_model", `String run_result.model_used);
                                               ( "output",
                                                 `String run_result.output );
                                               ( "output_preview",
@@ -2795,6 +2888,8 @@ let handle_step ctx args : result =
                                           persist_worker_run_snapshot
                                             ~worker_run_id ~worker_name
                                             ~mode:"delegate" ~wait_mode
+                                            ~status:`Failed
+                                            ~resolved_runtime:"local"
                                             ~success:false ~error:err
                                             ~trace_capability:"summary_only" ();
                                           append_delegate_event ~worker_run_id
@@ -2802,6 +2897,7 @@ let handle_step ctx args : result =
                                             ?execution_scope
                                             ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
                                             ~trace_capability:"summary_only"
+                                            ~resolved_runtime:"local"
                                             ~success:false ~error:err ();
                                           `Assoc [ ("error", `String err) ]
                                     in
@@ -3141,10 +3237,16 @@ let handle_verify_trace ctx args : result =
                       [
                         ("worker_run_id", `String worker_run_id);
                         ("worker_name", Yojson.Safe.Util.member "worker_name" meta_json);
+                        ("status", Yojson.Safe.Util.member "status" meta_json);
                         ("mode", Yojson.Safe.Util.member "mode" meta_json);
                         ("wait_mode", Yojson.Safe.Util.member "wait_mode" meta_json);
                         ("success", Yojson.Safe.Util.member "success" meta_json);
                         ("execution_scope", Yojson.Safe.Util.member "execution_scope" meta_json);
+                        ("requested_worker_class", Yojson.Safe.Util.member "requested_worker_class" meta_json);
+                        ("requested_worker_size", Yojson.Safe.Util.member "requested_worker_size" meta_json);
+                        ("resolved_runtime", Yojson.Safe.Util.member "resolved_runtime" meta_json);
+                        ("resolved_model", Yojson.Safe.Util.member "resolved_model" meta_json);
+                        ("routing_reason", Yojson.Safe.Util.member "routing_reason" meta_json);
                         ("tool_names", Yojson.Safe.Util.member "tool_names" meta_json);
                         ("tool_call_count", Yojson.Safe.Util.member "tool_call_count" meta_json);
                         ("output_preview", Yojson.Safe.Util.member "output_preview" meta_json);

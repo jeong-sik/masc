@@ -65,6 +65,82 @@ let event_detail_actor_of_json json =
       if trimmed = "" then None else Some trimmed
   | _ -> None
 
+let event_detail_string key json =
+  match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member key with
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let event_detail_worker_actor_of_json json =
+  match event_detail_string "runtime_actor" json with
+  | Some _ as actor -> actor
+  | None -> event_detail_string "target_agent" json
+
+type worker_run_event_snapshot = {
+  requested_ids : string list;
+  completed_success_count : int;
+  completed_failed_count : int;
+  in_flight_ids : string list;
+  in_flight_actors : string list;
+}
+
+let worker_run_event_snapshot (config : Room.config)
+    (session : Team_session_types.session) =
+  let requested = Hashtbl.create 16 in
+  let completed = Hashtbl.create 16 in
+  let events =
+    Team_session_store.read_events ~max_events:2000 config session.session_id
+  in
+  List.iter
+    (fun json ->
+      match event_type_of_json json with
+      | Some ("team_step_spawn_requested" | "team_step_delegate_requested") -> (
+          match event_detail_string "worker_run_id" json with
+          | Some worker_run_id ->
+              Hashtbl.replace requested worker_run_id
+                (event_detail_worker_actor_of_json json)
+          | None -> ())
+      | Some ("team_step_spawn" | "team_step_delegate") -> (
+          match event_detail_string "worker_run_id" json with
+          | Some worker_run_id -> (
+              match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "success" with
+              | `Bool success -> Hashtbl.replace completed worker_run_id success
+              | _ -> ())
+          | None -> ())
+      | _ -> ())
+    events;
+  let requested_ids =
+    Hashtbl.to_seq_keys requested |> List.of_seq |> Team_session_types.dedup_strings
+  in
+  let completed_success_count, completed_failed_count, completed_ids =
+    Hashtbl.fold
+      (fun worker_run_id success (ok_count, fail_count, ids) ->
+        if success then
+          (ok_count + 1, fail_count, worker_run_id :: ids)
+        else
+          (ok_count, fail_count + 1, worker_run_id :: ids))
+      completed (0, 0, [])
+  in
+  let in_flight_ids =
+    requested_ids
+    |> List.filter (fun worker_run_id ->
+           not (List.mem worker_run_id completed_ids))
+  in
+  let in_flight_actors =
+    in_flight_ids
+    |> List.filter_map (fun worker_run_id ->
+           Hashtbl.find_opt requested worker_run_id |> Option.join)
+    |> Team_session_types.dedup_strings |> List.sort String.compare
+  in
+  {
+    requested_ids;
+    completed_success_count;
+    completed_failed_count;
+    in_flight_ids;
+    in_flight_actors;
+  }
+
 let event_ts_of_json json =
   match Yojson.Safe.Util.member "ts" json with
   | `Float value -> Some value
@@ -108,10 +184,11 @@ let session_seen_and_live_agent_names (config : Room.config)
       ([], []) events
   in
   let bootstrap_agents = bootstrap_present_agent_names config session ~now in
+  let worker_runs = worker_run_event_snapshot config session in
   ( (seen_agents @ bootstrap_agents)
     |> Team_session_types.dedup_strings
     |> List.sort String.compare,
-    (live_agents @ bootstrap_agents)
+    (live_agents @ bootstrap_agents @ worker_runs.in_flight_actors)
     |> Team_session_types.dedup_strings
     |> List.sort String.compare )
 
@@ -596,6 +673,58 @@ let summary_json_of_session (config : Room.config)
       ("last_event_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) session.last_event_at);
     ]
 
+let recent_worker_run_meta_jsons config session_id =
+  Team_session_store.list_worker_run_ids config session_id
+  |> List.sort String.compare |> List.rev
+  |> List.filter_map (fun worker_run_id ->
+         let path =
+           Team_session_store.worker_run_meta_path config session_id worker_run_id
+         in
+         if Room_utils.path_exists config path then
+           Some (Room_utils.read_json config path)
+         else None)
+
+let ready_worker_names config (session : Team_session_types.session) =
+  Team_session_types.planned_worker_actor_names session
+  |> List.filter (fun worker_name ->
+         Room_utils.path_exists config
+           (Team_session_store.worker_container_checkpoint_path config
+              session.session_id worker_name))
+  |> Team_session_types.dedup_strings |> List.sort String.compare
+
+let pending_worker_names (session : Team_session_types.session) ready_names
+    in_flight_actors =
+  Team_session_types.planned_worker_actor_names session
+  |> List.filter (fun worker_name -> not (List.mem worker_name ready_names))
+  |> List.filter (fun worker_name ->
+         List.mem worker_name in_flight_actors
+         || not (List.mem worker_name ready_names))
+  |> Team_session_types.dedup_strings |> List.sort String.compare
+
+let worker_run_status_json (json : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  `Assoc
+    [
+      ("worker_run_id", member "worker_run_id" json);
+      ("worker_name", member "worker_name" json);
+      ("status", member "status" json);
+      ("mode", member "mode" json);
+      ("wait_mode", member "wait_mode" json);
+      ("success", member "success" json);
+      ("trace_capability", member "trace_capability" json);
+      ("execution_scope", member "execution_scope" json);
+      ("requested_worker_class", member "requested_worker_class" json);
+      ("requested_worker_size", member "requested_worker_size" json);
+      ("resolved_runtime", member "resolved_runtime" json);
+      ("resolved_model", member "resolved_model" json);
+      ("routing_reason", member "routing_reason" json);
+      ("tool_names", member "tool_names" json);
+      ("tool_call_count", member "tool_call_count" json);
+      ("output_preview", member "output_preview" json);
+      ("error", member "error" json);
+      ("ts_iso", member "ts_iso" json);
+    ]
+
 let status_sections (config : Room.config) (session : Team_session_types.session) =
   let summary = summary_json_of_session config session in
   let active_agents =
@@ -610,43 +739,33 @@ let status_sections (config : Room.config) (session : Team_session_types.session
 
 let session_status_json (config : Room.config) (session : Team_session_types.session) =
   let worker_run_summary =
-    let events = Team_session_store.read_events ~max_events:2000 config session.session_id in
-    let requested = ref [] in
-    let completed = Hashtbl.create 16 in
-    List.iter
-      (fun json ->
-        let open Yojson.Safe.Util in
-        match member "event_type" json, member "detail" json with
-        | `String ("team_step_spawn_requested" | "team_step_delegate_requested"), `Assoc _ -> (
-            match member "worker_run_id" (member "detail" json) with
-            | `String id -> requested := id :: !requested
-            | _ -> ())
-        | `String ("team_step_spawn" | "team_step_delegate"), `Assoc _ -> (
-            match member "worker_run_id" (member "detail" json),
-                  member "success" (member "detail" json) with
-            | `String id, `Bool success -> Hashtbl.replace completed id success
-            | _ -> ())
-        | _ -> ())
-      events;
-    let requested_ids = Team_session_types.dedup_strings !requested in
-    let completed_ids =
-      Hashtbl.fold (fun id success (done_count, failed_count, ids) ->
-          if success then (done_count + 1, failed_count, id :: ids)
-          else (done_count, failed_count + 1, id :: ids))
-        completed (0, 0, [])
+    let snapshot = worker_run_event_snapshot config session in
+    let recent_runs =
+      recent_worker_run_meta_jsons config session.session_id
+      |> List.fold_left
+           (fun acc json ->
+             if List.length acc >= 12 then acc
+             else worker_run_status_json json :: acc)
+           []
+      |> List.rev
     in
-    let completed_success, completed_failed, completed_id_list = completed_ids in
-    let in_flight =
-      requested_ids
-      |> List.filter (fun id -> not (List.mem id completed_id_list))
+    let ready_workers = ready_worker_names config session in
+    let pending_workers =
+      pending_worker_names session ready_workers snapshot.in_flight_actors
     in
     `Assoc
       [
-        ("requested_count", `Int (List.length requested_ids));
-        ("completed_success_count", `Int completed_success);
-        ("completed_failed_count", `Int completed_failed);
-        ("in_flight_count", `Int (List.length in_flight));
-        ("in_flight_run_ids", `List (List.map (fun id -> `String id) in_flight));
+        ("requested_count", `Int (List.length snapshot.requested_ids));
+        ("completed_success_count", `Int snapshot.completed_success_count);
+        ("completed_failed_count", `Int snapshot.completed_failed_count);
+        ("in_flight_count", `Int (List.length snapshot.in_flight_ids));
+        ("in_flight_run_ids", `List (List.map (fun id -> `String id) snapshot.in_flight_ids));
+        ("in_flight_actor_names", `List (List.map (fun id -> `String id) snapshot.in_flight_actors));
+        ("ready_worker_count", `Int (List.length ready_workers));
+        ("ready_worker_names", `List (List.map (fun name -> `String name) ready_workers));
+        ("pending_worker_count", `Int (List.length pending_workers));
+        ("pending_worker_names", `List (List.map (fun name -> `String name) pending_workers));
+        ("recent_runs", `List recent_runs);
       ]
   in
   let runtime_running =

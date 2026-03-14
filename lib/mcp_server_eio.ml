@@ -1179,6 +1179,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_room : Tool_room.context = { config; agent_name } in
   let simple_ctx_control : Tool_control.context = { config; agent_name } in
   let simple_ctx_misc : Tool_misc.context = { config; agent_name } in
+  let simple_ctx_agent_timeline : Tool_agent_timeline.context = { config; agent_name } in
   let simple_ctx_llama : Tool_llama.context = { config; agent_name } in
   let simple_ctx_voice : _ Tool_voice.context =
     { agent_name; sw; clock; net = state.Mcp_server.net }
@@ -1480,6 +1481,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         ~handler:(fun ~name ~args -> Tool_autoresearch.dispatch simple_ctx_autoresearch ~name ~args);
       reg ~schemas:Tool_risc.schemas
         ~handler:(fun ~name ~args -> Some (Tool_risc.dispatch name args));
+      reg ~schemas:Tool_agent_timeline.schemas
+        ~handler:(fun ~name ~args -> Tool_agent_timeline.dispatch simple_ctx_agent_timeline ~name ~args);
       Tool_dispatch.dispatch ~name ~args:arguments
     end else None
   in
@@ -1592,6 +1595,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_control.dispatch simple_ctx_control ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_agent_timeline.dispatch simple_ctx_agent_timeline ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_misc.dispatch simple_ctx_misc ~name ~args:arguments with

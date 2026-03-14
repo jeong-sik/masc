@@ -170,7 +170,7 @@ let essential_tools =
     "masc_broadcast"; "masc_heartbeat"; "masc_messages";
     "masc_worktree_create"; "masc_worktree_list"; "masc_worktree_remove";
     "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
-    "masc_who"; "masc_dashboard";
+    "masc_who"; "masc_dashboard"; "masc_agent_timeline";
   ]
 
 let standard_tools =

@@ -435,6 +435,29 @@ let locks_section locks : section =
 let count_locks (config : Room_utils.config) : int =
   count_locks_for_room config (Room.current_room_id config)
 
+(* Agent workflow summaries: recent activity per active agent *)
+let agent_workflow_section now (_config : Room_utils.config) (agents : Types.agent list) : section =
+  let content =
+    agents
+    |> List.filter (fun (a : Types.agent) ->
+           match a.status with Types.Active | Types.Busy -> true | _ -> false)
+    |> List.map (fun (agent : Types.agent) ->
+           let status_icon =
+             match agent.status with
+             | Types.Active -> "[active]"
+             | Types.Busy -> "[busy]"
+             | _ -> "[idle]"
+           in
+           let task_info =
+             match agent.current_task with
+             | Some t -> Printf.sprintf " task=%s" (truncate_message t)
+             | None -> ""
+           in
+           let elapsed = format_elapsed now agent.last_seen agent.last_seen in
+           Printf.sprintf "%s %s %s%s" agent.name status_icon elapsed task_info)
+  in
+  { title = "Agent Workflows"; content; empty_msg = "(no active agents)" }
+
 let generate ?(scope = All) (config : Room_utils.config) : string =
   let now = Time_compat.now () in
   let timestamp =
@@ -456,8 +479,10 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
   let sections =
     match scope with
     | All ->
+        let all_agents = List.concat_map (fun s -> s.agents) snapshots in
         [
           room_overview_section snapshots;
+          agent_workflow_section now config all_agents;
           swarm_section now config;
           tempo_section config;
           worktrees_section config;
@@ -467,6 +492,7 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
         let snapshot = room_snapshot config ~current_room current_room in
         [
           agents_section now snapshot.agents;
+          agent_workflow_section now config snapshot.agents;
           tasks_section snapshot.tasks;
           messages_section snapshot.messages;
           locks_section snapshot.locks;

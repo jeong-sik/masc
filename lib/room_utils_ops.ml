@@ -241,12 +241,12 @@ let with_file_lock config path f =
               Time_compat.sleep 0.05;
               acquire (attempts - 1)
       in
-      if acquire 20 then
+      if acquire 100 then
         Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
           ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           f
       else
-        invalid_arg (Printf.sprintf "Failed to acquire distributed lock for key: %s (20 attempts exhausted)" key)
+        invalid_arg (Printf.sprintf "Failed to acquire distributed lock for key: %s (100 attempts exhausted)" key)
 
 let with_file_lock_r config path f : ('a, masc_error) result =
   match key_of_path config path with
@@ -273,7 +273,7 @@ let with_file_lock_r config path f : ('a, masc_error) result =
           | Ok true -> true
           | _ -> Time_compat.sleep 0.05; acquire (attempts - 1)
       in
-      if acquire 20 then
+      if acquire 100 then
         Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
           ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           (fun () -> Ok (f ()))

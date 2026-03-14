@@ -299,6 +299,7 @@
    tool_control
    tool_verification
    tool_misc
+   tool_agent_timeline
    tool_llama
    tool_board
    tool_command_plane

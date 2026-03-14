@@ -196,88 +196,185 @@ let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
   Team_session_store.save_session config session;
   session
 
-let make_oas_tool_trace_checkpoint ?(session_id = "worker-session")
-    ?(agent_name = "llama-local-test") () : Oas.Checkpoint.t =
-  let msg role content : Oas.Types.message = { role; content } in
-  {
-    version = Oas.Checkpoint.checkpoint_version;
-    session_id;
-    agent_name;
-    model = Oas.Types.Custom "qwen3.5";
-    system_prompt = None;
-    messages =
-      [
-        msg Oas.Types.User [ Oas.Types.Text "inspect calc.py and fix it" ];
-        msg Oas.Types.Assistant
-          [
-            Oas.Types.ToolUse
-              ( "toolu_read",
-                "file_read",
-                `Assoc
-                  [
-                    ( "path",
-                      `String "test/fixtures/coding_worker_repo_smoke/calc.py" );
-                  ] );
-          ];
-        msg Oas.Types.User
-          [
-            Oas.Types.ToolResult
-              ("toolu_read", "def add_two_and_three():\n    return 4", false);
-          ];
-        msg Oas.Types.Assistant
-          [
-            Oas.Types.ToolUse
-              ( "toolu_write",
-                "file_write",
-                `Assoc
-                  [
-                    ( "path",
-                      `String "test/fixtures/coding_worker_repo_smoke/calc.py" );
-                    ( "content",
-                      `String "def add_two_and_three():\n    return 5\n" );
-                  ] );
-          ];
-        msg Oas.Types.User
-          [ Oas.Types.ToolResult ("toolu_write", "Written 37 bytes", false) ];
-        msg Oas.Types.Assistant
-          [
-            Oas.Types.ToolUse
-              ( "toolu_shell",
-                "shell_exec",
-                `Assoc
-                  [
-                    ( "command",
-                      `String
-                        "python3 test/fixtures/coding_worker_repo_smoke/check.py"
-                    );
-                  ] );
-          ];
-        msg Oas.Types.User
-          [ Oas.Types.ToolResult ("toolu_shell", "PASS", false) ];
-        msg Oas.Types.Assistant
-          [ Oas.Types.Text "Patched calc.py and verification passed." ];
-      ];
-    usage = Oas.Types.empty_usage;
-    turn_count = 3;
-    created_at = Time_compat.now ();
-    tools = [];
-    tool_choice = None;
-    temperature = None;
-    top_p = None;
-    top_k = None;
-    min_p = None;
-    enable_thinking = Some false;
-    response_format_json = false;
-    thinking_budget = None;
-    cache_system_prompt = false;
-    max_input_tokens = None;
-    max_total_tokens = None;
-    context = Oas.Context.create ();
-    mcp_sessions = [];
-  }
+let raw_trace_run_ref_to_json (run_ref : Oas.Raw_trace.run_ref) =
+  `Assoc
+    [
+      ("worker_run_id", `String run_ref.worker_run_id);
+      ("path", `String run_ref.path);
+      ("start_seq", `Int run_ref.start_seq);
+      ("end_seq", `Int run_ref.end_seq);
+      ("agent_name", `String run_ref.agent_name);
+      ( "session_id",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          run_ref.session_id );
+    ]
 
-let save_worker_run_checkpoint_exn config ~session_id ~worker_run_id
-    ~worker_name checkpoint =
+let write_worker_run_raw_trace_exn config ~session_id ~worker_run_id
+    ~worker_name =
+  let raw_trace_path =
+    Filename.concat
+      (Team_session_store.worker_run_dir config session_id worker_run_id)
+      "raw-trace.jsonl"
+  in
+  let raw_worker_run_id = "wr-fixture-raw-1" in
+  let lines =
+    [
+      `Assoc
+        [
+          ("trace_version", `Int 1);
+          ("worker_run_id", `String raw_worker_run_id);
+          ("seq", `Int 1);
+          ("ts", `Float 1.0);
+          ("agent_name", `String worker_name);
+          ("session_id", `String session_id);
+          ("record_type", `String "run_started");
+          ("prompt", `String "inspect calc.py and fix it");
+        ];
+      `Assoc
+        [
+          ("trace_version", `Int 1);
+          ("worker_run_id", `String raw_worker_run_id);
+          ("seq", `Int 2);
+          ("ts", `Float 2.0);
+          ("agent_name", `String worker_name);
+          ("session_id", `String session_id);
+          ("record_type", `String "assistant_block");
+          ("block_index", `Int 0);
+          ("block_kind", `String "tool_use");
+          ( "assistant_block",
+            `Assoc
+              [
+                ("type", `String "tool_use");
+                ("id", `String "toolu_read");
+                ("name", `String "file_read");
+                ( "input",
+                  `Assoc
+                    [
+                      ("path", `String "test/fixtures/coding_worker_repo_smoke/calc.py");
+                    ] );
+              ] );
+        ];
+      `Assoc
+        [
+          ("trace_version", `Int 1);
+          ("worker_run_id", `String raw_worker_run_id);
+          ("seq", `Int 3);
+          ("ts", `Float 3.0);
+          ("agent_name", `String worker_name);
+          ("session_id", `String session_id);
+          ("record_type", `String "tool_execution_started");
+          ("tool_use_id", `String "toolu_read");
+          ("tool_name", `String "file_read");
+          ( "tool_input",
+            `Assoc
+              [
+                ("path", `String "test/fixtures/coding_worker_repo_smoke/calc.py");
+              ] );
+        ];
+      `Assoc
+        [
+          ("trace_version", `Int 1);
+          ("worker_run_id", `String raw_worker_run_id);
+          ("seq", `Int 4);
+          ("ts", `Float 4.0);
+          ("agent_name", `String worker_name);
+          ("session_id", `String session_id);
+          ("record_type", `String "tool_execution_finished");
+          ("tool_use_id", `String "toolu_read");
+          ("tool_name", `String "file_read");
+          ("tool_result", `String "def add_two_and_three():\n    return 4");
+          ("tool_error", `Bool false);
+        ];
+      `Assoc
+        [
+          ("trace_version", `Int 1);
+          ("worker_run_id", `String raw_worker_run_id);
+          ("seq", `Int 5);
+          ("ts", `Float 5.0);
+          ("agent_name", `String worker_name);
+          ("session_id", `String session_id);
+          ("record_type", `String "tool_execution_started");
+          ("tool_use_id", `String "toolu_write");
+          ("tool_name", `String "file_write");
+          ( "tool_input",
+            `Assoc
+              [
+                ("path", `String "test/fixtures/coding_worker_repo_smoke/calc.py");
+                ("content", `String "def add_two_and_three():\n    return 5\n");
+              ] );
+        ];
+      `Assoc
+        [
+          ("trace_version", `Int 1);
+          ("worker_run_id", `String raw_worker_run_id);
+          ("seq", `Int 6);
+          ("ts", `Float 6.0);
+          ("agent_name", `String worker_name);
+          ("session_id", `String session_id);
+          ("record_type", `String "tool_execution_finished");
+          ("tool_use_id", `String "toolu_write");
+          ("tool_name", `String "file_write");
+          ("tool_result", `String "Written 37 bytes");
+          ("tool_error", `Bool false);
+        ];
+      `Assoc
+        [
+          ("trace_version", `Int 1);
+          ("worker_run_id", `String raw_worker_run_id);
+          ("seq", `Int 7);
+          ("ts", `Float 7.0);
+          ("agent_name", `String worker_name);
+          ("session_id", `String session_id);
+          ("record_type", `String "tool_execution_started");
+          ("tool_use_id", `String "toolu_shell");
+          ("tool_name", `String "shell_exec");
+          ( "tool_input",
+            `Assoc
+              [
+                ( "command",
+                  `String "python3 test/fixtures/coding_worker_repo_smoke/check.py" );
+              ] );
+        ];
+      `Assoc
+        [
+          ("trace_version", `Int 1);
+          ("worker_run_id", `String raw_worker_run_id);
+          ("seq", `Int 8);
+          ("ts", `Float 8.0);
+          ("agent_name", `String worker_name);
+          ("session_id", `String session_id);
+          ("record_type", `String "tool_execution_finished");
+          ("tool_use_id", `String "toolu_shell");
+          ("tool_name", `String "shell_exec");
+          ("tool_result", `String "PASS\n");
+          ("tool_error", `Bool false);
+        ];
+      `Assoc
+        [
+          ("trace_version", `Int 1);
+          ("worker_run_id", `String raw_worker_run_id);
+          ("seq", `Int 9);
+          ("ts", `Float 9.0);
+          ("agent_name", `String worker_name);
+          ("session_id", `String session_id);
+          ("record_type", `String "run_finished");
+          ("final_text", `String "Patched calc.py and verification passed.");
+          ("stop_reason", `String "end_turn");
+        ];
+    ]
+  in
+  Team_session_store.write_text_file raw_trace_path
+    (String.concat "\n" (List.map Yojson.Safe.to_string lines) ^ "\n");
+  let run_ref : Oas.Raw_trace.run_ref =
+    {
+      worker_run_id = raw_worker_run_id;
+      path = raw_trace_path;
+      start_seq = 1;
+      end_seq = 9;
+      agent_name = worker_name;
+      session_id = Some session_id;
+    }
+  in
   Team_session_store.save_worker_run_meta_json config session_id worker_run_id
     (`Assoc
       [
@@ -285,8 +382,7 @@ let save_worker_run_checkpoint_exn config ~session_id ~worker_run_id
         ("worker_name", `String worker_name);
         ("mode", `String "delegate");
         ("wait_mode", `String "blocking");
-        ("trace_capability", `String "checkpoint_snapshot");
+        ("trace_capability", `String "raw");
+        ("trace_ref", raw_trace_run_ref_to_json run_ref);
       ]);
-  Team_session_store.save_worker_run_checkpoint_text config session_id
-    worker_run_id
-    (Oas.Checkpoint.to_string checkpoint)
+  run_ref

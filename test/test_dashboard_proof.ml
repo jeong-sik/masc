@@ -172,6 +172,47 @@ let write_manual_proof config session_id verdict =
     (Lib.Team_session_store.proof_md_path config session_id)
     ("# proof\n\nverdict: " ^ verdict)
 
+let seed_worker_run_meta config session_id =
+  Lib.Team_session_store.save_worker_run_meta_json config session_id
+    "wr-proof-raw"
+    (`Assoc
+      [
+        ("worker_run_id", `String "wr-proof-raw");
+        ("worker_name", `String "worker-a");
+        ("mode", `String "delegate");
+        ("wait_mode", `String "background");
+        ("trace_capability", `String "raw");
+        ("success", `Bool true);
+        ("execution_scope", `String "limited_code_change");
+        ("tool_names", `List [ `String "file_write"; `String "shell_exec" ]);
+        ("tool_call_count", `Int 2);
+        ("output_preview", `String "Patched calc.py and verification passed.");
+        ( "trace_summary",
+          `Assoc
+            [
+              ("record_count", `Int 8);
+              ("assistant_block_count", `Int 3);
+              ("tool_execution_started_count", `Int 2);
+              ("tool_execution_finished_count", `Int 2);
+              ("tool_names", `List [ `String "file_write"; `String "shell_exec" ]);
+              ("final_text", `String "Patched calc.py and verification passed.");
+              ("stop_reason", `String "end_turn");
+              ("error", `Null);
+            ] );
+        ( "trace_validation",
+          `Assoc
+            [
+              ("ok", `Bool true);
+              ( "checks",
+                `List
+                  [
+                    `Assoc [ ("name", `String "seq_monotonic"); ("passed", `Bool true) ];
+                    `Assoc [ ("name", `String "run_started"); ("passed", `Bool true) ];
+                  ] );
+              ("evidence", `List [ `String "record_count=8" ]);
+            ] );
+      ])
+
 let test_dashboard_proof_projection () =
   let dir = test_dir () in
   Fun.protect
@@ -198,6 +239,31 @@ let test_dashboard_proof_projection () =
         ((json |> U.member "artifacts" |> U.to_list) <> []);
       check bool "cp backing present" true
         (json |> U.member "cp_backing_evidence" <> `Null))
+
+let test_dashboard_proof_exposes_validated_worker_run_evidence () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-worker-runs" in
+      seed_session_artifacts config session_id;
+      seed_worker_run_meta config session_id;
+      let json = Lib.Dashboard_proof.json ~config ~session_id () in
+      check int "raw trace run count" 1
+        (json |> U.member "summary" |> U.member "raw_trace_run_count" |> U.to_int);
+      check int "validated worker run count" 1
+        (json |> U.member "summary" |> U.member "validated_worker_run_count" |> U.to_int);
+      let worker_runs = json |> U.member "worker_run_evidence" |> U.to_list in
+      check int "worker run evidence count" 1 (List.length worker_runs);
+      let worker = List.hd worker_runs in
+      check string "worker run capability" "raw"
+        (worker |> U.member "trace_capability" |> U.to_string);
+      check bool "worker run validated" true
+        (worker |> U.member "trace_validated" |> U.to_bool);
+      check string "worker final text" "Patched calc.py and verification passed."
+        (worker |> U.member "final_text" |> U.to_string))
 
 let test_timeline_json_orders_command_plane_events_by_timestamp () =
   let dir = test_dir () in
@@ -408,6 +474,8 @@ let () =
       ( "projection",
         [
           test_case "builds collaboration proof projection" `Quick test_dashboard_proof_projection;
+          test_case "exposes validated worker run evidence" `Quick
+            test_dashboard_proof_exposes_validated_worker_run_evidence;
           test_case "orders merged timeline chronologically" `Quick
             test_timeline_json_orders_command_plane_events_by_timestamp;
           test_case "prefers actual activity over stronger persisted proof" `Quick

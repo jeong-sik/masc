@@ -118,6 +118,8 @@ let mock_spawn_result ?(success=true) ?(output="{}") () =
     output;
     exit_code = if success then 0 else 1;
     elapsed_ms = 100;
+    tool_call_count = 0;
+    tool_names = [];
     input_tokens = Some 50;
     output_tokens = Some 30;
     cache_creation_tokens = None;

@@ -115,6 +115,7 @@ type planned_worker = {
   runtime_actor : string option;
   spawn_role : string option;
   spawn_model : string option;
+  execution_scope : execution_scope option;
   worker_class : worker_class option;
   parent_actor : string option;
   capsule_mode : capsule_mode option;
@@ -458,6 +459,9 @@ let planned_worker_key (w : planned_worker) =
           ^ Option.value ~default:"" (Option.map String.trim w.spawn_role);
           "model:"
           ^ Option.value ~default:"" (Option.map String.trim w.spawn_model);
+          "scope:"
+          ^ Option.value ~default:""
+              (Option.map execution_scope_to_string w.execution_scope);
           "class:"
           ^ Option.value ~default:""
               (Option.map worker_class_to_string w.worker_class);
@@ -702,6 +706,10 @@ let planned_worker_to_yojson (w : planned_worker) =
         Option.fold ~none:`Null ~some:(fun s -> `String s) w.runtime_actor );
       ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) w.spawn_role);
       ("spawn_model", Option.fold ~none:`Null ~some:(fun s -> `String s) w.spawn_model);
+      ( "execution_scope",
+        Option.fold ~none:`Null
+          ~some:(fun scope -> `String (execution_scope_to_string scope))
+          w.execution_scope );
       ( "worker_class",
         Option.fold ~none:`Null
           ~some:(fun kind -> `String (worker_class_to_string kind))
@@ -762,6 +770,10 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
             runtime_actor = member "runtime_actor" json |> to_string_option;
             spawn_role = member "spawn_role" json |> to_string_option;
             spawn_model = member "spawn_model" json |> to_string_option;
+            execution_scope =
+              Option.map
+                execution_scope_of_string
+                (member "execution_scope" json |> to_string_option);
             worker_class =
               Option.bind
                 (member "worker_class" json |> to_string_option)

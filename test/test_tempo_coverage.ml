@@ -227,6 +227,7 @@ let make_test_config ~base_path : Room_utils.config =
   in
   {
     Room_utils.base_path;
+    workspace_path = base_path;
     lock_expiry_minutes = 30;
     backend_config;
     backend = Room_utils.Memory memory_backend;

@@ -1208,6 +1208,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         runtime_actor = Some runtime_actor;
         spawn_role = Some spawn_role;
         spawn_model = None;
+        execution_scope = Some Team_session_types.Observe_only;
         worker_class = Some worker_class;
         parent_actor = Some agent_name;
         capsule_mode = Some Team_session_types.Capsule_inherit;

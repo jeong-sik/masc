@@ -54,6 +54,7 @@ let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ])
           runtime_actor = Some "worker-a";
           spawn_role = Some "implementer";
           spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
+          execution_scope = Some Limited_code_change;
           worker_class = Some Worker_executor;
           parent_actor = Some "supervisor";
           capsule_mode = Some Capsule_inherit;

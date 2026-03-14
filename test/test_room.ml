@@ -230,6 +230,7 @@ let with_memory_test_env f =
   in
   let config : Room_utils.config = {
     base_path = tmp_dir;
+    workspace_path = tmp_dir;
     lock_expiry_minutes = 30;
     backend_config;
     backend = Room_utils.Memory memory_backend;

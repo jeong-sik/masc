@@ -409,6 +409,7 @@ type spawn_spec = {
   spawn_model : string option;
   spawn_model_explicit : bool;
   spawn_role : string option;
+  execution_scope : Team_session_types.execution_scope option;
   worker_class : Team_session_types.worker_class option;
   worker_size : Team_session_types.worker_size option;
   parent_actor : string option;
@@ -472,6 +473,16 @@ let default_worker_size_for_class = function
   | Some Team_session_types.Worker_metacog ->
       Some Team_session_types.Worker_lg
   | None -> Some Team_session_types.Worker_lg
+
+let default_execution_scope_for_worker_class = function
+  | Some Team_session_types.Worker_executor ->
+      Some Team_session_types.Limited_code_change
+  | _ -> Some Team_session_types.Observe_only
+
+let effective_execution_scope_of_spec spec =
+  match spec.execution_scope with
+  | Some scope -> Some scope
+  | None -> default_execution_scope_for_worker_class spec.worker_class
 
 let explicit_worker_size_of_spec (spec : spawn_spec) =
   match spec.worker_size with
@@ -1135,6 +1146,11 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
         Team_session_types.worker_size_of_string
           (String.lowercase_ascii (String.trim raw)))
   in
+  let get_optional_execution_scope key =
+    Option.map
+      Team_session_types.execution_scope_of_string
+      (get_optional_string key)
+  in
   let get_optional_task_profile key =
     Option.bind
       (get_optional_string key)
@@ -1185,6 +1201,12 @@ let parse_spawn_spec_from_object ?(default_timeout = 300) batch_index json =
           spawn_model = None;
           spawn_model_explicit = false;
           spawn_role = get_optional_string "spawn_role";
+          execution_scope =
+            (match get_optional_execution_scope "execution_scope" with
+            | Some _ as explicit -> explicit
+            | None ->
+                default_execution_scope_for_worker_class
+                  (get_optional_worker_class "worker_class"));
           worker_class = get_optional_worker_class "worker_class";
           worker_size = get_optional_worker_size "worker_size";
           parent_actor = get_optional_string "parent_actor";
@@ -1253,6 +1275,14 @@ let parse_step_spawn_specs args =
                   spawn_model = None;
                   spawn_model_explicit = false;
                   spawn_role = get_string_opt args "spawn_role";
+                  execution_scope =
+                    (match
+                       Option.map
+                         Team_session_types.execution_scope_of_string
+                         (get_string_opt args "execution_scope")
+                     with
+                    | Some _ as explicit -> explicit
+                    | None -> Some Team_session_types.Limited_code_change);
                   worker_class =
                     Option.bind
                       (get_string_opt args "worker_class")
@@ -1309,6 +1339,7 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
     runtime_actor;
     spawn_role = spec.spawn_role;
     spawn_model = spec.spawn_model;
+    execution_scope = effective_execution_scope_of_spec spec;
     worker_class = spec.worker_class;
     parent_actor = spec.parent_actor;
     capsule_mode = spec.capsule_mode;
@@ -1541,12 +1572,14 @@ let handle_step ctx args : result =
               let task_description = get_string_opt args "task_description" in
               let task_priority = get_int args "task_priority" 3 in
               let append_spawn_event ?spawn_agent ?runtime_actor ?spawn_role
-                  ?spawn_model ?worker_class ?worker_size ?worker_backend
+                  ?spawn_model ?execution_scope ?worker_class ?worker_size
+                  ?worker_backend
                   ?parent_actor ?capsule_mode
                   ?runtime_pool ?lane_id ?controller_level ?control_domain
                   ?supervisor_actor ?model_tier ?task_profile ?risk_level
                   ?routing_confidence ?routing_reason ?assigned_runtime
-                  ?spawn_selection_note ~success ?exit_code
+                  ?spawn_selection_note ?tool_names ?tool_call_count ~success
+                  ?exit_code
                   ?elapsed_ms ?output_preview ?error () =
                 let _ = spawn_agent and _ = spawn_model and _ = model_tier in
                 let detail =
@@ -1559,6 +1592,13 @@ let handle_step ctx args : result =
                       ( "spawn_role",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           spawn_role );
+                      ( "execution_scope",
+                        Option.fold ~none:`Null
+                          ~some:(fun scope ->
+                            `String
+                              (Team_session_types.execution_scope_to_string
+                                 scope))
+                          execution_scope );
                       ( "worker_class",
                         Option.fold ~none:`Null
                           ~some:(fun kind ->
@@ -1629,6 +1669,14 @@ let handle_step ctx args : result =
                       ( "spawn_selection_note",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           spawn_selection_note );
+                      ( "tool_names",
+                        Option.fold ~none:(`List [])
+                          ~some:(fun names ->
+                            `List (List.map (fun name -> `String name) names))
+                          tool_names );
+                      ( "tool_call_count",
+                        Option.fold ~none:`Null ~some:(fun n -> `Int n)
+                          tool_call_count );
                       ("success", `Bool success);
                       ("exit_code", int_opt_to_json exit_code);
                       ("elapsed_ms", int_opt_to_json elapsed_ms);
@@ -1746,6 +1794,8 @@ let handle_step ctx args : result =
                             ?runtime_actor:runtime_actor_name
                             ?spawn_role:failed_spec.spawn_role
                             ?spawn_model:failed_spec.spawn_model
+                            ?execution_scope:
+                              (effective_execution_scope_of_spec failed_spec)
                             ?worker_class:failed_spec.worker_class
                             ?worker_size:(worker_size_of_spec failed_spec)
                             ?worker_backend:
@@ -1801,6 +1851,8 @@ let handle_step ctx args : result =
                               ?runtime_actor:prepared.runtime_actor_name
                               ?spawn_role:prepared.spec.spawn_role
                               ?spawn_model:prepared.spec.spawn_model
+                              ?execution_scope:
+                                (effective_execution_scope_of_spec prepared.spec)
                               ?worker_class:prepared.spec.worker_class
                               ?worker_size:(worker_size_of_spec prepared.spec)
                               ?worker_backend:
@@ -1839,6 +1891,8 @@ let handle_step ctx args : result =
                                   ?runtime_actor:prepared.runtime_actor_name
                                   ?spawn_role:prepared.spec.spawn_role
                                   ?spawn_model:prepared.spec.spawn_model
+                                  ?execution_scope:
+                                    (effective_execution_scope_of_spec prepared.spec)
                                   ?worker_class:prepared.spec.worker_class
                                   ?worker_size:(worker_size_of_spec prepared.spec)
                                   ?worker_backend:
@@ -1888,6 +1942,8 @@ let handle_step ctx args : result =
                                          ?runtime_actor:prepared.runtime_actor_name
                                          ?spawn_role:prepared.spec.spawn_role
                                          ?spawn_model:prepared.spec.spawn_model
+                                         ?execution_scope:
+                                           (effective_execution_scope_of_spec prepared.spec)
                                          ?worker_class:prepared.spec.worker_class
                                          ?worker_size:(worker_size_of_spec prepared.spec)
                                          ?worker_backend:
@@ -1936,10 +1992,8 @@ let handle_step ctx args : result =
                                             ?worker_class:prepared.spec.worker_class
                                             ?worker_size:(worker_size_of_spec prepared.spec)
                                             ?execution_scope:
-                                              (Option.map
-                                                 (fun (session : Team_session_types.session) ->
-                                                   session.execution_scope)
-                                                 session_opt)
+                                              (effective_execution_scope_of_spec
+                                                 prepared.spec)
                                             ~runtime_session_id:session_id ()
                                         in
                                         let output_preview =
@@ -1960,6 +2014,8 @@ let handle_step ctx args : result =
                                           ?runtime_actor:prepared.runtime_actor_name
                                           ?spawn_role:prepared.spec.spawn_role
                                           ?spawn_model:prepared.spec.spawn_model
+                                          ?execution_scope:
+                                            (effective_execution_scope_of_spec prepared.spec)
                                           ?worker_class:prepared.spec.worker_class
                                           ?worker_size:(worker_size_of_spec prepared.spec)
                                           ?worker_backend:
@@ -1980,6 +2036,9 @@ let handle_step ctx args : result =
                                           ?assigned_runtime:prepared.assigned_runtime
                                           ?spawn_selection_note:
                                             prepared.spec.spawn_selection_note
+                                          ~tool_names:spawn_result.tool_names
+                                          ~tool_call_count:
+                                            spawn_result.tool_call_count
                                           ~success:spawn_result.success
                                           ~exit_code:spawn_result.exit_code
                                           ~elapsed_ms:spawn_result.elapsed_ms
@@ -2028,6 +2087,14 @@ let handle_step ctx args : result =
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
                                                     prepared.spec.spawn_role );
+                                                ( "execution_scope",
+                                                  Option.fold ~none:`Null
+                                                    ~some:(fun scope ->
+                                                      `String
+                                                        (Team_session_types.execution_scope_to_string
+                                                           scope))
+                                                    (effective_execution_scope_of_spec
+                                                       prepared.spec) );
                                                 ( "worker_class",
                                                   Option.fold ~none:`Null
                                                     ~some:(fun kind ->
@@ -2114,6 +2181,16 @@ let handle_step ctx args : result =
                                                   Option.fold ~none:`Null
                                                     ~some:(fun s -> `String s)
                                                     prepared.spec.spawn_selection_note );
+                                                ( "tool_call_count",
+                                                  `Int
+                                                    spawn_result.tool_call_count
+                                                );
+                                                ( "tool_names",
+                                                  `List
+                                                    (List.map
+                                                       (fun name -> `String name)
+                                                       spawn_result.tool_names)
+                                                );
                                                 ("success", `Bool spawn_result.success);
                                                 ("exit_code", `Int spawn_result.exit_code);
                                                 ("elapsed_ms", `Int spawn_result.elapsed_ms);
@@ -2811,6 +2888,17 @@ let schemas : tool_schema list =
                   ("task_description", `Assoc [ ("type", `String "string") ]);
                   ("task_priority", `Assoc [ ("type", `String "integer") ]);
 	                  ("spawn_role", `Assoc [ ("type", `String "string") ]);
+	                  ( "execution_scope",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ( "enum",
+	                          `List
+	                            [
+	                              `String "observe_only";
+	                              `String "limited_code_change";
+	                            ] );
+	                      ] );
 	                  ( "worker_class",
 	                    `Assoc
 	                      [
@@ -2905,6 +2993,17 @@ let schemas : tool_schema list =
                                 `Assoc
 	                                  [
 	                                    ("spawn_role", `Assoc [ ("type", `String "string") ]);
+	                                    ( "execution_scope",
+	                                      `Assoc
+	                                        [
+	                                          ("type", `String "string");
+	                                          ( "enum",
+	                                            `List
+	                                              [
+	                                                `String "observe_only";
+	                                                `String "limited_code_change";
+	                                              ] );
+	                                        ] );
 	                                    ( "worker_class",
 	                                      `Assoc
 	                                        [

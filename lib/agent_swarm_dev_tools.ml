@@ -11,9 +11,12 @@
 
 (** Resolve '.' and '..' segments in a path without filesystem access.
     This prevents path traversal attacks like /tmp/../../etc/passwd. *)
-let normalize_path path =
+let normalize_path ?base_dir path =
   let abs =
-    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
+    if Filename.is_relative path then
+      Filename.concat
+        (Option.value ~default:(Sys.getcwd ()) base_dir)
+        path
     else path
   in
   let parts = String.split_on_char '/' abs in
@@ -37,8 +40,8 @@ let rec split_existing_path path missing =
 
 (** Resolve symlinks in the existing prefix of a path and then append the
     remaining missing path segments lexically. *)
-let resolve_path path =
-  let abs = normalize_path path in
+let resolve_path ?base_dir path =
+  let abs = normalize_path ?base_dir path in
   let existing_prefix, missing_segments = split_existing_path abs [] in
   let resolved_prefix =
     try Unix.realpath existing_prefix |> normalize_path
@@ -55,7 +58,7 @@ let is_within_dir ~dir path =
 (** Path allowlist. When workdir is set, restrict to workdir + /tmp only.
     When unset, allow /tmp, cwd subtree, and ~/me subtree (backward compat). *)
 let validate_path ?workdir path =
-  let resolved = resolve_path path in
+  let resolved = resolve_path ?base_dir:workdir path in
   match workdir with
   | Some wd ->
     let resolved_wd = resolve_path wd in
@@ -153,8 +156,8 @@ let make_file_read ?workdir () =
        match Agent_swarm_tool_input.extract_string "path" input with
        | Error e -> Error e
        | Ok path ->
-         let resolved_path = resolve_path path in
-         if not (validate_path ?workdir resolved_path) then
+         let resolved_path = resolve_path ?base_dir:workdir path in
+         if not (validate_path ?workdir path) then
            Error (Printf.sprintf
              "Path blocked: %s (outside allowed directories)" path)
          else
@@ -185,8 +188,8 @@ let make_file_write ?workdir () =
              Agent_swarm_tool_input.extract_string "content" input with
        | Error e, _ | _, Error e -> Error e
        | Ok path, Ok content ->
-         let resolved_path = resolve_path path in
-         if not (validate_path ?workdir resolved_path) then
+         let resolved_path = resolve_path ?base_dir:workdir path in
+         if not (validate_path ?workdir path) then
            Error (Printf.sprintf
              "Path blocked: %s (outside allowed directories)" path)
          else
@@ -199,7 +202,7 @@ let make_file_write ?workdir () =
            with Sys_error msg ->
              Error (Printf.sprintf "Cannot write: %s" msg))
 
-let make_shell_exec_with_allowlist ~proc_mgr ~clock ~allowed_commands
+let make_shell_exec_with_allowlist ~workdir ~proc_mgr ~clock ~allowed_commands
     ~description =
   Agent_sdk.Tool.create
     ~name:"shell_exec"
@@ -229,10 +232,16 @@ let make_shell_exec_with_allowlist ~proc_mgr ~clock ~allowed_commands
                (fun () ->
                   Eio.Switch.run @@ fun sw ->
                   let buf = Buffer.create 1024 in
+                  let wrapped_command =
+                    match workdir with
+                    | Some dir when String.trim dir <> "" ->
+                        Printf.sprintf "cd %s && %s" (Filename.quote dir) command
+                    | _ -> command
+                  in
                   let proc = Eio.Process.spawn ~sw proc_mgr
                     ~stdout:(Eio.Flow.buffer_sink buf)
                     ~stderr:(Eio.Flow.buffer_sink buf)
-                    ["sh"; "-c"; command] in
+                    ["sh"; "-c"; wrapped_command] in
                   let status = Eio.Process.await proc in
                   let output = Buffer.contents buf in
                   (match status with
@@ -247,8 +256,8 @@ let make_shell_exec_with_allowlist ~proc_mgr ~clock ~allowed_commands
            with exn ->
              Error (Printf.sprintf "Command failed: %s" (Printexc.to_string exn))))
 
-let make_shell_exec ~proc_mgr ~clock =
-  make_shell_exec_with_allowlist ~proc_mgr ~clock
+let make_shell_exec ~workdir ~proc_mgr ~clock =
+  make_shell_exec_with_allowlist ~workdir ~proc_mgr ~clock
     ~allowed_commands:dev_allowed_commands
     ~description:
       "Execute a shell command and return stdout+stderr. \
@@ -257,8 +266,8 @@ let make_shell_exec ~proc_mgr ~clock =
        Unlike file_read (single file), this handles approved CLI operations. \
        Commands run in /bin/sh but shell control syntax is rejected."
 
-let make_shell_exec_readonly ~proc_mgr ~clock =
-  make_shell_exec_with_allowlist ~proc_mgr ~clock
+let make_shell_exec_readonly ~workdir ~proc_mgr ~clock =
+  make_shell_exec_with_allowlist ~workdir ~proc_mgr ~clock
     ~allowed_commands:readonly_allowed_commands
     ~description:
       "Execute a read-only shell command and return stdout+stderr. \
@@ -271,8 +280,8 @@ let make_shell_exec_readonly ~proc_mgr ~clock =
 let make_tools ~proc_mgr ~clock ?workdir () : Agent_sdk.Tool.t list =
   [ make_file_read ?workdir ();
     make_file_write ?workdir ();
-    make_shell_exec ~proc_mgr ~clock ]
+    make_shell_exec ~workdir ~proc_mgr ~clock ]
 
 let make_readonly_tools ~proc_mgr ~clock ?workdir () : Agent_sdk.Tool.t list =
   [ make_file_read ?workdir ();
-    make_shell_exec_readonly ~proc_mgr ~clock ]
+    make_shell_exec_readonly ~workdir ~proc_mgr ~clock ]

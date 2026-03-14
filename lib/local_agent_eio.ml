@@ -750,6 +750,9 @@ let worker_raw_trace_path ~base_path ~team_session_id ~worker_name =
     (worker_container_dir ~base_path ~team_session_id ~worker_name)
     "raw-trace.jsonl"
 
+let oas_trace_session_root ~base_path =
+  Filename.concat (Filename.concat base_path ".masc") "oas-runtime"
+
 let ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name =
   let dir = worker_container_dir ~base_path ~team_session_id ~worker_name in
   Team_session_store.write_text_file (Filename.concat dir ".keep") "";
@@ -1301,13 +1304,20 @@ let run_worker_oas ~sw ~base_path ~worker_name
           in
           let tools = mcp_tools @ shell_tools in
           let* raw_trace =
-            Oas.Raw_trace.create ~session_id:mcp_session_id
-              ~path:
-                (worker_raw_trace_path ~base_path
-                   ~team_session_id
-                   ~worker_name)
-              ()
-            |> Result.map_error Oas.Error.to_string
+            match team_session_id with
+            | Some trace_session_id ->
+                Oas.Raw_trace.create_for_session
+                  ~session_root:(oas_trace_session_root ~base_path)
+                  ~session_id:trace_session_id ~agent_name:worker_name ()
+                |> Result.map_error Oas.Error.to_string
+            | None ->
+                Oas.Raw_trace.create ~session_id:mcp_session_id
+                  ~path:
+                    (worker_raw_trace_path ~base_path
+                       ~team_session_id
+                       ~worker_name)
+                  ()
+                |> Result.map_error Oas.Error.to_string
           in
           let tool_names_ref = ref [] in
           let hooks =
@@ -1463,12 +1473,19 @@ let continue_worker ~sw ~base_path ~room_config ~worker_name
               in
               let* shell_tools = shell_tools in
               let* raw_trace =
-                Oas.Raw_trace.create ~session_id:meta.mcp_session_id
-                  ~path:
-                    (worker_raw_trace_path ~base_path ~team_session_id
-                       ~worker_name)
-                  ()
-                |> Result.map_error Oas.Error.to_string
+                match meta.team_session_id with
+                | Some trace_session_id ->
+                    Oas.Raw_trace.create_for_session
+                      ~session_root:(oas_trace_session_root ~base_path)
+                      ~session_id:trace_session_id ~agent_name:worker_name ()
+                    |> Result.map_error Oas.Error.to_string
+                | None ->
+                    Oas.Raw_trace.create ~session_id:meta.mcp_session_id
+                      ~path:
+                        (worker_raw_trace_path ~base_path ~team_session_id
+                           ~worker_name)
+                      ()
+                    |> Result.map_error Oas.Error.to_string
               in
               let tools = mcp_tools @ shell_tools in
               let tool_names_ref = ref [] in

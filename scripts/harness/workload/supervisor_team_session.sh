@@ -127,6 +127,56 @@ team_session_status() {
   printf '%s' "$status_raw" | extract_tool_result | jq -r '.session.status // empty'
 }
 
+team_session_events_result() {
+  local session_id="$1"
+  local event_types_json="$2"
+  local limit="${3:-200}"
+  local raw
+  raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 16 "masc_team_session_events" "$(jq -cn --arg s "$session_id" --argjson event_types "$event_types_json" --argjson limit "$limit" '{session_id:$s,event_types:$event_types,limit:$limit}')")"
+  require_tool_success "$raw"
+  printf '%s' "$raw" | extract_tool_result
+}
+
+wait_for_spawn_completions() {
+  local session_id="$1"
+  local expected_count="$2"
+  local deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
+  while :; do
+    local events_result success_count
+    events_result="$(team_session_events_result "$session_id" '["team_step_spawn"]' 400)"
+    success_count="$(printf '%s' "$events_result" | jq -r '[.events[]? | select(.detail.success == true)] | length')"
+    if [ "$success_count" -ge "$expected_count" ]; then
+      return 0
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "FAIL: team_step_spawn completions did not arrive in time"
+      printf '%s\n' "$events_result"
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+wait_for_turn_actor_count() {
+  local session_id="$1"
+  local min_actors="$2"
+  local deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
+  while :; do
+    local events_result unique_turn_actors
+    events_result="$(team_session_events_result "$session_id" '["team_turn"]' 400)"
+    unique_turn_actors="$(printf '%s' "$events_result" | jq -r '[.events[]? | .detail.actor // empty | select(. != "")] | unique | length')"
+    if [ "$unique_turn_actors" -ge "$min_actors" ]; then
+      return 0
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "FAIL: expected at least ${min_actors} unique team turn actors"
+      printf '%s\n' "$events_result"
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
 default_worker_batch_json() {
   jq -cn \
     --arg planner_prompt "You are the planner. Inspect the active team session and reply with exactly one concise line: [planner] decomposition and acceptance criteria." \
@@ -281,9 +331,9 @@ spawn_llama_batch() {
   raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 30 "masc_team_session_step" "$(jq -cn \
     --arg s "$TEAM_SESSION_ID" \
     --argjson batch "$batch_json" \
-    '{session_id:$s,spawn_batch:$batch}')")"
+    '{session_id:$s,wait_mode:"background",spawn_batch:$batch}')")"
   require_tool_success "$raw"
-  printf '%s' "$raw" | extract_tool_result | jq -e --arg note "$selection_note" '.spawn.mode == "batch" and .spawn.count == ($expected | length) and (.spawn.results | length) == ($expected | length) and .turn == null and (.spawn.results | all(.runtime_actor != null and .spawn_selection_note == $note))' --argjson expected "$batch_json" >/dev/null
+  printf '%s' "$raw" | extract_tool_result | jq -e '.spawn.mode == "batch" and .spawn.count == ($expected | length) and (.spawn.results | length) == ($expected | length) and .turn == null and (.spawn.results | all(.status == "accepted" and .runtime_actor != null and .worker_run_id != null))' --argjson expected "$batch_json" >/dev/null
   printf '%s' "$raw"
 }
 
@@ -361,6 +411,7 @@ require_tool_success "$model_selection_turn_raw"
 
 printf '[6/10] spawn full llama team\n'
 spawn_batch_raw="$(spawn_llama_batch "$MODEL_SELECTION_NOTE" "$NORMALIZED_SWARM_BATCH_JSON")"
+EXPECTED_WORKER_COUNT="$(printf '%s' "$NORMALIZED_SWARM_BATCH_JSON" | jq -r 'length')"
 
 printf '[7/10] inspect remote operator surface\n'
 tools_raw="$(jsonrpc_call "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 4 "tools/list" '{}')"
@@ -418,6 +469,8 @@ else
 fi
 
 printf '[10/10] stop session and prove evidence\n'
+wait_for_spawn_completions "$TEAM_SESSION_ID" "$EXPECTED_WORKER_COUNT"
+wait_for_turn_actor_count "$TEAM_SESSION_ID" 3
 TEAM_SESSION_STATUS="$(team_session_status "$TEAM_SESSION_ID")"
 if [ "$TEAM_SESSION_STATUS" = "running" ]; then
   stop_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_team_session_stop" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,reason:"supervisor_harness_complete",generate_report:true}')")"

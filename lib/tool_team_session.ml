@@ -208,19 +208,22 @@ let load_worker_run_meta config session_id worker_run_id =
   else
     Ok (Room_utils.read_json config path)
 
-let raw_trace_run_ref_of_json json =
+let oas_trace_session_root config =
+  Filename.concat (Room_utils.masc_dir config) "oas-runtime"
+
+type trace_run_locator = {
+  worker_run_id : string;
+  session_id : string option;
+}
+
+let trace_run_locator_of_json json =
   let open Yojson.Safe.Util in
   match member "trace_ref" json with
   | `Assoc _ as trace_json -> (
       try
         Some
           {
-            Oas.Raw_trace.worker_run_id =
-              trace_json |> member "worker_run_id" |> to_string;
-            path = trace_json |> member "path" |> to_string;
-            start_seq = trace_json |> member "start_seq" |> to_int;
-            end_seq = trace_json |> member "end_seq" |> to_int;
-            agent_name = trace_json |> member "agent_name" |> to_string;
+            worker_run_id = trace_json |> member "worker_run_id" |> to_string;
             session_id = trace_json |> member "session_id" |> to_string_option;
           }
       with _ -> None)
@@ -230,7 +233,6 @@ let raw_trace_run_ref_to_json (run_ref : Oas.Raw_trace.run_ref) =
   `Assoc
     [
       ("worker_run_id", `String run_ref.worker_run_id);
-      ("path", `String run_ref.path);
       ("start_seq", `Int run_ref.start_seq);
       ("end_seq", `Int run_ref.end_seq);
       ("agent_name", `String run_ref.agent_name);
@@ -431,13 +433,29 @@ let verification_json ~records
       ("verification_pass_after_file_write", `Bool verification_pass_after_file_write);
     ]
 
-let raw_trace_summary_and_validation run_ref =
-  match Oas.Raw_trace.summarize_run run_ref, Oas.Raw_trace.validate_run run_ref with
+let raw_trace_session_payloads ~config ~fallback_session_id
+    (run_ref : Oas.Raw_trace.run_ref) =
+  let trace_session_id =
+    Option.value ~default:fallback_session_id run_ref.session_id
+  in
+  let session_root = oas_trace_session_root config in
+  match
+    Oas.Sessions.get_raw_trace_summary ~session_root ~session_id:trace_session_id
+      ~worker_run_id:run_ref.worker_run_id (),
+    Oas.Sessions.validate_raw_trace_run ~session_root
+      ~session_id:trace_session_id ~worker_run_id:run_ref.worker_run_id ()
+  with
   | Ok summary, Ok validation ->
       Some
         ( raw_trace_summary_to_json summary,
           raw_trace_validation_to_json validation )
-  | _ -> None
+  | _ -> (
+      match Oas.Raw_trace.summarize_run run_ref, Oas.Raw_trace.validate_run run_ref with
+      | Ok summary, Ok validation ->
+          Some
+            ( raw_trace_summary_to_json summary,
+              raw_trace_validation_to_json validation )
+      | _ -> None)
 
 let record_session_turn_json ~(config : Room.config) ~session_id ~actor
     ~turn_kind ~message ~target_agent ~task_title ~task_description
@@ -2114,10 +2132,7 @@ let handle_step ctx args : result =
                   match trace_capability with
                   | Some value -> value
                   | None when Option.is_some trace_ref -> "raw"
-                  | None ->
-                      if Room_utils.path_exists ctx.config checkpoint_path then
-                        "checkpoint_snapshot"
-                      else "summary_only"
+                  | None -> ignore checkpoint_path; "summary_only"
                 in
                 if Room_utils.path_exists ctx.config checkpoint_path then
                   Team_session_store.save_worker_run_checkpoint_text ctx.config
@@ -2426,7 +2441,12 @@ let handle_step ctx args : result =
                                    let trace_summary_json, trace_validation_json =
                                      match spawn_result.raw_trace_run with
                                      | Some run_ref -> (
-                                         match raw_trace_summary_and_validation run_ref with
+                                         match
+                                           raw_trace_session_payloads
+                                             ~config:ctx.config
+                                             ~fallback_session_id:session_id
+                                             run_ref
+                                         with
                                          | Some pair -> (Some (fst pair), Some (snd pair))
                                          | None -> (None, None))
                                      | None -> (None, None)
@@ -2457,11 +2477,11 @@ let handle_step ctx args : result =
                                      ?trace_ref:spawn_result.raw_trace_run
                                      ?trace_summary:trace_summary_json
                                      ?trace_validation:trace_validation_json
-                                     ~trace_capability:
+                                       ~trace_capability:
                                        (if Option.is_some spawn_result.raw_trace_run then
                                           "raw"
                                         else if is_local_spawn_agent prepared.spec.spawn_agent
-                                        then "checkpoint_snapshot"
+                                        then "summary_only"
                                         else "summary_only")
                                      ();
                                    append_spawn_event
@@ -2480,7 +2500,7 @@ let handle_step ctx args : result =
                                      ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
                                      ~trace_capability:
                                        (if is_local_spawn_agent prepared.spec.spawn_agent
-                                        then "checkpoint_snapshot"
+                                        then "summary_only"
                                         else "summary_only")
                                      ?parent_actor:prepared.spec.parent_actor
                                      ?capsule_mode:prepared.spec.capsule_mode
@@ -2542,7 +2562,7 @@ let handle_step ctx args : result =
                                        ("worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) (worker_size_of_spec prepared.spec));
                                        ("worker_backend", if is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
                                        ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
-                                       ("trace_capability", `String (if Option.is_some spawn_result.raw_trace_run then "raw" else if is_local_spawn_agent prepared.spec.spawn_agent then "checkpoint_snapshot" else "summary_only"));
+                                       ("trace_capability", `String (if Option.is_some spawn_result.raw_trace_run then "raw" else "summary_only"));
                                        ("tool_call_count", `Int spawn_result.tool_call_count);
                                        ("tool_names", `List (List.map (fun name -> `String name) spawn_result.tool_names));
                                        ("success", `Bool spawn_result.success);
@@ -2708,7 +2728,12 @@ let handle_step ctx args : result =
                                           let trace_summary_json, trace_validation_json =
                                             match run_result.raw_trace_run with
                                             | Some run_ref -> (
-                                                match raw_trace_summary_and_validation run_ref with
+                                                match
+                                                  raw_trace_session_payloads
+                                                    ~config:ctx.config
+                                                    ~fallback_session_id:session_id
+                                                    run_ref
+                                                with
                                                 | Some pair -> (Some (fst pair), Some (snd pair))
                                                 | None -> (None, None))
                                             | None -> (None, None)
@@ -2727,7 +2752,7 @@ let handle_step ctx args : result =
                                             ~trace_capability:
                                               (if Option.is_some run_result.raw_trace_run
                                                then "raw"
-                                               else "checkpoint_snapshot") ();
+                                               else "summary_only") ();
                                           append_delegate_event ~worker_run_id
                                             ~worker_name ~delegate_prompt
                                             ?execution_scope
@@ -2735,7 +2760,7 @@ let handle_step ctx args : result =
                                             ~trace_capability:
                                               (if Option.is_some run_result.raw_trace_run
                                                then "raw"
-                                               else "checkpoint_snapshot")
+                                               else "summary_only")
                                             ~success:true
                                             ~tool_names:run_result.tool_names
                                             ~tool_call_count:
@@ -2747,7 +2772,7 @@ let handle_step ctx args : result =
                                               ("worker_name", `String worker_name);
                                               ("worker_backend", `String "local");
                                               ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
-                                              ("trace_capability", `String (if Option.is_some run_result.raw_trace_run then "raw" else "checkpoint_snapshot"));
+                                              ("trace_capability", `String (if Option.is_some run_result.raw_trace_run then "raw" else "summary_only"));
                                               ( "output",
                                                 `String run_result.output );
                                               ( "output_preview",
@@ -2771,12 +2796,12 @@ let handle_step ctx args : result =
                                             ~worker_run_id ~worker_name
                                             ~mode:"delegate" ~wait_mode
                                             ~success:false ~error:err
-                                            ~trace_capability:"checkpoint_snapshot" ();
+                                            ~trace_capability:"summary_only" ();
                                           append_delegate_event ~worker_run_id
                                             ~worker_name ~delegate_prompt
                                             ?execution_scope
                                             ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
-                                            ~trace_capability:"checkpoint_snapshot"
+                                            ~trace_capability:"summary_only"
                                             ~success:false ~error:err ();
                                           `Assoc [ ("error", `String err) ]
                                     in
@@ -3107,17 +3132,41 @@ let handle_verify_trace ctx args : result =
           in
           match worker_run_id with
           | None -> (false, json_error "no worker run found for session")
-          | Some worker_run_id -> (
+          | Some worker_run_id ->
               match load_worker_run_meta ctx.config session_id worker_run_id with
               | Error e -> (false, json_error e)
-              | Ok meta_json -> (
-                  match raw_trace_run_ref_of_json meta_json with
-                  | Some run_ref -> (
-                      match
-                        Oas.Raw_trace.read_run run_ref,
-                        Oas.Raw_trace.summarize_run run_ref,
-                        Oas.Raw_trace.validate_run run_ref
-                      with
+              | Ok meta_json ->
+                  let worker_run_summary =
+                    `Assoc
+                      [
+                        ("worker_run_id", `String worker_run_id);
+                        ("worker_name", Yojson.Safe.Util.member "worker_name" meta_json);
+                        ("mode", Yojson.Safe.Util.member "mode" meta_json);
+                        ("wait_mode", Yojson.Safe.Util.member "wait_mode" meta_json);
+                        ("success", Yojson.Safe.Util.member "success" meta_json);
+                        ("execution_scope", Yojson.Safe.Util.member "execution_scope" meta_json);
+                        ("tool_names", Yojson.Safe.Util.member "tool_names" meta_json);
+                        ("tool_call_count", Yojson.Safe.Util.member "tool_call_count" meta_json);
+                        ("output_preview", Yojson.Safe.Util.member "output_preview" meta_json);
+                      ]
+                  in
+                  (match trace_run_locator_of_json meta_json with
+                  | Some locator ->
+                      let trace_session_id =
+                        Option.value ~default:session_id locator.session_id
+                      in
+                      let session_root = oas_trace_session_root ctx.config in
+                      (match
+                         Oas.Sessions.get_raw_trace_records ~session_root
+                           ~session_id:trace_session_id
+                           ~worker_run_id:locator.worker_run_id (),
+                         Oas.Sessions.get_raw_trace_summary ~session_root
+                           ~session_id:trace_session_id
+                           ~worker_run_id:locator.worker_run_id (),
+                         Oas.Sessions.validate_raw_trace_run ~session_root
+                           ~session_id:trace_session_id
+                           ~worker_run_id:locator.worker_run_id ()
+                       with
                       | Ok records, Ok summary, Ok validation ->
                           let verification =
                             verification_json ~records ~summary ~validation
@@ -3130,15 +3179,17 @@ let handle_verify_trace ctx args : result =
                                     [
                                       ("worker_run_id", `String worker_run_id);
                                       ("trace_capability", `String "raw");
-                                      ("meta", meta_json);
+                                      ("worker_run", worker_run_summary);
                                       ( "trace_ref",
-                                        raw_trace_run_ref_to_json run_ref );
+                                        raw_trace_run_ref_to_json summary.run_ref );
                                       ("verification", verification);
                                     ] );
                               ] )
                       | records_result, summary_result, validation_result ->
                           let detail =
-                            match records_result, summary_result, validation_result with
+                            match
+                              records_result, summary_result, validation_result
+                            with
                             | Error err, _, _
                             | _, Error err, _
                             | _, _, Error err ->
@@ -3155,7 +3206,7 @@ let handle_verify_trace ctx args : result =
                                       ("trace_capability", `String "summary_only");
                                       ("ok", `Bool false);
                                       ("error", `String detail);
-                                      ("meta", meta_json);
+                                      ("worker_run", worker_run_summary);
                                     ] );
                               ] ))
                   | None ->
@@ -3171,9 +3222,9 @@ let handle_verify_trace ctx args : result =
                                   ( "error",
                                     `String
                                       "raw trace reference missing for worker run" );
-                                  ("meta", meta_json);
+                                  ("worker_run", worker_run_summary);
                                 ] );
-                          ] ))))
+                          ] )))
 
 let dispatch ctx ~name ~args : result option =
   match name with

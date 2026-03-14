@@ -234,6 +234,10 @@ let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
   let worker = List.hd session.planned_workers in
   Alcotest.(check string) "spawn agent normalized" "default"
     worker.Team_session_types.spawn_agent;
+  Alcotest.(check (option string)) "single worker defaults to write scope"
+    (Some "limited_code_change")
+    (Option.map Team_session_types.execution_scope_to_string
+       worker.execution_scope);
   Alcotest.(check (option string)) "tier falls back when middle model is unavailable"
     (Some "35b")
     (Option.map Team_session_types.model_tier_to_string worker.model_tier);
@@ -331,6 +335,70 @@ let test_step_rejects_legacy_batch_spawn_fields () =
   Alcotest.(check string) "legacy batch error"
     "spawn_batch[0].spawn_model is no longer supported in masc_team_session_step; use spawn_prompt, spawn_role, worker_class, and worker_size"
     (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
+  cleanup_dir base_dir
+
+let test_step_spawn_batch_defaults_execution_scope_by_worker_class () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"step-batch-default-execution-scope"
+    |> get_session_id
+  in
+  let step_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ( "spawn_batch",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("spawn_role", `String "planner");
+                      ("worker_class", `String "manager");
+                      ("spawn_prompt", `String "inspect and plan");
+                    ];
+                  `Assoc
+                    [
+                      ("spawn_role", `String "implementer");
+                      ("worker_class", `String "executor");
+                      ("spawn_prompt", `String "fix the failing test");
+                    ];
+                ] );
+          ])
+  in
+  Alcotest.(check bool) "batch still fails later without proc manager" false step_ok;
+  let session =
+    Team_session_store.load_session config session_id |> Option.get
+  in
+  let planner =
+    List.find
+      (fun worker ->
+        worker.Team_session_types.spawn_role = Some "planner")
+      session.planned_workers
+  in
+  let implementer =
+    List.find
+      (fun worker ->
+        worker.Team_session_types.spawn_role = Some "implementer")
+      session.planned_workers
+  in
+  Alcotest.(check (option string)) "planner defaults readonly"
+    (Some "observe_only")
+    (Option.map Team_session_types.execution_scope_to_string
+       planner.execution_scope);
+  Alcotest.(check (option string)) "implementer defaults write"
+    (Some "limited_code_change")
+    (Option.map Team_session_types.execution_scope_to_string
+       implementer.execution_scope);
   cleanup_dir base_dir
 
 let test_step_delegate_requires_target_agent () =

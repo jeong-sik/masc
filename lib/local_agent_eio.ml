@@ -34,6 +34,7 @@ type worker_container_meta = {
   worker_name : string;
   mcp_session_id : string;
   team_session_id : string option;
+  workspace_path : string;
   role : string option;
   selection_note : string option;
   execution_scope : Team_session_types.execution_scope;
@@ -818,6 +819,7 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
       ( "team_session_id",
         Option.fold ~none:`Null ~some:(fun s -> `String s) meta.team_session_id
       );
+      ("workspace_path", `String meta.workspace_path);
       ("role", Option.fold ~none:`Null ~some:(fun s -> `String s) meta.role);
       ( "selection_note",
         Option.fold ~none:`Null ~some:(fun s -> `String s) meta.selection_note
@@ -874,6 +876,9 @@ let worker_meta_of_yojson json =
                 |> Option.value ~default:(stable_worker_session_id worker_name);
               team_session_id =
                 json |> member "team_session_id" |> to_string_option;
+              workspace_path =
+                json |> member "workspace_path" |> to_string_option
+                |> Option.value ~default:"";
               role = json |> member "role" |> to_string_option;
               selection_note =
                 json |> member "selection_note" |> to_string_option;
@@ -1065,18 +1070,17 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt
                }))
     listed_schemas
 
-let build_local_shell_tools ~execution_scope ~base_path =
+let build_local_shell_tools ~execution_scope ~workdir =
   match Process_eio.get_proc_mgr (), Process_eio.get_clock () with
   | Ok proc_mgr, Ok clock -> (
       match execution_scope with
       | Team_session_types.Observe_only ->
           Ok
             (Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock
-               ~workdir:base_path ())
+               ~workdir ())
       | Team_session_types.Limited_code_change ->
           Ok
-            (Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir:base_path
-               ()))
+            (Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir ()))
   | Error e, _ | _, Error e -> Error e
 
 let oas_provider_of_model (model : Llm_client.model_spec) : Oas.Provider.config =
@@ -1101,9 +1105,9 @@ let oas_extract_text (response : Oas.Types.api_response) =
   |> List.filter_map (function Oas.Types.Text text -> Some text | _ -> None)
   |> String.concat "\n"
 
-let make_worker_meta ~base_path ~team_session_id ~worker_name ~mcp_session_id
-    ~role ~selection_note ~execution_scope ~worker_class ~worker_size
-    ~effective_model =
+let make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
+    ~mcp_session_id ~role ~selection_note ~execution_scope ~worker_class
+    ~worker_size ~effective_model =
   let tool_profile, shell_profile = worker_profiles_of_scope execution_scope in
   let effective_tier = derive_effective_tier worker_size effective_model in
   {
@@ -1111,6 +1115,7 @@ let make_worker_meta ~base_path ~team_session_id ~worker_name ~mcp_session_id
     worker_name;
     mcp_session_id;
     team_session_id;
+    workspace_path;
     role;
     selection_note;
     execution_scope;
@@ -1176,7 +1181,8 @@ let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
 
 let run_worker_oas ~sw ~base_path ~worker_name
     ~(model : Llm_client.model_spec) ~team_session_id
-    ?worker_class ?worker_size ?execution_scope ~role ~selection_note
+    ?working_dir ?worker_class ?worker_size ?execution_scope ~role
+    ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
   fun () ->
@@ -1186,25 +1192,47 @@ let run_worker_oas ~sw ~base_path ~worker_name
     let execution_scope =
       resolve_execution_scope ~base_path ~team_session_id ?execution_scope ()
     in
+    let workspace_path =
+      match working_dir with
+      | Some dir when String.trim dir <> "" -> dir
+      | _ -> base_path
+    in
     let meta =
-      make_worker_meta ~base_path ~team_session_id ~worker_name ~mcp_session_id
-        ~role ~selection_note ~execution_scope ~worker_class ~worker_size
-        ~effective_model:model.model_id
+      make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
+        ~mcp_session_id ~role ~selection_note ~execution_scope ~worker_class
+        ~worker_size ~effective_model:model.model_id
     in
     match worker_auth_token ~base_path ~worker_name with
     | Error e -> Error e
     | Ok auth_token ->
-        let net = Eio_context.get_net () in
+        let* net =
+          match Eio_context.get_net_opt () with
+          | Some net -> Ok net
+          | None -> Error "Eio net not initialized"
+        in
         let system_prompt =
           default_system_prompt ~worker_name ~model_id:model.model_id
             ?session_id:team_session_id ?role ?selection_note ()
         in
         let prompt =
-          Printf.sprintf
+          let tool_contract =
             "Tool contract reminder: if you call masc_team_session_step with \
              turn_kind=\"note\", you must include a non-empty message field. \
-             Calls missing message fail.\n\n%s"
-            prompt
+             Calls missing message fail."
+          in
+          let workflow_contract =
+            match execution_scope with
+            | Team_session_types.Limited_code_change ->
+                "Coding worker protocol: you must use tools before answering. \
+                 If the task requires a code change, the expected loop is \
+                 file_read -> shell_exec -> file_write -> shell_exec, and you \
+                 should not finish until the verification shell_exec succeeds. \
+                 If the task is inspection-only, do not modify files."
+            | Team_session_types.Observe_only ->
+                "Readonly worker protocol: use file_read and shell_exec for \
+                 inspection, but do not modify files."
+          in
+          String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
         in
         let stop_heartbeat =
           start_worker_heartbeat ~sw ~auth_token ~session_id:mcp_session_id
@@ -1228,7 +1256,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
               ~worker_name ~prompt ~allowed_tools
           in
           let* shell_tools =
-            build_local_shell_tools ~execution_scope ~base_path
+            build_local_shell_tools ~execution_scope ~workdir:workspace_path
           in
           let tools = mcp_tools @ shell_tools in
           let tool_names_ref = ref [] in
@@ -1244,7 +1272,12 @@ let run_worker_oas ~sw ~base_path ~worker_name
                     | _ -> Oas.Hooks.Continue);
             }
           in
-          let max_turns = max 2 (min 12 (max 2 (timeout_sec / 20))) in
+          let max_turn_cap =
+            match execution_scope with
+            | Team_session_types.Limited_code_change -> 20
+            | Team_session_types.Observe_only -> 12
+          in
+          let max_turns = max 2 (min max_turn_cap (max 2 (timeout_sec / 20))) in
           let config, options =
             build_oas_agent ~worker_name ~model ~system_prompt ~tools
               ~max_turns ~hooks
@@ -1312,10 +1345,18 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
   | None, _ -> Error (sprintf "worker container not found: %s" worker_name)
   | _, None -> Error (sprintf "worker checkpoint not found: %s" worker_name)
   | Some meta, Some checkpoint -> (
+      let workspace_path =
+        if String.trim meta.workspace_path <> "" then meta.workspace_path
+        else base_path
+      in
       match worker_auth_token ~base_path ~worker_name with
       | Error e -> Error e
       | Ok auth_token ->
-          let net = Eio_context.get_net () in
+          let* net =
+            match Eio_context.get_net_opt () with
+            | Some net -> Ok net
+            | None -> Error "Eio net not initialized"
+          in
           let stop_heartbeat =
             start_worker_heartbeat ~sw ~auth_token ~session_id:meta.mcp_session_id
               ~worker_name
@@ -1334,7 +1375,12 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
                 | Error e -> raise (Failure ("worker join failed: " ^ e))
               in
               let allowed_tools =
-                session_min_tool_names |> List.map (fun name -> "mcp__masc__" ^ name)
+                match meta.shell_profile with
+                | Shell_dev ->
+                    [ "mcp__masc__masc_heartbeat"; "mcp__masc__masc_memento_mori" ]
+                | _ ->
+                    session_min_tool_names
+                    |> List.map (fun name -> "mcp__masc__" ^ name)
               in
               let* mcp_tools =
                 build_oas_mcp_tools ~sw ~auth_token
@@ -1346,11 +1392,12 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
                 | Shell_none -> Ok []
                 | Shell_readonly ->
                     build_local_shell_tools
-                      ~execution_scope:Team_session_types.Observe_only ~base_path
+                      ~execution_scope:Team_session_types.Observe_only
+                      ~workdir:workspace_path
                 | Shell_dev ->
                     build_local_shell_tools
                       ~execution_scope:Team_session_types.Limited_code_change
-                      ~base_path
+                      ~workdir:workspace_path
               in
               let* shell_tools = shell_tools in
               let tools = mcp_tools @ shell_tools in
@@ -1375,13 +1422,39 @@ let continue_worker ~sw ~base_path ~worker_name ~(team_session_id : string)
                 | _ ->
                     { base_model with model_id = meta.effective_model }
               in
+              let prompt =
+                let tool_contract =
+                  "Tool contract reminder: if you call masc_team_session_step \
+                   with turn_kind=\"note\", you must include a non-empty \
+                   message field. Calls missing message fail."
+                in
+                let workflow_contract =
+                  match meta.execution_scope with
+                  | Team_session_types.Limited_code_change ->
+                      "Coding worker protocol: you must use tools before \
+                       answering. If the task requires a code change, the \
+                       expected loop is file_read -> shell_exec -> file_write \
+                       -> shell_exec, and you should not finish until \
+                       verification succeeds. If the task is inspection-only, \
+                       do not modify files."
+                  | Team_session_types.Observe_only ->
+                      "Readonly worker protocol: use file_read and shell_exec \
+                       for inspection, but do not modify files."
+                in
+                String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
+              in
+              let max_turns =
+                match meta.execution_scope with
+                | Team_session_types.Limited_code_change -> 20
+                | Team_session_types.Observe_only -> 8
+              in
               let config, options =
                 build_oas_agent ~worker_name ~model
                   ~system_prompt:
                     (default_system_prompt ~worker_name ~model_id:model.model_id
                        ?session_id:meta.team_session_id ?role:meta.role
                        ?selection_note:meta.selection_note ())
-                  ~tools ~max_turns:8 ~hooks
+                  ~tools ~max_turns ~hooks
               in
               let agent =
                 Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()
@@ -1624,7 +1697,8 @@ let run_worker_legacy ~sw ~base_path ~worker_name
               loop ~round:1 ~usage_acc:zero_usage ~tools_used:[] prompt)
 
 let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
-    ?worker_class ?worker_size ?execution_scope ~role ~selection_note
+    ?working_dir ?worker_class ?worker_size ?execution_scope ~role
+    ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
   match configured_backend () with
@@ -1633,5 +1707,5 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
         ~role ~selection_note ~prompt ~allowed_tools ~timeout_sec
   | `Oas ->
       run_worker_oas ~sw ~base_path ~worker_name ~model ~team_session_id
-        ?worker_class ?worker_size ?execution_scope ~role ~selection_note
-        ~prompt ~allowed_tools ~timeout_sec
+        ?working_dir ?worker_class ?worker_size ?execution_scope ~role
+        ~selection_note ~prompt ~allowed_tools ~timeout_sec

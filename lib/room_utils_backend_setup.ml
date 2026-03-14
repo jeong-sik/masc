@@ -9,6 +9,7 @@ type storage_backend =
 (** Room configuration *)
 type config = {
   base_path: string;
+  workspace_path: string;
   lock_expiry_minutes: int;
   backend_config: Backend.config;
   backend: storage_backend;
@@ -259,6 +260,7 @@ let default_config base_path =
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
+    workspace_path = base_path;
     lock_expiry_minutes = 30;
     backend_config;
     backend;
@@ -303,6 +305,7 @@ let default_config_eio ~sw ~env base_path =
   in
   {
     base_path = resolved_path;
+    workspace_path = base_path;
     lock_expiry_minutes = 30;
     backend_config;
     backend;

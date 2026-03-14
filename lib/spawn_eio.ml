@@ -20,6 +20,8 @@ type spawn_result = {
   output: string;
   exit_code: int;
   elapsed_ms: int;
+  tool_call_count: int;
+  tool_names: string list;
   input_tokens: int option;
   output_tokens: int option;
   cache_creation_tokens: int option;
@@ -31,6 +33,9 @@ type spawn_result = {
 let masc_mcp_tools = Agent_tool_surfaces.spawned_agent_prefixed_tools
 
 let llama_mcp_tools = Agent_tool_surfaces.llama_worker_prefixed_tools
+
+let coding_worker_mcp_tools =
+  [ "mcp__masc__masc_heartbeat"; "mcp__masc__masc_memento_mori" ]
 
 let masc_lifecycle_suffix = {| 
 --- 
@@ -293,6 +298,8 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
       output = "GLM cascade: no models available (check ZAI_API_KEY and config/llm_cascade.json)";
       exit_code = 1;
       elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+      tool_call_count = 0;
+      tool_names = [];
       input_tokens = None;
       output_tokens = None;
       cache_creation_tokens = None;
@@ -310,6 +317,8 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
           output = resp.Llm_client.content;
           exit_code = 0;
           elapsed_ms = resp.Llm_client.latency_ms;
+          tool_call_count = 0;
+          tool_names = [];
           input_tokens = Some resp.Llm_client.usage.Llm_client.input_tokens;
           output_tokens = Some resp.Llm_client.usage.Llm_client.output_tokens;
           cache_creation_tokens =
@@ -326,6 +335,8 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
           output = Printf.sprintf "GLM cascade failed: %s" e;
           exit_code = 1;
           elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+          tool_call_count = 0;
+          tool_names = [];
           input_tokens = None;
           output_tokens = None;
           cache_creation_tokens = None;
@@ -353,6 +364,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
       output = Provider_adapter.bare_ollama_migration_message ();
       exit_code = 2;
       elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+      tool_call_count = 0;
+      tool_names = [];
       input_tokens = None;
       output_tokens = None;
       cache_creation_tokens = None;
@@ -419,13 +432,21 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
           in
           Printf.sprintf "llama-local-%s" (String.sub digest 0 8)
     in
-    let base_path =
-      match room_config with
-      | Some rc -> rc.Room_utils.base_path
+  let base_path =
+    match room_config with
+    | Some rc -> rc.Room_utils.base_path
       | None ->
           (match working_dir with
            | Some dir -> dir
            | None -> Sys.getcwd ())
+    in
+    let worker_working_dir =
+      match working_dir with
+      | Some dir when String.trim dir <> "" -> Some dir
+      | _ ->
+          Option.map
+            (fun (rc : Room_utils.config) -> rc.workspace_path)
+            room_config
     in
     (match runtime_model with
      | None ->
@@ -435,6 +456,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
              "Spawn error (local worker): explicit runtime_model is required for local workers";
            exit_code = 1;
            elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+           tool_call_count = 0;
+           tool_names = [];
            input_tokens = None;
            output_tokens = None;
            cache_creation_tokens = None;
@@ -448,6 +471,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
              "Spawn error (local worker): runtime_model provider must be llama";
            exit_code = 1;
            elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+           tool_call_count = 0;
+           tool_names = [];
            input_tokens = None;
            output_tokens = None;
            cache_creation_tokens = None;
@@ -458,9 +483,15 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
          match
            Local_agent_eio.run_worker ~sw ~base_path ~worker_name ~model
              ~team_session_id:runtime_session_id ~role:runtime_role
-             ?worker_class ?worker_size ?execution_scope
+             ?working_dir:worker_working_dir ?worker_class ?worker_size
+             ?execution_scope
              ~selection_note:runtime_selection_note
-             ~prompt:augmented_prompt ~allowed_tools:llama_mcp_tools
+             ~prompt:augmented_prompt
+             ~allowed_tools:
+               (match execution_scope with
+               | Some Team_session_types.Limited_code_change ->
+                   coding_worker_mcp_tools
+               | _ -> llama_mcp_tools)
              ~timeout_sec:timeout ()
          with
          | Ok result ->
@@ -469,6 +500,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
                output = result.output;
                exit_code = 0;
                elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+               tool_call_count = result.tool_call_count;
+               tool_names = result.tool_names;
                input_tokens = result.input_tokens;
                output_tokens = result.output_tokens;
                cache_creation_tokens = None;
@@ -481,6 +514,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
                output = Printf.sprintf "Spawn error (local worker): %s" e;
                exit_code = 1;
                elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+               tool_call_count = 0;
+               tool_names = [];
                input_tokens = None;
                output_tokens = None;
                cache_creation_tokens = None;
@@ -544,6 +579,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
           output;
           exit_code;
           elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+          tool_call_count = 0;
+          tool_names = [];
           input_tokens;
           output_tokens;
           cache_creation_tokens = cache_creation;
@@ -556,6 +593,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
           output = Printf.sprintf "Spawn error (Eio): %s" (Printexc.to_string e);
           exit_code = -99;
           elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+          tool_call_count = 0;
+          tool_names = [];
           input_tokens = None;
           output_tokens = None;
           cache_creation_tokens = None;

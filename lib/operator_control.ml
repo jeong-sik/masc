@@ -154,6 +154,7 @@ type worker_card = {
   spawn_agent : string option;
   spawn_role : string option;
   spawn_model : string option;
+  execution_scope : string option;
   worker_class : string option;
   parent_actor : string option;
   capsule_mode : string option;
@@ -917,6 +918,7 @@ let worker_card_to_yojson (card : worker_card) =
       ("spawn_agent", string_option_to_json card.spawn_agent);
       ("spawn_role", string_option_to_json card.spawn_role);
       ("spawn_model", string_option_to_json card.spawn_model);
+      ("execution_scope", string_option_to_json card.execution_scope);
       ("worker_class", string_option_to_json card.worker_class);
       ("parent_actor", string_option_to_json card.parent_actor);
       ("capsule_mode", string_option_to_json card.capsule_mode);
@@ -960,6 +962,12 @@ let spawn_batch_stub_of_cards (cards : worker_card list) =
                       "REQUIRED: provide explicit spawn_prompt for replacement worker %s"
                       label) );
              ]
+           in
+           let fields =
+             match card.execution_scope with
+             | Some execution_scope when String.trim execution_scope <> "" ->
+                 ("execution_scope", `String execution_scope) :: fields
+             | _ -> fields
            in
                let fields =
                  match card.spawn_role with
@@ -1397,6 +1405,8 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
                Some worker.spawn_agent,
                worker.spawn_role,
                worker.spawn_model,
+               Option.map Team_session_types.execution_scope_to_string
+                 worker.execution_scope,
                Option.map Team_session_types.worker_class_to_string
                  worker.worker_class,
                worker.parent_actor,
@@ -1420,12 +1430,13 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
     else
       session.agent_names
       |> List.map (fun actor ->
-             ( Some actor,
-               None,
-               None,
-               None,
-               None,
-               None,
+               ( Some actor,
+                 None,
+                 None,
+                 None,
+                 None,
+                 None,
+                 None,
                None,
                None,
                None,
@@ -1445,6 +1456,7 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            spawn_agent,
            spawn_role,
            spawn_model,
+           execution_scope,
            worker_class,
            parent_actor,
            capsule_mode,
@@ -1507,6 +1519,7 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            spawn_agent;
            spawn_role;
            spawn_model;
+           execution_scope;
            worker_class;
            parent_actor;
            capsule_mode;

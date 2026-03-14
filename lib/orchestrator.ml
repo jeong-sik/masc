@@ -121,6 +121,7 @@ let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
   if Room.is_paused room_config then begin
     Eio.traceln "⏸️ Orchestrator: Room paused before spawn, aborting\n%!";
     { Spawn_eio.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
+      tool_call_count = 0; tool_names = [];
       input_tokens = None; output_tokens = None; cache_creation_tokens = None;
       cache_read_tokens = None; cost_usd = None }
   end else begin

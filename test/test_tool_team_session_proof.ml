@@ -47,6 +47,7 @@ let test_proof_exposes_spawn_selection_rationale () =
                    runtime_actor = Some "llama-local-proof";
                    spawn_role = Some "planner";
                    spawn_model = Some spawn_model;
+                   execution_scope = Some Team_session_types.Observe_only;
                    worker_class = None;
                    parent_actor = None;
                    capsule_mode = None;
@@ -153,6 +154,118 @@ let test_proof_exposes_spawn_selection_rationale () =
        let _ = Str.search_forward (Str.regexp_string selection_note) proof_md 0 in
        true
      with Not_found -> false);
+  cleanup_dir base_dir
+
+let test_report_and_proof_expose_spawn_tool_usage () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let start_json =
+    start_session_exn ctx ~goal:"prove spawn tool evidence visibility"
+  in
+  let session_id = get_session_id start_json in
+  Team_session_store.append_event config session_id ~event_type:"team_step_spawn"
+    ~detail:
+      (`Assoc
+        [
+          ("actor", `String "tester");
+          ("runtime_actor", `String "llama-local-coder");
+          ("spawn_role", `String "implementer");
+          ("execution_scope", `String "limited_code_change");
+          ("worker_class", `String "executor");
+          ("worker_size", `String "lg");
+          ("worker_backend", `String "oas-local");
+          ("tool_call_count", `Int 3);
+          ("tool_names", `List [ `String "file_read"; `String "file_write"; `String "shell_exec" ]);
+          ("success", `Bool true);
+          ("exit_code", `Int 0);
+          ("elapsed_ms", `Int 1200);
+          ("output_preview", `String "updated calc.py and reran tests");
+          ("ts_iso", `String (Types.now_iso ()));
+        ]);
+  ignore
+    (Team_session_store.update_session config session_id (fun s ->
+         {
+           s with
+           planned_workers =
+             Team_session_types.dedup_planned_workers
+               [
+                 {
+                   Team_session_types.spawn_agent = "default";
+                   runtime_actor = Some "llama-local-coder";
+                   spawn_role = Some "implementer";
+                   spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
+                   execution_scope = Some Team_session_types.Limited_code_change;
+                   worker_class = Some Team_session_types.Worker_executor;
+                   parent_actor = Some "tester";
+                   capsule_mode = None;
+                   runtime_pool = None;
+                   lane_id = None;
+                   controller_level = None;
+                   control_domain = Some Team_session_types.Domain_execution;
+                   supervisor_actor = Some "tester";
+                   model_tier = Some Team_session_types.Tier_35b;
+                   task_profile = Some Team_session_types.Profile_extract;
+                   risk_level = Some Team_session_types.Risk_medium;
+                   routing_confidence = Some 0.9;
+                   routing_reason = Some "coding quick win";
+                   routing_escalated = false;
+                 };
+               ];
+           updated_at_iso = Types.now_iso ();
+         }));
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "tool-evidence-done");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  let report_ok, report_body =
+    dispatch_exn ctx ~name:"masc_team_session_report"
+      ~args:(`Assoc [ ("session_id", `String session_id); ("force_regenerate", `Bool true) ])
+  in
+  Alcotest.(check bool) "report ok" true report_ok;
+  let report_result = parse_json_exn report_body |> result_field in
+  let report_json_path =
+    report_result |> Yojson.Safe.Util.member "json_path" |> Yojson.Safe.Util.to_string
+  in
+  let report_json = Yojson.Safe.from_file report_json_path in
+  let report_evidence = report_json |> Yojson.Safe.Util.member "evidence" in
+  Alcotest.(check int) "report spawn tool call count" 3
+    Yojson.Safe.Util.(report_evidence |> member "spawn_tool_call_count" |> to_int);
+  Alcotest.(check int) "report write-capable spawn count" 1
+    Yojson.Safe.Util.(report_evidence |> member "write_capable_spawn_count" |> to_int);
+  let report_tool_names =
+    Yojson.Safe.Util.(report_evidence |> member "spawn_tool_names" |> to_list |> List.map to_string)
+  in
+  Alcotest.(check bool) "report contains file_write" true
+    (List.mem "file_write" report_tool_names);
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:(`Assoc [ ("session_id", `String session_id); ("generate_report_if_missing", `Bool true) ])
+  in
+  Alcotest.(check bool) "prove ok" true prove_ok;
+  let prove_result = parse_json_exn prove_body |> result_field in
+  let evidence = prove_result |> Yojson.Safe.Util.member "proof" |> Yojson.Safe.Util.member "evidence" in
+  Alcotest.(check int) "proof spawn tool call count" 3
+    Yojson.Safe.Util.(evidence |> member "spawn_tool_call_count" |> to_int);
+  Alcotest.(check int) "proof write-capable spawn count" 1
+    Yojson.Safe.Util.(evidence |> member "write_capable_spawn_count" |> to_int);
+  let proof_tool_names =
+    Yojson.Safe.Util.(evidence |> member "spawn_tool_names" |> to_list |> List.map to_string)
+  in
+  Alcotest.(check bool) "proof contains shell_exec" true
+    (List.mem "shell_exec" proof_tool_names);
   cleanup_dir base_dir
 
 let test_bootstrap_grace_suppresses_min_agents_violation () =
@@ -408,4 +521,3 @@ let test_prove_requires_multi_actor_turn_coverage () =
   Alcotest.(check bool) "unique turn actors >= required" true
     (unique_turn_actors >= required_turn_actors);
   cleanup_dir base_dir
-

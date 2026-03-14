@@ -1,0 +1,378 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+
+SERVER_EXE="${SERVER_EXE:-${ROOT_DIR}/_build/default/bin/main_eio.exe}"
+HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-120}"
+STOP_WAIT_SEC="${STOP_WAIT_SEC:-60}"
+LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-qwen3.5-35b-a3b-ud-q8-xl}"
+SMOKE_AGENT="${SMOKE_AGENT:-coding-smoke-supervisor}"
+
+PORT=""
+MCP_URL=""
+SERVER_PID=""
+SERVER_LOG=""
+declare -a TMP_DIRS=()
+declare -a TMP_WORKTREES=()
+
+random_port() {
+  python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+
+cleanup_server() {
+  if [ -n "${SERVER_PID}" ]; then
+    kill "${SERVER_PID}" >/dev/null 2>&1 || true
+    wait "${SERVER_PID}" >/dev/null 2>&1 || true
+    SERVER_PID=""
+  fi
+}
+
+cleanup() {
+  cleanup_server
+  for wt in "${TMP_WORKTREES[@]:-}"; do
+    git -C "${ROOT_DIR}" worktree remove "${wt}" --force >/dev/null 2>&1 || true
+  done
+  for dir in "${TMP_DIRS[@]:-}"; do
+    rm -rf "${dir}" >/dev/null 2>&1 || true
+  done
+}
+trap cleanup EXIT
+
+require_json() {
+  printf '%s' "$1" | jq -e . >/dev/null
+}
+
+extract_response_error() {
+  jq -r 'if (.error | type) == "object" and (.error.message | type) == "string" then .error.message else empty end'
+}
+
+extract_is_error() {
+  jq -r 'try (.result.isError) catch "false"'
+}
+
+extract_tool_result() {
+  jq -c 'try (.result.content[0].text | fromjson | if has("result") and .result != null then .result else . end) catch empty'
+}
+
+require_success_response() {
+  local payload="$1"
+  require_json "$payload"
+  local err
+  err="$(printf '%s' "$payload" | extract_response_error)"
+  if [ -n "$err" ]; then
+    echo "FAIL: JSON-RPC error: $err"
+    printf '%s\n' "$payload"
+    exit 1
+  fi
+}
+
+require_tool_success() {
+  local payload="$1"
+  require_success_response "$payload"
+  local is_error
+  is_error="$(printf '%s' "$payload" | extract_is_error)"
+  if [ "$is_error" = "true" ]; then
+    echo "FAIL: tool returned isError=true"
+    printf '%s\n' "$payload" | jq -r '.result.content[0].text'
+    exit 1
+  fi
+}
+
+jsonrpc_call() {
+  local session_id="$1"
+  local id="$2"
+  local method="$3"
+  local params="$4"
+  local body_file
+  body_file="$(mktemp "${TMPDIR:-/tmp}/coding-worker-jsonrpc.XXXXXX")"
+  printf '{"jsonrpc":"2.0","id":%s,"method":"%s","params":%s}' "$id" "$method" "$params" >"$body_file"
+  local response
+  response="$(curl -sS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H "Mcp-Session-Id: $session_id" \
+    --data-binary "@$body_file")"
+  rm -f "$body_file"
+  jsonrpc_normalize_response "$response" "$id"
+}
+
+call_tool() {
+  local session_id="$1"
+  local id="$2"
+  local tool_name="$3"
+  local args_json="$4"
+  jsonrpc_call "$session_id" "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
+}
+
+wait_for_health() {
+  local deadline=$(( $(date +%s) + 20 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+start_server() {
+  local base_path="$1"
+  cleanup_server
+  PORT="$(random_port)"
+  MCP_URL="http://127.0.0.1:${PORT}/mcp"
+  SERVER_LOG="$(mktemp "${TMPDIR:-/tmp}/coding-worker-harness.XXXXXX")"
+  "${SERVER_EXE}" --port "${PORT}" --base-path "${base_path}" >"${SERVER_LOG}" 2>&1 &
+  SERVER_PID=$!
+  if ! wait_for_health; then
+    echo "FAIL: server did not become healthy"
+    cat "${SERVER_LOG}"
+    exit 1
+  fi
+}
+
+bootstrap_room() {
+  local session_id="$1"
+  require_tool_success "$(call_tool "$session_id" 1 "masc_init" "$(jq -cn --arg a "$SMOKE_AGENT" '{agent_name:$a}')")"
+  require_tool_success "$(call_tool "$session_id" 2 "masc_switch_mode" '{"mode":"full"}')"
+  require_tool_success "$(call_tool "$session_id" 3 "masc_join" "$(jq -cn --arg a "$SMOKE_AGENT" '{agent_name:$a,capabilities:["python","bash","worker"]}')")"
+}
+
+start_team_session() {
+  local session_id="$1"
+  local goal="$2"
+  local execution_scope="$3"
+  local raw
+  raw="$(call_tool "$session_id" 4 "masc_team_session_start" "$(jq -cn \
+    --arg goal "$goal" \
+    --arg scope "$execution_scope" \
+    '{goal:$goal,duration_seconds:180,checkpoint_interval_sec:15,orchestration_mode:"assist",communication_mode:"broadcast",execution_scope:$scope,fallback_policy:"cascade_then_task",instruction_profile:"strict",min_agents:1,agents:[]}' )")"
+  require_tool_success "$raw"
+  printf '%s' "$raw" | extract_tool_result | jq -r '.session_id // empty'
+}
+
+wait_until_terminal() {
+  local client_session_id="$1"
+  local team_session_id="$2"
+  local deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
+  while :; do
+    local raw status
+    raw="$(call_tool "$client_session_id" 90 "masc_team_session_status" "$(jq -cn --arg s "$team_session_id" '{session_id:$s}')")"
+    require_tool_success "$raw"
+    status="$(printf '%s' "$raw" | extract_tool_result | jq -r '.session.status // empty')"
+    if [ "$status" != "running" ]; then
+      return 0
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "FAIL: team session did not stop in time"
+      printf '%s\n' "$raw"
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+fixture_repo_setup() {
+  local fixture_dir
+  fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/coding-worker-fixture.XXXXXX")"
+  TMP_DIRS+=("$fixture_dir")
+  cat >"${fixture_dir}/calc.py" <<'PY'
+def add_two_and_three():
+    return 4
+PY
+  cat >"${fixture_dir}/check.py" <<'PY'
+import importlib.util
+import pathlib
+
+path = pathlib.Path("calc.py")
+spec = importlib.util.spec_from_file_location("fixture_calc", path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+value = module.add_two_and_three()
+assert value == 5, f"expected 5, got {value}"
+print("PASS")
+PY
+  git -C "$fixture_dir" init -q
+  git -C "$fixture_dir" add calc.py check.py
+  printf '%s' "$fixture_dir"
+}
+
+real_repo_setup() {
+  local wt
+  local rev
+  wt="$(mktemp -d "${TMPDIR:-/tmp}/coding-worker-repo.XXXXXX")"
+  rm -rf "$wt"
+  rev="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+  git -C "${ROOT_DIR}" worktree add --detach "$wt" "$rev" >/dev/null
+  if [ -d "${ROOT_DIR}/test/fixtures/coding_worker_repo_smoke" ]; then
+    mkdir -p "$wt/test/fixtures"
+    cp -R "${ROOT_DIR}/test/fixtures/coding_worker_repo_smoke" "$wt/test/fixtures/"
+    cat >"$wt/test/fixtures/coding_worker_repo_smoke/calc.py" <<'PY'
+def add_two_and_three():
+    return 4
+PY
+  fi
+  TMP_WORKTREES+=("$wt")
+  printf '%s' "$wt"
+}
+
+run_fixture_smoke() {
+  echo "[fixture] setup temp repo"
+  local fixture_dir
+  fixture_dir="$(fixture_repo_setup)"
+  start_server "$fixture_dir"
+  bootstrap_room "fixture-client"
+  local team_session_id
+  team_session_id="$(start_team_session "fixture-client" "coding worker fixture smoke" "limited_code_change")"
+  local inspect_prompt write_prompt raw result spawn delegate_raw delegate_json
+  inspect_prompt="$(cat <<'EOF'
+Use file_read and shell_exec only.
+1. Read calc.py with file_read.
+2. Run shell_exec with command "python3 check.py".
+3. Reply with exactly one short line describing the current bug.
+Do not modify files and do not call masc_team_session_step yourself.
+EOF
+)"
+  write_prompt="$(cat <<'EOF'
+Now perform the fix using file_write and shell_exec.
+Rewrite calc.py so its full contents become exactly:
+def add_two_and_three():
+    return 5
+Then run shell_exec with command "python3 check.py" and confirm it passes.
+Reply with exactly one short line describing the applied fix.
+Do not call masc_team_session_step yourself.
+EOF
+)"
+  raw="$(call_tool "fixture-client" 10 "masc_team_session_step" "$(jq -cn \
+    --arg s "$team_session_id" \
+    --arg prompt "$inspect_prompt" \
+    '{session_id:$s,spawn_role:"coder",worker_class:"executor",worker_size:"lg",execution_scope:"limited_code_change",spawn_prompt:$prompt}')")"
+  require_tool_success "$raw"
+  result="$(printf '%s' "$raw" | extract_tool_result)"
+  spawn="$(printf '%s' "$result" | jq -c '.spawn')"
+  printf '%s' "$spawn" | jq -e '.success == true' >/dev/null
+  printf '%s' "$spawn" | jq -e '.tool_call_count > 0' >/dev/null
+  printf '%s' "$spawn" | jq -e '(.tool_names | index("file_read")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+  delegate_raw="$(call_tool "fixture-client" 10 "masc_team_session_step" "$(jq -cn \
+    --arg s "$team_session_id" \
+    --arg prompt "$write_prompt" \
+    '{session_id:$s,target_agent:"coder",delegate_prompt:$prompt}')")"
+  require_tool_success "$delegate_raw"
+  delegate_json="$(printf '%s' "$delegate_raw" | extract_tool_result | jq -c '.delegate')"
+  printf '%s' "$delegate_json" | jq -e '.tool_call_count > 0' >/dev/null
+  printf '%s' "$delegate_json" | jq -e '(.tool_names | index("file_write")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+  (cd "$fixture_dir" && python3 check.py >/dev/null)
+  if [ -z "$(git -C "$fixture_dir" status --short)" ]; then
+    echo "FAIL: fixture repo has no file changes after coding worker run"
+    exit 1
+  fi
+  require_tool_success "$(call_tool "fixture-client" 11 "masc_team_session_stop" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,reason:"fixture_done",generate_report:true}')")"
+  wait_until_terminal "fixture-client" "$team_session_id"
+  local prove_raw prove_result
+  prove_raw="$(call_tool "fixture-client" 12 "masc_team_session_prove" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,generate_report_if_missing:true}')")"
+  require_tool_success "$prove_raw"
+  prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
+  printf '%s' "$prove_result" | jq -e '.proof.evidence.spawn_tool_call_count > 0' >/dev/null
+  printf '%s' "$prove_result" | jq -e '(.proof.evidence.spawn_tool_names | index("file_write")) != null' >/dev/null
+  printf '%s' "$prove_result" | jq -e '.proof.evidence.write_capable_spawn_count >= 1' >/dev/null
+  echo "[fixture] PASS"
+}
+
+run_real_repo_smoke() {
+  echo "[repo] setup temp worktree"
+  local repo_dir
+  repo_dir="$(real_repo_setup)"
+  start_server "$repo_dir"
+  bootstrap_room "repo-client"
+  local team_session_id
+  team_session_id="$(start_team_session "repo-client" "coding worker real repo smoke" "limited_code_change")"
+  local planner_prompt implementer_prompt implementer_write_prompt raw result delegate_raw delegate_json
+  planner_prompt="$(cat <<'EOF'
+Inspect test/fixtures/coding_worker_repo_smoke/calc.py and test/fixtures/coding_worker_repo_smoke/check.py.
+Use file_read and shell_exec only.
+Read the Python file before suggesting a fix.
+Return exactly one short line describing the bug and the required fix.
+Do not modify files and do not call masc_team_session_step yourself.
+EOF
+)"
+  implementer_prompt="$(cat <<'EOF'
+Inspect test/fixtures/coding_worker_repo_smoke/calc.py and test/fixtures/coding_worker_repo_smoke/check.py.
+Use file_read and shell_exec only.
+Return exactly one short line saying you are ready to patch the file.
+Do not call masc_team_session_step yourself.
+EOF
+)"
+  implementer_write_prompt="$(cat <<'EOF'
+Now patch test/fixtures/coding_worker_repo_smoke/calc.py.
+Use file_write and shell_exec.
+Rewrite the file so its full contents become exactly:
+def add_two_and_three():
+    return 5
+Then run python3 test/fixtures/coding_worker_repo_smoke/check.py and confirm it passes.
+Reply with exactly one short line describing the applied patch.
+Do not call masc_team_session_step yourself.
+EOF
+)"
+  raw="$(call_tool "repo-client" 20 "masc_team_session_step" "$(jq -cn \
+    --arg s "$team_session_id" \
+    --arg planner "$planner_prompt" \
+    --arg implementer "$implementer_prompt" \
+    '{session_id:$s,spawn_batch:[
+      {spawn_role:"planner",worker_class:"manager",worker_size:"xlg",execution_scope:"observe_only",spawn_prompt:$planner},
+      {spawn_role:"implementer",worker_class:"executor",worker_size:"lg",execution_scope:"limited_code_change",spawn_prompt:$implementer}
+    ]}')")"
+  require_tool_success "$raw"
+  result="$(printf '%s' "$raw" | extract_tool_result)"
+  printf '%s' "$result" | jq -e '.spawn.mode == "batch" and .spawn.count == 2 and (.spawn.results | length) == 2' >/dev/null
+  printf '%s' "$result" | jq -e '[.spawn.results[] | .execution_scope] | index("limited_code_change") != null' >/dev/null
+  printf '%s' "$result" | jq -e '[.spawn.results[] | .tool_names[]?] | index("file_read") != null and index("shell_exec") != null' >/dev/null
+  delegate_raw="$(call_tool "repo-client" 21 "masc_team_session_step" "$(jq -cn \
+    --arg s "$team_session_id" \
+    --arg prompt "$implementer_write_prompt" \
+    '{session_id:$s,target_agent:"implementer",delegate_prompt:$prompt}')")"
+  require_tool_success "$delegate_raw"
+  delegate_json="$(printf '%s' "$delegate_raw" | extract_tool_result | jq -c '.delegate')"
+  printf '%s' "$delegate_json" | jq -e '.tool_call_count > 0' >/dev/null
+  printf '%s' "$delegate_json" | jq -e '(.tool_names | index("file_write")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
+  require_tool_success "$(call_tool "repo-client" 21 "masc_team_session_step" "$(jq -cn \
+    --arg s "$team_session_id" \
+    --arg message "planner inspected the smoke target and implementer patched calc.py; verification passed" \
+    '{session_id:$s,turn_kind:"note",message:$message}')")"
+  (cd "$repo_dir" && python3 test/fixtures/coding_worker_repo_smoke/check.py >/dev/null)
+  if [ -z "$(git -C "$repo_dir" status --short --untracked-files=all -- test/fixtures/coding_worker_repo_smoke)" ]; then
+    echo "FAIL: real repo smoke worktree has no status change after coding pair run"
+    exit 1
+  fi
+  require_tool_success "$(call_tool "repo-client" 22 "masc_team_session_stop" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,reason:"repo_done",generate_report:true}')")"
+  wait_until_terminal "repo-client" "$team_session_id"
+  local prove_raw prove_result
+  prove_raw="$(call_tool "repo-client" 23 "masc_team_session_prove" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,generate_report_if_missing:true}')")"
+  require_tool_success "$prove_raw"
+  prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
+  printf '%s' "$prove_result" | jq -e '.proof.verdict == "proved"' >/dev/null
+  printf '%s' "$prove_result" | jq -e '.proof.evidence.unique_turn_actors_count >= 3' >/dev/null
+  printf '%s' "$prove_result" | jq -e '.proof.evidence.spawn_success_count >= 2' >/dev/null
+  printf '%s' "$prove_result" | jq -e '(.proof.evidence.spawn_tool_names | index("shell_exec")) != null and (.proof.evidence.spawn_tool_names | index("file_write")) != null' >/dev/null
+  printf '%s' "$prove_result" | jq -e '.proof.evidence.write_capable_spawn_count >= 1' >/dev/null
+  echo "[repo] PASS"
+}
+
+if [ ! -x "$SERVER_EXE" ]; then
+  echo "server executable not found: $SERVER_EXE"
+  echo "build it first with: dune build --root . @default"
+  exit 1
+fi
+
+echo "[1/2] fixture coding worker smoke"
+run_fixture_smoke
+echo "[2/2] real repo coding pair smoke"
+run_real_repo_smoke
+echo "PASS: coding worker quick win"

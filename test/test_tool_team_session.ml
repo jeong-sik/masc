@@ -15,6 +15,8 @@ let () =
             `Quick Test_tool_team_session_proof.test_min_agents_violation_after_bootstrap_grace;
           Alcotest.test_case "report-uses-participant-and-turn-metrics" `Quick
             Test_tool_team_session_proof.test_report_uses_participant_and_turn_metrics;
+          Alcotest.test_case "report-and-proof-expose-spawn-tool-usage" `Quick
+            Test_tool_team_session_proof.test_report_and_proof_expose_spawn_tool_usage;
           Alcotest.test_case "duration-reached-path" `Quick
             Test_tool_team_session_lifecycle.test_duration_reached_path;
           Alcotest.test_case "recover-elapsed-session" `Quick
@@ -38,6 +40,8 @@ let () =
             Test_tool_team_session_step_validation.test_step_spawn_requires_proc_mgr;
           Alcotest.test_case "step-spawn-default-local-allows-worker-size" `Quick
             Test_tool_team_session_step_validation.test_step_spawn_default_local_allows_worker_size_without_spawn_model;
+          Alcotest.test_case "step-spawn-batch-defaults-execution-scope" `Quick
+            Test_tool_team_session_step_validation.test_step_spawn_batch_defaults_execution_scope_by_worker_class;
           Alcotest.test_case "step-rejects-legacy-spawn-fields" `Quick
             Test_tool_team_session_step_validation.test_step_rejects_legacy_spawn_fields;
           Alcotest.test_case "step-rejects-legacy-batch-spawn-fields" `Quick

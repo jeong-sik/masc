@@ -667,6 +667,60 @@ let markdown_of_report ~(session : Team_session_types.session)
       Printf.sprintf "- Checkpoints captured: %d" checkpoints_count;
     ]
 
+let collect_spawn_tool_names events =
+  events
+  |> List.concat_map (fun json ->
+         if
+           List.mem
+             (Yojson.Safe.Util.member "event_type" json)
+             [ `String "team_step_spawn"; `String "team_step_delegate" ]
+         then
+           (match
+              Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "tool_names"
+            with
+           | `List xs ->
+               xs
+               |> List.filter_map (function
+                      | `String s ->
+                          let t = String.trim s in
+                          if t = "" then None else Some t
+                      | _ -> None)
+           | _ -> [])
+         else [])
+  |> Team_session_types.dedup_strings
+
+let sum_spawn_tool_call_count events =
+  events
+  |> List.fold_left
+       (fun acc json ->
+         if
+           List.mem
+             (Yojson.Safe.Util.member "event_type" json)
+             [ `String "team_step_spawn"; `String "team_step_delegate" ]
+         then
+           (match
+              Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "tool_call_count"
+            with
+           | `Int n -> acc + n
+           | `Intlit s -> acc + Option.value ~default:0 (int_of_string_opt s)
+           | _ -> acc)
+         else acc)
+       0
+
+let count_write_capable_spawns events =
+  events
+  |> List.fold_left
+       (fun acc json ->
+         if Yojson.Safe.Util.member "event_type" json = `String "team_step_spawn"
+         then
+           match
+             Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "execution_scope"
+           with
+           | `String "limited_code_change" -> acc + 1
+           | _ -> acc
+         else acc)
+       0
+
 let generate config (session : Team_session_types.session) :
     (Yojson.Safe.t * string, string) result =
   try
@@ -688,6 +742,9 @@ let generate config (session : Team_session_types.session) :
     let failed_spawn_roster = failed_spawn_roster_for_report events in
     let detached_actor_roster = detached_actor_roster_for_report events in
     let empty_note_turn_actors = empty_note_turn_roster_for_report events in
+    let spawn_tool_names = collect_spawn_tool_names events in
+    let spawn_tool_call_count = sum_spawn_tool_call_count events in
+    let write_capable_spawn_count = count_write_capable_spawns events in
     let mcp_notes =
       mcp_improvements session events checkpoints_count done_delta_total
     in
@@ -704,6 +761,10 @@ let generate config (session : Team_session_types.session) :
           ("detached_actor_roster", `List detached_actor_roster);
           ("empty_note_turn_count", `Int empty_note_turn_count);
           ("empty_note_turn_actors", `List empty_note_turn_actors);
+          ("spawn_tool_call_count", `Int spawn_tool_call_count);
+          ( "spawn_tool_names",
+            `List (List.map (fun value -> `String value) spawn_tool_names) );
+          ("write_capable_spawn_count", `Int write_capable_spawn_count);
         ]
     in
     let report_json =
@@ -758,6 +819,11 @@ let generate config (session : Team_session_types.session) :
                 ("spawn_failure_count", `Int spawn_failure_count);
                 ("detached_agent_count", `Int detached_agent_count);
                 ("empty_note_turn_count", `Int empty_note_turn_count);
+                ("spawn_tool_call_count", `Int spawn_tool_call_count);
+                ( "spawn_tool_names",
+                  `List (List.map (fun value -> `String value) spawn_tool_names)
+                );
+                ("write_capable_spawn_count", `Int write_capable_spawn_count);
                 ( "tier_counts",
                   match Yojson.Safe.Util.member "tier_counts" summary_json with
                   | `Assoc _ as json -> json
@@ -1093,6 +1159,17 @@ let parse_event_int path json =
   | `Intlit s -> int_of_string_opt s
   | _ -> None
 
+let parse_event_string_list path json =
+  match Yojson.Safe.Util.member path json with
+  | `List xs ->
+      xs
+      |> List.filter_map (function
+             | `String s ->
+                 let t = String.trim s in
+                 if t = "" then None else Some t
+             | _ -> None)
+  | _ -> []
+
 let parse_event_detail json = Yojson.Safe.Util.member "detail" json
 
 let parse_spawn_agent json = parse_event_detail json |> parse_event_string "spawn_agent"
@@ -1100,6 +1177,15 @@ let parse_spawn_agent json = parse_event_detail json |> parse_event_string "spaw
 let parse_spawn_success json = parse_event_detail json |> parse_event_bool "success"
 
 let parse_spawn_model json = parse_event_detail json |> parse_event_string "spawn_model"
+
+let parse_spawn_execution_scope json =
+  parse_event_detail json |> parse_event_string "execution_scope"
+
+let parse_spawn_tool_call_count json =
+  parse_event_detail json |> parse_event_int "tool_call_count"
+
+let parse_spawn_tool_names json =
+  parse_event_detail json |> parse_event_string_list "tool_names"
 
 let parse_spawn_selection_note json =
   parse_event_detail json |> parse_event_string "spawn_selection_note"
@@ -1155,6 +1241,43 @@ let collect_spawn_models events =
 let collect_spawn_selection_notes events =
   events |> List.filter_map spawn_selection_note_of_event
   |> Team_session_types.dedup_strings
+
+let collect_spawn_tool_names events =
+  events
+  |> List.concat_map (fun json ->
+         if
+           has_event_type json "team_step_spawn"
+           || has_event_type json "team_step_delegate"
+         then
+           parse_spawn_tool_names json
+         else [])
+  |> Team_session_types.dedup_strings
+
+let sum_spawn_tool_call_count events =
+  events
+  |> List.fold_left
+       (fun acc json ->
+         if
+           has_event_type json "team_step_spawn"
+           || has_event_type json "team_step_delegate"
+         then
+           acc + Option.value ~default:0 (parse_spawn_tool_call_count json)
+         else acc)
+       0
+
+let count_write_capable_spawns events =
+  events
+  |> List.fold_left
+       (fun acc json ->
+         if
+           has_event_type json "team_step_spawn"
+           || has_event_type json "team_step_delegate"
+         then
+           match parse_spawn_execution_scope json with
+           | Some "limited_code_change" -> acc + 1
+           | _ -> acc
+         else acc)
+       0
 
 let failed_spawn_roster_of_events events =
   events
@@ -1530,6 +1653,9 @@ let generate_proof ?(proof_level = default_proof_level) config
     let empty_note_turn_actors = empty_note_turn_actors_of_events events in
     let detached_actor_roster = detached_actor_roster_of_events events in
     let detached_agent_count = count_event_type events "session_agent_detached" in
+    let spawn_tool_names = collect_spawn_tool_names events in
+    let spawn_tool_call_count = sum_spawn_tool_call_count events in
+    let write_capable_spawn_count = count_write_capable_spawns events in
     let min_turn_events = min_turn_events_for_session required_turn_actors in
     let min_communication = min_communication_for_session required_turn_actors in
     let vote_events =
@@ -1602,6 +1728,11 @@ let generate_proof ?(proof_level = default_proof_level) config
                        session.planned_workers) );
                 ("planned_worker_count", `Int (List.length session.planned_workers));
                 ("spawn_models", `List (List.map (fun m -> `String m) spawn_models));
+                ( "spawn_tool_names",
+                  `List (List.map (fun value -> `String value) spawn_tool_names)
+                );
+                ("spawn_tool_call_count", `Int spawn_tool_call_count);
+                ("write_capable_spawn_count", `Int write_capable_spawn_count);
                 ( "spawn_selection_notes",
                   `List (List.map (fun note -> `String note) spawn_selection_notes)
                 );

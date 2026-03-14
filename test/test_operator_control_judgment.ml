@@ -240,6 +240,7 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
                     runtime_actor = Some "llama-local-deadbeef";
                     spawn_role = Some "implementer-a";
                     spawn_model = Some "qwen3.5";
+                    execution_scope = Some Team_session_types.Limited_code_change;
                     worker_class = None;
                     parent_actor = None;
                     capsule_mode = None;

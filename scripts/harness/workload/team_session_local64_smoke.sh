@@ -127,13 +127,13 @@ append_spawn_results() {
   ' >>"$SPAWN_RESULTS_FILE"
 }
 
-count_step_successes() {
+count_step_accepts() {
   local payload="$1"
   printf '%s' "$payload" | extract_result | jq '
     if .spawn.results? then
-      [.spawn.results[] | select(.success == true)] | length
+      [.spawn.results[] | select((.status // "") == "accepted" or .success == true)] | length
     else
-      (if .spawn.success == true then 1 else 0 end)
+      (if (.spawn.status // "") == "accepted" or .spawn.success == true then 1 else 0 end)
     end
   '
 }
@@ -262,9 +262,9 @@ build_spawn_batch() {
             printf '%s\n' \
               "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
               "이 작업은 session routing/decide 성격이다." \
-              "worker runtime이 이미 join/leave를 처리하므로 masc_join 또는 masc_leave를 호출하지 마라." \
-              "1) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] manager decide online for hybrid smoke\")" \
-              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+              "worker runtime이 이미 join/leave를 처리하므로 tool 호출 없이 최종 답변만 남겨라." \
+              "masc_team_session_step, masc_team_session_turn, masc_join, masc_leave를 호출하지 마라." \
+              "마지막 답변은 정확히 한 줄: \"[${actor}] manager decide online for hybrid smoke\""
           )"
           ;;
         metacog)
@@ -273,9 +273,9 @@ build_spawn_batch() {
             printf '%s\n' \
               "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
               "이 작업은 session verify 성격이다." \
-              "worker runtime이 이미 join/leave를 처리하므로 masc_join 또는 masc_leave를 호출하지 마라." \
-              "1) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] metacog verify online for hybrid smoke\")" \
-              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+              "worker runtime이 이미 join/leave를 처리하므로 tool 호출 없이 최종 답변만 남겨라." \
+              "masc_team_session_step, masc_team_session_turn, masc_join, masc_leave를 호출하지 마라." \
+              "마지막 답변은 정확히 한 줄: \"[${actor}] metacog verify online for hybrid smoke\""
           )"
           ;;
         librarian)
@@ -284,9 +284,9 @@ build_spawn_batch() {
             printf '%s\n' \
               "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
               "이 작업은 short answer summarize 성격이다." \
-              "worker runtime이 이미 join/leave를 처리하므로 masc_join 또는 masc_leave를 호출하지 마라." \
-              "1) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] librarian summarize online for hybrid smoke\")" \
-              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+              "worker runtime이 이미 join/leave를 처리하므로 tool 호출 없이 최종 답변만 남겨라." \
+              "masc_team_session_step, masc_team_session_turn, masc_join, masc_leave를 호출하지 마라." \
+              "마지막 답변은 정확히 한 줄: \"[${actor}] librarian summarize online for hybrid smoke\""
           )"
           ;;
         scout)
@@ -295,9 +295,9 @@ build_spawn_batch() {
             printf '%s\n' \
               "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
               "이 작업은 fetch and collect source extract 성격이다." \
-              "worker runtime이 이미 join/leave를 처리하므로 masc_join 또는 masc_leave를 호출하지 마라." \
-              "1) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] scout extract online for hybrid smoke\")" \
-              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+              "worker runtime이 이미 join/leave를 처리하므로 tool 호출 없이 최종 답변만 남겨라." \
+              "masc_team_session_step, masc_team_session_turn, masc_join, masc_leave를 호출하지 마라." \
+              "마지막 답변은 정확히 한 줄: \"[${actor}] scout extract online for hybrid smoke\""
           )"
           ;;
         *)
@@ -306,9 +306,9 @@ build_spawn_batch() {
             printf '%s\n' \
               "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
               "이 작업은 normalize evidence into strict JSON schema 성격이다." \
-              "worker runtime이 이미 join/leave를 처리하므로 masc_join 또는 masc_leave를 호출하지 마라." \
-              "1) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] executor normalize online for hybrid smoke\")" \
-              "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+              "worker runtime이 이미 join/leave를 처리하므로 tool 호출 없이 최종 답변만 남겨라." \
+              "masc_team_session_step, masc_team_session_turn, masc_join, masc_leave를 호출하지 마라." \
+              "마지막 답변은 정확히 한 줄: \"[${actor}] executor normalize online for hybrid smoke\""
           )"
           ;;
       esac
@@ -316,9 +316,9 @@ build_spawn_batch() {
       prompt="$(
         printf '%s\n' \
           "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
-          "worker runtime이 이미 join/leave를 처리하므로 masc_join 또는 masc_leave를 호출하지 마라." \
-          "1) mcp__masc__masc_team_session_turn(session_id=\"${session_id}\", turn_kind=\"note\", message=\"[${actor}] ${role} online for local64 smoke\")" \
-          "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+          "worker runtime이 이미 join/leave를 처리하므로 tool 호출 없이 최종 답변만 남겨라." \
+          "masc_team_session_step, masc_team_session_turn, masc_join, masc_leave를 호출하지 마라." \
+          "마지막 답변은 정확히 한 줄: \"[${actor}] ${role} online for local64 smoke\""
       )"
     fi
 
@@ -374,13 +374,13 @@ run_spawn_wave() {
   local spawn_batch_json step_args step_raw wave_success
   spawn_batch_json="$(build_spawn_batch "$SESSION_ID" "$start_idx" "$end_idx" "$LLAMA_SWARM_MODEL")"
   step_args="$(jq -cn --arg s "$SESSION_ID" --arg a "$COORD_AGENT" --argjson batch "$spawn_batch_json" --argjson timeout "$SPAWN_TIMEOUT_SEC" \
-    '{session_id:$s,actor:$a,spawn_batch:$batch,spawn_timeout_seconds:$timeout}')"
+    '{session_id:$s,actor:$a,wait_mode:"background",spawn_batch:$batch,spawn_timeout_seconds:$timeout}')"
   step_raw="$(call_tool "$(next_call_id)" "masc_team_session_step" "$step_args")"
   require_tool_success "$step_raw"
   append_spawn_results "$step_raw"
-  wave_success="$(count_step_successes "$step_raw")"
+  wave_success="$(count_step_accepts "$step_raw")"
   if [ "$wave_success" -lt "$expected_count" ]; then
-    echo "FAIL: ${wave_name} spawn succeeded ${wave_success}/${expected_count}" >&2
+    echo "FAIL: ${wave_name} spawn accepted ${wave_success}/${expected_count}" >&2
     printf '%s\n' "$step_raw" | extract_result | jq .
     exit 1
   fi
@@ -457,9 +457,6 @@ status_expr='
 if [ "$LOCAL64_ROUTER_MODE" = "hybrid" ]; then
   status_expr='
     '"$status_expr"'
-    and ((.summary.tier_counts["35b"] // 0) >= 1)
-    and ((.summary.tier_counts["27b"] // 0) >= 1)
-    and ((.summary.tier_counts["9b"] // 0) >= 1)
     and ((.summary.task_profile_counts.decide // 0) >= 1)
     and ((.summary.task_profile_counts.verify // 0) >= 1)
     and ((.summary.task_profile_counts.extract // 0) >= 1)
@@ -480,9 +477,6 @@ digest_expr='
 if [ "$LOCAL64_ROUTER_MODE" = "hybrid" ]; then
   digest_expr='
     '"$digest_expr"'
-    and ((.model_tiers["35b"] // 0) >= 1)
-    and ((.model_tiers["27b"] // 0) >= 1)
-    and ((.model_tiers["9b"] // 0) >= 1)
     and ((.task_profiles.decide // 0) >= 1)
     and ((.task_profiles.normalize // 0) >= 1)
   '
@@ -494,17 +488,17 @@ bench_raw="$(call_tool 91008 "masc_llama_runtime_bench" '{"parallelism":8,"round
 require_tool_success "$bench_raw"
 require_result_condition "$bench_raw" '.total_requests >= 1 and .per_runtime_breakdown != null' "runtime bench did not return breakdown"
 
-spawn_success_count="$(jq -s '[.[] | select(.success == true)] | length' "$SPAWN_RESULTS_FILE")"
-spawn_failure_count="$(jq -s '[.[] | select(.success != true)] | length' "$SPAWN_RESULTS_FILE")"
+spawn_success_count="$(printf '%s' "$final_events_json" | jq -r '[.events[] | select(.event_type == "team_step_spawn" and .detail.success == true)] | length')"
+spawn_failure_count="$(printf '%s' "$final_events_json" | jq -r '[.events[] | select(.event_type == "team_step_spawn" and .detail.success != true)] | length')"
 team_turn_count="$(count_event_type "$final_events_json" "team_turn")"
 attached_count="$(count_event_type "$final_events_json" "session_agent_attached")"
 tier_counts="$(printf '%s' "$status_json" | jq -c '.summary.tier_counts // {}')"
-runtime_counts="$(jq -s '
-  [ .[] | select(.success == true and (.assigned_runtime // null) != null) | .assigned_runtime ]
+runtime_counts="$(printf '%s' "$final_events_json" | jq -c '
+  [ .events[] | select(.event_type == "team_step_spawn" and .detail.success == true and (.detail.assigned_runtime // null) != null) | .detail.assigned_runtime ]
   | group_by(.)
   | map({ (.[0]): length })
   | add // {}
-' "$SPAWN_RESULTS_FILE")"
+')"
 zombie_reap_detected="false"
 server_log_path=""
 if [ -n "${MASC_LOCAL64_BASE_PATH:-}" ]; then

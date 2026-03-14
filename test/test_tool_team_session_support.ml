@@ -106,6 +106,18 @@ let wait_until_terminal ctx session_id =
   in
   loop 200
 
+let oas_trace_session_root base_dir =
+  Filename.concat (Filename.concat base_dir ".masc") "oas-runtime"
+
+let oas_trace_file_path base_dir ~session_id ~worker_name =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (Filename.concat (oas_trace_session_root base_dir) "sessions")
+          session_id)
+       "raw-traces")
+    (worker_name ^ ".jsonl")
+
 let rec start_session_exn ctx ~goal =
   start_session_custom_exn ctx ~goal ~min_agents:1 ~agents:[]
     ~operation_id:None
@@ -200,7 +212,6 @@ let raw_trace_run_ref_to_json (run_ref : Oas.Raw_trace.run_ref) =
   `Assoc
     [
       ("worker_run_id", `String run_ref.worker_run_id);
-      ("path", `String run_ref.path);
       ("start_seq", `Int run_ref.start_seq);
       ("end_seq", `Int run_ref.end_seq);
       ("agent_name", `String run_ref.agent_name);
@@ -211,11 +222,11 @@ let raw_trace_run_ref_to_json (run_ref : Oas.Raw_trace.run_ref) =
 
 let write_worker_run_raw_trace_exn config ~session_id ~worker_run_id
     ~worker_name =
-  let raw_trace_path =
-    Filename.concat
-      (Team_session_store.worker_run_dir config session_id worker_run_id)
-      "raw-trace.jsonl"
+  let base_dir =
+    Team_session_store.session_dir config session_id
+    |> Filename.dirname |> Filename.dirname |> Filename.dirname
   in
+  let raw_trace_path = oas_trace_file_path base_dir ~session_id ~worker_name in
   let raw_worker_run_id = "wr-fixture-raw-1" in
   let lines =
     [
@@ -365,16 +376,6 @@ let write_worker_run_raw_trace_exn config ~session_id ~worker_run_id
   in
   Team_session_store.write_text_file raw_trace_path
     (String.concat "\n" (List.map Yojson.Safe.to_string lines) ^ "\n");
-  let run_ref : Oas.Raw_trace.run_ref =
-    {
-      worker_run_id = raw_worker_run_id;
-      path = raw_trace_path;
-      start_seq = 1;
-      end_seq = 9;
-      agent_name = worker_name;
-      session_id = Some session_id;
-    }
-  in
   Team_session_store.save_worker_run_meta_json config session_id worker_run_id
     (`Assoc
       [
@@ -383,6 +384,21 @@ let write_worker_run_raw_trace_exn config ~session_id ~worker_run_id
         ("mode", `String "delegate");
         ("wait_mode", `String "blocking");
         ("trace_capability", `String "raw");
-        ("trace_ref", raw_trace_run_ref_to_json run_ref);
+        ( "trace_ref",
+          `Assoc
+            [
+              ("worker_run_id", `String raw_worker_run_id);
+              ("start_seq", `Int 1);
+              ("end_seq", `Int 9);
+              ("agent_name", `String worker_name);
+              ("session_id", `String session_id);
+            ] );
       ]);
-  run_ref
+  {
+    Oas.Raw_trace.worker_run_id = raw_worker_run_id;
+    path = raw_trace_path;
+    start_seq = 1;
+    end_seq = 9;
+    agent_name = worker_name;
+    session_id = Some session_id;
+  }

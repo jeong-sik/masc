@@ -326,9 +326,16 @@ let oas_worker_run_to_json (worker : Oas.Sessions.worker_run) =
   `Assoc
     [
       ("worker_run_id", `String worker.worker_run_id);
+      ("worker_id", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.worker_id);
       ("agent_name", `String worker.agent_name);
+      ( "runtime_actor",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          worker.runtime_actor );
       ("role", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.role);
       ("aliases", `List (List.map (fun alias -> `String alias) worker.aliases));
+      ( "primary_alias",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          worker.primary_alias );
       ("provider", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.provider);
       ("model", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.model);
       ( "requested_provider",
@@ -358,6 +365,11 @@ let oas_worker_run_to_json (worker : Oas.Sessions.worker_run) =
           worker.failure_reason );
       ("started_at", Option.fold ~none:`Null ~some:(fun ts -> `Float ts) worker.started_at);
       ("finished_at", Option.fold ~none:`Null ~some:(fun ts -> `Float ts) worker.finished_at);
+      ("accepted_at", Option.fold ~none:`Null ~some:(fun ts -> `Float ts) worker.accepted_at);
+      ("ready_at", Option.fold ~none:`Null ~some:(fun ts -> `Float ts) worker.ready_at);
+      ( "first_progress_at",
+        Option.fold ~none:`Null ~some:(fun ts -> `Float ts)
+          worker.first_progress_at );
       ( "last_progress_at",
         Option.fold ~none:`Null ~some:(fun ts -> `Float ts)
           worker.last_progress_at );

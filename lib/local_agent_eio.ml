@@ -1269,6 +1269,9 @@ let materialize_direct_evidence ~base_path ~worker_name
           goal = prompt;
           title = Some (Printf.sprintf "MASC worker %s" worker_name);
           tag = Some "masc-team-worker";
+          worker_id =
+            Some (stable_worker_session_id ?team_session_id:meta.team_session_id worker_name);
+          runtime_actor = Some worker_name;
           role = meta.role;
           aliases;
           requested_provider = Some "local";

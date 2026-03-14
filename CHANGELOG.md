@@ -8,7 +8,7 @@
 - **Team-Mode Solid Win Surface** — worker-run snapshots, status summaries, and dashboard proof projection now carry validated final text, failure reason, and session conformance for completed team-mode workers
 
 ### Changed
-- **Agent SDK Floor** — `masc-mcp` now requires `agent_sdk >= 0.20.0`
+- **Agent SDK Floor** — `masc-mcp` now requires `agent_sdk >= 0.21.0`
 - **Team Worker Evidence SSOT** — `masc_team_session_verify_trace` now prefers OAS direct-evidence sessions and only falls back to legacy raw-trace lookup for older worker runs
 - **Dashboard Worker Evidence** — validated worker evidence is projected from OAS-backed worker summaries while preserving MASC-specific mode/wait/execution overlays
 

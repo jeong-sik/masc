@@ -133,7 +133,8 @@ let tool_category tool_name =
 
   (* ── Core: room, tasks, run pipeline, team session, CPv2 orchestration ── *)
   | "masc_set_room" | "masc_init" | "masc_join" | "masc_leave"
-  | "masc_status" | "masc_add_task" | "masc_batch_add_tasks"
+  | "masc_status" | "masc_workflow_guide" | "masc_check"
+  | "masc_add_task" | "masc_batch_add_tasks"
   | "masc_tasks" | "masc_archive_view" | "masc_claim_next"
   | "masc_update_priority" | "masc_transition"
   | "masc_task_history" | "masc_dashboard"

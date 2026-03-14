@@ -3239,6 +3239,10 @@ in
   in
   let (status, required_follow_up) = parse_status_from_message ~success ~message in
   let quality = quality_from_result ~success ~message ~attempts in
+  let workflow_guidance =
+    Workflow_guide.guidance_to_json
+      (Workflow_guide.next_steps ~tool_name:name ~success)
+  in
   let envelope =
     `Assoc [
       ("kind", `String "tool_call");
@@ -3251,6 +3255,7 @@ in
         | Some value -> `String value));
       ("trace_id", `String trace_id);
       ("quality", quality);
+      ("workflow_guidance", workflow_guidance);
     ]
   in
   let content_items =

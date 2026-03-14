@@ -917,3 +917,9 @@
  (name test_build_identity)
  (modules test_build_identity)
  (libraries masc_mcp alcotest unix))
+
+; Workflow guidance — Golden Path encoding and next_steps
+(test
+ (name test_workflow_guide)
+ (modules test_workflow_guide)
+ (libraries masc_mcp alcotest yojson))

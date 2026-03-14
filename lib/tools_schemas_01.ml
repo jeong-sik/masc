@@ -354,4 +354,35 @@ Tip: Look for status='todo' tasks to claim.";
       ]);
     ];
   };
+
+  {
+    name = "masc_workflow_guide";
+    description = "Get personalized workflow guidance based on your current state. Returns what you should do next: which tool to call, why, and common mistakes to avoid. Call this when you are unsure what to do next or want to verify you are on the right track.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
+    name = "masc_check";
+    description = "Verify your current agent state against a list of assertions. Returns pass/fail for each assertion with fix hints. Use this to confirm prerequisites before starting work.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("assertions", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [
+            ("type", `String "string");
+            ("enum", `List [
+              `String "room_set"; `String "joined"; `String "task_claimed";
+              `String "current_task_set"; `String "worktree_active";
+            ]);
+          ]);
+          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false.");
+        ]);
+      ]);
+      ("required", `List [`String "assertions"]);
+    ];
+  };
 ]

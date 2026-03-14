@@ -774,6 +774,14 @@ let stable_worker_session_id ?team_session_id worker_name =
   let digest = Digest.string basis |> Digest.to_hex in
   sprintf "worker-%s" (String.sub digest 0 12)
 
+let oas_worker_evidence_session_id ~worker_run_id =
+  String.trim worker_run_id
+
+let evidence_session_id_of_worker_run = function
+  | Some worker_run_id when String.trim worker_run_id <> "" ->
+      Some (oas_worker_evidence_session_id ~worker_run_id)
+  | _ -> None
+
 let session_min_tool_names =
   Agent_tool_surfaces.llama_worker_tool_names
 
@@ -1236,10 +1244,56 @@ let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
   in
   (config, options)
 
+let materialize_direct_evidence ~base_path ~worker_name
+    ~(worker_run_id : string option) ~(meta : worker_container_meta) ~prompt
+    ~workspace_path ~agent ~raw_trace =
+  match evidence_session_id_of_worker_run worker_run_id with
+  | None -> ()
+  | Some session_id ->
+      let aliases =
+        unique_preserve_order
+          ([ worker_name ]
+          @
+          match meta.role with
+          | Some role
+            when String.trim role <> ""
+                 && not (String.equal role worker_name) ->
+              [ role ]
+          | _ -> [])
+      in
+      let options =
+        {
+          Oas.Direct_evidence.session_root =
+            Some (oas_trace_session_root ~base_path);
+          session_id;
+          goal = prompt;
+          title = Some (Printf.sprintf "MASC worker %s" worker_name);
+          tag = Some "masc-team-worker";
+          worker_id =
+            Some (stable_worker_session_id ?team_session_id:meta.team_session_id worker_name);
+          runtime_actor = Some worker_name;
+          role = meta.role;
+          aliases;
+          requested_provider = Some "local";
+          requested_model = Some meta.effective_model;
+          requested_policy =
+            Some
+              (Team_session_types.execution_scope_to_string
+                 meta.execution_scope);
+          workdir = Some workspace_path;
+        }
+      in
+      match Oas.Direct_evidence.persist ~agent ~raw_trace ~options () with
+      | Ok _ -> ()
+      | Error err ->
+          eprintf
+            "[local-worker] direct evidence persist failed for %s/%s: %s\n%!"
+            worker_name session_id (Oas.Error.to_string err)
+
 let run_worker_oas ~sw ~base_path ~worker_name
     ~(model : Llm_client.model_spec) ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
-    ?thinking_enabled ?max_turns
+    ?thinking_enabled ?max_turns ?worker_run_id
     ~role
     ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
@@ -1270,6 +1324,9 @@ let run_worker_oas ~sw ~base_path ~worker_name
           match Eio_context.get_net_opt () with
           | Some net -> Ok net
           | None -> Error "Eio net not initialized"
+        in
+        let evidence_session_id =
+          evidence_session_id_of_worker_run worker_run_id
         in
         let system_prompt =
           default_system_prompt ~worker_name ~model_id:model.model_id
@@ -1325,20 +1382,27 @@ let run_worker_oas ~sw ~base_path ~worker_name
           in
           let tools = mcp_tools @ shell_tools in
           let* raw_trace =
-            match team_session_id with
+            match evidence_session_id with
             | Some trace_session_id ->
                 Oas.Raw_trace.create_for_session
                   ~session_root:(oas_trace_session_root ~base_path)
                   ~session_id:trace_session_id ~agent_name:worker_name ()
                 |> Result.map_error Oas.Error.to_string
-            | None ->
-                Oas.Raw_trace.create ~session_id:mcp_session_id
-                  ~path:
-                    (worker_raw_trace_path ~base_path
-                       ~team_session_id
-                       ~worker_name)
-                  ()
-                |> Result.map_error Oas.Error.to_string
+            | None -> (
+                match team_session_id with
+                | Some trace_session_id ->
+                    Oas.Raw_trace.create_for_session
+                      ~session_root:(oas_trace_session_root ~base_path)
+                      ~session_id:trace_session_id ~agent_name:worker_name ()
+                    |> Result.map_error Oas.Error.to_string
+                | None ->
+                    Oas.Raw_trace.create ~session_id:mcp_session_id
+                      ~path:
+                        (worker_raw_trace_path ~base_path
+                           ~team_session_id
+                           ~worker_name)
+                      ()
+                    |> Result.map_error Oas.Error.to_string)
           in
           let tool_names_ref = ref [] in
           let hooks =
@@ -1389,6 +1453,8 @@ let run_worker_oas ~sw ~base_path ~worker_name
             save_worker_meta ~base_path ~team_session_id ~worker_name
               { meta with last_run_at = Some (Time_compat.now ()) }
           in
+          materialize_direct_evidence ~base_path ~worker_name ~worker_run_id
+            ~meta ~prompt ~workspace_path ~agent ~raw_trace;
           Oas.Agent.close agent;
           match result with
           | Ok response ->
@@ -1422,9 +1488,10 @@ let run_worker_oas ~sw ~base_path ~worker_name
               in
               Error detail)
 
-let continue_worker ~sw ~base_path ~room_config ~worker_name
+let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
     ~(team_session_id : string) ~(prompt : string) :
-    (run_result, string) result =
+    unit -> (run_result, string) result =
+  fun () ->
   let team_session_id = Some team_session_id in
   match worker_container_state ~base_path ~team_session_id ~worker_name with
   | Worker_missing ->
@@ -1516,19 +1583,26 @@ let continue_worker ~sw ~base_path ~room_config ~worker_name
               in
               let* shell_tools = shell_tools in
               let* raw_trace =
-                match meta.team_session_id with
+                match evidence_session_id_of_worker_run worker_run_id with
                 | Some trace_session_id ->
                     Oas.Raw_trace.create_for_session
                       ~session_root:(oas_trace_session_root ~base_path)
                       ~session_id:trace_session_id ~agent_name:worker_name ()
                     |> Result.map_error Oas.Error.to_string
-                | None ->
-                    Oas.Raw_trace.create ~session_id:meta.mcp_session_id
-                      ~path:
-                        (worker_raw_trace_path ~base_path ~team_session_id
-                           ~worker_name)
-                      ()
-                    |> Result.map_error Oas.Error.to_string
+                | None -> (
+                    match meta.team_session_id with
+                    | Some trace_session_id ->
+                        Oas.Raw_trace.create_for_session
+                          ~session_root:(oas_trace_session_root ~base_path)
+                          ~session_id:trace_session_id ~agent_name:worker_name ()
+                        |> Result.map_error Oas.Error.to_string
+                    | None ->
+                        Oas.Raw_trace.create ~session_id:meta.mcp_session_id
+                          ~path:
+                            (worker_raw_trace_path ~base_path ~team_session_id
+                               ~worker_name)
+                          ()
+                        |> Result.map_error Oas.Error.to_string)
               in
               let tools = mcp_tools @ shell_tools in
               let tool_names_ref = ref [] in
@@ -1613,6 +1687,8 @@ let continue_worker ~sw ~base_path ~room_config ~worker_name
                 save_worker_meta ~base_path ~team_session_id ~worker_name
                   { meta with last_run_at = Some (Time_compat.now ()) }
               in
+              materialize_direct_evidence ~base_path ~worker_name
+                ~worker_run_id ~meta ~prompt ~workspace_path ~agent ~raw_trace;
               Oas.Agent.close agent;
               match result with
               | Ok response ->
@@ -1851,7 +1927,7 @@ let run_worker_legacy ~sw ~base_path ~worker_name
 
 let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
-    ?thinking_enabled ?max_turns ~role
+    ?thinking_enabled ?max_turns ?worker_run_id ~role
     ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
@@ -1862,5 +1938,5 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
   | `Oas ->
       run_worker_oas ~sw ~base_path ~worker_name ~model ~team_session_id
         ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
-        ?thinking_enabled ?max_turns ~role
+        ?thinking_enabled ?max_turns ?worker_run_id ~role
         ~selection_note ~prompt ~allowed_tools ~timeout_sec

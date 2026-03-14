@@ -360,7 +360,7 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
 *)
 let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
     ?room_config ?runtime_agent_name ?runtime_model ?runtime_role
-    ?runtime_session_id ?runtime_selection_note ?worker_class ?worker_size
+    ?runtime_session_id ?runtime_selection_note ?worker_run_id ?worker_class ?worker_size
     ?execution_scope ?thinking_enabled ?max_turns () : spawn_result =
   let start_time = Time_compat.now () in
   let normalized_agent = String.lowercase_ascii (String.trim agent_name) in
@@ -493,7 +493,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
            Local_agent_eio.run_worker ~sw ~base_path ~worker_name ~model
              ~room_config
              ~team_session_id:runtime_session_id ~role:runtime_role
-             ?working_dir:worker_working_dir ?worker_class ?worker_size
+             ?working_dir:worker_working_dir ?worker_run_id ?worker_class ?worker_size
              ?execution_scope ?thinking_enabled ?max_turns
              ~selection_note:runtime_selection_note
              ~prompt:augmented_prompt

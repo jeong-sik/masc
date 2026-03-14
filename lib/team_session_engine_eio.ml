@@ -718,9 +718,14 @@ let worker_run_status_json (json : Yojson.Safe.t) =
       ("resolved_runtime", member "resolved_runtime" json);
       ("resolved_model", member "resolved_model" json);
       ("routing_reason", member "routing_reason" json);
+      ("validated", member "validated" json);
+      ("final_text", member "final_text" json);
+      ("stop_reason", member "stop_reason" json);
+      ("failure_reason", member "failure_reason" json);
       ("tool_names", member "tool_names" json);
       ("tool_call_count", member "tool_call_count" json);
       ("output_preview", member "output_preview" json);
+      ("session_conformance", member "session_conformance" json);
       ("error", member "error" json);
       ("ts_iso", member "ts_iso" json);
     ]

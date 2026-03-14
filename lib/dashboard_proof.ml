@@ -266,12 +266,15 @@ let worker_run_trace_capability json =
   | _ -> None
 
 let worker_run_trace_validated json =
-  match U.member "trace_validation" json |> U.member "ok" with
+  match U.member "validated" json with
   | `Bool value -> Some value
-  | _ -> None
+  | _ -> (
+      match U.member "trace_validation" json |> U.member "ok" with
+      | `Bool value -> Some value
+      | _ -> None)
 
-let worker_run_validation_failures json =
-  match U.member "trace_validation" json |> U.member "checks" with
+let session_conformance_failures json =
+  match U.member "session_conformance" json |> U.member "checks" with
   | `List items ->
       items
       |> List.filter_map (fun item ->
@@ -279,6 +282,20 @@ let worker_run_validation_failures json =
              | `String name, `Bool false -> Some name
              | _ -> None)
   | _ -> []
+
+let worker_run_validation_failures json =
+  let trace_failures =
+    match U.member "trace_validation" json |> U.member "checks" with
+    | `List items ->
+        items
+        |> List.filter_map (fun item ->
+               match U.member "name" item, U.member "passed" item with
+               | `String name, `Bool false -> Some name
+               | _ -> None)
+    | _ -> []
+  in
+  Team_session_types.dedup_strings
+    (trace_failures @ session_conformance_failures json)
 
 let worker_run_summary_json json =
   let summary = U.member "trace_summary" json in
@@ -311,9 +328,11 @@ let worker_run_summary_json json =
       ("output_preview", U.member "output_preview" json);
       ("record_count", U.member "record_count" summary);
       ("assistant_block_count", U.member "assistant_block_count" summary);
-      ("final_text", U.member "final_text" summary);
-      ("stop_reason", U.member "stop_reason" summary);
-      ("error", U.member "error" summary);
+      ("final_text", if U.member "final_text" json <> `Null then U.member "final_text" json else U.member "final_text" summary);
+      ("stop_reason", if U.member "stop_reason" json <> `Null then U.member "stop_reason" json else U.member "stop_reason" summary);
+      ("failure_reason", U.member "failure_reason" json);
+      ("error", if U.member "error" json <> `Null then U.member "error" json else U.member "error" summary);
+      ("session_conformance", U.member "session_conformance" json);
       ("ts_iso", U.member "ts_iso" json);
     ]
 

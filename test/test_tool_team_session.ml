@@ -84,6 +84,11 @@ let () =
             `Quick
             Test_tool_team_session_misc.test_verify_trace_uses_worker_run_raw_trace;
           Alcotest.test_case
+            "verify-trace-reports-summary-only-when-direct-evidence-missing"
+            `Quick
+            Test_tool_team_session_misc
+              .test_verify_trace_reports_summary_only_when_direct_evidence_missing;
+          Alcotest.test_case
             "delegate-rejects-not-ready-worker-with-guidance" `Quick
             Test_tool_team_session_misc
               .test_delegate_rejects_not_ready_worker_with_guidance;

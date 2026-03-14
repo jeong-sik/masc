@@ -341,26 +341,94 @@ let tool_trace_of_raw_records (records : Oas.Raw_trace.record list) =
                  ])
          | Oas.Raw_trace.Run_started -> None)
 
+let verification_rollup_of_trace trace =
+  let uses =
+    trace
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "kind" json = `String "tool_use")
+  in
+  let results =
+    trace
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "kind" json = `String "tool_result")
+  in
+  let pair_count =
+    List.fold_left
+      (fun acc use_json ->
+        match Yojson.Safe.Util.member "tool_use_id" use_json with
+        | `String id ->
+            if
+              List.exists
+                (fun result_json ->
+                  Yojson.Safe.Util.member "tool_use_id" result_json
+                  = `String id)
+                results
+            then acc + 1
+            else acc
+        | _ -> acc)
+      0 uses
+  in
+  let tool_names =
+    uses
+    |> List.filter_map (fun json ->
+           match Yojson.Safe.Util.member "tool_name" json with
+           | `String name -> Some name
+           | _ -> None)
+    |> Team_session_types.dedup_strings
+  in
+  let rec find_file_write idx = function
+    | [] -> None
+    | json :: rest -> (
+        match
+          Yojson.Safe.Util.member "kind" json,
+          Yojson.Safe.Util.member "tool_name" json
+        with
+        | `String "tool_use", `String "file_write" -> Some idx
+        | _ -> find_file_write (idx + 1) rest)
+  in
+  let file_write_index = find_file_write 0 trace in
+  let verification_pass_after_file_write =
+    match file_write_index with
+    | None -> not (List.mem "file_write" tool_names)
+    | Some idx ->
+        trace
+        |> List.mapi (fun i json -> (i, json))
+        |> List.exists (fun (i, json) ->
+               i > idx
+               &&
+               match
+                 Yojson.Safe.Util.member "kind" json,
+                 Yojson.Safe.Util.member "is_error" json,
+                 Yojson.Safe.Util.member "content" json
+               with
+               | `String "tool_result", `Bool false, `String content ->
+                   let trimmed = String.trim content in
+                   trimmed = "PASS"
+                   || String.starts_with ~prefix:"PASS" trimmed
+               | _ -> false)
+  in
+  (pair_count, tool_names, verification_pass_after_file_write)
+
 let verification_json ~records
     ~(summary : Oas.Sessions.raw_trace_summary)
     ~(validation : Oas.Sessions.raw_trace_validation) =
+  let tool_trace = tool_trace_of_raw_records records in
+  let pair_count, tool_names, verification_pass_after_file_write =
+    verification_rollup_of_trace tool_trace
+  in
   `Assoc
     [
-      ("tool_trace", `List (tool_trace_of_raw_records records));
+      ("tool_trace", `List tool_trace);
       ("summary", raw_trace_summary_to_json summary);
       ("validation", raw_trace_validation_to_json validation);
       ("ok", `Bool validation.ok);
-      ( "tool_names",
-        `List (List.map (fun name -> `String name) summary.tool_names) );
+      ("tool_names", `List (List.map (fun name -> `String name) tool_names));
       ("tool_use_count", `Int summary.tool_execution_started_count);
       ("tool_result_count", `Int summary.tool_execution_finished_count);
-      ("paired_tool_result_count", `Int summary.tool_execution_finished_count);
-      ( "has_file_write",
-        `Bool (List.mem "file_write" summary.tool_names) );
-      ( "has_shell_exec",
-        `Bool (List.mem "shell_exec" summary.tool_names) );
-      ( "verification_pass_after_file_write",
-        `Bool validation.ok );
+      ("paired_tool_result_count", `Int pair_count);
+      ("has_file_write", `Bool (List.mem "file_write" tool_names));
+      ("has_shell_exec", `Bool (List.mem "shell_exec" tool_names));
+      ("verification_pass_after_file_write", `Bool verification_pass_after_file_write);
     ]
 
 let raw_trace_summary_and_validation run_ref =

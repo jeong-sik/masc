@@ -317,7 +317,7 @@ let test_status_and_stop_linked_autoresearch () =
       Alcotest.(check bool) "loop registry updated" true
         (state.status = Autoresearch.Stopped))
 
-let test_verify_trace_uses_worker_run_checkpoint_snapshot () =
+let test_verify_trace_uses_worker_run_raw_trace () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -327,12 +327,11 @@ let test_verify_trace_uses_worker_run_checkpoint_snapshot () =
   let ctx : _ Tool_team_session.context =
     { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
-  let session_id = start_session_exn ctx ~goal:"verify-trace-checkpoint" |> get_session_id in
+  let session_id = start_session_exn ctx ~goal:"verify-trace-raw" |> get_session_id in
   let worker_run_id = "run-trace-1" in
-  save_worker_run_checkpoint_exn config ~session_id ~worker_run_id
-    ~worker_name:"llama-local-impl"
-    (make_oas_tool_trace_checkpoint ~session_id
-       ~agent_name:"llama-local-impl" ());
+  ignore
+    (write_worker_run_raw_trace_exn config ~session_id ~worker_run_id
+       ~worker_name:"llama-local-impl");
   let verify_ok, verify_body =
     dispatch_exn ctx ~name:"masc_team_session_verify_trace"
       ~args:
@@ -344,11 +343,15 @@ let test_verify_trace_uses_worker_run_checkpoint_snapshot () =
   in
   Alcotest.(check bool) "verify trace ok" true verify_ok;
   let result = parse_json_exn verify_body |> result_field in
-  Alcotest.(check string) "trace capability" "checkpoint_snapshot"
+  Alcotest.(check string) "trace capability" "raw"
     Yojson.Safe.Util.(result |> member "trace_capability" |> to_string);
   let verification = Yojson.Safe.Util.member "verification" result in
   Alcotest.(check bool) "verification ok" true
     Yojson.Safe.Util.(verification |> member "ok" |> to_bool);
+  Alcotest.(check bool) "summary present" true
+    (Yojson.Safe.Util.member "summary" verification <> `Null);
+  Alcotest.(check bool) "validation present" true
+    (Yojson.Safe.Util.member "validation" verification <> `Null);
   Alcotest.(check bool) "has file_write" true
     Yojson.Safe.Util.(verification |> member "has_file_write" |> to_bool);
   Alcotest.(check bool) "verification pass after file_write" true

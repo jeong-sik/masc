@@ -80,9 +80,9 @@ let () =
             Test_tool_team_session_misc.test_unauthorized_session_access;
           Alcotest.test_case "final-done-delta-snapshot-stable" `Quick
             Test_tool_team_session_misc.test_final_done_delta_snapshot_stable;
-          Alcotest.test_case "verify-trace-uses-worker-run-checkpoint-snapshot"
+          Alcotest.test_case "verify-trace-uses-worker-run-raw-trace"
             `Quick
-            Test_tool_team_session_misc.test_verify_trace_uses_worker_run_checkpoint_snapshot;
+            Test_tool_team_session_misc.test_verify_trace_uses_worker_run_raw_trace;
           Alcotest.test_case
             "verify-trace-reports-summary-only-without-checkpoint" `Quick
             Test_tool_team_session_misc.test_verify_trace_reports_summary_only_without_checkpoint;

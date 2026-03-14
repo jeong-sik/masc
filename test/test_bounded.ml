@@ -125,6 +125,7 @@ let mock_spawn_result ?(success=true) ?(output="{}") () =
     cache_creation_tokens = None;
     cache_read_tokens = None;
     cost_usd = Some 0.001;
+    raw_trace_run = None;
   }
 
 let test_bounded_run_empty_agents () =

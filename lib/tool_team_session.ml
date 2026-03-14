@@ -236,6 +236,11 @@ let trace_run_locator_of_json json =
       with _ -> None)
   | _ -> None
 
+let evidence_session_id_of_json json =
+  match Yojson.Safe.Util.member "evidence_session_id" json with
+  | `String value when String.trim value <> "" -> Some (String.trim value)
+  | _ -> None
+
 let raw_trace_run_ref_to_json (run_ref : Oas.Raw_trace.run_ref) =
   `Assoc
     [
@@ -303,6 +308,185 @@ let raw_trace_validation_to_json
         Option.fold ~none:`Null ~some:(fun s -> `String s)
           validation.failure_reason );
     ]
+
+let oas_trace_capability_to_string = function
+  | Oas.Sessions.Raw -> "raw"
+  | Oas.Sessions.Summary_only -> "summary_only"
+  | Oas.Sessions.No_trace -> "none"
+
+let oas_worker_status_to_json = function
+  | Oas.Sessions.Planned -> `String "planned"
+  | Oas.Sessions.Accepted -> `String "accepted"
+  | Oas.Sessions.Ready -> `String "ready"
+  | Oas.Sessions.Running -> `String "running"
+  | Oas.Sessions.Completed -> `String "completed"
+  | Oas.Sessions.Failed -> `String "failed"
+
+let oas_worker_run_to_json (worker : Oas.Sessions.worker_run) =
+  `Assoc
+    [
+      ("worker_run_id", `String worker.worker_run_id);
+      ("agent_name", `String worker.agent_name);
+      ("role", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.role);
+      ("aliases", `List (List.map (fun alias -> `String alias) worker.aliases));
+      ("provider", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.provider);
+      ("model", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.model);
+      ( "requested_provider",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          worker.requested_provider );
+      ( "requested_model",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          worker.requested_model );
+      ( "requested_policy",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          worker.requested_policy );
+      ( "resolved_provider",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          worker.resolved_provider );
+      ( "resolved_model",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          worker.resolved_model );
+      ("status", oas_worker_status_to_json worker.status);
+      ("trace_capability", `String (oas_trace_capability_to_string worker.trace_capability));
+      ("validated", `Bool worker.validated);
+      ("tool_names", `List (List.map (fun name -> `String name) worker.tool_names));
+      ("final_text", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.final_text);
+      ("stop_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.stop_reason);
+      ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) worker.error);
+      ( "failure_reason",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          worker.failure_reason );
+      ("started_at", Option.fold ~none:`Null ~some:(fun ts -> `Float ts) worker.started_at);
+      ("finished_at", Option.fold ~none:`Null ~some:(fun ts -> `Float ts) worker.finished_at);
+      ( "last_progress_at",
+        Option.fold ~none:`Null ~some:(fun ts -> `Float ts)
+          worker.last_progress_at );
+      ( "policy_snapshot",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          worker.policy_snapshot );
+      ("paired_tool_result_count", `Int worker.paired_tool_result_count);
+      ("has_file_write", `Bool worker.has_file_write);
+      ( "verification_pass_after_file_write",
+        `Bool worker.verification_pass_after_file_write );
+    ]
+
+let conformance_report_to_json (report : Oas.Conformance.report) =
+  `Assoc
+    [
+      ("ok", `Bool report.ok);
+      ( "summary",
+        `Assoc
+          [
+            ("session_id", `String report.summary.session_id);
+            ("generated_at", `Float report.summary.generated_at);
+            ("worker_run_count", `Int report.summary.worker_run_count);
+            ("raw_trace_run_count", `Int report.summary.raw_trace_run_count);
+            ( "validated_worker_run_count",
+              `Int report.summary.validated_worker_run_count );
+            ( "latest_accepted_worker_run_id",
+              Option.fold ~none:`Null ~some:(fun s -> `String s)
+                report.summary.latest_accepted_worker_run_id );
+            ( "latest_ready_worker_run_id",
+              Option.fold ~none:`Null ~some:(fun s -> `String s)
+                report.summary.latest_ready_worker_run_id );
+            ( "latest_running_worker_run_id",
+              Option.fold ~none:`Null ~some:(fun s -> `String s)
+                report.summary.latest_running_worker_run_id );
+            ( "latest_worker_run_id",
+              Option.fold ~none:`Null ~some:(fun s -> `String s)
+                report.summary.latest_worker_run_id );
+            ( "latest_completed_worker_run_id",
+              Option.fold ~none:`Null ~some:(fun s -> `String s)
+                report.summary.latest_completed_worker_run_id );
+            ( "latest_worker_agent_name",
+              Option.fold ~none:`Null ~some:(fun s -> `String s)
+                report.summary.latest_worker_agent_name );
+            ( "latest_worker_validated",
+              Option.fold ~none:`Null ~some:(fun v -> `Bool v)
+                report.summary.latest_worker_validated );
+            ( "latest_failed_worker_run_id",
+              Option.fold ~none:`Null ~some:(fun s -> `String s)
+                report.summary.latest_failed_worker_run_id );
+            ( "latest_failure_reason",
+              Option.fold ~none:`Null ~some:(fun s -> `String s)
+                report.summary.latest_failure_reason );
+            ( "trace_capabilities",
+              `List
+                (List.map
+                   (fun capability ->
+                     `String (oas_trace_capability_to_string capability))
+                   report.summary.trace_capabilities) );
+          ] );
+      ( "checks",
+        `List
+          (List.map
+             (fun (check : Oas.Conformance.check) ->
+               `Assoc
+                 [
+                   ("code", `String check.code);
+                   ("name", `String check.name);
+                   ("passed", `Bool check.passed);
+                   ("detail", Option.fold ~none:`Null ~some:(fun s -> `String s) check.detail);
+                 ])
+             report.checks) );
+    ]
+
+type oas_worker_evidence = {
+  trace_ref : Oas.Raw_trace.run_ref option;
+  trace_summary_json : Yojson.Safe.t option;
+  trace_validation_json : Yojson.Safe.t option;
+  worker_json : Yojson.Safe.t option;
+  conformance_json : Yojson.Safe.t option;
+  worker : Oas.Sessions.worker_run option;
+}
+
+let oas_worker_evidence_payload ~config ~evidence_session_id =
+  let session_root = oas_trace_session_root config in
+  match
+    Oas.Sessions.get_proof_bundle ~session_root ~session_id:evidence_session_id (),
+    Oas.Conformance.run ~session_root ~session_id:evidence_session_id ()
+  with
+  | Ok bundle, Ok report ->
+      let latest_trace_run = bundle.latest_raw_trace_run in
+      let worker = bundle.latest_worker_run in
+      let trace_summary_json =
+        match latest_trace_run with
+        | Some run_ref -> (
+            match
+              List.find_opt
+                (fun (summary : Oas.Sessions.raw_trace_summary) ->
+                  String.equal summary.run_ref.worker_run_id
+                    run_ref.worker_run_id)
+                bundle.raw_trace_summaries
+            with
+            | Some summary -> Some (raw_trace_summary_to_json summary)
+            | None -> None)
+        | None -> None
+      in
+      let trace_validation_json =
+        match latest_trace_run with
+        | Some run_ref -> (
+            match
+              List.find_opt
+                (fun (validation : Oas.Sessions.raw_trace_validation) ->
+                  String.equal validation.run_ref.worker_run_id
+                    run_ref.worker_run_id)
+                bundle.raw_trace_validations
+            with
+            | Some validation -> Some (raw_trace_validation_to_json validation)
+            | None -> None)
+        | None -> None
+      in
+      Some
+        {
+          trace_ref = latest_trace_run;
+          trace_summary_json;
+          trace_validation_json;
+          worker_json = Option.map oas_worker_run_to_json worker;
+          conformance_json = Some (conformance_report_to_json report);
+          worker;
+        }
+  | _ -> None
 
 let tool_trace_of_raw_records (records : Oas.Raw_trace.record list) =
   records
@@ -2174,17 +2358,91 @@ let handle_step ctx args : result =
                   ?resolved_runtime ?resolved_model ?routing_reason
                   ~status
                   ~success ?output_preview ?error ?trace_capability ?trace_ref
-                  ?trace_summary ?trace_validation
+                  ?trace_summary ?trace_validation ?evidence_session_id
                   () =
                 let checkpoint_path =
                   Team_session_store.worker_container_checkpoint_path ctx.config
                     session_id worker_name
                 in
+                let oas_evidence =
+                  Option.bind evidence_session_id (fun evidence_session_id ->
+                      oas_worker_evidence_payload ~config:ctx.config
+                        ~evidence_session_id)
+                in
+                let effective_trace_ref =
+                  match Option.bind oas_evidence (fun payload -> payload.trace_ref) with
+                  | Some _ as value -> value
+                  | None -> trace_ref
+                in
+                let effective_trace_summary =
+                  match
+                    Option.bind oas_evidence (fun payload ->
+                        payload.trace_summary_json)
+                  with
+                  | Some _ as value -> value
+                  | None -> trace_summary
+                in
+                let effective_trace_validation =
+                  match
+                    Option.bind oas_evidence (fun payload ->
+                        payload.trace_validation_json)
+                  with
+                  | Some _ as value -> value
+                  | None -> trace_validation
+                in
+                let oas_worker =
+                  Option.bind oas_evidence (fun payload -> payload.worker)
+                in
+                let effective_status =
+                  match oas_worker with
+                  | Some worker -> oas_worker_status_to_json worker.status
+                  | None -> worker_run_status_to_json status
+                in
                 let trace_capability =
                   match trace_capability with
+                  | _ when Option.is_some oas_worker ->
+                      Option.value ~default:"summary_only"
+                        (Option.map
+                           (fun worker ->
+                             oas_trace_capability_to_string
+                               worker.Oas.Sessions.trace_capability)
+                           oas_worker)
                   | Some value -> value
-                  | None when Option.is_some trace_ref -> "raw"
+                  | None when Option.is_some effective_trace_ref -> "raw"
                   | None -> ignore checkpoint_path; "summary_only"
+                in
+                let effective_tool_names =
+                  match oas_worker with
+                  | Some worker when worker.tool_names <> [] -> worker.tool_names
+                  | _ -> Option.value ~default:[] tool_names
+                in
+                let effective_resolved_model =
+                  match oas_worker with
+                  | Some worker -> (
+                      match worker.resolved_model with
+                      | Some _ as value -> value
+                      | None -> resolved_model)
+                  | None -> resolved_model
+                in
+                let effective_error =
+                  match oas_worker with
+                  | Some worker -> (
+                      match worker.failure_reason with
+                      | Some _ as value -> value
+                      | None -> (
+                          match worker.error with
+                          | Some _ as value -> value
+                          | None -> error))
+                  | None -> error
+                in
+                let effective_output_preview =
+                  match oas_worker with
+                  | Some worker -> (
+                      match worker.final_text with
+                      | Some final_text when String.trim final_text <> "" ->
+                          Some (truncate_for_event final_text)
+                      | _ -> output_preview)
+                  | None -> output_preview
                 in
                 if Room_utils.path_exists ctx.config checkpoint_path then
                   Team_session_store.save_worker_run_checkpoint_text ctx.config
@@ -2197,7 +2455,7 @@ let handle_step ctx args : result =
                       ("worker_run_id", `String worker_run_id);
                       ("worker_name", `String worker_name);
                       ("mode", `String mode);
-                      ("status", worker_run_status_to_json status);
+                      ("status", effective_status);
                       ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
                       ("trace_capability", `String trace_capability);
                       ("success", `Bool success);
@@ -2205,15 +2463,22 @@ let handle_step ctx args : result =
                       ("requested_worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) requested_worker_class);
                       ("requested_worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) requested_worker_size);
                       ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
-                      ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_model);
+                      ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_resolved_model);
                       ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
-                      ("tool_names", Option.fold ~none:(`List []) ~some:(fun names -> `List (List.map (fun name -> `String name) names)) tool_names);
+                      ("tool_names", `List (List.map (fun name -> `String name) effective_tool_names));
                       ("tool_call_count", Option.fold ~none:`Null ~some:(fun n -> `Int n) tool_call_count);
-                      ("output_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) output_preview);
-                      ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) error);
-                      ("trace_ref", Option.fold ~none:`Null ~some:raw_trace_run_ref_to_json trace_ref);
-                      ("trace_summary", Option.fold ~none:`Null ~some:(fun json -> json) trace_summary);
-                      ("trace_validation", Option.fold ~none:`Null ~some:(fun json -> json) trace_validation);
+                      ("output_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_output_preview);
+                      ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_error);
+                      ("trace_ref", Option.fold ~none:`Null ~some:raw_trace_run_ref_to_json effective_trace_ref);
+                      ("trace_summary", Option.fold ~none:`Null ~some:(fun json -> json) effective_trace_summary);
+                      ("trace_validation", Option.fold ~none:`Null ~some:(fun json -> json) effective_trace_validation);
+                      ("evidence_session_id", Option.fold ~none:`Null ~some:(fun s -> `String s) evidence_session_id);
+                      ("oas_worker_run", Option.fold ~none:`Null ~some:(fun json -> json) (Option.bind oas_evidence (fun payload -> payload.worker_json)));
+                      ("session_conformance", Option.fold ~none:`Null ~some:(fun json -> json) (Option.bind oas_evidence (fun payload -> payload.conformance_json)));
+                      ("validated", Option.fold ~none:`Null ~some:(fun worker -> `Bool worker.Oas.Sessions.validated) oas_worker);
+                      ("final_text", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.final_text) oas_worker);
+                      ("stop_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.stop_reason) oas_worker);
+                      ("failure_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.failure_reason) oas_worker);
                       ("ts_iso", `String (Types.now_iso ()));
                     ])
               in
@@ -2485,6 +2750,7 @@ let handle_step ctx args : result =
                                        ?runtime_role:prepared.spec.spawn_role
                                        ?runtime_selection_note:
                                          prepared.spec.spawn_selection_note
+                                       ~worker_run_id:prepared.worker_run_id
                                        ?worker_class:prepared.spec.worker_class
                                        ?worker_size:(worker_size_of_spec prepared.spec)
                                        ?execution_scope:
@@ -2539,6 +2805,11 @@ let handle_step ctx args : result =
                                      ~tool_call_count:spawn_result.tool_call_count
                                      ~success:spawn_result.success
                                      ~output_preview
+                                     ~evidence_session_id:
+                                       (Local_agent_eio
+                                        .oas_worker_evidence_session_id
+                                          ~worker_run_id:
+                                            prepared.worker_run_id)
                                      ?trace_ref:spawn_result.raw_trace_run
                                      ?trace_summary:trace_summary_json
                                      ?trace_validation:trace_validation_json
@@ -2792,7 +3063,8 @@ let handle_step ctx args : result =
                                           ~base_path:ctx.config.base_path
                                           ~room_config:(Some ctx.config)
                                           ~worker_name ~team_session_id:session_id
-                                          ~prompt:delegate_prompt
+                                          ~worker_run_id
+                                          ~prompt:delegate_prompt ()
                                       with
                                       | Ok run_result ->
                                           let output_preview =
@@ -2822,6 +3094,10 @@ let handle_step ctx args : result =
                                             ~tool_call_count:
                                               run_result.tool_call_count
                                             ~success:true ~output_preview
+                                            ~evidence_session_id:
+                                              (Local_agent_eio
+                                               .oas_worker_evidence_session_id
+                                                 ~worker_run_id)
                                             ?trace_ref:run_result.raw_trace_run
                                             ?trace_summary:trace_summary_json
                                             ?trace_validation:trace_validation_json
@@ -2891,6 +3167,10 @@ let handle_step ctx args : result =
                                             ~status:`Failed
                                             ~resolved_runtime:"local"
                                             ~success:false ~error:err
+                                            ~evidence_session_id:
+                                              (Local_agent_eio
+                                               .oas_worker_evidence_session_id
+                                                 ~worker_run_id)
                                             ~trace_capability:"summary_only" ();
                                           append_delegate_event ~worker_run_id
                                             ~worker_name ~delegate_prompt
@@ -3226,107 +3506,227 @@ let handle_verify_trace ctx args : result =
             | Some id when String.trim id <> "" -> Some (String.trim id)
             | _ -> latest_worker_run_id ctx.config session_id
           in
+          let verification_result meta_json worker_run_id =
+            let worker_run_summary =
+              `Assoc
+                [
+                  ("worker_run_id", `String worker_run_id);
+                  ("worker_name", Yojson.Safe.Util.member "worker_name" meta_json);
+                  ("status", Yojson.Safe.Util.member "status" meta_json);
+                  ("mode", Yojson.Safe.Util.member "mode" meta_json);
+                  ("wait_mode", Yojson.Safe.Util.member "wait_mode" meta_json);
+                  ("success", Yojson.Safe.Util.member "success" meta_json);
+                  ("execution_scope", Yojson.Safe.Util.member "execution_scope" meta_json);
+                  ("requested_worker_class", Yojson.Safe.Util.member "requested_worker_class" meta_json);
+                  ("requested_worker_size", Yojson.Safe.Util.member "requested_worker_size" meta_json);
+                  ("resolved_runtime", Yojson.Safe.Util.member "resolved_runtime" meta_json);
+                  ("resolved_model", Yojson.Safe.Util.member "resolved_model" meta_json);
+                  ("routing_reason", Yojson.Safe.Util.member "routing_reason" meta_json);
+                  ("tool_names", Yojson.Safe.Util.member "tool_names" meta_json);
+                  ("tool_call_count", Yojson.Safe.Util.member "tool_call_count" meta_json);
+                  ("output_preview", Yojson.Safe.Util.member "output_preview" meta_json);
+                ]
+            in
+            let session_root = oas_trace_session_root ctx.config in
+            match evidence_session_id_of_json meta_json with
+            | Some evidence_session_id -> (
+                match
+                  Oas.Sessions.get_proof_bundle ~session_root
+                    ~session_id:evidence_session_id (),
+                  Oas.Conformance.run ~session_root
+                    ~session_id:evidence_session_id ()
+                with
+                | Ok bundle, Ok report -> (
+                    match bundle.latest_raw_trace_run with
+                    | Some run_ref -> (
+                        match
+                          Oas.Sessions.get_raw_trace_records ~session_root
+                            ~session_id:evidence_session_id
+                            ~worker_run_id:run_ref.worker_run_id (),
+                          Oas.Sessions.get_raw_trace_summary ~session_root
+                            ~session_id:evidence_session_id
+                            ~worker_run_id:run_ref.worker_run_id (),
+                          Oas.Sessions.validate_raw_trace_run ~session_root
+                            ~session_id:evidence_session_id
+                            ~worker_run_id:run_ref.worker_run_id ()
+                        with
+                        | Ok records, Ok summary, Ok validation ->
+                            let verification =
+                              verification_json ~records ~summary ~validation
+                            in
+                            ( true,
+                              json_ok
+                                [
+                                  ( "result",
+                                    `Assoc
+                                      [
+                                        ("worker_run_id", `String worker_run_id);
+                                        ("trace_capability", `String "raw");
+                                        ( "worker_run",
+                                          Option.fold ~none:worker_run_summary
+                                            ~some:oas_worker_run_to_json
+                                            bundle.latest_worker_run );
+                                        ( "trace_ref",
+                                          raw_trace_run_ref_to_json summary.run_ref );
+                                        ("verification", verification);
+                                        ( "session_conformance",
+                                          conformance_report_to_json report );
+                                      ] );
+                                ] )
+                        | records_result, summary_result, validation_result ->
+                            let detail =
+                              match
+                                records_result, summary_result,
+                                validation_result
+                              with
+                              | Error err, _, _
+                              | _, Error err, _
+                              | _, _, Error err ->
+                                  Oas.Error.to_string err
+                              | _ -> "raw trace verification failed"
+                            in
+                            ( true,
+                              json_ok
+                                [
+                                  ( "result",
+                                    `Assoc
+                                      [
+                                        ("worker_run_id", `String worker_run_id);
+                                        ("trace_capability", `String "summary_only");
+                                        ("ok", `Bool false);
+                                        ("error", `String detail);
+                                        ( "worker_run",
+                                          Option.fold ~none:worker_run_summary
+                                            ~some:oas_worker_run_to_json
+                                            bundle.latest_worker_run );
+                                        ( "session_conformance",
+                                          conformance_report_to_json report );
+                                      ] );
+                                ] ))
+                    | None ->
+                        ( true,
+                          json_ok
+                            [
+                              ( "result",
+                                `Assoc
+                                  [
+                                    ("worker_run_id", `String worker_run_id);
+                                    ("trace_capability", `String "summary_only");
+                                    ("ok", `Bool false);
+                                    ( "error",
+                                      `String
+                                        "direct evidence proof bundle did not contain a raw trace run" );
+                                    ( "worker_run",
+                                      Option.fold ~none:worker_run_summary
+                                        ~some:oas_worker_run_to_json
+                                        bundle.latest_worker_run );
+                                    ( "session_conformance",
+                                      conformance_report_to_json report );
+                                  ] );
+                            ] ))
+                | bundle_result, conformance_result ->
+                    let detail =
+                      match bundle_result, conformance_result with
+                      | Error err, _
+                      | _, Error err ->
+                          Oas.Error.to_string err
+                      | _ -> "direct evidence verification failed"
+                    in
+                    ( true,
+                      json_ok
+                        [
+                          ( "result",
+                            `Assoc
+                              [
+                                ("worker_run_id", `String worker_run_id);
+                                ("trace_capability", `String "summary_only");
+                                ("ok", `Bool false);
+                                ("error", `String detail);
+                                ("worker_run", worker_run_summary);
+                              ] );
+                        ] ))
+            | None -> (
+                match trace_run_locator_of_json meta_json with
+                | Some locator ->
+                    let trace_session_id =
+                      Option.value ~default:session_id locator.session_id
+                    in
+                    (match
+                       Oas.Sessions.get_raw_trace_records ~session_root
+                         ~session_id:trace_session_id
+                         ~worker_run_id:locator.worker_run_id (),
+                       Oas.Sessions.get_raw_trace_summary ~session_root
+                         ~session_id:trace_session_id
+                         ~worker_run_id:locator.worker_run_id (),
+                       Oas.Sessions.validate_raw_trace_run ~session_root
+                         ~session_id:trace_session_id
+                         ~worker_run_id:locator.worker_run_id ()
+                     with
+                    | Ok records, Ok summary, Ok validation ->
+                        let verification =
+                          verification_json ~records ~summary ~validation
+                        in
+                        ( true,
+                          json_ok
+                            [
+                              ( "result",
+                                `Assoc
+                                  [
+                                    ("worker_run_id", `String worker_run_id);
+                                    ("trace_capability", `String "raw");
+                                    ("worker_run", worker_run_summary);
+                                    ( "trace_ref",
+                                      raw_trace_run_ref_to_json summary.run_ref );
+                                    ("verification", verification);
+                                  ] );
+                            ] )
+                    | records_result, summary_result, validation_result ->
+                        let detail =
+                          match
+                            records_result, summary_result, validation_result
+                          with
+                          | Error err, _, _
+                          | _, Error err, _
+                          | _, _, Error err ->
+                              Oas.Error.to_string err
+                          | _ -> "raw trace verification failed"
+                        in
+                        ( true,
+                          json_ok
+                            [
+                              ( "result",
+                                `Assoc
+                                  [
+                                    ("worker_run_id", `String worker_run_id);
+                                    ("trace_capability", `String "summary_only");
+                                    ("ok", `Bool false);
+                                    ("error", `String detail);
+                                    ("worker_run", worker_run_summary);
+                                  ] );
+                            ] ))
+                | None ->
+                    ( true,
+                      json_ok
+                        [
+                          ( "result",
+                            `Assoc
+                              [
+                                ("worker_run_id", `String worker_run_id);
+                                ("trace_capability", `String "summary_only");
+                                ("ok", `Bool false);
+                                ( "error",
+                                  `String
+                                    "raw trace reference missing for worker run" );
+                                ("worker_run", worker_run_summary);
+                              ] );
+                        ] ))
+          in
           match worker_run_id with
           | None -> (false, json_error "no worker run found for session")
-          | Some worker_run_id ->
+          | Some worker_run_id -> (
               match load_worker_run_meta ctx.config session_id worker_run_id with
               | Error e -> (false, json_error e)
-              | Ok meta_json ->
-                  let worker_run_summary =
-                    `Assoc
-                      [
-                        ("worker_run_id", `String worker_run_id);
-                        ("worker_name", Yojson.Safe.Util.member "worker_name" meta_json);
-                        ("status", Yojson.Safe.Util.member "status" meta_json);
-                        ("mode", Yojson.Safe.Util.member "mode" meta_json);
-                        ("wait_mode", Yojson.Safe.Util.member "wait_mode" meta_json);
-                        ("success", Yojson.Safe.Util.member "success" meta_json);
-                        ("execution_scope", Yojson.Safe.Util.member "execution_scope" meta_json);
-                        ("requested_worker_class", Yojson.Safe.Util.member "requested_worker_class" meta_json);
-                        ("requested_worker_size", Yojson.Safe.Util.member "requested_worker_size" meta_json);
-                        ("resolved_runtime", Yojson.Safe.Util.member "resolved_runtime" meta_json);
-                        ("resolved_model", Yojson.Safe.Util.member "resolved_model" meta_json);
-                        ("routing_reason", Yojson.Safe.Util.member "routing_reason" meta_json);
-                        ("tool_names", Yojson.Safe.Util.member "tool_names" meta_json);
-                        ("tool_call_count", Yojson.Safe.Util.member "tool_call_count" meta_json);
-                        ("output_preview", Yojson.Safe.Util.member "output_preview" meta_json);
-                      ]
-                  in
-                  (match trace_run_locator_of_json meta_json with
-                  | Some locator ->
-                      let trace_session_id =
-                        Option.value ~default:session_id locator.session_id
-                      in
-                      let session_root = oas_trace_session_root ctx.config in
-                      (match
-                         Oas.Sessions.get_raw_trace_records ~session_root
-                           ~session_id:trace_session_id
-                           ~worker_run_id:locator.worker_run_id (),
-                         Oas.Sessions.get_raw_trace_summary ~session_root
-                           ~session_id:trace_session_id
-                           ~worker_run_id:locator.worker_run_id (),
-                         Oas.Sessions.validate_raw_trace_run ~session_root
-                           ~session_id:trace_session_id
-                           ~worker_run_id:locator.worker_run_id ()
-                       with
-                      | Ok records, Ok summary, Ok validation ->
-                          let verification =
-                            verification_json ~records ~summary ~validation
-                          in
-                          ( true,
-                            json_ok
-                              [
-                                ( "result",
-                                  `Assoc
-                                    [
-                                      ("worker_run_id", `String worker_run_id);
-                                      ("trace_capability", `String "raw");
-                                      ("worker_run", worker_run_summary);
-                                      ( "trace_ref",
-                                        raw_trace_run_ref_to_json summary.run_ref );
-                                      ("verification", verification);
-                                    ] );
-                              ] )
-                      | records_result, summary_result, validation_result ->
-                          let detail =
-                            match
-                              records_result, summary_result, validation_result
-                            with
-                            | Error err, _, _
-                            | _, Error err, _
-                            | _, _, Error err ->
-                                Oas.Error.to_string err
-                            | _ -> "raw trace verification failed"
-                          in
-                          ( true,
-                            json_ok
-                              [
-                                ( "result",
-                                  `Assoc
-                                    [
-                                      ("worker_run_id", `String worker_run_id);
-                                      ("trace_capability", `String "summary_only");
-                                      ("ok", `Bool false);
-                                      ("error", `String detail);
-                                      ("worker_run", worker_run_summary);
-                                    ] );
-                              ] ))
-                  | None ->
-                      ( true,
-                        json_ok
-                          [
-                            ( "result",
-                              `Assoc
-                                [
-                                  ("worker_run_id", `String worker_run_id);
-                                  ("trace_capability", `String "summary_only");
-                                  ("ok", `Bool false);
-                                  ( "error",
-                                    `String
-                                      "raw trace reference missing for worker run" );
-                                  ("worker_run", worker_run_summary);
-                                ] );
-                          ] )))
+              | Ok meta_json -> verification_result meta_json worker_run_id))
 
 let dispatch ctx ~name ~args : result option =
   match name with

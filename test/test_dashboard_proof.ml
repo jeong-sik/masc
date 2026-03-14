@@ -193,6 +193,25 @@ let seed_worker_run_meta config session_id =
         ("tool_names", `List [ `String "file_write"; `String "shell_exec" ]);
         ("tool_call_count", `Int 2);
         ("output_preview", `String "Patched calc.py and verification passed.");
+        ("validated", `Bool true);
+        ("final_text", `String "Patched calc.py and verification passed.");
+        ("failure_reason", `Null);
+        ( "session_conformance",
+          `Assoc
+            [
+              ("ok", `Bool true);
+              ( "checks",
+                `List
+                  [
+                    `Assoc
+                      [
+                        ("code", `String "proof_bundle_available");
+                        ("name", `String "proof bundle available");
+                        ("passed", `Bool true);
+                        ("detail", `Null);
+                      ];
+                  ] );
+            ] );
         ( "trace_summary",
           `Assoc
             [

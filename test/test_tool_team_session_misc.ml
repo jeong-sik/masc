@@ -403,6 +403,45 @@ let test_verify_trace_reports_summary_only_without_checkpoint () =
     (String.length error > 0);
   cleanup_dir base_dir
 
+let test_verify_trace_reports_summary_only_when_direct_evidence_missing () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"verify-trace-direct-missing" |> get_session_id in
+  let worker_run_id = "run-direct-missing" in
+  Team_session_store.save_worker_run_meta_json config session_id worker_run_id
+    (`Assoc
+      [
+        ("worker_run_id", `String worker_run_id);
+        ("worker_name", `String "llama-local-impl");
+        ("evidence_session_id", `String "missing-direct-session");
+      ]);
+  let verify_ok, verify_body =
+    dispatch_exn ctx ~name:"masc_team_session_verify_trace"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("worker_run_id", `String worker_run_id);
+          ])
+  in
+  Alcotest.(check bool) "verify trace call still succeeds" true verify_ok;
+  let result = parse_json_exn verify_body |> result_field in
+  Alcotest.(check string) "trace capability" "summary_only"
+    Yojson.Safe.Util.(result |> member "trace_capability" |> to_string);
+  Alcotest.(check bool) "summary_only ok=false" false
+    Yojson.Safe.Util.(result |> member "ok" |> to_bool);
+  let error = Yojson.Safe.Util.(result |> member "error" |> to_string) in
+  Alcotest.(check bool) "missing direct evidence surfaced" true
+    (String.length error > 0);
+  cleanup_dir base_dir
+
 let test_delegate_rejects_not_ready_worker_with_guidance () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

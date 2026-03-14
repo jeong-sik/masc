@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.89.0] - 2026-03-14
+
+### Added
+- **OAS Direct Evidence Adoption** — local team-mode workers now materialize OAS `Direct_evidence` bundles per worker run, including lifecycle snapshots, worker summaries, and conformance output for `verify_trace`
+- **Team-Mode Solid Win Surface** — worker-run snapshots, status summaries, and dashboard proof projection now carry validated final text, failure reason, and session conformance for completed team-mode workers
+
+### Changed
+- **Agent SDK Floor** — `masc-mcp` now requires `agent_sdk >= 0.20.0`
+- **Team Worker Evidence SSOT** — `masc_team_session_verify_trace` now prefers OAS direct-evidence sessions and only falls back to legacy raw-trace lookup for older worker runs
+- **Dashboard Worker Evidence** — validated worker evidence is projected from OAS-backed worker summaries while preserving MASC-specific mode/wait/execution overlays
+
 ## [2.88.0] - 2026-03-14
 
 ### Added

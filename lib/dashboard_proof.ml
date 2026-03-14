@@ -245,6 +245,72 @@ let get_or_create_actor table session actor =
 let tool_name_union xs ys =
   Team_session_types.dedup_strings (xs @ ys)
 
+let worker_run_meta_jsons config = function
+  | None -> []
+  | Some session_id ->
+      Team_session_store.list_worker_run_ids config session_id
+      |> List.sort String.compare
+      |> List.rev
+      |> List.filter_map (fun worker_run_id ->
+             let path =
+               Team_session_store.worker_run_meta_path config session_id
+                 worker_run_id
+             in
+             if Room_utils.path_exists config path then
+               Some (Room_utils.read_json config path)
+             else None)
+
+let worker_run_trace_capability json =
+  match U.member "trace_capability" json with
+  | `String value -> Some value
+  | _ -> None
+
+let worker_run_trace_validated json =
+  match U.member "trace_validation" json |> U.member "ok" with
+  | `Bool value -> Some value
+  | _ -> None
+
+let worker_run_validation_failures json =
+  match U.member "trace_validation" json |> U.member "checks" with
+  | `List items ->
+      items
+      |> List.filter_map (fun item ->
+             match U.member "name" item, U.member "passed" item with
+             | `String name, `Bool false -> Some name
+             | _ -> None)
+  | _ -> []
+
+let worker_run_summary_json json =
+  let summary = U.member "trace_summary" json in
+  `Assoc
+    [
+      ("worker_run_id", U.member "worker_run_id" json);
+      ("worker_name", U.member "worker_name" json);
+      ("mode", U.member "mode" json);
+      ("wait_mode", U.member "wait_mode" json);
+      ( "trace_capability",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          (worker_run_trace_capability json) );
+      ( "trace_validated",
+        Option.fold ~none:`Null ~some:(fun v -> `Bool v)
+          (worker_run_trace_validated json) );
+      ( "validation_failures",
+        `List
+          (List.map (fun item -> `String item)
+             (worker_run_validation_failures json)) );
+      ("success", U.member "success" json);
+      ("execution_scope", U.member "execution_scope" json);
+      ("tool_names", U.member "tool_names" json);
+      ("tool_call_count", U.member "tool_call_count" json);
+      ("output_preview", U.member "output_preview" json);
+      ("record_count", U.member "record_count" summary);
+      ("assistant_block_count", U.member "assistant_block_count" summary);
+      ("final_text", U.member "final_text" summary);
+      ("stop_reason", U.member "stop_reason" summary);
+      ("error", U.member "error" summary);
+      ("ts_iso", U.member "ts_iso" json);
+    ]
+
 let actor_activity_state (acc : actor_acc) =
   if acc.observed_event_count > 0 then
     "acted"
@@ -512,7 +578,8 @@ let cp_backing_json config operation_id =
 
 let session_summary_json session verdict ~planned_actor_count ~active_actor_count
     ~mentioned_actor_count ~unanswered_actor_count ~interaction_count
-    ~evidence_count ~cp_trace_count ~live_verdict ~historical_verdict
+    ~evidence_count ~cp_trace_count ~raw_trace_run_count
+    ~validated_worker_run_count ~live_verdict ~historical_verdict
     ~verdict_basis =
   let detail_with_history base_detail =
     match historical_verdict, live_verdict, verdict_basis with
@@ -546,6 +613,8 @@ let session_summary_json session verdict ~planned_actor_count ~active_actor_coun
           ("interaction_count", `Int interaction_count);
           ("evidence_count", `Int evidence_count);
           ("cp_trace_count", `Int cp_trace_count);
+          ("raw_trace_run_count", `Int raw_trace_run_count);
+          ("validated_worker_run_count", `Int validated_worker_run_count);
         ]
   | Some session ->
       let headline =
@@ -584,6 +653,8 @@ let session_summary_json session verdict ~planned_actor_count ~active_actor_coun
           ("interaction_count", `Int interaction_count);
           ("evidence_count", `Int evidence_count);
           ("cp_trace_count", `Int cp_trace_count);
+          ("raw_trace_run_count", `Int raw_trace_run_count);
+          ("validated_worker_run_count", `Int validated_worker_run_count);
         ]
 
 let selection_json ~requested_session_id ~requested_operation_id ~session ~operation_id
@@ -761,6 +832,25 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
     tool_evidence_count > 0 || deliverable_count > 0 || checkpoints_count > 0
     || Option.is_some proof_doc
   in
+  let worker_run_meta = worker_run_meta_jsons config session_id in
+  let raw_trace_run_count =
+    worker_run_meta
+    |> List.fold_left
+         (fun acc json ->
+           match worker_run_trace_capability json with
+           | Some "raw" -> acc + 1
+           | _ -> acc)
+         0
+  in
+  let validated_worker_run_count =
+    worker_run_meta
+    |> List.fold_left
+         (fun acc json ->
+           match worker_run_trace_validated json with
+           | Some true -> acc + 1
+           | _ -> acc)
+         0
+  in
   let live_verdict =
     proof_verdict ~active_actor_count ~interaction_present:(interaction_count > 0)
       ~evidence_present ~artifact_present
@@ -829,11 +919,25 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
           ~active_actor_count ~mentioned_actor_count ~unanswered_actor_count
           ~interaction_count
           ~evidence_count:(tool_evidence_count + deliverable_count + checkpoints_count)
-          ~cp_trace_count ~live_verdict ~historical_verdict ~verdict_basis );
+          ~cp_trace_count ~raw_trace_run_count ~validated_worker_run_count
+          ~live_verdict ~historical_verdict ~verdict_basis );
       ("timeline", timeline_json ?session_id ?operation_id events cp_traces);
       ("actor_contributions", `List (actor_contributions_json contributions));
       ("goal_binding", goal_binding);
       ("tool_evidence", tool_evidence);
+      ( "worker_run_evidence",
+        `List
+          (worker_run_meta
+          |> List.filter (fun json ->
+                 match worker_run_trace_capability json with
+                 | Some "raw" | Some "summary_only" -> true
+                 | _ -> false)
+          |> List.fold_left
+               (fun acc json ->
+                 if List.length acc >= 12 then acc
+                 else worker_run_summary_json json :: acc)
+               []
+          |> List.rev) );
       ("cp_backing_evidence", match cp_backing with Some value -> value | None -> `Null);
       ("artifacts", `List artifact_paths);
       ("raw_proof", match proof_doc with Some value -> value | None -> `Null);

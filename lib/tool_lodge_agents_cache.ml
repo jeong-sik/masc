@@ -207,9 +207,18 @@ let load_agents_from_cache_if_available () =
   else
     false
 
+let prime_builtin_core_agents () =
+  Mutex.lock agent_cache_mu;
+  List.iter
+    (fun cfg -> Hashtbl.replace agent_cache cfg.name cfg)
+    (builtin_core_agent_configs ());
+  Mutex.unlock agent_cache_mu
+
 (** Load agents from Neo4j via GraphQL API with file cache fallback *)
 let load_agents_config () =
-  if load_agents_from_cache_if_available () then begin
+  if not Env_config.LodgeV2.enabled then begin
+    if not (has_cached_agents_in_memory ()) then prime_builtin_core_agents ()
+  end else if load_agents_from_cache_if_available () then begin
     Printf.eprintf "[Lodge] Using cached agents (skipping GraphQL bootstrap)\n%!";
   end else begin
     Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
@@ -271,9 +280,7 @@ let load_agents_config () =
       Printf.eprintf "[Lodge] Trying file cache fallback...\n%!";
       if not (load_agents_from_file_cache ()) then begin
         Printf.eprintf "[Lodge] Falling back to builtin core identities\n%!";
-        Mutex.lock agent_cache_mu;
-        List.iter (fun cfg -> Hashtbl.replace agent_cache cfg.name cfg) (builtin_core_agent_configs ());
-        Mutex.unlock agent_cache_mu;
+        prime_builtin_core_agents ();
       end;
       if not (has_cached_agents_in_memory ()) then
         Printf.eprintf "[Lodge] ⚠ No agents available (GraphQL failed, no valid cache)\n%!"
@@ -410,7 +417,8 @@ let record_feedback ~name ~dimension ~is_positive =
 (** Initialize Lodge module after Eio context is ready.
     Call from main_eio.ml after Eio_context.set_net *)
 let init () =
-  (* Load agents for evolution triggers *)
+  (* load_agents_config already handles the Lodge-disabled path by priming
+     builtin identities without touching GraphQL or file cache. *)
   load_agents_config ()
 
 (** Module initialization - only register callbacks (no network calls) *)

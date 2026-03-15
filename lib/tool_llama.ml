@@ -316,6 +316,51 @@ let string_member json key =
   let open Yojson.Safe.Util in
   Option.bind (member key json |> to_string_option) trim_to_option
 
+let provider_health_reachable ~status ~body:_ =
+  (* Reachability should reflect whether the health endpoint answered
+     successfully, not the exact body encoding. Current runtimes return either
+     plain text or JSON payloads for /health. *)
+  status = Some 200
+
+let classify_runtime_blocker ~provider_reachable ~slot_reachable ~expected_model
+    ~actual_model_id ~expected_slots ~actual_slots_total ~expected_ctx ~actual_ctx
+    =
+  if not provider_reachable || not slot_reachable then
+    (Some "provider_unreachable", Some "llama runtime health or slots endpoint failed")
+  else if
+    match expected_model, actual_model_id with
+    | Some expected, Some actual -> not (String.equal expected actual)
+    | Some _, None -> true
+    | _ -> false
+  then
+    ( Some "provider_model_mismatch",
+      Some
+        (Printf.sprintf "expected model %s, got %s"
+           (Option.value ~default:"<missing>" expected_model)
+           (Option.value ~default:"<mixed-or-missing>" actual_model_id)) )
+  else if
+    match expected_slots with
+    | Some expected -> actual_slots_total < expected
+    | None -> false
+  then
+    ( Some "slot_count_insufficient",
+      Some
+        (Printf.sprintf "expected at least %d slots, got %d"
+           (Option.value ~default:0 expected_slots) actual_slots_total) )
+  else if
+    match expected_ctx, actual_ctx with
+    | Some expected, Some actual -> expected <> actual
+    | Some _, None -> true
+    | _ -> false
+  then
+    ( Some "ctx_mismatch",
+      Some
+        (Printf.sprintf "expected ctx %s, got %s"
+           (match expected_ctx with Some value -> string_of_int value | None -> "<none>")
+           (match actual_ctx with Some value -> string_of_int value | None -> "<mixed-or-missing>")) )
+  else
+    (None, None)
+
 let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () =
   let runtimes = runtime_snapshots_for_pool runtime_pool in
   let configured_capacity =
@@ -361,8 +406,7 @@ let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_mo
         in
         let provider_ok' =
           provider_ok
-          && provider_status = Some 200
-          && (match provider_body with Some body -> String.trim body = "ok" | None -> false)
+          && provider_health_reachable ~status:provider_status ~body:provider_body
         in
         let slot_ok' = slot_ok && slot_status = Some 200 in
         let actual_slots =
@@ -428,41 +472,8 @@ let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_mo
     | _ -> None
   in
   let runtime_blocker, detail =
-    if not provider_reachable || not slot_reachable then
-      (Some "provider_unreachable", Some "llama runtime health or slots endpoint failed")
-    else if
-      match expected_model, actual_model_id with
-      | Some expected, Some actual -> not (String.equal expected actual)
-      | Some _, None -> true
-      | _ -> false
-    then
-      ( Some "provider_model_mismatch",
-        Some
-          (Printf.sprintf "expected model %s, got %s"
-             (Option.value ~default:"<missing>" expected_model)
-             (Option.value ~default:"<mixed-or-missing>" actual_model_id)) )
-    else if
-      match expected_slots with
-      | Some expected -> actual_slots_total < expected
-      | None -> false
-    then
-      ( Some "slot_count_insufficient",
-        Some
-          (Printf.sprintf "expected at least %d slots, got %d"
-             (Option.value ~default:0 expected_slots) actual_slots_total) )
-    else if
-      match expected_ctx, actual_ctx with
-      | Some expected, Some actual -> expected <> actual
-      | Some _, None -> true
-      | _ -> false
-    then
-      ( Some "ctx_mismatch",
-        Some
-          (Printf.sprintf "expected ctx %s, got %s"
-             (match expected_ctx with Some value -> string_of_int value | None -> "<none>")
-             (match actual_ctx with Some value -> string_of_int value | None -> "<mixed-or-missing>")) )
-    else
-      (None, None)
+    classify_runtime_blocker ~provider_reachable ~slot_reachable ~expected_model
+      ~actual_model_id ~expected_slots ~actual_slots_total ~expected_ctx ~actual_ctx
   in
   `Assoc
     [

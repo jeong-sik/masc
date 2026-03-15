@@ -44,3 +44,13 @@ let publish_task_transition (bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id ~
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:task_transition", payload))
+
+(** Publish a heartbeat recovery event to the OAS Event_bus.
+    Emitted when a previously timed-out agent re-activates. *)
+let publish_heartbeat_recovered (bus : Agent_sdk.Event_bus.t) ~agent_name ~previous_timeout_s =
+  let payload = `Assoc [
+    ("agent_name", `String agent_name);
+    ("previous_timeout_s", `Float previous_timeout_s);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:heartbeat_recovered", payload))

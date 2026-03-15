@@ -19,6 +19,11 @@ let result_to_response = function
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 
+(** Validate task_id is non-empty. Prevents phantom operations on empty IDs. *)
+let validate_task_id task_id =
+  if task_id = "" then Error (Types.TaskNotFound "")
+  else Ok task_id
+
 (* Handlers *)
 
 let handle_add_task ctx args =
@@ -42,6 +47,9 @@ let handle_batch_add_tasks ctx args =
 
 let handle_claim ctx args =
   let task_id = get_string args "task_id" "" in
+  match validate_task_id task_id with
+  | Error e -> result_to_response (Error e)
+  | Ok task_id ->
   let agent_role = match get_string args "agent_role" "" with
     | "" -> Agent_identity.Unassigned
     | s -> Agent_identity.role_of_string s
@@ -68,12 +76,18 @@ let handle_claim_next ctx _args =
 
 let handle_release ctx args =
   let task_id = get_string args "task_id" "" in
+  match validate_task_id task_id with
+  | Error e -> result_to_response (Error e)
+  | Ok task_id ->
   let expected_version = get_int_opt args "expected_version" in
   result_to_response
     (Room.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ?expected_version ())
 
 let handle_done ctx args =
   let task_id = get_string args "task_id" "" in
+  match validate_task_id task_id with
+  | Error e -> result_to_response (Error e)
+  | Ok task_id ->
   let notes = get_string args "notes" "" in
   (* Get task info BEFORE completion to extract actual start time *)
   let tasks = Room.get_tasks_raw ctx.config in
@@ -192,6 +206,9 @@ let handle_cancel_task ctx args =
 
 let handle_transition ctx args =
   let task_id = get_string args "task_id" "" in
+  match validate_task_id task_id with
+  | Error e -> result_to_response (Error e)
+  | Ok task_id ->
   let action = get_string args "action" "" in
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in

@@ -39,7 +39,6 @@ let local_mlx_config () : Provider.config =
   { provider = Local { base_url = "http://127.0.0.1:3033" };
     model_id = "qwen3.5";
     api_key_env = "DUMMY_KEY" }
-
 let resolve_provider name =
   match name with
   | "local-qwen" -> Some (local_qwen_config ())

@@ -146,6 +146,11 @@
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
 
 (test
+ (name test_oas_integration)
+ (modules test_oas_integration)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
+
+(test
  (name test_agent_swarm_unit)
  (modules test_agent_swarm_unit)
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))

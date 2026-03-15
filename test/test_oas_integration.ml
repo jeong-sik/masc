@@ -1,0 +1,192 @@
+(** Tests for OAS integration modules: oas_compat, oas_events, oas_checkpoint_bridge. *)
+
+open Agent_sdk
+open Masc_mcp
+
+(* ================================================================ *)
+(* Oas_compat tests                                                  *)
+(* ================================================================ *)
+
+let test_tool_ok () =
+  let result = Oas_compat.tool_ok "hello" in
+  match result with
+  | Ok out ->
+    Alcotest.(check string) "content" "hello" out.Agent_sdk.Types.content
+  | Error _ -> Alcotest.fail "expected Ok"
+
+let test_tool_error_default_recoverable () =
+  let result = Oas_compat.tool_error "fail" in
+  match result with
+  | Error err ->
+    Alcotest.(check string) "message" "fail" err.Agent_sdk.Types.message;
+    Alcotest.(check bool) "recoverable default true" true err.Agent_sdk.Types.recoverable
+  | Ok _ -> Alcotest.fail "expected Error"
+
+let test_tool_error_non_recoverable () =
+  let result = Oas_compat.tool_error ~recoverable:false "fatal" in
+  match result with
+  | Error err ->
+    Alcotest.(check bool) "recoverable false" false err.Agent_sdk.Types.recoverable
+  | Ok _ -> Alcotest.fail "expected Error"
+
+let test_adapt_result_ok () =
+  let result = Oas_compat.adapt_result (Ok "content") in
+  match result with
+  | Ok out -> Alcotest.(check string) "adapted ok" "content" out.Agent_sdk.Types.content
+  | Error _ -> Alcotest.fail "expected Ok"
+
+let test_adapt_result_error () =
+  let result = Oas_compat.adapt_result (Error "err msg") in
+  match result with
+  | Error err -> Alcotest.(check string) "adapted error" "err msg" err.Agent_sdk.Types.message
+  | Ok _ -> Alcotest.fail "expected Error"
+
+(* ================================================================ *)
+(* Oas_events tests                                                  *)
+(* ================================================================ *)
+
+let test_event_bus_broadcast () =
+  Eio_main.run @@ fun _env ->
+  let bus = Event_bus.create () in
+  let sub = Event_bus.subscribe bus in
+  Oas_events.publish_broadcast bus ~agent_name:"test-agent" ~content:"hello";
+  let events = Event_bus.drain sub in
+  Alcotest.(check int) "one event" 1 (List.length events);
+  match List.hd events with
+  | Event_bus.Custom ("masc:broadcast", payload) ->
+    let agent = Yojson.Safe.Util.(member "agent_name" payload |> to_string) in
+    Alcotest.(check string) "agent name" "test-agent" agent
+  | _ -> Alcotest.fail "expected Custom masc:broadcast event"
+
+let test_event_bus_heartbeat () =
+  Eio_main.run @@ fun _env ->
+  let bus = Event_bus.create () in
+  let sub = Event_bus.subscribe bus in
+  Oas_events.publish_heartbeat bus ~agent_name:"perpetual" ~turn:5 ~context_pct:0.42;
+  let events = Event_bus.drain sub in
+  Alcotest.(check int) "one event" 1 (List.length events);
+  match List.hd events with
+  | Event_bus.Custom ("masc:heartbeat", payload) ->
+    let turn = Yojson.Safe.Util.(member "turn" payload |> to_int) in
+    Alcotest.(check int) "turn" 5 turn
+  | _ -> Alcotest.fail "expected Custom masc:heartbeat event"
+
+let test_event_bus_task_transition () =
+  Eio_main.run @@ fun _env ->
+  let bus = Event_bus.create () in
+  let sub = Event_bus.subscribe bus in
+  Oas_events.publish_task_transition bus ~agent_name:"worker"
+    ~task_id:"task-1" ~transition:"done";
+  let events = Event_bus.drain sub in
+  Alcotest.(check int) "one event" 1 (List.length events);
+  match List.hd events with
+  | Event_bus.Custom ("masc:task_transition", payload) ->
+    let tid = Yojson.Safe.Util.(member "task_id" payload |> to_string) in
+    Alcotest.(check string) "task id" "task-1" tid
+  | _ -> Alcotest.fail "expected Custom masc:task_transition event"
+
+(* ================================================================ *)
+(* Oas_checkpoint_bridge tests                                       *)
+(* ================================================================ *)
+
+let test_message_roundtrip () =
+  let masc_msg : Llm_client.message = {
+    role = Llm_client.Assistant;
+    content = "test content";
+    name = None;
+    tool_call_id = None;
+  } in
+  let oas_msg = Oas_checkpoint_bridge.masc_msg_to_oas masc_msg in
+  let roundtrip = Oas_checkpoint_bridge.oas_msg_to_masc oas_msg in
+  Alcotest.(check string) "role preserved"
+    "assistant"
+    (match roundtrip.role with Llm_client.Assistant -> "assistant" | _ -> "other");
+  Alcotest.(check string) "content preserved"
+    "test content" roundtrip.content
+
+let test_system_role_maps_to_user () =
+  let masc_msg : Llm_client.message = {
+    role = Llm_client.System;
+    content = "system prompt";
+    name = None;
+    tool_call_id = None;
+  } in
+  let oas_msg = Oas_checkpoint_bridge.masc_msg_to_oas masc_msg in
+  Alcotest.(check string) "system maps to user"
+    "user"
+    (match oas_msg.Agent_sdk.Types.role with
+     | Agent_sdk.Types.User -> "user"
+     | Agent_sdk.Types.Assistant -> "assistant")
+
+let test_restore_messages () =
+  let oas_msgs : Agent_sdk.Types.message list = [
+    { Agent_sdk.Types.role = Agent_sdk.Types.User;
+      content = [Agent_sdk.Types.Text "hello"] };
+    { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+      content = [Agent_sdk.Types.Text "world"] };
+  ] in
+  let masc_msgs = Oas_checkpoint_bridge.restore_messages oas_msgs in
+  Alcotest.(check int) "2 messages" 2 (List.length masc_msgs);
+  Alcotest.(check string) "first content" "hello"
+    (List.hd masc_msgs).Llm_client.content
+
+(* ================================================================ *)
+(* Context_manager OAS sync tests                                    *)
+(* ================================================================ *)
+
+let test_oas_context_sync () =
+  let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:1000 in
+  let ctx = Context_manager.append ctx
+    (Llm_client.user_msg "hello") in
+  let ctx = Context_manager.sync_oas_context ctx in
+  let msg_count =
+    Context.get_scoped ctx.oas_context Context.Session "message_count" in
+  (match msg_count with
+   | Some (`Int n) -> Alcotest.(check int) "message count synced" 1 n
+   | _ -> Alcotest.fail "expected message_count in oas_context")
+
+let test_compact_syncs_oas_context () =
+  let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:1000 in
+  let ctx = Context_manager.append ctx (Llm_client.user_msg "msg1") in
+  let ctx = Context_manager.append ctx (Llm_client.assistant_msg "msg2") in
+  let ctx = Context_manager.compact ctx [Context_manager.MergeContiguous] in
+  let ratio =
+    Context.get_scoped ctx.oas_context Context.Session "context_ratio" in
+  (match ratio with
+   | Some (`Float r) ->
+     Alcotest.(check bool) "ratio is non-negative" true (r >= 0.0)
+   | _ -> Alcotest.fail "expected context_ratio in oas_context after compact")
+
+(* ================================================================ *)
+(* Runner                                                            *)
+(* ================================================================ *)
+
+let () =
+  Alcotest.run "OAS Integration" [
+    "oas_compat", [
+      Alcotest.test_case "tool_ok wraps content" `Quick test_tool_ok;
+      Alcotest.test_case "tool_error default recoverable" `Quick
+        test_tool_error_default_recoverable;
+      Alcotest.test_case "tool_error non-recoverable" `Quick
+        test_tool_error_non_recoverable;
+      Alcotest.test_case "adapt_result Ok" `Quick test_adapt_result_ok;
+      Alcotest.test_case "adapt_result Error" `Quick test_adapt_result_error;
+    ];
+    "oas_events", [
+      Alcotest.test_case "broadcast event" `Quick test_event_bus_broadcast;
+      Alcotest.test_case "heartbeat event" `Quick test_event_bus_heartbeat;
+      Alcotest.test_case "task transition event" `Quick
+        test_event_bus_task_transition;
+    ];
+    "oas_checkpoint_bridge", [
+      Alcotest.test_case "message roundtrip" `Quick test_message_roundtrip;
+      Alcotest.test_case "system role maps to user" `Quick
+        test_system_role_maps_to_user;
+      Alcotest.test_case "restore messages" `Quick test_restore_messages;
+    ];
+    "context_oas_sync", [
+      Alcotest.test_case "sync_oas_context" `Quick test_oas_context_sync;
+      Alcotest.test_case "compact syncs oas" `Quick
+        test_compact_syncs_oas_context;
+    ];
+  ]

@@ -18,6 +18,7 @@ type working_context = {
   token_count : int;                (** Estimated tokens in window *)
   max_tokens : int;                 (** Model context limit *)
   importance_scores : (int * float) list;  (** msg_index → importance 0.0-1.0 *)
+  oas_context : Agent_sdk.Context.t;  (** OAS scoped key-value store (Tier 1 bridge) *)
 }
 
 (** {1 Session Context} *)
@@ -89,6 +90,10 @@ val apply_strategy : working_context -> compaction_strategy -> working_context
 
 (** Apply a pipeline of compaction strategies in order. *)
 val compact : working_context -> compaction_strategy list -> working_context
+
+(** Sync working context stats (message_count, token_count, context_ratio)
+    into the OAS Context scoped keys. Called automatically by [compact]. *)
+val sync_oas_context : working_context -> working_context
 
 (** Extract [STATE] ... [/STATE] blocks from free-form text.
     Returns the block bodies in appearance order. *)

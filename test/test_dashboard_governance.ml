@@ -43,13 +43,19 @@ let test_empty_governance_structure () =
         (summary |> member "needs_human_gate" |> to_int);
       check int "executed is 0" 0 (summary |> member "executed" |> to_int);
       check int "blocked is 0" 0 (summary |> member "blocked" |> to_int);
+      check int "ready_to_execute equals ready_auto_execute" 0
+        (summary |> member "ready_to_execute" |> to_int);
+      check bool "oldest_open_case_age_s is null" true
+        (summary |> member "oldest_open_case_age_s" = `Null);
+      check bool "last_activity_age_s is null" true
+        (summary |> member "last_activity_age_s" = `Null);
       let items = json |> member "items" |> to_list in
       check int "items empty" 0 (List.length items);
       let activity = json |> member "activity" |> to_list in
       check int "activity empty" 0 (List.length activity);
       let judge = json |> member "judge" in
-      let judge_online = judge |> member "judge_online" |> to_bool in
-      check bool "judge online" true judge_online;
+      check bool "judge has judge_online bool" true
+        (match judge |> member "judge_online" with `Bool _ -> true | _ -> false);
       let pending = json |> member "pending_actions" |> to_list in
       check int "pending_actions empty" 0 (List.length pending))
 

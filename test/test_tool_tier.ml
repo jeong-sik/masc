@@ -25,8 +25,8 @@ let () =
                   check bool (name ^ " is essential") true
                     (Tool_catalog.tool_tier name = Tool_catalog.Essential))
                 essential);
-          test_case "count is 20" `Quick (fun () ->
-              check int "essential count" 20
+          test_case "count is 21" `Quick (fun () ->
+              check int "essential count" 21
                 (Tool_catalog.tier_tool_count Tool_catalog.Essential));
         ] );
       ( "standard_tools",

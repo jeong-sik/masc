@@ -2638,6 +2638,161 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     ~config:state.Mcp_server.room_config ~sw ~clock
     ~proc_mgr:state.Mcp_server.proc_mgr ()
 
+let dashboard_room_truth_focus_json ~initialized ~operator_digest_json ~top_queue =
+  let recommendation_summary =
+    json_assoc_field "recommendation_summary" operator_digest_json
+  in
+  let attention_summary = json_assoc_field "attention_summary" operator_digest_json in
+  let focus_of_recommendation top_action provenance =
+    `Assoc
+      [
+        ("label", `String "운영 권고");
+        ("reason", Yojson.Safe.Util.member "reason" top_action);
+        ("source", `String "operator");
+        ("provenance", `String provenance);
+        ("target_kind", `String "action");
+        ("target_id", Yojson.Safe.Util.member "target_id" top_action);
+        ("suggested_tab", `String "intervene");
+        ("suggested_surface", `Null);
+        ( "suggested_params",
+          `Assoc
+            [
+              ("action_type", Yojson.Safe.Util.member "action_type" top_action);
+              ("target_type", Yojson.Safe.Util.member "target_type" top_action);
+              ("target_id", Yojson.Safe.Util.member "target_id" top_action);
+            ] );
+      ]
+  in
+  let focus_of_attention top_item provenance =
+    let target_type = json_string_field_opt "target_type" top_item in
+    let target_id = json_string_field_opt "target_id" top_item in
+    `Assoc
+      [
+        ("label", `String "주의 필요");
+        ( "reason",
+          match json_string_field_opt "summary" top_item with
+          | Some summary -> `String summary
+          | None -> `String "Operator attention item requires follow-up." );
+        ("source", `String "operator");
+        ("provenance", `String provenance);
+        ("target_kind", `String "attention");
+        ( "target_id",
+          match target_id with
+          | Some value -> `String value
+          | None -> `Null );
+        ("suggested_tab", `String "intervene");
+        ("suggested_surface", `Null);
+        ( "suggested_params",
+          `Assoc
+            (List.filter_map
+               (fun (key, value_opt) ->
+                 Option.map (fun value -> (key, `String value)) value_opt)
+               [ ("target_type", target_type); ("target_id", target_id) ]) );
+      ]
+  in
+  let focus_of_queue queue =
+    let target_type =
+      json_string_field_opt "target_type" queue |> Option.value ~default:"execution"
+    in
+    let target_id = json_string_field_opt "target_id" queue in
+    let linked_session_id = json_string_field_opt "linked_session_id" queue in
+    let linked_operation_id = json_string_field_opt "linked_operation_id" queue in
+    let suggested_tab, suggested_surface, suggested_params =
+      match linked_session_id with
+      | Some session_id ->
+          ( "intervene",
+            None,
+            `Assoc
+              [
+                ("target_type", `String "team_session");
+                ("target_id", `String session_id);
+              ] )
+      | None -> (
+          match linked_operation_id with
+          | Some operation_id ->
+              ( "command",
+                Some "operations",
+                `Assoc [ ("operation_id", `String operation_id) ] )
+          | None ->
+              ( "command",
+                Some "summary",
+                `Assoc
+                  (List.filter_map
+                     (fun (key, value_opt) ->
+                       Option.map (fun value -> (key, `String value)) value_opt)
+                     [ ("target_type", Some target_type); ("target_id", target_id) ]) ))
+    in
+    `Assoc
+      [
+        ( "label",
+          `String
+            (match json_string_field_opt "summary" queue with
+            | Some summary -> summary
+            | None -> "Execution queue requires attention.") );
+        ( "reason",
+          `String
+            (match json_string_field_opt "summary" queue with
+            | Some summary -> summary
+            | None -> "Top execution queue item is the next drill-down target.") );
+        ("source", `String "execution");
+        ("provenance", `String "derived");
+        ("target_kind", `String "queue");
+        ( "target_id",
+          match target_id with
+          | Some value -> `String value
+          | None -> `Null );
+        ("suggested_tab", `String suggested_tab);
+        ( "suggested_surface",
+          match suggested_surface with
+          | Some value -> `String value
+          | None -> `Null );
+        ("suggested_params", suggested_params);
+      ]
+  in
+  match json_record_field "top_action" recommendation_summary with
+  | Some top_action ->
+      let provenance =
+        Option.value
+          ~default:"fallback"
+          (json_string_field_opt "provenance" recommendation_summary)
+      in
+      focus_of_recommendation top_action provenance
+  | None -> (
+      match json_record_field "top_item" attention_summary with
+      | Some top_item ->
+          let provenance =
+            Option.value
+              ~default:"derived"
+              (json_string_field_opt "provenance" attention_summary)
+          in
+          focus_of_attention top_item provenance
+      | None -> (
+          match top_queue with
+          | `Assoc _ as queue -> focus_of_queue queue
+          | _ ->
+              `Assoc
+                [
+                  ( "label",
+                    `String
+                      (if initialized then
+                         "지금은 방 전체가 비교적 안정적입니다"
+                       else
+                         "초기 room truth") );
+                  ( "reason",
+                    `String
+                      (if initialized then
+                         "Room-wide view is healthy enough; start from the command overview."
+                       else
+                         "방이 아직 초기화되지 않았습니다. 기본 room 상태부터 확인하세요.") );
+                  ("source", `String (if initialized then "room" else "orchestra"));
+                  ("provenance", `String (if initialized then "fallback" else "derived"));
+                  ("target_kind", `String "node");
+                  ("target_id", `String "room:default");
+                  ("suggested_tab", `String "command");
+                  ("suggested_surface", `String "summary");
+                  ("suggested_params", `Assoc []);
+                ]))
+
 let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let config = state.Mcp_server.room_config in
   let actor = operator_actor_hint request in
@@ -2672,31 +2827,6 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
             ("recommendation_summary", `Assoc [ ("count", `Int 0); ("provenance", `String "fallback") ]);
             ("error", `String message);
           ]
-  in
-  let operator_snapshot_json =
-    Operator_control.snapshot_json ?actor
-      ~include_messages:false ~include_sessions:false ~include_keepers:false
-      operator_ctx
-  in
-  let orchestra_json =
-    if Room.is_initialized config then
-      try Command_plane_orchestra.json operator_ctx with _ -> `Assoc []
-    else
-      `Assoc
-        [
-          ( "focus",
-            `Assoc
-              [
-                ("label", `String "초기 room truth");
-                ("reason", `String "방이 아직 초기화되지 않았습니다. 기본 room 상태부터 확인하세요.");
-                ("source", `String "orchestra");
-                ("provenance", `String "derived");
-                ("target_kind", `String "node");
-                ("target_id", `String "room:default");
-                ("suggested_surface", `String "summary");
-                ("suggested_params", `Assoc []);
-              ] );
-        ]
   in
   let execution_queue =
     match Yojson.Safe.Util.member "execution_queue" execution_json with
@@ -2799,57 +2929,9 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       ]
   in
   let focus_json =
-    match json_record_field "focus" orchestra_json with
-    | Some focus ->
-        let suggested_surface = json_string_field_opt "suggested_surface" focus in
-        let suggested_tab =
-          match suggested_surface with
-          | Some "intervene" -> "intervene"
-          | _ -> "command"
-        in
-        `Assoc
-          [
-            ("label", Yojson.Safe.Util.member "label" focus);
-            ("reason", Yojson.Safe.Util.member "reason" focus);
-            ("source", `String "orchestra");
-            ("provenance", `String "derived");
-            ("target_kind", Yojson.Safe.Util.member "target_kind" focus);
-            ("target_id", Yojson.Safe.Util.member "target_id" focus);
-            ("suggested_tab", `String suggested_tab);
-            ( "suggested_surface",
-              match suggested_surface with
-              | Some value when not (String.equal value "intervene") -> `String value
-              | _ -> `Null );
-            ("suggested_params", json_assoc_field "suggested_params" focus);
-          ]
-    | None -> (
-        let recommendation_summary =
-          json_assoc_field "recommendation_summary" operator_digest_json
-        in
-        match json_record_field "top_action" recommendation_summary with
-        | Some top_action ->
-            `Assoc
-              [
-                ("label", `String "운영 권고");
-                ("reason", Yojson.Safe.Util.member "reason" top_action);
-                ("source", `String "operator");
-                ( "provenance",
-                  match json_string_field_opt "provenance" recommendation_summary with
-                  | Some value -> `String value
-                  | None -> `String "fallback" );
-                ("target_kind", `String "action");
-                ("target_id", Yojson.Safe.Util.member "target_id" top_action);
-                ("suggested_tab", `String "intervene");
-                ("suggested_surface", `Null);
-                ( "suggested_params",
-                  `Assoc
-                    [
-                      ("action_type", Yojson.Safe.Util.member "action_type" top_action);
-                      ("target_type", Yojson.Safe.Util.member "target_type" top_action);
-                      ("target_id", Yojson.Safe.Util.member "target_id" top_action);
-                    ] );
-              ]
-        | None -> `Null)
+    dashboard_room_truth_focus_json
+      ~initialized:(Room.is_initialized config)
+      ~operator_digest_json ~top_queue
   in
   `Assoc
     [
@@ -2877,7 +2959,7 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
             ( "recommendation_summary",
               json_assoc_field "recommendation_summary" operator_digest_json );
             ( "pending_confirm_summary",
-              json_assoc_field "pending_confirm_summary" operator_snapshot_json );
+              json_assoc_field "pending_confirm_summary" operator_digest_json );
             ("provenance", `String "derived");
           ] );
       ("focus", focus_json);

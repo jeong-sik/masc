@@ -102,6 +102,7 @@ function jsonHeaders(): Record<string, string> {
 const DEFAULT_GET_TIMEOUT_MS = 15_000
 const DEFAULT_POST_TIMEOUT_MS = 30_000
 const DEFAULT_MCP_TIMEOUT_MS = 60_000
+const ROOM_TRUTH_GET_TIMEOUT_MS = 30_000
 const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
 
 class ApiRequestError extends Error {
@@ -170,8 +171,16 @@ function defaultBoardVoter(): string {
 
 // --- Generic fetcher ---
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetchWithTimeout(path, { headers: authHeaders() }, DEFAULT_GET_TIMEOUT_MS)
+type GetOptions = {
+  timeoutMs?: number
+}
+
+async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
+  const res = await fetchWithTimeout(
+    path,
+    { headers: authHeaders() },
+    opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
+  )
   if (!res.ok) {
     throw new ApiRequestError({
       method: 'GET',
@@ -534,7 +543,7 @@ export function fetchDashboardShell(): Promise<DashboardShellResponse> {
 }
 
 export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
-  return get('/api/v1/dashboard/room-truth')
+  return get('/api/v1/dashboard/room-truth', { timeoutMs: ROOM_TRUTH_GET_TIMEOUT_MS })
 }
 
 export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {

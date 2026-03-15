@@ -222,16 +222,21 @@ let keeper_policies_json ctx =
 let tool_inventory_json ctx ~include_hidden ~include_deprecated =
   let room_path = Room.masc_dir ctx.config in
   let cfg = Config.load room_path in
-  (* Build reverse index: tool_name -> surface string list *)
+  (* Build reverse index: tool_name -> surface string list.
+     Also index by backend_tool_name so keeper/privileged surfaces
+     are attached to the public tool name they dispatch to. *)
   let surface_map : (string, string list) Hashtbl.t = Hashtbl.create 256 in
+  let add_surface name s =
+    let prev =
+      match Hashtbl.find_opt surface_map name with Some l -> l | None -> []
+    in
+    if not (List.mem s prev) then Hashtbl.replace surface_map name (s :: prev)
+  in
   List.iter
     (fun (seed : Capability_registry.capability_seed) ->
-      let name = seed.projection.tool_name in
       let s = Capability_registry.surface_to_string seed.projection.surface in
-      let prev =
-        match Hashtbl.find_opt surface_map name with Some l -> l | None -> []
-      in
-      if not (List.mem s prev) then Hashtbl.replace surface_map name (s :: prev))
+      add_surface seed.projection.tool_name s;
+      add_surface seed.projection.backend_tool_name s)
     (Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas);
   let schemas =
     Config.raw_all_tool_schemas

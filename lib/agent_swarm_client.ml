@@ -145,13 +145,13 @@ let leave ~sw t =
     ~arguments:[("agent_name", `String t.agent_name)]
 
 let status ~sw t =
-  call_operation_assoc ~sw t ~operation_id:"masc_status"
+  call_operation_assoc ~sw t ~operation_id:"masc_room_status"
     ~arguments:[]
 
 (* --- Task operations --- *)
 
 let list_tasks ~sw t =
-  call_operation_assoc ~sw t ~operation_id:"masc_tasks"
+  call_operation_assoc ~sw t ~operation_id:"masc_list_tasks"
     ~arguments:[]
 
 let add_task ~sw t ~title ~description =
@@ -174,10 +174,8 @@ let batch_add_tasks ~sw t ~tasks =
     ~arguments:[("tasks", tasks_json)]
 
 let claim ~sw t ~task_id =
-  call_operation_assoc ~sw t ~operation_id:"masc_transition"
+  call_operation_assoc ~sw t ~operation_id:"masc_claim_task"
     ~arguments:[
-      ("action", `String "claim");
-      ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
     ]
 
@@ -186,32 +184,26 @@ let claim_next ~sw t =
     ~arguments:[("agent_name", `String t.agent_name)]
 
 let set_current_task ~sw t ~task_id =
-  call_operation_assoc ~sw t ~operation_id:"masc_plan_set_task"
+  call_operation_assoc ~sw t ~operation_id:"masc_set_current_task"
     ~arguments:[
       ("task_id", `String task_id);
     ]
 
 let done_task ~sw t ~task_id =
-  call_operation_assoc ~sw t ~operation_id:"masc_transition"
+  call_operation_assoc ~sw t ~operation_id:"masc_complete_task"
     ~arguments:[
-      ("action", `String "done");
-      ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
     ]
 
 let release_task ~sw t ~task_id =
-  call_operation_assoc ~sw t ~operation_id:"masc_transition"
+  call_operation_assoc ~sw t ~operation_id:"masc_release_task"
     ~arguments:[
-      ("action", `String "release");
-      ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
     ]
 
 let cancel_task ~sw t ~task_id ~reason =
-  call_operation_assoc ~sw t ~operation_id:"masc_transition"
+  call_operation_assoc ~sw t ~operation_id:"masc_cancel_task"
     ~arguments:[
-      ("action", `String "cancel");
-      ("agent_name", `String t.agent_name);
       ("task_id", `String task_id);
       ("reason", `String reason);
     ]
@@ -228,10 +220,9 @@ let broadcast ~sw t ~message =
 (** Send a direct message to a specific agent. Unlike broadcast (room-wide),
     this is private 1:1 delivery. *)
 let send_direct ~sw t ~target ~message =
-  call_operation_assoc ~sw t ~operation_id:"masc_a2a_delegate"
+  call_operation_assoc ~sw t ~operation_id:"masc_send_direct"
     ~arguments:[
       ("target_agent", `String target);
-      ("task_type", `String "async");
       ("message", `String message);
     ]
 

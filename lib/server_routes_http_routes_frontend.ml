@@ -113,6 +113,7 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/mcp/operator" handle_get_operator_mcp
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
+  |> Http.Router.post "/mcp/managed" (handle_post_mcp ~profile:Mcp_eio.Managed_agent)
   |> Http.Router.post "/mcp/operator" (handle_post_mcp ~profile:Mcp_eio.Operator_remote)
   |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->

@@ -311,8 +311,31 @@ let manifest_json cfg =
       ("workers", `List workers);
     ]
 
+let seed_tasks ~sw ~net ~masc_url plans =
+  let coordinator =
+    Agent_swarm_client.create_managed ~net ~base_url:masc_url
+      ~agent_name:"swarm-coordinator"
+  in
+  (match Agent_swarm_client.join ~sw coordinator with
+   | Error e ->
+       Printf.eprintf "[swarm-coordinator] MASC join warning: %s\n%!" e
+   | Ok _ -> ());
+  let tasks =
+    List.map
+      (fun (plan : worker_plan) -> (plan.task_title, plan.task_description))
+      plans
+  in
+  (match Agent_swarm_client.batch_add_tasks ~sw coordinator ~tasks with
+   | Error e ->
+       Printf.eprintf "[swarm-coordinator] batch_add_tasks warning: %s\n%!" e
+   | Ok _ ->
+       Printf.eprintf "[swarm-coordinator] seeded %d tasks\n%!"
+         (List.length tasks));
+  ignore (Agent_swarm_client.leave ~sw coordinator)
+
 let run ~sw ~net ~clock cfg =
   let plans = build_worker_plans ~worker_count:cfg.worker_count cfg.run_id in
+  seed_tasks ~sw ~net ~masc_url:cfg.masc_url plans;
   let swarm_config =
     {
       Agent_swarm_swarm.masc_url = cfg.masc_url;

@@ -558,8 +558,7 @@ let tool_trace_of_raw_records (records : Oas.Raw_trace.record list) =
                      Option.fold ~none:`Null ~some:(fun s -> `String s)
                        record.error );
                  ])
-         | Oas.Raw_trace.Run_started -> None
-         | Oas.Raw_trace.Hook_invoked -> None)
+         | Oas.Raw_trace.Run_started | Oas.Raw_trace.Hook_invoked -> None)
 
 let verification_rollup_of_trace trace =
   let uses =

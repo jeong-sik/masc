@@ -2523,3 +2523,15 @@ export async function fetchKeeperAutonomy(name: string): Promise<import('./types
     return null
   }
 }
+
+// --- Social Graph ---
+
+export async function fetchSocialGraph(): Promise<import('./types').SocialGraphResponse | null> {
+  try {
+    const resp = await fetchWithTimeout('/api/v1/social-graph', {}, 10000)
+    if (!resp.ok) return null
+    return (await resp.json()) as import('./types').SocialGraphResponse
+  } catch {
+    return null
+  }
+}

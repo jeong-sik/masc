@@ -175,6 +175,66 @@ let add_routes router =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  (* Mention Inbox API *)
+  |> Http.Router.prefix_get "/api/v1/mentions/" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let path = Http.Request.path request in
+         let prefix = "/api/v1/mentions/" in
+         let agent_name =
+           String.sub path (String.length prefix)
+             (String.length path - String.length prefix)
+         in
+         let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+         let mentions =
+           Mention_inbox.read_mentions state.Mcp_server.room_config
+             ~target_agent:agent_name ~limit
+         in
+         let unread =
+           Mention_inbox.unread_count state.Mcp_server.room_config
+             ~target_agent:agent_name
+         in
+         let json = `Assoc [
+           ("agent", `String agent_name);
+           ("unread_count", `Int unread);
+           ("mentions", `List (List.map Mention_inbox.mention_record_to_json mentions));
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  (* Agent Reputation API *)
+  |> Http.Router.prefix_get "/api/v1/reputation/" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let path = Http.Request.path request in
+         let prefix = "/api/v1/reputation/" in
+         let agent_name =
+           String.sub path (String.length prefix)
+             (String.length path - String.length prefix)
+         in
+         let rep =
+           Agent_reputation.compute_reputation
+             state.Mcp_server.room_config ~agent_name
+         in
+         Http.Response.json
+           (Yojson.Safe.to_string (Agent_reputation.reputation_to_json rep))
+           reqd
+       ) request reqd)
+
+  (* Activity Feed API *)
+  |> Http.Router.get "/api/v1/activity" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let agent_name = query_param req "agent" in
+         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+         let items =
+           Activity_feed.recent_activity state.Mcp_server.room_config
+             ?agent_name ~limit ()
+         in
+         let json = `Assoc [
+           ("items", `List (List.map Activity_feed.activity_item_to_json items));
+           ("count", `Int (List.length items));
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   (* Lodge Agents REST API — GET public, POST admin *)
   |> Http.Router.add ~path:"/api/v1/lodge/agents" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->

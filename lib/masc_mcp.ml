@@ -91,6 +91,9 @@ module Council = Council
 module Social = Social
 module Social_motion = Social_motion
 module Social_runtime = Social_runtime
+module Mention_inbox = Mention_inbox
+module Agent_reputation = Agent_reputation
+module Activity_feed = Activity_feed
 module Task_pg = Task_pg
 module Task_dispatch = Task_dispatch
 module Web_dashboard = Web_dashboard
@@ -310,12 +313,16 @@ module Anti_fake = Anti_fake
 (* Keeper Autonomy Engine (Phase 2: autonomy slider + verifier) *)
 module Keeper_autonomy = Keeper_autonomy
 module Keeper_verifier = Keeper_verifier
+module Keeper_contract = Keeper_contract
+module Keeper_deliberation = Keeper_deliberation
 module Keeper_types = Keeper_types
 module Keeper_memory = Keeper_memory
 module Keeper_alerting = Keeper_alerting
 module Keeper_exec_tools = Keeper_exec_tools
 module Keeper_exec_status = Keeper_exec_status
 module Keeper_execution = Keeper_execution
+module Keeper_learning = Keeper_learning
+module Keeper_feedback_tool = Keeper_feedback_tool
 module Keeper_keepalive = Keeper_keepalive
 module Keeper_runtime = Keeper_runtime
 

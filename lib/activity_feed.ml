@@ -1,0 +1,267 @@
+(** Activity_feed — Unified activity timeline
+
+    Aggregates events from different JSONL sources into a single
+    chronological timeline for agent dashboards and keeper observations.
+
+    Sources:
+    - Task files (`.masc/tasks/*.json`)
+    - Board posts (`.masc/board_posts.jsonl`)
+    - Board comments (`.masc/board_comments.jsonl`)
+    - Mention inbox (`.masc/mention_inbox.jsonl`)
+    - Debates (`.masc/debates/*.json`)
+
+    @since Phase 3B — Keeper Deliberation Engine
+*)
+
+type activity_item = {
+  id: string;
+  kind: string;
+  agent_name: string;
+  summary: string;
+  detail_json: Yojson.Safe.t;
+  created_at: float;
+}
+
+(** {1 JSON Serialization} *)
+
+let activity_item_to_json (item : activity_item) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String item.id);
+    ("kind", `String item.kind);
+    ("agent_name", `String item.agent_name);
+    ("summary", `String item.summary);
+    ("detail_json", item.detail_json);
+    ("created_at", `Float item.created_at);
+  ]
+
+let activity_item_of_json (json : Yojson.Safe.t) : activity_item option =
+  try
+    let id = Safe_ops.json_string ~default:"" "id" json in
+    let kind = Safe_ops.json_string ~default:"" "kind" json in
+    let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
+    let summary = Safe_ops.json_string ~default:"" "summary" json in
+    let detail_json =
+      try Yojson.Safe.Util.member "detail_json" json
+      with _ -> `Null
+    in
+    let created_at = Safe_ops.json_float ~default:0.0 "created_at" json in
+    if id = "" then None
+    else Some { id; kind; agent_name; summary; detail_json; created_at }
+  with _ -> None
+
+(** {1 JSONL Helpers} *)
+
+let load_jsonl_safe (path : string) : Yojson.Safe.t list =
+  if not (Sys.file_exists path) then []
+  else
+    match Safe_ops.read_file_safe path with
+    | Error _ -> []
+    | Ok content ->
+      String.split_on_char '\n' content
+      |> List.filter (fun line -> String.length (String.trim line) > 0)
+      |> List.filter_map (fun line ->
+          try Some (Yojson.Safe.from_string line)
+          with Yojson.Json_error _ -> None)
+
+(** {1 Source Readers} *)
+
+(** Read task activity from `.masc/tasks/` directory. *)
+let task_activities (config : Room.config) : activity_item list =
+  let tasks_dir = Filename.concat (Room.masc_dir config) "tasks" in
+  if not (Sys.file_exists tasks_dir) || not (Sys.is_directory tasks_dir) then []
+  else
+    let files =
+      try Sys.readdir tasks_dir |> Array.to_list
+      with Sys_error _ -> []
+    in
+    files
+    |> List.filter (fun fname -> Filename.check_suffix fname ".json")
+    |> List.filter_map (fun fname ->
+        let path = Filename.concat tasks_dir fname in
+        match Safe_ops.read_json_file_safe path with
+        | Error _ -> None
+        | Ok json ->
+          let id = Safe_ops.json_string ~default:"" "id" json in
+          let status = Safe_ops.json_string ~default:"" "status" json in
+          let assignee = Safe_ops.json_string ~default:"" "assignee" json in
+          let title = Safe_ops.json_string ~default:"" "title" json in
+          let created_at_str = Safe_ops.json_string ~default:"" "created_at" json in
+          let created_at =
+            (* Try to parse ISO timestamp to float, fallback to 0.0 *)
+            try
+              Scanf.sscanf created_at_str "%d-%d-%dT%d:%d:%d"
+                (fun y m d h mi s ->
+                   let tm = {
+                     Unix.tm_sec = s; tm_min = mi; tm_hour = h;
+                     tm_mday = d; tm_mon = m - 1; tm_year = y - 1900;
+                     tm_wday = 0; tm_yday = 0; tm_isdst = false;
+                   } in
+                   let (t, _) = Unix.mktime tm in t)
+            with _ -> 0.0
+          in
+          let agent = if assignee <> "" then assignee else "system" in
+          let summary = Printf.sprintf "Task %s: %s (%s)" id title status in
+          if id = "" then None
+          else Some {
+            id = "act-task-" ^ id;
+            kind = "task";
+            agent_name = agent;
+            summary;
+            detail_json = json;
+            created_at;
+          })
+
+(** Read board post activity from `.masc/board_posts.jsonl`. *)
+let board_post_activities (config : Room.config) : activity_item list =
+  let path = Filename.concat (Room.masc_dir config) "board_posts.jsonl" in
+  load_jsonl_safe path
+  |> List.filter_map (fun json ->
+      let id = Safe_ops.json_string ~default:"" "id" json in
+      let author = Safe_ops.json_string ~default:"" "author" json in
+      let title = Safe_ops.json_string ~default:"" "title" json in
+      let content = Safe_ops.json_string ~default:"" "content" json in
+      let created_at = Safe_ops.json_float ~default:0.0 "created_at" json in
+      if id = "" then None
+      else
+        let preview = if title <> "" then title
+          else if String.length content > 80 then String.sub content 0 80 ^ "..."
+          else content
+        in
+        Some {
+          id = "act-post-" ^ id;
+          kind = "board_post";
+          agent_name = author;
+          summary = Printf.sprintf "Posted: %s" preview;
+          detail_json = json;
+          created_at;
+        })
+
+(** Read board comment activity from `.masc/board_comments.jsonl`. *)
+let board_comment_activities (config : Room.config) : activity_item list =
+  let path = Filename.concat (Room.masc_dir config) "board_comments.jsonl" in
+  load_jsonl_safe path
+  |> List.filter_map (fun json ->
+      let id = Safe_ops.json_string ~default:"" "id" json in
+      let author = Safe_ops.json_string ~default:"" "author" json in
+      let content = Safe_ops.json_string ~default:"" "content" json in
+      let created_at = Safe_ops.json_float ~default:0.0 "created_at" json in
+      if id = "" then None
+      else
+        let preview =
+          if String.length content > 80 then String.sub content 0 80 ^ "..."
+          else content
+        in
+        Some {
+          id = "act-comment-" ^ id;
+          kind = "board_comment";
+          agent_name = author;
+          summary = Printf.sprintf "Commented: %s" preview;
+          detail_json = json;
+          created_at;
+        })
+
+(** Read mention activity from `.masc/mention_inbox.jsonl`. *)
+let mention_activities (config : Room.config) : activity_item list =
+  let path = Mention_inbox.inbox_path config in
+  load_jsonl_safe path
+  |> List.filter_map (fun json ->
+      let id = Safe_ops.json_string ~default:"" "id" json in
+      let source_agent = Safe_ops.json_string ~default:"" "source_agent" json in
+      let target_agent = Safe_ops.json_string ~default:"" "target_agent" json in
+      let content_preview = Safe_ops.json_string ~default:"" "content_preview" json in
+      let created_at = Safe_ops.json_float ~default:0.0 "created_at" json in
+      if id = "" then None
+      else Some {
+        id = "act-mention-" ^ id;
+        kind = "mention";
+        agent_name = source_agent;
+        summary = Printf.sprintf "@%s mentioned @%s: %s"
+                    source_agent target_agent
+                    (if String.length content_preview > 60
+                     then String.sub content_preview 0 60 ^ "..."
+                     else content_preview);
+        detail_json = json;
+        created_at;
+      })
+
+(** Read debate activity from `.masc/debates/` directory. *)
+let debate_activities (config : Room.config) : activity_item list =
+  let debates_dir = Filename.concat (Room.masc_dir config) "debates" in
+  if not (Sys.file_exists debates_dir) || not (Sys.is_directory debates_dir) then []
+  else
+    let files =
+      try Sys.readdir debates_dir |> Array.to_list
+      with Sys_error _ -> []
+    in
+    files
+    |> List.filter (fun fname -> Filename.check_suffix fname ".json")
+    |> List.filter_map (fun fname ->
+        let path = Filename.concat debates_dir fname in
+        match Safe_ops.read_json_file_safe path with
+        | Error _ -> None
+        | Ok json ->
+          let id = Safe_ops.json_string ~default:"" "id" json in
+          let topic = Safe_ops.json_string ~default:"" "topic" json in
+          let status = Safe_ops.json_string ~default:"" "status" json in
+          let created_at = Safe_ops.json_float ~default:0.0 "created_at" json in
+          (* Extract participating agents from arguments *)
+          let agents =
+            try
+              Yojson.Safe.Util.member "arguments" json
+              |> Yojson.Safe.Util.to_list
+              |> List.filter_map (fun arg ->
+                  let a = Safe_ops.json_string ~default:"" "agent" arg in
+                  if a <> "" then Some a else None)
+            with _ -> []
+          in
+          if id = "" then None
+          else
+            (* Create one activity per participating agent *)
+            match agents with
+            | [] ->
+              Some [{
+                id = "act-debate-" ^ id;
+                kind = "debate";
+                agent_name = "system";
+                summary = Printf.sprintf "Debate: %s (%s)" topic status;
+                detail_json = json;
+                created_at;
+              }]
+            | agents ->
+              Some (List.map (fun agent ->
+                  { id = Printf.sprintf "act-debate-%s-%s" id agent;
+                    kind = "debate";
+                    agent_name = agent;
+                    summary = Printf.sprintf "Debated: %s (%s)" topic status;
+                    detail_json = json;
+                    created_at;
+                  }) agents))
+    |> List.flatten
+
+(** {1 Unified Timeline} *)
+
+let recent_activity (config : Room.config) ?agent_name ~(limit : int) ()
+    : activity_item list =
+  let all_items =
+    List.concat [
+      task_activities config;
+      board_post_activities config;
+      board_comment_activities config;
+      mention_activities config;
+      debate_activities config;
+    ]
+  in
+  let filtered = match agent_name with
+    | None -> all_items
+    | Some name ->
+      List.filter (fun item -> item.agent_name = name) all_items
+  in
+  let sorted =
+    List.sort (fun a b -> compare b.created_at a.created_at) filtered
+  in
+  let rec take n acc = function
+    | [] -> List.rev acc
+    | _ when n <= 0 -> List.rev acc
+    | x :: rest -> take (n - 1) (x :: acc) rest
+  in
+  take limit [] sorted

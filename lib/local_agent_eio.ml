@@ -1106,9 +1106,11 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt
                    ~args
                with
                | Ok result when result.is_error ->
-                 Error Oas.Types.{ message = result.text; recoverable = true }
-               | Ok result -> Ok Oas.Types.{ content = result.text }
-               | Error e -> Error Oas.Types.{ message = e; recoverable = true }
+                 Error { Oas.Types.message = result.text; recoverable = false }
+               | Ok result ->
+                 Ok { Oas.Types.content = result.text }
+               | Error e ->
+                 Error { Oas.Types.message = e; recoverable = false }
              in
              Oas.Mcp.mcp_tool_to_sdk_tool ~call_fn
                {

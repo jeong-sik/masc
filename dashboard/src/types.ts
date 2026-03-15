@@ -2958,6 +2958,7 @@ export type TabId =
   | 'intervene'
   | 'command'
   | 'lab'
+  | 'social'
 
 export const VALID_TABS: TabId[] = [
   'mission',
@@ -2971,4 +2972,51 @@ export const VALID_TABS: TabId[] = [
   'intervene',
   'command',
   'lab',
+  'social',
 ]
+
+// --- Social Graph types ---
+
+export interface SocialGraphNode {
+  id: string
+  label: string
+  type: string
+  weight: number
+  kind: string
+  status: string
+}
+
+export interface SocialGraphEdge {
+  source: string
+  target: string
+  type: string
+  weight: number
+  kind: string
+  active: boolean
+}
+
+export interface SocialGraphTimelineEvent {
+  kind: string
+  actor: Record<string, unknown>
+  summary: string
+  subject: { id: string; type: string } | null
+  ts: number
+  ts_iso: string
+  seq: number
+  room_id: string
+  tags: string[]
+  payload: Record<string, unknown>
+}
+
+export interface SocialGraphStats {
+  [key: string]: number
+}
+
+export interface SocialGraphResponse {
+  nodes: SocialGraphNode[]
+  edges: SocialGraphEdge[]
+  stats: SocialGraphStats
+  timeline: SocialGraphTimelineEvent[]
+  generated_at: string
+  window: { start: number; end: number; limit: number; room_id: string }
+}

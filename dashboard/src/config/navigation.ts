@@ -83,6 +83,13 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     description: '토론, 표결, 판단 구조를 규범과 결정의 관점에서 읽는 표면',
   },
   {
+    id: 'social',
+    label: '소셜',
+    icon: '\uD83D\uDD17',
+    group: 'why',
+    description: '에이전트 관계 그래프와 활동 흐름을 보는 사회 분석 표면',
+  },
+  {
     id: 'planning',
     label: '계획',
     icon: '\uD83C\uDFAF',

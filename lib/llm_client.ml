@@ -575,7 +575,7 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
               call_arguments = fn |> member "arguments" |> to_string;
             }
           with exn ->
-            ignore (Printexc.to_string exn);
+            Printf.eprintf "[WARN] [llm] tool_call parse failed: %s\n%!" (Printexc.to_string exn);
             None
         ) calls
       | _ -> (
@@ -1084,7 +1084,7 @@ let rec model_spec_of_string s =
             provider = Custom "mlx";
             model_id;
             max_context = 128000;
-            api_url = "http://127.0.0.1:8091";
+            api_url = Env_config_runtime.Mlx.server_url;
             api_key_env = None;
             cost_per_1k_input = 0.0;
             cost_per_1k_output = 0.0;
@@ -1097,7 +1097,7 @@ let rec model_spec_of_string s =
               ( String.sub model_id 0 at_idx,
                 String.sub model_id (at_idx + 1)
                   (String.length model_id - at_idx - 1) )
-            | None -> (model_id, "http://127.0.0.1:8080")
+            | None -> (model_id, Env_config_runtime.Custom_llm.default_server_url)
           in
           Ok {
             provider = Custom actual_model;

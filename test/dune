@@ -940,3 +940,9 @@
  (name test_workflow_guide)
  (modules test_workflow_guide)
  (libraries masc_mcp alcotest yojson))
+
+; Agent Neo4j — parameterized Cypher query safety tests
+(test
+ (name test_agent_neo4j)
+ (modules test_agent_neo4j)
+ (libraries masc_mcp alcotest yojson))

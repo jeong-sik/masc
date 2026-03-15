@@ -79,11 +79,19 @@ module Tracker = struct
 
   (** Forward reference for notify - breaks circular dependency.
       See wire-up comment below for INVARIANT. *)
+  let wired = ref false
+
   let notify_ref : (task_id:string -> progress:float -> ?message:string -> ?estimated_remaining:float -> unit -> unit) ref =
     ref (fun ~task_id ~progress ?message:_ ?estimated_remaining:_ () ->
-      (* WARNING: If you see this, notify_ref was never wired up! *)
       Printf.eprintf "[Progress] BUG: notify_ref not wired up! task=%s progress=%.2f\n%!" task_id progress
     )
+
+  (** Assert that notify_ref has been wired up.
+      Call at server startup to catch initialization ordering bugs early. *)
+  let assert_wired () =
+    if not !wired then
+      failwith "Progress.Tracker.notify_ref was never wired up. \
+                Ensure Progress module initialization runs before use."
 
   let create ~task_id ?(total_steps=100) () = {
     task_id;
@@ -176,7 +184,9 @@ let notify ~task_id ~progress ?message ?estimated_remaining () =
     If omitted, Tracker.update/step/complete will log BUG warnings to stderr.
     This pattern breaks circular dependency: Tracker needs notify, State needs Tracker.
     Alternative: recursive modules or functors (more complex). *)
-let () = Tracker.notify_ref := notify
+let () =
+  Tracker.notify_ref := notify;
+  Tracker.wired := true
 
 (** Start tracking a task *)
 let start_tracking ~task_id ?total_steps () =

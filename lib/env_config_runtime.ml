@@ -144,4 +144,64 @@ module Cancellation = struct
     get_float ~default:3600.0 "MASC_CANCELLATION_TOKEN_MAX_AGE_SEC"
 end
 
+(** {1 Neo4j Configuration} *)
+
+module Neo4j = struct
+  (** Bolt connection URI *)
+  let uri =
+    get_string ~default:"bolt://turntable.proxy.rlwy.net:11490" "NEO4J_URI"
+
+  (** HTTP API URI (overrides bolt-to-HTTP conversion when set) *)
+  let http_uri =
+    get_string ~default:"" "NEO4J_HTTP_URI"
+
+  (** Database user *)
+  let user =
+    get_string ~default:"neo4j" "NEO4J_USER"
+
+  (** Require NEO4J_PASSWORD from environment. Returns Error if unset or empty. *)
+  let password_result () : (string, string) result =
+    match Sys.getenv_opt "NEO4J_PASSWORD" with
+    | Some pw when String.trim pw <> "" -> Ok pw
+    | Some _ -> Error "NEO4J_PASSWORD is set but empty"
+    | None -> Error "NEO4J_PASSWORD not set"
+end
+
+(** {1 Voice Bridge Configuration} *)
+
+module Voice = struct
+  (** Default Voice MCP server host *)
+  let default_host =
+    get_string ~default:"127.0.0.1" "VOICE_MCP_HOST"
+
+  (** Default Voice MCP server port *)
+  let default_port =
+    get_int ~default:8936 "VOICE_MCP_PORT"
+end
+
+(** {1 LLM Provider Defaults} *)
+
+module Mlx = struct
+  (** MLX local server URL *)
+  let server_url =
+    get_string ~default:"http://127.0.0.1:8091" "MLX_SERVER_URL"
+end
+
+module Custom_llm = struct
+  (** Default URL for custom OpenAI-compatible server *)
+  let default_server_url =
+    get_string ~default:"http://127.0.0.1:8080" "CUSTOM_LLM_SERVER_URL"
+end
+
+(** {1 Network Utilities} *)
+
+module Network = struct
+  (** Check if a host string refers to the local machine.
+      Covers localhost, 127.0.0.0/8 (any 127.x address), and ::1. *)
+  let is_localhost host =
+    host = "localhost"
+    || host = "::1"
+    || String.length host >= 4 && String.sub host 0 4 = "127."
+end
+
 (** {1 Internal Guardian Configuration} *)

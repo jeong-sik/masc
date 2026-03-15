@@ -18,6 +18,8 @@ export const roomTruth = signal<DashboardRoomTruthResponse | null>(null)
 export const roomTruthLoading = signal(false)
 export const roomTruthError = signal<string | null>(null)
 
+let inflightRoomTruthRefresh: Promise<void> | null = null
+
 function normalizeServerStatus(raw: unknown): ServerStatus | null {
   if (!isRecord(raw)) return null
   return {
@@ -227,14 +229,21 @@ function normalizeRoomTruth(raw: unknown): DashboardRoomTruthResponse {
 }
 
 export async function refreshRoomTruth(): Promise<void> {
+  if (inflightRoomTruthRefresh) return inflightRoomTruthRefresh
+
   roomTruthLoading.value = true
   roomTruthError.value = null
-  try {
-    const raw = await fetchDashboardRoomTruth()
-    roomTruth.value = normalizeRoomTruth(raw)
-  } catch (err) {
-    roomTruthError.value = err instanceof Error ? err.message : 'Failed to load room truth'
-  } finally {
-    roomTruthLoading.value = false
-  }
+  inflightRoomTruthRefresh = (async () => {
+    try {
+      const raw = await fetchDashboardRoomTruth()
+      roomTruth.value = normalizeRoomTruth(raw)
+    } catch (err) {
+      roomTruthError.value = err instanceof Error ? err.message : 'Failed to load room truth'
+    } finally {
+      roomTruthLoading.value = false
+      inflightRoomTruthRefresh = null
+    }
+  })()
+
+  return inflightRoomTruthRefresh
 }

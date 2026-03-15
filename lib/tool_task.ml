@@ -213,9 +213,28 @@ let handle_transition ctx args =
         | _ -> (default_time, []))
     | None -> (default_time, [])
   in
-  let result =
-    Room.transition_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~action ?expected_version ~notes ~reason ()
+  let max_cas_retries = 3 in
+  let cas_retry_delay_s = 0.05 in
+  let is_version_mismatch = function
+    | Error (Types.TaskInvalidState msg) ->
+        let prefix = "Version mismatch" in
+        String.length msg >= String.length prefix
+        && String.sub msg 0 (String.length prefix) = prefix
+    | _ -> false
   in
+  let rec try_transition attempt =
+    let ev = if attempt = 0 then expected_version else None in
+    let r = Room.transition_task_r ctx.config ~agent_name:ctx.agent_name
+              ~task_id ~action ?expected_version:ev ~notes ~reason () in
+    if is_version_mismatch r && attempt < max_cas_retries then begin
+      Printf.eprintf "[task] CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms\n%!"
+        task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
+      Unix.sleepf cas_retry_delay_s;
+      try_transition (attempt + 1)
+    end else
+      r
+  in
+  let result = try_transition 0 in
   (* Notify A2A subscribers on successful transition *)
   (match result with
    | Ok _ ->

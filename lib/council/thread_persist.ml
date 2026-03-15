@@ -226,8 +226,11 @@ let truncate_for_log s =
   let max_len = 500 in
   if String.length s <= max_len then s else String.sub s 0 max_len ^ "..."
 
+(** Check if host refers to the local machine. Covers 127.0.0.0/8, not just 127.0.0.1. *)
 let looks_like_localhost host =
-  host = "localhost" || host = "127.0.0.1" || host = "::1"
+  host = "localhost"
+  || host = "::1"
+  || String.length host >= 4 && String.sub host 0 4 = "127."
 
 let neo4j_http_base_uri () : (Uri.t, string) result =
   (* Prefer explicit HTTP URI if provided to avoid bolt/http port mismatches. *)

@@ -57,6 +57,11 @@ let local_playback_enabled_for_agent agent_id =
   | Ok config -> Voice_config.local_playback_enabled_for_agent config agent_id
   | Error _ -> false
 
+let default_voice_uri path =
+  let host = Env_config_runtime.Voice.default_host in
+  let port = Env_config_runtime.Voice.default_port in
+  Uri.make ~scheme:"http" ~host ~port ~path ()
+
 let voice_mcp_uri () =
   match load_voice_config () with
   | Ok config -> (
@@ -64,9 +69,9 @@ let voice_mcp_uri () =
       | Ok endpoint -> (
           match Provider_adapter.voice_session_mcp_url_of_endpoint endpoint with
           | Ok url -> Uri.of_string url
-          | Error _ -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" () )
-      | Error _ -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ())
-  | Error _ -> Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/mcp" ()
+          | Error _ -> default_voice_uri "/mcp" )
+      | Error _ -> default_voice_uri "/mcp")
+  | Error _ -> default_voice_uri "/mcp"
 
 let voice_health_uri () =
   match load_voice_config () with
@@ -75,18 +80,19 @@ let voice_health_uri () =
       | Ok endpoint -> (
           match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
           | Ok url -> Uri.of_string url
-          | Error _ ->
-              Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" () )
-      | Error _ ->
-          Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ())
-  | Error _ ->
-      Uri.make ~scheme:"http" ~host:"127.0.0.1" ~port:8936 ~path:"/health" ()
+          | Error _ -> default_voice_uri "/health" )
+      | Error _ -> default_voice_uri "/health")
+  | Error _ -> default_voice_uri "/health"
 
 let voice_mcp_host () =
-  match Uri.host (voice_mcp_uri ()) with Some host -> host | None -> "127.0.0.1"
+  match Uri.host (voice_mcp_uri ()) with
+  | Some host -> host
+  | None -> Env_config_runtime.Voice.default_host
 
 let voice_mcp_port () =
-  match Uri.port (voice_mcp_uri ()) with Some port -> port | None -> 8936
+  match Uri.port (voice_mcp_uri ()) with
+  | Some port -> port
+  | None -> Env_config_runtime.Voice.default_port
 
 let client_for_uri ~net uri =
   if Uri.scheme uri = Some "https" then

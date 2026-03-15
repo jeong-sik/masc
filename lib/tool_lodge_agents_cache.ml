@@ -417,9 +417,9 @@ let record_feedback ~name ~dimension ~is_positive =
 (** Initialize Lodge module after Eio context is ready.
     Call from main_eio.ml after Eio_context.set_net *)
 let init () =
-  if Env_config.LodgeV2.enabled then
-    (* Load agents for evolution triggers *)
-    load_agents_config ()
+  (* load_agents_config already handles the Lodge-disabled path by priming
+     builtin identities without touching GraphQL or file cache. *)
+  load_agents_config ()
 
 (** Module initialization - only register callbacks (no network calls) *)
 let () =

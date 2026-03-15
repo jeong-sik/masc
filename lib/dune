@@ -165,6 +165,7 @@
    lodge_memory
    lodge_memory_gc
    lodge_reaction
+   lodge_topic
    lodge_tom
    lodge_selection
    memory_stream

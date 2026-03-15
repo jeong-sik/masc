@@ -315,24 +315,10 @@ let get_or_compute_signature ~agent_name : agent_signature =
 (** {1 Topic Extraction} *)
 
 (** Extract topics from post content.
-    Simple keyword extraction — can be enhanced with NLP later. *)
+    Delegates to Lodge_topic which supports Heuristic/LLM/Hybrid modes.
+    @since 4.1.0 — LLM-based extraction via MASC_TOPIC_MODE env var *)
 let extract_topics (content : string) : string list =
-  (* Common tech/domain keywords to look for *)
-  let keywords = [
-    "ocaml"; "eio"; "graphql"; "neo4j"; "rust"; "typescript"; "react";
-    "agent"; "mcp"; "llm"; "ai"; "ml"; "api"; "webrtc"; "grpc";
-    "postgresql"; "sqlite"; "redis"; "vector";
-    "test"; "debug"; "deploy"; "ci"; "docker"; "kubernetes";
-    "architecture"; "design"; "pattern"; "refactor";
-    "performance"; "memory"; "concurrency"; "async";
-  ] in
-
-  let lower = String.lowercase_ascii content in
-  List.filter (fun kw ->
-    let pattern = Str.regexp_string kw in
-    try ignore (Str.search_forward pattern lower 0); true
-    with Not_found -> false
-  ) keywords
+  Lodge_topic.extract_topics content
 
 (** {1 Prompt Generation} *)
 

@@ -18,6 +18,7 @@ let () =
                   "masc_worktree_list"; "masc_worktree_remove";
                   "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task";
                   "masc_plan_update"; "masc_who"; "masc_dashboard";
+                  "masc_agent_timeline";
                 ]
               in
               List.iter
@@ -25,8 +26,8 @@ let () =
                   check bool (name ^ " is essential") true
                     (Tool_catalog.tool_tier name = Tool_catalog.Essential))
                 essential);
-          test_case "count is 20" `Quick (fun () ->
-              check int "essential count" 20
+          test_case "count is 21" `Quick (fun () ->
+              check int "essential count" 21
                 (Tool_catalog.tier_tool_count Tool_catalog.Essential));
         ] );
       ( "standard_tools",

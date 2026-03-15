@@ -12,6 +12,7 @@ import { Execution } from './agents'
 import { Tools } from './tools'
 import { Planning } from './goals'
 import { Governance } from './governance'
+import { Social } from './social'
 import { Lab } from './lab'
 import { Live } from './live'
 import { TimeAgo } from './common/time-ago'
@@ -156,6 +157,8 @@ export function TabContent() {
       return html`<${Memory} />`
     case 'governance':
       return html`<${Governance} />`
+    case 'social':
+      return html`<${Social} />`
     case 'planning':
       return html`<${Planning} />`
     case 'intervene':

@@ -4,12 +4,6 @@
 open Agent_sdk
 open Masc_mcp
 
-(* Helper: convert OAS v0.23 tool_result to (string, string) result for test assertions *)
-let exec tool args : (string, string) result =
-  match Tool.execute tool args with
-  | Ok out -> Ok out.Agent_sdk.Types.content
-  | Error err -> Error err.Agent_sdk.Types.message
-
 let has_sub s sub =
   let sn = String.length s and subn = String.length sub in
   if subn > sn then false
@@ -81,9 +75,9 @@ let test_claim_requires_task_id () =
   in
   let tools = Agent_swarm_tools.make_tools client ~sw in
   let claim_tool = List.find (fun (t : Tool.t) -> t.schema.name = "masc_claim_task") tools in
-  let result = exec claim_tool (`Assoc []) in
+  let result = Tool.execute claim_tool (`Assoc []) in
   match result with
-  | Error msg ->
+  | Error { Agent_sdk.Types.message = msg; _ } ->
     Alcotest.(check bool) "mentions task_id" true
       (String.length msg > 0)
   | Ok _ ->
@@ -98,9 +92,9 @@ let test_add_task_requires_title () =
   in
   let tools = Agent_swarm_tools.make_tools client ~sw in
   let add_tool = List.find (fun (t : Tool.t) -> t.schema.name = "masc_add_task") tools in
-  let result = exec add_tool (`Assoc []) in
+  let result = Tool.execute add_tool (`Assoc []) in
   match result with
-  | Error msg ->
+  | Error { Agent_sdk.Types.message = msg; _ } ->
     Alcotest.(check bool) "error is non-empty" true (String.length msg > 0)
   | Ok _ ->
     Alcotest.fail "should fail without title"
@@ -116,9 +110,9 @@ let test_batch_add_requires_tasks () =
   let batch_tool =
     List.find (fun (t : Tool.t) -> t.schema.name = "masc_batch_add_tasks") tools
   in
-  let result = exec batch_tool (`Assoc []) in
+  let result = Tool.execute batch_tool (`Assoc []) in
   match result with
-  | Error msg ->
+  | Error { Agent_sdk.Types.message = msg; _ } ->
     Alcotest.(check bool) "mentions tasks" true (has_sub msg "tasks")
   | Ok _ ->
     Alcotest.fail "should fail without tasks"
@@ -134,9 +128,9 @@ let test_batch_add_rejects_empty_tasks () =
   let batch_tool =
     List.find (fun (t : Tool.t) -> t.schema.name = "masc_batch_add_tasks") tools
   in
-  let result = exec batch_tool (`Assoc [("tasks", `List [])]) in
+  let result = Tool.execute batch_tool (`Assoc [("tasks", `List [])]) in
   match result with
-  | Error msg ->
+  | Error { Agent_sdk.Types.message = msg; _ } ->
     Alcotest.(check bool) "mentions non-empty" true (has_sub msg "non-empty")
   | Ok _ ->
     Alcotest.fail "should fail with empty tasks"
@@ -152,9 +146,9 @@ let test_claim_next_no_params () =
   let claim_next_tool =
     List.find (fun (t : Tool.t) -> t.schema.name = "masc_claim_next") tools
   in
-  let result = exec claim_next_tool (`Assoc []) in
+  let result = Tool.execute claim_next_tool (`Assoc []) in
   match result with
-  | Error msg ->
+  | Error { Agent_sdk.Types.message = msg; _ } ->
     Alcotest.(check bool) "non-empty rpc error" true (String.length msg > 0);
     Alcotest.(check bool) "not validation failure" false
       (has_sub msg "missing required field")
@@ -172,9 +166,9 @@ let test_set_current_task_requires_task_id () =
   let set_tool =
     List.find (fun (t : Tool.t) -> t.schema.name = "masc_set_current_task") tools
   in
-  let result = exec set_tool (`Assoc []) in
+  let result = Tool.execute set_tool (`Assoc []) in
   match result with
-  | Error msg ->
+  | Error { Agent_sdk.Types.message = msg; _ } ->
     Alcotest.(check bool) "mentions task_id" true (String.length msg > 0)
   | Ok _ ->
     Alcotest.fail "should fail without task_id"
@@ -190,9 +184,9 @@ let test_release_requires_task_id () =
   let release_tool =
     List.find (fun (t : Tool.t) -> t.schema.name = "masc_release_task") tools
   in
-  let result = exec release_tool (`Assoc []) in
+  let result = Tool.execute release_tool (`Assoc []) in
   match result with
-  | Error msg ->
+  | Error { Agent_sdk.Types.message = msg; _ } ->
     Alcotest.(check bool) "mentions task_id" true (has_sub msg "task_id")
   | Ok _ ->
     Alcotest.fail "should fail without task_id"
@@ -208,9 +202,9 @@ let test_cancel_requires_task_id () =
   let cancel_tool =
     List.find (fun (t : Tool.t) -> t.schema.name = "masc_cancel_task") tools
   in
-  let result = exec cancel_tool (`Assoc []) in
+  let result = Tool.execute cancel_tool (`Assoc []) in
   match result with
-  | Error msg ->
+  | Error { Agent_sdk.Types.message = msg; _ } ->
     Alcotest.(check bool) "mentions task_id" true (has_sub msg "task_id")
   | Ok _ ->
     Alcotest.fail "should fail without task_id"

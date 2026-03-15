@@ -335,6 +335,9 @@
    tool_notifications
    tool_voice
    debate
+   mention_inbox
+   agent_reputation
+   activity_feed
    social
    tool_social
    transport
@@ -363,6 +366,7 @@
    keeper_schema
    keeper_config
    keeper_contract
+   keeper_deliberation
    keeper_types
    keeper_memory
    keeper_alerting
@@ -370,6 +374,8 @@
    keeper_exec_status
    keeper_exec_persona
    keeper_execution
+   keeper_learning
+   keeper_feedback_tool
    keeper_keepalive
    keeper_runtime
    keeper_turn

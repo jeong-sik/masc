@@ -8,12 +8,6 @@ open Masc_mcp
 let find_tool name tools =
   List.find (fun (t : Tool.t) -> t.schema.name = name) tools
 
-(* Helper: convert OAS v0.23 tool_result to (string, string) result for test assertions *)
-let exec tool args : (string, string) result =
-  match Tool.execute tool args with
-  | Ok out -> Ok out.Agent_sdk.Types.content
-  | Error err -> Error err.Agent_sdk.Types.message
-
 (* --- Tool structure tests --- *)
 
 let test_tool_count () =
@@ -53,12 +47,12 @@ let test_file_read_existing () =
   let path = Filename.concat "/tmp" "dev_tools_test_read.txt" in
   Out_channel.with_open_text path
     (fun oc -> Out_channel.output_string oc "hello world");
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("path", `String path)]) in
   (match result with
-   | Ok content ->
+   | Ok { Agent_sdk.Types.content } ->
      Alcotest.(check string) "content matches" "hello world" content
-   | Error e ->
+   | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e));
   Sys.remove path
 
@@ -68,7 +62,7 @@ let test_file_read_nonexistent () =
   let clock = Eio.Stdenv.clock env in
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("path", `String "/tmp/nonexistent_dev_tools_xyz.txt")]) in
   (match result with
    | Error _ -> ()  (* expected *)
@@ -80,10 +74,10 @@ let test_file_read_blocked_path () =
   let clock = Eio.Stdenv.clock env in
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("path", `String "/etc/passwd")]) in
   (match result with
-   | Error msg ->
+   | Error { Agent_sdk.Types.message = msg; _ } ->
      Alcotest.(check bool) "mentions blocked" true
        (String.length msg > 0 &&
         (try ignore (String.index msg 'b'); true
@@ -97,7 +91,7 @@ let test_file_read_path_traversal () =
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
   (* /tmp/../../etc/passwd normalizes to /etc/passwd — must be blocked *)
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("path", `String "/tmp/../../etc/passwd")]) in
   (match result with
    | Error _ -> ()  (* expected: path traversal blocked *)
@@ -110,7 +104,7 @@ let test_file_read_rejects_prefix_sibling () =
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
   let home = Sys.getenv "HOME" in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("path", `String (Filename.concat home "me-sibling/secret.txt"))]) in
   match result with
   | Error _ -> ()
@@ -128,7 +122,7 @@ let test_file_read_rejects_tmp_symlink_escape () =
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
-      let result = exec tool (`Assoc [("path", `String path)]) in
+      let result = Tool.execute tool (`Assoc [("path", `String path)]) in
       match result with
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "should reject /tmp symlink escaping outside allowlist")
@@ -144,10 +138,10 @@ let test_file_read_truncation () =
   let large_content = String.make 101_000 'x' in
   Out_channel.with_open_text path
     (fun oc -> Out_channel.output_string oc large_content);
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("path", `String path)]) in
   (match result with
-   | Ok content ->
+   | Ok { Agent_sdk.Types.content } ->
      Alcotest.(check bool) "truncated to ~100KB" true
        (String.length content <= 100_100);
      Alcotest.(check bool) "has truncation marker" true
@@ -156,7 +150,7 @@ let test_file_read_truncation () =
         String.sub content
           (String.length content - String.length suffix)
           (String.length suffix) = suffix)
-   | Error e ->
+   | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok (truncated), got Error: %s" e));
   Sys.remove path
 
@@ -170,16 +164,16 @@ let test_file_write_new () =
   let tool = find_tool "file_write" tools in
   let path = "/tmp/dev_tools_test_write.txt" in
   (if Sys.file_exists path then Sys.remove path);
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("path", `String path);
              ("content", `String "test content")]) in
   (match result with
-   | Ok msg ->
+   | Ok { Agent_sdk.Types.content = msg } ->
      Alcotest.(check bool) "mentions bytes" true
        (String.length msg > 0);
      let written = In_channel.with_open_text path In_channel.input_all in
      Alcotest.(check string) "file content" "test content" written
-   | Error e ->
+   | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e));
   Sys.remove path
 
@@ -189,7 +183,7 @@ let test_file_write_blocked_path () =
   let clock = Eio.Stdenv.clock env in
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_write" tools in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("path", `String "/etc/shadow_test");
              ("content", `String "bad")]) in
   (match result with
@@ -203,7 +197,7 @@ let test_file_write_rejects_prefix_sibling () =
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_write" tools in
   let home = Sys.getenv "HOME" in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("path", `String (Filename.concat home "me-sibling/out.txt"));
              ("content", `String "bad")]) in
   match result with
@@ -222,7 +216,7 @@ let test_file_write_rejects_tmp_symlink_escape () =
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
-      let result = exec tool
+      let result = Tool.execute tool
         (`Assoc [("path", `String (Filename.concat path "passwd_copy"));
                  ("content", `String "bad")]) in
       match result with
@@ -237,12 +231,12 @@ let test_shell_exec_echo () =
   let clock = Eio.Stdenv.clock env in
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("command", `String "echo hello")]) in
   (match result with
-   | Ok output ->
+   | Ok { Agent_sdk.Types.content = output } ->
      Alcotest.(check string) "echo output" "hello\n" output
-   | Error e ->
+   | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e))
 
 let test_shell_exec_blocked_command () =
@@ -251,10 +245,10 @@ let test_shell_exec_blocked_command () =
   let clock = Eio.Stdenv.clock env in
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("command", `String "rm -rf /")]) in
   (match result with
-   | Error msg ->
+   | Error { Agent_sdk.Types.message = msg; _ } ->
      Alcotest.(check bool) "mentions blocked" true
        (String.length msg > 0)
    | Ok _ -> Alcotest.fail "should reject rm -rf /")
@@ -296,23 +290,23 @@ let test_tool_exec_observer_bridges_to_telemetry () =
       let read_tool = find_tool "file_read" tools in
       let shell_tool = find_tool "shell_exec" tools in
       (match
-         exec write_tool
+         Tool.execute write_tool
            (`Assoc
              [ ("path", `String tmp_path); ("content", `String "bridge") ])
        with
       | Ok _ -> ()
-      | Error e ->
+      | Error { Agent_sdk.Types.message = e; _ } ->
           Alcotest.fail (Printf.sprintf "file_write failed: %s" e));
-      (match exec read_tool (`Assoc [ ("path", `String tmp_path) ]) with
+      (match Tool.execute read_tool (`Assoc [ ("path", `String tmp_path) ]) with
       | Ok _ -> ()
-      | Error e ->
+      | Error { Agent_sdk.Types.message = e; _ } ->
           Alcotest.fail (Printf.sprintf "file_read failed: %s" e));
       (match
-         exec shell_tool
+         Tool.execute shell_tool
            (`Assoc [ ("command", `String "echo telemetry-ok") ])
        with
       | Ok _ -> ()
-      | Error e ->
+      | Error { Agent_sdk.Types.message = e; _ } ->
           Alcotest.fail (Printf.sprintf "shell_exec failed: %s" e));
       let summary = Telemetry_eio.summarize_tool_usage ~fs config in
       let stats name =
@@ -332,10 +326,10 @@ let test_shell_exec_rejects_shell_metacharacters () =
   let clock = Eio.Stdenv.clock env in
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("command", `String "echo hello; pwd")]) in
   (match result with
-   | Error msg ->
+   | Error { Agent_sdk.Types.message = msg; _ } ->
        let normalized = String.lowercase_ascii msg in
        let needle = "workdir" in
        let needle_len = String.length needle in
@@ -355,7 +349,7 @@ let test_shell_exec_nonexistent_cmd () =
   let clock = Eio.Stdenv.clock env in
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("command", `String "nonexistent_cmd_xyz_123")]) in
   (match result with
    | Error _ -> ()  (* expected: exit code != 0 *)
@@ -367,9 +361,9 @@ let test_shell_exec_missing_param () =
   let clock = Eio.Stdenv.clock env in
   let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
-  let result = exec tool (`Assoc []) in
+  let result = Tool.execute tool (`Assoc []) in
   (match result with
-   | Error msg ->
+   | Error { Agent_sdk.Types.message = msg; _ } ->
      Alcotest.(check bool) "error about missing command" true
        (String.length msg > 0)
    | Ok _ -> Alcotest.fail "should fail without command param")
@@ -380,7 +374,7 @@ let test_readonly_shell_exec_blocks_git () =
   let clock = Eio.Stdenv.clock env in
   let tools = Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
-  let result = exec tool
+  let result = Tool.execute tool
     (`Assoc [("command", `String "git status")]) in
   match result with
   | Error _ -> ()
@@ -395,16 +389,16 @@ let test_workdir_enforcement () =
   let tool = find_tool "file_write" tools in
   (* Writing inside workdir should succeed *)
   let ok_path = "/tmp/test_workdir/test.txt" in
-  let result_ok = exec tool
+  let result_ok = Tool.execute tool
     (`Assoc [("path", `String ok_path);
              ("content", `String "ok")]) in
   (match result_ok with
    | Ok _ -> ()
-   | Error e -> Alcotest.fail (Printf.sprintf "workdir write failed: %s" e));
+   | Error { Agent_sdk.Types.message = e; _ } -> Alcotest.fail (Printf.sprintf "workdir write failed: %s" e));
   (* Writing outside workdir (but inside ~/me) should be blocked *)
   let home = Sys.getenv "HOME" in
   let bad_path = Filename.concat home "me/should_not_write.txt" in
-  let result_bad = exec tool
+  let result_bad = Tool.execute tool
     (`Assoc [("path", `String bad_path);
              ("content", `String "bad")]) in
   (match result_bad with

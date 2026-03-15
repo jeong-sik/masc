@@ -199,8 +199,17 @@ let keeper_policy_observation_of_room_message
     last_turn_ago_s;
   }
 
+let deterministic_policy_baseline_action_typed
+    (obs : keeper_policy_observation) : Keeper_deliberation.deliberation_action =
+  if obs.direct_mention then
+    Keeper_deliberation.ReplyInRoom { room_id = ""; content = "" }
+  else
+    Keeper_deliberation.Noop "no_trigger"
+
+(** Backward-compatible string interface for existing callers. *)
 let deterministic_policy_baseline_action (obs : keeper_policy_observation) : string =
-  if obs.direct_mention then "reply_in_room" else "noop"
+  deterministic_policy_baseline_action_typed obs
+  |> Keeper_deliberation.deliberation_action_to_legacy_string
 
 let choose_policy_action (candidates : keeper_policy_candidate_score list) :
     keeper_policy_candidate_score option =

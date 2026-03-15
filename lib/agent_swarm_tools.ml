@@ -13,20 +13,22 @@ let tool_of_binding (client : Agent_swarm_client.t) ~sw
   in
   Tool.create ~name:binding.sdk_name ~description:binding.description ~parameters
     (fun input ->
-      Oas_compat.adapt_result @@
       match
         Agent_swarm_contract.build_operation_arguments
           ~agent_name:client.agent_name binding input
       with
-      | Error message -> Error message
+      | Error message ->
+        Error { Agent_sdk.Types.message; recoverable = false }
       | Ok arguments_json -> (
           match
             Agent_swarm_client.call_operation_json ~sw client
               ~operation_id:binding.canonical_operation
               ~arguments_json
           with
-          | Ok json -> Ok (Agent_swarm_tool_input.json_to_string json)
-          | Error message -> Error message))
+          | Ok json ->
+            Ok { Agent_sdk.Types.content = Agent_swarm_tool_input.json_to_string json }
+          | Error message ->
+            Error { Agent_sdk.Types.message; recoverable = false }))
 
 let make_tools (client : Agent_swarm_client.t) ~sw : Tool.t list =
   List.map (tool_of_binding client ~sw) Agent_swarm_contract.sdk_bindings

@@ -1101,14 +1101,16 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt
                       ~schema:(Some schema)
                  |> inject_prompt_full_context ~prompt ~tool_name:schema.name
                in
-               Oas_compat.adapt_result @@
                match
                  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:schema.name
                    ~args
                with
-               | Ok result when result.is_error -> Error result.text
-               | Ok result -> Ok result.text
-               | Error e -> Error e
+               | Ok result when result.is_error ->
+                 Error { Oas.Types.message = result.text; recoverable = false }
+               | Ok result ->
+                 Ok { Oas.Types.content = result.text }
+               | Error e ->
+                 Error { Oas.Types.message = e; recoverable = false }
              in
              Oas.Mcp.mcp_tool_to_sdk_tool ~call_fn
                {

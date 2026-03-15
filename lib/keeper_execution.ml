@@ -1523,6 +1523,448 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
     in
     if idle_seconds < idle_gate || cooldown_elapsed < cooldown_gate then meta
     else
+      (* Phase 2 Deliberation Engine: if policy_mode is Llm_deliberation AND
+         triage returned Triggered, call the LLM deliberation engine instead
+         of the existing proactive logic. *)
+      let policy_mode =
+        Keeper_contract.policy_mode_of_string meta.policy_mode
+      in
+      let triage_is_triggered =
+        Keeper_contract.policy_mode_is_deliberation policy_mode
+        && (let tt = String.trim meta.last_triage_triggers in
+            tt <> "" && not (String.length tt >= 5
+                            && String.sub tt 0 5 = "skip:"))
+      in
+      if triage_is_triggered then (
+        (* Deliberation engine path *)
+        let daily_budget = Keeper_deliberation.daily_budget_usd_from_env () in
+        if not (Keeper_deliberation.deliberation_budget_check
+                  ~daily_budget_usd:daily_budget
+                  ~cost_today_usd:meta.deliberation_cost_total_usd)
+        then (
+          Printf.eprintf
+            "[keeper-deliberation] %s budget exhausted (%.4f >= %.4f)\n%!"
+            meta.name meta.deliberation_cost_total_usd daily_budget;
+          meta)
+        else
+          match model_specs_of_strings meta.models with
+          | Error msg ->
+              log_proactive_failure
+                ("deliberation model specs: " ^ msg);
+              meta
+          | Ok specs -> (
+              match ensure_api_keys specs with
+              | Error msg ->
+                  log_proactive_failure
+                    ("deliberation api keys: " ^ msg);
+                  meta
+              | Ok () ->
+                  (* Parse triggers from last_triage_triggers string *)
+                  let trigger_strs =
+                    String.split_on_char ',' meta.last_triage_triggers
+                    |> List.map String.trim
+                    |> List.filter (fun s -> s <> "")
+                  in
+                  let triggers =
+                    List.filter_map (fun s ->
+                      match s with
+                      | "direct_mention" ->
+                          Some Keeper_deliberation.DirectMention
+                      | "new_unclaimed_task" ->
+                          Some Keeper_deliberation.NewUnclaimedTask
+                      | "failed_task" ->
+                          Some Keeper_deliberation.FailedTask
+                      | "agent_joined_or_left" ->
+                          Some Keeper_deliberation.AgentJoinedOrLeft
+                      | "goal_deadline" ->
+                          Some Keeper_deliberation.GoalDeadline
+                      | "idle_timeout" ->
+                          Some Keeper_deliberation.IdleTimeout
+                      | "strategic_review" ->
+                          Some Keeper_deliberation.StrategicReview
+                      | other ->
+                          if String.length other > 15
+                             && String.sub other 0 15 = "board_activity:" then
+                            Some (Keeper_deliberation.BoardActivity
+                                    (String.sub other 15
+                                       (String.length other - 15)))
+                          else if String.length other > 17
+                                  && String.sub other 0 17 = "metrics_anomaly:" then
+                            Some (Keeper_deliberation.MetricsAnomaly
+                                    (String.sub other 17
+                                       (String.length other - 17)))
+                          else None)
+                      trigger_strs
+                  in
+                  if triggers = [] then (
+                    Printf.eprintf
+                      "[keeper-deliberation] %s no parseable triggers from: %s\n%!"
+                      meta.name meta.last_triage_triggers;
+                    meta)
+                  else
+                    (* Build world observation for prompt with L2 room enrichment *)
+                    let unclaimed_count, failed_count =
+                      (try
+                         let backlog = Room.read_backlog ctx.config in
+                         let unclaimed =
+                           List.length
+                             (List.filter
+                                (fun (t : Types.task) ->
+                                  t.task_status = Types.Todo)
+                                backlog.tasks)
+                         in
+                         let failed =
+                           List.length
+                             (List.filter
+                                (fun (t : Types.task) ->
+                                  match t.task_status with
+                                  | Types.Cancelled _ -> true
+                                  | _ -> false)
+                                backlog.tasks)
+                         in
+                         (unclaimed, failed)
+                       with _exn -> (0, 0))
+                    in
+                    let active_agents =
+                      (try List.length (Room.get_agents_raw ctx.config)
+                       with _exn -> 0)
+                    in
+                    let obs =
+                      { (Keeper_deliberation.empty_world_observation
+                           ~keeper_name:meta.name)
+                        with
+                        unclaimed_task_count = unclaimed_count;
+                        failed_task_count = failed_count;
+                        active_agent_count = active_agents;
+                        active_goal_count =
+                          List.length meta.active_goal_ids;
+                        idle_seconds;
+                        idle_gate;
+                        direct_mention =
+                          List.mem Keeper_deliberation.DirectMention
+                            triggers;
+                      }
+                    in
+                    let prompt =
+                      Keeper_deliberation.build_deliberation_prompt
+                        ~autonomy_level:meta.autonomy_level
+                        ~keeper_name:meta.name
+                        ~soul_profile:meta.soul_profile
+                        ~goal:meta.goal
+                        ~triggers
+                        obs
+                    in
+                    let model_specs =
+                      Llm_client.available_model_specs_of_strings meta.models
+                    in
+                    let result =
+                      Llm_client.run_prompt_cascade
+                        ~temperature:0.3
+                        ~model_specs
+                        ~max_tokens:1024
+                        ~prompt
+                        ~system:("You are " ^ meta.name
+                                 ^ ", a keeper agent. Respond with JSON only.")
+                        ()
+                    in
+                    match result with
+                    | Error msg ->
+                        Printf.eprintf
+                          "[keeper-deliberation] %s LLM call failed: %s\n%!"
+                          meta.name msg;
+                        meta
+                    | Ok response ->
+                        let turn_cost =
+                          let inp =
+                            float_of_int response.usage.input_tokens /. 1000.0
+                          in
+                          let outp =
+                            float_of_int response.usage.output_tokens /. 1000.0
+                          in
+                          let primary =
+                            match model_specs with
+                            | p :: _ -> p
+                            | [] -> Llm_client.default_local_model_spec ()
+                          in
+                          (inp *. primary.cost_per_1k_input)
+                          +. (outp *. primary.cost_per_1k_output)
+                        in
+                        (match
+                           Keeper_deliberation.parse_deliberation_response
+                             response.content
+                         with
+                         | Error msg ->
+                             Printf.eprintf
+                               "[keeper-deliberation] %s parse failed: %s (raw: %s)\n%!"
+                               meta.name msg
+                               (Keeper_types.short_preview response.content);
+                             (* Update meta with cost even on parse failure *)
+                             let updated =
+                               { meta with
+                                 deliberation_count =
+                                   meta.deliberation_count + 1;
+                                 deliberation_cost_total_usd =
+                                   meta.deliberation_cost_total_usd
+                                   +. turn_cost;
+                                 last_deliberation_ts = now_ts;
+                                 updated_at = now_iso ();
+                               }
+                             in
+                             (match write_meta ctx.config updated with
+                              | Ok () -> ()
+                              | Error msg ->
+                                  Printf.eprintf
+                                    "[keeper-deliberation] write_meta failed: %s\n%!"
+                                    msg);
+                             updated
+                         | Ok (action, reasoning, confidence) ->
+                             Printf.eprintf
+                               "[keeper-deliberation] %s decided: %s (confidence=%.2f, reason=%s)\n%!"
+                               meta.name
+                               (Keeper_deliberation.deliberation_action_to_string action)
+                               confidence
+                               (Keeper_types.short_preview reasoning);
+                             (* Execute the action *)
+                             (match action with
+                              | Keeper_deliberation.Noop _reason -> ()
+                              | Keeper_deliberation.ReplyInRoom { room_id; content } ->
+                                  let target_room =
+                                    if room_id = "" || room_id = "default"
+                                    then Room.current_room_id ctx.config
+                                    else room_id
+                                  in
+                                  (try
+                                     ignore
+                                       (Room.broadcast_in_room ctx.config
+                                          ~room_id:target_room
+                                          ~from_agent:meta.agent_name
+                                          ~content)
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] reply_in_room failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | Keeper_deliberation.Broadcast { message } ->
+                                  (try
+                                     ignore
+                                       (Room.broadcast ctx.config
+                                          ~from_agent:meta.agent_name
+                                          ~content:message)
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] broadcast failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | Keeper_deliberation.TaskClaim { task_id; reason = _ } ->
+                                  (try
+                                     let result =
+                                       Room.claim_task ctx.config
+                                         ~agent_name:meta.agent_name
+                                         ~task_id
+                                     in
+                                     Printf.eprintf
+                                       "[keeper-deliberation] task_claim result: %s\n%!"
+                                       result
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] task_claim failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | Keeper_deliberation.BoardPost { content; hearth } ->
+                                  (try
+                                     ignore
+                                       (Board_dispatch.create_post
+                                          ~author:meta.agent_name
+                                          ~content
+                                          ?hearth
+                                          ())
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] board_post failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | Keeper_deliberation.BoardComment { post_id; content } ->
+                                  (try
+                                     ignore
+                                       (Board_dispatch.add_comment
+                                          ~post_id
+                                          ~author:meta.agent_name
+                                          ~content
+                                          ())
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] board_comment failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | Keeper_deliberation.BoardVote { post_id; direction } ->
+                                  (try
+                                     let dir : Board.vote_direction =
+                                       if String.lowercase_ascii direction = "down"
+                                       then Board.Down
+                                       else Board.Up
+                                     in
+                                     ignore
+                                       (Board_dispatch.vote
+                                          ~voter:meta.agent_name
+                                          ~post_id
+                                          ~direction:dir)
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] board_vote failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | Keeper_deliberation.ProposeSpawn { topic; reason } ->
+                                  (try
+                                     let msg =
+                                       Printf.sprintf
+                                         "[spawn-proposal] %s proposes spawning agent for topic '%s': %s"
+                                         meta.name topic reason
+                                     in
+                                     ignore
+                                       (Room.broadcast ctx.config
+                                          ~from_agent:meta.agent_name
+                                          ~content:msg)
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] propose_spawn failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | Keeper_deliberation.MultiStep actions ->
+                                  let max_steps = 5 in
+                                  let steps_to_run =
+                                    if List.length actions > max_steps then
+                                      let rec take n acc = function
+                                        | _ when n <= 0 -> List.rev acc
+                                        | [] -> List.rev acc
+                                        | x :: xs -> take (n - 1) (x :: acc) xs
+                                      in
+                                      take max_steps [] actions
+                                    else actions
+                                  in
+                                  let step_count = ref 0 in
+                                  let stop = ref false in
+                                  List.iter
+                                    (fun step_action ->
+                                      if !stop then ()
+                                      else (
+                                        incr step_count;
+                                        Printf.eprintf
+                                          "[keeper-deliberation] %s multi_step %d/%d: %s\n%!"
+                                          meta.name !step_count (List.length steps_to_run)
+                                          (Keeper_deliberation.deliberation_action_to_string
+                                             step_action);
+                                        (try
+                                           match step_action with
+                                           | Keeper_deliberation.Noop _ -> ()
+                                           | Keeper_deliberation.ReplyInRoom { room_id; content } ->
+                                               let target_room =
+                                                 if room_id = "" || room_id = "default"
+                                                 then Room.current_room_id ctx.config
+                                                 else room_id
+                                               in
+                                               ignore
+                                                 (Room.broadcast_in_room ctx.config
+                                                    ~room_id:target_room
+                                                    ~from_agent:meta.agent_name
+                                                    ~content)
+                                           | Keeper_deliberation.Broadcast { message } ->
+                                               ignore
+                                                 (Room.broadcast ctx.config
+                                                    ~from_agent:meta.agent_name
+                                                    ~content:message)
+                                           | Keeper_deliberation.TaskClaim { task_id; reason = _ } ->
+                                               ignore
+                                                 (Room.claim_task ctx.config
+                                                    ~agent_name:meta.agent_name
+                                                    ~task_id)
+                                           | Keeper_deliberation.BoardPost { content; hearth } ->
+                                               ignore
+                                                 (Board_dispatch.create_post
+                                                    ~author:meta.agent_name
+                                                    ~content
+                                                    ?hearth
+                                                    ())
+                                           | Keeper_deliberation.BoardComment { post_id; content } ->
+                                               ignore
+                                                 (Board_dispatch.add_comment
+                                                    ~post_id
+                                                    ~author:meta.agent_name
+                                                    ~content
+                                                    ())
+                                           | Keeper_deliberation.BoardVote { post_id; direction } ->
+                                               let dir : Board.vote_direction =
+                                                 if String.lowercase_ascii direction = "down"
+                                                 then Board.Down
+                                                 else Board.Up
+                                               in
+                                               ignore
+                                                 (Board_dispatch.vote
+                                                    ~voter:meta.agent_name
+                                                    ~post_id
+                                                    ~direction:dir)
+                                           | Keeper_deliberation.ProposeSpawn { topic; reason } ->
+                                               let msg =
+                                                 Printf.sprintf
+                                                   "[spawn-proposal] %s proposes spawning agent for topic '%s': %s"
+                                                   meta.name topic reason
+                                               in
+                                               ignore
+                                                 (Room.broadcast ctx.config
+                                                    ~from_agent:meta.agent_name
+                                                    ~content:msg)
+                                           | Keeper_deliberation.MultiStep _ ->
+                                               Printf.eprintf
+                                                 "[keeper-deliberation] %s nested multi_step skipped\n%!"
+                                                 meta.name
+                                         with exn ->
+                                           Printf.eprintf
+                                             "[keeper-deliberation] %s multi_step %d failed: %s\n%!"
+                                             meta.name !step_count
+                                             (Printexc.to_string exn);
+                                           stop := true)))
+                                    steps_to_run);
+                             (* Update meta *)
+                             let updated =
+                               { meta with
+                                 deliberation_count =
+                                   meta.deliberation_count + 1;
+                                 deliberation_cost_total_usd =
+                                   meta.deliberation_cost_total_usd
+                                   +. turn_cost;
+                                 last_deliberation_ts = now_ts;
+                                 total_turns = meta.total_turns + 1;
+                                 total_input_tokens =
+                                   meta.total_input_tokens
+                                   + response.usage.input_tokens;
+                                 total_output_tokens =
+                                   meta.total_output_tokens
+                                   + response.usage.output_tokens;
+                                 total_tokens =
+                                   meta.total_tokens
+                                   + response.usage.total_tokens;
+                                 total_cost_usd =
+                                   meta.total_cost_usd +. turn_cost;
+                                 last_turn_ts = now_ts;
+                                 last_model_used = response.model_used;
+                                 last_input_tokens =
+                                   response.usage.input_tokens;
+                                 last_output_tokens =
+                                   response.usage.output_tokens;
+                                 last_total_tokens =
+                                   response.usage.total_tokens;
+                                 last_latency_ms = response.latency_ms;
+                                 last_proactive_ts = now_ts;
+                                 last_proactive_reason =
+                                   Printf.sprintf
+                                     "deliberation:%s;confidence=%.2f"
+                                     (Keeper_deliberation.deliberation_action_to_legacy_string action)
+                                     confidence;
+                                 last_proactive_preview =
+                                   short_preview reasoning;
+                                 updated_at = now_iso ();
+                               }
+                             in
+                             (match write_meta ctx.config updated with
+                              | Ok () -> ()
+                              | Error msg ->
+                                  Printf.eprintf
+                                    "[keeper-deliberation] write_meta failed: %s\n%!"
+                                    msg);
+                             updated)))
+      else
       match model_specs_of_strings meta.models with
       | Error msg ->
           log_proactive_failure ("model specs: " ^ msg);

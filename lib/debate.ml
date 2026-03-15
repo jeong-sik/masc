@@ -262,6 +262,81 @@ let close_debate config ~debate_id : (debate, string) result =
           Error (Printf.sprintf "Failed to close debate: %s" (Printexc.to_string e))
       end
 
+(** {1 Resolution} *)
+
+type resolution = {
+  winning_position: position;
+  support_count: int;
+  oppose_count: int;
+  neutral_count: int;
+  summary: string;
+}
+
+let resolution_to_json (r : resolution) : Yojson.Safe.t =
+  `Assoc [
+    ("winning_position", `String (position_to_string r.winning_position));
+    ("support_count", `Int r.support_count);
+    ("oppose_count", `Int r.oppose_count);
+    ("neutral_count", `Int r.neutral_count);
+    ("summary", `String r.summary);
+  ]
+
+let determine_resolution (debate : debate) : resolution =
+  let count_pos pos =
+    List.length (List.filter (fun (a : argument) -> a.position = pos) debate.arguments)
+  in
+  let sc = count_pos Support in
+  let oc = count_pos Oppose in
+  let nc = count_pos Neutral in
+  let winning_position =
+    if sc > oc && sc > nc then Support
+    else if oc > sc && oc > nc then Oppose
+    else Neutral
+  in
+  let summary =
+    Printf.sprintf "Debate '%s' resolved: %s (%d support, %d oppose, %d neutral)"
+      debate.topic (position_to_string winning_position) sc oc nc
+  in
+  { winning_position; support_count = sc; oppose_count = oc;
+    neutral_count = nc; summary }
+
+(** Close a debate with resolution and optionally create a task from the outcome. *)
+let close_with_resolution config ~debate_id ~create_task :
+    (debate * resolution * string option, string) result =
+  match get_debate config ~debate_id with
+  | Error e -> Error e
+  | Ok debate ->
+      if debate.status = Closed then
+        Error (Printf.sprintf "Debate %s is already closed" debate_id)
+      else
+        let resolution = determine_resolution debate in
+        let updated = { debate with status = Closed } in
+        (try save_debate config updated
+         with e ->
+           Printf.eprintf "[debate] save failed: %s\n%!" (Printexc.to_string e));
+        let task_id =
+          if create_task && resolution.winning_position = Support then
+            (try
+               let task_title =
+                 Printf.sprintf "[Debate Resolution] %s" debate.topic
+               in
+               let task_desc =
+                 Printf.sprintf "Auto-created from debate %s. %s"
+                   debate.id resolution.summary
+               in
+               let _task =
+                 Room.add_task config ~title:task_title ~priority:3
+                   ~description:task_desc
+               in
+               Some (Printf.sprintf "task created: %s" task_title)
+             with e ->
+               Printf.eprintf "[debate] task creation failed: %s\n%!"
+                 (Printexc.to_string e);
+               None)
+          else None
+        in
+        Ok (updated, resolution, task_id)
+
 (** List all debates *)
 let list_debates config ?(status_filter=None) ?(limit=50) () : debate list =
   ensure_dirs config;

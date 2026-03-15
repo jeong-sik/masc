@@ -143,6 +143,11 @@ let rec mkdir_p path perm =
 type tool_exec_observer =
   tool_name:string -> success:bool -> duration_ms:int -> unit
 
+(* --- Tool result helpers (Agent_sdk.Types.tool_result) --- *)
+
+let tool_ok s : Agent_sdk.Types.tool_output = { content = s }
+let tool_err s : Agent_sdk.Types.tool_error = { message = s; recoverable = true }
+
 (* --- Tool implementations --- *)
 
 let make_file_read ?workdir ?on_exec () =
@@ -158,7 +163,7 @@ let make_file_read ?workdir ?on_exec () =
     ]
     (fun input ->
        match Agent_swarm_tool_input.extract_string "path" input with
-       | Error e -> Error e
+       | Error e -> Error (tool_err e)
        | Ok path ->
          let started = Time_compat.now () in
          let resolved_path = resolve_path ?base_dir:workdir path in
@@ -172,7 +177,7 @@ let make_file_read ?workdir ?on_exec () =
            Option.iter
              (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
              on_exec;
-           Error err
+           Error (tool_err err)
          else
            try
              let content = In_channel.with_open_text resolved_path In_channel.input_all in
@@ -183,8 +188,8 @@ let make_file_read ?workdir ?on_exec () =
                (fun f -> f ~tool_name:"file_read" ~success:true ~duration_ms)
                on_exec;
              if String.length content > 100_000 then
-               Ok (String.sub content 0 100_000 ^ "\n[TRUNCATED at 100KB]")
-             else Ok content
+               Ok (tool_ok (String.sub content 0 100_000 ^ "\n[TRUNCATED at 100KB]"))
+             else Ok (tool_ok content)
            with Sys_error msg ->
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
@@ -192,7 +197,7 @@ let make_file_read ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
                on_exec;
-             Error (Printf.sprintf "Cannot read: %s" msg))
+             Error (tool_err (Printf.sprintf "Cannot read: %s" msg)))
 
 let make_file_write ?workdir ?on_exec () =
   Agent_sdk.Tool.create
@@ -211,7 +216,7 @@ let make_file_write ?workdir ?on_exec () =
     (fun input ->
        match Agent_swarm_tool_input.extract_string "path" input,
              Agent_swarm_tool_input.extract_string "content" input with
-       | Error e, _ | _, Error e -> Error e
+       | Error e, _ | _, Error e -> Error (tool_err e)
        | Ok path, Ok content ->
          let started = Time_compat.now () in
          let resolved_path = resolve_path ?base_dir:workdir path in
@@ -225,7 +230,7 @@ let make_file_write ?workdir ?on_exec () =
            Option.iter
              (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
              on_exec;
-           Error err
+           Error (tool_err err)
          else
            try
              mkdir_p (Filename.dirname resolved_path) 0o755;
@@ -237,8 +242,8 @@ let make_file_write ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_write" ~success:true ~duration_ms)
                on_exec;
-             Ok (Printf.sprintf "Written %d bytes to %s"
-               (String.length content) resolved_path)
+             Ok (tool_ok (Printf.sprintf "Written %d bytes to %s"
+               (String.length content) resolved_path))
            with Sys_error msg ->
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
@@ -246,7 +251,7 @@ let make_file_write ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
                on_exec;
-             Error (Printf.sprintf "Cannot write: %s" msg))
+             Error (tool_err (Printf.sprintf "Cannot write: %s" msg)))
 
 let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_commands
     ~description =
@@ -263,10 +268,10 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
     ]
     (fun input ->
        match Agent_swarm_tool_input.extract_string "command" input with
-       | Error e -> Error e
+       | Error e -> Error (tool_err e)
        | Ok command ->
          (match validate_command_with_allowlist ~allowed_commands command with
-          | Error e -> Error e
+          | Error e -> Error (tool_err e)
           | Ok () ->
            let timeout =
              Agent_swarm_tool_input.extract_float "timeout_s" input
@@ -293,14 +298,14 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                   let status = Eio.Process.await proc in
                   let output = Buffer.contents buf in
                   (match status with
-                   | `Exited 0 -> Ok output
+                   | `Exited 0 -> Ok (tool_ok output)
                    | `Exited code ->
-                     Error (Printf.sprintf "Exit code %d:\n%s" code output)
+                     Error (tool_err (Printf.sprintf "Exit code %d:\n%s" code output))
                    | `Signaled sig_num ->
-                     Error (Printf.sprintf "Killed by signal %d:\n%s" sig_num output)))
+                     Error (tool_err (Printf.sprintf "Killed by signal %d:\n%s" sig_num output))))
                (fun () ->
                   Eio.Time.sleep clock timeout;
-                  Error (Printf.sprintf "Timeout after %.0fs: %s" timeout command))
+                  Error (tool_err (Printf.sprintf "Timeout after %.0fs: %s" timeout command)))
              in
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
@@ -316,7 +321,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
              Option.iter
                (fun f -> f ~tool_name:"shell_exec" ~success:false ~duration_ms)
                on_exec;
-             Error (Printf.sprintf "Command failed: %s" (Printexc.to_string exn))))
+             Error (tool_err (Printf.sprintf "Command failed: %s" (Printexc.to_string exn)))))
 
 let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
   make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock

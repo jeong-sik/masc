@@ -4,6 +4,10 @@
 open Agent_sdk
 open Masc_mcp
 
+(* Accessors for Agent_sdk.Types.tool_output / tool_error *)
+let tc (o : Agent_sdk.Types.tool_output) = o.content
+let te (e : Agent_sdk.Types.tool_error) = e.message
+
 (* Helper: find tool by name from tool list *)
 let find_tool name tools =
   List.find (fun (t : Tool.t) -> t.schema.name = name) tools
@@ -51,9 +55,9 @@ let test_file_read_existing () =
     (`Assoc [("path", `String path)]) in
   (match result with
    | Ok content ->
-     Alcotest.(check string) "content matches" "hello world" content
+     Alcotest.(check string) "content matches" "hello world" (tc content)
    | Error e ->
-     Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e));
+     Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" (te e)));
   Sys.remove path
 
 let test_file_read_nonexistent () =
@@ -78,9 +82,10 @@ let test_file_read_blocked_path () =
     (`Assoc [("path", `String "/etc/passwd")]) in
   (match result with
    | Error msg ->
+     let m = msg.Agent_sdk.Types.message in
      Alcotest.(check bool) "mentions blocked" true
-       (String.length msg > 0 &&
-        (try ignore (String.index msg 'b'); true
+       (String.length m > 0 &&
+        (try ignore (String.index m 'b'); true
          with Not_found -> true))
    | Ok _ -> Alcotest.fail "should reject /etc/passwd")
 
@@ -142,16 +147,17 @@ let test_file_read_truncation () =
     (`Assoc [("path", `String path)]) in
   (match result with
    | Ok content ->
+     let c = (tc content) in
      Alcotest.(check bool) "truncated to ~100KB" true
-       (String.length content <= 100_100);
+       (String.length c <= 100_100);
      Alcotest.(check bool) "has truncation marker" true
        (let suffix = "[TRUNCATED at 100KB]" in
-        String.length content >= String.length suffix &&
-        String.sub content
-          (String.length content - String.length suffix)
+        String.length c >= String.length suffix &&
+        String.sub c
+          (String.length c - String.length suffix)
           (String.length suffix) = suffix)
    | Error e ->
-     Alcotest.fail (Printf.sprintf "expected Ok (truncated), got Error: %s" e));
+     Alcotest.fail (Printf.sprintf "expected Ok (truncated), got Error: %s" (te e)));
   Sys.remove path
 
 (* --- file_write tests --- *)
@@ -170,11 +176,11 @@ let test_file_write_new () =
   (match result with
    | Ok msg ->
      Alcotest.(check bool) "mentions bytes" true
-       (String.length msg > 0);
+       (String.length (tc msg) > 0);
      let written = In_channel.with_open_text path In_channel.input_all in
      Alcotest.(check string) "file content" "test content" written
    | Error e ->
-     Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e));
+     Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" (te e)));
   Sys.remove path
 
 let test_file_write_blocked_path () =
@@ -235,9 +241,9 @@ let test_shell_exec_echo () =
     (`Assoc [("command", `String "echo hello")]) in
   (match result with
    | Ok output ->
-     Alcotest.(check string) "echo output" "hello\n" output
+     Alcotest.(check string) "echo output" "hello\n" (tc output)
    | Error e ->
-     Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e))
+     Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" (te e)))
 
 let test_shell_exec_blocked_command () =
   Eio_main.run @@ fun env ->
@@ -250,7 +256,7 @@ let test_shell_exec_blocked_command () =
   (match result with
    | Error msg ->
      Alcotest.(check bool) "mentions blocked" true
-       (String.length msg > 0)
+       (String.length (te msg) > 0)
    | Ok _ -> Alcotest.fail "should reject rm -rf /")
 
 let test_tool_exec_observer_bridges_to_telemetry () =
@@ -296,18 +302,18 @@ let test_tool_exec_observer_bridges_to_telemetry () =
        with
       | Ok _ -> ()
       | Error e ->
-          Alcotest.fail (Printf.sprintf "file_write failed: %s" e));
+          Alcotest.fail (Printf.sprintf "file_write failed: %s" (te e)));
       (match Tool.execute read_tool (`Assoc [ ("path", `String tmp_path) ]) with
       | Ok _ -> ()
       | Error e ->
-          Alcotest.fail (Printf.sprintf "file_read failed: %s" e));
+          Alcotest.fail (Printf.sprintf "file_read failed: %s" (te e)));
       (match
          Tool.execute shell_tool
            (`Assoc [ ("command", `String "echo telemetry-ok") ])
        with
       | Ok _ -> ()
       | Error e ->
-          Alcotest.fail (Printf.sprintf "shell_exec failed: %s" e));
+          Alcotest.fail (Printf.sprintf "shell_exec failed: %s" (te e)));
       let summary = Telemetry_eio.summarize_tool_usage ~fs config in
       let stats name =
         match Hashtbl.find_opt summary.stats_by_tool name with
@@ -330,7 +336,7 @@ let test_shell_exec_rejects_shell_metacharacters () =
     (`Assoc [("command", `String "echo hello; pwd")]) in
   (match result with
    | Error msg ->
-       let normalized = String.lowercase_ascii msg in
+       let normalized = String.lowercase_ascii (te msg) in
        let needle = "workdir" in
        let needle_len = String.length needle in
        let hay_len = String.length normalized in
@@ -365,7 +371,7 @@ let test_shell_exec_missing_param () =
   (match result with
    | Error msg ->
      Alcotest.(check bool) "error about missing command" true
-       (String.length msg > 0)
+       (String.length (te msg) > 0)
    | Ok _ -> Alcotest.fail "should fail without command param")
 
 let test_readonly_shell_exec_blocks_git () =
@@ -394,7 +400,7 @@ let test_workdir_enforcement () =
              ("content", `String "ok")]) in
   (match result_ok with
    | Ok _ -> ()
-   | Error e -> Alcotest.fail (Printf.sprintf "workdir write failed: %s" e));
+   | Error e -> Alcotest.fail (Printf.sprintf "workdir write failed: %s" (te e)));
   (* Writing outside workdir (but inside ~/me) should be blocked *)
   let home = Sys.getenv "HOME" in
   let bad_path = Filename.concat home "me/should_not_write.txt" in

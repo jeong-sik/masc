@@ -30,14 +30,24 @@ let default_config = {
   verbose = false;
 }
 
+let local_qwen_config () : Provider.config =
+  { provider = Local { base_url = "http://127.0.0.1:8085" };
+    model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+    api_key_env = "DUMMY_KEY" }
+
+let local_mlx_config () : Provider.config =
+  { provider = Local { base_url = "http://127.0.0.1:8091" };
+    model_id = "mlx-community/Qwen2.5-Coder-32B-Instruct-8bit";
+    api_key_env = "DUMMY_KEY" }
+
 let resolve_provider name =
   match name with
-  | "local-qwen" -> Some (Provider.local_qwen ())
-  | "local-mlx" -> Some (Provider.local_mlx ())
+  | "local-qwen" -> Some (local_qwen_config ())
+  | "local-mlx" -> Some (local_mlx_config ())
   | "sonnet" -> Some (Provider.anthropic_sonnet ())
   | "haiku" -> Some (Provider.anthropic_haiku ())
   | "opus" -> Some (Provider.anthropic_opus ())
-  | "llama" -> Some (Provider.local_qwen ())
+  | "llama" -> Some (local_qwen_config ())
   | "openrouter" -> Some (Provider.openrouter ())
   | _ -> None
 
@@ -76,7 +86,7 @@ let parse_args argv =
 
 let run_solo ~sw ~net ~clock ~proc_mgr config =
   let provider_cfg = match resolve_provider config.provider_name with
-    | Some p -> p | None -> Provider.local_qwen () in
+    | Some p -> p | None -> local_qwen_config () in
   let base_url = match provider_cfg.provider with
     | Provider.Local { base_url } -> base_url
     | Provider.Anthropic -> Api.default_base_url
@@ -106,7 +116,7 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
 
 let run_fleet ~sw ~net ~clock ~proc_mgr config =
   let provider_cfg = match resolve_provider config.provider_name with
-    | Some p -> p | None -> Provider.local_qwen () in
+    | Some p -> p | None -> local_qwen_config () in
   let workdir = if config.workdir = "." then None else Some config.workdir in
   Agent_swarm_fleet.run_full ~sw ~net ~clock ~proc_mgr
     ~masc_url:config.masc_url

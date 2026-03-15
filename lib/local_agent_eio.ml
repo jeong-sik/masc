@@ -1105,9 +1105,12 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt
                  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:schema.name
                    ~args
                with
-               | Ok result when result.is_error -> Error result.text
-               | Ok result -> Ok result.text
-               | Error e -> Error e
+               | Ok result when result.is_error ->
+                   Error ({ Agent_sdk.Types.message = result.text; recoverable = true })
+               | Ok result ->
+                   Ok ({ Agent_sdk.Types.content = result.text })
+               | Error e ->
+                   Error ({ Agent_sdk.Types.message = e; recoverable = true })
              in
              Oas.Mcp.mcp_tool_to_sdk_tool ~call_fn
                {

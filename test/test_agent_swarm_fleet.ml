@@ -106,7 +106,7 @@ let test_fleet_worker_prompt () =
     (has_sub prompt "masc_set_current_task")
 
 let test_run_full_plan () =
-  let provider = Provider.local_qwen () in
+  let provider = { Agent_sdk.Provider.provider = Local { base_url = "http://127.0.0.1:8085" }; model_id = "qwen3.5-35b-a3b-ud-q8-xl"; api_key_env = "DUMMY_KEY" } in
   let plan =
     Agent_swarm_fleet.build_run_full_plan ~provider ~goal:"Fix the bug"
       ~num_members:3 ~workdir:"/tmp/work" ~max_turns:7
@@ -138,7 +138,7 @@ let test_run_full_plan_rejects_zero_members () =
     (Invalid_argument "num_members must be positive")
     (fun () ->
        ignore
-         (Agent_swarm_fleet.build_run_full_plan ~provider:(Provider.local_qwen ())
+         (Agent_swarm_fleet.build_run_full_plan ~provider:({ Agent_sdk.Provider.provider = Local { base_url = "http://127.0.0.1:8085" }; model_id = "qwen3.5-35b-a3b-ud-q8-xl"; api_key_env = "DUMMY_KEY" })
             ~goal:"Fix the bug" ~num_members:0 ~workdir:"/tmp/work"
             ~max_turns:7))
 

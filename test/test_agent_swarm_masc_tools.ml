@@ -4,6 +4,8 @@
 open Agent_sdk
 open Masc_mcp
 
+let te (e : Agent_sdk.Types.tool_error) = e.message
+
 let has_sub s sub =
   let sn = String.length s and subn = String.length sub in
   if subn > sn then false
@@ -79,7 +81,7 @@ let test_claim_requires_task_id () =
   match result with
   | Error msg ->
     Alcotest.(check bool) "mentions task_id" true
-      (String.length msg > 0)
+      (String.length (te msg) > 0)
   | Ok _ ->
     Alcotest.fail "should fail without task_id"
 
@@ -95,7 +97,7 @@ let test_add_task_requires_title () =
   let result = Tool.execute add_tool (`Assoc []) in
   match result with
   | Error msg ->
-    Alcotest.(check bool) "error is non-empty" true (String.length msg > 0)
+    Alcotest.(check bool) "error is non-empty" true (String.length (te msg) > 0)
   | Ok _ ->
     Alcotest.fail "should fail without title"
 
@@ -113,7 +115,7 @@ let test_batch_add_requires_tasks () =
   let result = Tool.execute batch_tool (`Assoc []) in
   match result with
   | Error msg ->
-    Alcotest.(check bool) "mentions tasks" true (has_sub msg "tasks")
+    Alcotest.(check bool) "mentions tasks" true (has_sub (te msg) "tasks")
   | Ok _ ->
     Alcotest.fail "should fail without tasks"
 
@@ -131,7 +133,7 @@ let test_batch_add_rejects_empty_tasks () =
   let result = Tool.execute batch_tool (`Assoc [("tasks", `List [])]) in
   match result with
   | Error msg ->
-    Alcotest.(check bool) "mentions non-empty" true (has_sub msg "non-empty")
+    Alcotest.(check bool) "mentions non-empty" true (has_sub (te msg) "non-empty")
   | Ok _ ->
     Alcotest.fail "should fail with empty tasks"
 
@@ -149,9 +151,10 @@ let test_claim_next_no_params () =
   let result = Tool.execute claim_next_tool (`Assoc []) in
   match result with
   | Error msg ->
-    Alcotest.(check bool) "non-empty rpc error" true (String.length msg > 0);
+    let m = te msg in
+    Alcotest.(check bool) "non-empty rpc error" true (String.length m > 0);
     Alcotest.(check bool) "not validation failure" false
-      (has_sub msg "missing required field")
+      (has_sub m "missing required field")
   | Ok _ ->
     Alcotest.fail "should fail because no live server is available"
 
@@ -169,7 +172,7 @@ let test_set_current_task_requires_task_id () =
   let result = Tool.execute set_tool (`Assoc []) in
   match result with
   | Error msg ->
-    Alcotest.(check bool) "mentions task_id" true (String.length msg > 0)
+    Alcotest.(check bool) "mentions task_id" true (String.length (te msg) > 0)
   | Ok _ ->
     Alcotest.fail "should fail without task_id"
 
@@ -187,7 +190,7 @@ let test_release_requires_task_id () =
   let result = Tool.execute release_tool (`Assoc []) in
   match result with
   | Error msg ->
-    Alcotest.(check bool) "mentions task_id" true (has_sub msg "task_id")
+    Alcotest.(check bool) "mentions task_id" true (has_sub (te msg) "task_id")
   | Ok _ ->
     Alcotest.fail "should fail without task_id"
 
@@ -205,7 +208,7 @@ let test_cancel_requires_task_id () =
   let result = Tool.execute cancel_tool (`Assoc []) in
   match result with
   | Error msg ->
-    Alcotest.(check bool) "mentions task_id" true (has_sub msg "task_id")
+    Alcotest.(check bool) "mentions task_id" true (has_sub (te msg) "task_id")
   | Ok _ ->
     Alcotest.fail "should fail without task_id"
 

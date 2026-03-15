@@ -56,7 +56,8 @@ function eventKindLabel(kind: string): string {
 }
 
 function eventActor(event: SocialGraphTimelineEvent): string {
-  if (event.actor?.id) return event.actor.id
+  const actor = event.actor as Record<string, unknown>
+  if (actor?.id) return actor.id as string
   const payload = event.payload as Record<string, unknown>
   return (payload.agent as string) ?? (payload.author as string) ?? (payload.from as string) ?? ''
 }

@@ -2982,6 +2982,8 @@ export interface SocialGraphNode {
   label: string
   type: string
   weight: number
+  kind: string
+  status: string
 }
 
 export interface SocialGraphEdge {
@@ -2989,13 +2991,21 @@ export interface SocialGraphEdge {
   target: string
   type: string
   weight: number
+  kind: string
+  active: boolean
 }
 
 export interface SocialGraphTimelineEvent {
   kind: string
-  actor: string
+  actor: Record<string, unknown>
   summary: string
+  subject: { id: string; type: string } | null
   ts: number
+  ts_iso: string
+  seq: number
+  room_id: string
+  tags: string[]
+  payload: Record<string, unknown>
 }
 
 export interface SocialGraphStats {
@@ -3006,5 +3016,7 @@ export interface SocialGraphResponse {
   nodes: SocialGraphNode[]
   edges: SocialGraphEdge[]
   stats: SocialGraphStats
-  timeline?: SocialGraphTimelineEvent[]
+  timeline: SocialGraphTimelineEvent[]
+  generated_at: string
+  window: { start: number; end: number; limit: number; room_id: string }
 }

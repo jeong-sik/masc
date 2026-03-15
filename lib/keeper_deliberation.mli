@@ -107,8 +107,10 @@ val deliberation_budget_check :
 
 (** Build a prompt for the LLM to decide the keeper's next action.
     Describes the keeper's identity, current state, detected triggers,
-    and available actions. Asks the LLM to respond with structured JSON. *)
+    and available actions. Asks the LLM to respond with structured JSON.
+    When [~autonomy_level] is L3+, the [multi_step] action is included. *)
 val build_deliberation_prompt :
+  ?autonomy_level:string ->
   keeper_name:string ->
   soul_profile:string ->
   goal:string ->

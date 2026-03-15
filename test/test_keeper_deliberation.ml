@@ -579,6 +579,204 @@ let test_daily_budget_from_env_custom () =
        Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" "");
   check (float 0.001) "custom env budget" 0.50 budget
 
+(* ================================================================ *)
+(* Phase 5: L2 Proactive and L3 Strategic tests                     *)
+(* ================================================================ *)
+
+(* ---------- L2 Proactive triage: GoalDeadline trigger ---------- *)
+
+let test_triage_goal_deadline () =
+  (* GoalDeadline fires when active_goal_count > 0 AND idle_seconds > idle_gate * 2 *)
+  let obs =
+    { base_obs with
+      active_goal_count = 1;
+      idle_seconds = 700;
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> fail "expected GoalDeadline trigger"
+  | D.Triggered triggers ->
+      check bool "contains GoalDeadline" true
+        (List.mem D.GoalDeadline triggers)
+
+let test_triage_goal_deadline_not_triggered_below_threshold () =
+  (* idle_seconds (500) is NOT > idle_gate * 2 (600) *)
+  let obs =
+    { base_obs with
+      active_goal_count = 2;
+      idle_seconds = 500;
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> ()
+  | D.Triggered triggers ->
+      (* IdleTimeout may fire (500 > 300) but GoalDeadline should not *)
+      check bool "GoalDeadline should not trigger" false
+        (List.mem D.GoalDeadline triggers)
+
+let test_triage_goal_deadline_no_goals () =
+  (* No active goals, so GoalDeadline should not fire even with high idle *)
+  let obs =
+    { base_obs with
+      active_goal_count = 0;
+      idle_seconds = 1000;
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> () (* expected: no goals, no triggers *)
+  | D.Triggered triggers ->
+      check bool "GoalDeadline should not trigger without goals" false
+        (List.mem D.GoalDeadline triggers)
+
+(* ---------- L2 Proactive triage: StrategicReview trigger ---------- *)
+
+let test_triage_strategic_review () =
+  (* StrategicReview fires when idle_seconds > idle_gate * 5 AND active_goal_count > 0 *)
+  let obs =
+    { base_obs with
+      active_goal_count = 1;
+      idle_seconds = 1600;
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> fail "expected StrategicReview trigger"
+  | D.Triggered triggers ->
+      check bool "contains StrategicReview" true
+        (List.mem D.StrategicReview triggers)
+
+let test_triage_strategic_review_not_triggered_below_threshold () =
+  (* idle_seconds (1400) is NOT > idle_gate * 5 (1500) *)
+  let obs =
+    { base_obs with
+      active_goal_count = 1;
+      idle_seconds = 1400;
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> () (* could skip entirely or trigger other things *)
+  | D.Triggered triggers ->
+      check bool "StrategicReview should not trigger" false
+        (List.mem D.StrategicReview triggers)
+
+(* ---------- L3 Strategic: multi_step parse ---------- *)
+
+let test_parse_multi_step_action () =
+  let raw =
+    {|{"action":"multi_step","params":{"steps":[
+        {"action":"task_claim","params":{"task_id":"t-1","reason":"urgent"}},
+        {"action":"broadcast","params":{"message":"Claimed t-1"}}
+      ]},"reasoning":"Claim and announce","confidence":0.7}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok for multi_step, got Error: " ^ msg)
+  | Ok (action, reasoning, confidence) ->
+      (match action with
+       | D.MultiStep actions ->
+           check int "step count" 2 (List.length actions);
+           check string "reasoning" "Claim and announce" reasoning;
+           check (float 0.01) "confidence" 0.7 confidence
+       | _ -> fail "expected MultiStep action")
+
+let test_parse_multi_step_empty_steps_fails () =
+  let raw =
+    {|{"action":"multi_step","params":{"steps":[]},"reasoning":"empty","confidence":0.5}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error _ -> () (* expected *)
+  | Ok _ -> fail "expected Error for empty multi_step steps"
+
+let test_parse_multi_step_truncated_to_5 () =
+  let steps =
+    List.init 7 (fun i ->
+      Printf.sprintf
+        {|{"action":"noop","params":{"reason":"step-%d"}}|} i)
+  in
+  let steps_str = String.concat "," steps in
+  let raw =
+    Printf.sprintf
+      {|{"action":"multi_step","params":{"steps":[%s]},"reasoning":"many steps","confidence":0.6}|}
+      steps_str
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok for truncated multi_step, got Error: " ^ msg)
+  | Ok (action, _reasoning, _confidence) ->
+      match action with
+      | D.MultiStep actions ->
+          check int "truncated to 5 steps" 5 (List.length actions)
+      | _ -> fail "expected MultiStep action"
+
+let test_parse_multi_step_nested_rejected () =
+  let raw =
+    {|{"action":"multi_step","params":{"steps":[
+        {"action":"multi_step","params":{"steps":[{"action":"noop","params":{"reason":"inner"}}]}}
+      ]},"reasoning":"nested","confidence":0.5}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg ->
+      check bool "mentions nested" true
+        (try ignore (Str.search_forward (Str.regexp_string "nested") msg 0); true
+         with Not_found -> false)
+  | Ok _ -> fail "expected Error for nested multi_step"
+
+let test_parse_multi_step_invalid_substep_fails () =
+  let raw =
+    {|{"action":"multi_step","params":{"steps":[
+        {"action":"reply_in_room","params":{"room_id":"r1","content":""}},
+        {"action":"noop","params":{"reason":"ok"}}
+      ]},"reasoning":"bad step","confidence":0.5}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error _ -> () (* expected: reply with empty content fails *)
+  | Ok _ -> fail "expected Error for invalid substep in multi_step"
+
+(* ---------- L3 Strategic: prompt includes multi_step for L3+ ---------- *)
+
+let test_prompt_l3_includes_multi_step () =
+  let prompt =
+    D.build_deliberation_prompt
+      ~autonomy_level:"L3_Guided"
+      ~keeper_name:"strategic-keeper"
+      ~soul_profile:"strategist"
+      ~goal:"Plan and execute"
+      ~triggers:[ D.DirectMention ]
+      base_obs
+  in
+  check bool "L3 prompt contains multi_step" true
+    (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
+     with Not_found -> false)
+
+let test_prompt_l1_excludes_multi_step () =
+  let prompt =
+    D.build_deliberation_prompt
+      ~autonomy_level:"L1_Reactive"
+      ~keeper_name:"reactive-keeper"
+      ~soul_profile:"observer"
+      ~goal:"React only"
+      ~triggers:[ D.DirectMention ]
+      base_obs
+  in
+  check bool "L1 prompt does not contain multi_step" false
+    (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
+     with Not_found -> false)
+
+let test_prompt_no_autonomy_excludes_multi_step () =
+  let prompt =
+    D.build_deliberation_prompt
+      ~keeper_name:"default-keeper"
+      ~soul_profile:"basic"
+      ~goal:"Default"
+      ~triggers:[ D.DirectMention ]
+      base_obs
+  in
+  check bool "no autonomy prompt does not contain multi_step" false
+    (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
+     with Not_found -> false)
+
 let () =
   run "Keeper_deliberation"
     [
@@ -602,6 +800,16 @@ let () =
             test_triage_idle_without_goals_skips;
           test_case "multiple triggers" `Quick
             test_triage_multiple_triggers;
+          test_case "goal deadline triggers" `Quick
+            test_triage_goal_deadline;
+          test_case "goal deadline not triggered below threshold" `Quick
+            test_triage_goal_deadline_not_triggered_below_threshold;
+          test_case "goal deadline no goals" `Quick
+            test_triage_goal_deadline_no_goals;
+          test_case "strategic review triggers" `Quick
+            test_triage_strategic_review;
+          test_case "strategic review not triggered below threshold" `Quick
+            test_triage_strategic_review_not_triggered_below_threshold;
         ] );
       ( "actions",
         [
@@ -675,6 +883,12 @@ let () =
             test_prompt_contains_json_instruction;
           test_case "prompt lists available actions" `Quick
             test_prompt_contains_action_list;
+          test_case "L3+ prompt includes multi_step" `Quick
+            test_prompt_l3_includes_multi_step;
+          test_case "L1 prompt excludes multi_step" `Quick
+            test_prompt_l1_excludes_multi_step;
+          test_case "no autonomy prompt excludes multi_step" `Quick
+            test_prompt_no_autonomy_excludes_multi_step;
         ] );
       ( "parse_deliberation_response",
         [
@@ -707,6 +921,16 @@ let () =
             test_parse_negative_confidence_clamped;
           test_case "missing confidence defaults to 0.5" `Quick
             test_parse_missing_confidence_defaults;
+          test_case "parse multi_step action" `Quick
+            test_parse_multi_step_action;
+          test_case "multi_step empty steps fails" `Quick
+            test_parse_multi_step_empty_steps_fails;
+          test_case "multi_step truncated to 5" `Quick
+            test_parse_multi_step_truncated_to_5;
+          test_case "nested multi_step rejected" `Quick
+            test_parse_multi_step_nested_rejected;
+          test_case "multi_step invalid substep fails" `Quick
+            test_parse_multi_step_invalid_substep_fails;
         ] );
       ( "deliberation_budget",
         [

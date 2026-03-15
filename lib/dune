@@ -373,6 +373,8 @@
    keeper_exec_status
    keeper_exec_persona
    keeper_execution
+   keeper_learning
+   keeper_feedback_tool
    keeper_keepalive
    keeper_runtime
    keeper_turn

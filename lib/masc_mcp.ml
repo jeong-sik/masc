@@ -321,6 +321,8 @@ module Keeper_alerting = Keeper_alerting
 module Keeper_exec_tools = Keeper_exec_tools
 module Keeper_exec_status = Keeper_exec_status
 module Keeper_execution = Keeper_execution
+module Keeper_learning = Keeper_learning
+module Keeper_feedback_tool = Keeper_feedback_tool
 module Keeper_keepalive = Keeper_keepalive
 module Keeper_runtime = Keeper_runtime
 

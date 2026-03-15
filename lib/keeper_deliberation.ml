@@ -223,6 +223,12 @@ let triage (obs : world_observation) : triage_result =
     add (BoardActivity "mentioned_in_post");
   if obs.idle_seconds > obs.idle_gate && obs.active_goal_count > 0 then
     add IdleTimeout;
+  if obs.active_goal_count > 0
+     && obs.idle_seconds > obs.idle_gate * 2 then
+    add GoalDeadline;
+  if obs.idle_seconds > obs.idle_gate * 5
+     && obs.active_goal_count > 0 then
+    add StrategicReview;
 
   match List.rev !triggers with
   | [] -> Skip "no triggers detected"
@@ -328,11 +334,34 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
 
 (** Build a prompt for the LLM to decide the keeper's next action.
     The prompt describes the keeper's identity, current state, detected triggers,
-    and available actions. The LLM is asked to respond with JSON. *)
+    and available actions. The LLM is asked to respond with JSON.
+    When [autonomy_level] is L3+, the [multi_step] action is included. *)
 let build_deliberation_prompt
+    ?(autonomy_level : string option)
     ~keeper_name ~soul_profile ~goal
     ~(triggers : deliberation_trigger list)
     (obs : world_observation) : string =
+  let is_l3_plus =
+    match autonomy_level with
+    | None -> false
+    | Some raw -> (
+        match Keeper_autonomy.autonomy_level_of_string raw with
+        | Some (Keeper_autonomy.L3_Guided | L4_Autonomous | L5_Independent) ->
+            true
+        | _ -> false)
+  in
+  let multi_step_line =
+    if is_l3_plus then
+      "\n- multi_step: Execute multiple actions sequentially (max 5). \
+       Requires steps array of action objects."
+    else ""
+  in
+  let multi_step_example =
+    if is_l3_plus then
+      {|
+{"action":"multi_step","params":{"steps":[{"action":"task_claim","params":{"task_id":"task-1","reason":"urgent"}},{"action":"broadcast","params":{"message":"Claimed task-1"}}]},"reasoning":"Claim and announce","confidence":0.7}|}
+    else ""
+  in
   Printf.sprintf
     {|You are %s, a keeper agent in a multi-agent coordination system.
 
@@ -352,7 +381,7 @@ Available actions (pick exactly one):
 - board_post: Post to the community board. Requires content and optional hearth.
 - board_comment: Comment on a board post. Requires post_id and content.
 - board_vote: Vote on a board post. Requires post_id and direction (up/down).
-- propose_spawn: Propose spawning a new agent. Requires topic and reason.
+- propose_spawn: Propose spawning a new agent. Requires topic and reason.%s
 
 Respond with ONLY a JSON object in this exact format:
 {"action":"<action_name>","params":{<action_specific_params>},"reasoning":"<brief_explanation>","confidence":<0.0_to_1.0>}
@@ -361,12 +390,14 @@ Examples:
 {"action":"noop","params":{"reason":"No urgent triggers"},"reasoning":"All triggers are low priority","confidence":0.9}
 {"action":"reply_in_room","params":{"room_id":"default","content":"I see a new task available."},"reasoning":"Direct mention needs response","confidence":0.8}
 {"action":"task_claim","params":{"task_id":"task-123","reason":"Matches my goal"},"reasoning":"Unclaimed task aligns with keeper goal","confidence":0.7}
-{"action":"broadcast","params":{"message":"Status update: monitoring active goals"},"reasoning":"Team needs coordination update","confidence":0.6}|}
+{"action":"broadcast","params":{"message":"Status update: monitoring active goals"},"reasoning":"Team needs coordination update","confidence":0.6}%s|}
     keeper_name
     soul_profile
     goal
     (triggers_to_prompt_list triggers)
     (world_observation_to_prompt_section obs)
+    multi_step_line
+    multi_step_example
 
 (* ---------- Response parser ---------- *)
 
@@ -423,7 +454,7 @@ let extract_json_from_response (raw : string) : (Yojson.Safe.t, string) result =
 
 (** Parse a deliberation action from the "action" and "params" fields of the
     LLM response JSON. Returns the typed action or an error string. *)
-let parse_action_from_json (json : Yojson.Safe.t)
+let rec parse_action_from_json (json : Yojson.Safe.t)
     : (deliberation_action, string) result =
   let action_str = Safe_ops.json_string ~default:"" "action" json in
   let params =
@@ -474,6 +505,59 @@ let parse_action_from_json (json : Yojson.Safe.t)
       let reason = Safe_ops.json_string ~default:"" "reason" params in
       if topic = "" then Error "propose_spawn requires non-empty topic"
       else Ok (ProposeSpawn { topic; reason })
+  | "multi_step" -> (
+      let steps_json =
+        match params with
+        | `Assoc fields -> (
+            match List.assoc_opt "steps" fields with
+            | Some (`List items) -> items
+            | _ -> [])
+        | _ -> []
+      in
+      match steps_json with
+      | [] -> Error "multi_step requires non-empty steps array"
+      | items ->
+          let max_steps = 5 in
+          let truncated =
+            if List.length items > max_steps then
+              let rec take n acc = function
+                | _ when n <= 0 -> List.rev acc
+                | [] -> List.rev acc
+                | x :: xs -> take (n - 1) (x :: acc) xs
+              in
+              take max_steps [] items
+            else items
+          in
+          let results =
+            List.map
+              (fun step_json ->
+                parse_action_from_json step_json)
+              truncated
+          in
+          let errors =
+            List.filter_map
+              (function Error e -> Some e | Ok _ -> None)
+              results
+          in
+          if errors <> [] then
+            Error
+              (Printf.sprintf "multi_step contains invalid actions: %s"
+                 (String.concat "; " errors))
+          else
+            let actions =
+              List.filter_map
+                (function Ok a -> Some a | Error _ -> None)
+                results
+            in
+            (* Reject nested multi_step *)
+            let has_nested =
+              List.exists
+                (function MultiStep _ -> true | _ -> false)
+                actions
+            in
+            if has_nested then
+              Error "multi_step cannot contain nested multi_step actions"
+            else Ok (MultiStep actions))
   | "" -> Error "missing 'action' field in LLM response"
   | unknown -> Error (Printf.sprintf "unknown action type: %s" unknown)
 

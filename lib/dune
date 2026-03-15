@@ -296,6 +296,7 @@
    task_pg
    task_dispatch
    tool_room
+   workflow_guide
    tool_control
    tool_verification
    tool_misc

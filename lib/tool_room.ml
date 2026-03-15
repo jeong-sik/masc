@@ -138,6 +138,141 @@ let handle_room_strategy_set ctx args =
               ("project", `String updated.project);
             ]) )
 
+(* ── State inspection (shared by workflow_guide and check) ──────── *)
+
+type agent_state = {
+  room_set : bool;
+  joined : bool;
+  task_claimed : bool;
+  current_task_set : bool;
+  worktree_active : bool;
+}
+
+let inspect_state ctx =
+  let room_set = Room.is_initialized ctx.config in
+  let joined =
+    if room_set then
+      (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name
+       with Sys_error _ | Yojson.Json_error _ -> false)
+    else false
+  in
+  let (task_claimed, current_task_set) =
+    if joined then
+      let agents_path =
+        Filename.concat
+          (Room.agents_dir ctx.config)
+          (Room.safe_filename ctx.agent_name ^ ".json")
+      in
+      if Sys.file_exists agents_path then
+        match Room.read_json ctx.config agents_path |> Types.agent_of_yojson with
+        | Ok agent ->
+            let claimed = agent.Types.current_task <> None in
+            (claimed, claimed)
+        | Error _ -> (false, false)
+      else (false, false)
+    else (false, false)
+  in
+  let worktree_active =
+    if room_set then
+      let wt_dir = Filename.concat ctx.config.base_path ".worktrees" in
+      (try Sys.file_exists wt_dir && Sys.is_directory wt_dir &&
+           Array.length (Sys.readdir wt_dir) > 0
+       with _ -> false)
+    else false
+  in
+  { room_set; joined; task_claimed; current_task_set; worktree_active }
+
+let state_to_json st =
+  `Assoc [
+    ("room_set", `Bool st.room_set);
+    ("joined", `Bool st.joined);
+    ("task_claimed", `Bool st.task_claimed);
+    ("current_task_set", `Bool st.current_task_set);
+    ("worktree_active", `Bool st.worktree_active);
+    ("session_active", `Bool false);
+  ]
+
+(* ── Workflow guide ─────────────────────────────────────────────── *)
+
+let handle_workflow_guide ctx _args =
+  let st = inspect_state ctx in
+  let guidance =
+    Workflow_guide.current_state_guidance
+      ~room_set:st.room_set ~joined:st.joined
+      ~task_claimed:st.task_claimed ~current_task_set:st.current_task_set
+      ~worktree_active:st.worktree_active ~session_active:false
+  in
+  let result =
+    `Assoc [
+      ("current_state", state_to_json st);
+      ("guidance", Workflow_guide.guidance_to_json guidance);
+    ]
+  in
+  (true, Yojson.Safe.pretty_to_string result)
+
+(* ── State check (assertion-based verification) ────────────────── *)
+
+let check_assertion st assertion =
+  let (passed, fix_hint) = match assertion with
+    | "room_set" ->
+        (st.room_set,
+         "Call masc_set_room with your project root path")
+    | "joined" ->
+        (st.joined,
+         "Call masc_join to register your agent in the room")
+    | "task_claimed" ->
+        (st.task_claimed,
+         "Call masc_claim or masc_add_task + masc_claim to get a task")
+    | "current_task_set" ->
+        (st.current_task_set,
+         "Call masc_plan_set_task after claiming a task")
+    | "worktree_active" ->
+        (st.worktree_active,
+         "Call masc_worktree_create to work in an isolated branch")
+    | other ->
+        (false, Printf.sprintf "Unknown assertion: %s" other)
+  in
+  `Assoc [
+    ("assertion", `String assertion);
+    ("passed", `Bool passed);
+    ("fix_hint", if passed then `Null else `String fix_hint);
+  ]
+
+let handle_check ctx args =
+  let st = inspect_state ctx in
+  let default_assertions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ] in
+  let assertions =
+    match Yojson.Safe.Util.member "assertions" args with
+    | `List items ->
+        let parsed = List.filter_map (function `String s -> Some s | _ -> None) items in
+        if parsed = [] then default_assertions else parsed
+    | _ -> default_assertions
+  in
+  let results = List.map (check_assertion st) assertions in
+  let all_passed = List.for_all (fun r ->
+    match Yojson.Safe.Util.member "passed" r with
+    | `Bool b -> b | _ -> false) results
+  in
+  let fix_hint =
+    if all_passed then `Null
+    else
+      let first_fail = List.find_opt (fun r ->
+        match Yojson.Safe.Util.member "passed" r with
+        | `Bool false -> true | _ -> false) results
+      in
+      match first_fail with
+      | Some r -> Yojson.Safe.Util.member "fix_hint" r
+      | None -> `Null
+  in
+  let result =
+    `Assoc [
+      ("assertions", `List results);
+      ("all_passed", `Bool all_passed);
+      ("fix_hint", fix_hint);
+    ]
+  in
+  (true, Yojson.Safe.pretty_to_string result)
+
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =
   match name with
@@ -149,4 +284,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_room_enter" -> Some (handle_room_enter ctx args)
   | "masc_room_strategy_get" -> Some (handle_room_strategy_get ctx args)
   | "masc_room_strategy_set" -> Some (handle_room_strategy_set ctx args)
+  | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)
+  | "masc_check" -> Some (handle_check ctx args)
   | _ -> None

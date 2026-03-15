@@ -122,6 +122,10 @@ let default_model_strings ~cascade_name =
       [ Printf.sprintf "glm:%s" Env_config.Llm.default_model;
         Printf.sprintf "glm:%s" Env_config.Llm.flash_model;
         "glm:glm-5"; "glm:glm-5-code" ]
+  (* topic extraction — fast local model, glm fallback *)
+  | "topic_extraction" ->
+      [ Printf.sprintf "ollama:%s" Env_config.Llm.flash_model;
+        Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
   (* unregistered cascade: llama + glm as safety net *)
   | _ -> llama_glm
 

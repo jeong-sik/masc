@@ -61,17 +61,20 @@ let test_trait_weight_100_reactions () =
   let w = Lodge_reaction.trait_weight ~reaction_count:100 in
   check (float 0.01) "100 reactions = 0% traits (clamped)" 0.0 w
 
-(* Topic extraction tests *)
+(* Topic extraction tests — pinned to heuristic mode for deterministic results *)
 let test_extract_topics_ocaml () =
+  Unix.putenv "MASC_TOPIC_MODE" "heuristic";
   let topics = Lodge_reaction.extract_topics "I love OCaml and Eio for async programming" in
   check bool "contains ocaml" true (List.mem "ocaml" topics);
   check bool "contains eio" true (List.mem "eio" topics)
 
 let test_extract_topics_empty () =
+  Unix.putenv "MASC_TOPIC_MODE" "heuristic";
   let topics = Lodge_reaction.extract_topics "Hello world" in
   check int "no topics" 0 (List.length topics)
 
 let test_extract_topics_multiple () =
+  Unix.putenv "MASC_TOPIC_MODE" "heuristic";
   let topics = Lodge_reaction.extract_topics "GraphQL API with Neo4j and React frontend" in
   check bool "contains graphql" true (List.mem "graphql" topics);
   check bool "contains neo4j" true (List.mem "neo4j" topics);

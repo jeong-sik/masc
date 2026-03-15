@@ -252,6 +252,12 @@
  (modules test_guardian_sentinel)
  (libraries masc_mcp alcotest yojson unix))
 
+; Lodge_topic module tests (Heuristic/LLM/Hybrid Topic Extraction)
+(test
+ (name test_lodge_topic)
+ (modules test_lodge_topic)
+ (libraries masc_mcp alcotest str yojson unix))
+
 ; Lodge_reaction module tests (Emergent Identity System)
 (test
  (name test_lodge_reaction)

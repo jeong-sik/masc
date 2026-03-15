@@ -89,16 +89,16 @@ let explicit_metadata : (string * metadata) list =
         "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface." );
     ( "masc_vote_create",
       hidden_active
-        "Low-usage room vote utility hidden from the default tool list; prefer decision.*, masc_consensus_*, or masc_debate_* for primary coordination workflows." );
+        "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
     ( "masc_vote_cast",
       hidden_active
-        "Low-usage room vote utility hidden from the default tool list; prefer decision.*, masc_consensus_*, or masc_debate_* for primary coordination workflows." );
+        "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
     ( "masc_vote_status",
       hidden_active
-        "Low-usage room vote utility hidden from the default tool list; prefer decision.*, masc_consensus_*, or masc_debate_* for primary coordination workflows." );
+        "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
     ( "masc_votes",
       hidden_active
-        "Low-usage room vote utility hidden from the default tool list; prefer decision.*, masc_consensus_*, or masc_debate_* for primary coordination workflows." );
+        "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal resident-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );

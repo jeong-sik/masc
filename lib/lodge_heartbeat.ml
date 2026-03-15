@@ -49,14 +49,20 @@ let generate_agent_uuid () =
     (String.sub (Digest.to_hex (Digest.string (string_of_float (Time_compat.now ())))) 0 8)
     (Random.int 0xFFFFFF)
 
-(** Check if agent is currently active (with 120s timeout for crash recovery).
+(** Crash recovery timeout: 360s (3x the heartbeat interval of 120s).
+    Previous value (120s = 1x interval) caused race conditions where agents
+    were removed between heartbeat ticks. 3x provides adequate margin. *)
+let agent_crash_timeout = 360.0
+
+(** Check if agent is currently active (with crash recovery timeout).
     Internal — must be called under [with_lodge_lock]. *)
 let is_agent_active_unlocked ~name =
   match Hashtbl.find_opt active_agents name with
-  | Some (_uuid, started_at) ->
-      let elapsed = Time_compat.now () -. started_at in
-      if elapsed < 120.0 then true
+  | Some (_uuid, last_seen) ->
+      let elapsed = Time_compat.now () -. last_seen in
+      if elapsed < agent_crash_timeout then true
       else begin
+        Printf.eprintf "[lodge] Agent '%s' timed out after %.0fs (crash recovery)\n%!" name elapsed;
         Hashtbl.remove active_agents name;
         false
       end
@@ -78,6 +84,15 @@ let try_activate_agent ~name : string option =
       Printf.printf "   🆔 [%s] Activated: %s\n%!" name uuid;
       Some uuid
     end)
+
+(** Refresh agent heartbeat timestamp — prevents crash-recovery timeout
+    while agent is actively ticking. *)
+let refresh_agent_heartbeat ~name =
+  with_lodge_lock (fun () ->
+    match Hashtbl.find_opt active_agents name with
+    | Some (uuid, _old_ts) ->
+        Hashtbl.replace active_agents name (uuid, Time_compat.now ())
+    | None -> ())
 
 (** Mark agent as done (deactivate) *)
 let deactivate_agent ~name =
@@ -284,6 +299,8 @@ let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
         state.should_stop <- true;
         deactivate_agent ~name
       end else begin
+        (* Refresh crash-recovery timestamp before tick *)
+        refresh_agent_heartbeat ~name;
         (* Do a tick *)
         state.action_count <- state.action_count + 1;
         Printf.printf "   💓 [%s] Heartbeat #%d (idle=%.0fs)\n%!" name state.action_count idle_time;

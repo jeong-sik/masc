@@ -261,7 +261,7 @@ let default_config base_path =
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
     workspace_path = base_path;
-    lock_expiry_minutes = 30;
+    lock_expiry_minutes = 2;
     backend_config;
     backend;
   }
@@ -306,7 +306,7 @@ let default_config_eio ~sw ~env base_path =
   {
     base_path = resolved_path;
     workspace_path = base_path;
-    lock_expiry_minutes = 30;
+    lock_expiry_minutes = 2;
     backend_config;
     backend;
   }

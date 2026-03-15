@@ -10,6 +10,7 @@
    agent_identity
    agent_tool_surfaces
    agent_neo4j
+   agent_permanence
    agent_registry_eio
    auto_recall
    auto_responder

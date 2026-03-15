@@ -47,8 +47,14 @@ let get_neo4j_uri () =
 let get_neo4j_user () =
   Sys.getenv_opt "NEO4J_USER" |> Option.value ~default:"neo4j"
 
-let get_neo4j_password () =
-  Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"password"
+(** Get Neo4j password from environment.
+    Returns Error if NEO4J_PASSWORD is unset or empty.
+    Fail-fast: no silent fallback to a dummy password. *)
+let get_neo4j_password () : (string, string) result =
+  match Sys.getenv_opt "NEO4J_PASSWORD" with
+  | Some pw when String.trim pw <> "" -> Ok pw
+  | Some _ -> Error "NEO4J_PASSWORD is set but empty"
+  | None -> Error "NEO4J_PASSWORD environment variable not set"
 
 (** Close existing connection if any *)
 let close_connection () =
@@ -81,26 +87,30 @@ let get_connection ~sw ~net ~clock () =
         close_connection ();
         let uri = get_neo4j_uri () in
         let user = get_neo4j_user () in
-        let password = get_neo4j_password () in
+        (match get_neo4j_password () with
+         | Error msg -> Error (Connection_failed msg)
+         | Ok password ->
         (match Bolt.connect_uri ~sw ~net ~clock ~uri ~username:user ~password () with
          | Ok conn ->
              global_state.conn <- Some (Box conn);
              global_state.last_used <- now;
              Ok ()
          | Error e ->
-             Error (convert_error e))
+             Error (convert_error e)))
     | None ->
         (* No connection, create new *)
         let uri = get_neo4j_uri () in
         let user = get_neo4j_user () in
-        let password = get_neo4j_password () in
+        (match get_neo4j_password () with
+         | Error msg -> Error (Connection_failed msg)
+         | Ok password ->
         (match Bolt.connect_uri ~sw ~net ~clock ~uri ~username:user ~password () with
          | Ok conn ->
              global_state.conn <- Some (Box conn);
              global_state.last_used <- now;
              Ok ()
          | Error e ->
-             Error (convert_error e))
+             Error (convert_error e)))
   )
 
 (** Execute a Cypher query and return JSON result *)

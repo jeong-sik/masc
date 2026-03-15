@@ -1,7 +1,19 @@
 (** Agent Neo4j - Persist Agent identities to Neo4j graph database
 
+    All queries use parameterized Cypher ($param syntax) to prevent injection.
+
     @since 0.6.0
 *)
+
+(** {1 Types} *)
+
+(** Parameterized Cypher query. [statement] uses [$param] placeholders;
+    [params] carries corresponding values.
+    Pass to [to_bolt_params], [to_http_payload], or [to_shell_cmd]. *)
+type cypher_query = {
+  statement : string;
+  params : (string * Yojson.Safe.t) list;
+}
 
 (** {1 Configuration} *)
 
@@ -28,22 +40,43 @@ type agent_record = {
   visit_count : int;
 }
 
-(** {1 Cypher Query Builders} *)
+(** {1 Cypher Query Builders}
 
-val build_agent_merge_query : Agent_ecosystem.extended -> string
-val build_lineage_query : Agent_ecosystem.extended -> string option
-val build_touch_query : string -> string
-val build_collaboration_query : string -> string -> string -> string
-val build_post_link_query : string -> string -> string
-val build_get_agent_query : string -> string
-val build_list_by_type_query : Agent_ecosystem.agent_type -> string
-val build_lineage_tree_query : string -> int -> string
-val build_collaboration_network_query : string -> string
-val build_stats_query : unit -> string
+    All builders return parameterized [cypher_query] values.
+    Use [to_bolt_params] or [to_http_payload] for safe execution. *)
 
-(** {1 Shell Command Operations} *)
+val build_agent_merge_query : Agent_ecosystem.extended -> cypher_query
+val build_lineage_query : Agent_ecosystem.extended -> cypher_query option
+val build_touch_query : string -> cypher_query
+val build_collaboration_query : string -> string -> string -> cypher_query
+val build_post_link_query : string -> string -> cypher_query
+val build_get_agent_query : string -> cypher_query
+val build_list_by_type_query : Agent_ecosystem.agent_type -> cypher_query
+val build_lineage_tree_query : string -> int -> cypher_query
+val build_collaboration_network_query : string -> cypher_query
+val build_stats_query : unit -> cypher_query
 
-(** Save agent to Neo4j - returns shell commands to execute *)
+(** {1 Query Serialization} *)
+
+(** Escape a string for inline Cypher use (defense-in-depth).
+    Prefer parameterized queries. *)
+val escape_cypher_string : string -> string
+
+(** JSON payload for Neo4j HTTP Transactional API (primary safe path). *)
+val to_http_payload : cypher_query -> string
+
+(** [(cypher, params)] for use with [Neo4j_client_eio.query]. *)
+val to_bolt_params : cypher_query -> string * Yojson.Safe.t
+
+(** Shell command for [sb neo4j query] with proper escaping. *)
+val to_shell_cmd : cypher_query -> string
+
+(** {1 High-Level Operations} *)
+
+(** Save agent — returns parameterized queries *)
+val save_agent_queries : Agent_ecosystem.extended -> cypher_query list
+
+(** Save agent — returns shell commands (legacy interface) *)
 val save_agent_cmd : Agent_ecosystem.extended -> string list
 
 (** Update agent's last_seen timestamp *)

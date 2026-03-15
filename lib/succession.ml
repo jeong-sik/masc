@@ -349,7 +349,14 @@ let build_successor_system_prompt (dna : succession_dna) : string =
         dna.metrics.errors_encountered;
     ]
   in
-  String.concat "\n" with_metrics
+  (* Phase 3B: Inject procedural memory from predecessor *)
+  let with_procedures =
+    let proc_block = Procedural_memory.format_for_dna
+      ~agent_name:"_global" ~limit:5 in
+    if proc_block = "" then with_metrics
+    else with_metrics @ [""; proc_block]
+  in
+  String.concat "\n" with_procedures
 
 let hydrate (dna : succession_dna) (spec : successor_spec) : Context_manager.working_context =
   let restored_opt =

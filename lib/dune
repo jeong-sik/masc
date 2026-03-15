@@ -394,6 +394,7 @@
    verifier
    succession
    perpetual_loop
+   procedural_memory
    oas_events
    oas_checkpoint_bridge
    env_config_core

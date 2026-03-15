@@ -219,6 +219,45 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                    "[keeper] heartbeat snapshot write failed: %s\n%!"
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
+            (* Deliberation triage: run for llm_deliberation mode keepers *)
+            let meta_after_triage =
+              let pm =
+                Keeper_contract.policy_mode_of_string meta_current.policy_mode
+              in
+              if Keeper_contract.policy_mode_is_deliberation pm then (
+                let obs =
+                  Keeper_deliberation.empty_world_observation
+                    ~keeper_name:meta_current.name
+                in
+                let obs =
+                  { obs with
+                    active_goal_count = List.length meta_current.active_goal_ids;
+                    idle_seconds =
+                      (let activity_ts =
+                         max meta_current.last_turn_ts
+                           meta_current.last_proactive_ts
+                       in
+                       if activity_ts <= 0.0 then 0
+                       else int_of_float (max 0.0 (now_ts -. activity_ts)));
+                    idle_gate = meta_current.proactive_idle_sec;
+                  }
+                in
+                let triage_result = Keeper_deliberation.triage obs in
+                let triggers_str =
+                  match triage_result with
+                  | Keeper_deliberation.Skip reason -> "skip:" ^ reason
+                  | Keeper_deliberation.Triggered triggers ->
+                      String.concat ","
+                        (List.map
+                           Keeper_deliberation.deliberation_trigger_to_string
+                           triggers)
+                in
+                if Keeper_types.keeper_debug then
+                  Printf.eprintf "[keeper-deliberation] %s triage: %s\n%!"
+                    meta_current.name triggers_str;
+                { meta_current with last_triage_triggers = triggers_str })
+              else meta_current
+            in
             let proactive_warmup_elapsed =
               proactive_warmup_sec <= 0
               || now_ts -. keepalive_started_ts
@@ -228,17 +267,17 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
               if proactive_warmup_elapsed then
                 (try
                    if
-                     meta_current.trigger_mode
+                     meta_after_triage.trigger_mode
                      |> Keeper_contract.trigger_mode_of_string
                      |> Keeper_contract.trigger_mode_is_explicit_only
-                   then maybe_emit_explicit_room_replies ctx meta_current
-                   else maybe_emit_proactive ctx meta_current
+                   then maybe_emit_explicit_room_replies ctx meta_after_triage
+                   else maybe_emit_proactive ctx meta_after_triage
                  with exn ->
                    Printf.eprintf
                      "[keeper] proactive emission failed: %s\n%!"
                      (Printexc.to_string exn);
-                   meta_current)
-              else meta_current
+                   meta_after_triage)
+              else meta_after_triage
             in
             let base =
               float_of_int

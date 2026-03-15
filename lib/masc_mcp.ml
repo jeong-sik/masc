@@ -310,6 +310,8 @@ module Anti_fake = Anti_fake
 (* Keeper Autonomy Engine (Phase 2: autonomy slider + verifier) *)
 module Keeper_autonomy = Keeper_autonomy
 module Keeper_verifier = Keeper_verifier
+module Keeper_contract = Keeper_contract
+module Keeper_deliberation = Keeper_deliberation
 module Keeper_types = Keeper_types
 module Keeper_memory = Keeper_memory
 module Keeper_alerting = Keeper_alerting

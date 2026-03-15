@@ -362,6 +362,7 @@
    keeper_schema
    keeper_config
    keeper_contract
+   keeper_deliberation
    keeper_types
    keeper_memory
    keeper_alerting

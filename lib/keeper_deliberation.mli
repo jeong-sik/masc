@@ -1,0 +1,92 @@
+(** Keeper_deliberation — typed action space, deliberation triggers,
+    world observation builder, and triage logic.
+
+    @since 2.90.0 *)
+
+(** {1 Triggers} *)
+
+type deliberation_trigger =
+  | DirectMention
+  | NewUnclaimedTask
+  | FailedTask
+  | AgentJoinedOrLeft
+  | GoalDeadline
+  | BoardActivity of string
+  | IdleTimeout
+  | MetricsAnomaly of string
+  | StrategicReview
+
+val deliberation_trigger_to_string : deliberation_trigger -> string
+val deliberation_trigger_to_json : deliberation_trigger -> Yojson.Safe.t
+
+(** {1 Actions} *)
+
+type deliberation_action =
+  | Noop of string
+  | ReplyInRoom of { room_id: string; content: string }
+  | BoardPost of { content: string; hearth: string option }
+  | BoardComment of { post_id: string; content: string }
+  | BoardVote of { post_id: string; direction: string }
+  | TaskClaim of { task_id: string; reason: string }
+  | Broadcast of { message: string }
+  | ProposeSpawn of { topic: string; reason: string }
+  | MultiStep of deliberation_action list
+
+val deliberation_action_to_string : deliberation_action -> string
+
+(** Map typed action to legacy string labels for policy logging. *)
+val deliberation_action_to_legacy_string : deliberation_action -> string
+
+val deliberation_action_to_json : deliberation_action -> Yojson.Safe.t
+
+(** {1 World observation} *)
+
+type world_observation = {
+  keeper_name: string;
+  direct_mention: bool;
+  has_question: bool;
+  message_content: string;
+  unclaimed_task_count: int;
+  failed_task_count: int;
+  active_agent_count: int;
+  agent_count_changed: bool;
+  active_goal_count: int;
+  idle_seconds: int;
+  idle_gate: int;
+  board_new_post_count: int;
+  board_mention_count: int;
+}
+
+val empty_world_observation : keeper_name:string -> world_observation
+val world_observation_to_json : world_observation -> Yojson.Safe.t
+
+(** {1 Triage} *)
+
+type triage_result =
+  | Skip of string
+  | Triggered of deliberation_trigger list
+
+val triage_result_to_json : triage_result -> Yojson.Safe.t
+
+(** Evaluate a world observation and return triggers that warrant deliberation.
+    Pure heuristic — no LLM calls, no I/O. *)
+val triage : world_observation -> triage_result
+
+(** {1 Deliberation meta (tracking fields for keeper_meta)} *)
+
+type deliberation_meta = {
+  deliberation_count: int;
+  deliberation_cost_total_usd: float;
+  last_deliberation_ts: float;
+  last_triage_triggers: string;
+}
+
+val default_deliberation_meta : deliberation_meta
+val deliberation_meta_to_json : deliberation_meta -> (string * Yojson.Safe.t) list
+val deliberation_meta_of_json : Yojson.Safe.t -> deliberation_meta
+
+(** {1 Baseline action} *)
+
+(** Deterministic baseline using the typed action space.
+    Equivalent to the old [if direct_mention then "reply_in_room" else "noop"]. *)
+val deterministic_baseline_action : world_observation -> deliberation_action

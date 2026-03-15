@@ -3,6 +3,15 @@
 open Alcotest
 open Masc_mcp
 
+(* Helper: run f with MASC_TOPIC_MODE set, restore after (even on exception) *)
+let with_topic_mode mode f =
+  let prev = Sys.getenv_opt "MASC_TOPIC_MODE" in
+  Unix.putenv "MASC_TOPIC_MODE" mode;
+  Fun.protect f ~finally:(fun () ->
+    match prev with
+    | Some v -> Unix.putenv "MASC_TOPIC_MODE" v
+    | None -> Unix.putenv "MASC_TOPIC_MODE" "hybrid")
+
 (* ============================================
    Parsing tests — pure functions, no I/O
    ============================================ *)
@@ -90,26 +99,20 @@ let test_heuristic_case_insensitive () =
    ============================================ *)
 
 let test_mode_dispatch_heuristic () =
-  (* Force heuristic mode *)
-  Unix.putenv "MASC_TOPIC_MODE" "heuristic";
-  let topics = Lodge_topic.extract_topics "I love OCaml and Eio" in
-  check bool "contains ocaml" true (List.mem "ocaml" topics);
-  check bool "contains eio" true (List.mem "eio" topics);
-  (* Clean up *)
-  Unix.putenv "MASC_TOPIC_MODE" "hybrid"
+  with_topic_mode "heuristic" (fun () ->
+    let topics = Lodge_topic.extract_topics "I love OCaml and Eio" in
+    check bool "contains ocaml" true (List.mem "ocaml" topics);
+    check bool "contains eio" true (List.mem "eio" topics))
 
 let test_mode_env_parsing () =
-  Unix.putenv "MASC_TOPIC_MODE" "heuristic";
-  check bool "heuristic mode" true (Lodge_topic.get_topic_mode () = Lodge_topic.Heuristic);
-  Unix.putenv "MASC_TOPIC_MODE" "llm";
-  check bool "llm mode" true (Lodge_topic.get_topic_mode () = Lodge_topic.Llm);
-  Unix.putenv "MASC_TOPIC_MODE" "hybrid";
-  check bool "hybrid mode" true (Lodge_topic.get_topic_mode () = Lodge_topic.Hybrid);
-  (* Unknown defaults to Hybrid *)
-  Unix.putenv "MASC_TOPIC_MODE" "unknown";
-  check bool "unknown defaults to hybrid" true (Lodge_topic.get_topic_mode () = Lodge_topic.Hybrid);
-  (* Restore *)
-  Unix.putenv "MASC_TOPIC_MODE" "hybrid"
+  with_topic_mode "heuristic" (fun () ->
+    check bool "heuristic mode" true (Lodge_topic.get_topic_mode () = Lodge_topic.Heuristic));
+  with_topic_mode "llm" (fun () ->
+    check bool "llm mode" true (Lodge_topic.get_topic_mode () = Lodge_topic.Llm));
+  with_topic_mode "hybrid" (fun () ->
+    check bool "hybrid mode" true (Lodge_topic.get_topic_mode () = Lodge_topic.Hybrid));
+  with_topic_mode "unknown" (fun () ->
+    check bool "unknown defaults to hybrid" true (Lodge_topic.get_topic_mode () = Lodge_topic.Hybrid))
 
 (* ============================================
    Prompt generation tests
@@ -139,12 +142,10 @@ let test_build_prompt_has_json_instruction () =
    ============================================ *)
 
 let test_llm_skip_short_content () =
-  (* Very short content should return Ok [] without LLM call *)
-  Unix.putenv "MASC_TOPIC_MODE" "llm";
-  let result = Lodge_topic.extract_topics_llm "hi" in
-  check bool "short content returns Ok" true (Result.is_ok result);
-  check int "empty topics" 0 (List.length (Result.get_ok result));
-  Unix.putenv "MASC_TOPIC_MODE" "hybrid"
+  with_topic_mode "llm" (fun () ->
+    let result = Lodge_topic.extract_topics_llm "hi" in
+    check bool "short content returns Ok" true (Result.is_ok result);
+    check int "empty topics" 0 (List.length (Result.get_ok result)))
 
 (* ============================================
    Test suite

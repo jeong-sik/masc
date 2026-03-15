@@ -151,8 +151,12 @@ let extract_topics_llm (content : string) : (string list, string) result =
         | _ -> []
       in
       Ok topics
-    | Ok None | Error _ ->
-      (* Cache miss — call LLM via cascade *)
+    | cache_result ->
+      (* Log cache read errors separately from clean misses *)
+      (match cache_result with
+       | Error e -> eprintf "[lodge_topic] cache read error: %s\n%!" e
+       | _ -> ());
+      (* Cache miss or error — call LLM via cascade *)
       let prompt = build_topic_prompt content in
       begin match
         Lodge_cascade.call
@@ -167,12 +171,14 @@ let extract_topics_llm (content : string) : (string list, string) result =
         let topics = parse_topics_response result.Lodge_cascade.response in
         (* Cache the result *)
         let json = `List (List.map (fun t -> `String t) topics) in
-        let _ =
+        (match
           Llm_response_cache.set_json
             ~key:cache_key
             ~ttl_seconds:cache_ttl_seconds
             json
-        in
+        with
+        | Ok () -> ()
+        | Error e -> eprintf "[lodge_topic] cache write failed: %s\n%!" e);
         Ok topics
       | Error msg ->
         Error (sprintf "topic_extraction cascade failed: %s" msg)

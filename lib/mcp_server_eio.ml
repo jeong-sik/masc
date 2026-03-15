@@ -1383,7 +1383,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     in
     (* Eio outer timeout includes LLM time + protocol overhead (serialization,
        network). Add 10s grace to avoid racing the LLM timeout. *)
-    let eio_timeout = timeout_sec +. 10.0 in
+    let eio_timeout = timeout_sec +. (Env_config_runtime.Timeout.llm_grace_sec *. 2.0) in
     try
       Eio.Time.with_timeout_exn clock eio_timeout (fun () ->
           match

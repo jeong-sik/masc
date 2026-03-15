@@ -696,7 +696,7 @@ let fetch_vertex_adc_access_token () =
   else
     let status, output =
       Process_eio.run_argv_with_status
-        ~timeout_sec:15.0
+        ~timeout_sec:Env_config_runtime.Timeout.gcloud_auth_sec
         [ "gcloud"; "auth"; "application-default"; "print-access-token" ]
     in
     match status with
@@ -826,7 +826,7 @@ let call_claude ?timeout_sec (req : completion_request) : (completion_response, 
       ("x-api-key", api_key);
       ("anthropic-version", "2023-06-01");
     ] in
-    let timeout_sec = Option.value timeout_sec ~default:120 in
+    let timeout_sec = Option.value timeout_sec ~default:Env_config_runtime.Timeout.anthropic_api_sec in
     match curl_post ~url ~headers ~body ~timeout_sec with
     | Error e -> Error e
     | Ok raw -> parse_claude_response raw
@@ -843,11 +843,12 @@ let call_openai_compatible ?timeout_sec (req : completion_request) : (completion
         req.model.model_id (string_of_provider req.model.provider) req.max_tokens
         effective_req.max_tokens (List.length req.tools) url;
       if req.tools <> [] then begin
-        let body_trunc = if String.length body > 1500 then String.sub body 0 1500 ^ "..." else body in
+        let trunc = Env_config_runtime.Llm_defaults.log_truncation_len in
+        let body_trunc = if String.length body > trunc then String.sub body 0 trunc ^ "..." else body in
         Log.LlmClient.debug "openai-compat body (tools present, %d bytes): %s" (String.length body) body_trunc
       end;
       let headers = [("Content-Type", "application/json")] @ auth_headers in
-      let timeout_sec = Option.value timeout_sec ~default:60 in
+      let timeout_sec = Option.value timeout_sec ~default:Env_config_runtime.Timeout.openai_compat_api_sec in
       match curl_post ~url ~headers ~body ~timeout_sec with
       | Error e -> Error e
       | Ok raw ->

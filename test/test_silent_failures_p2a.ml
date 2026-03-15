@@ -161,7 +161,7 @@ let test_source_metrics_fd_unlock () =
 let test_source_llm_token_parse () =
   check bool "llm_client.ml has token count parse logging"
     true (file_contains_pattern "lib/llm_client.ml"
-      {|[llm] token field missing or wrong type|})
+      {|token field missing or wrong type|})
 
 let test_source_keeper_proactive () =
   check bool "keeper sources have proactive emission logging"

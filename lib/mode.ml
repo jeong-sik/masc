@@ -136,7 +136,7 @@ let tool_category tool_name =
   | "masc_status" | "masc_add_task" | "masc_batch_add_tasks"
   | "masc_tasks" | "masc_archive_view" | "masc_claim_next"
   | "masc_update_priority" | "masc_transition"
-  | "masc_task_history" | "masc_dashboard"
+  | "masc_task_history" | "masc_dashboard" | "masc_agent_timeline"
   (* Run pipeline *)
   | "masc_run_init" | "masc_run_plan" | "masc_run_log"
   | "masc_run_deliverable" | "masc_run_get" | "masc_run_list"

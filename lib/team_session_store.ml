@@ -97,8 +97,8 @@ let load_session config session_id : Team_session_types.session option =
   if not (path_exists config path) then
     None
   else
-    with_file_lock config path (fun () ->
-        Team_session_types.session_of_yojson (read_json config path))
+    (* Read-only: no lock needed. read_json is atomic (tmp+rename writes). *)
+    Team_session_types.session_of_yojson (read_json config path)
 
 let load_session_or_error config session_id =
   match load_session config session_id with
@@ -119,46 +119,46 @@ let read_events ?max_events config session_id : Yojson.Safe.t list =
   if not (path_exists config path) then
     []
   else
-    with_file_lock config path (fun () ->
-        match max_events with
-        | Some n when n > 0 ->
-            let q = Queue.create () in
-            In_channel.with_open_text path (fun ic ->
-                (try
-                   while true do
-                     let line = input_line ic in
-                     let trimmed = String.trim line in
-                     if trimmed <> "" then
-                       match
-                         Safe_ops.parse_json_safe ~context:"team_session.events" trimmed
-                       with
-                       | Ok json ->
-                           Queue.add json q;
-                           if Queue.length q > n then ignore (Queue.take q)
-                       | Error _ -> ()
-                   done
-                 with End_of_file -> ());
-                Queue.to_seq q |> List.of_seq)
-        | _ ->
-            In_channel.with_open_text path (fun ic ->
-                let rec loop acc =
-                  match input_line ic with
-                  | line ->
-                      let trimmed = String.trim line in
-                      let acc' =
-                        if trimmed = "" then
-                          acc
-                        else
-                          match
-                            Safe_ops.parse_json_safe ~context:"team_session.events" trimmed
-                          with
-                          | Ok json -> json :: acc
-                          | Error _ -> acc
-                      in
-                      loop acc'
-                  | exception End_of_file -> List.rev acc
-                in
-                loop []))
+    (* Read-only: no lock needed. Append-only JSONL is safe for concurrent reads. *)
+    match max_events with
+    | Some n when n > 0 ->
+        let q = Queue.create () in
+        In_channel.with_open_text path (fun ic ->
+            (try
+               while true do
+                 let line = input_line ic in
+                 let trimmed = String.trim line in
+                 if trimmed <> "" then
+                   match
+                     Safe_ops.parse_json_safe ~context:"team_session.events" trimmed
+                   with
+                   | Ok json ->
+                       Queue.add json q;
+                       if Queue.length q > n then ignore (Queue.take q)
+                   | Error _ -> ()
+               done
+             with End_of_file -> ());
+            Queue.to_seq q |> List.of_seq)
+    | _ ->
+        In_channel.with_open_text path (fun ic ->
+            let rec loop acc =
+              match input_line ic with
+              | line ->
+                  let trimmed = String.trim line in
+                  let acc' =
+                    if trimmed = "" then
+                      acc
+                    else
+                      match
+                        Safe_ops.parse_json_safe ~context:"team_session.events" trimmed
+                      with
+                      | Ok json -> json :: acc
+                      | Error _ -> acc
+                  in
+                  loop acc'
+              | exception End_of_file -> List.rev acc
+            in
+            loop [])
 
 let write_checkpoint config session_id (checkpoint : Team_session_types.checkpoint) =
   let filename = Printf.sprintf "%Ld.json" (Int64.of_float (checkpoint.ts *. 1000.0)) in

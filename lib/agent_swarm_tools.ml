@@ -13,6 +13,7 @@ let tool_of_binding (client : Agent_swarm_client.t) ~sw
   in
   Tool.create ~name:binding.sdk_name ~description:binding.description ~parameters
     (fun input ->
+      Oas_compat.adapt_result @@
       match
         Agent_swarm_contract.build_operation_arguments
           ~agent_name:client.agent_name binding input

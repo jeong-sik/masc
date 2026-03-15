@@ -1101,6 +1101,7 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt
                       ~schema:(Some schema)
                  |> inject_prompt_full_context ~prompt ~tool_name:schema.name
                in
+               Oas_compat.adapt_result @@
                match
                  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:schema.name
                    ~args

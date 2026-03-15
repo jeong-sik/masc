@@ -24,6 +24,7 @@ type working_context = {
   token_count : int;
   max_tokens : int;
   importance_scores : (int * float) list;
+  oas_context : Agent_sdk.Context.t;
 }
 
 type checkpoint = {
@@ -116,7 +117,9 @@ let exceeds_threshold ctx threshold =
 
 let create ~system_prompt ~max_tokens =
   let token_count = (String.length system_prompt / 4) + 4 in
-  { system_prompt; messages = []; token_count; max_tokens; importance_scores = [] }
+  let oas_context = Agent_sdk.Context.create () in
+  { system_prompt; messages = []; token_count; max_tokens;
+    importance_scores = []; oas_context }
 
 let set_system_prompt (ctx : working_context) ~system_prompt =
   (* Avoid leaking prior compaction summaries into the "system prompt" channel for providers
@@ -297,8 +300,21 @@ let apply_strategy ctx = function
   | DropLowImportance -> drop_low_importance ctx
   | SummarizeOld -> summarize_old ctx
 
+(** Sync working context stats into OAS Context scoped keys.
+    Called after compaction so OAS consumers see current state. *)
+let sync_oas_context (ctx : working_context) : working_context =
+  let oas = ctx.oas_context in
+  Agent_sdk.Context.set_scoped oas Agent_sdk.Context.Session
+    "message_count" (`Int (List.length ctx.messages));
+  Agent_sdk.Context.set_scoped oas Agent_sdk.Context.Session
+    "token_count" (`Int ctx.token_count);
+  Agent_sdk.Context.set_scoped oas Agent_sdk.Context.Session
+    "context_ratio" (`Float (context_ratio ctx));
+  ctx
+
 let compact ctx strategies =
-  List.fold_left apply_strategy ctx strategies
+  let ctx = List.fold_left apply_strategy ctx strategies in
+  sync_oas_context ctx
 
 (* ================================================================ *)
 (* Checkpointing                                                    *)
@@ -356,7 +372,8 @@ let deserialize_context (s : string) ~max_tokens : working_context =
   in
   let messages = json |> member "messages" |> to_list |> List.map message_of_json in
   let token_count = json |> member "token_count" |> to_int in
-  { system_prompt; messages; token_count; max_tokens; importance_scores = [] }
+  { system_prompt; messages; token_count; max_tokens; importance_scores = [];
+    oas_context = Agent_sdk.Context.create () }
 
 let create_checkpoint ctx ~generation =
   {

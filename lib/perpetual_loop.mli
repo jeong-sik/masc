@@ -41,6 +41,7 @@ type loop_config = {
   compact_strategies : Context_manager.compaction_strategy list;
   session_base_dir : string;                     (** Where to store session data *)
   on_event : event -> unit;                      (** Callback for monitoring *)
+  event_bus : Agent_sdk.Event_bus.t option;       (** OAS Event_bus for cross-system events *)
   coding_mode : bool;                            (** Spawn Claude Code instead of LLM direct calls *)
   coding_agent : string;                         (** Target agent for coding mode (default: "claude") *)
   coding_timeout_s : int;                        (** Timeout per coding turn in seconds *)

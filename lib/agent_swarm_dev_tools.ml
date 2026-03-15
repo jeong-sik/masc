@@ -157,6 +157,7 @@ let make_file_read ?workdir ?on_exec () =
         param_type = Agent_sdk.Types.String; required = true };
     ]
     (fun input ->
+       Oas_compat.adapt_result @@
        match Agent_swarm_tool_input.extract_string "path" input with
        | Error e -> Error e
        | Ok path ->
@@ -209,6 +210,7 @@ let make_file_write ?workdir ?on_exec () =
         param_type = Agent_sdk.Types.String; required = true };
     ]
     (fun input ->
+       Oas_compat.adapt_result @@
        match Agent_swarm_tool_input.extract_string "path" input,
              Agent_swarm_tool_input.extract_string "content" input with
        | Error e, _ | _, Error e -> Error e
@@ -262,6 +264,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
         param_type = Agent_sdk.Types.Number; required = false };
     ]
     (fun input ->
+       Oas_compat.adapt_result @@
        match Agent_swarm_tool_input.extract_string "command" input with
        | Error e -> Error e
        | Ok command ->

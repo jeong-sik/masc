@@ -49,6 +49,7 @@ type loop_config = {
   compact_strategies : Context_manager.compaction_strategy list;
   session_base_dir : string;
   on_event : event -> unit;
+  event_bus : Agent_sdk.Event_bus.t option;
   (* Coding mode: spawn Claude Code instead of LLM direct calls *)
   coding_mode : bool;
   coding_agent : string;
@@ -117,6 +118,7 @@ let default_config ~goal ~models ?verifier ?session_dir () =
     ];
     session_base_dir = session_base;
     on_event = (fun _ -> ());  (* No-op default *)
+    event_bus = None;
     coding_mode = false;
     coding_agent = Provider_adapter.default_cli_agent_name ();
     coding_timeout_s = Env_config.Spawn.coding_timeout_seconds;
@@ -320,7 +322,22 @@ let run_coding_turn ~config ~state =
   let turn = state.turn_count in
   let emit ev =
     record_event state ev;
-    config.on_event ev
+    config.on_event ev;
+    Option.iter (fun bus ->
+      match ev with
+      | Heartbeat { turn; context_pct } ->
+        Oas_events.publish_heartbeat bus ~agent_name:"perpetual"
+          ~turn ~context_pct
+      | TurnStart turn ->
+        Agent_sdk.Event_bus.publish bus
+          (Agent_sdk.Event_bus.TurnStarted
+             { agent_name = "perpetual"; turn })
+      | TurnEnd { turn; _ } ->
+        Agent_sdk.Event_bus.publish bus
+          (Agent_sdk.Event_bus.TurnCompleted
+             { agent_name = "perpetual"; turn })
+      | _ -> ()
+    ) config.event_bus
   in
   match coding_turn ~config ~state with
   | Error e ->
@@ -432,7 +449,23 @@ let run_turn ~config ~state =
     let turn = state.turn_count in
     let emit ev =
       record_event state ev;
-      config.on_event ev
+      config.on_event ev;
+      (* Bridge to OAS Event_bus when configured *)
+      Option.iter (fun bus ->
+        match ev with
+        | Heartbeat { turn; context_pct } ->
+          Oas_events.publish_heartbeat bus ~agent_name:"perpetual"
+            ~turn ~context_pct
+        | TurnStart turn ->
+          Agent_sdk.Event_bus.publish bus
+            (Agent_sdk.Event_bus.TurnStarted
+               { agent_name = "perpetual"; turn })
+        | TurnEnd { turn; _ } ->
+          Agent_sdk.Event_bus.publish bus
+            (Agent_sdk.Event_bus.TurnCompleted
+               { agent_name = "perpetual"; turn })
+        | _ -> ()
+      ) config.event_bus
     in
     emit (TurnStart turn);
 

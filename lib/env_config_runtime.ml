@@ -204,4 +204,48 @@ module Network = struct
     || String.length host >= 4 && String.sub host 0 4 = "127."
 end
 
+(** {1 Timeout Defaults} *)
+
+module Timeout = struct
+  (** gcloud auth token fetch (used by a2a_tools, llm_client, keeper_alerting) *)
+  let gcloud_auth_sec =
+    get_float ~default:15.0 "MASC_TIMEOUT_GCLOUD_AUTH_SEC"
+
+  (** Anthropic / Claude API request timeout *)
+  let anthropic_api_sec =
+    get_int ~default:120 "MASC_TIMEOUT_ANTHROPIC_SEC"
+
+  (** OpenAI-compatible API request timeout *)
+  let openai_compat_api_sec =
+    get_int ~default:60 "MASC_TIMEOUT_OPENAI_COMPAT_SEC"
+
+  (** Grace period added on top of LLM timeouts for curl/network overhead *)
+  let llm_grace_sec =
+    get_float ~default:5.0 "MASC_TIMEOUT_LLM_GRACE_SEC"
+
+  (** GraphQL query timeout (agent loading, etc.) *)
+  let graphql_query_sec =
+    get_float ~default:5.0 "MASC_TIMEOUT_GRAPHQL_SEC"
+
+  (** Keeper status check timeout *)
+  let keeper_status_sec =
+    get_float ~default:5.0 "MASC_TIMEOUT_KEEPER_STATUS_SEC"
+end
+
+(** {1 LLM Generation Defaults} *)
+
+module Llm_defaults = struct
+  (** Default max_tokens for LLM generation (used by spawn, chain, perpetual, etc.) *)
+  let default_max_tokens =
+    get_int ~default:4096 "MASC_LLM_DEFAULT_MAX_TOKENS"
+
+  (** SSE retry interval in milliseconds (client reconnection hint) *)
+  let sse_retry_ms =
+    get_int ~default:3000 "MASC_SSE_RETRY_MS"
+
+  (** Log output truncation length *)
+  let log_truncation_len =
+    get_int ~default:1500 "MASC_LOG_TRUNCATION_LEN"
+end
+
 (** {1 Internal Guardian Configuration} *)

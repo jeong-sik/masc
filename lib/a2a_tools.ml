@@ -333,7 +333,7 @@ let fetch_remote_agent_card url :
         in
         try
           let (status, body) =
-            Process_eio.run_argv_with_status ~timeout_sec:15.0 argv
+            Process_eio.run_argv_with_status ~timeout_sec:Env_config_runtime.Timeout.gcloud_auth_sec argv
           in
           match status with
           | Unix.WEXITED 0 when String.length body > 0 -> (

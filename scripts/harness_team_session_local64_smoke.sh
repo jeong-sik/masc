@@ -102,12 +102,15 @@ if [ "$MCP_URL" = "http://127.0.0.1:${PORT}/mcp" ]; then
     DUNE_SOURCEROOT="${DUNE_SOURCEROOT:-$ROOT_DIR}" \
     MASC_STORAGE_TYPE=filesystem \
     MASC_BASE_PATH="$BASE_PATH" \
+    MASC_SENTINEL_ENABLED=false \
     MASC_GUARDIAN_ENABLED=false \
+    MASC_GARDENER_ENABLED=false \
     MASC_ORCHESTRATOR_ENABLED=false \
     MASC_LODGE_ENABLED=false \
     MASC_LODGE_DAEMON_ENABLED=false \
     MASC_LODGE_NEO4J_ENABLED=false \
     GRAPHQL_API_KEY="" \
+    GRAPHQL_URL="http://127.0.0.1:9/graphql" \
     "$SERVER_EXE" --port "$PORT" --base-path "$BASE_PATH" >"$LOG_FILE" 2>&1 &
   SERVER_PID="$!"
   if ! wait_for_health; then

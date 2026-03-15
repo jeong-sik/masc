@@ -367,9 +367,15 @@ llama_models_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_T
 require_tool_success "$llama_models_raw"
 llama_models_result="$(printf '%s' "$llama_models_raw" | extract_tool_result)"
 if [ -z "$LLAMA_SWARM_MODEL" ]; then
-  echo "FAIL: LLAMA_SWARM_MODEL is required; available models:"
-  printf '%s\n' "$llama_models_result" | jq -r '.models[]?'
-  exit 1
+  single_model="$(printf '%s\n' "$llama_models_result" | jq -r 'if (.models | length) == 1 then .models[0] else "" end')"
+  if [ -n "$single_model" ]; then
+    LLAMA_SWARM_MODEL="$single_model"
+    printf 'auto-selected single llama model: %s\n' "$LLAMA_SWARM_MODEL"
+  else
+    echo "FAIL: LLAMA_SWARM_MODEL is required; available models:"
+    printf '%s\n' "$llama_models_result" | jq -r '.models[]?'
+    exit 1
+  fi
 fi
 if ! printf '%s' "$llama_models_result" | jq -e --arg model "$LLAMA_SWARM_MODEL" '.models | index($model) != null' >/dev/null; then
   echo "FAIL: LLAMA_SWARM_MODEL not present in inventory: $LLAMA_SWARM_MODEL"

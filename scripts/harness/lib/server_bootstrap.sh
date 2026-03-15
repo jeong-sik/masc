@@ -85,6 +85,7 @@ harness_start_server() {
   local base_path="$3"
   local log_file="$4"
 
+  mkdir -p "$base_path"
   (
     export ME_ROOT="$base_path"
     export MASC_BASE_PATH="$base_path"

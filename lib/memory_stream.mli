@@ -23,6 +23,9 @@ type memory_entry = {
   timestamp: float;
   importance: int;          (** 1-10, LLM-judged *)
   entry_type: memory_type;
+  access_count: int;        (** How many times this memory was retrieved. @since 2.90.0 *)
+  last_accessed: float;     (** Last retrieval timestamp. @since 2.90.0 *)
+  links: string list;       (** IDs of related memories (A-MEM style). @since 2.90.0 *)
 }
 
 (** {1 Scoring Weights} *)

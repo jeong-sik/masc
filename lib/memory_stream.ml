@@ -30,6 +30,10 @@ type memory_entry = {
   timestamp: float;
   importance: int;
   entry_type: memory_type;
+  (* Phase 2: Stability-based retention fields *)
+  access_count: int;
+  last_accessed: float;
+  links: string list;       (** IDs of related memories (A-MEM style) *)
 }
 
 type scoring_weights = {
@@ -94,18 +98,33 @@ let entry_to_json (e : memory_entry) : Yojson.Safe.t =
     ("timestamp", `Float e.timestamp);
     ("importance", `Int e.importance);
     ("entry_type", memory_type_to_json e.entry_type);
+    ("access_count", `Int e.access_count);
+    ("last_accessed", `Float e.last_accessed);
+    ("links", `List (List.map (fun l -> `String l) e.links));
   ]
 
+(** Deserialize entry from JSON. Unknown fields are ignored for forward compat.
+    Missing Phase 2 fields default to safe values. *)
 let entry_of_json (json : Yojson.Safe.t) : memory_entry option =
   try
     let open Yojson.Safe.Util in
+    let ts = json |> member "timestamp" |> to_float in
     Some {
       id = json |> member "id" |> to_string;
       agent_name = json |> member "agent_name" |> to_string;
       content = json |> member "content" |> to_string;
-      timestamp = json |> member "timestamp" |> to_float;
+      timestamp = ts;
       importance = json |> member "importance" |> to_int;
       entry_type = json |> member "entry_type" |> memory_type_of_json;
+      access_count =
+        (try json |> member "access_count" |> to_int
+         with Type_error _ -> 0);
+      last_accessed =
+        (try json |> member "last_accessed" |> to_float
+         with Type_error _ -> ts);
+      links =
+        (try json |> member "links" |> to_list |> List.map to_string
+         with Type_error _ -> []);
     }
   with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
@@ -215,15 +234,51 @@ let add_memory ~agent_name ~content ~importance entry_type =
     (int_of_float (Time_compat.now ()))
     (Random.int 999999)
   in
+  let now = Time_compat.now () in
   let entry = {
     id;
     agent_name;
     content;
-    timestamp = Time_compat.now ();
+    timestamp = now;
     importance;
     entry_type;
+    access_count = 0;
+    last_accessed = now;
+    links = [];
   } in
-  append_entry ~agent_name entry
+  append_entry ~agent_name entry;
+  (* A-MEM style: link to recent entries with keyword overlap >= 30% *)
+  let recent_entries = load_all_entries ~agent_name in
+  let to_check = List.filteri (fun i _ -> i < 20) (List.rev recent_entries) in
+  let content_words =
+    content |> String.lowercase_ascii |> String.split_on_char ' '
+    |> List.filter (fun w -> String.length w > 2) |> List.sort_uniq String.compare
+  in
+  if List.length content_words > 0 then begin
+    let linked_ids = List.filter_map (fun (e : memory_entry) ->
+      if e.id = id then None
+      else
+        let e_words =
+          e.content |> String.lowercase_ascii |> String.split_on_char ' '
+          |> List.filter (fun w -> String.length w > 2) |> List.sort_uniq String.compare
+        in
+        let overlap = List.filter (fun w -> List.mem w e_words) content_words in
+        let ratio = Float.of_int (List.length overlap) /. Float.of_int (List.length content_words) in
+        if ratio >= 0.3 then Some e.id else None
+    ) to_check in
+    if List.length linked_ids > 0 then begin
+      (* Update this entry with links *)
+      let updated = { entry with links = linked_ids } in
+      let all = load_all_entries ~agent_name in
+      let patched = List.map (fun e ->
+        if e.id = id then updated
+        else if List.mem e.id linked_ids then
+          { e with links = id :: (List.filter (fun l -> l <> id) e.links) }
+        else e
+      ) all in
+      rewrite_entries ~agent_name patched
+    end
+  end
 
 let retrieve ~agent_name ~query ~limit =
   let entries = load_all_entries ~agent_name in

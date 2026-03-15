@@ -360,3 +360,8 @@ module Work_stealing = Work_stealing
 (* SWARM-RISC Phase 4: Speculative Execution + MCTS *)
 module Mcts_tree = Mcts_tree
 module Speculative_engine = Speculative_engine
+
+(* OAS Integration — Agent SDK v0.23+ bridge *)
+module Oas_compat = Oas_compat
+module Oas_events = Oas_events
+module Oas_checkpoint_bridge = Oas_checkpoint_bridge

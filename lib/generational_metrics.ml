@@ -80,10 +80,93 @@ let with_lock f =
   else
     f ()
 
-(** In-memory store for quick prototyping *)
+(** In-memory store — also backed by JSONL for restart survival *)
 let task_records : task_record list ref = ref []
 let handoff_records : handoff_record list ref = ref []
 let retention_tests : retention_test list ref = ref []
+
+(** {1 JSONL Persistence}
+
+    Append-only JSONL backup under .masc/metrics/{agent}/
+    Used as fallback when in-memory store is empty (post-restart). *)
+
+let metrics_dir () =
+  let me_root = Env_config.me_root () in
+  Filename.concat me_root ".masc/metrics"
+
+let ensure_dir dir =
+  let rec mkdir_p path =
+    let parent = Filename.dirname path in
+    if parent <> path && not (Sys.file_exists parent) then
+      mkdir_p parent;
+    if not (Sys.file_exists path) then
+      (try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p dir
+
+let task_record_to_json (r : task_record) =
+  `Assoc [
+    ("type", `String "task");
+    ("generation", `Int r.generation);
+    ("task_id", `String r.task_id);
+    ("completed", `Bool r.completed);
+    ("duration_ms", `Int r.duration_ms);
+    ("error_count", `Int r.error_count);
+    ("input_tokens", `Int r.input_tokens);
+    ("output_tokens", `Int r.output_tokens);
+    ("timestamp", `Float r.timestamp);
+  ]
+
+let handoff_record_to_json (r : handoff_record) =
+  `Assoc [
+    ("type", `String "handoff");
+    ("from_generation", `Int r.from_generation);
+    ("to_generation", `Int r.to_generation);
+    ("dna_size", `Int r.dna_size);
+    ("context_ratio", `Float r.context_ratio);
+    ("timestamp", `Float r.timestamp);
+  ]
+
+let append_jsonl ~agent_name json_line =
+  let dir = Filename.concat (metrics_dir ()) agent_name in
+  ensure_dir dir;
+  let path = Filename.concat dir "generations.jsonl" in
+  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
+  output_string oc (Yojson.Safe.to_string json_line);
+  output_char oc '\n';
+  close_out oc
+
+(** Load task records from JSONL file for a given agent. *)
+let load_task_records_from_jsonl ~agent_name : task_record list =
+  let dir = Filename.concat (metrics_dir ()) agent_name in
+  let path = Filename.concat dir "generations.jsonl" in
+  if not (Sys.file_exists path) then []
+  else begin
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let records = ref [] in
+      (try while true do
+        let line = input_line ic in
+        if String.length line > 0 then begin
+          try
+            let json = Yojson.Safe.from_string line in
+            let open Yojson.Safe.Util in
+            if json |> member "type" |> to_string = "task" then
+              records := {
+                generation = json |> member "generation" |> to_int;
+                task_id = json |> member "task_id" |> to_string;
+                completed = json |> member "completed" |> to_bool;
+                duration_ms = json |> member "duration_ms" |> to_int;
+                error_count = json |> member "error_count" |> to_int;
+                input_tokens = json |> member "input_tokens" |> to_int;
+                output_tokens = json |> member "output_tokens" |> to_int;
+                timestamp = json |> member "timestamp" |> to_float;
+              } :: !records
+          with _ -> ()
+        end
+      done with End_of_file -> ());
+      List.rev !records)
+  end
 
 (** Record a task completion *)
 let record_task ~generation ~task_id ~completed ~duration_ms ~error_count
@@ -100,6 +183,9 @@ let record_task ~generation ~task_id ~completed ~duration_ms ~error_count
       timestamp = Time_compat.now ();
     } in
     task_records := record :: !task_records;
+    (* JSONL backup — best effort, don't fail the record *)
+    (try append_jsonl ~agent_name:"_global" (task_record_to_json record)
+     with _ -> ());
     record)
 
 (** Record a handoff *)
@@ -113,6 +199,8 @@ let record_handoff ~from_generation ~to_generation ~dna_size ~context_ratio =
       timestamp = Time_compat.now ();
     } in
     handoff_records := record :: !handoff_records;
+    (try append_jsonl ~agent_name:"_global" (handoff_record_to_json record)
+     with _ -> ());
     record)
 
 (** Record a knowledge retention test *)
@@ -125,7 +213,14 @@ let record_retention_test ~generation ~question ~expected ~actual ~confidence =
 
 (** Internal: summarize without acquiring lock (caller must hold lock) *)
 let summarize_generation_unlocked generation =
-  let tasks = List.filter (fun (t : task_record) -> t.generation = generation) !task_records in
+  (* Fallback: if in-memory is empty, try loading from JSONL *)
+  let all_tasks =
+    if !task_records = [] then
+      (try load_task_records_from_jsonl ~agent_name:"_global"
+       with _ -> [])
+    else !task_records
+  in
+  let tasks = List.filter (fun (t : task_record) -> t.generation = generation) all_tasks in
   let total = List.length tasks in
   if total = 0 then None
   else

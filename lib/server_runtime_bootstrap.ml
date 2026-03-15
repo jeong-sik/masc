@@ -117,7 +117,13 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       Operator_control.snapshot_json ~actor:"operator-judge" ~view:"summary"
         ~include_messages:false ~include_keepers:false operator_judge_ctx)
     ();
-  Session.start_mcp_session_cleanup_loop ~sw ~clock ()
+  Session.start_mcp_session_cleanup_loop ~sw ~clock ();
+  (* Phase 5: unified startup subsystem summary *)
+  let on_off b = if b then "on" else "off" in
+  Log.info ~ctx:"startup" "subsystems: sentinel=%s guardian=%s gardener=%s"
+    (on_off Env_config.Sentinel.enabled)
+    (on_off Env_config.Guardian.enabled)
+    (on_off Env_config.Gardener.enabled)
 
 let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
   (match Board_dispatch.get_pg_pool () with
@@ -173,7 +179,7 @@ let listen_socket ~sw ~net (config : Http.config) =
 
 let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
     ~masc_dir =
-  Printf.printf "🚀 MASC MCP Server listening on http://%s:%d\n%!" config.host
+  Printf.printf "MASC MCP Server listening on http://%s:%d\n%!" config.host
     config.port;
   Printf.printf "   Base path: %s\n%!" resolved_base;
   if resolved_base <> base_path then

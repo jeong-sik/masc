@@ -155,19 +155,19 @@ let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt
   Printf.eprintf "[LLM] Trying %s...\n%!" (string_of_provider cli);
   match cli_generate cli ~system prompt with
   | Ok response ->
-      Printf.eprintf "[LLM] ✅ %s succeeded\n%!" (string_of_provider cli);
+      Printf.eprintf "[LLM] %s succeeded\n%!" (string_of_provider cli);
       Ok response
   | Error e1 ->
-      Printf.eprintf "[LLM] ❌ %s failed: %s\n%!" (string_of_provider cli) e1;
+      Printf.eprintf "[LLM] [fail] %s: %s\n%!" (string_of_provider cli) e1;
       (* 2. Try another CLI *)
       let cli2 = next_cli_provider () in
       Printf.eprintf "[LLM] Trying %s...\n%!" (string_of_provider cli2);
       match cli_generate cli2 ~system prompt with
       | Ok response ->
-          Printf.eprintf "[LLM] ✅ %s succeeded\n%!" (string_of_provider cli2);
+          Printf.eprintf "[LLM] %s succeeded\n%!" (string_of_provider cli2);
           Ok response
       | Error e2 ->
-          Printf.eprintf "[LLM] ❌ %s failed: %s\n%!" (string_of_provider cli2) e2;
+          Printf.eprintf "[LLM] [fail] %s: %s\n%!" (string_of_provider cli2) e2;
           (* 3. Fallback to cloud GLM via Z.ai API — 200K context, no VRAM *)
           Printf.eprintf "[LLM] Falling back to cloud GLM (Z.ai)...\n%!";
           glm_direct ~net ~temperature ~max_tokens:num_predict ~system prompt

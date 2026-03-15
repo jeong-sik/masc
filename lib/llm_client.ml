@@ -615,7 +615,7 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
       match Safe_ops.json_int_opt key usage_json with
       | Some n -> n
       | None ->
-        Printf.eprintf "[llm] token field missing or wrong type: %s\n%!" key;
+        Log.LlmClient.debug "token field missing or wrong type: %s" key;
         0
     in
     let usage = {
@@ -838,13 +838,13 @@ let call_openai_compatible ?timeout_sec (req : completion_request) : (completion
   | Ok (base_url, path, auth_headers) ->
       let url = sprintf "%s%s" base_url path in
       let body = build_openai_body effective_req in
-      Printf.eprintf
-        "[llm_client] openai-compat req: model=%s provider=%s requested_max_tokens=%d effective_max_tokens=%d tools=%d url=%s\n%!"
+      Log.LlmClient.debug
+        "openai-compat req: model=%s provider=%s requested_max_tokens=%d effective_max_tokens=%d tools=%d url=%s"
         req.model.model_id (string_of_provider req.model.provider) req.max_tokens
         effective_req.max_tokens (List.length req.tools) url;
       if req.tools <> [] then begin
         let body_trunc = if String.length body > 1500 then String.sub body 0 1500 ^ "..." else body in
-        Printf.eprintf "[llm_client] openai-compat body (tools present, %d bytes): %s\n%!" (String.length body) body_trunc
+        Log.LlmClient.debug "openai-compat body (tools present, %d bytes): %s" (String.length body) body_trunc
       end;
       let headers = [("Content-Type", "application/json")] @ auth_headers in
       let timeout_sec = Option.value timeout_sec ~default:60 in
@@ -852,7 +852,7 @@ let call_openai_compatible ?timeout_sec (req : completion_request) : (completion
       | Error e -> Error e
       | Ok raw ->
           let trunc = if String.length raw > 500 then String.sub raw 0 500 ^ "..." else raw in
-          Printf.eprintf "[llm_client] openai-compat raw (%d bytes): %s\n%!" (String.length raw) trunc;
+          Log.LlmClient.debug "openai-compat raw (%d bytes): %s" (String.length raw) trunc;
           parse_openai_response raw
 
 (** GLM Cloud call with pool-based load balancing.
@@ -905,14 +905,14 @@ let complete ?timeout_sec (req : completion_request) : (completion_response, str
             | Error e ->
                 Prometheus.inc_counter "masc_llm_cache_errors_total" ();
                 let _ = Llm_response_cache.delete ~key in
-                eprintf "[llm_client] cache decode error: %s\n%!" e;
+                Log.LlmClient.warn "cache decode error: %s" e;
                 None)
         | Ok None ->
             Prometheus.inc_counter "masc_llm_cache_misses_total" ();
             None
         | Error e ->
             Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-            eprintf "[llm_client] cache read error: %s\n%!" e;
+            Log.LlmClient.warn "cache read error: %s" e;
             None)
   in
   let result =
@@ -936,7 +936,7 @@ let complete ?timeout_sec (req : completion_request) : (completion_response, str
             | Ok () -> Prometheus.inc_counter "masc_llm_cache_writes_total" ()
             | Error e ->
                 Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-                eprintf "[llm_client] cache write error: %s\n%!" e);
+                Log.LlmClient.warn "cache write error: %s" e);
             Ok resp
         | _ -> upstream_result)
   in
@@ -952,7 +952,7 @@ let cascade ?(accept = fun _ -> true) ?timeout_sec
     (requests : completion_request list) : (completion_response, string) result =
   with_llm_permit (fun () ->
     let avail = Eio.Semaphore.get_value llm_semaphore in
-    eprintf "[llm_client] cascade: acquired permit (%d/%d available)\n%!"
+    Log.LlmClient.debug "cascade: acquired permit (%d/%d available)"
       avail max_concurrent_llm;
     let deadline_opt =
       Option.map (fun sec -> Time_compat.now () +. float_of_int sec) timeout_sec
@@ -974,7 +974,7 @@ let cascade ?(accept = fun _ -> true) ?timeout_sec
         in
         Error (sprintf "All models failed: %s" all_errors)
       | req :: rest ->
-        eprintf "[llm_client] cascade: trying %s (%s)\n%!"
+        Log.LlmClient.debug "cascade: trying %s (%s)"
           req.model.model_id (string_of_provider req.model.provider);
         let attempt_result =
           match remaining_timeout_sec () with
@@ -986,16 +986,16 @@ let cascade ?(accept = fun _ -> true) ?timeout_sec
         match attempt_result with
         | Ok resp ->
           if accept resp then (
-            eprintf "[llm_client] cascade: success with %s (%dms)\n%!"
+            Log.LlmClient.info "cascade: success with %s (%dms)"
               resp.model_used resp.latency_ms;
             Ok resp)
           else (
-            eprintf
-              "[llm_client] cascade: %s rejected by validator, continuing\n%!"
+            Log.LlmClient.warn
+              "cascade: %s rejected by validator, continuing"
               resp.model_used;
             try_next ("response rejected by validator" :: errors) rest)
         | Error e ->
-          eprintf "[llm_client] cascade: %s failed: %s\n%!"
+          Log.LlmClient.warn "cascade: %s failed: %s"
             req.model.model_id e;
           try_next (e :: errors) rest
     in
@@ -1130,7 +1130,7 @@ let available_model_specs_of_strings model_strs =
   |> List.filter_map (fun model_str ->
          match model_spec_of_string model_str with
          | Error err ->
-             eprintf "[llm_client] ignoring invalid model spec %s: %s\n%!"
+             Log.LlmClient.warn "ignoring invalid model spec %s: %s"
                model_str err;
              None
          | Ok spec -> (
@@ -1138,7 +1138,7 @@ let available_model_specs_of_strings model_strs =
              | Some env_name ->
                  let value = Sys.getenv_opt env_name |> Option.value ~default:"" in
                  if String.trim value = "" then (
-                   eprintf "[llm_client] skipping %s: %s not set\n%!"
+                   Log.LlmClient.debug "skipping %s: %s not set"
                      model_str env_name;
                    None)
                  else Some spec

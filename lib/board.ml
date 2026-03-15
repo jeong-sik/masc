@@ -288,7 +288,7 @@ let maybe_sweep store =
   let now = Time_compat.now () in
   if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then
     (try ignore (sweep store)
-     with exn -> Printf.eprintf "[board] sweep failed: %s\n%!" (Printexc.to_string exn));
+     with exn -> Log.BoardLog.warn "sweep failed: %s" (Printexc.to_string exn));
   if now -. store.last_flush > flush_interval_sec then
     !deferred_flush_fn store
 
@@ -341,13 +341,13 @@ let rotate_if_needed path =
       let backup = path ^ ".1" in
       (try Sys.rename backup (path ^ ".2") with Sys_error _ -> ());
       Sys.rename path backup;
-      Printf.eprintf "[Board] Rotated %s (was %d bytes)\n%!" path st.Unix.st_size
+      Log.BoardLog.info "rotated %s (was %d bytes)" path st.Unix.st_size
     end
   with
   | Unix.Unix_error (e, fn, arg) ->
-      Printf.eprintf "[Board] rotate error: %s(%s): %s\n%!" fn arg (Unix.error_message e)
+      Log.BoardLog.warn "rotate error: %s(%s): %s" fn arg (Unix.error_message e)
   | Sys_error msg ->
-      Printf.eprintf "[Board] rotate error: %s\n%!" msg
+      Log.BoardLog.warn "rotate error: %s" msg
 
 (** {1 JSON Serialization} *)
 
@@ -531,7 +531,7 @@ let rewrite_posts store =
         output_string oc (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
       ) store.posts);
     Sys.rename tmp_path path
-  with Sys_error msg -> Printf.eprintf "[Board] persist error (rewrite_posts): %s\n%!" msg
+  with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_posts): %s" msg
 
 let rewrite_comments store =
   try
@@ -544,7 +544,7 @@ let rewrite_comments store =
         output_string oc (Yojson.Safe.to_string (comment_to_yojson cmt) ^ "\n")
       ) store.comments);
     Sys.rename tmp_path path
-  with Sys_error msg -> Printf.eprintf "[Board] persist error (rewrite_comments): %s\n%!" msg
+  with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_comments): %s" msg
 
 (** {1 Append Helpers} *)
 
@@ -556,7 +556,7 @@ let append_post (p : post) =
     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc (Yojson.Safe.to_string (post_to_yojson p) ^ "\n"));
     rotate_if_needed path
-  with Sys_error msg -> Printf.eprintf "[Board] persist error (append_post): %s\n%!" msg
+  with Sys_error msg -> Log.BoardLog.error "persist error (append_post): %s" msg
 
 let append_comment (c : comment) =
   try
@@ -566,7 +566,7 @@ let append_comment (c : comment) =
     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n"));
     rotate_if_needed path
-  with Sys_error msg -> Printf.eprintf "[Board] persist error (append_comment): %s\n%!" msg
+  with Sys_error msg -> Log.BoardLog.error "persist error (append_comment): %s" msg
 
 (** {1 Post Operations} *)
 
@@ -821,7 +821,7 @@ let append_vote_log ~target ~voter ~direction =
       ] in
       output_string oc (Yojson.Safe.to_string json ^ "\n"));
     rotate_if_needed path
-  with Sys_error msg -> Printf.eprintf "[Board] persist error (append_vote_log): %s\n%!" msg
+  with Sys_error msg -> Log.BoardLog.error "persist error (append_vote_log): %s" msg
 
 let vote store ~voter ~post_id ~direction : (int, board_error) result =
   match Agent_id.of_string voter with
@@ -1055,9 +1055,12 @@ let load_persisted_posts store =
           done
         with End_of_file -> ()));
       store.post_count := Hashtbl.length store.posts;
-      Printf.eprintf "[Board] Loaded %d posts from %s\n%!" !loaded path
+      if !loaded > 0 then
+        Log.BoardLog.info "loaded %d posts from %s" !loaded path
+      else
+        Log.BoardLog.debug "loaded 0 posts from %s" path
     with e ->
-      Printf.eprintf "[Board] Load posts failed: %s\n%!" (Printexc.to_string e)
+      Log.BoardLog.error "load posts failed: %s" (Printexc.to_string e)
   end
 
 let load_persisted_comments store =
@@ -1084,9 +1087,12 @@ let load_persisted_comments store =
               | _ -> ()
           done
         with End_of_file -> ()));
-      Printf.eprintf "[Board] Loaded %d comments from %s\n%!" !loaded path
+      if !loaded > 0 then
+        Log.BoardLog.info "loaded %d comments from %s" !loaded path
+      else
+        Log.BoardLog.debug "loaded 0 comments from %s" path
     with e ->
-      Printf.eprintf "[Board] Load comments failed: %s\n%!" (Printexc.to_string e)
+      Log.BoardLog.error "load comments failed: %s" (Printexc.to_string e)
   end
 
 (** Recalculate reply_count for all posts based on actual comments.
@@ -1105,7 +1111,7 @@ let recalculate_reply_counts store =
     | None -> ()
   ) store.comments;
   let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
-  Printf.eprintf "[Board] Recalculated reply_counts: %d total comments across posts\n%!" total
+  Log.BoardLog.debug "recalculated reply_counts: %d total comments across posts" total
 
 let load_persisted_votes store =
   let path = vote_log_path () in
@@ -1128,9 +1134,12 @@ let load_persisted_votes store =
             end
           done
         with End_of_file | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()));
-      Printf.eprintf "[Board] Loaded %d vote entries from %s\n%!" !loaded path
+      if !loaded > 0 then
+        Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
+      else
+        Log.BoardLog.debug "loaded 0 vote entries from %s" path
     with e ->
-      Printf.eprintf "[Board] Load votes failed: %s\n%!" (Printexc.to_string e)
+      Log.BoardLog.error "load votes failed: %s" (Printexc.to_string e)
   end
 
 (** {1 Hearth (topic) operations} *)

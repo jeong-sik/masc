@@ -121,7 +121,7 @@ let dispatch_consumers consumers beat =
       match C.on_beat beat with
       | Ok () -> ()
       | Error msg ->
-        Eio.traceln "[pulse] consumer %s error on beat #%d: %s"
+        Log.Pulse.warn "consumer %s error on beat #%d: %s"
           C.name beat.seq msg
     end
   ) consumers
@@ -144,14 +144,14 @@ let tick t trigger =
   } in
   t.last_beat_v <- Some beat;
   (match trigger with Nudge _ -> t.total_nudges <- t.total_nudges + 1 | _ -> ());
-  Eio.traceln "[pulse] beat #%d trigger=%s" beat.seq (trigger_to_string trigger);
+  Log.Pulse.debug "beat #%d trigger=%s" beat.seq (trigger_to_string trigger);
   dispatch_consumers t.consumers beat;
   (* Check bounded lifecycle *)
   (match t.lifecycle with
    | Perpetual -> ()
    | Bounded pred ->
      if pred beat && not (is_shutdown t) then begin
-       Eio.traceln "[pulse] bounded lifecycle condition met at beat #%d" beat.seq;
+       Log.Pulse.info "bounded lifecycle condition met at beat #%d" beat.seq;
        Eio.Promise.resolve t.shutdown_r ()
      end);
   beat
@@ -195,7 +195,7 @@ let loop t =
   (* Final beat: shutdown demand *)
   let _shutdown_beat = tick t Demand in
   t.alive <- false;
-  Eio.traceln "[pulse] stopped after %d beats" t.seq
+  Log.Pulse.info "stopped after %d beats" t.seq
 
 (* ── Public API ──────────────────────────────────────────────── *)
 

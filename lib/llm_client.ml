@@ -575,7 +575,7 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
               call_arguments = fn |> member "arguments" |> to_string;
             }
           with exn ->
-            ignore (Printexc.to_string exn);
+            Printf.eprintf "[WARN] [llm] tool_call parse failed: %s\n%!" (Printexc.to_string exn);
             None
         ) calls
       | _ -> (

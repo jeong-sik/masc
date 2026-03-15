@@ -321,7 +321,7 @@ let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
               | Some (Https_connector c) ->
                   Cohttp_eio.Client.make ~https:(Some c) net
               | None ->
-                  failwith "HTTPS requested but https connector not initialized"
+                  failwith "HTTPS requested but no https_connector provided to eio_context"
           in
           let headers =
             Cohttp.Header.of_list

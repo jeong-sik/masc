@@ -334,6 +334,9 @@
    tool_notifications
    tool_voice
    debate
+   mention_inbox
+   agent_reputation
+   activity_feed
    social
    tool_social
    transport

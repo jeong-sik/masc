@@ -307,6 +307,278 @@ let test_canonical_policy_mode_unknown () =
   check string "canonical unknown" "heuristic"
     (Keeper_types.canonical_policy_mode "unknown_mode")
 
+(* ================================================================ *)
+(* Phase 2: LLM-Driven Deliberation tests                          *)
+(* ================================================================ *)
+
+(* ---------- build_deliberation_prompt tests ---------- *)
+
+let test_prompt_contains_keeper_name () =
+  let prompt =
+    D.build_deliberation_prompt
+      ~keeper_name:"alpha-keeper"
+      ~soul_profile:"strategic coordinator"
+      ~goal:"Monitor CI pipeline"
+      ~triggers:[ D.DirectMention; D.NewUnclaimedTask ]
+      base_obs
+  in
+  check bool "contains keeper name" true
+    (String.length prompt > 0
+     && try ignore (Str.search_forward (Str.regexp_string "alpha-keeper") prompt 0); true
+        with Not_found -> false)
+
+let test_prompt_contains_triggers () =
+  let prompt =
+    D.build_deliberation_prompt
+      ~keeper_name:"test-k"
+      ~soul_profile:"observer"
+      ~goal:"Watch tasks"
+      ~triggers:[ D.FailedTask; D.IdleTimeout ]
+      base_obs
+  in
+  check bool "contains failed_task" true
+    (try ignore (Str.search_forward (Str.regexp_string "failed_task") prompt 0); true
+     with Not_found -> false);
+  check bool "contains idle_timeout" true
+    (try ignore (Str.search_forward (Str.regexp_string "idle_timeout") prompt 0); true
+     with Not_found -> false)
+
+let test_prompt_contains_json_instruction () =
+  let prompt =
+    D.build_deliberation_prompt
+      ~keeper_name:"test-k"
+      ~soul_profile:"observer"
+      ~goal:"Watch"
+      ~triggers:[ D.DirectMention ]
+      base_obs
+  in
+  check bool "mentions JSON response format" true
+    (try ignore (Str.search_forward (Str.regexp_string "JSON") prompt 0); true
+     with Not_found -> false)
+
+let test_prompt_contains_action_list () =
+  let prompt =
+    D.build_deliberation_prompt
+      ~keeper_name:"test-k"
+      ~soul_profile:""
+      ~goal:""
+      ~triggers:[ D.DirectMention ]
+      base_obs
+  in
+  check bool "mentions noop action" true
+    (try ignore (Str.search_forward (Str.regexp_string "noop") prompt 0); true
+     with Not_found -> false);
+  check bool "mentions reply_in_room action" true
+    (try ignore (Str.search_forward (Str.regexp_string "reply_in_room") prompt 0); true
+     with Not_found -> false);
+  check bool "mentions task_claim action" true
+    (try ignore (Str.search_forward (Str.regexp_string "task_claim") prompt 0); true
+     with Not_found -> false);
+  check bool "mentions broadcast action" true
+    (try ignore (Str.search_forward (Str.regexp_string "broadcast") prompt 0); true
+     with Not_found -> false)
+
+(* ---------- parse_deliberation_response tests ---------- *)
+
+let test_parse_valid_noop_json () =
+  let raw =
+    {|{"action":"noop","params":{"reason":"All quiet"},"reasoning":"Nothing to do","confidence":0.95}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok, got Error: " ^ msg)
+  | Ok (action, reasoning, confidence) ->
+      (match action with
+       | D.Noop reason ->
+           check string "noop reason" "All quiet" reason
+       | _ -> fail "expected Noop action");
+      check string "reasoning" "Nothing to do" reasoning;
+      check (float 0.01) "confidence" 0.95 confidence
+
+let test_parse_valid_reply_json () =
+  let raw =
+    {|{"action":"reply_in_room","params":{"room_id":"room-42","content":"Hello team"},"reasoning":"Responding to mention","confidence":0.8}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok, got Error: " ^ msg)
+  | Ok (action, _reasoning, _confidence) ->
+      match action with
+      | D.ReplyInRoom { room_id; content } ->
+          check string "room_id" "room-42" room_id;
+          check string "content" "Hello team" content
+      | _ -> fail "expected ReplyInRoom action"
+
+let test_parse_valid_task_claim_json () =
+  let raw =
+    {|{"action":"task_claim","params":{"task_id":"task-99","reason":"Matches my goal"},"reasoning":"Aligned","confidence":0.7}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok, got Error: " ^ msg)
+  | Ok (action, _reasoning, _confidence) ->
+      match action with
+      | D.TaskClaim { task_id; reason } ->
+          check string "task_id" "task-99" task_id;
+          check string "reason" "Matches my goal" reason
+      | _ -> fail "expected TaskClaim action"
+
+let test_parse_valid_broadcast_json () =
+  let raw =
+    {|{"action":"broadcast","params":{"message":"Status update"},"reasoning":"Team needs info","confidence":0.6}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok, got Error: " ^ msg)
+  | Ok (action, _reasoning, _confidence) ->
+      match action with
+      | D.Broadcast { message } ->
+          check string "message" "Status update" message
+      | _ -> fail "expected Broadcast action"
+
+let test_parse_json_with_code_fences () =
+  let raw =
+    "```json\n{\"action\":\"noop\",\"params\":{\"reason\":\"quiet\"},\"reasoning\":\"nothing\",\"confidence\":0.9}\n```"
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok with code fences, got Error: " ^ msg)
+  | Ok (action, _reasoning, _confidence) ->
+      match action with
+      | D.Noop _ -> ()
+      | _ -> fail "expected Noop action from fenced JSON"
+
+let test_parse_json_with_surrounding_text () =
+  let raw =
+    "Here is my decision:\n{\"action\":\"noop\",\"params\":{\"reason\":\"quiet\"},\"reasoning\":\"nothing\",\"confidence\":0.5}\nThat's my answer."
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok with surrounding text, got Error: " ^ msg)
+  | Ok (action, _reasoning, _confidence) ->
+      match action with
+      | D.Noop _ -> ()
+      | _ -> fail "expected Noop action from embedded JSON"
+
+let test_parse_malformed_json () =
+  let raw = "this is not json at all" in
+  match D.parse_deliberation_response raw with
+  | Error _ -> () (* expected *)
+  | Ok _ -> fail "expected Error for malformed input"
+
+let test_parse_empty_string () =
+  match D.parse_deliberation_response "" with
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for empty string"
+
+let test_parse_missing_action_field () =
+  let raw =
+    {|{"params":{"reason":"test"},"reasoning":"no action","confidence":0.5}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for missing action field"
+
+let test_parse_unknown_action_type () =
+  let raw =
+    {|{"action":"teleport","params":{},"reasoning":"unknown","confidence":0.5}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg ->
+      check bool "mentions unknown action" true
+        (try ignore (Str.search_forward (Str.regexp_string "unknown action") msg 0); true
+         with Not_found -> false)
+  | Ok _ -> fail "expected Error for unknown action type"
+
+let test_parse_reply_empty_content_fails () =
+  let raw =
+    {|{"action":"reply_in_room","params":{"room_id":"r1","content":""},"reasoning":"test","confidence":0.5}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for empty reply content"
+
+let test_parse_task_claim_empty_task_id_fails () =
+  let raw =
+    {|{"action":"task_claim","params":{"task_id":"","reason":"test"},"reasoning":"test","confidence":0.5}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for empty task_id"
+
+let test_parse_confidence_clamped () =
+  let raw =
+    {|{"action":"noop","params":{"reason":"test"},"reasoning":"test","confidence":1.5}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok, got Error: " ^ msg)
+  | Ok (_action, _reasoning, confidence) ->
+      check (float 0.01) "confidence clamped to 1.0" 1.0 confidence
+
+let test_parse_negative_confidence_clamped () =
+  let raw =
+    {|{"action":"noop","params":{"reason":"test"},"reasoning":"test","confidence":-0.5}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok, got Error: " ^ msg)
+  | Ok (_action, _reasoning, confidence) ->
+      check (float 0.01) "negative confidence clamped to 0.0" 0.0 confidence
+
+let test_parse_missing_confidence_defaults () =
+  let raw =
+    {|{"action":"noop","params":{"reason":"test"},"reasoning":"test"}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok, got Error: " ^ msg)
+  | Ok (_action, _reasoning, confidence) ->
+      check (float 0.01) "default confidence" 0.5 confidence
+
+(* ---------- deliberation_budget_check tests ---------- *)
+
+let test_budget_check_under_budget () =
+  check bool "under budget" true
+    (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.05)
+
+let test_budget_check_at_budget () =
+  check bool "at budget (should fail)" false
+    (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.10)
+
+let test_budget_check_over_budget () =
+  check bool "over budget" false
+    (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.15)
+
+let test_budget_check_zero_budget () =
+  check bool "zero budget always fails" false
+    (D.deliberation_budget_check ~daily_budget_usd:0.0 ~cost_today_usd:0.0)
+
+let test_budget_check_zero_cost () =
+  check bool "zero cost under positive budget" true
+    (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.0)
+
+let test_default_daily_budget () =
+  check (float 0.001) "default budget" 0.10 D.default_daily_budget_usd
+
+let test_daily_budget_from_env_default () =
+  (* Unset the env var to get default *)
+  let saved = Sys.getenv_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" in
+  (match saved with
+   | Some _ -> Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" ""
+   | None -> ());
+  (* The function reads at call time, but with empty string it should
+     fall back to default due to float_of_string failure *)
+  let budget = D.daily_budget_usd_from_env () in
+  (* Restore *)
+  (match saved with
+   | Some v -> Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" v
+   | None -> ());
+  (* Empty string causes Failure in float_of_string, so default applies *)
+  check (float 0.001) "env default budget" D.default_daily_budget_usd budget
+
+let test_daily_budget_from_env_custom () =
+  let saved = Sys.getenv_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" in
+  Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" "0.50";
+  let budget = D.daily_budget_usd_from_env () in
+  (match saved with
+   | Some v -> Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" v
+   | None ->
+       (* Cannot truly unset with Unix.putenv, set to empty *)
+       Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" "");
+  check (float 0.001) "custom env budget" 0.50 budget
+
 let () =
   run "Keeper_deliberation"
     [
@@ -392,5 +664,67 @@ let () =
             test_canonical_policy_mode_heuristic;
           test_case "canonical policy mode unknown" `Quick
             test_canonical_policy_mode_unknown;
+        ] );
+      ( "build_deliberation_prompt",
+        [
+          test_case "prompt contains keeper name" `Quick
+            test_prompt_contains_keeper_name;
+          test_case "prompt contains trigger strings" `Quick
+            test_prompt_contains_triggers;
+          test_case "prompt mentions JSON format" `Quick
+            test_prompt_contains_json_instruction;
+          test_case "prompt lists available actions" `Quick
+            test_prompt_contains_action_list;
+        ] );
+      ( "parse_deliberation_response",
+        [
+          test_case "parse valid noop" `Quick test_parse_valid_noop_json;
+          test_case "parse valid reply_in_room" `Quick
+            test_parse_valid_reply_json;
+          test_case "parse valid task_claim" `Quick
+            test_parse_valid_task_claim_json;
+          test_case "parse valid broadcast" `Quick
+            test_parse_valid_broadcast_json;
+          test_case "parse JSON with code fences" `Quick
+            test_parse_json_with_code_fences;
+          test_case "parse JSON with surrounding text" `Quick
+            test_parse_json_with_surrounding_text;
+          test_case "parse malformed JSON returns Error" `Quick
+            test_parse_malformed_json;
+          test_case "parse empty string returns Error" `Quick
+            test_parse_empty_string;
+          test_case "parse missing action field" `Quick
+            test_parse_missing_action_field;
+          test_case "parse unknown action type" `Quick
+            test_parse_unknown_action_type;
+          test_case "reply with empty content fails" `Quick
+            test_parse_reply_empty_content_fails;
+          test_case "task_claim with empty task_id fails" `Quick
+            test_parse_task_claim_empty_task_id_fails;
+          test_case "confidence clamped to 1.0" `Quick
+            test_parse_confidence_clamped;
+          test_case "negative confidence clamped to 0.0" `Quick
+            test_parse_negative_confidence_clamped;
+          test_case "missing confidence defaults to 0.5" `Quick
+            test_parse_missing_confidence_defaults;
+        ] );
+      ( "deliberation_budget",
+        [
+          test_case "under budget returns true" `Quick
+            test_budget_check_under_budget;
+          test_case "at budget returns false" `Quick
+            test_budget_check_at_budget;
+          test_case "over budget returns false" `Quick
+            test_budget_check_over_budget;
+          test_case "zero budget always false" `Quick
+            test_budget_check_zero_budget;
+          test_case "zero cost under positive budget" `Quick
+            test_budget_check_zero_cost;
+          test_case "default daily budget value" `Quick
+            test_default_daily_budget;
+          test_case "daily budget from env default" `Quick
+            test_daily_budget_from_env_default;
+          test_case "daily budget from env custom" `Quick
+            test_daily_budget_from_env_custom;
         ] );
     ]

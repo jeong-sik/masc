@@ -1523,6 +1523,281 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
     in
     if idle_seconds < idle_gate || cooldown_elapsed < cooldown_gate then meta
     else
+      (* Phase 2 Deliberation Engine: if policy_mode is Llm_deliberation AND
+         triage returned Triggered, call the LLM deliberation engine instead
+         of the existing proactive logic. *)
+      let policy_mode =
+        Keeper_contract.policy_mode_of_string meta.policy_mode
+      in
+      let triage_is_triggered =
+        Keeper_contract.policy_mode_is_deliberation policy_mode
+        && (let tt = String.trim meta.last_triage_triggers in
+            tt <> "" && not (String.length tt >= 5
+                            && String.sub tt 0 5 = "skip:"))
+      in
+      if triage_is_triggered then (
+        (* Deliberation engine path *)
+        let daily_budget = Keeper_deliberation.daily_budget_usd_from_env () in
+        if not (Keeper_deliberation.deliberation_budget_check
+                  ~daily_budget_usd:daily_budget
+                  ~cost_today_usd:meta.deliberation_cost_total_usd)
+        then (
+          Printf.eprintf
+            "[keeper-deliberation] %s budget exhausted (%.4f >= %.4f)\n%!"
+            meta.name meta.deliberation_cost_total_usd daily_budget;
+          meta)
+        else
+          match model_specs_of_strings meta.models with
+          | Error msg ->
+              log_proactive_failure
+                ("deliberation model specs: " ^ msg);
+              meta
+          | Ok specs -> (
+              match ensure_api_keys specs with
+              | Error msg ->
+                  log_proactive_failure
+                    ("deliberation api keys: " ^ msg);
+                  meta
+              | Ok () ->
+                  (* Parse triggers from last_triage_triggers string *)
+                  let trigger_strs =
+                    String.split_on_char ',' meta.last_triage_triggers
+                    |> List.map String.trim
+                    |> List.filter (fun s -> s <> "")
+                  in
+                  let triggers =
+                    List.filter_map (fun s ->
+                      match s with
+                      | "direct_mention" ->
+                          Some Keeper_deliberation.DirectMention
+                      | "new_unclaimed_task" ->
+                          Some Keeper_deliberation.NewUnclaimedTask
+                      | "failed_task" ->
+                          Some Keeper_deliberation.FailedTask
+                      | "agent_joined_or_left" ->
+                          Some Keeper_deliberation.AgentJoinedOrLeft
+                      | "goal_deadline" ->
+                          Some Keeper_deliberation.GoalDeadline
+                      | "idle_timeout" ->
+                          Some Keeper_deliberation.IdleTimeout
+                      | "strategic_review" ->
+                          Some Keeper_deliberation.StrategicReview
+                      | other ->
+                          if String.length other > 15
+                             && String.sub other 0 15 = "board_activity:" then
+                            Some (Keeper_deliberation.BoardActivity
+                                    (String.sub other 15
+                                       (String.length other - 15)))
+                          else if String.length other > 17
+                                  && String.sub other 0 17 = "metrics_anomaly:" then
+                            Some (Keeper_deliberation.MetricsAnomaly
+                                    (String.sub other 17
+                                       (String.length other - 17)))
+                          else None)
+                      trigger_strs
+                  in
+                  if triggers = [] then (
+                    Printf.eprintf
+                      "[keeper-deliberation] %s no parseable triggers from: %s\n%!"
+                      meta.name meta.last_triage_triggers;
+                    meta)
+                  else
+                    (* Build world observation for prompt *)
+                    let obs =
+                      { (Keeper_deliberation.empty_world_observation
+                           ~keeper_name:meta.name)
+                        with
+                        unclaimed_task_count =
+                          List.length (List.filter (fun s ->
+                            String.trim s <> "")
+                            (String.split_on_char ','
+                               meta.last_triage_triggers));
+                        active_goal_count =
+                          List.length meta.active_goal_ids;
+                        idle_seconds;
+                        idle_gate;
+                        direct_mention =
+                          List.mem Keeper_deliberation.DirectMention
+                            triggers;
+                      }
+                    in
+                    let prompt =
+                      Keeper_deliberation.build_deliberation_prompt
+                        ~keeper_name:meta.name
+                        ~soul_profile:meta.soul_profile
+                        ~goal:meta.goal
+                        ~triggers
+                        obs
+                    in
+                    let model_specs =
+                      Llm_client.available_model_specs_of_strings meta.models
+                    in
+                    let result =
+                      Llm_client.run_prompt_cascade
+                        ~temperature:0.3
+                        ~model_specs
+                        ~max_tokens:1024
+                        ~prompt
+                        ~system:("You are " ^ meta.name
+                                 ^ ", a keeper agent. Respond with JSON only.")
+                        ()
+                    in
+                    match result with
+                    | Error msg ->
+                        Printf.eprintf
+                          "[keeper-deliberation] %s LLM call failed: %s\n%!"
+                          meta.name msg;
+                        meta
+                    | Ok response ->
+                        let turn_cost =
+                          let inp =
+                            float_of_int response.usage.input_tokens /. 1000.0
+                          in
+                          let outp =
+                            float_of_int response.usage.output_tokens /. 1000.0
+                          in
+                          let primary =
+                            match model_specs with
+                            | p :: _ -> p
+                            | [] -> Llm_client.default_local_model_spec ()
+                          in
+                          (inp *. primary.cost_per_1k_input)
+                          +. (outp *. primary.cost_per_1k_output)
+                        in
+                        (match
+                           Keeper_deliberation.parse_deliberation_response
+                             response.content
+                         with
+                         | Error msg ->
+                             Printf.eprintf
+                               "[keeper-deliberation] %s parse failed: %s (raw: %s)\n%!"
+                               meta.name msg
+                               (Keeper_types.short_preview response.content);
+                             (* Update meta with cost even on parse failure *)
+                             let updated =
+                               { meta with
+                                 deliberation_count =
+                                   meta.deliberation_count + 1;
+                                 deliberation_cost_total_usd =
+                                   meta.deliberation_cost_total_usd
+                                   +. turn_cost;
+                                 last_deliberation_ts = now_ts;
+                                 updated_at = now_iso ();
+                               }
+                             in
+                             (match write_meta ctx.config updated with
+                              | Ok () -> ()
+                              | Error msg ->
+                                  Printf.eprintf
+                                    "[keeper-deliberation] write_meta failed: %s\n%!"
+                                    msg);
+                             updated
+                         | Ok (action, reasoning, confidence) ->
+                             Printf.eprintf
+                               "[keeper-deliberation] %s decided: %s (confidence=%.2f, reason=%s)\n%!"
+                               meta.name
+                               (Keeper_deliberation.deliberation_action_to_string action)
+                               confidence
+                               (Keeper_types.short_preview reasoning);
+                             (* Execute the action *)
+                             (match action with
+                              | Keeper_deliberation.Noop _reason -> ()
+                              | Keeper_deliberation.ReplyInRoom { room_id; content } ->
+                                  let target_room =
+                                    if room_id = "" || room_id = "default"
+                                    then Room.current_room_id ctx.config
+                                    else room_id
+                                  in
+                                  (try
+                                     ignore
+                                       (Room.broadcast_in_room ctx.config
+                                          ~room_id:target_room
+                                          ~from_agent:meta.agent_name
+                                          ~content)
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] reply_in_room failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | Keeper_deliberation.Broadcast { message } ->
+                                  (try
+                                     ignore
+                                       (Room.broadcast ctx.config
+                                          ~from_agent:meta.agent_name
+                                          ~content:message)
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] broadcast failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | Keeper_deliberation.TaskClaim { task_id; reason = _ } ->
+                                  (try
+                                     let result =
+                                       Room.claim_task ctx.config
+                                         ~agent_name:meta.agent_name
+                                         ~task_id
+                                     in
+                                     Printf.eprintf
+                                       "[keeper-deliberation] task_claim result: %s\n%!"
+                                       result
+                                   with exn ->
+                                     Printf.eprintf
+                                       "[keeper-deliberation] task_claim failed: %s\n%!"
+                                       (Printexc.to_string exn))
+                              | _ ->
+                                  (* Other actions (BoardPost, BoardComment, etc.)
+                                     are Phase 3 scope *)
+                                  Printf.eprintf
+                                    "[keeper-deliberation] %s action %s deferred to Phase 3\n%!"
+                                    meta.name
+                                    (Keeper_deliberation.deliberation_action_to_string action));
+                             (* Update meta *)
+                             let updated =
+                               { meta with
+                                 deliberation_count =
+                                   meta.deliberation_count + 1;
+                                 deliberation_cost_total_usd =
+                                   meta.deliberation_cost_total_usd
+                                   +. turn_cost;
+                                 last_deliberation_ts = now_ts;
+                                 total_turns = meta.total_turns + 1;
+                                 total_input_tokens =
+                                   meta.total_input_tokens
+                                   + response.usage.input_tokens;
+                                 total_output_tokens =
+                                   meta.total_output_tokens
+                                   + response.usage.output_tokens;
+                                 total_tokens =
+                                   meta.total_tokens
+                                   + response.usage.total_tokens;
+                                 total_cost_usd =
+                                   meta.total_cost_usd +. turn_cost;
+                                 last_turn_ts = now_ts;
+                                 last_model_used = response.model_used;
+                                 last_input_tokens =
+                                   response.usage.input_tokens;
+                                 last_output_tokens =
+                                   response.usage.output_tokens;
+                                 last_total_tokens =
+                                   response.usage.total_tokens;
+                                 last_latency_ms = response.latency_ms;
+                                 last_proactive_ts = now_ts;
+                                 last_proactive_reason =
+                                   Printf.sprintf
+                                     "deliberation:%s;confidence=%.2f"
+                                     (Keeper_deliberation.deliberation_action_to_legacy_string action)
+                                     confidence;
+                                 last_proactive_preview =
+                                   short_preview reasoning;
+                                 updated_at = now_iso ();
+                               }
+                             in
+                             (match write_meta ctx.config updated with
+                              | Ok () -> ()
+                              | Error msg ->
+                                  Printf.eprintf
+                                    "[keeper-deliberation] write_meta failed: %s\n%!"
+                                    msg);
+                             updated)))
+      else
       match model_specs_of_strings meta.models with
       | Error msg ->
           log_proactive_failure ("model specs: " ^ msg);

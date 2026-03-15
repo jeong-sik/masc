@@ -1,5 +1,5 @@
 (** Keeper_deliberation — typed action space, deliberation triggers,
-    world observation builder, and triage logic.
+    world observation builder, triage logic, and LLM-driven deliberation.
 
     @since 2.90.0 *)
 
@@ -90,3 +90,34 @@ val deliberation_meta_of_json : Yojson.Safe.t -> deliberation_meta
 (** Deterministic baseline using the typed action space.
     Equivalent to the old [if direct_mention then "reply_in_room" else "noop"]. *)
 val deterministic_baseline_action : world_observation -> deliberation_action
+
+(** {1 Phase 2: LLM-Driven Deliberation} *)
+
+(** Default daily budget in USD for deliberation LLM calls. *)
+val default_daily_budget_usd : float
+
+(** Read the daily budget from [MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD]
+    env var, returning [default_daily_budget_usd] if absent or invalid. *)
+val daily_budget_usd_from_env : unit -> float
+
+(** Check whether the keeper has remaining budget for deliberation.
+    Returns [true] when [cost_today_usd < daily_budget_usd]. *)
+val deliberation_budget_check :
+  daily_budget_usd:float -> cost_today_usd:float -> bool
+
+(** Build a prompt for the LLM to decide the keeper's next action.
+    Describes the keeper's identity, current state, detected triggers,
+    and available actions. Asks the LLM to respond with structured JSON. *)
+val build_deliberation_prompt :
+  keeper_name:string ->
+  soul_profile:string ->
+  goal:string ->
+  triggers:deliberation_trigger list ->
+  world_observation ->
+  string
+
+(** Parse the LLM's JSON response into a typed deliberation action.
+    Returns [(action, reasoning, confidence)] or an [Error] message.
+    Handles code fences, extra whitespace, and embedded JSON. *)
+val parse_deliberation_response :
+  string -> (deliberation_action * string * float, string) result

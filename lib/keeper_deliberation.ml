@@ -1,8 +1,10 @@
 (** Keeper_deliberation — typed action space, deliberation triggers,
-    world observation builder, and triage logic for the deliberation engine.
+    world observation builder, triage logic, and LLM-driven deliberation
+    for the keeper deliberation engine.
 
     Phase 1: Pure heuristic triage (no LLM calls).
-    Phase 2 will add LLM-driven deliberation behind the triage gate.
+    Phase 2: LLM-driven deliberation (L1 Reactive) — when triage detects
+    triggers, call an LLM to decide what action to take.
 
     @since 2.90.0 *)
 
@@ -272,3 +274,224 @@ let deterministic_baseline_action (obs : world_observation) : deliberation_actio
     ReplyInRoom { room_id = ""; content = "" }
   else
     Noop "no_trigger"
+
+(* ================================================================ *)
+(* Phase 2: LLM-Driven Deliberation (L1 Reactive)                  *)
+(* ================================================================ *)
+
+(* ---------- Budget check ---------- *)
+
+let default_daily_budget_usd = 0.10
+
+(** Read the daily budget from env, returning the default if absent or invalid. *)
+let daily_budget_usd_from_env () : float =
+  match Sys.getenv_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" with
+  | Some s -> (try float_of_string (String.trim s) with Failure _ -> default_daily_budget_usd)
+  | None -> default_daily_budget_usd
+
+(** Check whether the keeper has remaining budget for another deliberation call.
+    Returns [true] if [cost_today_usd < daily_budget_usd]. *)
+let deliberation_budget_check ~daily_budget_usd ~cost_today_usd : bool =
+  cost_today_usd < daily_budget_usd
+
+(* ---------- Prompt builder ---------- *)
+
+let triggers_to_prompt_list (triggers : deliberation_trigger list) : string =
+  triggers
+  |> List.mapi (fun i t ->
+         Printf.sprintf "  %d. %s" (i + 1) (deliberation_trigger_to_string t))
+  |> String.concat "\n"
+
+let world_observation_to_prompt_section (obs : world_observation) : string =
+  Printf.sprintf
+    "World state:\n\
+    \  - Unclaimed tasks: %d\n\
+    \  - Failed tasks: %d\n\
+    \  - Active agents: %d\n\
+    \  - Agent count changed: %b\n\
+    \  - Active goals: %d\n\
+    \  - Idle seconds: %d (gate: %d)\n\
+    \  - Board new posts: %d\n\
+    \  - Board mentions: %d\n\
+    \  - Direct mention: %b\n\
+    \  - Has question: %b"
+    obs.unclaimed_task_count
+    obs.failed_task_count
+    obs.active_agent_count
+    obs.agent_count_changed
+    obs.active_goal_count
+    obs.idle_seconds obs.idle_gate
+    obs.board_new_post_count
+    obs.board_mention_count
+    obs.direct_mention
+    obs.has_question
+
+(** Build a prompt for the LLM to decide the keeper's next action.
+    The prompt describes the keeper's identity, current state, detected triggers,
+    and available actions. The LLM is asked to respond with JSON. *)
+let build_deliberation_prompt
+    ~keeper_name ~soul_profile ~goal
+    ~(triggers : deliberation_trigger list)
+    (obs : world_observation) : string =
+  Printf.sprintf
+    {|You are %s, a keeper agent in a multi-agent coordination system.
+
+Your soul profile: %s
+Your current goal: %s
+
+Detected triggers that require your attention:
+%s
+
+%s
+
+Available actions (pick exactly one):
+- noop: Do nothing. Use when triggers do not warrant action.
+- reply_in_room: Send a message to a specific room. Requires room_id and content.
+- task_claim: Claim an unclaimed task. Requires task_id and reason.
+- broadcast: Send a broadcast message to all agents. Requires message.
+- board_post: Post to the community board. Requires content and optional hearth.
+- board_comment: Comment on a board post. Requires post_id and content.
+- board_vote: Vote on a board post. Requires post_id and direction (up/down).
+- propose_spawn: Propose spawning a new agent. Requires topic and reason.
+
+Respond with ONLY a JSON object in this exact format:
+{"action":"<action_name>","params":{<action_specific_params>},"reasoning":"<brief_explanation>","confidence":<0.0_to_1.0>}
+
+Examples:
+{"action":"noop","params":{"reason":"No urgent triggers"},"reasoning":"All triggers are low priority","confidence":0.9}
+{"action":"reply_in_room","params":{"room_id":"default","content":"I see a new task available."},"reasoning":"Direct mention needs response","confidence":0.8}
+{"action":"task_claim","params":{"task_id":"task-123","reason":"Matches my goal"},"reasoning":"Unclaimed task aligns with keeper goal","confidence":0.7}
+{"action":"broadcast","params":{"message":"Status update: monitoring active goals"},"reasoning":"Team needs coordination update","confidence":0.6}|}
+    keeper_name
+    soul_profile
+    goal
+    (triggers_to_prompt_list triggers)
+    (world_observation_to_prompt_section obs)
+
+(* ---------- Response parser ---------- *)
+
+(** Extract a JSON object from a raw LLM response string.
+    Handles cases where the LLM wraps JSON in markdown code fences or
+    adds extra text before/after the JSON. *)
+let extract_json_from_response (raw : string) : (Yojson.Safe.t, string) result =
+  let trimmed = String.trim raw in
+  (* Try direct parse first *)
+  match Yojson.Safe.from_string trimmed with
+  | json -> Ok json
+  | exception Yojson.Json_error _ ->
+      (* Try to find JSON between code fences *)
+      let re_fenced = Str.regexp {|```\(json\)?\n?\(.*\)\n?```|} in
+      if Str.string_match re_fenced trimmed 0 then
+        let inner = Str.matched_group 2 trimmed in
+        match Yojson.Safe.from_string (String.trim inner) with
+        | json -> Ok json
+        | exception Yojson.Json_error _ -> Error "JSON parse failed after fence extraction"
+      else
+        (* Try to find first { ... } substring *)
+        let len = String.length trimmed in
+        let rec find_brace i =
+          if i >= len then Error "no JSON object found in response"
+          else if trimmed.[i] = '{' then
+            (* Find matching closing brace *)
+            let depth = ref 0 in
+            let in_string = ref false in
+            let escape = ref false in
+            let j = ref i in
+            let found = ref false in
+            while !j < len && not !found do
+              let c = trimmed.[!j] in
+              if !escape then escape := false
+              else if c = '\\' && !in_string then escape := true
+              else if c = '"' then in_string := not !in_string
+              else if not !in_string then (
+                if c = '{' then incr depth
+                else if c = '}' then (
+                  decr depth;
+                  if !depth = 0 then found := true));
+              if not !found then incr j
+            done;
+            if !found then
+              let substr = String.sub trimmed i (!j - i + 1) in
+              match Yojson.Safe.from_string substr with
+              | json -> Ok json
+              | exception Yojson.Json_error msg ->
+                  Error (Printf.sprintf "extracted JSON parse failed: %s" msg)
+            else Error "unmatched braces in response"
+          else find_brace (i + 1)
+        in
+        find_brace 0
+
+(** Parse a deliberation action from the "action" and "params" fields of the
+    LLM response JSON. Returns the typed action or an error string. *)
+let parse_action_from_json (json : Yojson.Safe.t)
+    : (deliberation_action, string) result =
+  let action_str = Safe_ops.json_string ~default:"" "action" json in
+  let params =
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt "params" fields with
+        | Some p -> p
+        | None -> `Assoc [])
+    | _ -> `Assoc []
+  in
+  match action_str with
+  | "noop" ->
+      let reason = Safe_ops.json_string ~default:"no reason" "reason" params in
+      Ok (Noop reason)
+  | "reply_in_room" ->
+      let room_id = Safe_ops.json_string ~default:"default" "room_id" params in
+      let content = Safe_ops.json_string ~default:"" "content" params in
+      if content = "" then Error "reply_in_room requires non-empty content"
+      else Ok (ReplyInRoom { room_id; content })
+  | "task_claim" ->
+      let task_id = Safe_ops.json_string ~default:"" "task_id" params in
+      let reason = Safe_ops.json_string ~default:"" "reason" params in
+      if task_id = "" then Error "task_claim requires non-empty task_id"
+      else Ok (TaskClaim { task_id; reason })
+  | "broadcast" ->
+      let message = Safe_ops.json_string ~default:"" "message" params in
+      if message = "" then Error "broadcast requires non-empty message"
+      else Ok (Broadcast { message })
+  | "board_post" ->
+      let content = Safe_ops.json_string ~default:"" "content" params in
+      let hearth = Safe_ops.json_string_opt "hearth" params in
+      if content = "" then Error "board_post requires non-empty content"
+      else Ok (BoardPost { content; hearth })
+  | "board_comment" ->
+      let post_id = Safe_ops.json_string ~default:"" "post_id" params in
+      let content = Safe_ops.json_string ~default:"" "content" params in
+      if post_id = "" || content = "" then
+        Error "board_comment requires non-empty post_id and content"
+      else Ok (BoardComment { post_id; content })
+  | "board_vote" ->
+      let post_id = Safe_ops.json_string ~default:"" "post_id" params in
+      let direction = Safe_ops.json_string ~default:"" "direction" params in
+      if post_id = "" || direction = "" then
+        Error "board_vote requires non-empty post_id and direction"
+      else Ok (BoardVote { post_id; direction })
+  | "propose_spawn" ->
+      let topic = Safe_ops.json_string ~default:"" "topic" params in
+      let reason = Safe_ops.json_string ~default:"" "reason" params in
+      if topic = "" then Error "propose_spawn requires non-empty topic"
+      else Ok (ProposeSpawn { topic; reason })
+  | "" -> Error "missing 'action' field in LLM response"
+  | unknown -> Error (Printf.sprintf "unknown action type: %s" unknown)
+
+(** Parse the LLM's JSON response into a deliberation_action with reasoning
+    and confidence. Returns [(action, reasoning, confidence)] or an error string. *)
+let parse_deliberation_response (raw : string)
+    : (deliberation_action * string * float, string) result =
+  match extract_json_from_response raw with
+  | Error msg -> Error (Printf.sprintf "json extraction failed: %s" msg)
+  | Ok json -> (
+      match parse_action_from_json json with
+      | Error msg -> Error msg
+      | Ok action ->
+          let reasoning =
+            Safe_ops.json_string ~default:"" "reasoning" json
+          in
+          let confidence =
+            let raw_conf = Safe_ops.json_float ~default:0.5 "confidence" json in
+            max 0.0 (min 1.0 raw_conf)
+          in
+          Ok (action, reasoning, confidence))

@@ -143,12 +143,6 @@ let rec mkdir_p path perm =
 type tool_exec_observer =
   tool_name:string -> success:bool -> duration_ms:int -> unit
 
-(* --- Tool result helpers --- *)
-
-let tool_ok content = Ok Agent_sdk.Types.{ content }
-let tool_err ?(recoverable = true) message =
-  Error Agent_sdk.Types.{ message; recoverable }
-
 (* --- Tool implementations --- *)
 
 let make_file_read ?workdir ?on_exec () =
@@ -164,7 +158,8 @@ let make_file_read ?workdir ?on_exec () =
     ]
     (fun input ->
        match Agent_swarm_tool_input.extract_string "path" input with
-       | Error e -> tool_err e
+       | Error e ->
+         Error { Agent_sdk.Types.message = e; recoverable = false }
        | Ok path ->
          let started = Time_compat.now () in
          let resolved_path = resolve_path ?base_dir:workdir path in
@@ -178,7 +173,7 @@ let make_file_read ?workdir ?on_exec () =
            Option.iter
              (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
              on_exec;
-           tool_err err
+           Error { Agent_sdk.Types.message = err; recoverable = false }
          else
            try
              let content = In_channel.with_open_text resolved_path In_channel.input_all in
@@ -189,8 +184,9 @@ let make_file_read ?workdir ?on_exec () =
                (fun f -> f ~tool_name:"file_read" ~success:true ~duration_ms)
                on_exec;
              if String.length content > 100_000 then
-               tool_ok (String.sub content 0 100_000 ^ "\n[TRUNCATED at 100KB]")
-             else tool_ok content
+               Ok { Agent_sdk.Types.content =
+                 String.sub content 0 100_000 ^ "\n[TRUNCATED at 100KB]" }
+             else Ok { Agent_sdk.Types.content = content }
            with Sys_error msg ->
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
@@ -198,7 +194,8 @@ let make_file_read ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
                on_exec;
-             tool_err (Printf.sprintf "Cannot read: %s" msg))
+             Error { Agent_sdk.Types.message =
+               Printf.sprintf "Cannot read: %s" msg; recoverable = false })
 
 let make_file_write ?workdir ?on_exec () =
   Agent_sdk.Tool.create
@@ -217,7 +214,8 @@ let make_file_write ?workdir ?on_exec () =
     (fun input ->
        match Agent_swarm_tool_input.extract_string "path" input,
              Agent_swarm_tool_input.extract_string "content" input with
-       | Error e, _ | _, Error e -> tool_err e
+       | Error e, _ | _, Error e ->
+         Error { Agent_sdk.Types.message = e; recoverable = false }
        | Ok path, Ok content ->
          let started = Time_compat.now () in
          let resolved_path = resolve_path ?base_dir:workdir path in
@@ -231,7 +229,7 @@ let make_file_write ?workdir ?on_exec () =
            Option.iter
              (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
              on_exec;
-           tool_err err
+           Error { Agent_sdk.Types.message = err; recoverable = false }
          else
            try
              mkdir_p (Filename.dirname resolved_path) 0o755;
@@ -243,8 +241,9 @@ let make_file_write ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_write" ~success:true ~duration_ms)
                on_exec;
-             tool_ok (Printf.sprintf "Written %d bytes to %s"
-               (String.length content) resolved_path)
+             Ok { Agent_sdk.Types.content =
+               Printf.sprintf "Written %d bytes to %s"
+                 (String.length content) resolved_path }
            with Sys_error msg ->
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
@@ -252,7 +251,8 @@ let make_file_write ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
                on_exec;
-             tool_err (Printf.sprintf "Cannot write: %s" msg))
+             Error { Agent_sdk.Types.message =
+               Printf.sprintf "Cannot write: %s" msg; recoverable = false })
 
 let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_commands
     ~description =
@@ -269,10 +269,12 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
     ]
     (fun input ->
        match Agent_swarm_tool_input.extract_string "command" input with
-       | Error e -> tool_err e
+       | Error e ->
+         Error { Agent_sdk.Types.message = e; recoverable = false }
        | Ok command ->
          (match validate_command_with_allowlist ~allowed_commands command with
-          | Error e -> tool_err e
+          | Error e ->
+            Error { Agent_sdk.Types.message = e; recoverable = false }
           | Ok () ->
            let timeout =
              Agent_swarm_tool_input.extract_float "timeout_s" input
@@ -299,14 +301,21 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                   let status = Eio.Process.await proc in
                   let output = Buffer.contents buf in
                   (match status with
-                   | `Exited 0 -> tool_ok output
+                   | `Exited 0 ->
+                     Ok { Agent_sdk.Types.content = output }
                    | `Exited code ->
-                     tool_err (Printf.sprintf "Exit code %d:\n%s" code output)
+                     Error { Agent_sdk.Types.message =
+                       Printf.sprintf "Exit code %d:\n%s" code output;
+                       recoverable = false }
                    | `Signaled sig_num ->
-                     tool_err (Printf.sprintf "Killed by signal %d:\n%s" sig_num output)))
+                     Error { Agent_sdk.Types.message =
+                       Printf.sprintf "Killed by signal %d:\n%s" sig_num output;
+                       recoverable = false }))
                (fun () ->
                   Eio.Time.sleep clock timeout;
-                  tool_err (Printf.sprintf "Timeout after %.0fs: %s" timeout command))
+                  Error { Agent_sdk.Types.message =
+                    Printf.sprintf "Timeout after %.0fs: %s" timeout command;
+                    recoverable = true })
              in
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
@@ -322,7 +331,9 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
              Option.iter
                (fun f -> f ~tool_name:"shell_exec" ~success:false ~duration_ms)
                on_exec;
-             tool_err (Printf.sprintf "Command failed: %s" (Printexc.to_string exn))))
+             Error { Agent_sdk.Types.message =
+               Printf.sprintf "Command failed: %s" (Printexc.to_string exn);
+               recoverable = false }))
 
 let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
   make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock

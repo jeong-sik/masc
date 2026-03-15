@@ -61,8 +61,9 @@ let zombie_pulse : Pulse.t option ref = ref None
 let gc_pulse : Pulse.t option ref = ref None
 let lodge_pulse_inst : Pulse.t option ref = ref None
 
-let log msg =
-  eprintf "[guardian] %s\n%!" msg
+let log_debug msg = Log.Guardian.debug "%s" msg
+let log_info msg = Log.Guardian.info "%s" msg
+let log_warn msg = Log.Guardian.warn "%s" msg
 
 let set_last r =
   r := Some (Types.now_iso ())
@@ -126,11 +127,11 @@ let make_zombie_consumer config : (module Pulse.Consumer) =
         let result = Room.cleanup_zombies config in
         last_zombie_result := Some result;
         set_last last_zombie_cleanup;
-        log result;
+        log_debug result;
         Ok ()
       with exn ->
         let msg = sprintf "zombie cleanup failed: %s" (Printexc.to_string exn) in
-        log msg;
+        log_warn msg;
         Error msg
   end)
 
@@ -143,11 +144,11 @@ let make_gc_consumer config : (module Pulse.Consumer) =
         let result = Room.gc config ~days:gc_days () in
         last_gc_result := Some result;
         set_last last_gc;
-        log (sprintf "gc: %s" result);
+        log_debug (sprintf "gc: %s" result);
         Ok ()
       with exn ->
         let msg = sprintf "gc failed: %s" (Printexc.to_string exn) in
-        log msg;
+        log_warn msg;
         Error msg
   end)
 
@@ -157,7 +158,7 @@ let make_lodge_consumer ~net : (module Pulse.Consumer) =
 
     let should_act _beat =
       if is_quiet_hours () then begin
-        log "quiet hours - skipping lodge loop";
+        log_debug "quiet hours - skipping lodge loop";
         false
       end else
         true
@@ -178,8 +179,8 @@ let make_lodge_consumer ~net : (module Pulse.Consumer) =
       set_last last_lodge;
       lodge_running := false;
       match result with
-      | (true, msg) -> log (sprintf "lodge loop ok: %s" msg); Ok ()
-      | (false, msg) -> log (sprintf "lodge loop failed: %s" msg); Error msg
+      | (true, msg) -> log_info (sprintf "lodge loop ok: %s" msg); Ok ()
+      | (false, msg) -> log_warn (sprintf "lodge loop failed: %s" msg); Error msg
   end)
 
 (* ── Status ────────────────────────────────────────────────── *)
@@ -232,10 +233,10 @@ let status_json () : Yojson.Safe.t =
 let start_masc_loops_internal ~owner ~respect_guardian_toggle ~sw ~clock config =
   let can_start = if respect_guardian_toggle then masc_enabled else true in
   if not can_start then begin
-    log "masc guardian disabled";
+    log_debug "masc guardian disabled";
     ()
   end else if masc_loops_running () then begin
-    log
+    log_debug
       (sprintf "masc guardian loops already running (owner=%s)"
          (masc_runtime_owner_label ()))
   end else begin
@@ -267,7 +268,7 @@ let start_masc_loops_internal ~owner ~respect_guardian_toggle ~sw ~clock config 
     if !started_any then
       masc_loops_owner := Some owner
     else
-      log "masc guardian loops disabled by interval configuration"
+      log_debug "masc guardian loops disabled by interval configuration"
   end
 
 let start_masc_loops ~sw ~clock config =
@@ -280,13 +281,13 @@ let start_embedded_masc_loops ~sw ~clock config =
 
 let start_lodge_loop ~sw ~clock ~net =
   if not lodge_enabled then begin
-    log "lodge guardian disabled";
+    log_debug "lodge guardian disabled";
     ()
   end else if Option.is_some !lodge_pulse_inst then begin
-    log "guardian lodge loop already running";
+    log_debug "guardian lodge loop already running";
     ()
   end else if lodge_interval_s <= 0.0 || lodge_iterations <= 0 then begin
-    log "lodge guardian disabled by interval/iterations";
+    log_debug "lodge guardian disabled by interval/iterations";
     ()
   end else begin
     let p = Pulse.create
@@ -302,9 +303,9 @@ let start_lodge_loop ~sw ~clock ~net =
 
 let start ~sw ~clock ~net room_config =
   if not enabled then begin
-    log "guardian disabled (set MASC_GUARDIAN_ENABLED=true)";
+    log_debug "guardian disabled (set MASC_GUARDIAN_ENABLED=true)";
   end else begin
     start_masc_loops ~sw ~clock room_config;
     start_lodge_loop ~sw ~clock ~net;
-    log (sprintf "guardian started (mode=%s)" (Mode.to_string mode))
+    log_info (sprintf "guardian started (mode=%s)" (Mode.to_string mode))
   end

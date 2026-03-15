@@ -17,8 +17,9 @@ open Printf
 
 let agent_name = "sentinel"
 
-let log msg =
-  eprintf "[sentinel] %s\n%!" msg
+let log_debug msg = Log.Sentinel.debug "%s" msg
+let log_info msg = Log.Sentinel.info "%s" msg
+let log_warn msg = Log.Sentinel.warn "%s" msg
 
 type board_patrol_decision = {
   needs_attention : bool;
@@ -56,21 +57,21 @@ let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
   else
     match Prompt_registry.render ~id:prompt_id ~vars () with
     | Error msg ->
-        log (sprintf "prompt %s render failed: %s" prompt_id msg);
+        log_warn (sprintf "prompt %s render failed: %s" prompt_id msg);
         None
     | Ok prompt ->
         let timeout = Env_config.Sentinel.llm_timeout_sec in
         (match Lodge_cascade.call ~cascade_name ~prompt
             ~temperature:0.3 ~timeout_sec:timeout ~max_tokens:800 () with
         | Ok r when String.length r.response > 5 ->
-            log (sprintf "LLM response from %s (%d chars)" r.llm_used
+            log_debug (sprintf "LLM response from %s (%d chars)" r.llm_used
                    (String.length r.response));
             parse_llm_json_safe r.response
         | Ok r ->
-            log (sprintf "LLM response too short from %s" r.llm_used);
+            log_warn (sprintf "LLM response too short from %s" r.llm_used);
             None
         | Error err ->
-            log (sprintf "LLM cascade %s failed: %s" cascade_name err);
+            log_warn (sprintf "LLM cascade %s failed: %s" cascade_name err);
             None)
 
 let trimmed_string_option = function
@@ -140,7 +141,7 @@ let make_heartbeat_consumer config : (module Pulse.Consumer) =
         Ok ()
       with exn ->
         let msg = sprintf "heartbeat failed: %s" (Printexc.to_string exn) in
-        log msg;
+        log_warn msg;
         Error msg
   end)
 
@@ -163,7 +164,7 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
           last_daily_post := Some today_key;
           (try write_board_patrol_day_key_for_tests config today_key
            with exn ->
-             log
+             log_warn
                (sprintf "board patrol state persist failed: %s"
                   (Printexc.to_string exn)));
           let agent_names = String.concat ", " state.active_agents in
@@ -180,7 +181,7 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
           if stale_posts = 0 then begin
             record_result ~checked_at:now_f ~action:"silent"
               ?reason:(Some "no stale posts over 7d") ~stale_count:stale_posts ();
-            log "no stale posts, skipping board patrol post"
+            log_debug "no stale posts, skipping board patrol post"
           end else begin
             let llm_content = call_sentinel_llm
               ~cascade_name:"sentinel_board"
@@ -197,7 +198,7 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
                 if not decision.needs_attention then begin
                   record_result ~checked_at:now_f ~action:"silent"
                     ?reason:decision.reason ~stale_count:stale_posts ();
-                  log "board patrol decided no operator-visible action is needed"
+                  log_debug "board patrol decided no operator-visible action is needed"
                 end else
                   (match decision.board_post with
                    | Some summary when String.length summary > 10 ->
@@ -210,27 +211,27 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
                         | Ok _post ->
                             record_result ~checked_at:now_f ~action:"posted"
                               ?reason:decision.reason ~stale_count:stale_posts ();
-                            log "board patrol attention posted"
+                            log_info "board patrol attention posted"
                         | Error e ->
                             let reason = Board.show_board_error e in
                             record_result ~checked_at:now_f ~action:"post_failed"
                               ?reason:(Some reason) ~stale_count:stale_posts ();
-                            log (sprintf "board patrol post failed: %s" reason))
+                            log_warn (sprintf "board patrol post failed: %s" reason))
                    | _ ->
                        record_result ~checked_at:now_f ~action:"suppressed"
                          ?reason:(Some "needs_attention=true but board_post was empty")
                          ~stale_count:stale_posts ();
-                       log "board patrol attention requested but board_post was empty; suppressing")
+                       log_debug "board patrol attention requested but board_post was empty; suppressing")
             | None ->
                 record_result ~checked_at:now_f ~action:"llm_unavailable"
                   ?reason:(Some "sentinel_board cascade unavailable") ~stale_count:stale_posts ();
-                log "LLM unavailable, skipping board patrol post"
+                log_debug "LLM unavailable, skipping board patrol post"
           end
         end;
         Ok ()
       with exn ->
         let msg = sprintf "board patrol failed: %s" (Printexc.to_string exn) in
-        log msg;
+        log_warn msg;
         Error msg
   end)
 
@@ -279,7 +280,7 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
 
           let warnings = match llm_result with
             | Some (`List items) ->
-                log (sprintf "task hygiene LLM assessed %d tasks" (List.length items));
+                log_debug (sprintf "task hygiene LLM assessed %d tasks" (List.length items));
                 List.filter_map (fun item ->
                   let open Yojson.Safe.Util in
                   let action = item |> member "action" |> to_string_option
@@ -295,15 +296,14 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
                     Some (sprintf "task %s: %s [%s] %s" task_id action priority reason)
                 ) items
             | _ ->
-                log (sprintf "%d candidate stuck tasks, LLM unavailable — skipping"
+                log_debug (sprintf "%d candidate stuck tasks, LLM unavailable — skipping"
                   (List.length !candidates));
                 []
           in
 
           if warnings <> [] then begin
-            let msg = sprintf "[sentinel] %d task warning(s): %s"
-              (List.length warnings) (String.concat "; " warnings) in
-            log msg;
+            Log.Sentinel.warn "%d task warning(s)" (List.length warnings);
+            List.iter (fun w -> Log.Sentinel.warn "  %s" w) warnings;
             Sse.broadcast (`Assoc [
               ("type", `String "sentinel_warning");
               ("source", `String agent_name);
@@ -315,7 +315,7 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
         Ok ()
       with exn ->
         let msg = sprintf "task hygiene failed: %s" (Printexc.to_string exn) in
-        log msg;
+        log_warn msg;
         Error msg
   end)
 
@@ -368,7 +368,7 @@ let make_keeper_health_consumer _config : (module Pulse.Consumer) =
 
             match llm_result with
             | Some (`List items) ->
-                log (sprintf "keeper health LLM assessed %d keepers" (List.length items));
+                log_debug (sprintf "keeper health LLM assessed %d keepers" (List.length items));
                 List.iter (fun item ->
                   let open Yojson.Safe.Util in
                   let keeper = item |> member "keeper" |> to_string_option
@@ -378,17 +378,17 @@ let make_keeper_health_consumer _config : (module Pulse.Consumer) =
                   let reason = item |> member "reason" |> to_string_option
                                |> Option.value ~default:"" in
                   if action <> "ignore" then
-                    log (sprintf "keeper %s: %s — %s" keeper action reason)
+                    log_warn (sprintf "keeper %s: %s — %s" keeper action reason)
                 ) items
             | _ ->
-                log (sprintf "%d stale keeper(s) detected, LLM unavailable — skipping"
+                log_debug (sprintf "%d stale keeper(s) detected, LLM unavailable — skipping"
                   (List.length !stale))
           end
         end;
         Ok ()
       with exn ->
         let msg = sprintf "keeper health failed: %s" (Printexc.to_string exn) in
-        log msg;
+        log_warn msg;
         Error msg
   end)
 
@@ -453,12 +453,12 @@ let status_json () : Yojson.Safe.t =
 
 let start ~sw ~clock ~net config =
   if not Env_config.Sentinel.enabled then
-    log "disabled (set MASC_SENTINEL_ENABLED=true)"
+    log_debug "disabled (set MASC_SENTINEL_ENABLED=true)"
   else begin
     ensure_room_initialized_for_start config;
     (* 1. Join room as sentinel agent *)
     let join_result = Room.join config ~agent_name ~capabilities:["sentinel"; "housekeeping"] () in
-    log (sprintf "join: %s" (String.sub join_result 0 (min 80 (String.length join_result))));
+    log_info (sprintf "join: %s" (String.sub join_result 0 (min 80 (String.length join_result))));
 
     (* 2. Heartbeat pulse (30s) *)
     let p_hb = Pulse.create
@@ -496,5 +496,5 @@ let start ~sw ~clock ~net config =
     started := true;
     start_ts := Time_compat.now ();
     ignore net;  (* net reserved for future HTTP-based health checks *)
-    log "started (heartbeat, embedded zombie/gc, board-patrol, task-hygiene, keeper-health)"
+    log_info "started (heartbeat, embedded zombie/gc, board-patrol, task-hygiene, keeper-health)"
   end

@@ -29,26 +29,26 @@ let is_initialized () =
 (** Initialize PostgreSQL backend. Call during server startup when PG pool is available. *)
 let init_pg pool =
   if is_initialized () then begin
-    Printf.eprintf "[Board_dispatch] WARNING: already initialized, ignoring init_pg\n%!";
+    Log.BoardLog.warn "already initialized, ignoring init_pg";
     Ok ()
   end else
   match Board_pg.create pool with
   | Ok t ->
       backend_state := Active (Postgres t);
-      Printf.eprintf "[Board_dispatch] PostgreSQL backend initialized.\n%!";
+      Log.BoardLog.info "PostgreSQL backend initialized";
       Ok ()
   | Error e ->
-      Printf.eprintf "[Board_dispatch] PG init failed, falling back to JSONL: %s\n%!"
+      Log.BoardLog.warn "PG init failed, falling back to JSONL: %s"
         (Board.show_board_error e);
       Error e
 
 (** Initialize JSONL backend. Default fallback. *)
 let init_jsonl () =
   if is_initialized () then
-    Printf.eprintf "[Board_dispatch] WARNING: already initialized, ignoring init_jsonl\n%!"
+    Log.BoardLog.warn "already initialized, ignoring init_jsonl"
   else begin
     backend_state := Active (Jsonl (Board.global ()));
-    Printf.eprintf "[Board_dispatch] JSONL backend initialized.\n%!"
+    Log.BoardLog.info "JSONL backend initialized"
   end
 
 (** Reset for testing. Clears backend state so init can be called again. *)

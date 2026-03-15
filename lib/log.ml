@@ -81,12 +81,37 @@ let info ?ctx fmt = log Info ?ctx fmt
 let warn ?ctx fmt = log Warn ?ctx fmt
 let error ?ctx fmt = log Error ?ctx fmt
 
-(** Module-specific loggers *)
+(** Module-specific loggers.
+    Each module checks MASC_LOG_{NAME}_LEVEL env var for per-module override,
+    falling back to the global level. *)
 module Make (M : sig val name : string end) = struct
-  let debug fmt = log Debug ~ctx:M.name fmt
-  let info fmt = log Info ~ctx:M.name fmt
-  let warn fmt = log Warn ~ctx:M.name fmt
-  let error fmt = log Error ~ctx:M.name fmt
+  let module_level : int option =
+    let env_key = Printf.sprintf "MASC_LOG_%s_LEVEL"
+      (String.uppercase_ascii M.name) in
+    match Sys.getenv_opt env_key with
+    | Some s -> Some (level_to_int (level_of_string s))
+    | None -> None
+
+  let should_log_module level =
+    let threshold = match module_level with
+      | Some l -> l
+      | None -> Atomic.get current_level
+    in
+    level_to_int level >= threshold
+
+  let log_module level fmt =
+    Printf.ksprintf (fun msg ->
+      if should_log_module level then begin
+        let prefix = Printf.sprintf "[%s] [%s] [%s]"
+          (timestamp ()) (level_to_string level) M.name in
+        Printf.eprintf "%s %s\n%!" prefix msg
+      end
+    ) fmt
+
+  let debug fmt = log_module Debug fmt
+  let info fmt = log_module Info fmt
+  let warn fmt = log_module Warn fmt
+  let error fmt = log_module Error fmt
 end
 
 (** Pre-defined module loggers *)
@@ -101,3 +126,9 @@ module Sub = Make(struct let name = "Subscriptions" end)
 module Mitosis_log = Make(struct let name = "Mitosis" end)
 module Glm_pool = Make(struct let name = "GlmPool" end)
 module Spawn = Make(struct let name = "Spawn" end)
+module Pulse = Make(struct let name = "Pulse" end)
+module Guardian = Make(struct let name = "Guardian" end)
+module Sentinel = Make(struct let name = "Sentinel" end)
+module LlmClient = Make(struct let name = "LlmClient" end)
+module Orchestrator = Make(struct let name = "Orchestrator" end)
+module BoardLog = Make(struct let name = "Board" end)

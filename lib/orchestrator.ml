@@ -51,7 +51,7 @@ let load_config () =
 let should_orchestrate room_config =
   (* Check if room is paused first *)
   if Room.is_paused room_config then begin
-    Eio.traceln "⏸️ Orchestrator: Room is paused, skipping\n%!";
+    Log.Orchestrator.debug "room is paused, skipping";
     false
   end else begin
   (* Get unclaimed tasks with priority <= min_priority *)
@@ -72,7 +72,7 @@ let should_orchestrate room_config =
   in
 
   if needs_orchestration then
-    Eio.traceln "🎯 Orchestrator: %d unclaimed tasks, %d active agents → spawning\n%!"
+    Log.Orchestrator.info "%d unclaimed tasks, %d active agents, spawning"
       (List.length unclaimed_important) (List.length active_agents);
 
   needs_orchestration
@@ -119,13 +119,13 @@ Start by calling mcp__masc__masc_status to see the current room state.|}
 let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
   (* TOCTOU defense: re-check pause before spawn *)
   if Room.is_paused room_config then begin
-    Eio.traceln "⏸️ Orchestrator: Room paused before spawn, aborting\n%!";
+    Log.Orchestrator.debug "room paused before spawn, aborting";
     { Spawn_eio.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
       tool_call_count = 0; tool_names = [];
       input_tokens = None; output_tokens = None; cache_creation_tokens = None;
       cache_read_tokens = None; cost_usd = None; raw_trace_run = None }
   end else begin
-  Eio.traceln "🚀 Spawning orchestrator agent: %s (with MCP tools)\n%!" config.orchestrator_agent;
+  Log.Orchestrator.info "spawning agent: %s (with MCP tools)" config.orchestrator_agent;
 
   (* Broadcast that orchestrator is starting *)
   let _ = Room.broadcast room_config ~from_agent:"system"
@@ -148,9 +148,9 @@ let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
   in
 
   if result.success then
-    Eio.traceln "✅ Orchestrator completed in %dms\n%!" result.elapsed_ms
+    Log.Orchestrator.info "completed in %dms" result.elapsed_ms
   else
-    Eio.traceln "❌ Orchestrator failed (exit %d) in %dms\n%!"
+    Log.Orchestrator.warn "failed (exit %d) in %dms"
       result.exit_code result.elapsed_ms;
 
   result
@@ -182,11 +182,11 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
             try
               ignore (spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config)
             with exn ->
-              Printf.eprintf "[Orchestrator] spawn failed: %s\n%!" (Printexc.to_string exn));
+              Log.Orchestrator.error "spawn failed: %s" (Printexc.to_string exn));
         Ok ()
       with exn ->
         let msg = Printf.sprintf "orchestrator check error: %s" (Printexc.to_string exn) in
-        Eio.traceln "[Orchestrator] %s (recovering...)" msg;
+        Log.Orchestrator.warn "%s (recovering...)" msg;
         Error msg
   end)
 
@@ -210,7 +210,7 @@ let make_zero_zombie_consumer ~room_config
             with exn -> let _ = exn in false
           in
           if has_zombie_indicator then
-            Printf.eprintf "[ZeroZombie] %s\n%!" status_trimmed
+            Log.Orchestrator.info "[zombie] %s" status_trimmed
         end;
         Ok ()
       with exn ->
@@ -218,7 +218,7 @@ let make_zero_zombie_consumer ~room_config
           Ok ()
         else begin
           let msg = Printf.sprintf "zombie cleanup error: %s" (Printexc.to_string exn) in
-          Printf.eprintf "[ZeroZombie] %s\n%!" msg;
+          Log.Orchestrator.warn "[zombie] %s" msg;
           Error msg
         end
   end)
@@ -229,7 +229,7 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   let config = load_config () in
 
   (* Zero-Zombie cleanup: always enabled, 60s interval *)
-  Eio.traceln "🧟 Zero-Zombie Protocol: Automatic cleanup enabled (interval: 60s)\n%!";
+  Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: 60s)";
   let zombie_consumer = make_zero_zombie_consumer ~room_config in
   let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm 60.0) ~lifecycle:Perpetual ~consumers:[zombie_consumer] in
   zombie_pulse := Some zp;
@@ -237,10 +237,10 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
 
   (* Orchestrator check: respects enabled flag via should_act *)
   if config.enabled then
-    Eio.traceln "🎮 Orchestrator loop enabled (interval: %.0fs, agent: %s)\n%!"
+    Log.Orchestrator.debug "loop enabled (interval: %.0fs, agent: %s)"
       config.check_interval_s config.orchestrator_agent
   else
-    Eio.traceln "💤 Orchestrator loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)\n%!";
+    Log.Orchestrator.debug "loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)";
 
   let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config () in
   let op = Pulse.create ~clock ~rhythm:(fixed_rhythm config.check_interval_s) ~lifecycle:Perpetual ~consumers:[orch_consumer] in

@@ -181,3 +181,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_plan_get_task" -> Some (handle_plan_get_task ctx args)
   | "masc_plan_clear_task" -> Some (handle_plan_clear_task ctx args)
   | _ -> None
+
+let schemas = Tool_schemas_plan.schemas

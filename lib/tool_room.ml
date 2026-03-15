@@ -287,3 +287,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)
   | "masc_check" -> Some (handle_check ctx args)
   | _ -> None
+
+let schemas = Tool_schemas_room.schemas

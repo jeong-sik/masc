@@ -117,3 +117,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_auth_revoke" -> Some (handle_auth_revoke ctx args)
   | "masc_auth_list" -> Some (handle_auth_list ctx args)
   | _ -> None
+
+let schemas = Tool_schemas_auth.schemas

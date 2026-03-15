@@ -35,3 +35,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_worktree_remove" -> Some (handle_worktree_remove ctx args)
   | "masc_worktree_list" -> Some (handle_worktree_list ctx args)
   | _ -> None
+
+let schemas = Tool_schemas_worktree.schemas

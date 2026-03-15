@@ -286,3 +286,5 @@ let dispatch ctx ~name ~args =
   | "masc_consolidate_learning" -> Some (handle_consolidate_learning ctx args)
   | "masc_agent_card" -> Some (handle_agent_card ctx args)
   | _ -> None
+
+let schemas = Tool_schemas_agent.schemas

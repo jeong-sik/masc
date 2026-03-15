@@ -16,3 +16,5 @@ val handle_auth_revoke : context -> Yojson.Safe.t -> result
 val handle_auth_list : context -> Yojson.Safe.t -> result
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
+
+val schemas : Types.tool_schema list

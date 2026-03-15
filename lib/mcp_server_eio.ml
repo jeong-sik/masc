@@ -1483,6 +1483,19 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         ~handler:(fun ~name ~args -> Some (Tool_risc.dispatch name args));
       reg ~schemas:Tool_agent_timeline.schemas
         ~handler:(fun ~name ~args -> Tool_agent_timeline.dispatch simple_ctx_agent_timeline ~name ~args);
+      (* B-0a: newly registered modules with domain schema files *)
+      reg ~schemas:Tool_plan.schemas
+        ~handler:(fun ~name ~args -> Tool_plan.dispatch simple_ctx_config ~name ~args);
+      reg ~schemas:Tool_portal.schemas
+        ~handler:(fun ~name ~args -> Tool_portal.dispatch simple_ctx_portal ~name ~args);
+      reg ~schemas:Tool_worktree.schemas
+        ~handler:(fun ~name ~args -> Tool_worktree.dispatch simple_ctx_worktree ~name ~args);
+      reg ~schemas:Tool_auth.schemas
+        ~handler:(fun ~name ~args -> Tool_auth.dispatch simple_ctx_auth ~name ~args);
+      reg ~schemas:Tool_agent.schemas
+        ~handler:(fun ~name ~args -> Tool_agent.dispatch simple_ctx_agent ~name ~args);
+      reg ~schemas:Tool_room.schemas
+        ~handler:(fun ~name ~args -> Tool_room.dispatch simple_ctx_room ~name ~args);
       Tool_dispatch.dispatch ~name ~args:arguments
     end else None
   in

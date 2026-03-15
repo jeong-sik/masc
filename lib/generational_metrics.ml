@@ -2,7 +2,7 @@
 
     Tracks metrics across generations to prove (or disprove) that
     successor agents perform better than their predecessors.
-    
+
     Key metrics:
     - Task completion rate
     - Error rate
@@ -65,48 +65,66 @@ type generation_comparison = {
   verdict: string;              (* "improved" | "degraded" | "neutral" *)
 }
 
+(** {1 Eio-aware Mutex Guard}
+
+    Follows the dual-mode pattern from prometheus.ml:
+    Before Eio runtime starts, runs unlocked (single-threaded).
+    After {!enable_eio}, uses [Eio.Mutex]. *)
+let mu = Eio.Mutex.create ()
+let eio_available = ref false
+let enable_eio () = eio_available := true
+
+let with_lock f =
+  if !eio_available then
+    Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
+  else
+    f ()
+
 (** In-memory store for quick prototyping *)
 let task_records : task_record list ref = ref []
 let handoff_records : handoff_record list ref = ref []
 let retention_tests : retention_test list ref = ref []
 
 (** Record a task completion *)
-let record_task ~generation ~task_id ~completed ~duration_ms ~error_count 
+let record_task ~generation ~task_id ~completed ~duration_ms ~error_count
     ~input_tokens ~output_tokens =
-  let record = {
-    generation;
-    task_id;
-    completed;
-    duration_ms;
-    error_count;
-    input_tokens;
-    output_tokens;
-    timestamp = Time_compat.now ();
-  } in
-  task_records := record :: !task_records;
-  record
+  with_lock (fun () ->
+    let record = {
+      generation;
+      task_id;
+      completed;
+      duration_ms;
+      error_count;
+      input_tokens;
+      output_tokens;
+      timestamp = Time_compat.now ();
+    } in
+    task_records := record :: !task_records;
+    record)
 
 (** Record a handoff *)
 let record_handoff ~from_generation ~to_generation ~dna_size ~context_ratio =
-  let record = {
-    from_generation;
-    to_generation;
-    dna_size;
-    context_ratio;
-    timestamp = Time_compat.now ();
-  } in
-  handoff_records := record :: !handoff_records;
-  record
+  with_lock (fun () ->
+    let record = {
+      from_generation;
+      to_generation;
+      dna_size;
+      context_ratio;
+      timestamp = Time_compat.now ();
+    } in
+    handoff_records := record :: !handoff_records;
+    record)
 
 (** Record a knowledge retention test *)
 let record_retention_test ~generation ~question ~expected ~actual ~confidence =
-  let correct = String.lowercase_ascii expected = String.lowercase_ascii actual in
-  let record = { generation; question; expected; actual; correct; confidence } in
-  retention_tests := record :: !retention_tests;
-  record
+  with_lock (fun () ->
+    let correct = String.lowercase_ascii expected = String.lowercase_ascii actual in
+    let record = { generation; question; expected; actual; correct; confidence } in
+    retention_tests := record :: !retention_tests;
+    record)
 
-(** Summarize a generation's performance *)
-let summarize_generation generation =
+(** Internal: summarize without acquiring lock (caller must hold lock) *)
+let summarize_generation_unlocked generation =
   let tasks = List.filter (fun (t : task_record) -> t.generation = generation) !task_records in
   let total = List.length tasks in
   if total = 0 then None
@@ -116,15 +134,15 @@ let summarize_generation generation =
     let duration_sum = List.fold_left (fun acc t -> acc + t.duration_ms) 0 tasks in
     let input_sum = List.fold_left (fun acc t -> acc + t.input_tokens) 0 tasks in
     let output_sum = List.fold_left (fun acc t -> acc + t.output_tokens) 0 tasks in
-    
+
     let retention_tests_gen = List.filter (fun (r : retention_test) -> r.generation = generation) !retention_tests in
-    let retention = 
+    let retention =
       if List.length retention_tests_gen = 0 then None
       else
         let correct_count = List.filter (fun r -> r.correct) retention_tests_gen |> List.length in
         Some (float_of_int correct_count /. float_of_int (List.length retention_tests_gen))
     in
-    
+
     Some {
       generation;
       total_tasks = total;
@@ -136,46 +154,51 @@ let summarize_generation generation =
       knowledge_retention = retention;
     }
 
+(** Summarize a generation's performance *)
+let summarize_generation generation =
+  with_lock (fun () -> summarize_generation_unlocked generation)
+
 (** Compare two generations *)
 let compare_generations gen_a gen_b =
-  match summarize_generation gen_a, summarize_generation gen_b with
-  | None, _ | _, None -> None
-  | Some a, Some b ->
-      let completion_rate_a = float_of_int a.completed_tasks /. float_of_int a.total_tasks in
-      let completion_rate_b = float_of_int b.completed_tasks /. float_of_int b.total_tasks in
-      let error_rate_a = float_of_int a.total_errors /. float_of_int a.total_tasks in
-      let error_rate_b = float_of_int b.total_errors /. float_of_int b.total_tasks in
-      let tokens_per_task_a = float_of_int (a.total_input_tokens + a.total_output_tokens) /. float_of_int a.total_tasks in
-      let tokens_per_task_b = float_of_int (b.total_input_tokens + b.total_output_tokens) /. float_of_int b.total_tasks in
-      
-      let completion_delta = completion_rate_b -. completion_rate_a in
-      let error_delta = error_rate_b -. error_rate_a in
-      let duration_delta = b.avg_duration_ms -. a.avg_duration_ms in
-      let token_delta = tokens_per_task_b -. tokens_per_task_a in
-      
-      (* Verdict: improved if majority of metrics are better *)
-      let improvements = 
-        (if completion_delta > 0.05 then 1 else 0) +
-        (if error_delta < -0.05 then 1 else 0) +
-        (if duration_delta < 0.0 then 1 else 0) +
-        (if token_delta < 0.0 then 1 else 0)
-      in
-      let verdict = 
-        if improvements >= 3 then "improved"
-        else if improvements <= 1 then "degraded"
-        else "neutral"
-      in
-      
-      Some {
-        gen_a;
-        gen_b;
-        completion_delta;
-        error_delta;
-        duration_delta;
-        token_delta;
-        retention_b = b.knowledge_retention;
-        verdict;
-      }
+  with_lock (fun () ->
+    match summarize_generation_unlocked gen_a, summarize_generation_unlocked gen_b with
+    | None, _ | _, None -> None
+    | Some a, Some b ->
+        let completion_rate_a = float_of_int a.completed_tasks /. float_of_int a.total_tasks in
+        let completion_rate_b = float_of_int b.completed_tasks /. float_of_int b.total_tasks in
+        let error_rate_a = float_of_int a.total_errors /. float_of_int a.total_tasks in
+        let error_rate_b = float_of_int b.total_errors /. float_of_int b.total_tasks in
+        let tokens_per_task_a = float_of_int (a.total_input_tokens + a.total_output_tokens) /. float_of_int a.total_tasks in
+        let tokens_per_task_b = float_of_int (b.total_input_tokens + b.total_output_tokens) /. float_of_int b.total_tasks in
+
+        let completion_delta = completion_rate_b -. completion_rate_a in
+        let error_delta = error_rate_b -. error_rate_a in
+        let duration_delta = b.avg_duration_ms -. a.avg_duration_ms in
+        let token_delta = tokens_per_task_b -. tokens_per_task_a in
+
+        (* Verdict: improved if majority of metrics are better *)
+        let improvements =
+          (if completion_delta > 0.05 then 1 else 0) +
+          (if error_delta < -0.05 then 1 else 0) +
+          (if duration_delta < 0.0 then 1 else 0) +
+          (if token_delta < 0.0 then 1 else 0)
+        in
+        let verdict =
+          if improvements >= 3 then "improved"
+          else if improvements <= 1 then "degraded"
+          else "neutral"
+        in
+
+        Some {
+          gen_a;
+          gen_b;
+          completion_delta;
+          error_delta;
+          duration_delta;
+          token_delta;
+          retention_b = b.knowledge_retention;
+          verdict;
+        })
 
 (** Format comparison as string *)
 let format_comparison comp =
@@ -197,36 +220,38 @@ let format_comparison comp =
 
 (** Reset all metrics (for testing) *)
 let reset () =
-  task_records := [];
-  handoff_records := [];
-  retention_tests := []
+  with_lock (fun () ->
+    task_records := [];
+    handoff_records := [];
+    retention_tests := [])
 
 (** Export metrics to JSON *)
 let to_json () =
-  let tasks_json = `List (List.map (fun (t : task_record) ->
+  with_lock (fun () ->
+    let tasks_json = `List (List.map (fun (t : task_record) ->
+      `Assoc [
+        ("generation", `Int t.generation);
+        ("task_id", `String t.task_id);
+        ("completed", `Bool t.completed);
+        ("duration_ms", `Int t.duration_ms);
+        ("error_count", `Int t.error_count);
+        ("input_tokens", `Int t.input_tokens);
+        ("output_tokens", `Int t.output_tokens);
+        ("timestamp", `Float t.timestamp);
+      ]
+    ) !task_records) in
+
+    let handoffs_json = `List (List.map (fun (h : handoff_record) ->
+      `Assoc [
+        ("from_generation", `Int h.from_generation);
+        ("to_generation", `Int h.to_generation);
+        ("dna_size", `Int h.dna_size);
+        ("context_ratio", `Float h.context_ratio);
+        ("timestamp", `Float h.timestamp);
+      ]
+    ) !handoff_records) in
+
     `Assoc [
-      ("generation", `Int t.generation);
-      ("task_id", `String t.task_id);
-      ("completed", `Bool t.completed);
-      ("duration_ms", `Int t.duration_ms);
-      ("error_count", `Int t.error_count);
-      ("input_tokens", `Int t.input_tokens);
-      ("output_tokens", `Int t.output_tokens);
-      ("timestamp", `Float t.timestamp);
-    ]
-  ) !task_records) in
-  
-  let handoffs_json = `List (List.map (fun (h : handoff_record) ->
-    `Assoc [
-      ("from_generation", `Int h.from_generation);
-      ("to_generation", `Int h.to_generation);
-      ("dna_size", `Int h.dna_size);
-      ("context_ratio", `Float h.context_ratio);
-      ("timestamp", `Float h.timestamp);
-    ]
-  ) !handoff_records) in
-  
-  `Assoc [
-    ("tasks", tasks_json);
-    ("handoffs", handoffs_json);
-  ]
+      ("tasks", tasks_json);
+      ("handoffs", handoffs_json);
+    ])

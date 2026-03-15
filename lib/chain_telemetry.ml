@@ -16,14 +16,19 @@
 
 open Chain_category
 
-(** {1 Helper for Stdlib.Mutex} *)
+(** {1 Eio-aware Mutex Guard}
+
+    Follows the dual-mode pattern from prometheus.ml:
+    Before Eio runtime starts (module init), runs unlocked (single-threaded).
+    After {!enable_eio} is called inside [Eio_main.run], uses [Eio.Mutex]. *)
+let eio_available = ref false
+let enable_eio () = eio_available := true
+
 let with_mutex mutex f =
-  Mutex.lock mutex;
-  Common.protect
-    ~module_name:"chain_telemetry"
-    ~finally_label:"Mutex.unlock"
-    ~finally:(fun () -> Mutex.unlock mutex)
-    f
+  if !eio_available then
+    Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ())
+  else
+    f ()
 
 (** {1 History Persistence} *)
 
@@ -127,7 +132,7 @@ type event_handler = chain_event -> unit
 (** Global subscription registry *)
 let next_sub_id = ref 0
 let subscribers : (subscription_id, event_handler) Hashtbl.t = Hashtbl.create 16
-let subscribers_mutex = Mutex.create ()
+let subscribers_mutex = Eio.Mutex.create ()
 
 (** {1 Running Chains Tracking} *)
 
@@ -141,7 +146,7 @@ type running_chain_info = {
 }
 
 let running_chains : (string, running_chain_info) Hashtbl.t = Hashtbl.create 16
-let running_chains_mutex = Mutex.create ()
+let running_chains_mutex = Eio.Mutex.create ()
 
 (** Register a chain as running *)
 let register_running_chain ~chain_id ~total_nodes =
@@ -318,7 +323,7 @@ let error ~node_id ~message ~retries =
 
 (** Event log buffer for persistence *)
 let event_log : chain_event list ref = ref []
-let event_log_mutex = Mutex.create ()
+let event_log_mutex = Eio.Mutex.create ()
 let max_log_size = ref 10000
 
 (** Logging subscriber that buffers events *)

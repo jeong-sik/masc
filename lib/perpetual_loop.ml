@@ -312,6 +312,49 @@ let coding_turn ~config ~state =
     Error "coding_mode requires coding_sw and coding_proc_mgr to be set"
 
 (* ================================================================ *)
+(* Event Bus Bridge                                                 *)
+(* ================================================================ *)
+
+(** Publish perpetual_loop events to OAS Event_bus when configured.
+    Extracted to module level to avoid duplication across emit closures. *)
+let publish_to_event_bus bus (ev : event) =
+  match ev with
+  | Heartbeat { turn; context_pct } ->
+    Oas_events.publish_heartbeat bus ~agent_name:"perpetual"
+      ~turn ~context_pct
+  | TurnStart turn ->
+    Agent_sdk.Event_bus.publish bus
+      (Agent_sdk.Event_bus.TurnStarted
+         { agent_name = "perpetual"; turn })
+  | TurnEnd { turn; _ } ->
+    Agent_sdk.Event_bus.publish bus
+      (Agent_sdk.Event_bus.TurnCompleted
+         { agent_name = "perpetual"; turn })
+  | Error msg ->
+    Agent_sdk.Event_bus.publish bus
+      (Agent_sdk.Event_bus.Custom ("masc:perpetual:error",
+        `Assoc [("message", `String msg);
+                ("timestamp", `Float (Time_compat.now ()))]))
+  | Terminated reason ->
+    Agent_sdk.Event_bus.publish bus
+      (Agent_sdk.Event_bus.Custom ("masc:perpetual:terminated",
+        `Assoc [("reason", `String reason);
+                ("timestamp", `Float (Time_compat.now ()))]))
+  | Compacted { before_tokens; after_tokens } ->
+    Agent_sdk.Event_bus.publish bus
+      (Agent_sdk.Event_bus.Custom ("masc:perpetual:compacted",
+        `Assoc [("before", `Int before_tokens);
+                ("after", `Int after_tokens);
+                ("timestamp", `Float (Time_compat.now ()))]))
+  | Handoff { to_model; generation } ->
+    Agent_sdk.Event_bus.publish bus
+      (Agent_sdk.Event_bus.Custom ("masc:perpetual:handoff",
+        `Assoc [("to_model", `String to_model);
+                ("generation", `Int generation);
+                ("timestamp", `Float (Time_compat.now ()))]))
+  | _ -> ()
+
+(* ================================================================ *)
 (* Single Turn Execution                                            *)
 (* ================================================================ *)
 
@@ -323,21 +366,7 @@ let run_coding_turn ~config ~state =
   let emit ev =
     record_event state ev;
     config.on_event ev;
-    Option.iter (fun bus ->
-      match ev with
-      | Heartbeat { turn; context_pct } ->
-        Oas_events.publish_heartbeat bus ~agent_name:"perpetual"
-          ~turn ~context_pct
-      | TurnStart turn ->
-        Agent_sdk.Event_bus.publish bus
-          (Agent_sdk.Event_bus.TurnStarted
-             { agent_name = "perpetual"; turn })
-      | TurnEnd { turn; _ } ->
-        Agent_sdk.Event_bus.publish bus
-          (Agent_sdk.Event_bus.TurnCompleted
-             { agent_name = "perpetual"; turn })
-      | _ -> ()
-    ) config.event_bus
+    Option.iter (fun bus -> publish_to_event_bus bus ev) config.event_bus
   in
   match coding_turn ~config ~state with
   | Error e ->
@@ -451,21 +480,7 @@ let run_turn ~config ~state =
       record_event state ev;
       config.on_event ev;
       (* Bridge to OAS Event_bus when configured *)
-      Option.iter (fun bus ->
-        match ev with
-        | Heartbeat { turn; context_pct } ->
-          Oas_events.publish_heartbeat bus ~agent_name:"perpetual"
-            ~turn ~context_pct
-        | TurnStart turn ->
-          Agent_sdk.Event_bus.publish bus
-            (Agent_sdk.Event_bus.TurnStarted
-               { agent_name = "perpetual"; turn })
-        | TurnEnd { turn; _ } ->
-          Agent_sdk.Event_bus.publish bus
-            (Agent_sdk.Event_bus.TurnCompleted
-               { agent_name = "perpetual"; turn })
-        | _ -> ()
-      ) config.event_bus
+      Option.iter (fun bus -> publish_to_event_bus bus ev) config.event_bus
     in
     emit (TurnStart turn);
 

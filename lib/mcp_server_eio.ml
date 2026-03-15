@@ -695,6 +695,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
   let module U = Yojson.Safe.Util in
 
+  (* Prometheus: count every inbound tool call *)
+  Prometheus.record_request ();
+
   let config = state.Mcp_server.room_config in
   let registry = state.Mcp_server.session_registry in
 
@@ -1013,6 +1016,13 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         write_term_session_agent nickname;
         (try ignore (Session.register registry ~agent_name:nickname)
          with exn -> Printf.eprintf "[mcp_server] session register (nickname) failed: %s\n%!" (Printexc.to_string exn));
+        (* Prometheus + Telemetry: track auto-join *)
+        Prometheus.inc_gauge "masc_active_agents" ();
+        (match state.Mcp_server.fs with
+         | Some fs ->
+             (try Telemetry_eio.track_agent_joined ~fs config ~agent_id:nickname ()
+              with _ -> ())
+         | None -> ());
         nickname
       end
     end else
@@ -1789,6 +1799,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (* Audit: log join event *)
       Audit_log.log_join config ~agent_id:nickname
         ~room_id:(Filename.basename config.base_path) ();
+      (* Prometheus: increment active agent gauge *)
+      Prometheus.inc_gauge "masc_active_agents" ();
+      (* Telemetry_eio: track agent joined *)
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (try Telemetry_eio.track_agent_joined ~fs config ~agent_id:nickname ()
+            with _ -> ())
+       | None -> ());
       (true, final_result)
 
   | "masc_leave" ->
@@ -1811,6 +1829,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (* Audit: log leave event *)
       Audit_log.log_leave config ~agent_id:agent_name
         ~room_id:(Filename.basename config.base_path) ();
+      (* Prometheus: decrement active agent gauge *)
+      Prometheus.dec_gauge "masc_active_agents" ();
+      (* Telemetry_eio: track agent left *)
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (try Telemetry_eio.track_agent_left ~fs config ~agent_id:agent_name ~reason:"leave"
+            with _ -> ())
+       | None -> ());
       (true, result)
 
 
@@ -3231,6 +3257,10 @@ in
           with exn ->
             Printf.eprintf "[WARN] telemetry tracking failed: %s\n%!" (Printexc.to_string exn))
      | None -> ());
+
+  (* Prometheus: record errors for failed tool calls *)
+  if not success then
+    Prometheus.record_error ~error_type:name ();
 
   (* Track in-memory call counter only for declared tool names. *)
   Tool_registry.record_call_if_known ~tool_name:name ~success ~duration_ms;

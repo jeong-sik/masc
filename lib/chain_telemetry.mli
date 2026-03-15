@@ -6,11 +6,17 @@
     - 비동기 이벤트 발행 (emit)
     - 다중 구독자 지원 (subscribe/unsubscribe)
     - 구조화된 이벤트 타입 (ChainStart, NodeComplete, Error 등)
-    - Thread-safe 구독자 관리 (Stdlib.Mutex 사용)
+    - Fiber-safe 구독자 관리 (Eio.Mutex, dual-mode guard)
 
     @author Chain Engine
     @since 2026-01
 *)
+
+(** {1 Eio Runtime Activation} *)
+
+(** [enable_eio ()] activates Eio.Mutex guards.
+    Must be called once inside [Eio_main.run] before any concurrent access. *)
+val enable_eio : unit -> unit
 
 (** {1 Event Payload Types} *)
 

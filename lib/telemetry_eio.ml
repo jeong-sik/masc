@@ -279,35 +279,6 @@ let get_metrics ~fs config : metrics =
     error_rate = calculate_error_rate events;
   }
 
-(** Export metrics in Prometheus format *)
-let export_prometheus ~fs config : string =
-  let m = get_metrics ~fs config in
-  Printf.sprintf {|# HELP masc_active_agents Number of active agents
-# TYPE masc_active_agents gauge
-masc_active_agents %d
-
-# HELP masc_tasks_in_progress Tasks currently in progress
-# TYPE masc_tasks_in_progress gauge
-masc_tasks_in_progress %d
-
-# HELP masc_tasks_completed Tasks completed in last 24h
-# TYPE masc_tasks_completed counter
-masc_tasks_completed %d
-
-# HELP masc_avg_task_duration Average task duration in ms
-# TYPE masc_avg_task_duration gauge
-masc_avg_task_duration %.2f
-
-# HELP masc_handoff_rate Handoff rate (0-1)
-# TYPE masc_handoff_rate gauge
-masc_handoff_rate %.4f
-
-# HELP masc_error_rate Error rate (0-1)
-# TYPE masc_error_rate gauge
-masc_error_rate %.4f
-|} m.active_agents m.tasks_in_progress m.tasks_completed_24h
-     m.avg_task_duration_ms m.handoff_rate m.error_rate
-
 (** Convenience tracking functions *)
 let track_agent_joined ~fs config ~agent_id ?(capabilities=[]) () =
   track ~fs config (Agent_joined { agent_id; capabilities })

@@ -132,6 +132,8 @@ let handle_done ctx args =
         with exn -> Printf.eprintf "[task] Metrics_store_eio.record(done) failed: %s\n%!" (Printexc.to_string exn));
        (* Feed success into Thompson Sampling quality signal *)
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
+       (* Prometheus: record task completion *)
+       Prometheus.record_task_completed ();
        (* Audit: log done event *)
        Audit_log.log_done_task ctx.config ~agent_id:ctx.agent_name
          ~room_id:(Filename.basename ctx.config.base_path)
@@ -174,6 +176,8 @@ let handle_cancel_task ctx args =
         with exn -> Printf.eprintf "[task] Metrics_store_eio.record(cancel) failed: %s\n%!" (Printexc.to_string exn));
        (* Feed failure into Thompson Sampling quality signal *)
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
+       (* Prometheus: record task failure *)
+       Prometheus.record_task_failed ();
        (* Notification harness: push cancel event to all active sessions *)
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_cancelled");
@@ -284,7 +288,8 @@ let handle_transition ctx args =
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
         with exn -> Printf.eprintf "[task] Metrics_store_eio.record(transition-done) failed: %s\n%!" (Printexc.to_string exn));
-       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up
+       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
+       Prometheus.record_task_completed ()
    | Ok _, "cancel" ->
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
@@ -300,7 +305,8 @@ let handle_transition ctx args =
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
         with exn -> Printf.eprintf "[task] Metrics_store_eio.record(transition-cancel) failed: %s\n%!" (Printexc.to_string exn));
-       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down
+       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
+       Prometheus.record_task_failed ()
    | _ -> ());
   result_to_response result
 

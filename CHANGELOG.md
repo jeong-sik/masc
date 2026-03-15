@@ -1,6 +1,31 @@
 # Changelog
 
 
+## [2.90.0] - 2026-03-16
+
+### Security
+- **Cypher Injection Eradication** — all `agent_neo4j.ml` queries use parameterized Cypher (`$param` syntax) with `cypher_query` type
+- **Password Fail-Fast** — `neo4j_client_eio` returns `Error` on missing `NEO4J_PASSWORD` instead of defaulting to `"password"`
+
+### Added
+- `Agent_neo4j.cypher_query` type with `to_bolt_params`, `to_http_payload`, `to_shell_cmd`
+- `Json_util.require_string/int/float/bool` — `(value, string) result`-returning JSON helpers
+- `Progress.Tracker.assert_wired` — detects initialization ordering bugs at startup
+- `Env_config_runtime.Timeout` submodule (gcloud_auth, anthropic_api, openai_compat, llm_grace, graphql_query, keeper_status)
+- `Env_config_runtime.Llm_defaults` submodule (default_max_tokens, sse_retry_ms, log_truncation_len)
+- `Env_config_runtime.Neo4j/Voice/Mlx/Custom_llm/Network` submodules
+- 20 adversarial tests for Cypher escaping and parameter isolation
+
+### Changed
+- `mcp_server_eio` walph context: `lazy` + `failwith` replaced with explicit `Result` type
+- `voice_bridge_eio`: 6 hardcoded URIs replaced with centralized `Voice.default_host/port`
+- `llm_client`: endpoint URLs and timeouts now env-configurable
+- `thread_persist`: `is_localhost` expanded to full 127.0.0.0/8 coverage
+
+### Fixed
+- `llm_client`: silenced exceptions now logged to stderr
+- `escape_cypher_string`: handles backslash, unicode escape, null bytes (previously missed backslash)
+
 ## [2.89.0] - 2026-03-14
 
 ### Added

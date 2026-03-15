@@ -50,9 +50,9 @@ let test_file_read_existing () =
   let result = Tool.execute tool
     (`Assoc [("path", `String path)]) in
   (match result with
-   | Ok content ->
+   | Ok { Agent_sdk.Types.content } ->
      Alcotest.(check string) "content matches" "hello world" content
-   | Error e ->
+   | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e));
   Sys.remove path
 
@@ -77,7 +77,7 @@ let test_file_read_blocked_path () =
   let result = Tool.execute tool
     (`Assoc [("path", `String "/etc/passwd")]) in
   (match result with
-   | Error msg ->
+   | Error { Agent_sdk.Types.message = msg; _ } ->
      Alcotest.(check bool) "mentions blocked" true
        (String.length msg > 0 &&
         (try ignore (String.index msg 'b'); true
@@ -141,7 +141,7 @@ let test_file_read_truncation () =
   let result = Tool.execute tool
     (`Assoc [("path", `String path)]) in
   (match result with
-   | Ok content ->
+   | Ok { Agent_sdk.Types.content } ->
      Alcotest.(check bool) "truncated to ~100KB" true
        (String.length content <= 100_100);
      Alcotest.(check bool) "has truncation marker" true
@@ -150,7 +150,7 @@ let test_file_read_truncation () =
         String.sub content
           (String.length content - String.length suffix)
           (String.length suffix) = suffix)
-   | Error e ->
+   | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok (truncated), got Error: %s" e));
   Sys.remove path
 
@@ -168,12 +168,12 @@ let test_file_write_new () =
     (`Assoc [("path", `String path);
              ("content", `String "test content")]) in
   (match result with
-   | Ok msg ->
+   | Ok { Agent_sdk.Types.content = msg } ->
      Alcotest.(check bool) "mentions bytes" true
        (String.length msg > 0);
      let written = In_channel.with_open_text path In_channel.input_all in
      Alcotest.(check string) "file content" "test content" written
-   | Error e ->
+   | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e));
   Sys.remove path
 
@@ -234,9 +234,9 @@ let test_shell_exec_echo () =
   let result = Tool.execute tool
     (`Assoc [("command", `String "echo hello")]) in
   (match result with
-   | Ok output ->
+   | Ok { Agent_sdk.Types.content = output } ->
      Alcotest.(check string) "echo output" "hello\n" output
-   | Error e ->
+   | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e))
 
 let test_shell_exec_blocked_command () =
@@ -248,7 +248,7 @@ let test_shell_exec_blocked_command () =
   let result = Tool.execute tool
     (`Assoc [("command", `String "rm -rf /")]) in
   (match result with
-   | Error msg ->
+   | Error { Agent_sdk.Types.message = msg; _ } ->
      Alcotest.(check bool) "mentions blocked" true
        (String.length msg > 0)
    | Ok _ -> Alcotest.fail "should reject rm -rf /")
@@ -295,18 +295,18 @@ let test_tool_exec_observer_bridges_to_telemetry () =
              [ ("path", `String tmp_path); ("content", `String "bridge") ])
        with
       | Ok _ -> ()
-      | Error e ->
+      | Error { Agent_sdk.Types.message = e; _ } ->
           Alcotest.fail (Printf.sprintf "file_write failed: %s" e));
       (match Tool.execute read_tool (`Assoc [ ("path", `String tmp_path) ]) with
       | Ok _ -> ()
-      | Error e ->
+      | Error { Agent_sdk.Types.message = e; _ } ->
           Alcotest.fail (Printf.sprintf "file_read failed: %s" e));
       (match
          Tool.execute shell_tool
            (`Assoc [ ("command", `String "echo telemetry-ok") ])
        with
       | Ok _ -> ()
-      | Error e ->
+      | Error { Agent_sdk.Types.message = e; _ } ->
           Alcotest.fail (Printf.sprintf "shell_exec failed: %s" e));
       let summary = Telemetry_eio.summarize_tool_usage ~fs config in
       let stats name =
@@ -329,7 +329,7 @@ let test_shell_exec_rejects_shell_metacharacters () =
   let result = Tool.execute tool
     (`Assoc [("command", `String "echo hello; pwd")]) in
   (match result with
-   | Error msg ->
+   | Error { Agent_sdk.Types.message = msg; _ } ->
        let normalized = String.lowercase_ascii msg in
        let needle = "workdir" in
        let needle_len = String.length needle in
@@ -363,7 +363,7 @@ let test_shell_exec_missing_param () =
   let tool = find_tool "shell_exec" tools in
   let result = Tool.execute tool (`Assoc []) in
   (match result with
-   | Error msg ->
+   | Error { Agent_sdk.Types.message = msg; _ } ->
      Alcotest.(check bool) "error about missing command" true
        (String.length msg > 0)
    | Ok _ -> Alcotest.fail "should fail without command param")
@@ -394,7 +394,7 @@ let test_workdir_enforcement () =
              ("content", `String "ok")]) in
   (match result_ok with
    | Ok _ -> ()
-   | Error e -> Alcotest.fail (Printf.sprintf "workdir write failed: %s" e));
+   | Error { Agent_sdk.Types.message = e; _ } -> Alcotest.fail (Printf.sprintf "workdir write failed: %s" e));
   (* Writing outside workdir (but inside ~/me) should be blocked *)
   let home = Sys.getenv "HOME" in
   let bad_path = Filename.concat home "me/should_not_write.txt" in

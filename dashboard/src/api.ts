@@ -647,6 +647,7 @@ export interface DashboardToolInventoryItem {
   required_permission?: string | null
   doc_refs: string[]
   prompt_hints: string[]
+  surfaces: string[]
   visibility: string
   lifecycle: string
   implementationStatus: string
@@ -656,9 +657,15 @@ export interface DashboardToolInventoryItem {
   reason?: string | null
 }
 
+export interface SurfaceSummaryEntry {
+  count: number
+  tools: string[]
+}
+
 export interface DashboardToolInventoryResponse {
   count: number
   tools: DashboardToolInventoryItem[]
+  surface_summary?: Record<string, SurfaceSummaryEntry>
 }
 
 export interface ToolMetricsTopEntry {

@@ -222,6 +222,17 @@ let keeper_policies_json ctx =
 let tool_inventory_json ctx ~include_hidden ~include_deprecated =
   let room_path = Room.masc_dir ctx.config in
   let cfg = Config.load room_path in
+  (* Build reverse index: tool_name -> surface string list *)
+  let surface_map : (string, string list) Hashtbl.t = Hashtbl.create 256 in
+  List.iter
+    (fun (seed : Capability_registry.capability_seed) ->
+      let name = seed.projection.tool_name in
+      let s = Capability_registry.surface_to_string seed.projection.surface in
+      let prev =
+        match Hashtbl.find_opt surface_map name with Some l -> l | None -> []
+      in
+      if not (List.mem s prev) then Hashtbl.replace surface_map name (s :: prev))
+    (Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas);
   let schemas =
     Config.raw_all_tool_schemas
     |> List.filter (fun (schema : Types.tool_schema) ->
@@ -244,6 +255,11 @@ let tool_inventory_json ctx ~include_hidden ~include_deprecated =
                 ("required_permission", permission_to_json schema.name);
                 ("doc_refs", `List (List.map (fun value -> `String value) help_entry.doc_refs));
                 ("prompt_hints", `List (List.map (fun value -> `String value) help_entry.prompt_hints));
+                ("surfaces",
+                 `List
+                   (match Hashtbl.find_opt surface_map schema.name with
+                   | Some ss -> List.map (fun s -> `String s) (List.rev ss)
+                   | None -> []));
               ]
              @ Tool_catalog.metadata_to_fields schema.name))
   in
@@ -251,6 +267,8 @@ let tool_inventory_json ctx ~include_hidden ~include_deprecated =
     [
       ("count", `Int (List.length rows));
       ("tools", `List rows);
+      ("surface_summary",
+       Capability_registry.surface_snapshot_json Config.raw_all_tool_schemas);
     ]
 
 let enforcement_summary_json () =

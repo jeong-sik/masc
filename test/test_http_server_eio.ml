@@ -47,7 +47,10 @@ let test_router_prefix_specificity () =
     |> Router.prefix_get "/dashboard/" generic_handler
   in
   let request = Httpun.Request.create `GET "/dashboard/assets/index.css" in
-  Router.dispatch routes request (Obj.magic ());
+  (* Httpun.Reqd.t is opaque and cannot be constructed outside the HTTP
+     stack. The test handlers ignore the reqd parameter entirely.
+     TODO: extract Router.resolve to remove this unsafe cast. *)
+  Router.dispatch routes request (Obj.magic () : Httpun.Reqd.t);
   Alcotest.(check string) "longest prefix route should win" "asset" !matched
 
 (* ===== Unit Tests for Config ===== *)

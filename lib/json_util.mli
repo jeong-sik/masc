@@ -29,6 +29,16 @@ val get_object : Yojson.Safe.t -> string -> Yojson.Safe.t option
 val get_array : Yojson.Safe.t -> string -> Yojson.Safe.t option
 (** [get_array json key] extracts JSON array *)
 
+(** {1 Required field extraction (Result-returning)}
+
+    Return [(value, string) result] with an error message identifying
+    the missing or mistyped field. Use with [let ( let* ) = Result.bind]. *)
+
+val require_string : Yojson.Safe.t -> string -> (string, string) result
+val require_int : Yojson.Safe.t -> string -> (int, string) result
+val require_float : Yojson.Safe.t -> string -> (float, string) result
+val require_bool : Yojson.Safe.t -> string -> (bool, string) result
+
 (** Construction helpers *)
 
 val json_string_list : string list -> Yojson.Safe.t

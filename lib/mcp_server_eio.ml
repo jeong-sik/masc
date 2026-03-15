@@ -1169,11 +1169,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_audit : Tool_audit.context = { config } in
   let simple_ctx_rate_limit : Tool_rate_limit.context = { config; agent_name; registry } in
   let simple_ctx_cost : Tool_cost.context = { agent_name } in
-  let simple_ctx_walph = lazy (
+  let simple_ctx_walph : (_ Tool_walph.context, string) result =
     match state.Mcp_server.net with
-    | Some net -> ({ config; agent_name; net; clock } : _ Tool_walph.context)
-    | None -> failwith "walph requires net (server_state.net is None)"
-  ) in
+    | Some net -> Ok ({ config; agent_name; net; clock } : _ Tool_walph.context)
+    | None -> Error "walph requires net (server_state.net is None)"
+  in
   let simple_ctx_agent : Tool_agent.context = { config; agent_name } in
   let simple_ctx_task : Tool_task.context = { config; agent_name } in
   let simple_ctx_room : Tool_room.context = { config; agent_name } in
@@ -1579,11 +1579,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   if String.length name >= 11 && String.equal (String.sub name 0 11) "masc_walph_" then
-    try
-      match Tool_walph.dispatch (Lazy.force simple_ctx_walph) ~name ~args:arguments with
-      | Some result -> result
-      | None -> (false, Printf.sprintf "Unknown Walph tool: %s" name)
-    with Failure msg -> (false, msg)
+    (match simple_ctx_walph with
+     | Error msg -> (false, msg)
+     | Ok ctx ->
+       match Tool_walph.dispatch ctx ~name ~args:arguments with
+       | Some result -> result
+       | None -> (false, Printf.sprintf "Unknown Walph tool: %s" name))
   else
   match Tool_agent.dispatch simple_ctx_agent ~name ~args:arguments with
   | Some result -> result

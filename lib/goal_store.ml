@@ -158,12 +158,15 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
     ?priority ?status ?parent_goal_id () =
   let normalized_horizon = normalize_horizon horizon in
   let normalized_status = normalize_status status in
+  let is_new_goal = id = None in
   match horizon with
   | Some _ when normalized_horizon = None -> Error "invalid horizon (short|mid|long)"
   | _ -> (
       match status with
       | Some _ when normalized_status = None ->
           Error "invalid status (active|paused|done|dropped)"
+      | _ when is_new_goal && (title = None || title = Some "") ->
+          Error "title required for new goal"
       | _ ->
           let now = Types.now_iso () in
           let resolved_id = Option.value id ~default:(gen_goal_id ()) in

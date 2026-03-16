@@ -69,7 +69,20 @@ let plans_dir base_path =
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   d
 
+(** Validate plan_id: alphanumeric + dash only, no path separators. *)
+let validate_plan_id plan_id =
+  let is_safe c =
+    match c with
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> true
+    | _ -> false
+  in
+  String.length plan_id > 0
+  && String.length plan_id <= 64
+  && String.to_seq plan_id |> Seq.for_all is_safe
+
 let plan_file base_path plan_id =
+  if not (validate_plan_id plan_id) then
+    failwith (sprintf "Invalid plan_id: %s" plan_id);
   Filename.concat (plans_dir base_path) (plan_id ^ ".json")
 
 let save_plan (plan : swarm_plan) =
@@ -101,8 +114,8 @@ let save_plan (plan : swarm_plan) =
   in
   let path = plan_file plan.base_path plan.plan_id in
   let oc = open_out path in
-  output_string oc (Yojson.Safe.pretty_to_string json);
-  close_out oc
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    output_string oc (Yojson.Safe.pretty_to_string json))
 
 let load_plan base_path plan_id : (swarm_plan, string) result =
   let path = plan_file base_path plan_id in
@@ -147,7 +160,10 @@ let grep_matches ~base_path ~pattern ~file_glob ~exclude_files =
     [ "grep"; "-rc"; "--include=" ^ file_glob; "-E"; pattern; base_path ]
   in
   let output =
-    try Process_eio.run_argv ~timeout_sec:30.0 argv with _ -> ""
+    try Process_eio.run_argv ~timeout_sec:30.0 argv
+    with exn ->
+      eprintf "[code_swarm] grep failed: %s\n%!" (Printexc.to_string exn);
+      ""
   in
   output |> String.split_on_char '\n'
   |> List.filter_map (fun line ->
@@ -157,10 +173,13 @@ let grep_matches ~base_path ~pattern ~file_glob ~exclude_files =
              let count_str = String.concat ":" rest in
              match int_of_string_opt (String.trim count_str) with
              | Some n when n > 0 ->
+                 let blen = String.length base_path in
+                 let flen = String.length file in
                  let rel =
-                   if String.length file > String.length base_path then
-                     String.sub file (String.length base_path + 1)
-                       (String.length file - String.length base_path - 1)
+                   if flen > blen + 1
+                      && String.sub file 0 blen = base_path
+                      && file.[blen] = '/' then
+                     String.sub file (blen + 1) (flen - blen - 1)
                    else file
                  in
                  if List.mem rel exclude_files then None

@@ -29,7 +29,7 @@ let contains_error result =
   String.length result >= 3 && String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
 
 (** Check for cancel emoji *)
-let contains_cancel result =
+let _contains_cancel result =
   String.length result >= 4 && String.sub result 0 4 = "\xF0\x9F\x9A\xAB"  (* 🚫 *)
 
 (** Substring check helper *)
@@ -156,6 +156,82 @@ let test_claim_next_consecutive () =
     (* Different agents should get different tasks *)
     Alcotest.(check bool) "different tasks" true
       (str_contains r1 "task-001" || str_contains r2 "task-002")
+  )
+
+(* ============================================================ *)
+(* BUG-004: claim_next auto-release Tests                        *)
+(* ============================================================ *)
+
+(** BUG-004: Same agent calling claim_next twice should auto-release
+    the first task, not orphan it. *)
+let test_claim_next_auto_releases_previous () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"First" ~priority:1 ~description:"" in
+    let _ = Room.add_task config ~title:"Second" ~priority:2 ~description:"" in
+
+    (* First claim: agent gets task-001 *)
+    let r1 = Room.claim_next config ~agent_name:"claude" in
+    Alcotest.(check bool) "first claim ok" true (contains_check r1);
+    Alcotest.(check bool) "first claim has task-001" true (str_contains r1 "task-001");
+
+    (* Second claim by same agent: should auto-release task-001, claim task-002 *)
+    let r2 = Room.claim_next config ~agent_name:"claude" in
+    (* Result should contain warning about auto-release *)
+    Alcotest.(check bool) "second claim contains warning" true (contains_warning r2);
+    Alcotest.(check bool) "mentions released task" true (str_contains r2 "task-001");
+    Alcotest.(check bool) "claims new task" true (str_contains r2 "task-002");
+
+    (* Verify task-001 is back to Todo (not orphaned) via raw task data *)
+    let tasks = Room.get_tasks_raw config in
+    let task_001 = List.find_opt (fun (t : Types.task) -> t.id = "task-001") tasks in
+    (match task_001 with
+     | Some t ->
+         Alcotest.(check string) "task-001 released to todo"
+           "todo" (Types.task_status_to_string t.task_status)
+     | None -> Alcotest.fail "task-001 not found in backlog")
+  )
+
+(** BUG-004: After auto-release, the released task is claimable by others. *)
+let test_claim_next_released_task_claimable_by_others () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Task A" ~priority:1 ~description:"" in
+    let _ = Room.add_task config ~title:"Task B" ~priority:2 ~description:"" in
+
+    (* Claude claims task-001 *)
+    let _ = Room.claim_next config ~agent_name:"claude" in
+    (* Claude claims again, auto-releasing task-001 *)
+    let _ = Room.claim_next config ~agent_name:"claude" in
+
+    (* Gemini should be able to claim the released task-001 *)
+    let r = Room.claim_next config ~agent_name:"gemini" in
+    Alcotest.(check bool) "gemini can claim released task" true (contains_check r);
+    Alcotest.(check bool) "gemini gets task-001" true (str_contains r "task-001")
+  )
+
+(** BUG-004: claim_next_r returns released_task_id in structured result. *)
+let test_claim_next_r_released_task_field () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Alpha" ~priority:1 ~description:"" in
+    let _ = Room.add_task config ~title:"Beta" ~priority:2 ~description:"" in
+
+    (* First claim: no previous task to release *)
+    let r1 = Room.claim_next_r config ~agent_name:"claude" () in
+    (match r1 with
+     | Room.Claim_next_claimed { released_task_id = None; task_id; _ } ->
+         Alcotest.(check string) "first claim is task-001" "task-001" task_id
+     | Room.Claim_next_claimed { released_task_id = Some _; _ } ->
+         Alcotest.fail "first claim should not release anything"
+     | _ -> Alcotest.fail "first claim should succeed");
+
+    (* Second claim: should release task-001 *)
+    let r2 = Room.claim_next_r config ~agent_name:"claude" () in
+    (match r2 with
+     | Room.Claim_next_claimed { released_task_id = Some rid; task_id; _ } ->
+         Alcotest.(check string) "released task-001" "task-001" rid;
+         Alcotest.(check string) "claimed task-002" "task-002" task_id
+     | Room.Claim_next_claimed { released_task_id = None; _ } ->
+         Alcotest.fail "second claim should report released task"
+     | _ -> Alcotest.fail "second claim should succeed")
   )
 
 (* ============================================================ *)
@@ -499,13 +575,13 @@ let test_update_agent_status () =
     let _ = Room.join config ~agent_name:"gemini" ~capabilities:["test"] () in
 
     (* Get the actual agent name (auto-generated nickname) *)
-    let agents : Types.agent list = Room.get_agents_raw config in
-    let gemini = List.find_opt (fun a ->
-      String.length a.Types.name >= 6 && String.sub a.Types.name 0 6 = "gemini"
+    let agents = Room.get_agents_raw config in
+    let gemini = List.find_opt (fun (a : Types.agent) ->
+      String.length a.name >= 6 && String.sub a.name 0 6 = "gemini"
     ) agents in
     match gemini with
     | Some agent ->
-        let result = Room.update_agent_r config ~agent_name:agent.name ~status:(Some "listening") () in
+        let result = Room.update_agent_r config ~agent_name:agent.name ~status:"listening" () in
         (match result with
          | Ok _ -> ()
          | Error _ -> Alcotest.fail "Expected Ok")
@@ -516,14 +592,14 @@ let test_update_agent_capabilities () =
   with_test_env (fun config ->
     let _ = Room.join config ~agent_name:"gemini" ~capabilities:[] () in
 
-    let agents : Types.agent list = Room.get_agents_raw config in
-    let gemini = List.find_opt (fun a ->
-      String.length a.Types.name >= 6 && String.sub a.Types.name 0 6 = "gemini"
+    let agents = Room.get_agents_raw config in
+    let gemini = List.find_opt (fun (a : Types.agent) ->
+      String.length a.name >= 6 && String.sub a.name 0 6 = "gemini"
     ) agents in
     match gemini with
     | Some agent ->
         let result = Room.update_agent_r config ~agent_name:agent.name
-                       ~capabilities:(Some ["python"; "code-review"]) () in
+                       ~capabilities:["python"; "code-review"] () in
         (match result with
          | Ok _ -> ()
          | Error _ -> Alcotest.fail "Expected Ok")
@@ -532,7 +608,7 @@ let test_update_agent_capabilities () =
 
 let test_update_agent_not_found () =
   with_test_env (fun config ->
-    let result = Room.update_agent_r config ~agent_name:"nonexistent" ~status:(Some "active") () in
+    let result = Room.update_agent_r config ~agent_name:"nonexistent" ~status:"active" () in
     match result with
     | Error Types.AgentNotFound _ -> ()
     | _ -> Alcotest.fail "Expected AgentNotFound"
@@ -588,6 +664,9 @@ let () =
       Alcotest.test_case "empty backlog" `Quick test_claim_next_empty_backlog;
       Alcotest.test_case "all claimed" `Quick test_claim_next_all_claimed;
       Alcotest.test_case "consecutive" `Quick test_claim_next_consecutive;
+      Alcotest.test_case "BUG-004: auto-releases previous" `Quick test_claim_next_auto_releases_previous;
+      Alcotest.test_case "BUG-004: released task claimable" `Quick test_claim_next_released_task_claimable_by_others;
+      Alcotest.test_case "BUG-004: released_task_id field" `Quick test_claim_next_r_released_task_field;
     ];
 
     (* === Update Priority === *)

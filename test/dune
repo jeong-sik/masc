@@ -47,6 +47,12 @@
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
 
+; Room coverage tests (claim_next auto-release, batch ops, transitions)
+(test
+ (name test_room_coverage)
+ (modules test_room_coverage)
+ (libraries masc_mcp alcotest yojson unix))
+
 ; Streamable HTTP test (requires Eio for Eio.Mutex)
 (test
  (name test_streamable_http)

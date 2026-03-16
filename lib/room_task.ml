@@ -542,6 +542,7 @@ type claim_next_result =
       task_id : string;
       title : string;
       priority : int;
+      released_task_id : string option;  (** Previous task auto-released, if any *)
       message : string;
     }
   | Claim_next_no_unclaimed
@@ -557,6 +558,33 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
   with_file_lock config backlog_path (fun () ->
     try
       let backlog = read_backlog config in
+
+      (* BUG-004: Detect and auto-release previous claim to prevent orphaned tasks.
+         If this agent already holds a Claimed or InProgress task, release it
+         back to Todo before proceeding. This prevents "claimed but orphaned"
+         tasks that permanently block the backlog. *)
+      let previous_claim = List.find_opt (fun (t : Types.task) ->
+        match t.task_status with
+        | Claimed { assignee; _ } | InProgress { assignee; _ } ->
+            String.equal assignee agent_name
+        | Todo | Done _ | Cancelled _ -> false
+      ) backlog.tasks in
+      let released_task_id, working_tasks = match previous_claim with
+        | None -> None, backlog.tasks
+        | Some prev ->
+            log_event config (Printf.sprintf
+              "{\"type\":\"task_claim_next_auto_release\",\"agent\":\"%s\",\"released_task\":\"%s\",\"ts\":\"%s\"}"
+              agent_name prev.id (now_iso ()));
+            let _ = broadcast config ~from_agent:agent_name
+              ~content:(Printf.sprintf
+                "⚠ Auto-released %s (was %s) before claiming next task"
+                prev.id (Types.task_status_to_string prev.task_status)) in
+            let updated = List.map (fun (t : Types.task) ->
+              if String.equal t.id prev.id then { t with task_status = Todo }
+              else t
+            ) backlog.tasks in
+            Some prev.id, updated
+      in
 
       (* Starvation prevention: Calculate effective priority
          Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
@@ -588,18 +616,44 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
         let priority_cmp = compare (effective_priority a) (effective_priority b) in
         if priority_cmp <> 0 then priority_cmp
         else compare a.created_at b.created_at  (* Older first for same priority *)
-      ) backlog.tasks in
+      ) working_tasks in
       let unclaimed = List.filter (fun t ->
         match t.task_status with
         | Todo -> true
         | _ -> false
       ) sorted in
-      let eligible = List.filter (fun t -> not (List.mem t.id exclude_task_ids)) unclaimed in
+      (* Also exclude the just-released task: the agent is moving on,
+         re-claiming the same task would be a no-op loop. *)
+      let all_excluded = match released_task_id with
+        | Some rid -> rid :: exclude_task_ids
+        | None -> exclude_task_ids
+      in
+      let eligible = List.filter (fun t -> not (List.mem t.id all_excluded)) unclaimed in
 
       match unclaimed, eligible with
       | [], _ ->
+          (* Even if we released a task, there may be nothing else to claim.
+             Write the release if it happened. *)
+          (match released_task_id with
+           | Some _ ->
+               let new_backlog = {
+                 tasks = working_tasks;
+                 last_updated = now_iso ();
+                 version = backlog.version + 1;
+               } in
+               write_backlog config new_backlog
+           | None -> ());
           Claim_next_no_unclaimed
       | _ :: _, [] ->
+          (match released_task_id with
+           | Some _ ->
+               let new_backlog = {
+                 tasks = working_tasks;
+                 last_updated = now_iso ();
+                 version = backlog.version + 1;
+               } in
+               write_backlog config new_backlog
+           | None -> ());
           Claim_next_no_eligible { excluded_count = List.length exclude_task_ids }
       | _ :: _, task :: _ ->
           (* Claim this task *)
@@ -611,7 +665,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
                 }
               }
             else t
-          ) backlog.tasks in
+          ) working_tasks in
 
           let new_backlog = {
             tasks = new_tasks;
@@ -632,19 +686,32 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
                 Log.Misc.error "agent state write failed: %s" msg
           end;
 
+          let release_note = match released_task_id with
+            | Some rid -> Printf.sprintf " (auto-released %s)" rid
+            | None -> ""
+          in
           let _ = broadcast config ~from_agent:agent_name
-            ~content:(Printf.sprintf "📋 Auto-claimed [P%d] %s: %s" task.priority task.id task.title) in
+            ~content:(Printf.sprintf "📋 Auto-claimed [P%d] %s: %s%s"
+              task.priority task.id task.title release_note) in
 
           log_event config (Printf.sprintf
             "{\"type\":\"task_claim_next\",\"agent\":\"%s\",\"task\":\"%s\",\"priority\":%d,\"ts\":\"%s\"}"
             agent_name task.id task.priority (now_iso ()));
 
+          let message = match released_task_id with
+            | Some rid ->
+                Printf.sprintf "⚠ %s auto-released %s, then claimed [P%d] %s: %s"
+                  agent_name rid task.priority task.id task.title
+            | None ->
+                Printf.sprintf "✅ %s auto-claimed [P%d] %s: %s"
+                  agent_name task.priority task.id task.title
+          in
           Claim_next_claimed {
             task_id = task.id;
             title = task.title;
             priority = task.priority;
-            message =
-              Printf.sprintf "✅ %s auto-claimed [P%d] %s: %s" agent_name task.priority task.id task.title;
+            released_task_id;
+            message;
           }
     with e ->
       Claim_next_error (Printexc.to_string e)

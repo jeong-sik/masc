@@ -976,6 +976,18 @@
  (modules test_room_checkpoint)
  (libraries masc_mcp alcotest yojson))
 
+; Tool Metrics — per-tool timing percentiles (Harness Sprint 5)
+(test
+ (name test_tool_metrics)
+ (modules test_tool_metrics)
+ (libraries masc_mcp alcotest yojson))
+
+; Harness Health — subsystem health check (Harness Sprint 6)
+(test
+ (name test_harness_health)
+ (modules test_harness_health)
+ (libraries masc_mcp alcotest yojson))
+
 ; Tool Unified — unified query interface across catalog, registry, dispatch (P4 Phase 4.4)
 (test
  (name test_tool_unified)

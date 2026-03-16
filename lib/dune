@@ -371,6 +371,8 @@
    tool_permissions
    sse_room_filter
    room_checkpoint
+   tool_metrics
+   tool_harness_health
    tool_inline_dispatch
    tool_unified
    tool_help_registry

@@ -44,7 +44,9 @@ let cli_generate provider ~system prompt =
     | Unix.WEXITED 0 -> Ok content
     | Unix.WEXITED n -> Error (Printf.sprintf "❌ LLM: %s exit %d" cli_cmd n)
     | _ -> Error (Printf.sprintf "❌ LLM: %s signaled" cli_cmd)
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
     Error (Printf.sprintf "❌ LLM: %s exception [%s]" cli_cmd (Printexc.to_string exn))
 
 (** Unified LLM generate with automatic provider selection *)
@@ -145,6 +147,7 @@ let _local_llama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500
     | Unix.WEXITED n -> Error (Printf.sprintf "❌ LLM: llama exit %d" n)
     | _ -> Error "❌ LLM: llama signaled"
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Yojson.Json_error msg -> Error (Printf.sprintf "❌ Parse: JSON error [%s]" msg)
   | exn -> Error (Printf.sprintf "❌ LLM: llama exception [%s]" (Printexc.to_string exn))
 

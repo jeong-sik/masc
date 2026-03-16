@@ -156,6 +156,7 @@ let load_eio ~fs (store : checkpoint_store) ~run_id : (checkpoint, string) resul
     checkpoint_of_json json
   with
   | Eio.Io _ -> Error (Printf.sprintf "Checkpoint not found: %s" run_id)
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printf.sprintf "Failed to load checkpoint: %s" (Printexc.to_string exn))
 
 (** Load a checkpoint (non-Eio version) *)

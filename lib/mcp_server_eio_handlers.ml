@@ -321,6 +321,7 @@ let handle_request
                  | Invalid_argument msg
                    when TC.contains_casefold msg "invalid_argument(\"masc not initialized" ->
                      make_error ~id (-32603) (Types.masc_error_to_string Types.NotInitialized)
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn ->
                        let err = Printexc.to_string exn in
                        Log.Mcp.error "Request handling failed: %s" err;
@@ -457,5 +458,6 @@ let run_stdio ~sw ~env ~execute_tool_eio ~log_mcp_exn state =
   with
   | End_of_file ->
       Log.Mcp.info "Connection closed"
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
       Log.Mcp.error "Server error: %s" (Printexc.to_string exn)

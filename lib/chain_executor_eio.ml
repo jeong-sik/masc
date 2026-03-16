@@ -686,6 +686,7 @@ and execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
             try_tier rest escalations (hard_failures + 1) prev_context
         with
         | Out_of_memory | Stack_overflow | Sys.Break as exn -> raise exn
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
           record_error ctx node.id (Printexc.to_string exn);
           try_tier rest escalations (hard_failures + 1) prev_context

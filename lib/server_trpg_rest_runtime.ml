@@ -52,6 +52,7 @@ let trpg_keeper_call_with_runtime
             `Error (Printf.sprintf "keeper returned invalid json: %s" e))
       | Some (false, msg) -> `Error msg)
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Time.Timeout -> `Timeout
   | exn -> `Error (Printexc.to_string exn)
 
@@ -91,6 +92,7 @@ let trpg_keeper_probe_with_runtime
       | Some (true, _body) -> `Ok
       | Some (false, msg) -> `Error msg)
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Time.Timeout -> `Error "timeout"
   | exn -> `Error (Printexc.to_string exn)
 let trpg_round_run_json

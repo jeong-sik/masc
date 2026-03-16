@@ -474,6 +474,7 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
                 in
                 `Verdict verdict
               with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
               | Eio.Time.Timeout ->
                   `Timeout
               | exn ->

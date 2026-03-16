@@ -221,6 +221,7 @@ let connect_with_retry ~sw (net : _ Eio.Net.t) (clock : _ Eio.Time.clock) (t : t
       try
         connect_raw ~sw net t ~on_event ~on_state_change
       with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           if retry_count < t.max_retries && t.state <> Closed then begin
             t.state <- Reconnecting retry_count;

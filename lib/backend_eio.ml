@@ -242,6 +242,7 @@ module FileSystem = struct
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
               Error (NotFound key)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               Error (IOError (Printexc.to_string exn))
     )
@@ -291,6 +292,7 @@ module FileSystem = struct
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
               Error (NotFound key)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               Error (IOError (Printexc.to_string exn))
     )
@@ -312,6 +314,7 @@ module FileSystem = struct
         with
         | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
             Ok []  (* Directory doesn't exist = no keys *)
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             Error (IOError (Printexc.to_string exn))
 
@@ -351,6 +354,7 @@ module FileSystem = struct
                    Ok true)
           | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
               Error (AlreadyExists key)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               Error (IOError (Printexc.to_string exn))
     )

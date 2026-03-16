@@ -71,6 +71,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
           | Some result -> result
           | None -> (false, "masc_keeper_msg dispatch unavailable"))
     with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout ->
         timeout_hit := true;
         Log.Mcp.error "tools/call timeout: masc_keeper_msg after %.0fs" timeout_sec;

@@ -368,10 +368,14 @@ let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
       | Some clock -> (
           try Eio.Time.with_timeout_exn clock timeout_sec run
           with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout -> Error "Neo4j HTTP timeout"
           | exn -> Error (Printexc.to_string exn))
       | None -> (
-          try run () with exn -> Error (Printexc.to_string exn)))
+          try run ()
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)))
 
 (** Execute a Cypher query, ignoring the response data.
     Returns Ok () on success, Error msg on failure. *)

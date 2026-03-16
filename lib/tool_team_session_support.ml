@@ -488,7 +488,7 @@ let raw_trace_session_payloads ~config ~fallback_session_id
         ( Oas.Raw_trace.run_summary_to_yojson summary,
           Oas.Raw_trace.run_validation_to_yojson validation )
   | _ -> (
-      match Oas.Raw_trace.summarize_run run_ref, Oas.Raw_trace.validate_run run_ref with
+      match Oas.Raw_trace_query.summarize_run run_ref, Oas.Raw_trace_query.validate_run run_ref with
       | Ok summary, Ok validation ->
           Some
             ( Oas.Raw_trace.run_summary_to_yojson summary,

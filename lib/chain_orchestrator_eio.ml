@@ -410,7 +410,12 @@ let orchestrate
         | m when is_gemini_model m ->
             exec_with_retry "gemini" (("model", `String model) :: args)
         | _ ->
-            exec_with_retry "gemini" args
+            let default_gemini = Env_config.Gemini.default_model in
+            let fallback_args =
+              if default_gemini <> "" then ("model", `String default_gemini) :: args
+              else args
+            in
+            exec_with_retry "gemini" fallback_args
       in
 
       (* Create tool execution wrapper *)

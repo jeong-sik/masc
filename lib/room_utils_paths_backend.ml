@@ -13,7 +13,8 @@ let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
 let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
 
-(* Legacy paths (pre-room refactor) kept for backward compatibility *)
+(* Legacy paths (pre-room refactor) — kept for read_current_room backward compat.
+   @deprecated Will be removed after all users migrate to scope-based config. *)
 let legacy_rooms_root_dir config = Filename.concat config.base_path "rooms"
 let legacy_registry_root_path config = Filename.concat config.base_path "rooms.json"
 let legacy_current_room_path config = Filename.concat config.base_path "current_room"
@@ -48,10 +49,24 @@ let room_dir_for config room_id =
     else if Sys.file_exists legacy_path then legacy_path
     else root_path
 
-let masc_dir config =
+(** Resolve the initial scope from the current_room file.
+    Called once at config creation time; the result is stored in config.scope
+    so that all subsequent path lookups are pure and deterministic. *)
+let resolve_initial_scope config =
   match read_current_room config with
-  | Some room_id -> room_dir_for config room_id
-  | None -> masc_root_dir config
+  | Some "default" | None -> Default
+  | Some room_id -> Named room_id
+
+(** Scope-based directory resolution.
+    Named scope: pure, deterministic (no filesystem reads).
+    Default scope: reads current_room file for backward compatibility. *)
+let masc_dir config =
+  match config.scope with
+  | Named id -> room_dir_for config id
+  | Default ->
+    match read_current_room config with
+    | Some room_id -> room_dir_for config room_id
+    | None -> masc_root_dir config
 
 let agents_dir config = Filename.concat (masc_dir config) "agents"
 let tasks_dir config = Filename.concat (masc_dir config) "tasks"
@@ -267,6 +282,12 @@ let is_initialized config =
       Sys.file_exists (masc_dir config) &&
       Sys.is_directory (masc_dir config) &&
       Sys.file_exists (state_path config)
+
+(** Create a config with scope resolved from the current_room file.
+    Wraps default_config / default_config_eio output so that masc_dir
+    never needs to read the filesystem again. *)
+let config_with_resolved_scope config =
+  { config with scope = resolve_initial_scope config }
 
 (* ============================================ *)
 (* Validation helpers                           *)

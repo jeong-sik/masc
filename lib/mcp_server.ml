@@ -540,7 +540,10 @@ type server_state = {
 }
 
 let create_state ~base_path =
-  let config = Room.default_config base_path in
+  let config =
+    Room.default_config base_path
+    |> Room.config_with_resolved_scope
+  in
   let registry = Session.create () in
   (* Restore sessions from disk for persistence across restarts *)
   let agents_path = Filename.concat config.base_path ".masc/agents" in
@@ -563,7 +566,10 @@ let create_state ~base_path =
 
 (** Create state with Eio context - required for PostgresNative backend *)
 let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
-  let config = Room.default_config_eio ~sw ~env base_path in
+  let config =
+    Room.default_config_eio ~sw ~env base_path
+    |> Room.config_with_resolved_scope
+  in
   let registry = Session.create () in
   let agents_path = Filename.concat config.base_path ".masc/agents" in
   Session.restore_from_disk registry ~agents_path;

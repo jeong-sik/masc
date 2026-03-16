@@ -540,30 +540,8 @@ and join config ~agent_name ?(agent_type_override=None) ~capabilities
     (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
     (now_iso ()));
 
-  Printf.sprintf {|✅ %s joined the room!
-
-🎫 **Your Identity**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Nickname: %s
-  Type: %s
-  Session: %s
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📋 **MASC 협업 가이드 (필독!)**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔴 **필수 행동** (Lobby 가시성):
-1. 작업 시작시 broadcast
-2. 진행 상황 broadcast (30분마다)
-3. 완료시 broadcast
-4. @mention 응답 필수
-
-💡 **협업 패턴**:
-• "@에이전트 도움 요청"
-• "@에이전트 리뷰 요청"
-• "✅ [작업] 완료!"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-|} nickname nickname agent_type session_id
+  Printf.sprintf "✅ %s joined\n  Nickname: %s\n  Type: %s\n  Session: %s"
+    nickname nickname agent_type session_id
   end
 
 and join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities

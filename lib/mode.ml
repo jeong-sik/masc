@@ -31,7 +31,7 @@ type category =
 (** Mode presets *)
 type mode =
   | Minimal   (* core, health *)
-  | Standard  (* core, comm, worktree, health, plan, board *)
+  | Standard  (* core, comm, worktree, health, plan, board, consensus *)
   | Parallel  (* core, comm, portal, worktree, health, discovery, plan, board, consensus, voting, interrupt *)
   | Coding    (* core, worktree, code, health, plan *)
   | Full      (* all categories *)
@@ -115,7 +115,7 @@ let all_categories = [
 (** Categories for each mode preset *)
 let categories_for_mode = function
   | Minimal -> [Core; Health]
-  | Standard -> [Core; Comm; Worktree; Health; Plan; Board]
+  | Standard -> [Core; Comm; Worktree; Health; Plan; Board; Consensus]
   | Parallel -> [Core; Comm; Portal; Worktree; Health; Discovery;
                  Plan; Board; Consensus; Voting; Interrupt]
   | Coding -> [Core; Worktree; Code; Health; Plan; Consensus]
@@ -425,7 +425,7 @@ let is_tool_enabled enabled_categories tool_name =
 (** Mode descriptions for help text *)
 let mode_description = function
   | Minimal -> "Core task management + health checks only"
-  | Standard -> "Core, communication, worktree, health, plan, and board"
+  | Standard -> "Core, communication, worktree, health, plan, board, and consensus"
   | Parallel -> "Multi-agent: adds portal, discovery, plan, board, consensus, voting, and interrupt"
   | Coding -> "Core, worktree, code navigation, health, plan, and consensus for agent development"
   | Full -> "All categories enabled"

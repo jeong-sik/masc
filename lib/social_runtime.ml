@@ -160,9 +160,11 @@ let eligible_keepers config (event : board_event) : keeper_meta list =
   |> List.filter_map (fun name ->
          match read_meta config name with
          | Ok (Some meta) ->
+             (* Board events are reactive — initiative_enabled gates proactive
+                behavior only, not responses to board posts/comments.
+                policy_action_budget="board" is the relevant check here. *)
              if
-               meta.initiative_enabled
-               && canonical_policy_action_budget meta.policy_action_budget = "board"
+               canonical_policy_action_budget meta.policy_action_budget = "board"
                && List.mem (canonical_policy_mode meta.policy_mode)
                     [ "learned_offline_v1"; "explicit_event_v1"; "llm_deliberation" ]
                && meta.name <> event.author

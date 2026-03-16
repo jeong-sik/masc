@@ -64,8 +64,8 @@ let test_minimal_range () =
   assert_in_range Minimal ~low:115 ~high:175
 
 let test_standard_range () =
-  (* Standard = [Core; Comm; Worktree; Health; Plan; Board] — baseline ~205 *)
-  assert_in_range Standard ~low:165 ~high:250
+  (* Standard = [Core; Comm; Worktree; Health; Plan; Board; Consensus] — baseline ~221 *)
+  assert_in_range Standard ~low:175 ~high:275
 
 let test_parallel_range () =
   (* Parallel = 11 categories — baseline ~251 *)

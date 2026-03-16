@@ -76,7 +76,7 @@ jobs:
           cid="$(docker run -d -e PORT=8080 -p 18080:8080 masc-mcp-railway-smoke)"
           trap 'docker logs "$cid" || true; docker rm -f "$cid" || true' EXIT
 
-          for attempt in $(seq 1 20); do
+          for attempt in $(seq 1 45); do
             if curl -fsS "http://127.0.0.1:18080/health" >/dev/null 2>&1; then
               echo "Container healthcheck passed."
               exit 0

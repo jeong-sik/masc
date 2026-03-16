@@ -804,10 +804,9 @@ end = struct
     (Caqti_type.unit ->. Caqti_type.unit)
     "DELETE FROM masc_kv WHERE expires_at IS NOT NULL AND expires_at < NOW()"
 
-  (* Circuit breaker for expired lock cleanup: after 3 consecutive failures,
-     skip cleanup for 60s to avoid blocking acquire_lock when PG is saturated *)
-  let cleanup_failures = ref 0
-  let cleanup_backoff_until = ref 0.0
+  (* Eio-native timeout for expired lock cleanup: cooperatively cancels
+     when PG is saturated instead of blocking the caller indefinitely *)
+  let cleanup_timeout_sec = 2.0
 
   let health_check_q =
     (Caqti_type.unit ->! Caqti_type.int)
@@ -1026,24 +1025,26 @@ end = struct
 
   let acquire_lock t ~key ~ttl_seconds ~owner =
     let nkey = namespaced_key t.namespace ("lock:" ^ key) in
-    (* Clean up expired locks — circuit breaker skips after 3 consecutive failures *)
-    (if Time_compat.now () < !cleanup_backoff_until then ()
-     else
-       match Caqti_eio.Pool.use (fun conn ->
-         let module C = (val conn : Caqti_eio.CONNECTION) in
-         C.exec cleanup_expired_q ()
-       ) t.pool with
-       | Ok () -> cleanup_failures := 0
-       | Error err ->
-         cleanup_failures := !cleanup_failures + 1;
-         if !cleanup_failures >= 3 then begin
-           cleanup_backoff_until := Time_compat.now () +. 60.0;
-           Log.Misc.warn
-             "[backend] expired lock cleanup failed %d times, backing off 60s: %s"
-             !cleanup_failures (Caqti_error.show err)
-         end else
-           Log.Misc.error "[backend] expired lock cleanup failed: %s"
-             (Caqti_error.show err));
+    (* Clean up expired locks with Eio cooperative timeout.
+       If PG is saturated, cleanup times out after 2s instead of blocking. *)
+    (try
+       let clock = Eio_context.get_clock () in
+       Eio.Time.with_timeout_exn clock cleanup_timeout_sec (fun () ->
+         match Caqti_eio.Pool.use (fun conn ->
+           let module C = (val conn : Caqti_eio.CONNECTION) in
+           C.exec cleanup_expired_q ()
+         ) t.pool with
+         | Ok () -> ()
+         | Error err ->
+             Log.Misc.error "[backend] expired lock cleanup failed: %s"
+               (Caqti_error.show err))
+     with
+     | Eio.Time.Timeout ->
+         Log.Misc.warn "[backend] expired lock cleanup timed out (%.0fs), skipping"
+           cleanup_timeout_sec
+     | exn ->
+         Log.Misc.error "[backend] expired lock cleanup error: %s"
+           (Printexc.to_string exn));
     (* Try to acquire lock *)
     match Caqti_eio.Pool.use (fun conn ->
       let module C = (val conn : Caqti_eio.CONNECTION) in

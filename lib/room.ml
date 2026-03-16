@@ -143,7 +143,12 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
   in
   let nickname =
     if Nickname.is_generated_nickname agent_name then agent_name
-    else Nickname.generate agent_type
+    else
+      let resolved = resolve_agent_name_in_room config ~room_id agent_name in
+      if resolved <> agent_name && Nickname.is_generated_nickname resolved then
+        resolved
+      else
+        Nickname.generate agent_type
   in
   let agent_file_dedup =
     Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")

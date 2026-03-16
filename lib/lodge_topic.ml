@@ -40,6 +40,28 @@ let max_prompt_content_length = 1000
 (** Cache TTL for topic extraction results (seconds) *)
 let cache_ttl_seconds = 3600
 
+(** {1 Helpers} *)
+
+(** Truncate a topic list to [max_topics] items. *)
+let truncate_topics (topics : string list) : string list =
+  if List.length topics > max_topics then
+    List.filteri (fun i _ -> i < max_topics) topics
+  else
+    topics
+
+(** Filter a Yojson list to valid topic strings.
+    Keeps only non-empty strings within [max_topic_length]. *)
+let filter_topic_items (items : Yojson.Safe.t list) : string list =
+  List.filter_map (function
+    | `String topic ->
+      let t = String.trim (String.lowercase_ascii topic) in
+      if String.length t > 0 && String.length t <= max_topic_length then
+        Some t
+      else
+        None
+    | _ -> None
+  ) items
+
 (** {1 Heuristic Extraction} *)
 
 (** Compound keywords — multi-word phrases checked before single words
@@ -145,6 +167,11 @@ Rules:
 - Use kebab-case for multi-word topics
 - Include both explicit and implied topics
 - Focus on technical concepts, tools, and domains
+- Return [] (empty array) if no clear topics can be extracted
+- Do NOT include generic words like "code", "project", "work"
+
+Bad examples: ["code", "stuff", "thing", "misc"]
+Good examples: ["ocaml", "eio-concurrency", "graphql-schema", "neo4j"]
 
 Post:
 "%s"
@@ -153,50 +180,70 @@ Topics (JSON array only):|} truncated
 
 (** {1 Response Parsing} *)
 
-(** Try to find and parse a JSON array from text.
-    Handles: clean JSON, JSON embedded in prose, malformed input. *)
-let parse_topics_response (text : string) : string list =
-  let try_parse_json s =
-    try
-      match Yojson.Safe.from_string s with
-      | `List items ->
-        List.filter_map (function
-          | `String topic ->
-            let t = String.trim (String.lowercase_ascii topic) in
-            if String.length t > 0 && String.length t <= max_topic_length then
-              Some t
-            else
-              None
-          | _ -> None
-        ) items
-      | _ -> []
-    with Yojson.Json_error _ -> []
+(** Find the outermost JSON array brackets in a string.
+    Uses depth tracking to handle nested brackets like ["type[T]", "foo"]. *)
+let find_array_bounds (s : string) : (int * int) option =
+  let len = String.length s in
+  let rec find_start i =
+    if i >= len then None
+    else if s.[i] = '[' then
+      let rec find_end j depth =
+        if j >= len then None
+        else match s.[j] with
+          | '[' -> find_end (j + 1) (depth + 1)
+          | ']' ->
+            if depth = 1 then Some (i, j)
+            else find_end (j + 1) (depth - 1)
+          | '"' -> skip_string (j + 1) depth
+          | _ -> find_end (j + 1) depth
+      and skip_string j depth =
+        if j >= len then None
+        else match s.[j] with
+          | '\\' -> skip_string (j + 2) depth
+          | '"' -> find_end (j + 1) depth
+          | _ -> skip_string (j + 1) depth
+      in
+      find_end (i + 1) 1
+    else find_start (i + 1)
   in
-  (* First: try parsing the entire text as JSON *)
+  find_start 0
+
+(** Try to parse a JSON string as a topic array. *)
+let try_parse_json (s : string) : string list =
+  try
+    match Yojson.Safe.from_string s with
+    | `List items -> filter_topic_items items
+    | _ -> []
+  with Yojson.Json_error _ -> []
+
+(** Try to find and parse a JSON array from text.
+    Handles: clean JSON, JSON embedded in prose, nested brackets, trailing text. *)
+let parse_topics_response (text : string) : string list =
   let trimmed = String.trim text in
+  (* First: try parsing the entire text as JSON *)
   match try_parse_json trimmed with
-  | (_ :: _) as topics ->
-    if List.length topics > max_topics then
-      List.filteri (fun i _ -> i < max_topics) topics
-    else
-      topics
+  | (_ :: _) as topics -> truncate_topics topics
   | [] ->
-    (* Second: try to find a JSON array within the text *)
-    let result =
-      try
-        let start = String.index trimmed '[' in
-        let stop = String.rindex trimmed ']' in
-        if stop > start then
-          let json_str = String.sub trimmed start (stop - start + 1) in
-          try_parse_json json_str
-        else
-          []
-      with Not_found -> []
-    in
-    if List.length result > max_topics then
-      List.filteri (fun i _ -> i < max_topics) result
-    else
-      result
+    (* Second: use bracket-aware scan to find the array *)
+    match find_array_bounds trimmed with
+    | Some (start, stop) ->
+      let json_str = String.sub trimmed start (stop - start + 1) in
+      truncate_topics (try_parse_json json_str)
+    | None -> []
+
+(** {1 Response Validation} *)
+
+(** Validate an LLM completion response for use as [~accept] predicate.
+    Rejects empty, garbage, or non-array responses so the cascade retries
+    with the next model. *)
+let topics_response_is_valid (result : Llm_client.completion_response) : bool =
+  let text = String.trim result.Llm_client.content in
+  (* Must contain at least one bracket pair *)
+  if not (String.contains text '[' && String.contains text ']') then false
+  else
+    match parse_topics_response text with
+    | _ :: _ -> true
+    | [] -> false
 
 (** {1 LLM Extraction} *)
 
@@ -211,6 +258,7 @@ let extract_topics_llm (content : string) : (string list, string) result =
     (* Check cache first *)
     match Llm_response_cache.get_json ~key:cache_key with
     | Ok (Some cached_json) ->
+      Prometheus.inc_counter "lodge_topic_cache_hits_total" ();
       let topics = match cached_json with
         | `List items ->
           List.filter_map (function
@@ -225,7 +273,9 @@ let extract_topics_llm (content : string) : (string list, string) result =
       (match cache_result with
        | Error e -> eprintf "[lodge_topic] cache read error: %s\n%!" e
        | _ -> ());
+      Prometheus.inc_counter "lodge_topic_cache_misses_total" ();
       (* Cache miss or error — call LLM via cascade *)
+      Prometheus.inc_counter "lodge_topic_llm_calls_total" ();
       let prompt = build_topic_prompt content in
       begin match
         Lodge_cascade.call
@@ -234,6 +284,7 @@ let extract_topics_llm (content : string) : (string list, string) result =
           ~temperature:0.1
           ~timeout_sec:5
           ~max_tokens:150
+          ~accept:topics_response_is_valid
           ()
       with
       | Ok result ->
@@ -291,12 +342,12 @@ let extract_topics (content : string) : string list =
     let heuristic_topics = extract_topics_heuristic content in
     begin match extract_topics_llm content with
     | Ok llm_topics when llm_topics <> [] ->
-      (* Smart merge: LLM topics are primary, heuristic fills gaps *)
       merge_topics ~primary:llm_topics ~secondary:heuristic_topics
     | Ok _ ->
-      (* LLM returned empty — use heuristic alone *)
+      Prometheus.inc_counter "lodge_topic_heuristic_fallbacks_total" ();
       heuristic_topics
     | Error msg ->
       eprintf "[lodge_topic] LLM failed, using heuristic: %s\n%!" msg;
+      Prometheus.inc_counter "lodge_topic_heuristic_fallbacks_total" ();
       heuristic_topics
     end

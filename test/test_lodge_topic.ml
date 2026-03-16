@@ -69,6 +69,138 @@ let test_parse_empty_string_topic () =
   let topics = Lodge_topic.parse_topics_response {|["", "ocaml", ""]|} in
   check int "1 valid topic" 1 (List.length topics)
 
+let test_parse_nested_brackets () =
+  (* Inner brackets like type[T] should not confuse the parser *)
+  let topics = Lodge_topic.parse_topics_response {|["type[t]", "foo"]|} in
+  check int "2 topics from nested brackets" 2 (List.length topics);
+  check bool "contains type[t]" true (List.mem "type[t]" topics);
+  check bool "contains foo" true (List.mem "foo" topics)
+
+let test_parse_json_with_trailing_text () =
+  (* Trailing text after the array should be ignored *)
+  let topics = Lodge_topic.parse_topics_response {|["ocaml","eio"] some extra text|} in
+  check int "2 topics ignoring trailing" 2 (List.length topics);
+  check bool "contains ocaml" true (List.mem "ocaml" topics);
+  check bool "contains eio" true (List.mem "eio" topics)
+
+let test_parse_number_array () =
+  (* An array of numbers should yield 0 string topics *)
+  let topics = Lodge_topic.parse_topics_response {|[1, 2, 3]|} in
+  check int "0 topics from number array" 0 (List.length topics)
+
+let test_parse_deeply_nested () =
+  (* Brackets inside strings should be handled *)
+  let topics = Lodge_topic.parse_topics_response
+    {|["list[int]", "map[string, list[float]]", "simple"]|} in
+  check int "3 topics" 3 (List.length topics);
+  check bool "simple present" true (List.mem "simple" topics)
+
+let test_parse_prose_before_and_after () =
+  let topics = Lodge_topic.parse_topics_response
+    {|Sure, here are topics: ["graphql", "api"] Hope that helps.|} in
+  check int "2 topics" 2 (List.length topics);
+  check bool "graphql" true (List.mem "graphql" topics);
+  check bool "api" true (List.mem "api" topics)
+
+(* ============================================
+   find_array_bounds tests
+   ============================================ *)
+
+let test_find_array_simple () =
+  match Lodge_topic.find_array_bounds {|["a","b"]|} with
+  | Some (0, 8) -> ()
+  | Some (s, e) -> fail (Printf.sprintf "wrong bounds: %d,%d" s e)
+  | None -> fail "expected Some"
+
+let test_find_array_nested () =
+  match Lodge_topic.find_array_bounds {|["x[y]","z"]|} with
+  | Some (0, 11) -> ()
+  | Some (s, e) -> fail (Printf.sprintf "wrong bounds: %d,%d" s e)
+  | None -> fail "expected Some"
+
+let test_find_array_none () =
+  match Lodge_topic.find_array_bounds "no brackets here" with
+  | None -> ()
+  | Some _ -> fail "expected None"
+
+let test_find_array_with_prefix () =
+  match Lodge_topic.find_array_bounds {|topics: ["a"]|} with
+  | Some (8, 12) -> ()
+  | Some (s, e) -> fail (Printf.sprintf "wrong bounds: %d,%d" s e)
+  | None -> fail "expected Some"
+
+(* ============================================
+   truncate_topics tests
+   ============================================ *)
+
+let test_truncate_over () =
+  let topics = List.init 12 (fun i -> Printf.sprintf "t%d" i) in
+  let result = Lodge_topic.truncate_topics topics in
+  check int "truncated to 8" 8 (List.length result)
+
+let test_truncate_exact () =
+  let topics = List.init 8 (fun i -> Printf.sprintf "t%d" i) in
+  let result = Lodge_topic.truncate_topics topics in
+  check int "exactly 8" 8 (List.length result)
+
+let test_truncate_under () =
+  let topics = ["a"; "b"; "c"] in
+  let result = Lodge_topic.truncate_topics topics in
+  check int "unchanged 3" 3 (List.length result)
+
+(* ============================================
+   filter_topic_items tests
+   ============================================ *)
+
+let test_filter_valid () =
+  let items = [`String "ocaml"; `String "eio"] in
+  let result = Lodge_topic.filter_topic_items items in
+  check int "2 items" 2 (List.length result)
+
+let test_filter_mixed () =
+  let items = [`String "ocaml"; `Int 42; `Bool true; `String "eio"] in
+  let result = Lodge_topic.filter_topic_items items in
+  check int "2 string items" 2 (List.length result)
+
+let test_filter_empty_and_oversized () =
+  let long = `String (String.make 60 'z') in
+  let items = [`String ""; long; `String "ok"] in
+  let result = Lodge_topic.filter_topic_items items in
+  check int "only 1 valid" 1 (List.length result);
+  check bool "ok present" true (List.mem "ok" result)
+
+(* ============================================
+   topics_response_is_valid tests
+   ============================================ *)
+
+let make_llm_response content =
+  Llm_client.{
+    content;
+    tool_calls = [];
+    usage = {
+      input_tokens = 0; output_tokens = 0; total_tokens = 0;
+      cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
+    };
+    model_used = "test";
+    latency_ms = 0;
+  }
+
+let test_validate_valid () =
+  let r = make_llm_response {|["ocaml", "eio"]|} in
+  check bool "valid response" true (Lodge_topic.topics_response_is_valid r)
+
+let test_validate_empty_array () =
+  let r = make_llm_response {|[]|} in
+  check bool "empty array is invalid" false (Lodge_topic.topics_response_is_valid r)
+
+let test_validate_garbage () =
+  let r = make_llm_response "I don't know what to say" in
+  check bool "garbage is invalid" false (Lodge_topic.topics_response_is_valid r)
+
+let test_validate_number_array () =
+  let r = make_llm_response {|[1, 2, 3]|} in
+  check bool "number array is invalid" false (Lodge_topic.topics_response_is_valid r)
+
 (* ============================================
    Heuristic tests — keyword matching
    ============================================ *)
@@ -222,6 +354,18 @@ let test_build_prompt_has_json_instruction () =
     (try ignore (Str.search_forward (Str.regexp_string "JSON array") prompt 0); true
      with Not_found -> false)
 
+let test_build_prompt_has_empty_array_instruction () =
+  let prompt = Lodge_topic.build_topic_prompt "test content" in
+  check bool "mentions empty array []" true
+    (try ignore (Str.search_forward (Str.regexp_string "[]") prompt 0); true
+     with Not_found -> false)
+
+let test_build_prompt_has_bad_examples () =
+  let prompt = Lodge_topic.build_topic_prompt "test content" in
+  check bool "has bad examples" true
+    (try ignore (Str.search_forward (Str.regexp_string "Bad examples") prompt 0); true
+     with Not_found -> false)
+
 (* ============================================
    LLM extraction tests (short content skip)
    ============================================ *)
@@ -248,6 +392,33 @@ let () =
       test_case "mixed types" `Quick test_parse_mixed_types;
       test_case "whitespace and case" `Quick test_parse_whitespace_and_case;
       test_case "empty string topic" `Quick test_parse_empty_string_topic;
+      test_case "nested brackets" `Quick test_parse_nested_brackets;
+      test_case "trailing text" `Quick test_parse_json_with_trailing_text;
+      test_case "number array" `Quick test_parse_number_array;
+      test_case "deeply nested brackets" `Quick test_parse_deeply_nested;
+      test_case "prose before and after" `Quick test_parse_prose_before_and_after;
+    ];
+    "find_array_bounds", [
+      test_case "simple array" `Quick test_find_array_simple;
+      test_case "nested brackets" `Quick test_find_array_nested;
+      test_case "no brackets" `Quick test_find_array_none;
+      test_case "with prefix text" `Quick test_find_array_with_prefix;
+    ];
+    "truncate_topics", [
+      test_case "over max" `Quick test_truncate_over;
+      test_case "exact max" `Quick test_truncate_exact;
+      test_case "under max" `Quick test_truncate_under;
+    ];
+    "filter_topic_items", [
+      test_case "valid items" `Quick test_filter_valid;
+      test_case "mixed types" `Quick test_filter_mixed;
+      test_case "empty and oversized" `Quick test_filter_empty_and_oversized;
+    ];
+    "topics_response_is_valid", [
+      test_case "valid response" `Quick test_validate_valid;
+      test_case "empty array invalid" `Quick test_validate_empty_array;
+      test_case "garbage invalid" `Quick test_validate_garbage;
+      test_case "number array invalid" `Quick test_validate_number_array;
     ];
     "heuristic", [
       test_case "ocaml keywords" `Quick test_heuristic_ocaml;
@@ -277,6 +448,8 @@ let () =
       test_case "contains content" `Quick test_build_prompt_contains_content;
       test_case "truncates long content" `Quick test_build_prompt_truncates_long_content;
       test_case "has json instruction" `Quick test_build_prompt_has_json_instruction;
+      test_case "has empty array instruction" `Quick test_build_prompt_has_empty_array_instruction;
+      test_case "has bad examples" `Quick test_build_prompt_has_bad_examples;
     ];
     "llm", [
       test_case "skip short content" `Quick test_llm_skip_short_content;

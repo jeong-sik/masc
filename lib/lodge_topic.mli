@@ -53,12 +53,28 @@ val match_compound : string -> string -> bool
 (** [match_compound lower_text phrase] checks if a kebab-case [phrase]
     matches in [lower_text] (both "kebab-case" and "space separated" forms). *)
 
+(** {1 Helpers} *)
+
+val truncate_topics : string list -> string list
+(** Truncate a list to at most [max_topics] (8) items. *)
+
+val filter_topic_items : Yojson.Safe.t list -> string list
+(** Filter a Yojson list to valid lowercase topic strings (non-empty, <=50 chars). *)
 (** {1 Parsing} *)
 
 val parse_topics_response : string -> string list
 (** Parse LLM response text into topic list.
-    Handles clean JSON arrays, JSON embedded in prose, and malformed input.
+    Uses bracket-aware scanning to handle nested brackets like ["type[T]"].
+    Handles clean JSON arrays, JSON embedded in prose, trailing text, and malformed input.
     Filters oversized topics (>50 chars) and truncates to 8 items. *)
+
+val find_array_bounds : string -> (int * int) option
+(** Find the start and end positions of the outermost JSON array in a string.
+    Uses depth tracking to handle nested brackets correctly. *)
+
+val topics_response_is_valid : Llm_client.completion_response -> bool
+(** Validate an LLM completion response. Used as [~accept] predicate so
+    the cascade retries with the next model on garbage/empty responses. *)
 
 (** {1 Prompt} *)
 

@@ -82,6 +82,7 @@ let to_oas_checkpoint
     max_total_tokens = None;
     context = oas_ctx;
     mcp_sessions = [];
+    disable_parallel_tool_use = false;
   }
 
 (** Extract MASC metadata from an OAS Checkpoint for loop state initialization. *)

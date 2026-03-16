@@ -864,11 +864,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                 let author_name = Agent_id.to_string post.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
                 Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir;
-                (* Agent Economy: earn credits for upvote received *)
-                (if direction = Up then
-                   ignore (Agent_economy.earn
-                     ~base_path:(board_base_path ()) ~agent_name:author_name
-                     ~kind:Earn_upvote ~reason:"upvote on post (flip)" ()));
+                (* No economy earn on flip: prevents down/up alternation abuse *)
                 Ok (flipped.votes_up - flipped.votes_down)
             | None ->
                 let updated = match direction with

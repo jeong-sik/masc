@@ -190,8 +190,9 @@ let append_transaction base_path (txn : transaction) : (unit, string) result =
 
 (** {1 Balance Cache} *)
 
-(* In-memory balance cache: agent_name -> current balance *)
-let balance_cache : (string, float) Hashtbl.t = Hashtbl.create 32
+(* In-memory balance cache: (base_path, agent_name) -> current balance.
+   Namespaced by base_path to prevent cross-workspace contamination. *)
+let balance_cache : (string * string, float) Hashtbl.t = Hashtbl.create 32
 
 (* Track whether we have loaded from disk for a given base_path *)
 let loaded_paths : (string, bool) Hashtbl.t = Hashtbl.create 4
@@ -212,7 +213,7 @@ let load_balances_from_ledger base_path =
               let json = Yojson.Safe.from_string trimmed in
               match transaction_of_json json with
               | Some txn ->
-                Hashtbl.replace balance_cache txn.agent_name txn.balance_after
+                Hashtbl.replace balance_cache (base_path, txn.agent_name) txn.balance_after
               | None -> ()
             with Yojson.Json_error _ -> ())
     end;
@@ -221,7 +222,7 @@ let load_balances_from_ledger base_path =
 
 let get_balance ~base_path ~agent_name =
   load_balances_from_ledger base_path;
-  match Hashtbl.find_opt balance_cache agent_name with
+  match Hashtbl.find_opt balance_cache (base_path, agent_name) with
   | Some b -> b
   | None -> initial_balance ()
 
@@ -272,7 +273,7 @@ let earn ~base_path ~agent_name ~kind ~reason ?reputation_score ?(metadata = `Nu
       match append_transaction base_path txn with
       | Error msg -> Error msg
       | Ok () ->
-        Hashtbl.replace balance_cache agent_name balance_after;
+        Hashtbl.replace balance_cache (base_path, agent_name) balance_after;
         Ok balance_after
 
 let spend ~base_path ~agent_name ~amount ~kind ~reason ?(metadata = `Null) () =
@@ -295,7 +296,7 @@ let spend ~base_path ~agent_name ~amount ~kind ~reason ?(metadata = `Null) () =
     match append_transaction base_path txn with
     | Error msg -> Error msg
     | Ok () ->
-      Hashtbl.replace balance_cache agent_name balance_after;
+      Hashtbl.replace balance_cache (base_path, agent_name) balance_after;
       Ok balance_after
 
 (** {1 Behavioral Pressure} *)

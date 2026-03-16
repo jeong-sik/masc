@@ -72,7 +72,11 @@ let reputation_of_json (json : Yojson.Safe.t) : agent_reputation option =
         debates_participated = Safe_ops.json_int ~default:0 "debates_participated" json;
         overall_score = Safe_ops.json_float ~default:0.0 "overall_score" json;
       }
-  with _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
+  | exn ->
+      Log.Reputation.warn "agent reputation of_json unexpected: %s" (Printexc.to_string exn);
+      None
 
 (** {1 JSONL Helpers} *)
 
@@ -178,7 +182,11 @@ let count_debate_participation (config : Room.config) ~(agent_name : string) : i
                  let agent = Safe_ops.json_string ~default:"" "agent" arg_json in
                  agent = agent_name)
                args_list
-           with _ -> false))
+           with
+           | Yojson.Safe.Util.Type_error _ -> false
+           | exn ->
+               Log.Reputation.warn "dispatch count parse: %s" (Printexc.to_string exn);
+               false))
     |> List.length
 
 (** {1 Mention Counting} *)

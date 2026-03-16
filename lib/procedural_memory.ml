@@ -78,7 +78,11 @@ let of_json (json : Yojson.Safe.t) : procedure option =
         (try json |> member "last_applied" |> to_float
          with Type_error _ -> 0.0);
     }
-  with _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
+  | exn ->
+      Log.Memory.warn "procedure of_json unexpected: %s" (Printexc.to_string exn);
+      None
 
 (* ================================================================ *)
 (* File I/O                                                         *)

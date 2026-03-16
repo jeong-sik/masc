@@ -89,7 +89,11 @@ let snapshot_of_json (json : Yojson.Safe.t) : reputation_snapshot option =
       board_posts =
         (try json |> member "board_posts" |> to_int with Type_error _ -> 0);
     }
-  with _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
+  | exn ->
+      Log.Reputation.warn "snapshot_of_json unexpected: %s" (Printexc.to_string exn);
+      None
 
 (* ================================================================ *)
 (* File I/O                                                         *)

@@ -270,7 +270,8 @@ let broadcast_cycle_result (state : Autoresearch.loop_state) (record : Autoresea
     ("delta", `Float record.delta);
     ("baseline", `Float state.baseline);
     ("best_score", `Float state.best_score);
-  ]) with _ -> ()
+  ]) with exn ->
+    Log.Autoresearch.warn "broadcast_cycle_result failed: %s" (Printexc.to_string exn)
 
 (* ================================================================ *)
 (* Handlers                                                         *)
@@ -621,7 +622,8 @@ let handle_stop ctx args =
                        ("reason", `String reason);
                        ("status", `String (Autoresearch.status_to_string state.status));
                      ])
-             with _ -> ())
+             with exn ->
+               Log.Autoresearch.warn "stop event append failed: %s" (Printexc.to_string exn))
         | None -> ());
         `Assoc [
           ("loop_id", `String id);
@@ -841,7 +843,8 @@ let handle_cycle ctx args =
                                    ("baseline", `Float state.baseline);
                                    ("best_score", `Float state.best_score);
                                  ])
-                         with _ -> ())
+                         with exn ->
+                           Log.Autoresearch.warn "cycle event append failed: %s" (Printexc.to_string exn))
                     | None -> ());
                     (* 10. SSE broadcast *)
                     broadcast_cycle_result state record;

@@ -104,7 +104,8 @@ let send_raw info data =
           Httpun.Body.Writer.write_string info.writer data;
           Httpun.Body.Writer.flush info.writer (fun _ -> ());
           true
-        with _ ->
+        with exn ->
+          Log.Social.warn "send_raw write failed: %s" (Printexc.to_string exn);
           info.closed <- true;
           false)
 

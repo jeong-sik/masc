@@ -418,6 +418,10 @@
    keeper_exec_tools
    keeper_exec_status
    keeper_exec_persona
+   keeper_exec_context
+   keeper_exec_autonomy
+   keeper_exec_proactive
+   keeper_exec_room
    keeper_execution
    keeper_learning
    keeper_feedback_tool
@@ -585,6 +589,10 @@
   keeper_exec_tools
   keeper_exec_status
   keeper_exec_persona
+  keeper_exec_context
+  keeper_exec_autonomy
+  keeper_exec_proactive
+  keeper_exec_room
   keeper_turn_session
   keeper_turn_response
   keeper_turn_setup

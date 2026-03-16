@@ -15,6 +15,26 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Build concurrency limit: use half of available cores to prevent system freeze
+# when multiple worktrees trigger simultaneous dune builds.
+DUNE_JOBS="${MASC_DUNE_JOBS:-8}"
+
+# mkdir-based build mutex (atomic on POSIX, works on macOS without flock).
+# Prevents multiple start-masc-mcp.sh instances from building concurrently.
+MASC_BUILD_LOCK="/tmp/masc-mcp-build.lock"
+acquire_build_lock() {
+    if ! mkdir "$MASC_BUILD_LOCK" 2>/dev/null; then
+        echo "Another MASC build in progress, skipping rebuild" >&2
+        return 1
+    fi
+    # Clean up lock on exit (normal or error)
+    trap 'rmdir "$MASC_BUILD_LOCK" 2>/dev/null; trap - EXIT' EXIT
+    return 0
+}
+release_build_lock() {
+    rmdir "$MASC_BUILD_LOCK" 2>/dev/null || true
+}
+
 resolve_repo_env_root() {
     if command -v git >/dev/null 2>&1; then
         local common_dir
@@ -174,7 +194,10 @@ if [ -z "$MASC_EIO_EXE" ]; then
         echo "Error: dune not found. Install dune first." >&2
         exit 1
     fi
-    dune build --root "$SCRIPT_DIR" bin/main_eio.exe 1>&2
+    if acquire_build_lock; then
+        dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" bin/main_eio.exe 1>&2
+        release_build_lock
+    fi
     if [ -x "$LOCAL_EIO_EXE" ]; then
         MASC_EIO_EXE="$LOCAL_EIO_EXE"
     else
@@ -189,7 +212,10 @@ if [ "$HTTP_MODE" = "false" ] && [ -z "$MASC_STDIO_EIO_EXE" ]; then
         echo "Error: dune not found. Cannot build stdio server." >&2
         exit 1
     fi
-    dune build --root "$SCRIPT_DIR" bin/main_stdio_eio.exe 1>&2
+    if acquire_build_lock; then
+        dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" bin/main_stdio_eio.exe 1>&2
+        release_build_lock
+    fi
     if [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
         MASC_STDIO_EIO_EXE="$WORKSPACE_STDIO_EIO_EXE"
     elif [ -x "$LOCAL_STDIO_EIO_EXE" ]; then
@@ -206,8 +232,11 @@ if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
     if find "$SCRIPT_DIR/bin" "$SCRIPT_DIR/lib" \
         -type f \( -name '*.ml' -o -name '*.mli' -o -name 'dune' \) \
         -newer "$MASC_EIO_EXE" 2>/dev/null | head -n 1 | grep -q .; then
-        echo "Rebuilding MASC MCP server (stale executable detected)..." >&2
-        dune build --root "$SCRIPT_DIR" bin/main_eio.exe 1>&2
+        if acquire_build_lock; then
+            echo "Rebuilding MASC MCP server (stale executable detected)..." >&2
+            dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" bin/main_eio.exe 1>&2
+            release_build_lock
+        fi
 
         if [ -x "$WORKSPACE_EIO_EXE" ]; then
             MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
@@ -305,7 +334,10 @@ if [ "$EIO_MODE" = "true" ]; then
             echo "Error: dune not found. Cannot build Eio server." >&2
             exit 1
         fi
-        dune build --root "$SCRIPT_DIR" bin/main_eio.exe 1>&2
+        if acquire_build_lock; then
+            dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" bin/main_eio.exe 1>&2
+            release_build_lock
+        fi
         if [ -x "$WORKSPACE_EIO_EXE" ]; then
             MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
         elif [ -x "$LOCAL_EIO_EXE" ]; then

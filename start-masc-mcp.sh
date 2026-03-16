@@ -21,18 +21,41 @@ DUNE_JOBS="${MASC_DUNE_JOBS:-8}"
 
 # mkdir-based build mutex (atomic on POSIX, works on macOS without flock).
 # Prevents multiple start-masc-mcp.sh instances from building concurrently.
+# Stores owner PID to detect and recover from stale locks left by crashed processes.
 MASC_BUILD_LOCK="/tmp/masc-mcp-build.lock"
-acquire_build_lock() {
-    if ! mkdir "$MASC_BUILD_LOCK" 2>/dev/null; then
-        echo "Another MASC build in progress, skipping rebuild" >&2
-        return 1
+_MASC_LOCK_HELD=""
+_masc_cleanup_lock() {
+    if [ -n "$_MASC_LOCK_HELD" ] && [ -d "$MASC_BUILD_LOCK" ]; then
+        rm -f "$MASC_BUILD_LOCK/pid"
+        rmdir "$MASC_BUILD_LOCK" 2>/dev/null || true
+        _MASC_LOCK_HELD=""
     fi
-    # Clean up lock on exit (normal or error)
-    trap 'rmdir "$MASC_BUILD_LOCK" 2>/dev/null; trap - EXIT' EXIT
-    return 0
+}
+trap '_masc_cleanup_lock' EXIT
+acquire_build_lock() {
+    if mkdir "$MASC_BUILD_LOCK" 2>/dev/null; then
+        echo $$ > "$MASC_BUILD_LOCK/pid"
+        _MASC_LOCK_HELD="1"
+        return 0
+    fi
+    # Check for stale lock (owner process no longer running)
+    local owner_pid
+    owner_pid="$(cat "$MASC_BUILD_LOCK/pid" 2>/dev/null || echo "")"
+    if [ -n "$owner_pid" ] && ! kill -0 "$owner_pid" 2>/dev/null; then
+        echo "Removing stale build lock (pid $owner_pid no longer running)" >&2
+        rm -f "$MASC_BUILD_LOCK/pid"
+        rmdir "$MASC_BUILD_LOCK" 2>/dev/null || true
+        if mkdir "$MASC_BUILD_LOCK" 2>/dev/null; then
+            echo $$ > "$MASC_BUILD_LOCK/pid"
+            _MASC_LOCK_HELD="1"
+            return 0
+        fi
+    fi
+    echo "Another MASC build in progress (pid ${owner_pid:-unknown}), skipping rebuild" >&2
+    return 1
 }
 release_build_lock() {
-    rmdir "$MASC_BUILD_LOCK" 2>/dev/null || true
+    _masc_cleanup_lock
 }
 
 resolve_repo_env_root() {

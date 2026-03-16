@@ -3,6 +3,7 @@
 open Alcotest
 
 module Agent_card = Masc_mcp.Agent_card
+module Config = Masc_mcp.Config
 
 (* ============================================================
    Provider Tests
@@ -57,8 +58,8 @@ let test_skill_json_roundtrip () =
     id = "test-skill";
     name = "Test Skill";
     description = Some "A test skill";
-    input_modes = ["text/plain"; "application/json"];
-    output_modes = ["text/plain"; "application/octet-stream"];
+    tags = []; input_modes = ["text/plain"; "application/json"];
+    output_modes = ["text/plain"; "application/octet-stream"]; tool_count = 0;
   } in
   let json = Agent_card.skill_to_yojson s in
   match Agent_card.skill_of_yojson json with
@@ -75,8 +76,8 @@ let test_skill_without_description () =
     id = "minimal";
     name = "Minimal";
     description = None;
-    input_modes = [];
-    output_modes = [];
+    tags = []; input_modes = [];
+    output_modes = []; tool_count = 0;
   } in
   let json = Agent_card.skill_to_yojson s in
   match Agent_card.skill_of_yojson json with
@@ -90,21 +91,21 @@ let test_skill_show () =
     id = "show-test";
     name = "Show Test Skill";
     description = Some "Test";
-    input_modes = ["text/plain"];
-    output_modes = ["text/plain"];
+    tags = []; input_modes = ["text/plain"];
+    output_modes = ["text/plain"]; tool_count = 0;
   } in
   let str = Agent_card.show_skill s in
   check bool "non-empty" true (String.length str > 0)
 
 let test_skill_eq () =
   let s1 : Agent_card.skill = {
-    id = "a"; name = "A"; description = None; input_modes = []; output_modes = []
+    id = "a"; name = "A"; description = None; tags = []; input_modes = []; output_modes = []; tool_count = 0
   } in
   let s2 : Agent_card.skill = {
-    id = "a"; name = "A"; description = None; input_modes = []; output_modes = []
+    id = "a"; name = "A"; description = None; tags = []; input_modes = []; output_modes = []; tool_count = 0
   } in
   let s3 : Agent_card.skill = {
-    id = "b"; name = "B"; description = None; input_modes = []; output_modes = []
+    id = "b"; name = "B"; description = None; tags = []; input_modes = []; output_modes = []; tool_count = 0
   } in
   check bool "equal same" true (Agent_card.equal_skill s1 s2);
   check bool "not equal diff" false (Agent_card.equal_skill s1 s3)
@@ -283,7 +284,7 @@ let test_signature_of_json_invalid () =
    ============================================================ *)
 
 let test_generate_default () =
-  let card = Agent_card.generate_default () in
+  let card = Agent_card.generate_default ~schemas:Config.raw_all_tool_schemas () in
   check string "name" "MASC-MCP" card.name;
   check string "version" Masc_mcp.Version.version card.version;
   check bool "has description" true (Option.is_some card.description);
@@ -431,36 +432,53 @@ let test_agent_card_eq () =
    MASC Skills Tests
    ============================================================ *)
 
+let dynamic_skills () =
+  Agent_card.skills_from_tools Config.raw_all_tool_schemas
+
 let test_masc_skills_not_empty () =
-  check bool "has skills" true (List.length Agent_card.masc_skills > 0)
+  check bool "has skills" true (List.length (dynamic_skills ()) > 0)
 
 let test_masc_skills_have_ids () =
   let all_have_ids = List.for_all (fun (s : Agent_card.skill) ->
     String.length s.id > 0
-  ) Agent_card.masc_skills in
+  ) (dynamic_skills ()) in
   check bool "all have ids" true all_have_ids
 
 let test_masc_skills_unique_ids () =
-  let ids = List.map (fun (s : Agent_card.skill) -> s.id) Agent_card.masc_skills in
+  let ids = List.map (fun (s : Agent_card.skill) -> s.id) (dynamic_skills ()) in
   let unique_ids = List.sort_uniq String.compare ids in
   check int "unique ids" (List.length ids) (List.length unique_ids)
 
 let test_masc_skills_have_names () =
   let all_have_names = List.for_all (fun (s : Agent_card.skill) ->
     String.length s.name > 0
-  ) Agent_card.masc_skills in
+  ) (dynamic_skills ()) in
   check bool "all have names" true all_have_names
 
 let test_masc_skills_expected_count () =
-  check int "skill count" 8 (List.length Agent_card.masc_skills)
+  (* Dynamic skills: one per Mode.category with tools (excluding Unknown) *)
+  let count = List.length (dynamic_skills ()) in
+  check bool "skill count > 8 (was hardcoded 8, now dynamic from categories)"
+    true (count >= 8)
 
 let test_masc_skills_mime_types () =
-  (* v0.3: input/output modes should be MIME types *)
   let all_mime = List.for_all (fun (s : Agent_card.skill) ->
     List.for_all (fun m -> String.contains m '/') s.input_modes
     && List.for_all (fun m -> String.contains m '/') s.output_modes
-  ) Agent_card.masc_skills in
+  ) (dynamic_skills ()) in
   check bool "all modes are MIME types" true all_mime
+
+let test_masc_skills_have_tags () =
+  let all_have_tags = List.for_all (fun (s : Agent_card.skill) ->
+    List.length s.tags > 0
+  ) (dynamic_skills ()) in
+  check bool "all have tags" true all_have_tags
+
+let test_masc_skills_have_tool_count () =
+  let all_positive = List.for_all (fun (s : Agent_card.skill) ->
+    s.tool_count > 0
+  ) (dynamic_skills ()) in
+  check bool "all have positive tool_count" true all_positive
 
 (* ============================================================
    Now ISO8601 Tests
@@ -603,6 +621,8 @@ let () =
       test_case "have names" `Quick test_masc_skills_have_names;
       test_case "expected count" `Quick test_masc_skills_expected_count;
       test_case "MIME types" `Quick test_masc_skills_mime_types;
+      test_case "have tags" `Quick test_masc_skills_have_tags;
+      test_case "have tool_count" `Quick test_masc_skills_have_tool_count;
     ];
     "now_iso8601", [
       test_case "format" `Quick test_now_iso8601_format;

@@ -20,13 +20,17 @@ type provider = {
   url: string option;
 } [@@deriving yojson, show, eq]
 
-(** Skill definition for agent capabilities *)
+(** Skill definition for agent capabilities.
+    A2A v0.3 compatible with [tags] for category-based discovery.
+    [tool_count] tracks how many MCP tools this skill aggregates. *)
 type skill = {
   id: string;
   name: string;
   description: string option;
-  input_modes: string list;   (** MIME types: "text/plain", "application/json" *)
-  output_modes: string list;  (** MIME types: "text/plain", "application/json" *)
+  tags: string list;           (** Category tags for skill discovery *)
+  input_modes: string list;    (** MIME types: "text/plain", "application/json" *)
+  output_modes: string list;   (** MIME types: "text/plain", "application/json" *)
+  tool_count: int;             (** Number of MCP tools under this skill *)
 } [@@deriving yojson, show, eq]
 
 (** Protocol binding for agent communication.
@@ -290,70 +294,50 @@ let now_iso8601 () : string =
     tm.Unix.tm_min
     tm.Unix.tm_sec
 
-(** MASC skill definitions (MIME-typed for v0.3) *)
-let masc_skills : skill list = [
-  {
-    id = "task-management";
-    name = "Task Management";
-    description = Some "Create, claim, and complete tasks on the quest board";
-    input_modes = ["text/plain"; "application/json"];
-    output_modes = ["text/plain"; "application/json"];
-  };
-  {
-    id = "agent-coordination";
-    name = "Agent Coordination";
-    description = Some "Join room, broadcast messages, coordinate with other agents";
-    input_modes = ["text/plain"];
-    output_modes = ["text/plain"; "text/event-stream"];
-  };
-  {
-    id = "file-locking";
-    name = "File Locking";
-    description = Some "Lock and unlock files to prevent concurrent edits";
-    input_modes = ["text/plain"];
-    output_modes = ["text/plain"];
-  };
-  {
-    id = "git-worktree";
-    name = "Git Worktree Management";
-    description = Some "Create isolated git worktrees for parallel development";
-    input_modes = ["text/plain"];
-    output_modes = ["text/plain"; "application/octet-stream"];
-  };
-  {
-    id = "voting";
-    name = "Multi-Agent Voting";
-    description = Some "Create votes and reach consensus among agents";
-    input_modes = ["text/plain"; "application/json"];
-    output_modes = ["text/plain"; "application/json"];
-  };
-  {
-    id = "cost-tracking";
-    name = "Cost Tracking";
-    description = Some "Log and report token usage and API costs";
-    input_modes = ["application/json"];
-    output_modes = ["text/plain"; "application/json"];
-  };
-  {
-    id = "human-in-loop";
-    name = "Human-in-the-Loop";
-    description = Some "Interrupt workflows for user approval on sensitive actions";
-    input_modes = ["text/plain"];
-    output_modes = ["text/plain"];
-  };
-  {
-    id = "portal-a2a";
-    name = "A2A Portal Communication";
-    description = Some "Direct agent-to-agent private communication channels";
-    input_modes = ["text/plain"; "application/json"];
-    output_modes = ["text/plain"; "text/event-stream"];
-  };
-]
+(** Build A2A skills dynamically from MCP tool schemas grouped by category.
 
-(** Generate default MASC agent card (A2A v0.3 compliant) *)
-let generate_default ?(port=8935) ?(host="127.0.0.1") () : agent_card =
+    Each [Mode.category] becomes one A2A skill. The skill description comes
+    from [Mode.category_description] and [tool_count] tracks how many
+    MCP tools are aggregated under that category.
+
+    Categories with zero visible tools are excluded. [Unknown] is always excluded. *)
+let skills_from_tools (schemas : Types.tool_schema list) : skill list =
+  let tbl : (string, int) Hashtbl.t = Hashtbl.create 20 in
+  List.iter (fun (schema : Types.tool_schema) ->
+    let cat = Mode.tool_category schema.name in
+    if cat <> Mode.Unknown then begin
+      let key = Mode.category_to_string cat in
+      let prev = try Hashtbl.find tbl key with Not_found -> 0 in
+      Hashtbl.replace tbl key (prev + 1)
+    end
+  ) schemas;
+  Hashtbl.fold (fun cat_str count acc ->
+    match Mode.category_of_string cat_str with
+    | None -> acc
+    | Some cat ->
+      let skill : skill = {
+        id = cat_str;
+        name = String.capitalize_ascii cat_str;
+        description = Some (Mode.category_description cat);
+        tags = [cat_str; "masc"];
+        input_modes = ["application/json"];
+        output_modes = ["application/json"; "text/plain"];
+        tool_count = count;
+      } in
+      skill :: acc
+  ) tbl []
+  |> List.sort (fun (a : skill) (b : skill) -> String.compare a.id b.id)
+
+(** Generate default MASC agent card (A2A v0.3 compliant).
+    [schemas] defaults to [Config.raw_all_tool_schemas] when provided,
+    populating skills dynamically from actual MCP tools. *)
+let generate_default ?(port=8935) ?(host="127.0.0.1") ?(schemas=[]) () : agent_card =
   let timestamp = now_iso8601 () in
   let base_url = Printf.sprintf "http://%s:%d" host port in
+  let skills = match schemas with
+    | [] -> []  (* Caller should pass schemas for dynamic skills *)
+    | ss -> skills_from_tools ss
+  in
   {
     name = "MASC-MCP";
     version = Version.version;
@@ -368,7 +352,7 @@ let generate_default ?(port=8935) ?(host="127.0.0.1") () : agent_card =
       push_notifications = true;
       extended_agent_card = false;
     };
-    skills = masc_skills;
+    skills;
     supported_interfaces = [
       { protocol = "SSE"; url = Printf.sprintf "%s/sse" base_url };
       { protocol = "JSONRPC"; url = Printf.sprintf "%s/mcp" base_url };

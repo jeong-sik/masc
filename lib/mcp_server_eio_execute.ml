@@ -266,6 +266,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
        with Invalid_argument msg -> Some msg
           | Sys_error msg -> Some msg
           | Yojson.Json_error msg -> Some msg
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Some (Printexc.to_string exn))
     else
       None
@@ -354,6 +355,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       try
         ignore (Room.heartbeat config ~agent_name)
       with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           Log.Misc.warn "heartbeat update skipped for %s on %s: %s"
             agent_name name (Printexc.to_string exn)
@@ -689,6 +691,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
                 `Error (Printf.sprintf "keeper returned invalid json: %s" e))
           | Some (false, msg) -> `Error msg)
     with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout -> `Timeout
     | exn -> `Error (Printexc.to_string exn)
   in
@@ -706,6 +709,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           | Some (true, _body) -> `Ok
           | Some (false, msg) -> `Error msg)
     with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout -> `Error "timeout"
     | exn -> `Error (Printexc.to_string exn)
   in

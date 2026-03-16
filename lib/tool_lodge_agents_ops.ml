@@ -101,7 +101,9 @@ let neo4j_http_cypher cypher =
 	      Log.Lodge.info "response: %s" (if String.length output < 200 then output else String.sub output 0 200 ^ "...");
 	      if String.length output > 0 then Ok output
 	      else Error "empty response"
-	    with exn -> Error (Printexc.to_string exn)
+	    with
+	    | Eio.Cancel.Cancelled _ as exn -> raise exn
+	    | exn -> Error (Printexc.to_string exn)
 
 (** Spawn a new agent — can be called by another agent.
     Uses GraphQL createAgent mutation (works in Railway production). *)
@@ -182,6 +184,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
             let msg = result |> member "message" |> to_string_option |> Option.value ~default:"Unknown" in
             (false, Printf.sprintf "❌ Lodge: %s" msg)
       with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Yojson.Json_error e -> (false, Printf.sprintf "❌ Lodge: JSON parse error: %s" e)
       | exn -> (false, Printf.sprintf "❌ Lodge: %s" (Printexc.to_string exn))
 

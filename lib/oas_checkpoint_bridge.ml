@@ -11,31 +11,14 @@
     @since 2.90.0 *)
 
 (** Convert a MASC Llm_client.message to an OAS Types.message.
-    OAS role only has User | Assistant, so System and Tool map to User. *)
+    Delegates to [Llm_client.to_oas_message] — the canonical conversion. *)
 let masc_msg_to_oas (m : Llm_client.message) : Agent_sdk.Types.message =
-  let role = match m.role with
-    | Llm_client.System | Llm_client.Tool -> Agent_sdk.Types.User
-    | Llm_client.User -> Agent_sdk.Types.User
-    | Llm_client.Assistant -> Agent_sdk.Types.Assistant
-  in
-  let content = [Agent_sdk.Types.Text m.content] in
-  { Agent_sdk.Types.role; content }
+  Llm_client.to_oas_message m
 
-(** Convert an OAS Types.message back to MASC Llm_client.message. *)
+(** Convert an OAS Types.message back to MASC Llm_client.message.
+    Delegates to [Llm_client.of_oas_message]. *)
 let oas_msg_to_masc (m : Agent_sdk.Types.message) : Llm_client.message =
-  let role = match m.role with
-    | Agent_sdk.Types.User -> Llm_client.User
-    | Agent_sdk.Types.Assistant -> Llm_client.Assistant
-  in
-  let content =
-    m.content
-    |> List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
-         match block with
-         | Agent_sdk.Types.Text s -> Some s
-         | _ -> None)
-    |> String.concat "\n"
-  in
-  { Llm_client.role; content; name = None; tool_call_id = None }
+  Llm_client.of_oas_message m
 
 (** Minimal perpetual-loop state needed for OAS checkpoint persistence. *)
 type checkpoint_state = {

@@ -317,6 +317,96 @@ let compact ctx strategies =
   sync_oas_context ctx
 
 (* ================================================================ *)
+(* OAS Context_reducer Integration                                  *)
+(* ================================================================ *)
+
+let masc_msg_to_oas_tagged (m : Llm_client.message) : Agent_sdk.Types.message =
+  let role, tag = match m.role with
+    | Llm_client.System -> Agent_sdk.Types.User, Some "[__MASC_ROLE:system__]"
+    | Llm_client.Tool -> Agent_sdk.Types.User, Some "[__MASC_ROLE:tool__]"
+    | Llm_client.User -> Agent_sdk.Types.User, None
+    | Llm_client.Assistant -> Agent_sdk.Types.Assistant, None
+  in
+  let text = match tag with
+    | Some t -> t ^ m.content
+    | None -> m.content
+  in
+  let content = match m.role with
+    | Llm_client.Tool ->
+      let tool_use_id = Option.value ~default:"masc-tool" m.tool_call_id in
+      [Agent_sdk.Types.ToolResult { tool_use_id; content = text; is_error = false }]
+    | _ -> [Agent_sdk.Types.Text text]
+  in
+  { Agent_sdk.Types.role; content }
+
+let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Llm_client.message =
+  let text =
+    m.content
+    |> List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
+         match block with
+         | Agent_sdk.Types.Text s -> Some s
+         | Agent_sdk.Types.ToolResult { content; _ } -> Some content
+         | _ -> None)
+    |> String.concat "\n"
+  in
+  let system_tag = "[__MASC_ROLE:system__]" in
+  let tool_tag = "[__MASC_ROLE:tool__]" in
+  let role, content =
+    if starts_with ~prefix:system_tag text then
+      Llm_client.System,
+      String.sub text (String.length system_tag)
+        (String.length text - String.length system_tag)
+    else if starts_with ~prefix:tool_tag text then
+      Llm_client.Tool,
+      String.sub text (String.length tool_tag)
+        (String.length text - String.length tool_tag)
+    else
+      (match m.role with
+       | Agent_sdk.Types.User -> Llm_client.User
+       | Agent_sdk.Types.Assistant -> Llm_client.Assistant),
+      text
+  in
+  { Llm_client.role; content; name = None; tool_call_id = None }
+
+let oas_strategy_of_compaction (s : compaction_strategy) : Agent_sdk.Context_reducer.strategy =
+  match s with
+  | PruneToolOutputs ->
+    Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 }
+  | MergeContiguous ->
+    Agent_sdk.Context_reducer.Merge_contiguous
+  | DropLowImportance ->
+    Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
+      let masc_msgs = List.map oas_msg_to_masc_tagged oas_msgs in
+      let dummy_ctx = {
+        system_prompt = ""; messages = masc_msgs;
+        token_count = 0; max_tokens = 0;
+        importance_scores = []; oas_context = Agent_sdk.Context.create ()
+      } in
+      let result = drop_low_importance dummy_ctx in
+      List.map masc_msg_to_oas_tagged result.messages)
+  | SummarizeOld ->
+    Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
+      let masc_msgs = List.map oas_msg_to_masc_tagged oas_msgs in
+      let dummy_ctx = {
+        system_prompt = ""; messages = masc_msgs;
+        token_count = 0; max_tokens = 0;
+        importance_scores = []; oas_context = Agent_sdk.Context.create ()
+      } in
+      let result = summarize_old dummy_ctx in
+      List.map masc_msg_to_oas_tagged result.messages)
+
+let compact_via_oas ctx strategies =
+  let oas_strategies = List.map oas_strategy_of_compaction strategies in
+  let reducer = Agent_sdk.Context_reducer.compose
+    (List.map (fun s -> { Agent_sdk.Context_reducer.strategy = s }) oas_strategies) in
+  let oas_msgs = List.map masc_msg_to_oas_tagged ctx.messages in
+  let reduced = Agent_sdk.Context_reducer.reduce reducer oas_msgs in
+  let messages = List.map oas_msg_to_masc_tagged reduced in
+  let token_count = count_tokens ctx.system_prompt messages in
+  let ctx = { ctx with messages; token_count; importance_scores = [] } in
+  sync_oas_context ctx
+
+(* ================================================================ *)
 (* Checkpointing                                                    *)
 (* ================================================================ *)
 

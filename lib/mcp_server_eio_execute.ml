@@ -113,7 +113,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   let room_path = Room.masc_dir config in
-  let mode_config = Config.load room_path in
+  let _mode_config = Config.load room_path in
 
   let mode_gate_error =
     if not (Tool_catalog.allow_direct_call name) then
@@ -121,11 +121,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         (Printf.sprintf
            "Tool '%s' is hidden from the default tool surface and not callable directly."
            name)
-    else if not (Mode.is_tool_enabled mode_config.enabled_categories name) then
-      Some
-        (Printf.sprintf
-           "Tool '%s' is disabled in current mode '%s'. Run masc_get_config or masc_switch_mode first."
-           name (Mode.mode_to_string mode_config.mode))
     else
       None
   in

@@ -169,6 +169,346 @@ let handle_turn ctx args : result =
               | Ok json -> (true, json_ok [ ("result", json) ])
               | Error e -> (false, json_error e))))
 
+(* --- Extracted closures from handle_step --- *)
+
+type step_env = {
+  config : Room.config;
+  session_id : string;
+  actor : string;
+  wait_mode : Team_session_types.wait_mode;
+}
+
+let append_spawn_event (env : step_env) ?worker_run_id ?spawn_agent ?runtime_actor ?spawn_role
+    ?spawn_model ?execution_scope ?worker_class ?worker_size
+    ?worker_backend ?wait_mode ?trace_capability
+    ?parent_actor ?capsule_mode
+    ?runtime_pool ?lane_id ?controller_level ?control_domain
+    ?supervisor_actor ?model_tier ?task_profile ?risk_level
+    ?routing_confidence ?routing_reason ?assigned_runtime
+    ?spawn_selection_note ?tool_names ?tool_call_count ~success
+    ?exit_code
+    ?elapsed_ms ?output_preview ?error () =
+  let _ = spawn_agent and _ = spawn_model and _ = model_tier in
+  let detail =
+    `Assoc
+      [
+        ("actor", `String env.actor);
+        ("worker_run_id", Option.fold ~none:`Null ~some:(fun s -> `String s) worker_run_id);
+        ( "runtime_actor",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            runtime_actor );
+        ( "spawn_role",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            spawn_role );
+        ( "execution_scope",
+          Option.fold ~none:`Null
+            ~some:(fun scope ->
+              `String
+                (Team_session_types.execution_scope_to_string
+                   scope))
+            execution_scope );
+        ( "worker_class",
+          Option.fold ~none:`Null
+            ~some:(fun kind ->
+              `String
+                (Team_session_types.worker_class_to_string kind))
+            worker_class );
+        ( "worker_size",
+          Option.fold ~none:`Null
+            ~some:(fun size ->
+              `String
+                (Team_session_types.worker_size_to_string size))
+            worker_size );
+        ( "worker_backend",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            worker_backend );
+        ( "wait_mode",
+          Option.fold ~none:`Null ~some:(fun mode -> `String mode)
+            wait_mode );
+        ( "trace_capability",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            trace_capability );
+        ( "parent_actor",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            parent_actor );
+        ( "capsule_mode",
+          Option.fold ~none:`Null
+            ~some:(fun mode ->
+              `String
+                (Team_session_types.capsule_mode_to_string mode))
+            capsule_mode );
+        ( "runtime_pool",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            runtime_pool );
+        ( "lane_id",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            lane_id );
+        ( "controller_level",
+          Option.fold ~none:`Null
+            ~some:(fun level ->
+              `String
+                (Team_session_types.controller_level_to_string
+                   level))
+            controller_level );
+        ( "control_domain",
+          Option.fold ~none:`Null
+            ~some:(fun domain ->
+              `String
+                (Team_session_types.control_domain_to_string
+                   domain))
+            control_domain );
+        ( "supervisor_actor",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            supervisor_actor );
+        ( "task_profile",
+          Option.fold ~none:`Null
+            ~some:(fun profile ->
+              `String
+                (Team_session_types.task_profile_to_string
+                   profile))
+            task_profile );
+        ( "risk_level",
+          Option.fold ~none:`Null
+            ~some:(fun level ->
+              `String
+                (Team_session_types.risk_level_to_string level))
+            risk_level );
+        ("routing_confidence", float_opt_to_json routing_confidence);
+        ( "routing_reason",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            routing_reason );
+        ( "assigned_runtime",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            assigned_runtime );
+        ( "spawn_selection_note",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            spawn_selection_note );
+        ( "tool_names",
+          Option.fold ~none:(`List [])
+            ~some:(fun names ->
+              `List (List.map (fun name -> `String name) names))
+            tool_names );
+        ( "tool_call_count",
+          Option.fold ~none:`Null ~some:(fun n -> `Int n)
+            tool_call_count );
+        ("success", `Bool success);
+        ("exit_code", int_opt_to_json exit_code);
+        ("elapsed_ms", int_opt_to_json elapsed_ms);
+        ( "output_preview",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            output_preview );
+        ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) error);
+        ("ts_iso", `String (Types.now_iso ()));
+      ]
+  in
+  Team_session_store.append_event env.config env.session_id
+    ~event_type:"team_step_spawn" ~detail
+
+let append_delegate_event (env : step_env) ~worker_run_id ~worker_name ~delegate_prompt ~success
+    ?execution_scope ?wait_mode ?trace_capability
+    ?resolved_runtime ?resolved_model ?routing_reason
+    ?tool_names ?tool_call_count ?output_preview ?error () =
+  Team_session_store.append_event env.config env.session_id
+    ~event_type:"team_step_delegate"
+    ~detail:
+      (`Assoc
+        [
+          ("actor", `String env.actor);
+          ("worker_run_id", `String worker_run_id);
+          ("target_agent", `String worker_name);
+          ("delegate_prompt", `String delegate_prompt);
+          ("worker_backend", `String "local");
+          ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
+          ("wait_mode", Option.fold ~none:`Null ~some:(fun mode -> `String mode) wait_mode);
+          ("trace_capability", Option.fold ~none:`Null ~some:(fun s -> `String s) trace_capability);
+          ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
+          ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_model);
+          ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
+          ("success", `Bool success);
+          ( "tool_names",
+            Option.fold ~none:(`List [])
+              ~some:(fun names ->
+                `List (List.map (fun name -> `String name) names))
+              tool_names );
+          ( "tool_call_count",
+            Option.fold ~none:`Null ~some:(fun n -> `Int n)
+              tool_call_count );
+          ( "output_preview",
+            Option.fold ~none:`Null ~some:(fun s -> `String s)
+              output_preview );
+          ( "error",
+            Option.fold ~none:`Null ~some:(fun s -> `String s)
+              error );
+          ("ts_iso", `String (Types.now_iso ()));
+        ])
+
+let append_spawn_requested_event (env : step_env) ~worker_run_id prepared =
+  Team_session_store.append_event env.config env.session_id
+    ~event_type:"team_step_spawn_requested"
+    ~detail:
+      (`Assoc
+        [
+          ("actor", `String env.actor);
+          ("worker_run_id", `String worker_run_id);
+          ( "runtime_actor",
+            Option.fold ~none:`Null
+              ~some:(fun s -> `String s)
+              prepared.runtime_actor_name );
+          ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.spawn_role);
+          ("worker_backend", if is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
+          ("wait_mode", `String (Team_session_types.wait_mode_to_string env.wait_mode));
+          ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
+          ("resolved_model", `String prepared.runtime_model.model_id);
+          ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
+          ("ts_iso", `String (Types.now_iso ()));
+        ])
+
+let append_delegate_requested_event (env : step_env) ~worker_run_id ~worker_name ~delegate_prompt =
+  Team_session_store.append_event env.config env.session_id
+    ~event_type:"team_step_delegate_requested"
+    ~detail:
+      (`Assoc
+        [
+          ("actor", `String env.actor);
+          ("worker_run_id", `String worker_run_id);
+          ("target_agent", `String worker_name);
+          ("delegate_prompt", `String delegate_prompt);
+          ("worker_backend", `String "local");
+          ("wait_mode", `String (Team_session_types.wait_mode_to_string env.wait_mode));
+          ("ts_iso", `String (Types.now_iso ()));
+        ])
+
+let persist_worker_run_snapshot (env : step_env) ~worker_run_id ~worker_name
+    ~mode ~wait_mode ?execution_scope ?tool_names ?tool_call_count
+    ?requested_worker_class ?requested_worker_size
+    ?resolved_runtime ?resolved_model ?routing_reason
+    ~status
+    ~success ?output_preview ?error ?trace_capability ?trace_ref
+    ?trace_summary ?trace_validation ?evidence_session_id
+    () =
+  let checkpoint_path =
+    Team_session_store.worker_container_checkpoint_path env.config
+      env.session_id worker_name
+  in
+  let oas_evidence =
+    Option.bind evidence_session_id (fun evidence_session_id ->
+        oas_worker_evidence_payload ~config:env.config
+          ~evidence_session_id)
+  in
+  let effective_trace_ref =
+    match Option.bind oas_evidence (fun payload -> payload.trace_ref) with
+    | Some _ as value -> value
+    | None -> trace_ref
+  in
+  let effective_trace_summary =
+    match
+      Option.bind oas_evidence (fun payload ->
+          payload.trace_summary_json)
+    with
+    | Some _ as value -> value
+    | None -> trace_summary
+  in
+  let effective_trace_validation =
+    match
+      Option.bind oas_evidence (fun payload ->
+          payload.trace_validation_json)
+    with
+    | Some _ as value -> value
+    | None -> trace_validation
+  in
+  let oas_worker =
+    Option.bind oas_evidence (fun payload -> payload.worker)
+  in
+  let effective_status =
+    match oas_worker with
+    | Some worker -> Oas.Sessions.worker_status_to_yojson worker.status
+    | None -> worker_run_status_to_json status
+  in
+  let trace_capability =
+    match trace_capability with
+    | _ when Option.is_some oas_worker ->
+        Option.value ~default:"summary_only"
+          (Option.map
+             (fun worker ->
+               oas_trace_capability_to_string
+                 worker.Oas.Sessions.trace_capability)
+             oas_worker)
+    | Some value -> value
+    | None when Option.is_some effective_trace_ref -> "raw"
+    | None -> ignore checkpoint_path; "summary_only"
+  in
+  let effective_tool_names =
+    match oas_worker with
+    | Some worker when worker.tool_names <> [] -> worker.tool_names
+    | _ -> Option.value ~default:[] tool_names
+  in
+  let effective_resolved_model =
+    match oas_worker with
+    | Some worker -> (
+        match worker.resolved_model with
+        | Some _ as value -> value
+        | None -> resolved_model)
+    | None -> resolved_model
+  in
+  let effective_error =
+    match oas_worker with
+    | Some worker -> (
+        match worker.failure_reason with
+        | Some _ as value -> value
+        | None -> (
+            match worker.error with
+            | Some _ as value -> value
+            | None -> error))
+    | None -> error
+  in
+  let effective_output_preview =
+    match oas_worker with
+    | Some worker -> (
+        match worker.final_text with
+        | Some final_text when String.trim final_text <> "" ->
+            Some (truncate_for_event final_text)
+        | _ -> output_preview)
+    | None -> output_preview
+  in
+  if Room_utils.path_exists env.config checkpoint_path then
+    Team_session_store.save_worker_run_checkpoint_text env.config
+      env.session_id worker_run_id
+      (Team_session_store.read_text_file checkpoint_path);
+  Team_session_store.save_worker_run_meta_json env.config env.session_id
+    worker_run_id
+    (`Assoc
+      [
+        ("worker_run_id", `String worker_run_id);
+        ("worker_name", `String worker_name);
+        ("mode", `String mode);
+        ("status", effective_status);
+        ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
+        ("trace_capability", `String trace_capability);
+        ("success", `Bool success);
+        ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
+        ("requested_worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) requested_worker_class);
+        ("requested_worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) requested_worker_size);
+        ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
+        ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_resolved_model);
+        ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
+        ("tool_names", `List (List.map (fun name -> `String name) effective_tool_names));
+        ("tool_call_count", Option.fold ~none:`Null ~some:(fun n -> `Int n) tool_call_count);
+        ("output_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_output_preview);
+        ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_error);
+        ("trace_ref", Option.fold ~none:`Null ~some:Oas.Raw_trace.run_ref_to_yojson effective_trace_ref);
+        ("trace_summary", Option.fold ~none:`Null ~some:(fun json -> json) effective_trace_summary);
+        ("trace_validation", Option.fold ~none:`Null ~some:(fun json -> json) effective_trace_validation);
+        ("evidence_session_id", Option.fold ~none:`Null ~some:(fun s -> `String s) evidence_session_id);
+        ("oas_worker_run", Option.fold ~none:`Null ~some:(fun json -> json) (Option.bind oas_evidence (fun payload -> payload.worker_json)));
+        ("session_conformance", Option.fold ~none:`Null ~some:(fun json -> json) (Option.bind oas_evidence (fun payload -> payload.conformance_json)));
+        ("validated", Option.fold ~none:`Null ~some:(fun worker -> `Bool worker.Oas.Sessions.validated) oas_worker);
+        ("final_text", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.final_text) oas_worker);
+        ("stop_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.stop_reason) oas_worker);
+        ("failure_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.failure_reason) oas_worker);
+        ("ts_iso", `String (Types.now_iso ()));
+      ])
+
+(* --- End extracted closures --- *)
 
 let handle_step ctx args : result =
   match get_valid_session_id args with
@@ -220,336 +560,8 @@ let handle_step ctx args : result =
               let task_title = get_string_opt args "task_title" in
               let task_description = get_string_opt args "task_description" in
               let task_priority = get_int args "task_priority" 3 in
-              let append_spawn_event ?worker_run_id ?spawn_agent ?runtime_actor ?spawn_role
-                  ?spawn_model ?execution_scope ?worker_class ?worker_size
-                  ?worker_backend ?wait_mode ?trace_capability
-                  ?parent_actor ?capsule_mode
-                  ?runtime_pool ?lane_id ?controller_level ?control_domain
-                  ?supervisor_actor ?model_tier ?task_profile ?risk_level
-                  ?routing_confidence ?routing_reason ?assigned_runtime
-                  ?spawn_selection_note ?tool_names ?tool_call_count ~success
-                  ?exit_code
-                  ?elapsed_ms ?output_preview ?error () =
-                let _ = spawn_agent and _ = spawn_model and _ = model_tier in
-                let detail =
-                  `Assoc
-                    [
-                      ("actor", `String actor);
-                      ("worker_run_id", Option.fold ~none:`Null ~some:(fun s -> `String s) worker_run_id);
-                      ( "runtime_actor",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          runtime_actor );
-                      ( "spawn_role",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          spawn_role );
-                      ( "execution_scope",
-                        Option.fold ~none:`Null
-                          ~some:(fun scope ->
-                            `String
-                              (Team_session_types.execution_scope_to_string
-                                 scope))
-                          execution_scope );
-                      ( "worker_class",
-                        Option.fold ~none:`Null
-                          ~some:(fun kind ->
-                            `String
-                              (Team_session_types.worker_class_to_string kind))
-                          worker_class );
-                      ( "worker_size",
-                        Option.fold ~none:`Null
-                          ~some:(fun size ->
-                            `String
-                              (Team_session_types.worker_size_to_string size))
-                          worker_size );
-                      ( "worker_backend",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          worker_backend );
-                      ( "wait_mode",
-                        Option.fold ~none:`Null ~some:(fun mode -> `String mode)
-                          wait_mode );
-                      ( "trace_capability",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          trace_capability );
-                      ( "parent_actor",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          parent_actor );
-                      ( "capsule_mode",
-                        Option.fold ~none:`Null
-                          ~some:(fun mode ->
-                            `String
-                              (Team_session_types.capsule_mode_to_string mode))
-                          capsule_mode );
-                      ( "runtime_pool",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          runtime_pool );
-                      ( "lane_id",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          lane_id );
-                      ( "controller_level",
-                        Option.fold ~none:`Null
-                          ~some:(fun level ->
-                            `String
-                              (Team_session_types.controller_level_to_string
-                                 level))
-                          controller_level );
-                      ( "control_domain",
-                        Option.fold ~none:`Null
-                          ~some:(fun domain ->
-                            `String
-                              (Team_session_types.control_domain_to_string
-                                 domain))
-                          control_domain );
-                      ( "supervisor_actor",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          supervisor_actor );
-                      ( "task_profile",
-                        Option.fold ~none:`Null
-                          ~some:(fun profile ->
-                            `String
-                              (Team_session_types.task_profile_to_string
-                                 profile))
-                          task_profile );
-                      ( "risk_level",
-                        Option.fold ~none:`Null
-                          ~some:(fun level ->
-                            `String
-                              (Team_session_types.risk_level_to_string level))
-                          risk_level );
-                      ("routing_confidence", float_opt_to_json routing_confidence);
-                      ( "routing_reason",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          routing_reason );
-                      ( "assigned_runtime",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          assigned_runtime );
-                      ( "spawn_selection_note",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          spawn_selection_note );
-                      ( "tool_names",
-                        Option.fold ~none:(`List [])
-                          ~some:(fun names ->
-                            `List (List.map (fun name -> `String name) names))
-                          tool_names );
-                      ( "tool_call_count",
-                        Option.fold ~none:`Null ~some:(fun n -> `Int n)
-                          tool_call_count );
-                      ("success", `Bool success);
-                      ("exit_code", int_opt_to_json exit_code);
-                      ("elapsed_ms", int_opt_to_json elapsed_ms);
-                      ( "output_preview",
-                        Option.fold ~none:`Null ~some:(fun s -> `String s)
-                          output_preview );
-                      ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) error);
-                      ("ts_iso", `String (Types.now_iso ()));
-                    ]
-                in
-                Team_session_store.append_event ctx.config session_id
-                  ~event_type:"team_step_spawn" ~detail
-              in
-              let append_delegate_event ~worker_run_id ~worker_name ~delegate_prompt ~success
-                  ?execution_scope ?wait_mode ?trace_capability
-                  ?resolved_runtime ?resolved_model ?routing_reason
-                  ?tool_names ?tool_call_count ?output_preview ?error () =
-                Team_session_store.append_event ctx.config session_id
-                  ~event_type:"team_step_delegate"
-                  ~detail:
-                    (`Assoc
-                      [
-                        ("actor", `String actor);
-                        ("worker_run_id", `String worker_run_id);
-                        ("target_agent", `String worker_name);
-                        ("delegate_prompt", `String delegate_prompt);
-                        ("worker_backend", `String "local");
-                        ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
-                        ("wait_mode", Option.fold ~none:`Null ~some:(fun mode -> `String mode) wait_mode);
-                        ("trace_capability", Option.fold ~none:`Null ~some:(fun s -> `String s) trace_capability);
-                        ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
-                        ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_model);
-                        ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
-                        ("success", `Bool success);
-                        ( "tool_names",
-                          Option.fold ~none:(`List [])
-                            ~some:(fun names ->
-                              `List (List.map (fun name -> `String name) names))
-                            tool_names );
-                        ( "tool_call_count",
-                          Option.fold ~none:`Null ~some:(fun n -> `Int n)
-                            tool_call_count );
-                        ( "output_preview",
-                          Option.fold ~none:`Null ~some:(fun s -> `String s)
-                            output_preview );
-                        ( "error",
-                          Option.fold ~none:`Null ~some:(fun s -> `String s)
-                            error );
-                        ("ts_iso", `String (Types.now_iso ()));
-                      ])
-              in
-              let append_spawn_requested_event ~worker_run_id prepared =
-                Team_session_store.append_event ctx.config session_id
-                  ~event_type:"team_step_spawn_requested"
-                  ~detail:
-                    (`Assoc
-                      [
-                        ("actor", `String actor);
-                        ("worker_run_id", `String worker_run_id);
-                        ( "runtime_actor",
-                          Option.fold ~none:`Null
-                            ~some:(fun s -> `String s)
-                            prepared.runtime_actor_name );
-                        ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.spawn_role);
-                        ("worker_backend", if is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
-                        ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
-                        ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
-                        ("resolved_model", `String prepared.runtime_model.model_id);
-                        ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
-                        ("ts_iso", `String (Types.now_iso ()));
-                      ])
-              in
-              let append_delegate_requested_event ~worker_run_id ~worker_name ~delegate_prompt =
-                Team_session_store.append_event ctx.config session_id
-                  ~event_type:"team_step_delegate_requested"
-                  ~detail:
-                    (`Assoc
-                      [
-                        ("actor", `String actor);
-                        ("worker_run_id", `String worker_run_id);
-                        ("target_agent", `String worker_name);
-                        ("delegate_prompt", `String delegate_prompt);
-                        ("worker_backend", `String "local");
-                        ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
-                        ("ts_iso", `String (Types.now_iso ()));
-                      ])
-              in
-              let persist_worker_run_snapshot ~worker_run_id ~worker_name
-                  ~mode ~wait_mode ?execution_scope ?tool_names ?tool_call_count
-                  ?requested_worker_class ?requested_worker_size
-                  ?resolved_runtime ?resolved_model ?routing_reason
-                  ~status
-                  ~success ?output_preview ?error ?trace_capability ?trace_ref
-                  ?trace_summary ?trace_validation ?evidence_session_id
-                  () =
-                let checkpoint_path =
-                  Team_session_store.worker_container_checkpoint_path ctx.config
-                    session_id worker_name
-                in
-                let oas_evidence =
-                  Option.bind evidence_session_id (fun evidence_session_id ->
-                      oas_worker_evidence_payload ~config:ctx.config
-                        ~evidence_session_id)
-                in
-                let effective_trace_ref =
-                  match Option.bind oas_evidence (fun payload -> payload.trace_ref) with
-                  | Some _ as value -> value
-                  | None -> trace_ref
-                in
-                let effective_trace_summary =
-                  match
-                    Option.bind oas_evidence (fun payload ->
-                        payload.trace_summary_json)
-                  with
-                  | Some _ as value -> value
-                  | None -> trace_summary
-                in
-                let effective_trace_validation =
-                  match
-                    Option.bind oas_evidence (fun payload ->
-                        payload.trace_validation_json)
-                  with
-                  | Some _ as value -> value
-                  | None -> trace_validation
-                in
-                let oas_worker =
-                  Option.bind oas_evidence (fun payload -> payload.worker)
-                in
-                let effective_status =
-                  match oas_worker with
-                  | Some worker -> Oas.Sessions.worker_status_to_yojson worker.status
-                  | None -> worker_run_status_to_json status
-                in
-                let trace_capability =
-                  match trace_capability with
-                  | _ when Option.is_some oas_worker ->
-                      Option.value ~default:"summary_only"
-                        (Option.map
-                           (fun worker ->
-                             oas_trace_capability_to_string
-                               worker.Oas.Sessions.trace_capability)
-                           oas_worker)
-                  | Some value -> value
-                  | None when Option.is_some effective_trace_ref -> "raw"
-                  | None -> ignore checkpoint_path; "summary_only"
-                in
-                let effective_tool_names =
-                  match oas_worker with
-                  | Some worker when worker.tool_names <> [] -> worker.tool_names
-                  | _ -> Option.value ~default:[] tool_names
-                in
-                let effective_resolved_model =
-                  match oas_worker with
-                  | Some worker -> (
-                      match worker.resolved_model with
-                      | Some _ as value -> value
-                      | None -> resolved_model)
-                  | None -> resolved_model
-                in
-                let effective_error =
-                  match oas_worker with
-                  | Some worker -> (
-                      match worker.failure_reason with
-                      | Some _ as value -> value
-                      | None -> (
-                          match worker.error with
-                          | Some _ as value -> value
-                          | None -> error))
-                  | None -> error
-                in
-                let effective_output_preview =
-                  match oas_worker with
-                  | Some worker -> (
-                      match worker.final_text with
-                      | Some final_text when String.trim final_text <> "" ->
-                          Some (truncate_for_event final_text)
-                      | _ -> output_preview)
-                  | None -> output_preview
-                in
-                if Room_utils.path_exists ctx.config checkpoint_path then
-                  Team_session_store.save_worker_run_checkpoint_text ctx.config
-                    session_id worker_run_id
-                    (Team_session_store.read_text_file checkpoint_path);
-                Team_session_store.save_worker_run_meta_json ctx.config session_id
-                  worker_run_id
-                  (`Assoc
-                    [
-                      ("worker_run_id", `String worker_run_id);
-                      ("worker_name", `String worker_name);
-                      ("mode", `String mode);
-                      ("status", effective_status);
-                      ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
-                      ("trace_capability", `String trace_capability);
-                      ("success", `Bool success);
-                      ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
-                      ("requested_worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) requested_worker_class);
-                      ("requested_worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) requested_worker_size);
-                      ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
-                      ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_resolved_model);
-                      ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
-                      ("tool_names", `List (List.map (fun name -> `String name) effective_tool_names));
-                      ("tool_call_count", Option.fold ~none:`Null ~some:(fun n -> `Int n) tool_call_count);
-                      ("output_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_output_preview);
-                      ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_error);
-                      ("trace_ref", Option.fold ~none:`Null ~some:Oas.Raw_trace.run_ref_to_yojson effective_trace_ref);
-                      ("trace_summary", Option.fold ~none:`Null ~some:(fun json -> json) effective_trace_summary);
-                      ("trace_validation", Option.fold ~none:`Null ~some:(fun json -> json) effective_trace_validation);
-                      ("evidence_session_id", Option.fold ~none:`Null ~some:(fun s -> `String s) evidence_session_id);
-                      ("oas_worker_run", Option.fold ~none:`Null ~some:(fun json -> json) (Option.bind oas_evidence (fun payload -> payload.worker_json)));
-                      ("session_conformance", Option.fold ~none:`Null ~some:(fun json -> json) (Option.bind oas_evidence (fun payload -> payload.conformance_json)));
-                      ("validated", Option.fold ~none:`Null ~some:(fun worker -> `Bool worker.Oas.Sessions.validated) oas_worker);
-                      ("final_text", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.final_text) oas_worker);
-                      ("stop_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.stop_reason) oas_worker);
-                      ("failure_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.failure_reason) oas_worker);
-                      ("ts_iso", `String (Types.now_iso ()));
-                    ])
-              in
+              (* step_env + 5 extracted closures: see module-level definitions above *)
+              let env = { config = ctx.config; session_id; actor; wait_mode } in
               let release_prepared_runtime (prepared : prepared_spawn) ~success
                   ?error ?latency_ms () =
                 match prepared.runtime_lease with
@@ -622,7 +634,7 @@ let handle_step ctx args : result =
                       | Ok prepared -> loop (prepared :: acc) rest
                       | Error (failed_spec, runtime_actor_name, msg) ->
                           release_all_prepared (List.rev acc) ~error:msg;
-                          append_spawn_event ~spawn_agent:failed_spec.spawn_agent
+                          append_spawn_event env ~spawn_agent:failed_spec.spawn_agent
                             ?runtime_actor:runtime_actor_name
                             ?spawn_role:failed_spec.spawn_role
                             ?spawn_model:failed_spec.spawn_model
@@ -678,7 +690,7 @@ let handle_step ctx args : result =
                           (fun prepared ->
                             release_prepared_runtime prepared ~success:false
                               ~error:msg ();
-                            append_spawn_event
+                            append_spawn_event env
                               ~spawn_agent:prepared.spec.spawn_agent
                               ?runtime_actor:prepared.runtime_actor_name
                               ?spawn_role:prepared.spec.spawn_role
@@ -718,7 +730,7 @@ let handle_step ctx args : result =
                               (fun prepared ->
                                 release_prepared_runtime prepared ~success:false
                                   ~error:msg ();
-                                append_spawn_event
+                                append_spawn_event env
                                   ~worker_run_id:prepared.worker_run_id
                                   ~spawn_agent:prepared.spec.spawn_agent
                                   ?runtime_actor:prepared.runtime_actor_name
@@ -770,7 +782,7 @@ let handle_step ctx args : result =
                                    (fun prepared ->
                                      release_prepared_runtime prepared
                                        ~success:false ~error:msg ();
-                                       append_spawn_event
+                                       append_spawn_event env
                                          ~worker_run_id:prepared.worker_run_id
                                          ~spawn_agent:prepared.spec.spawn_agent
                                          ?runtime_actor:prepared.runtime_actor_name
@@ -853,7 +865,7 @@ let handle_step ctx args : result =
                                          ~success:false
                                          ~error:spawn_result.output
                                          ~latency_ms:spawn_result.elapsed_ms ());
-                                   persist_worker_run_snapshot
+                                   persist_worker_run_snapshot env
                                      ~worker_run_id:prepared.worker_run_id
                                      ~worker_name:
                                        (Option.value
@@ -888,7 +900,7 @@ let handle_step ctx args : result =
                                         then "summary_only"
                                         else "summary_only")
                                      ();
-                                   append_spawn_event
+                                   append_spawn_event env
                                      ~worker_run_id:prepared.worker_run_id
                                      ~spawn_agent:prepared.spec.spawn_agent
                                      ?runtime_actor:prepared.runtime_actor_name
@@ -986,7 +998,7 @@ let handle_step ctx args : result =
                                      in
                                      List.iter
                                        (fun prepared ->
-                                         append_spawn_requested_event
+                                         append_spawn_requested_event env
                                            ~worker_run_id:prepared.worker_run_id
                                            prepared;
                                          Eio.Fiber.fork ~sw:sw_bg (fun () ->
@@ -1151,7 +1163,7 @@ let handle_step ctx args : result =
                                                 | None -> (None, None))
                                             | None -> (None, None)
                                           in
-                                          persist_worker_run_snapshot
+                                          persist_worker_run_snapshot env
                                             ~worker_run_id ~worker_name
                                             ~mode:"delegate"
                                             ~wait_mode ?execution_scope
@@ -1173,7 +1185,7 @@ let handle_step ctx args : result =
                                               (if Option.is_some run_result.raw_trace_run
                                                then "raw"
                                                else "summary_only") ();
-                                          append_delegate_event ~worker_run_id
+                                          append_delegate_event env ~worker_run_id
                                             ~worker_name ~delegate_prompt
                                             ?execution_scope
                                             ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
@@ -1229,7 +1241,7 @@ let handle_step ctx args : result =
                                                 float_opt_to_json run_result.cost_usd );
                                             ]
                                       | Error err ->
-                                          persist_worker_run_snapshot
+                                          persist_worker_run_snapshot env
                                             ~worker_run_id ~worker_name
                                             ~mode:"delegate" ~wait_mode
                                             ~status:`Failed
@@ -1240,7 +1252,7 @@ let handle_step ctx args : result =
                                                .oas_worker_evidence_session_id
                                                  ~worker_run_id)
                                             ~trace_capability:"summary_only" ();
-                                          append_delegate_event ~worker_run_id
+                                          append_delegate_event env ~worker_run_id
                                             ~worker_name ~delegate_prompt
                                             ?execution_scope
                                             ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
@@ -1257,7 +1269,7 @@ let handle_step ctx args : result =
                                           Option.value ~default:ctx.sw
                                             (Eio_context.get_switch_opt ())
                                         in
-                                        append_delegate_requested_event
+                                        append_delegate_requested_event env
                                           ~worker_run_id ~worker_name
                                           ~delegate_prompt;
                                         Eio.Fiber.fork ~sw:sw_bg (fun () ->

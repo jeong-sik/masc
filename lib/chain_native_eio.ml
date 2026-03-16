@@ -228,7 +228,8 @@ let llm_tool_calls_json (calls : Llm_client.tool_call list) =
 type llm_runner =
   | Stub
   | Direct of Llm_client.model_spec
-  | Spawn of string
+  | Spawn of string (* agent name *)
+  | SpawnWithModel of { agent: string; model: string }
 
 let model_runner_of_string raw =
   let model = trim raw in
@@ -239,14 +240,12 @@ let model_runner_of_string raw =
     | Error msg -> Error msg
   in
   match lower with
-  | "" | "gemini" | "gemini-3.1-pro-preview" | "gemini-3-pro-preview"
-  | "gemini-2.5-pro" ->
-      direct "gemini:pro"
+  | "" | "gemini" -> direct "gemini:pro"
   | "pro" -> direct "gemini:pro"
-  | "flash" | "flash-lite" | "3-flash" -> direct "gemini:flash"
-  | "claude" | "claude-cli" | "opus" | "opus-4" -> direct "claude:opus"
+  | "flash" | "flash-lite" -> direct "gemini:flash"
+  | "claude" | "claude-cli" | "opus" -> direct "claude:opus"
   | "sonnet" -> direct "claude:sonnet"
-  | "haiku" | "haiku-4.5" -> direct "claude:haiku"
+  | "haiku" -> direct "claude:haiku"
   | "ollama" -> Error (Provider_adapter.bare_ollama_migration_message ())
   | "llama" -> (
       match Provider_adapter.explicit_llama_model_label_result () with
@@ -255,7 +254,7 @@ let model_runner_of_string raw =
   | "glm" ->
       direct "glm:auto"
   | "stub" | "mock" -> Ok Stub
-  | "codex" | "gpt-5.2" -> Ok (Spawn "codex")
+  | "codex" -> Ok (Spawn "codex")
   | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")
   | value -> (
       match Llm_client.model_spec_of_string model with
@@ -264,9 +263,18 @@ let model_runner_of_string raw =
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model
       | Error _ when starts_with ~prefix:"claude:" value -> direct model
       | Error _ when starts_with ~prefix:"glm:" value -> direct model
+      (* Bare provider model names → route to provider *)
+      | Error _ when starts_with ~prefix:"glm-" value ->
+          direct (Printf.sprintf "glm:%s" value)
+      | Error _ when starts_with ~prefix:"gemini-" value ->
+          direct (Printf.sprintf "gemini:%s" value)
+      | Error _ when starts_with ~prefix:"claude-" value ->
+          direct (Printf.sprintf "claude:%s" value)
+      | Error _ when starts_with ~prefix:"gpt-" value ->
+          Ok (SpawnWithModel { agent = "codex"; model = value })
       | Error msg -> Error msg)
 
-let call_spawn_model (runtime : runtime) ~agent_name ~prompt ~timeout_sec =
+let call_spawn_model (runtime : runtime) ~agent_name ?model_override ~prompt ~timeout_sec () =
   match runtime.mcp_state.Mcp_server.proc_mgr with
   | None -> Error "spawn runtime unavailable"
   | Some proc_mgr ->
@@ -274,6 +282,7 @@ let call_spawn_model (runtime : runtime) ~agent_name ~prompt ~timeout_sec =
         Spawn_eio.spawn ~sw:runtime.sw ~proc_mgr ~agent_name ~prompt
           ~timeout_seconds:timeout_sec
           ?working_dir:(Some runtime.config.base_path)
+          ?model_override
           ~room_config:runtime.config ()
       in
       if result.success then Ok result.output else Error result.output
@@ -289,7 +298,14 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
         | Some sys when trim sys <> "" -> sprintf "[system]\n%s\n\n[user]\n%s" sys prompt
         | _ -> prompt
       in
-      call_spawn_model runtime ~agent_name ~prompt:full_prompt ~timeout_sec
+      call_spawn_model runtime ~agent_name ~prompt:full_prompt ~timeout_sec ()
+  | Ok (SpawnWithModel { agent = agent_name; model = model_override }) ->
+      let full_prompt =
+        match system with
+        | Some sys when trim sys <> "" -> sprintf "[system]\n%s\n\n[user]\n%s" sys prompt
+        | _ -> prompt
+      in
+      call_spawn_model runtime ~agent_name ~model_override ~prompt:full_prompt ~timeout_sec ()
   | Ok (Direct spec) ->
       let req : Llm_client.completion_request =
         {

@@ -940,6 +940,12 @@
  (modules test_tool_dispatch)
  (libraries masc_mcp alcotest yojson))
 
+; Tool Result — structured tool result type (Harness Sprint 1)
+(test
+ (name test_tool_result)
+ (modules test_tool_result)
+ (libraries masc_mcp alcotest yojson))
+
 ; Tool Unified — unified query interface across catalog, registry, dispatch (P4 Phase 4.4)
 (test
  (name test_tool_unified)

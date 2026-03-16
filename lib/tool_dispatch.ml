@@ -45,6 +45,16 @@ let dispatch ~name ~args : (bool * string) option =
               (Printexc.to_string exn) ))
   | None -> None
 
+(** Structured dispatch — wraps the legacy [(bool * string)] into
+    {!Tool_result.t} with timing and tool name metadata.
+    Returns [None] when the tool is unknown, same as {!dispatch}. *)
+let dispatch_structured ~name ~args : Tool_result.t option =
+  let start_time = Time_compat.now () in
+  match dispatch ~name ~args with
+  | Some (success, message) ->
+    Some (Tool_result.wrap ~tool_name:name ~start_time (success, message))
+  | None -> None
+
 (** Feature flag: use the new dispatch path. *)
 let v2_enabled =
   match Sys.getenv_opt "MASC_DISPATCH_V2" with

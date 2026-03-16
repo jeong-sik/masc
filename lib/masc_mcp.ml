@@ -271,6 +271,7 @@ module Tool_verification = Tool_verification
 module Tool_misc = Tool_misc
 module Tool_registry = Tool_registry
 module Tool_catalog = Tool_catalog
+module Tool_result = Tool_result
 module Tool_dispatch = Tool_dispatch
 module Tool_unified = Tool_unified
 module Tool_llama = Tool_llama

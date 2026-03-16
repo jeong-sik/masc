@@ -750,7 +750,7 @@ let run_proactive_generation
                  (Llm_client.system_msg turn_system_prompt)
                  :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
                temperature = proactive_temperature attempt;
-               max_tokens = 1024; (* increased from 220 to allow tool calls *)
+               max_tokens = Keeper_config.keeper_proactive_max_tokens ();
                tools = keeper_allowed_llm_tools meta;
                response_format = `Text;
              }
@@ -818,8 +818,8 @@ let run_proactive_generation
                                ~character_context:turn_system_prompt);
                           Llm_client.user_msg followup_prompt;
                         ];
-                        temperature = 0.3;
-                        max_tokens = 1024; (* increased from 220 to allow tool calls *)
+                        temperature = Keeper_config.keeper_deterministic_temp ();
+                        max_tokens = Keeper_config.keeper_proactive_max_tokens ();
                         tools = next_tools;
                         response_format = `Text;
                       }
@@ -960,7 +960,7 @@ let autonomous_gate_config
   | L4_Autonomous ->
       (* L4: allow bash for safe commands *)
       {
-        max_cost_usd = 0.10;
+        max_cost_usd = Keeper_config.keeper_cost_gate_usd ();
         max_tool_calls_per_turn = 5;
         entropy_threshold = 2;
         destructive_check_enabled = true;
@@ -971,7 +971,7 @@ let autonomous_gate_config
   | L5_Independent ->
       (* L5: all tools allowed, higher budget *)
       {
-        max_cost_usd = 0.50;
+        max_cost_usd = Keeper_config.keeper_tool_cost_max_usd ();
         max_tool_calls_per_turn = 10;
         entropy_threshold = 3;
         destructive_check_enabled = true;
@@ -982,7 +982,7 @@ let autonomous_gate_config
   | _ ->
       (* L3 and below: strict safe-only *)
       {
-        max_cost_usd = 0.10;
+        max_cost_usd = Keeper_config.keeper_cost_gate_usd ();
         max_tool_calls_per_turn = 5;
         entropy_threshold = 2;
         destructive_check_enabled = true;
@@ -1081,8 +1081,8 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
         Llm_client.system_msg system_prompt;
         Llm_client.user_msg "Execute the first step of the plan now.";
       ];
-      temperature = 0.3;
-      max_tokens = 1024;
+      temperature = Keeper_config.keeper_deterministic_temp ();
+      max_tokens = Keeper_config.keeper_proactive_max_tokens ();
       tools = keeper_allowed_llm_tools meta;
       response_format = `Text;
     }
@@ -1129,8 +1129,8 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
                 Llm_client.system_msg system_prompt;
                 Llm_client.user_msg followup_prompt;
               ];
-              temperature = 0.3;
-              max_tokens = 1024;
+              temperature = Keeper_config.keeper_deterministic_temp ();
+              max_tokens = Keeper_config.keeper_proactive_max_tokens ();
               tools = next_tools;
               response_format = `Text;
             }
@@ -2255,7 +2255,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                 ({
                   Llm_client.model;
                   messages = (Llm_client.system_msg ctx_work.system_prompt) :: ctx_work.messages;
-                  temperature = 0.6;
+                  temperature = Keeper_config.keeper_reflection_temp ();
                   max_tokens = 256;
                   tools = [];
                   response_format = `Text;
@@ -2421,7 +2421,7 @@ let run_social_board_event_turn
                     messages =
                       (Llm_client.system_msg ctx_work.system_prompt)
                       :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
-                    temperature = 0.35;
+                    temperature = Keeper_config.keeper_planning_temp ();
                     max_tokens = 768;
                     tools = keeper_allowed_llm_tools meta;
                     response_format = `Text;
@@ -2488,7 +2488,7 @@ let run_social_board_event_turn
                                    ~character_context:ctx_work.system_prompt);
                               Llm_client.user_msg followup_prompt;
                             ];
-                            temperature = 0.3;
+                            temperature = Keeper_config.keeper_deterministic_temp ();
                             max_tokens = 512;
                             tools = next_tools;
                             response_format = `Text;
@@ -2752,7 +2752,7 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
     let targets =
       if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
     in
-    let batch_limit = 200 in
+    let batch_limit = Keeper_config.keeper_batch_limit () in
     let next_meta =
       List.fold_left
         (fun meta_acc room_id ->

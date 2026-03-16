@@ -383,6 +383,66 @@ let keeper_proactive_similarity_threshold () : float =
     ~max_v:1.0
 
 (* ================================================================ *)
+(* Keeper execution parameters (previously hardcoded)               *)
+(* ================================================================ *)
+
+let keeper_proactive_max_tokens () : int =
+  int_of_env_default
+    "MASC_KEEPER_PROACTIVE_MAX_TOKENS"
+    ~default:1024
+    ~min_v:128
+    ~max_v:4096
+
+let keeper_deterministic_temp () : float =
+  float_of_env_default
+    "MASC_KEEPER_DETERMINISTIC_TEMP"
+    ~default:0.3
+    ~min_v:0.0
+    ~max_v:2.0
+
+let keeper_reflection_temp () : float =
+  float_of_env_default
+    "MASC_KEEPER_REFLECTION_TEMP"
+    ~default:0.6
+    ~min_v:0.0
+    ~max_v:2.0
+
+let keeper_planning_temp () : float =
+  float_of_env_default
+    "MASC_KEEPER_PLANNING_TEMP"
+    ~default:0.35
+    ~min_v:0.0
+    ~max_v:2.0
+
+let keeper_batch_limit () : int =
+  int_of_env_default
+    "MASC_KEEPER_BATCH_LIMIT"
+    ~default:200
+    ~min_v:10
+    ~max_v:2000
+
+let keeper_msg_timeout_max_sec () : int =
+  int_of_env_default
+    "MASC_KEEPER_MSG_TIMEOUT_MAX_SEC"
+    ~default:300
+    ~min_v:5
+    ~max_v:3600
+
+let keeper_cost_gate_usd () : float =
+  float_of_env_default
+    "MASC_KEEPER_COST_GATE_USD"
+    ~default:0.10
+    ~min_v:0.01
+    ~max_v:10.0
+
+let keeper_tool_cost_max_usd () : float =
+  float_of_env_default
+    "MASC_KEEPER_TOOL_COST_MAX_USD"
+    ~default:0.50
+    ~min_v:0.01
+    ~max_v:50.0
+
+(* ================================================================ *)
 (* Rule engine thresholds                                           *)
 (* ================================================================ *)
 

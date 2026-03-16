@@ -165,13 +165,17 @@ val create_agent_graphql :
 val string_of_trigger : checkin_trigger -> string
 val string_of_checkin_result : checkin_result -> string
 
-(** {1 Gap Signal Detection — Ecosystem Evolution} *)
+(** {1 Gap Signal Detection — Ecosystem Evolution}
+
+    Delegated to {!Lodge_ecosystem}. Types and key functions re-exported here
+    for backward compatibility.
+    @since 4.1.0 *)
 
 (** A gap signal indicates a detected need for a new agent role *)
-type gap_signal_t = {
-  gs_topic: string;           (** e.g., "security", "performance", "UX" *)
-  gs_detected_by: string;     (** agent who detected *)
-  gs_context: string;         (** surrounding discussion *)
+type gap_signal_t = Lodge_ecosystem.gap_signal_t = {
+  gs_topic: string;
+  gs_detected_by: string;
+  gs_context: string;
   gs_timestamp: float;
 }
 

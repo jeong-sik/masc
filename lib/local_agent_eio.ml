@@ -1157,16 +1157,11 @@ let oas_provider_of_model (model : Llm_client.model_spec) : Oas.Provider.config 
           static_token = None;
         };
     model_id = model.model_id;
-    api_key_env = "DUMMY_KEY";
+    api_key_env = Option.value ~default:"DUMMY_KEY" model.api_key_env;
   }
 
 let oas_tool_names (tools : Oas.Tool.t list) =
   List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
-
-let oas_extract_text (response : Oas.Types.api_response) =
-  response.content
-  |> List.filter_map (function Oas.Types.Text text -> Some text | _ -> None)
-  |> String.concat "\n"
 
 let make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
     ~mcp_session_id ~role ~selection_note ~execution_scope ~worker_class
@@ -1461,7 +1456,13 @@ let run_worker_oas ~sw ~base_path ~worker_name
           Oas.Agent.close agent;
           match result with
           | Ok response ->
-              let output = oas_extract_text response in
+              let output =
+                response.content
+                |> List.filter_map (function
+                     | Oas.Types.Text text -> Some text
+                     | _ -> None)
+                |> String.concat "\n"
+              in
               let* () =
                 append_worker_completion_log ~base_path ~team_session_id
                   ~worker_name ~prompt ~tool_names ~status:"ok" ~output ()
@@ -1474,9 +1475,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
                      else model.model_id);
                   input_tokens = Some checkpoint.usage.total_input_tokens;
                   output_tokens = Some checkpoint.usage.total_output_tokens;
-                  cost_usd = estimate_cost_usd model
-                      (make_usage ~input_tokens:checkpoint.usage.total_input_tokens
-                         ~output_tokens:checkpoint.usage.total_output_tokens ());
+                  cost_usd = Some checkpoint.usage.estimated_cost_usd;
                   tool_call_count = List.length tool_names;
                   tool_names;
                   session_id = mcp_session_id;
@@ -1695,7 +1694,13 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
               Oas.Agent.close agent;
               match result with
               | Ok response ->
-                  let output = oas_extract_text response in
+                  let output =
+                    response.content
+                    |> List.filter_map (function
+                         | Oas.Types.Text text -> Some text
+                         | _ -> None)
+                    |> String.concat "\n"
+                  in
                   let* () =
                     append_worker_completion_log ~base_path ~team_session_id
                       ~worker_name ~prompt ~tool_names ~status:"ok" ~output ()
@@ -1708,12 +1713,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                          else meta.effective_model);
                       input_tokens = Some next_checkpoint.usage.total_input_tokens;
                       output_tokens = Some next_checkpoint.usage.total_output_tokens;
-                      cost_usd =
-                        estimate_cost_usd model
-                          (make_usage
-                             ~input_tokens:next_checkpoint.usage.total_input_tokens
-                             ~output_tokens:next_checkpoint.usage.total_output_tokens
-                             ());
+                      cost_usd = Some next_checkpoint.usage.estimated_cost_usd;
                       tool_call_count = List.length tool_names;
                       tool_names;
                       session_id = meta.mcp_session_id;

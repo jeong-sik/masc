@@ -9,8 +9,10 @@
     [ttl * 3] additional seconds while a background fiber recomputes.
     This prevents slow endpoints from blocking HTTP responses. *)
 
-val enable_eio : unit -> unit
-(** Activate Eio.Mutex guards. Call once inside [Eio_main.run]. *)
+val enable_eio : ?clock:_ Eio.Time.clock -> unit -> unit
+(** Activate Eio.Mutex guards. Call once inside [Eio_main.run].
+    Pass [~clock] so the bounded-wait poll loop can sleep between retries
+    instead of busy-spinning with [Fiber.yield]. *)
 
 val set_sw : Eio.Switch.t -> unit
 (** Register the server switch for background revalidation fibers.

@@ -79,6 +79,8 @@
    server_trpg_rest
    dashboard_http_helpers
    dashboard_http_monitoring
+   dashboard_http_keeper_metrics
+   dashboard_http_keeper_detail
    dashboard_http_keeper
    dashboard_http_mdal
    server_dashboard_http
@@ -418,6 +420,9 @@
    tool_mdal
    lodge_daemon
    gardener_types
+   gardener_state
+   gardener_health
+   gardener_decisions
    gardener
    tool_gardener
    tool_library
@@ -437,6 +442,8 @@
    library_bridge
    tool_council
    tool_code
+   tool_protocol_game_view_utils
+   tool_protocol_game_view_handlers
    tool_protocol_game_view
    tool_experiment
    tool_suspend
@@ -547,6 +554,8 @@
    tool_lodge_project
    tool_lodge_autonomous
    trpg_schema
+   trpg_types_world
+   trpg_types_canon
    trpg_types
    trpg_bestiary
    trpg_action
@@ -601,6 +610,15 @@
    mcts_tree
    speculative_engine)
 (private_modules
+ gardener_state
+ gardener_health
+ gardener_decisions
+ trpg_types_world
+ trpg_types_canon
+ tool_protocol_game_view_utils
+ tool_protocol_game_view_handlers
+ dashboard_http_keeper_metrics
+ dashboard_http_keeper_detail
  tool_schemas_core_01
  tool_schemas_core_02
  tool_schemas_core_03

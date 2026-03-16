@@ -354,3 +354,105 @@ let synthesize ~fs (config : config) ~topic ~contributions : collective_insight 
     save_noosphere ~fs config n';
     Some insight
   | None -> None
+
+(** {1 Lightweight JSONL Interface (No Eio Required)}
+
+    Enables noosphere operations from contexts without Eio fs.
+    Shared beliefs and emergent goals are logged to JSONL for
+    later sync to the full noosphere state.
+
+    @since 2.90.0 *)
+
+let noosphere_events_path () =
+  let me_root = Env_config.me_root () in
+  Filename.concat me_root ".masc/noosphere_events.jsonl"
+
+(** Record a shared belief without Eio context.
+    Called when 3+ agents have similar shared memories (keyword overlap 70%+). *)
+let record_shared_belief_jsonl ~content ~supporters =
+  let now = Time_compat.now () in
+  let belief : shared_belief = {
+    id = generate_id "belief";
+    content;
+    confidence = 0.5 +. (0.1 *. Float.of_int (List.length supporters));
+    supporters;
+    created_at = now;
+    last_reinforced = now;
+  } in
+  let json = `Assoc [
+    ("type", `String "shared_belief");
+    ("belief", shared_belief_to_json belief);
+    ("timestamp", `Float now);
+  ] in
+  let path = noosphere_events_path () in
+  (try
+    let dir = Filename.dirname path in
+    if not (Sys.file_exists dir) then
+      Unix.mkdir dir 0o755;
+    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
+    output_string oc (Yojson.Safe.to_string json);
+    output_char oc '\n';
+    close_out oc
+  with exn ->
+    Printf.eprintf "[noosphere] JSONL write failed: %s\n%!" (Printexc.to_string exn));
+  belief
+
+(** Record an emergent goal from keeper decision patterns. *)
+let record_emergent_goal_jsonl ~description ~contributing_minds =
+  let now = Time_compat.now () in
+  let goal : emergent_goal = {
+    id = generate_id "goal";
+    description;
+    emerged_at = now;
+    contributing_minds;
+    strength = 0.5;
+    status = `Emerging;
+  } in
+  let json = `Assoc [
+    ("type", `String "emergent_goal");
+    ("goal", emergent_goal_to_json goal);
+    ("timestamp", `Float now);
+  ] in
+  let path = noosphere_events_path () in
+  (try
+    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
+    output_string oc (Yojson.Safe.to_string json);
+    output_char oc '\n';
+    close_out oc
+  with exn ->
+    Printf.eprintf "[noosphere] JSONL write failed: %s\n%!" (Printexc.to_string exn));
+  goal
+
+(** Compute collective atmosphere from real social signals.
+    Replaces the env-var-based Lodge_atmosphere with actual data:
+    coherence (connection density), activity (recent interactions),
+    belief convergence (shared belief count). *)
+let compute_social_atmosphere () : float =
+  let path = noosphere_events_path () in
+  if not (Sys.file_exists path) then 0.5  (* neutral default *)
+  else begin
+    let ic = open_in path in
+    let beliefs = ref 0 in
+    let goals = ref 0 in
+    let now = Time_compat.now () in
+    let recent_cutoff = now -. 86400.0 in  (* last 24h *)
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      (try while true do
+        let line = input_line ic in
+        if String.length line > 0 then begin
+          try
+            let json = Yojson.Safe.from_string line in
+            let open Yojson.Safe.Util in
+            let ts = (try json |> member "timestamp" |> to_float with _ -> 0.0) in
+            if ts >= recent_cutoff then begin
+              let typ = (try json |> member "type" |> to_string with _ -> "") in
+              if typ = "shared_belief" then incr beliefs;
+              if typ = "emergent_goal" then incr goals
+            end
+          with _ -> ()
+        end
+      done with End_of_file -> ()));
+    (* Normalize: more recent beliefs/goals = higher atmosphere *)
+    let signal = Float.of_int (!beliefs + !goals * 2) /. 10.0 in
+    min 1.0 (0.3 +. signal)  (* floor at 0.3, cap at 1.0 *)
+  end

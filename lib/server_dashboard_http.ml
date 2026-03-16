@@ -2822,6 +2822,7 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
         ("health", `String health);
         ("attention_summary", `Assoc [ ("count", `Int (if has_warn then 1 else 0)); ("provenance", `String "derived") ]);
         ("recommendation_summary", `Assoc [ ("count", `Int 0); ("provenance", `String "derived") ]);
+        ("pending_confirm_summary", Operator_control.pending_confirm_summary_json config);
       ]
   in
   let execution_queue =

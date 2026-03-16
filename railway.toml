@@ -4,7 +4,6 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "sh -c '/app/masc-mcp --port $PORT --base-path /app'"
-healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 300
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

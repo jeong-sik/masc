@@ -87,35 +87,41 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   Progress.set_sse_callback Sse.broadcast;
   (* OAS Event_bus: shared instance for cross-subsystem communication *)
   let event_bus = Agent_sdk.Event_bus.create () in
-  (* Isolate each subsystem so one failure does not kill the rest *)
-  let try_start name f =
-    try f ()
-    with exn ->
-      Log.Server.error "subsystem %s failed to start: %s" name
-        (Printexc.to_string exn)
+  (* Eio fiber isolation: each subsystem runs in its own fiber.
+     If one crashes, others keep running — Eio's structured concurrency. *)
+  let fork_subsystem name f =
+    Eio.Fiber.fork ~sw (fun () ->
+      try f ()
+      with exn ->
+        Log.Server.error "subsystem %s crashed: %s" name
+          (Printexc.to_string exn))
   in
-  try_start "orchestrator" (fun () ->
+  (* Orchestrator needs synchronous registration for shutdown hook *)
+  (try
     let cancel_orchestrator =
       Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config
     in
-    Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator);
-  try_start "social_runtime" (fun () ->
+    Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator
+  with exn ->
+    Log.Server.error "subsystem orchestrator failed to start: %s"
+      (Printexc.to_string exn));
+  fork_subsystem "social_runtime" (fun () ->
     Social_runtime.start ~sw ~clock ~config:state.room_config);
-  try_start "gardener" (fun () ->
+  fork_subsystem "gardener" (fun () ->
     Gardener.start ~bus:event_bus ~sw ~clock ~room_config:state.room_config ());
-  try_start "sentinel_guardian" (fun () ->
+  fork_subsystem "sentinel_guardian" (fun () ->
     if Env_config.Sentinel.enabled then begin
       Sentinel.start ~bus:event_bus ~sw ~clock ~net state.room_config;
       if Env_config.Guardian.enabled then Guardian.start_lodge_loop ~sw ~clock ~net
     end else Guardian.start ~bus:event_bus ~sw ~clock ~net state.room_config);
-  try_start "governance_judge" (fun () ->
+  fork_subsystem "governance_judge" (fun () ->
     Dashboard_governance_judge.start ~sw ~clock
       ~base_path:state.room_config.base_path
       ~build_facts:(fun () ->
         Dashboard_governance.factual_snapshot_json
           ~base_path:state.room_config.base_path)
       ());
-  try_start "operator_judge" (fun () ->
+  fork_subsystem "operator_judge" (fun () ->
     let operator_judge_ctx : _ Operator_control.context =
       {
         config = state.room_config;
@@ -131,7 +137,7 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         Operator_control.snapshot_json ~actor:"operator-judge" ~view:"summary"
           ~include_messages:false ~include_keepers:false operator_judge_ctx)
       ());
-  try_start "session_cleanup" (fun () ->
+  fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
   (* Phase 5: unified startup subsystem summary *)
   let on_off b = if b then "on" else "off" in

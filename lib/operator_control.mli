@@ -1,6 +1,8 @@
 include module type of Operator_pending_confirm
 include module type of Operator_digest
 
+val invalidate_snapshot_cache : unit -> unit
+
 val snapshot_json :
   ?actor:string ->
   ?view:string ->

@@ -36,6 +36,11 @@ type social_turn_outcome = {
   failure_reason : string option;
 }
 
+(** {1 Logging} *)
+
+(** Log a keeper exception with label prefix. *)
+val log_keeper_exn : label:string -> exn -> unit
+
 (** {1 Context and Checkpoint} *)
 
 (** Load keeper context from checkpoint for resumption. *)

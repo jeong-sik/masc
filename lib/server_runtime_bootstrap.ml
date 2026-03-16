@@ -265,14 +265,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
-  let state =
-    create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
-  in
-  bootstrap_server_state state;
-  bootstrap_keepers ~sw ~clock state;
-  init_task_backend ();
-  (* HTTP server starts FIRST — resident loops (GraphQL, Lodge, Sentinel)
-     run in a background fiber to avoid blocking /health during startup. *)
+
+  (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = make_http_config ~host ~port in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
   let request_handler = make_request_handler routes in
@@ -281,10 +275,21 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   in
   let _h2_error_handler = make_h2_error_handler () in
   let socket = listen_socket ~sw ~net config in
-  let resolved_base, masc_dir =
-    start_background_maintenance ~sw ~clock state
-  in
-  print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
+
+  (* 2. All init in background fiber (PG connect 3s + Lodge GraphQL 20-40s) *)
   Eio.Fiber.fork ~sw (fun () ->
-    start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state);
+    let state =
+      create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
+    in
+    bootstrap_server_state state;
+    bootstrap_keepers ~sw ~clock state;
+    init_task_backend ();
+    let resolved_base, masc_dir =
+      start_background_maintenance ~sw ~clock state
+    in
+    print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
+    start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
+  );
+
+  (* 3. Start serving — /health responds before init completes *)
   serve ~sw ~clock ~socket ~request_handler

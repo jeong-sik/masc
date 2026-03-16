@@ -15,6 +15,32 @@ let force_release_task_fn
   = ref (fun _config ~agent_name:_ ~task_id:_ () ->
       Error (Types.TaskInvalidState "Room_gc: force_release_task_fn not connected"))
 
+(** CP cleanup result type — mirrors Cp_cleanup.cleanup_result without
+    introducing a dependency on Cp_cleanup (which depends on Room). *)
+type cp_cleanup_result = {
+  dead_units_removed : int;
+  orphaned_units_removed : int;
+  operations_archived : int;
+  detachments_removed : int;
+  intents_removed : int;
+}
+
+let empty_cp_result = {
+  dead_units_removed = 0;
+  orphaned_units_removed = 0;
+  operations_archived = 0;
+  detachments_removed = 0;
+  intents_removed = 0;
+}
+
+(** Callback for CP cleanup — set by the module that connects Room_gc
+    and Cp_cleanup (e.g. command_plane_v2.ml or room.ml post-include).
+    This avoids a circular dependency: Cp_cleanup depends on Cp_io which
+    depends on Room, and Room includes Room_gc. *)
+let cp_cleanup_fn
+  : (config -> cp_cleanup_result) ref
+  = ref (fun _config -> empty_cp_result)
+
 
 (** Update agent heartbeat - must be called periodically *)
 let heartbeat_in_room config ~room_id ~agent_name =
@@ -314,78 +340,31 @@ let gc config ?(days=7) () =
   else
     results := "✅ No team sessions to archive" :: !results;
 
-  (* 7. Cleanup dead topology units (leader offline, 0 live roster, stale).
-     Read/write units.json directly to avoid Cp_io dependency cycle. *)
-  let dead_unit_count = ref 0 in
-  let cp_dir = Filename.concat (Filename.concat config.base_path ".masc") "control-plane" in
-  let units_file = Filename.concat cp_dir "units.json" in
-  (try
-    if Sys.file_exists units_file then begin
-      let json = Yojson.Safe.from_file units_file in
-      let unit_rows = match json with
-        | `Assoc fields -> (match List.assoc_opt "units" fields with
-            | Some (`List rows) -> rows | _ -> [])
-        | `List rows -> rows
-        | _ -> []
-      in
-      if unit_rows <> [] then begin
-        (* Collect active agent names from the agents directory *)
-        let agents_dir = Filename.concat (Filename.concat config.base_path ".masc") "agents" in
-        let active_agent_names =
-          if Sys.file_exists agents_dir && Sys.is_directory agents_dir then
-            Sys.readdir agents_dir |> Array.to_list
-            |> List.filter_map (fun fname ->
-              if Filename.check_suffix fname ".json" then
-                try
-                  let agent_json = Yojson.Safe.from_file (Filename.concat agents_dir fname) in
-                  let status = Yojson.Safe.Util.(member "status" agent_json |> to_string_option)
-                    |> Option.value ~default:"offline" in
-                  let name = Yojson.Safe.Util.(member "name" agent_json |> to_string_option) in
-                  if status <> "offline" then name else None
-                with _ -> None
-              else None)
-          else []
-        in
-        let is_dead unit_json =
-          let leader = Yojson.Safe.Util.(member "leader_id" unit_json |> to_string_option) in
-          let roster = match Yojson.Safe.Util.member "roster" unit_json with
-            | `List items -> List.filter_map Yojson.Safe.Util.to_string_option items
-            | _ -> []
-          in
-          let updated = Yojson.Safe.Util.(member "updated_at" unit_json |> to_string_option)
-            |> Option.value ~default:"" in
-          let leader_offline = match leader with
-            | None -> true
-            | Some l -> not (List.mem l active_agent_names)
-          in
-          let live_roster = List.filter (fun m -> List.mem m active_agent_names) roster in
-          leader_offline && live_roster = [] && updated <> "" && updated < cutoff_iso
-        in
-        let kept = List.filter (fun u -> not (is_dead u)) unit_rows in
-        let removed = List.length unit_rows - List.length kept in
-        if removed > 0 then begin
-          let out_json = `Assoc [
-            ("version", `String "cp-v2");
-            ("updated_at", `String (now_iso ()));
-            ("units", `List kept);
-          ] in
-          let oc = open_out units_file in
-          output_string oc (Yojson.Safe.pretty_to_string out_json);
-          close_out oc;
-          dead_unit_count := removed
-        end
-      end
-    end
-  with exn ->
-    Printf.eprintf "[gc] topology unit cleanup failed: %s\n%!" (Printexc.to_string exn));
-  if !dead_unit_count > 0 then
-    results := Printf.sprintf "Removed %d dead topology unit(s) (leader offline, empty roster, stale)" !dead_unit_count :: !results
+  (* 7. CP data cleanup (dead units, stale operations, orphaned detachments) *)
+  let cp_result = !cp_cleanup_fn config in
+  let cp_total =
+    cp_result.dead_units_removed + cp_result.orphaned_units_removed
+    + cp_result.operations_archived + cp_result.detachments_removed
+    + cp_result.intents_removed
+  in
+  if cp_total > 0 then
+    results := Printf.sprintf
+      "🧹 CP cleanup: %d dead unit(s), %d orphan unit(s), %d operation(s) archived, %d orphan detachment(s), %d dropped intent(s)"
+      cp_result.dead_units_removed cp_result.orphaned_units_removed
+      cp_result.operations_archived cp_result.detachments_removed
+      cp_result.intents_removed :: !results
   else
-    results := "No dead topology units" :: !results;
-
+    results := "✅ No stale CP data" :: !results;
   (* Log event *)
+  let cp_json =
+    Printf.sprintf "{\"dead_units\":%d,\"orphan_units\":%d,\"ops_archived\":%d,\"orphan_dets\":%d,\"dropped_intents\":%d}"
+      cp_result.dead_units_removed cp_result.orphaned_units_removed
+      cp_result.operations_archived cp_result.detachments_removed
+      cp_result.intents_removed
+  in
   log_event config (Printf.sprintf
-    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"dead_units\":%d,\"days\":%d,\"ts\":\"%s\"}"
-    !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count !keeper_orphan_count !session_archive_count !dead_unit_count days (now_iso ()));
+    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"cp_cleanup\":%s,\"days\":%d,\"ts\":\"%s\"}"
+    !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count !keeper_orphan_count !session_archive_count
+    cp_json days (now_iso ()));
 
   String.concat "\n" (List.rev !results)

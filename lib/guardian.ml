@@ -8,7 +8,7 @@ open Printf
 
 let agent_card : Agent_card.agent_card = {
   name = "guardian";
-  version = "2.95.0";
+  version = "2.95.1";
   description = Some "Internal housekeeping: zombie cleanup, garbage collection, lodge loops";
   provider = Some { organization = "MASC"; url = None };
   protocol_versions = ["0.3"];

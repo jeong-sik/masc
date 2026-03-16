@@ -17,6 +17,8 @@
    auto_responder
    auth
    board
+   board_core
+   board_votes
    board_pg
    board_dispatch
    board_listener
@@ -39,6 +41,8 @@
    cp_io
    cp_unit
    cp_snapshot
+   cp_snapshot_core
+   cp_snapshot_summaries
    cp_cleanup
    cp_lifecycle
    cp_lifecycle_swarm_live
@@ -374,6 +378,7 @@
    tool_team_session_handlers
    tool_team_session
    tool_team_session_routing
+   tool_team_session_routing_workers
    tool_team_session_step
    tool_team_session_schemas
    tool_heartbeat
@@ -499,6 +504,8 @@
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
    llm_client
+   llm_client_core
+   llm_client_providers
    llm_response_cache
    context_manager
    verifier
@@ -589,6 +596,10 @@
  mitosis_helpers
  mitosis_spawn
  trpg_round_run_handler
+ board_core
+ board_votes
+ cp_snapshot_core
+ cp_snapshot_summaries
  dashboard_execution_helpers
  dashboard_execution_fixture
  dashboard_execution_builders
@@ -597,6 +608,9 @@
  chain_parser_validate
  chain_parser_serialize
  cp_lifecycle_swarm_live
+ llm_client_core
+ llm_client_providers
+ tool_team_session_routing_workers
  cp_lifecycle_search
  cp_lifecycle_intents
  dashboard_http_helpers

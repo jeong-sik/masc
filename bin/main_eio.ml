@@ -243,10 +243,21 @@ let run_cmd host port base_path =
   (* Graceful shutdown setup *)
   let switch_ref = ref None in
   let shutdown_initiated = ref false in
+  let force_exit_timer_started = ref false in
   let initiate_shutdown signal_name =
     if not !shutdown_initiated then begin
       shutdown_initiated := true;
-      Printf.eprintf "\n🚀 MASC MCP: Received %s, shutting down gracefully...\n%!" signal_name;
+      Printf.eprintf "\n[MASC] Received %s, shutting down gracefully...\n%!" signal_name;
+
+      (* Start force-exit timer: if shutdown doesn't complete in 5s, force exit *)
+      if not !force_exit_timer_started then begin
+        force_exit_timer_started := true;
+        ignore (Thread.create (fun () ->
+          Unix.sleepf 5.0;
+          Printf.eprintf "[MASC] Graceful shutdown timed out after 5s, forcing exit.\n%!";
+          exit 1
+        ) ())
+      end;
 
       (* Broadcast shutdown notification to all SSE clients *)
       let shutdown_data = Printf.sprintf
@@ -254,7 +265,7 @@ let run_cmd host port base_path =
         signal_name
       in
       Sse.broadcast (Yojson.Safe.from_string shutdown_data);
-      Printf.eprintf "🚀 MASC MCP: Sent shutdown notification to %d SSE clients\n%!" (Sse.client_count ());
+      Printf.eprintf "[MASC] Sent shutdown notification to %d SSE clients\n%!" (Sse.client_count ());
 
       (* Give clients 200ms to receive the notification *)
       Unix.sleepf 0.2;

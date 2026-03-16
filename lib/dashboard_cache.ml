@@ -70,6 +70,13 @@ let get_or_compute_simple key ~ttl compute =
     Hashtbl.replace table key (Ready { value; expires_at = now () +. ttl });
     value
 
+let timeout_error_json key timeout_sec =
+  `Assoc [
+    ("error", `String "computation_timeout");
+    ("message", `String (Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec));
+    ("generated_at", `String (Types.now_iso ()));
+  ]
+
 let get_or_compute key ~ttl compute =
   if !eio_available then get_or_compute_eio key ~ttl compute
   else get_or_compute_simple key ~ttl compute
@@ -123,6 +130,7 @@ let stats () =
           match slot with Computing _ -> count + 1 | _ -> count)
         table 0
     in
+    let computing_count = Hashtbl.length computing in
     `Assoc
       [
         ("entries", `Int total);

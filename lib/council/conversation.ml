@@ -309,6 +309,21 @@ let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "")
   (* Create initial turn if content provided *)
   let turns, current_turn =
     if String.length initial_content > 0 then
+      (* Extract @mentions from initial_content using simple regex *)
+      let mentions =
+        try
+          let re = Str.regexp "@\\([a-zA-Z0-9_-]+\\)" in
+          let rec collect pos acc =
+            try
+              let _ = Str.search_forward re initial_content pos in
+              let target = Str.matched_group 1 initial_content in
+              let next_pos = Str.match_end () in
+              collect next_pos (target :: acc)
+            with Not_found -> List.rev acc
+          in
+          collect 0 []
+        with _ -> []
+      in
       let turn = {
         id = generate_turn_id ~thread_id:id ~seq:0;
         seq = 0;

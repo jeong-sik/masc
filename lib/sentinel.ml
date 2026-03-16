@@ -551,6 +551,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                 title result.case_.id merged_label)
           | Error msg ->
               log_warn (sprintf "governance petition failed: %s -- %s" title msg)
+          end
         in
 
         (* 1. Tasks stuck > threshold (default 24h) *)

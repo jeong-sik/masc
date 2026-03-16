@@ -963,8 +963,15 @@
  (modules test_workflow_guide)
  (libraries masc_mcp alcotest yojson))
 
+; Agent Economy — currency/reward system tests
+(test
+ (name test_agent_economy)
+ (modules test_agent_economy)
+ (libraries masc_mcp alcotest yojson unix mirage-crypto-rng mirage-crypto-rng.unix))
+
 ; Agent Neo4j — parameterized Cypher query safety tests
 (test
  (name test_agent_neo4j)
  (modules test_agent_neo4j)
  (libraries masc_mcp alcotest yojson))
+

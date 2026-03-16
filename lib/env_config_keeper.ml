@@ -201,6 +201,13 @@ module Sentinel = struct
   let task_stale_threshold_sec = get_float ~default:1800.0 "MASC_SENTINEL_TASK_STALE_SEC"
   let llm_enabled = get_bool ~default:true "MASC_SENTINEL_LLM_ENABLED"
   let llm_timeout_sec = get_int ~default:30 "MASC_SENTINEL_LLM_TIMEOUT_SEC"
+
+  (** Governance sweep: auto-generate petitions for stuck tasks / inactive agents *)
+  let governance_enabled = get_bool ~default:true "MASC_SENTINEL_GOVERNANCE_ENABLED"
+  let governance_interval_sec = get_float ~default:1800.0 "MASC_SENTINEL_GOVERNANCE_INTERVAL_SEC"
+
+  (** Threshold: tasks stuck longer than this trigger a governance petition *)
+  let governance_task_stuck_sec = get_float ~default:86400.0 "MASC_SENTINEL_GOV_TASK_STUCK_SEC"
 end
 
 (** Print configuration summary for debugging *)

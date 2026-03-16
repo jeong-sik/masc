@@ -232,6 +232,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
             (try Institution_eio.load_and_format_for_welcome ~fs config
              with
              | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
              | exn ->
                  Eio.traceln "[WARN] Unexpected institution error: %s" (Printexc.to_string exn); "")
         | None -> ""

@@ -173,6 +173,7 @@ let load_handover ~fs config handover_id : (handover_record, string) result =
   with
   | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
       Error (Printf.sprintf "Handover not found: %s" handover_id)
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
       Error (Printf.sprintf "Failed to load handover: %s" (Printexc.to_string exn))
 

@@ -54,3 +54,36 @@ let publish_heartbeat_recovered (bus : Agent_sdk.Event_bus.t) ~agent_name ~previ
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:heartbeat_recovered", payload))
+
+(** {1 Phase 4: Social Events} *)
+
+(** Publish a trust score update between two agents. *)
+let publish_trust_updated (bus : Agent_sdk.Event_bus.t) ~agent_a ~agent_b ~trust_score =
+  let payload = `Assoc [
+    ("agent_a", `String agent_a);
+    ("agent_b", `String agent_b);
+    ("trust_score", `Float trust_score);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:trust_updated", payload))
+
+(** Publish a reputation change event. *)
+let publish_reputation_changed (bus : Agent_sdk.Event_bus.t) ~agent_name ~old_score ~new_score ~trend =
+  let payload = `Assoc [
+    ("agent_name", `String agent_name);
+    ("old_score", `Float old_score);
+    ("new_score", `Float new_score);
+    ("trend", `String trend);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:reputation_changed", payload))
+
+(** Publish an institution episode event. *)
+let publish_institution_episode (bus : Agent_sdk.Event_bus.t) ~episode_id ~event_type ~participants =
+  let payload = `Assoc [
+    ("episode_id", `String episode_id);
+    ("event_type", `String event_type);
+    ("participant_count", `Int (List.length participants));
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:institution_episode", payload))

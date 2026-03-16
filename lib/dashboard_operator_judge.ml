@@ -299,7 +299,11 @@ let compute_judgments ~facts_json =
     | Error message -> Error message
     | Ok response -> (
         try Ok (response.model_used, Yojson.Safe.from_string response.content)
-        with _ -> Error "Operator judge returned invalid JSON.")
+        with
+        | Yojson.Json_error msg ->
+            Error (Printf.sprintf "Operator judge returned invalid JSON: %s" msg)
+        | exn ->
+            Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
 let refresh_once ~(config : Room.config) ~build_facts =
   let st = get_state config.base_path in

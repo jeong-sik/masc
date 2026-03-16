@@ -117,7 +117,9 @@ let load_latest_from_disk base_path =
                  | Some current
                    when judgment_generated_at current >= judgment_generated_at json -> ()
                  | _ -> Hashtbl.replace table key json
-             with _ -> ());
+             with
+             | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
+             | exn -> Log.Governance.warn "load_latest_from_disk parse: %s" (Printexc.to_string exn));
     table
 
 let latest_judgments base_path =
@@ -309,7 +311,11 @@ let compute_judgments ~base_path:_ ~factual_json =
                     ~model_used:response.model_used)
           in
           Ok (response.model_used, generated_at, expires_at, judgments)
-        with _ -> Error "Governance judge returned invalid JSON.")
+        with
+        | Yojson.Json_error msg ->
+            Error (Printf.sprintf "Governance judge returned invalid JSON: %s" msg)
+        | exn ->
+            Error (Printf.sprintf "Governance judge parse error: %s" (Printexc.to_string exn)))
 
 let append_judgments base_path judgments =
   ensure_dir (governance_dir base_path);

@@ -1042,7 +1042,11 @@ let ag_ui_event_of_masc_event ~room_id event =
         let ag_event = Ag_ui.of_custom ~room_id ~name:"MASC_EVENT" json in
         Ag_ui.event_to_sse ag_event
     | None -> event
-  with _ -> event
+  with
+  | Yojson.Json_error _ -> event
+  | exn ->
+      Log.Transport.warn "ag_ui_event_of_masc_event failed: %s" (Printexc.to_string exn);
+      event
 
 let handle_ag_ui_events ~deps request reqd =
   let origin = deps.get_origin request in

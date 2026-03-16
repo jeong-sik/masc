@@ -373,7 +373,11 @@ let latest_cycle_record ~base_path loop_id =
             else
               let next =
                 try Some (cycle_of_yojson (Yojson.Safe.from_string trimmed))
-                with _ -> last
+                with
+                | Yojson.Json_error _ -> last
+                | exn ->
+                    Log.Autoresearch.warn "cycle parse failed: %s" (Printexc.to_string exn);
+                    last
               in
               loop next
         | exception End_of_file -> last

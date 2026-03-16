@@ -210,7 +210,11 @@ let send_to_langfuse ~endpoint ~body () =
       let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string
         (try (Unix.gethostbyname host).Unix.h_addr_list.(0)
               |> Unix.string_of_inet_addr
-         with _ -> "127.0.0.1"), port) in
+         with
+         | Not_found -> "127.0.0.1"
+         | exn ->
+             Log.Telemetry.warn "langfuse hostname resolve failed: %s" (Printexc.to_string exn);
+             "127.0.0.1"), port) in
       let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
       (* Use blocking socket for reliable connection *)
       Unix.setsockopt_float sock Unix.SO_SNDTIMEO 2.0;  (* 2 second timeout *)

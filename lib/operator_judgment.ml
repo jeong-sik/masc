@@ -176,7 +176,11 @@ let load_all config =
                match of_yojson json with
                | Ok value -> Some value
                | Error _ -> None
-             with _ -> None)
+             with
+             | Yojson.Json_error _ -> None
+             | exn ->
+                 Log.Governance.warn "operator judgment parse: %s" (Printexc.to_string exn);
+                 None)
 
 let append config values =
   ensure_dir (operator_dir config);

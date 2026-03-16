@@ -44,7 +44,13 @@ let git_probe_from_root repo_root =
   in
   let ic = Unix.open_process_in cmd in
   let output =
-    try In_channel.input_all ic with _ -> ""
+    try In_channel.input_all ic with
+    | Sys_error msg ->
+        Log.Identity.warn "git_probe_from_root read failed: %s" msg;
+        ""
+    | exn ->
+        Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
+        ""
   in
   match Unix.close_process_in ic with
   | Unix.WEXITED 0 -> trim_to_option output

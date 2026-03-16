@@ -103,7 +103,11 @@ let of_json (json : Yojson.Safe.t) : norm option =
         (try json |> member "summary" |> to_string
          with Type_error _ -> "");
     }
-  with _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
+  | exn ->
+      Log.Norm.warn "norm of_json unexpected: %s" (Printexc.to_string exn);
+      None
 
 (* ================================================================ *)
 (* File I/O                                                         *)

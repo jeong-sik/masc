@@ -669,7 +669,9 @@ let handle_gc ctx args =
   (* Also expire pending decisions past TTL *)
   let expired =
     try Cp_lifecycle.check_expired_decisions ctx.config
-    with _ -> 0
+    with exn ->
+      Log.Misc.warn "check_expired_decisions failed: %s" (Printexc.to_string exn);
+      0
   in
   let decision_note =
     if expired > 0 then Printf.sprintf "\n⏰ Expired %d pending decision(s) past TTL" expired

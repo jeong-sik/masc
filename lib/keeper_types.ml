@@ -309,7 +309,11 @@ let personas_root_opt () =
     let me_root = Env_config.me_root () in
     let path = Filename.concat me_root "personas" in
     if Sys.file_exists path && Sys.is_directory path then Some path else None
-  with _ -> None
+  with
+  | Sys_error _ -> None
+  | exn ->
+      Log.Keeper.warn "personas_root_opt unexpected: %s" (Printexc.to_string exn);
+      None
 
 let persona_profile_path_opt name =
   match personas_root_opt () with

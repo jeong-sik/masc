@@ -6,7 +6,7 @@ let iso_of_unix unix_ts =
 
 let parse_iso_opt = function
   | Some raw when String.trim raw <> "" -> (
-      try Some (Types.parse_iso8601 raw) with _ -> None)
+      try Some (Types.parse_iso8601 raw) with Failure _ -> None)
   | _ -> None
 
 let trim_to_option text =

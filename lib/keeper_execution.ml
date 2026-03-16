@@ -7,6 +7,17 @@ open Keeper_alerting
 open Keeper_exec_tools
 open Keeper_exec_status
 
+(** Log a keeper error with [UNEXPECTED] tag for unrecognized exceptions.
+    Known IO/parse exceptions get a plain log; anything else is tagged for triage.
+    No re-raise — side-effect-only patterns must not change control flow. *)
+let log_keeper_exn ~label exn =
+  let tag = match exn with
+    | Sys_error _ | Failure _ | Not_found
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
+    | _ -> "[UNEXPECTED] "
+  in
+  Printf.eprintf "[keeper] %s%s: %s\n%!" tag label (Printexc.to_string exn)
+
 let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
   let latest_ckpt =
@@ -196,9 +207,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
             (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name);
           room_id :: acc
         with exn ->
-          Printf.eprintf
-            "[keeper] room presence sync failed for %s in %s: %s\n%!"
-            meta.name room_id (Printexc.to_string exn);
+          log_keeper_exn ~label:(Printf.sprintf "room presence sync failed for %s in %s" meta.name room_id) exn;
           acc)
       [] room_ids
   in
@@ -1237,7 +1246,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                   | (false, err) ->
                       Printf.eprintf "[keeper-autonomy] %s L2 perpetual board post failed: %s\n%!" meta.name err
                   | exception exn ->
-                      Printf.eprintf "[keeper-autonomy] %s L2 board post error: %s\n%!" meta.name (Printexc.to_string exn));
+                      log_keeper_exn ~label:(Printf.sprintf "autonomy %s L2 board post error" meta.name) exn);
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;
@@ -1289,7 +1298,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                         ~goal_id:req.goal_id ~outcome:"progress"
                         ~note:(Printf.sprintf "Perpetual agent started (models: %s)"
                           (String.concat ", " req.models)) ()) with exn ->
-                        Printf.eprintf "[keeper] goal review failed: %s\n%!" (Printexc.to_string exn));
+                        log_keeper_exn ~label:"goal review failed" exn);
                       (* Post to Board *)
                       let board_args = `Assoc [
                         ("author", `String meta.name);
@@ -1314,7 +1323,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                        | (false, err) ->
                            Printf.eprintf "[keeper-autonomy] %s: board post failed: %s\n%!" meta.name err
                        | exception exn ->
-                           Printf.eprintf "[keeper-autonomy] %s: board post error: %s\n%!" meta.name (Printexc.to_string exn));
+                           log_keeper_exn ~label:(Printf.sprintf "autonomy %s board post error" meta.name) exn);
                       Some { meta with
                         last_autonomous_action_at = now_iso ();
                         autonomous_action_count = meta.autonomous_action_count + 1;
@@ -1346,14 +1355,14 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("action", `String pa.action_description);
                    ("autonomy_level", `String (Keeper_autonomy.autonomy_level_to_string level));
                  ]) with exn ->
-                   Printf.eprintf "[keeper] SSE keeper_autonomy_start broadcast failed: %s\n%!" (Printexc.to_string exn));
+                   log_keeper_exn ~label:"SSE keeper_autonomy_start broadcast failed" exn);
                  (* 5-2: Execute the approved plan *)
                  let (summary, exec_cost, tools_used) =
                    execute_approved_plan ~config ~meta ~specs ~plan ~pa
                      ~autonomy_level:level ~trajectory_acc:(Some traj_acc) in
                  (* 5-3: Finalize trajectory *)
                  (try ignore (Trajectory.finalize traj_acc Trajectory.Completed)
-                  with exn -> Printf.eprintf "[keeper] trajectory finalize failed: %s\n%!" (Printexc.to_string exn));
+                  with exn -> log_keeper_exn ~label:"trajectory finalize failed" exn);
                  (* 5-3: Update goal progress *)
                  let outcome = if tools_used <> [] then "progress" else "blocked" in
                  let review_note = Printf.sprintf
@@ -1364,7 +1373,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    exec_cost in
                  (try ignore (Goal_store.review_goal config
                    ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with exn ->
-                   Printf.eprintf "[keeper] goal review failed: %s\n%!" (Printexc.to_string exn));
+                   log_keeper_exn ~label:"goal review failed" exn);
                  (* 5-4: Post execution report to Board *)
                  let report_args = `Assoc [
                    ("author", `String meta.name);
@@ -1395,7 +1404,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("tools_used", `List (List.map (fun t -> `String t) tools_used));
                    ("cost_usd", `Float exec_cost);
                  ]) with exn ->
-                   Printf.eprintf "[keeper] SSE keeper_autonomy_complete broadcast failed: %s\n%!" (Printexc.to_string exn));
+                   log_keeper_exn ~label:"SSE keeper_autonomy_complete broadcast failed" exn);
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;
@@ -1436,13 +1445,13 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("autonomy_level", `String (Keeper_autonomy.autonomy_level_to_string level));
                    ("caution", `String warning);
                  ]) with exn ->
-                   Printf.eprintf "[keeper] SSE keeper_autonomy_start (cautioned) broadcast failed: %s\n%!" (Printexc.to_string exn));
+                   log_keeper_exn ~label:"SSE keeper_autonomy_start (cautioned) broadcast failed" exn);
                  (* 5-2: Execute despite caution *)
                  let (summary, exec_cost, tools_used) =
                    execute_approved_plan ~config ~meta ~specs ~plan ~pa
                      ~autonomy_level:level ~trajectory_acc:(Some traj_acc) in
                  (try ignore (Trajectory.finalize traj_acc Trajectory.Completed)
-                  with exn -> Printf.eprintf "[keeper] trajectory finalize (cautioned) failed: %s\n%!" (Printexc.to_string exn));
+                  with exn -> log_keeper_exn ~label:"trajectory finalize (cautioned) failed" exn);
                  (* 5-3: Update goal progress *)
                  let outcome = if tools_used <> [] then "progress" else "blocked" in
                  let review_note = Printf.sprintf
@@ -1453,7 +1462,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    exec_cost in
                  (try ignore (Goal_store.review_goal config
                    ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with exn ->
-                   Printf.eprintf "[keeper] goal review (cautioned) failed: %s\n%!" (Printexc.to_string exn));
+                   log_keeper_exn ~label:"goal review (cautioned) failed" exn);
                  (* 5-4: Board report + SSE complete *)
                  let report_args = `Assoc [
                    ("author", `String meta.name);
@@ -1486,7 +1495,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("cost_usd", `Float exec_cost);
                    ("warning", `String warning);
                  ]) with exn ->
-                   Printf.eprintf "[keeper] SSE keeper_autonomy_complete (cautioned) broadcast failed: %s\n%!" (Printexc.to_string exn));
+                   log_keeper_exn ~label:"SSE keeper_autonomy_complete (cautioned) broadcast failed" exn);
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;
@@ -1740,9 +1749,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~from_agent:meta.agent_name
                                           ~content)
                                    with exn ->
-                                     Printf.eprintf
-                                       "[keeper-deliberation] reply_in_room failed: %s\n%!"
-                                       (Printexc.to_string exn))
+                                     log_keeper_exn ~label:"deliberation reply_in_room failed" exn)
                               | Keeper_deliberation.Broadcast { message } ->
                                   (try
                                      ignore
@@ -1750,9 +1757,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~from_agent:meta.agent_name
                                           ~content:message)
                                    with exn ->
-                                     Printf.eprintf
-                                       "[keeper-deliberation] broadcast failed: %s\n%!"
-                                       (Printexc.to_string exn))
+                                     log_keeper_exn ~label:"deliberation broadcast failed" exn)
                               | Keeper_deliberation.TaskClaim { task_id; reason = _ } ->
                                   (try
                                      let result =
@@ -1764,9 +1769,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                        "[keeper-deliberation] task_claim result: %s\n%!"
                                        result
                                    with exn ->
-                                     Printf.eprintf
-                                       "[keeper-deliberation] task_claim failed: %s\n%!"
-                                       (Printexc.to_string exn))
+                                     log_keeper_exn ~label:"deliberation task_claim failed" exn)
                               | Keeper_deliberation.BoardPost { content; hearth } ->
                                   (try
                                      ignore
@@ -1776,9 +1779,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ?hearth
                                           ())
                                    with exn ->
-                                     Printf.eprintf
-                                       "[keeper-deliberation] board_post failed: %s\n%!"
-                                       (Printexc.to_string exn))
+                                     log_keeper_exn ~label:"deliberation board_post failed" exn)
                               | Keeper_deliberation.BoardComment { post_id; content } ->
                                   (try
                                      ignore
@@ -1788,9 +1789,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~content
                                           ())
                                    with exn ->
-                                     Printf.eprintf
-                                       "[keeper-deliberation] board_comment failed: %s\n%!"
-                                       (Printexc.to_string exn))
+                                     log_keeper_exn ~label:"deliberation board_comment failed" exn)
                               | Keeper_deliberation.BoardVote { post_id; direction } ->
                                   (try
                                      let dir : Board.vote_direction =
@@ -1804,9 +1803,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~post_id
                                           ~direction:dir)
                                    with exn ->
-                                     Printf.eprintf
-                                       "[keeper-deliberation] board_vote failed: %s\n%!"
-                                       (Printexc.to_string exn))
+                                     log_keeper_exn ~label:"deliberation board_vote failed" exn)
                               | Keeper_deliberation.ProposeSpawn { topic; reason } ->
                                   (try
                                      let msg =
@@ -1819,9 +1816,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~from_agent:meta.agent_name
                                           ~content:msg)
                                    with exn ->
-                                     Printf.eprintf
-                                       "[keeper-deliberation] propose_spawn failed: %s\n%!"
-                                       (Printexc.to_string exn))
+                                     log_keeper_exn ~label:"deliberation propose_spawn failed" exn)
                               | Keeper_deliberation.MultiStep actions ->
                                   let max_steps = 5 in
                                   let steps_to_run =
@@ -1910,10 +1905,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                                  "[keeper-deliberation] %s nested multi_step skipped\n%!"
                                                  meta.name
                                          with exn ->
-                                           Printf.eprintf
-                                             "[keeper-deliberation] %s multi_step %d failed: %s\n%!"
-                                             meta.name !step_count
-                                             (Printexc.to_string exn);
+                                           log_keeper_exn ~label:(Printf.sprintf "deliberation %s multi_step %d failed" meta.name !step_count) exn;
                                            stop := true)))
                                     steps_to_run);
                              (* Update meta *)
@@ -2066,7 +2058,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                        let after_compact_tokens = ctx_work.token_count in
                        let compacted = after_compact_tokens < before_compact_tokens in
                        (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
-                        with exn -> Printf.eprintf "[keeper] save_checkpoint (tool_loop) failed: %s\n%!" (Printexc.to_string exn));
+                        with exn -> log_keeper_exn ~label:"save_checkpoint (tool_loop) failed" exn);
                        let turn_cost = generated.total_cost_usd in
                        let proactive_reason =
                          Printf.sprintf
@@ -2183,7 +2175,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                           in
                           append_jsonl_line metrics_path metrics_json
                        with exn ->
-                         Printf.eprintf "[keeper] metrics JSONL write failed: %s\n%!" (Printexc.to_string exn));
+                         log_keeper_exn ~label:"metrics JSONL write failed" exn);
                        updated))
 
 let explicit_room_prompt ~(meta : keeper_meta) ~(room_id : string) (msg : Types.message) : string =
@@ -2288,8 +2280,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               Context_manager.persist_message session assistant_message;
               (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
                with exn ->
-                 Printf.eprintf "[keeper] save_checkpoint (explicit room reply) failed: %s\n%!"
-                   (Printexc.to_string exn));
+                 log_keeper_exn ~label:"save_checkpoint (explicit room reply) failed" exn);
               let usage = resp.usage in
               let now_ts = Time_compat.now () in
               let updated =
@@ -2551,8 +2542,7 @@ let run_social_board_event_turn
               Context_manager.persist_message session assistant_message;
               (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
                with exn ->
-                 Printf.eprintf "[keeper] save_checkpoint (social board turn) failed: %s\n%!"
-                   (Printexc.to_string exn));
+                 log_keeper_exn ~label:"save_checkpoint (social board turn) failed" exn);
               let now_ts = Time_compat.now () in
               let action_kind = keeper_action_kind_of_tool_names final_tools_used in
               let outcome =
@@ -2649,9 +2639,7 @@ let run_learned_policy_room_event
                      (Room.broadcast_in_room ctx.config ~room_id
                         ~from_agent:updated_meta.agent_name ~content:reply)
                  with exn ->
-                   Printf.eprintf
-                     "[keeper] learned policy room broadcast failed for %s in %s: %s\n%!"
-                     updated_meta.name room_id (Printexc.to_string exn));
+                   log_keeper_exn ~label:(Printf.sprintf "learned policy room broadcast failed for %s in %s" updated_meta.name room_id) exn);
                 ( `Assoc
                     [
                       ("executed", `Bool true);
@@ -2810,9 +2798,7 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
                              (Room.broadcast_in_room ctx.config ~room_id
                                 ~from_agent:updated_meta.agent_name ~content:reply)
                          with exn ->
-                           Printf.eprintf
-                             "[keeper] explicit room broadcast failed for %s in %s: %s\n%!"
-                             updated_meta.name room_id (Printexc.to_string exn));
+                           log_keeper_exn ~label:(Printf.sprintf "explicit room broadcast failed for %s in %s" updated_meta.name room_id) exn);
                         (match write_meta ctx.config updated_meta with
                          | Ok () -> ()
                          | Error err ->

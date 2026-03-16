@@ -188,7 +188,7 @@ let get_temporal_reputation ~agent_name : temporal_reputation =
     Trust(A,B) = synapse_weight(A,B) × reputation(B)
     This combines collaboration history with individual reputation. *)
 
-let compute_trust ~agent_a ~agent_b ~(synapse_weight : float) : float =
+let compute_trust ~agent_a:_ ~agent_b ~(synapse_weight : float) : float =
   let rep_b = get_temporal_reputation ~agent_name:agent_b in
   synapse_weight *. rep_b.current_score
 

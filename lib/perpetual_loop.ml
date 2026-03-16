@@ -202,65 +202,6 @@ let create_state config =
     trace_id;
   }
 
-(** Resume source for creating loop state. *)
-type resume_source =
-  | Fresh of { goal : string; models : Llm_client.model_spec list }
-  | FromCheckpoint of { session_id : string; base_dir : string }
-
-(** Create state from an OAS checkpoint (resume path).
-    Falls back to fresh state if checkpoint is missing or incompatible. *)
-let create_state_from_checkpoint config ~session_id ~base_dir =
-  match Agent_sdk.Checkpoint_store.load ~dir:base_dir ~session_id with
-  | Error _ ->
-    eprintf "[perpetual] No checkpoint found for %s, starting fresh\n%!" session_id;
-    create_state config
-  | Ok ckpt ->
-    let (goal, generation, oas_msgs) =
-      Oas_checkpoint_bridge.from_oas_checkpoint ckpt in
-    let msgs = Oas_checkpoint_bridge.restore_messages oas_msgs in
-    let primary_model = match config.model_cascade with
-      | m :: _ -> m
-      | [] -> Llm_client.default_local_model_spec ()
-    in
-    let system_prompt = Option.value ~default:"" ckpt.system_prompt in
-    let context = Context_manager.create ~system_prompt ~max_tokens:primary_model.max_context in
-    let context = List.fold_left Context_manager.append context msgs in
-    let trace_id = generate_trace_id () in
-    let session = Context_manager.create_session
-      ~session_id:trace_id ~base_dir:config.session_base_dir in
-    let zero_usage : Llm_client.token_usage = {
-      input_tokens = 0; output_tokens = 0; total_tokens = 0;
-      cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
-    } in
-    let now_ts = Time_compat.now () in
-    eprintf "[perpetual] Resumed from checkpoint: session=%s goal=%s gen=%d msgs=%d\n%!"
-      session_id
-      (if String.length goal > 40 then String.sub goal 0 40 ^ "..." else goal)
-      generation (List.length msgs);
-    {
-      context;
-      session;
-      generation = generation + 1;  (* New generation *)
-      turn_count = 0;
-      idle_turns = 0;
-      total_cost = ckpt.usage.estimated_cost_usd;
-      total_tokens = ckpt.usage.total_input_tokens;
-      last_heartbeat = now_ts;
-      started_at = now_ts;
-      last_turn_ts = 0.0;
-      last_model_used = "";
-      last_usage = zero_usage;
-      last_latency_ms = 0;
-      compaction_count = 0;
-      compaction_tokens_saved = 0;
-      last_compaction_ts = 0.0;
-      last_compaction_before_tokens = 0;
-      last_compaction_after_tokens = 0;
-      events = [];
-      running = true;
-      trace_id;
-    }
-
 let record_event (state : loop_state) (ev : event) =
   let ts = Time_compat.now () in
   state.events <- (ts, ev) :: state.events;
@@ -679,11 +620,22 @@ let run_turn ~config ~state =
         (* OAS Checkpoint bridge: portable state snapshot *)
         (try
           let oas_ckpt = Oas_checkpoint_bridge.to_oas_checkpoint
-            ~state ~ctx:state.context ~goal:config.initial_goal in
-          Agent_sdk.Checkpoint_store.save
-            ~dir:config.session_base_dir
-            ~session_id:state.trace_id
-            oas_ckpt
+            ~state:
+              {
+                Oas_checkpoint_bridge.session_id = state.session.session_id;
+                generation = state.generation;
+                turn_count = state.turn_count;
+                total_tokens = state.total_tokens;
+                total_cost = state.total_cost;
+                trace_id = state.trace_id;
+              }
+            ~ctx:state.context ~goal:config.initial_goal in
+          let checkpoint_path =
+            Filename.concat config.session_base_dir (state.trace_id ^ ".json")
+          in
+          Fs_compat.mkdir_p config.session_base_dir;
+          Fs_compat.save_file checkpoint_path
+            (Agent_sdk.Checkpoint.to_string oas_ckpt)
         with exn ->
           eprintf "[perpetual] OAS checkpoint save failed: %s\n%!"
             (Printexc.to_string exn))

@@ -2795,7 +2795,6 @@ let dashboard_room_truth_focus_json ~initialized ~operator_digest_json ~top_queu
 
 let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let config = state.Mcp_server.room_config in
-  let actor = operator_actor_hint request in
   let shell_json = dashboard_shell_http_json config in
   let execution_json = dashboard_execution_http_json ~state ~sw ~clock request in
   let command_summary_json =
@@ -2805,16 +2804,6 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       with _ -> `Assoc []
     else
       `Assoc []
-  in
-  let operator_ctx : _ Operator_control.context =
-    {
-      config;
-      agent_name = Option.value ~default:"dashboard" actor;
-      sw;
-      clock;
-      proc_mgr = state.Mcp_server.proc_mgr;
-      mcp_session_id = None;
-    }
   in
   (* Derive digest fields from execution_json to avoid duplicate
      Operator_control.digest_json call (saves ~3s).

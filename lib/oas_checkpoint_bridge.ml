@@ -37,11 +37,21 @@ let oas_msg_to_masc (m : Agent_sdk.Types.message) : Llm_client.message =
   in
   { Llm_client.role; content; name = None; tool_call_id = None }
 
+(** Minimal perpetual-loop state needed for OAS checkpoint persistence. *)
+type checkpoint_state = {
+  session_id : string;
+  generation : int;
+  turn_count : int;
+  total_tokens : int;
+  total_cost : float;
+  trace_id : string;
+}
+
 (** Build an OAS Checkpoint from perpetual loop state and working context.
     Stores MASC-specific metadata (generation, goal, turn_count) in the
     checkpoint's context via scoped keys. *)
 let to_oas_checkpoint
-    ~(state : Perpetual_loop.loop_state)
+    ~(state : checkpoint_state)
     ~(ctx : Context_manager.working_context)
     ~(goal : string)
   : Agent_sdk.Checkpoint.t =
@@ -60,7 +70,7 @@ let to_oas_checkpoint
   let messages = List.map masc_msg_to_oas ctx.messages in
   {
     Agent_sdk.Checkpoint.version = 3;
-    session_id = state.session.session_id;
+    session_id = state.session_id;
     agent_name = "perpetual";
     model = Agent_sdk.Types.Custom "masc-perpetual";
     system_prompt = Some ctx.system_prompt;

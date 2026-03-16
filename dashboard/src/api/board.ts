@@ -1,0 +1,477 @@
+import { get, post, postRaw, withRetries, defaultBoardVoter } from '../api'
+import { isRecord } from '../components/common/normalize'
+import { asString, asNumber, asStringList } from './trpg'
+import type {
+  BoardPost, BoardComment, BoardHearth, BoardFlair, BoardSortMode,
+  GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,
+  GovernanceDecisionItem, GovernanceExecutedRoute, GovernanceExecutionOrder,
+  GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
+  GovernanceResolvedAction, GovernanceTimelineEvent, PendingConfirmation,
+} from '../types'
+
+// --- Board ---
+
+const SYSTEM_BOARD_AUTHORS = new Set(['lodge-system', 'team-session'])
+
+function toIsoTimestamp(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value
+  if (typeof value !== 'number' || Number.isNaN(value)) return new Date().toISOString()
+  const ms = value < 1_000_000_000_000 ? value * 1000 : value
+  return new Date(ms).toISOString()
+}
+
+function asNullableIsoTimestamp(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed ? trimmed : null
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const ms = value < 1_000_000_000_000 ? value * 1000 : value
+    return new Date(ms).toISOString()
+  }
+  return null
+}
+
+function asNullableString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
+}
+
+function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
+  if (!isRecord(raw)) return null
+  const confirmToken = asString(raw.confirm_token ?? raw.token, '').trim()
+  if (!confirmToken) return null
+  return {
+    confirm_token: confirmToken,
+    actor: asNullableString(raw.actor) ?? undefined,
+    action_type: asNullableString(raw.action_type) ?? undefined,
+    target_type: asNullableString(raw.target_type) ?? undefined,
+    target_id: asNullableString(raw.target_id),
+    delegated_tool: asNullableString(raw.delegated_tool) ?? undefined,
+    created_at: asNullableIsoTimestamp(raw.created_at) ?? undefined,
+    preview: raw.preview,
+  }
+}
+
+function normalizeGovernanceContextRef(raw: unknown): GovernanceContextRef {
+  if (!isRecord(raw)) return {}
+  return {
+    board_post_id: asNullableString(raw.board_post_id),
+    task_id: asNullableString(raw.task_id),
+    operation_id: asNullableString(raw.operation_id),
+    team_session_id: asNullableString(raw.team_session_id),
+  }
+}
+
+function normalizeGovernanceResolvedAction(raw: unknown): GovernanceResolvedAction | null {
+  if (!isRecord(raw)) return null
+  const actionKind = asNullableString(raw.action_kind)
+  const resolvedTool = asNullableString(raw.resolved_tool)
+  const targetType = asNullableString(raw.target_type)
+  const targetId = asNullableString(raw.target_id)
+  const reason = asNullableString(raw.reason)
+  if (!actionKind && !resolvedTool && !targetType && !reason) return null
+  return {
+    action_kind: actionKind ?? undefined,
+    resolved_tool: resolvedTool,
+    target_type: targetType,
+    target_id: targetId,
+    reason: reason ?? undefined,
+    payload_preview: raw.payload_preview,
+  }
+}
+
+function normalizeGovernanceExecutedRoute(raw: unknown): GovernanceExecutedRoute | null {
+  if (!isRecord(raw)) return null
+  const actionType = asNullableString(raw.action_type)
+  const delegatedTool = asNullableString(raw.delegated_tool)
+  const confirmationState = asNullableString(raw.confirmation_state)
+  const createdAt = asNullableIsoTimestamp(raw.created_at)
+  if (!actionType && !delegatedTool && !confirmationState && !createdAt) return null
+  return {
+    action_type: actionType ?? undefined,
+    delegated_tool: delegatedTool,
+    confirmation_state: confirmationState ?? undefined,
+    created_at: createdAt,
+  }
+}
+
+function normalizeGovernanceGuardrailState(raw: unknown): GovernanceGuardrailState | null {
+  if (!isRecord(raw)) return null
+  const pendingConfirm = normalizePendingConfirmation(raw.pending_confirm)
+  const pendingConfirmToken =
+    asNullableString(raw.pending_confirm_token) ?? pendingConfirm?.confirm_token ?? null
+  return {
+    requires_human_gate:
+      typeof raw.requires_human_gate === 'boolean' ? raw.requires_human_gate : undefined,
+    pending_confirm: pendingConfirm,
+    pending_confirm_token: pendingConfirmToken,
+    ready_to_execute:
+      typeof raw.ready_to_execute === 'boolean' ? raw.ready_to_execute : undefined,
+  }
+}
+
+function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | null {
+  if (!isRecord(raw)) return null
+  const summary = asNullableString(raw.summary)
+  const targetId = asNullableString(raw.target_id)
+  if (!summary && !targetId) return null
+  return {
+    judgment_id: asNullableString(raw.judgment_id) ?? undefined,
+    target_kind: asNullableString(raw.target_kind) ?? undefined,
+    target_id: targetId ?? undefined,
+    status: asNullableString(raw.status) ?? undefined,
+    summary: summary ?? undefined,
+    confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
+    generated_at: asNullableIsoTimestamp(raw.generated_at),
+    expires_at: asNullableIsoTimestamp(raw.expires_at),
+    model_used: asNullableString(raw.model_used),
+    keeper_name: asNullableString(raw.keeper_name),
+    evidence_refs: asStringList(raw.evidence_refs),
+    recommended_action: normalizeGovernanceResolvedAction(raw.recommended_action),
+    guardrail_state: normalizeGovernanceGuardrailState(raw.guardrail_state),
+    executed_route: normalizeGovernanceExecutedRoute(raw.executed_route),
+  }
+}
+
+function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisionItem | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const topic = asString(raw.topic ?? raw.title, '').trim()
+  if (!id || !topic) return null
+  const context = normalizeGovernanceContextRef(raw.context)
+  return {
+    kind: asString(raw.kind, 'case'),
+    id,
+    topic,
+    status: asString(raw.status ?? raw.state, 'open'),
+    origin: asNullableString(raw.origin),
+    subject_type: asNullableString(raw.subject_type),
+    risk_class: asNullableString(raw.risk_class),
+    provenance: asNullableString(raw.provenance),
+    auto_execution_state: asNullableString(raw.auto_execution_state),
+    petition_count: asInt(raw.petition_count),
+    brief_count: asInt(raw.brief_count),
+    last_activity_at: asNullableIsoTimestamp(raw.last_activity_at),
+    truth_summary: asNullableString(raw.truth_summary) ?? undefined,
+    judgment_summary: asNullableString(raw.judgment_summary),
+    confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
+    related_agents: asStringList(raw.related_agents),
+    context,
+    linked_board_post_id: asNullableString(raw.linked_board_post_id) ?? context.board_post_id ?? null,
+    linked_task_id: asNullableString(raw.linked_task_id) ?? context.task_id ?? null,
+    linked_operation_id: asNullableString(raw.linked_operation_id) ?? context.operation_id ?? null,
+    linked_session_id: asNullableString(raw.linked_session_id) ?? context.team_session_id ?? null,
+    recommended_action: normalizeGovernanceResolvedAction(raw.recommended_action),
+    executed_route: normalizeGovernanceExecutedRoute(raw.executed_route),
+    guardrail_state: normalizeGovernanceGuardrailState(raw.guardrail_state),
+    evidence_refs: asStringList(raw.evidence_refs),
+  }
+}
+
+function normalizeGovernanceCaseBrief(raw: unknown): GovernanceCaseBrief | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const author = asString(raw.author, '').trim()
+  const summary = asString(raw.summary, '').trim()
+  if (!id || !author || !summary) return null
+  return {
+    id,
+    author,
+    stance: asString(raw.stance, 'support'),
+    summary,
+    evidence_refs: asStringList(raw.evidence_refs),
+    created_at: asNullableIsoTimestamp(raw.created_at),
+  }
+}
+
+export function normalizeGovernanceExecutionOrder(raw: unknown): GovernanceExecutionOrder | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const caseId = asString(raw.case_id, '').trim()
+  if (!id || !caseId) return null
+  return {
+    id,
+    case_id: caseId,
+    status: asString(raw.status, 'blocked'),
+    risk_class: asNullableString(raw.risk_class),
+    action_request: normalizeGovernanceResolvedAction(raw.action_request),
+    created_at: asNullableIsoTimestamp(raw.created_at),
+    updated_at: asNullableIsoTimestamp(raw.updated_at),
+    execution_ref: asNullableString(raw.execution_ref),
+    result_summary: asNullableString(raw.result_summary),
+    actor: asNullableString(raw.actor),
+  }
+}
+
+export function normalizeGovernanceCaseBundle(raw: unknown): GovernanceCaseBundle | null {
+  if (!isRecord(raw) || !isRecord(raw.case)) return null
+  const caseRaw = raw.case
+  const id = asString(caseRaw.id, '').trim()
+  const title = asString(caseRaw.title, '').trim()
+  if (!id || !title) return null
+  return {
+    case: {
+      id,
+      petition_ids: asStringList(caseRaw.petition_ids),
+      title,
+      origin: asNullableString(caseRaw.origin),
+      subject_type: asNullableString(caseRaw.subject_type),
+      risk_class: asNullableString(caseRaw.risk_class),
+      status: asString(caseRaw.status, 'pending_ruling'),
+      created_at: asNullableIsoTimestamp(caseRaw.created_at),
+      updated_at: asNullableIsoTimestamp(caseRaw.updated_at),
+      source_refs: asStringList(caseRaw.source_refs),
+      briefs: Array.isArray(caseRaw.briefs)
+        ? caseRaw.briefs
+            .map(item => normalizeGovernanceCaseBrief(item))
+            .filter((item): item is GovernanceCaseBrief => item !== null)
+        : [],
+    },
+    petitions: Array.isArray(raw.petitions)
+      ? raw.petitions.flatMap(item => {
+          if (!isRecord(item)) return []
+          const petitionId = asString(item.id, '').trim()
+          const caseId = asString(item.case_id, '').trim()
+          const petitionTitle = asString(item.title, '').trim()
+          if (!petitionId || !caseId || !petitionTitle) return []
+          return [{
+            id: petitionId,
+            case_id: caseId,
+            title: petitionTitle,
+            origin: asNullableString(item.origin),
+            subject_type: asNullableString(item.subject_type),
+            risk_class: asNullableString(item.risk_class),
+            source_refs: asStringList(item.source_refs),
+            created_by: asNullableString(item.created_by),
+            created_at: asNullableIsoTimestamp(item.created_at),
+          }]
+        })
+      : [],
+    ruling: normalizeGovernanceJudgment(raw.ruling),
+    execution_order: normalizeGovernanceExecutionOrder(raw.execution_order),
+  }
+}
+
+function normalizeGovernanceTimelineEvent(raw: unknown): GovernanceTimelineEvent | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind, '').trim()
+  if (!kind) return null
+  return {
+    kind,
+    item_kind: asNullableString(raw.item_kind) ?? undefined,
+    item_id: asNullableString(raw.item_id) ?? undefined,
+    topic: asNullableString(raw.topic) ?? undefined,
+    created_at: asNullableIsoTimestamp(raw.created_at),
+    summary: asNullableString(raw.summary) ?? undefined,
+    actor: asNullableString(raw.actor),
+    index: asInt(raw.index),
+    decision: asNullableString(raw.decision),
+  }
+}
+
+function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSummary | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    judge_online: typeof raw.judge_online === 'boolean' ? raw.judge_online : undefined,
+    refreshing: typeof raw.refreshing === 'boolean' ? raw.refreshing : undefined,
+    generated_at: asNullableIsoTimestamp(raw.generated_at),
+    expires_at: asNullableIsoTimestamp(raw.expires_at),
+    model_used: asNullableString(raw.model_used),
+    keeper_name: asNullableString(raw.keeper_name),
+    last_error: asNullableString(raw.last_error),
+  }
+}
+
+function isSystemBoardAuthor(author: string): boolean {
+  return SYSTEM_BOARD_AUTHORS.has(author.trim().toLowerCase())
+}
+
+function filterSystemBoardPosts(posts: BoardPost[]): BoardPost[] {
+  return posts.filter(post => !isSystemBoardAuthor(post.author))
+}
+
+function derivePostTitle(content: string): string {
+  const trimmed = content.trim()
+  const withoutFlair = trimmed.startsWith('[flair:') ? trimmed.replace(/^\[flair:[^\]]+\]\s*/i, '') : trimmed
+  const firstLine = withoutFlair.split('\n')[0]?.trim() || 'Untitled post'
+  if (firstLine.length <= 96) return firstLine
+  return `${firstLine.slice(0, 93)}...`
+}
+
+function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
+  if (!isRecord(raw)) return null
+  const source = asString(raw.source, '').trim() || null
+  const stateBlock = asString(raw.state_block, '').trim() || null
+  if (!source && !stateBlock) return null
+  return {
+    source,
+    state_block: stateBlock,
+  }
+}
+
+function normalizeBoardPost(raw: unknown): BoardPost | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const author = asString(raw.author, '').trim()
+  const body = (asString(raw.body, '').trim() || asString(raw.content, '').trim())
+  const content = body
+  if (!id || !author) return null
+
+  const score = asNumber(raw.score, 0)
+  const votesUp = asNumber(raw.votes_up, 0)
+  const votesDown = asNumber(raw.votes_down, 0)
+  const votes = asNumber(raw.votes, score || (votesUp - votesDown))
+  const commentCount = asNumber(raw.comment_count, asNumber(raw.reply_count, 0))
+  const flairValue = (() => {
+    const flair = raw.flair
+    if (typeof flair === 'string' && flair.trim()) return flair.trim()
+    if (isRecord(flair)) {
+      const name = asString(flair.name, '').trim()
+      if (name) return name
+    }
+    const fallback = asString(raw.flair_name, '').trim()
+    return fallback || undefined
+  })()
+  const createdAt =
+    asString(raw.created_at_iso, '').trim() || toIsoTimestamp(raw.created_at)
+  const updatedAt =
+    asString(raw.updated_at_iso, '').trim()
+    || (raw.updated_at !== undefined ? toIsoTimestamp(raw.updated_at) : createdAt)
+  const titleRaw = asString(raw.title, '').trim()
+  const title = titleRaw || derivePostTitle(body)
+  const tags = Array.isArray(raw.tags)
+    ? raw.tags.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    : []
+
+  return {
+    id,
+    author,
+    post_kind:
+      (() => {
+        const rawKind = asString(raw.post_kind, '').trim().toLowerCase()
+        return rawKind === 'automation' || rawKind === 'system' || rawKind === 'human'
+          ? rawKind
+          : undefined
+      })(),
+    title,
+    body,
+    content,
+    meta: normalizeBoardMeta(raw.meta),
+    tags,
+    votes,
+    vote_balance: score,
+    comment_count: commentCount,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    flair: flairValue,
+    hearth: asString(raw.hearth, '').trim() || null,
+    visibility: asString(raw.visibility, '').trim() || undefined,
+    expires_at:
+      asString(raw.expires_at_iso, '').trim()
+      || (raw.expires_at !== undefined && raw.expires_at !== 0
+        ? toIsoTimestamp(raw.expires_at)
+        : '')
+      || null,
+    hearth_count: asNumber(raw.hearth_count, 0),
+  }
+}
+
+function normalizeBoardComment(raw: unknown): BoardComment | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const postId = asString(raw.post_id, '').trim()
+  const author = asString(raw.author, '').trim()
+  if (!id || !author) return null
+  return {
+    id,
+    post_id: postId,
+    author,
+    content: asString(raw.content, ''),
+    created_at: toIsoTimestamp(raw.created_at),
+  }
+}
+
+export async function fetchBoard(
+  sortBy?: BoardSortMode,
+  options?: { excludeSystem?: boolean },
+): Promise<{ posts: BoardPost[] }> {
+  return withRetries('fetchBoard', async () => {
+    const params = new URLSearchParams()
+    if (sortBy) params.set('sort_by', sortBy)
+    if (options?.excludeSystem) params.set('exclude_system', 'true')
+    params.set('limit', options?.excludeSystem ? '150' : '100')
+    const qs = params.toString()
+    const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
+    const normalizedPosts = Array.isArray(raw.posts)
+      ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
+      : []
+    const posts = options?.excludeSystem ? filterSystemBoardPosts(normalizedPosts) : normalizedPosts
+    return { posts }
+  })
+}
+
+export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
+  return withRetries('fetchBoardPost', async () => {
+    const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?format=flat`)
+    const postRaw = isRecord(raw.post) ? raw.post : raw
+    const post = normalizeBoardPost(postRaw) ?? {
+      id: postId,
+      author: 'unknown',
+      post_kind: 'human',
+      title: 'Post',
+      body: '',
+      content: '',
+      meta: null,
+      tags: [],
+      votes: 0,
+      comment_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      hearth: null,
+      visibility: 'internal',
+      expires_at: null,
+    }
+    const commentsRaw = Array.isArray(raw.comments) ? raw.comments : []
+    const comments = commentsRaw
+      .map(normalizeBoardComment)
+      .filter((row): row is BoardComment => row !== null)
+    return { ...post, comments }
+  })
+}
+
+export function fetchBoardHearths(): Promise<{ hearths: BoardHearth[] }> {
+  return get('/api/v1/board/hearths')
+}
+
+export function fetchBoardFlairs(): Promise<{ flairs: BoardFlair[] }> {
+  return get('/api/v1/board/flairs')
+}
+
+export function votePost(postId: string, direction: 'up' | 'down'): Promise<unknown> {
+  return post('/api/v1/tools/masc_board_vote', {
+    post_id: postId,
+    direction,
+    vote: direction,
+    voter: defaultBoardVoter(),
+  })
+}
+
+export function voteBoardTool(postId: string, vote: 'up' | 'down', voter: string): Promise<unknown> {
+  return post('/api/v1/tools/masc_board_vote', {
+    post_id: postId,
+    direction: vote,
+    vote,
+    voter,
+  })
+}
+
+export function commentPost(postId: string, author: string, content: string): Promise<unknown> {
+  return post(`/api/v1/tools/masc_board_comment`, {
+    post_id: postId,
+    author,
+    content,
+  })
+}
+

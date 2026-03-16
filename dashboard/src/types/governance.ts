@@ -1,0 +1,357 @@
+// --- Governance ---
+
+export interface GovernanceContextRef {
+  board_post_id?: string | null
+  task_id?: string | null
+  operation_id?: string | null
+  team_session_id?: string | null
+}
+
+export interface GovernanceResolvedAction {
+  action_kind?: string
+  resolved_tool?: string | null
+  target_type?: string | null
+  target_id?: string | null
+  reason?: string
+  payload_preview?: unknown
+}
+
+export interface GovernanceExecutedRoute {
+  action_type?: string
+  delegated_tool?: string | null
+  confirmation_state?: string
+  created_at?: string | null
+}
+
+export interface GovernanceGuardrailState {
+  requires_human_gate?: boolean
+  pending_confirm?: PendingConfirmation | null
+  pending_confirm_token?: string | null
+  ready_to_execute?: boolean
+}
+
+export interface PendingConfirmEnvelope {
+  items: PendingConfirmation[]
+  summary: PendingConfirmSummary
+}
+
+export interface GovernanceJudgment {
+  judgment_id?: string
+  target_kind?: string
+  target_id?: string
+  status?: string
+  summary?: string
+  confidence?: number | null
+  generated_at?: string | null
+  expires_at?: string | null
+  model_used?: string | null
+  keeper_name?: string | null
+  evidence_refs?: string[]
+  recommended_action?: GovernanceResolvedAction | null
+  guardrail_state?: GovernanceGuardrailState | null
+  executed_route?: GovernanceExecutedRoute | null
+}
+
+export interface GovernanceDecisionItem {
+  kind: 'case' | string
+  id: string
+  topic: string
+  status: string
+  origin?: string | null
+  subject_type?: string | null
+  risk_class?: 'low' | 'high' | string | null
+  provenance?: string | null
+  auto_execution_state?: string | null
+  petition_count?: number
+  brief_count?: number
+  last_activity_at?: string | null
+  truth_summary?: string
+  judgment_summary?: string | null
+  confidence?: number | null
+  related_agents: string[]
+  context?: GovernanceContextRef
+  linked_board_post_id?: string | null
+  linked_task_id?: string | null
+  linked_operation_id?: string | null
+  linked_session_id?: string | null
+  recommended_action?: GovernanceResolvedAction | null
+  executed_route?: GovernanceExecutedRoute | null
+  guardrail_state?: GovernanceGuardrailState | null
+  evidence_refs: string[]
+}
+
+export interface GovernancePetition {
+  id: string
+  case_id: string
+  title: string
+  origin?: string | null
+  subject_type?: string | null
+  risk_class?: 'low' | 'high' | string | null
+  source_refs: string[]
+  created_by?: string | null
+  created_at?: string | null
+}
+
+export interface GovernanceCaseBrief {
+  id: string
+  author: string
+  stance: 'support' | 'oppose' | 'neutral' | string
+  summary: string
+  evidence_refs: string[]
+  created_at?: string | null
+}
+
+export interface GovernanceExecutionOrder {
+  id: string
+  case_id: string
+  status: 'queued_auto' | 'needs_human_gate' | 'auto_executed' | 'done' | 'denied' | 'blocked' | string
+  risk_class?: 'low' | 'high' | string | null
+  action_request?: GovernanceResolvedAction | null
+  created_at?: string | null
+  updated_at?: string | null
+  execution_ref?: string | null
+  result_summary?: string | null
+  actor?: string | null
+}
+
+export interface GovernanceCaseBundle {
+  case: {
+    id: string
+    petition_ids: string[]
+    title: string
+    origin?: string | null
+    subject_type?: string | null
+    risk_class?: 'low' | 'high' | string | null
+    status: string
+    created_at?: string | null
+    updated_at?: string | null
+    source_refs: string[]
+    briefs: GovernanceCaseBrief[]
+  }
+  petitions: GovernancePetition[]
+  ruling?: GovernanceJudgment | null
+  execution_order?: GovernanceExecutionOrder | null
+}
+
+export interface GovernanceTimelineEvent {
+  kind: string
+  item_kind?: string
+  item_id?: string
+  topic?: string
+  created_at?: string | null
+  summary?: string
+  actor?: string | null
+  index?: number
+  decision?: string | null
+}
+
+export interface GovernanceJudgeSummary {
+  judge_online?: boolean
+  refreshing?: boolean
+  generated_at?: string | null
+  expires_at?: string | null
+  model_used?: string | null
+  keeper_name?: string | null
+  last_error?: string | null
+}
+
+export interface BoardMonitoring {
+  alert_level?: 'ok' | 'warn' | 'bad' | string
+  posts_total?: number
+  new_posts_24h?: number
+  unanswered_posts?: number
+  last_activity_age_s?: number | null
+  slo_target_age_s?: number
+  slo_breached?: boolean
+  warn_age_s?: number
+  bad_age_s?: number
+}
+
+export interface GovernanceMonitoring {
+  alert_level?: 'ok' | 'warn' | 'bad' | string
+  cases_open?: number
+  pending_ruling?: number
+  ready_auto_execute?: number
+  needs_human_gate?: number
+  executed?: number
+  blocked?: number
+  oldest_open_case_age_s?: number | null
+  last_activity_age_s?: number | null
+  slo_target_case_age_s?: number
+  slo_breached?: boolean
+  judge_online?: boolean
+  warn_age_s?: number
+  bad_age_s?: number
+}
+
+export interface SocialRuntimeStatus {
+  enabled: boolean
+  strategy?: string
+  queue_depth?: number
+  processed_events?: number
+  active_keepers?: number
+  last_event_at?: string | null
+  last_social_action_at?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
+  total_checks?: number
+  total_acted?: number
+  total_passed?: number
+  total_skipped?: number
+  total_failed?: number
+  last_result?: {
+    checked?: number
+    acted?: number
+    passed?: number
+    skipped?: number
+    failed?: number
+    last_tick_at?: string | null
+    last_pass_reason?: string | null
+    last_system_skip_reason?: string | null
+    activity_report?: string | null
+    checkins?: LodgeCheckinResult[]
+  } | null
+}
+
+export interface LodgeCheckinResult {
+  name: string
+  trigger?: string
+  outcome?: 'acted' | 'passed' | 'skipped' | string
+  summary?: string
+  reason?: string
+}
+
+export interface LodgeTickResult {
+  hour?: number
+  checked: number
+  acted: number
+  acted_names: string[]
+  activity_report?: string
+  quiet_hours_overridden?: boolean
+  skipped_reason?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
+  acted_rows?: Array<{ name: string; summary?: string }>
+  passed_rows?: Array<{ name: string; reason?: string }>
+  skipped_rows?: Array<{ name: string; reason?: string }>
+  checkins?: LodgeCheckinResult[]
+}
+
+export interface LodgeRuntimeStatus {
+  enabled: boolean
+  interval_s: number
+  quiet_start?: number
+  quiet_end?: number
+  quiet_active?: boolean
+  use_planner?: boolean
+  delegate_llm?: boolean
+  agent_count?: number
+  agents?: string[]
+  last_tick_ago_s?: number | null
+  last_tick_ago?: string
+  total_ticks?: number
+  total_checkins?: number
+  last_skip_reason?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
+  last_tick_result?: LodgeTickResult | null
+  active_self_heartbeats?: string[]
+}
+
+export interface GardenerRuntimeStatus {
+  enabled: boolean
+  alive: boolean
+  status?: string
+  tick_in_progress?: boolean
+  tick_count?: number
+  check_interval_sec?: number
+  last_tick_started_at?: string | null
+  last_tick_completed_at?: string | null
+  next_tick_due_at?: string | null
+  last_health_check_at?: string | null
+  last_intervention?: string
+  last_decision_source?: string
+  last_action?: string
+  last_target?: string | null
+  last_reason?: string | null
+  last_error?: string | null
+  circuit_open?: boolean
+  circuit_open_until?: string | null
+  can_spawn?: boolean
+  can_retire?: boolean
+  last_spawn_attempt_at?: string | null
+  last_retirement_attempt_at?: string | null
+  spawns_today?: number
+  retirements_today?: number
+  health_summary?: {
+    total_agents?: number
+    active_agents?: number
+    idle_agents?: number
+    todo_count?: number
+    high_priority_todo?: number
+    orphan_count?: number
+    homeostatic_score?: number
+    needs_workers?: boolean
+  }
+}
+
+export interface GuardianRuntimeStatus {
+  enabled: boolean
+  mode?: string
+  masc_enabled?: boolean
+  masc_loops_running?: boolean
+  runtime_owner?: string | null
+  zombie_loop_running?: boolean
+  gc_loop_running?: boolean
+  lodge_enabled?: boolean
+  lodge_loop_started?: boolean
+  lodge_running?: boolean
+  last_zombie_cleanup?: string | null
+  last_gc?: string | null
+  last_lodge?: string | null
+  last_zombie_result?: string | null
+  last_gc_result?: string | null
+  last_lodge_result?: {
+    ok?: boolean
+    message?: string
+  } | null
+}
+
+export interface SentinelRuntimeStatus {
+  enabled: boolean
+  started: boolean
+  agent_name?: string | null
+  llm_enabled?: boolean
+  uptime_s?: number
+  embedded_guardian_loops_running?: boolean
+  guardian_runtime_owner?: string | null
+  consumers?: string[]
+}
+
+export interface PendingConfirmation {
+  confirm_token: string
+  actor?: string
+  action_type?: string
+  target_type?: string
+  target_id?: string | null
+  delegated_tool?: string
+  created_at?: string
+  preview?: unknown
+}
+
+export interface OperatorActionDescriptor {
+  action_type: string
+  target_type: string
+  description?: string
+  confirm_required?: boolean
+}
+
+export interface PendingConfirmSummary {
+  actor_filter?: string | null
+  filter_active: boolean
+  visible_count: number
+  total_count: number
+  hidden_count: number
+  hidden_actors: string[]
+  confirm_required_actions: OperatorActionDescriptor[]
+}

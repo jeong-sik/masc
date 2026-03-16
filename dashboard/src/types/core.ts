@@ -1,0 +1,408 @@
+// MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
+
+import type { TrpgCharacterStats } from './trpg'
+
+// --- Core entities ---
+
+export interface Agent {
+  name: string
+  agent_type?: string
+  status: 'active' | 'busy' | 'listening' | 'idle' | 'inactive' | 'offline'
+  current_task: string | null
+  context_ratio?: number
+  joined_at?: string
+  last_seen?: string
+  capabilities?: string[]
+  emoji?: string
+  koreanName?: string
+  model?: string
+  traits?: string[]
+  interests?: string[]
+  activityLevel?: number
+  preferredHours?: number[]
+  peakHour?: number
+  primaryValue?: string
+  personalityHint?: string
+}
+
+export interface Task {
+  id: string
+  title: string
+  status: 'todo' | 'in_progress' | 'claimed' | 'done' | 'cancelled'
+  priority?: number
+  assignee?: string
+  description?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface Message {
+  id?: string
+  seq?: number
+  from: string
+  content: string
+  timestamp: string
+  type?: string
+}
+
+// --- Board ---
+
+export interface BoardPost {
+  id: string
+  author: string
+  post_kind?: 'human' | 'automation' | 'system'
+  title: string
+  body: string
+  content: string
+  meta?: {
+    source?: string | null
+    state_block?: string | null
+  } | null
+  tags: string[]
+  votes: number
+  vote_balance?: number
+  comment_count: number
+  created_at: string
+  updated_at: string
+  flair?: string
+  hearth?: string | null
+  visibility?: string
+  expires_at?: string | null
+  hearth_count?: number
+}
+
+export interface BoardComment {
+  id: string
+  post_id: string
+  author: string
+  content: string
+  created_at: string
+}
+
+export interface BoardHearth {
+  post_id: string
+  agent: string
+  created_at: string
+}
+
+export interface BoardFlair {
+  name: string
+  emoji: string
+  color: string
+}
+
+// --- Keeper Metrics ---
+
+export interface KeeperMetricPoint {
+  ts: number
+  context_ratio: number
+  context_tokens: number
+  context_max: number
+  latency_ms: number
+  generation: number
+  channel: string
+  is_handoff: boolean
+  is_compaction: boolean
+  compaction_saved_tokens: number
+  compaction_trigger: string | null
+  model_used: string
+  cost_usd: number
+  handoff_to_model: string | null
+  handoff_new_generation: number | null
+}
+
+export type KeeperLifecycleState =
+  | 'active'
+  | 'compacting'
+  | 'preparing'
+  | 'handoff-imminent'
+  | 'idle'
+  | 'offline'
+
+// --- Keeper SSE Events ---
+
+export interface KeeperHeartbeatEvent {
+  type: 'keeper_heartbeat'
+  name: string
+  generation: number
+  context_ratio: number
+  ts_unix: number
+}
+
+export interface KeeperHandoffEvent {
+  type: 'keeper_handoff'
+  name: string
+  from_generation: number
+  to_generation: number
+  from_model: string
+  to_model: string
+  ts_unix: number
+}
+
+export interface KeeperCompactionEvent {
+  type: 'keeper_compaction'
+  name: string
+  generation: number
+  before_tokens: number
+  after_tokens: number
+  saved_tokens: number
+  trigger: string
+  ts_unix: number
+}
+
+export interface KeeperGuardrailEvent {
+  type: 'keeper_guardrail'
+  name: string
+  generation: number
+  reason: string
+  ts_unix: number
+}
+
+// --- Keeper Autonomy ---
+
+export type AutonomyLevel = 'L1_Reactive' | 'L2_Suggestive' | 'L3_Guided' | 'L4_Autonomous' | 'L5_Independent'
+
+export interface Goal {
+  id: string
+  horizon: 'short' | 'mid' | 'long'
+  title: string
+  metric?: string | null
+  target_value?: string | null
+  due_date?: string | null
+  priority: number
+  status: string
+  parent_goal_id?: string | null
+  last_review_note?: string | null
+  last_review_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface KeeperAutonomyInfo {
+  autonomy_level: AutonomyLevel
+  active_goal_ids: string[]
+  last_autonomous_action_at?: string | null
+  autonomous_action_count: number
+}
+
+// --- Keeper / Lodge ---
+
+export type KeeperHealthState = 'healthy' | 'idle' | 'stale' | 'degraded' | 'offline'
+
+export type KeeperQuietReason =
+  | 'quiet_hours'
+  | 'min_gap'
+  | 'no_recent_activity'
+  | 'disabled'
+  | 'startup'
+  | 'llm_error'
+  | 'graphql_error'
+  | 'never_started'
+  | 'unknown'
+
+export type KeeperNextActionPath =
+  | 'direct_message'
+  | 'manual_lodge_poke'
+  | 'probe'
+  | 'recover'
+
+export type KeeperReplyStatus =
+  | 'never'
+  | 'awaiting_reply'
+  | 'delivered'
+  | 'fresh'
+  | 'stale'
+  | 'error'
+  | 'unknown'
+
+export type KeeperContinuityState =
+  | 'desired_offline'
+  | 'recovering'
+  | 'healthy'
+  | 'offline'
+
+export interface KeeperDiagnostic {
+  health_state: KeeperHealthState
+  quiet_reason?: KeeperQuietReason | null
+  next_action_path: KeeperNextActionPath
+  last_reply_status: KeeperReplyStatus
+  last_reply_at?: string | null
+  last_reply_preview?: string | null
+  last_error?: string | null
+  next_eligible_at_s?: number | null
+  recoverable?: boolean
+  summary?: string
+  keepalive_running?: boolean
+  continuity_state?: KeeperContinuityState | null
+  continuity_summary?: string | null
+}
+
+export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
+
+export type KeeperConversationDelivery =
+  | 'history'
+  | 'sending'
+  | 'streaming'
+  | 'delivered'
+  | 'timeout'
+  | 'error'
+
+export interface KeeperConversationUsage {
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+}
+
+export interface KeeperConversationDetails {
+  traceId?: string | null
+  generation?: number | null
+  modelUsed?: string | null
+  latencyMs?: number | null
+  costUsd?: number | null
+  usage?: KeeperConversationUsage | null
+  skillPrimary?: string | null
+  skillReason?: string | null
+  stateBlock?: string | null
+  rawPayload?: unknown
+}
+
+export type KeeperConversationStreamState =
+  | 'opening'
+  | 'streaming'
+  | 'finalizing'
+  | null
+
+export interface KeeperConversationEntry {
+  id: string
+  role: KeeperConversationRole
+  label: string
+  text: string
+  timestamp?: string | null
+  delivery: KeeperConversationDelivery
+  streamState?: KeeperConversationStreamState
+  details?: KeeperConversationDetails | null
+  error?: string | null
+}
+
+export interface KeeperStatusDetail {
+  name: string
+  diagnostic?: KeeperDiagnostic | null
+  history: KeeperConversationEntry[]
+  rawText: string
+  rawStatus?: unknown
+  loadedAt: string
+}
+
+export interface Keeper {
+  name: string
+  runtime_class?: 'resident_keeper' | 'persistent_agent'
+  desired?: boolean
+  resident_registered?: boolean
+  reconcile_status?: string | null
+  emoji?: string
+  koreanName?: string
+  agent_name?: string
+  trace_id?: string
+  model?: string
+  primary_model?: string
+  active_model?: string
+  next_model_hint?: string | null
+  status: string
+  presence_keepalive?: boolean
+  presence_keepalive_sec?: number
+  keepalive_running?: boolean
+  proactive_enabled?: boolean
+  proactive_idle_sec?: number
+  proactive_cooldown_sec?: number
+  // Autonomy fields (Phase 2)
+  autonomy_level?: AutonomyLevel
+  active_goal_ids?: string[]
+  last_autonomous_action_at?: string | null
+  autonomous_action_count?: number
+  created_at?: string
+  updated_at?: string
+  last_heartbeat?: string
+  keeper_age_s?: number
+  last_turn_ago_s?: number
+  last_handoff_ago_s?: number
+  last_compaction_ago_s?: number
+  last_proactive_ago_s?: number
+  last_proactive_reason?: string | null
+  last_proactive_preview?: string | null
+  last_drift_reason?: string | null
+  drift_count_total?: number
+  generation?: number
+  turn_count?: number
+  context_ratio?: number
+  context_tokens?: number
+  context_max?: number
+  context_source?: string
+  context?: {
+    source?: string
+    context_ratio?: number
+    context_tokens?: number
+    context_max?: number
+    message_count?: number
+    has_checkpoint?: boolean
+  }
+  traits?: string[]
+  interests?: string[]
+  primaryValue?: string
+  activityLevel?: number
+  will?: string | null
+  needs?: string | null
+  desires?: string | null
+  memory_recent_note?: string | null
+  recent_input_preview?: string | null
+  recent_output_preview?: string | null
+  recent_tool_names?: string[]
+  allowed_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
+  conversation_tail_count?: number
+  k2k_count?: number
+  k2k_mentions?: Array<{ keeper: string; count: number }>
+  handoff_count_total?: number
+  compaction_count?: number
+  last_compaction_saved_tokens?: number
+  diagnostic?: KeeperDiagnostic | null
+  skill_primary?: string | null
+  skill_secondary?: string[]
+  skill_reason?: string | null
+  metrics_window?: {
+    fallback_rate?: number
+    model_fallback_rate?: number
+    proactive_fallback_rate?: number
+    proactive_preview_similarity_avg?: number
+    memory_pass_rate?: number
+    memory_avg_score?: number
+    handoff_count?: number
+    compaction_events?: number
+    compaction_saved_tokens?: number
+    tool_call_count?: number
+    [key: string]: unknown
+  }
+  agent?: {
+    name?: string
+    exists?: boolean
+    error?: string
+    agent_type?: string
+    status?: string
+    current_task?: string | null
+    joined_at?: string
+    last_seen?: string
+    last_seen_ago_s?: number
+    capabilities?: string[]
+    is_zombie?: boolean
+    [key: string]: unknown
+  }
+  // Metrics time-series (from backend metrics_series)
+  metrics_series?: KeeperMetricPoint[]
+  // TRPG-specific keeper fields
+  trpg_stats?: TrpgCharacterStats
+  inventory?: string[]
+  relationships?: Record<string, string>
+}
+

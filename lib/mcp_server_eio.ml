@@ -4,7 +4,7 @@
 
     Sub-modules (extracted for maintainability):
     - Mcp_server_eio_types: Shared types (tool_profile)
-    - Mcp_server_eio_helpers: Logging, unregister_sync, wait_for_message_eio
+    - Mcp_server_eio_helpers: Logging, wait_for_message_eio
     - Mcp_server_eio_resource: Resource reading handler
     - Mcp_server_eio_execute: Core execute_tool_eio function
     - Mcp_server_eio_call_tool: Tool call handler (retry, timeout, result envelope)
@@ -75,7 +75,7 @@ let public_tool_help_schemas () = Config.visible_tool_schemas ()
 
 (** {1 Session Adapters} *)
 
-let unregister_sync = Mcp_server_eio_helpers.unregister_sync
+let unregister_sync = Session.unregister_sync
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
 (** {1 Governance Re-exports} *)

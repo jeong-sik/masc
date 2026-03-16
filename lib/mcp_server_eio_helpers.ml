@@ -13,14 +13,6 @@ let log_mcp_exn ~label exn =
   in
   Printf.eprintf "[mcp_server] %s%s: %s\n%!" tag label (Printexc.to_string exn)
 
-(** Unregister agent synchronously - adapter for Session.registry.
-    Directly removes from hashtable without extra mutex layer.
-    Safe in Eio single-fiber context. *)
-let unregister_sync (registry : Session.registry) ~agent_name =
-  Hashtbl.remove registry.Session.sessions agent_name;
-  Log.Session.info "Session unregistered (sync): %s (total: %d)"
-    agent_name (Hashtbl.length registry.sessions)
-
 (** Wait for message using Eio sleep - adapter for Session.registry *)
 let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeout =
   let start_time = Time_compat.now () in

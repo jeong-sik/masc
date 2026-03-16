@@ -174,7 +174,7 @@ let handle_turn ctx args : result =
               | Error e -> (false, json_error e))))
 
 (* Routing, spawn spec parsing, model inference, worker management *)
-include Tool_team_session_routing
+include Tool_team_session_routing_workers
 
 let step_deps : Tool_team_session_step.step_deps =
   {

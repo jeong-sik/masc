@@ -104,6 +104,30 @@ let run_alert_channel_with_retry
 
 let dedup_strings = Dashboard_utils.dedup_strings
 
+(** Alert dedup: suppress identical alerts within a time window.
+    Key = keeper_name ^ ":" ^ sorted_reasons. Default window: 60s.
+    Thread-safety: Eio single-domain cooperative scheduling ensures no
+    preemption between Hashtbl.find_opt and Hashtbl.replace. *)
+let alert_dedup_window_sec =
+  match Sys.getenv_opt "MASC_ALERT_DEDUP_WINDOW_SEC" with
+  | Some s -> (try max 5.0 (float_of_string (String.trim s)) with Failure _ -> 60.0)
+  | None -> 60.0
+
+let alert_dedup_table : (string, float) Hashtbl.t = Hashtbl.create 32
+
+let alert_dedup_key ~(keeper_name : string) ~(reasons : string list) : string =
+  let sorted = List.sort String.compare reasons in
+  keeper_name ^ ":" ^ String.concat "," sorted
+
+let is_alert_deduplicated ~(keeper_name : string) ~(reasons : string list) : bool =
+  let key = alert_dedup_key ~keeper_name ~reasons in
+  let now = Time_compat.now () in
+  match Hashtbl.find_opt alert_dedup_table key with
+  | Some last_ts when now -. last_ts < alert_dedup_window_sec -> true
+  | _ ->
+    Hashtbl.replace alert_dedup_table key now;
+    false
+
 let keeper_alert_signal
     ~(message : string)
     ~(reply : string)
@@ -415,6 +439,15 @@ let maybe_emit_interesting_alert
         ~auto_rules
     in
     if score < threshold then
+      {
+        empty_interesting_alert_result with
+        enabled = true;
+        threshold;
+        score;
+        reasons;
+        keywords;
+      }
+    else if is_alert_deduplicated ~keeper_name:meta.name ~reasons then
       {
         empty_interesting_alert_result with
         enabled = true;

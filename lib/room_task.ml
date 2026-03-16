@@ -168,11 +168,17 @@ let claim_task_r config ~agent_name ~task_id
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
-    (* BUG-005: Verify agent has joined before allowing claim *)
+    (* BUG-005: Verify agent has joined before allowing claim.
+       Check both room-scoped and root agent directories for consistency
+       with heartbeat_in_room, which may write to either path. *)
     let actual_name = resolve_agent_name config agent_name in
-    let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
-    if not (path_exists config agent_file) then
-      Error (Types.AgentNotFound actual_name)
+    let filename = safe_filename actual_name ^ ".json" in
+    let room_path = Filename.concat
+      (agents_dir_in_room config (current_room_id config)) filename in
+    let root_path = Filename.concat (agents_dir config) filename in
+    let agent_joined = path_exists config room_path || path_exists config root_path in
+    if not agent_joined then
+      Error (Types.AgentNotJoined actual_name)
     else
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->

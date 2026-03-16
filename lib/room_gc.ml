@@ -53,33 +53,45 @@ let is_keeper_runtime_agent_name = Resilience.Zombie.is_keeper_name
 let cleanup_zombies config =
   ensure_initialized config;
 
-  let agents_path = agents_dir config in
-  if not (Sys.file_exists agents_path) then
+  (* Scan both root and room-scoped agent directories for consistency
+     with heartbeat_in_room, which may write to either path. *)
+  let root_agents_path = agents_dir config in
+  let room_agents_path =
+    agents_dir_in_room config (current_room_id config)
+  in
+  let scan_paths =
+    List.filter Sys.file_exists
+      (List.sort_uniq String.compare [ root_agents_path; room_agents_path ])
+  in
+  if scan_paths = [] then
     "📋 No agents directory"
   else begin
     let zombies = ref [] in
 
-    (* Find zombie agents *)
-    Sys.readdir agents_path |> Array.iter (fun name ->
-      if Filename.check_suffix name ".json" then begin
-        let path = Filename.concat agents_path name in
-        let json = read_json config path in
-        match agent_of_yojson json with
-        | Ok agent
-          when (let threshold =
-                  if is_keeper_runtime_agent_name agent.name
-                  then Env_config.Zombie.keeper_threshold_seconds
-                  else Env_config.Zombie.threshold_seconds
-                in
-                Resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
-            zombies := agent.name :: !zombies;
-            (* Stop heartbeats owned by this zombie agent *)
-            let _stopped = Heartbeat.stop_by_agent ~agent_name:agent.name in
-            (* Remove agent file *)
-            Sys.remove path
-        | _ -> ()
-      end
-    );
+    (* Find zombie agents across all agent directories *)
+    List.iter (fun agents_path ->
+      Sys.readdir agents_path |> Array.iter (fun name ->
+        if Filename.check_suffix name ".json" then begin
+          let path = Filename.concat agents_path name in
+          let json = read_json config path in
+          match agent_of_yojson json with
+          | Ok agent
+            when (not (List.mem agent.name !zombies)) &&
+                 (let threshold =
+                    if is_keeper_runtime_agent_name agent.name
+                    then Env_config.Zombie.keeper_threshold_seconds
+                    else Env_config.Zombie.threshold_seconds
+                  in
+                  Resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
+              zombies := agent.name :: !zombies;
+              (* Stop heartbeats owned by this zombie agent *)
+              let _stopped = Heartbeat.stop_by_agent ~agent_name:agent.name in
+              (* Remove agent file *)
+              (try Sys.remove path with Sys_error _ -> ())
+          | _ -> ()
+        end
+      )
+    ) scan_paths;
 
     (* Cascade: release tasks claimed by zombie agents *)
     let released_tasks = ref [] in

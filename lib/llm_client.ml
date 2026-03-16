@@ -35,15 +35,25 @@ let llm_semaphore = Eio.Semaphore.make max_concurrent_llm
 
 let llm_semaphore_available () = Eio.Semaphore.get_value llm_semaphore
 
+(** Outstanding permit counter for diagnostics.
+    Tracks how many LLM calls are currently holding a permit. *)
+let permits_outstanding = Atomic.make 0
+
+let [@warning "-32"] permits_outstanding_count () = Atomic.get permits_outstanding
+
 (** Eio-safe permit acquisition: explicit try/with ensures release on any
-    exception including Eio.Cancel.Cancelled. *)
+    exception including Eio.Cancel.Cancelled.
+    Also tracks outstanding permits via Atomic counter for diagnostics. *)
 let with_llm_permit f =
   Eio.Semaphore.acquire llm_semaphore;
+  Atomic.incr permits_outstanding;
   match f () with
   | result ->
+      Atomic.decr permits_outstanding;
       Eio.Semaphore.release llm_semaphore;
       result
   | exception exn ->
+      Atomic.decr permits_outstanding;
       Eio.Semaphore.release llm_semaphore;
       raise exn
 

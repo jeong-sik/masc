@@ -1009,11 +1009,15 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                 backlog.tasks)
                          in
                          (unclaimed, failed)
-                       with _exn -> (0, 0))
+                       with exn ->
+                         Log.Keeper.warn "execution: task count query failed: %s" (Printexc.to_string exn);
+                         (0, 0))
                     in
                     let active_agents =
                       (try List.length (Room.get_agents_raw ctx.config)
-                       with _exn -> 0)
+                       with exn ->
+                         Log.Keeper.warn "execution: agent count query failed: %s" (Printexc.to_string exn);
+                         0)
                     in
                     let obs =
                       { (Keeper_deliberation.empty_world_observation

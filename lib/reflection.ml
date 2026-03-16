@@ -54,7 +54,7 @@ let load_meta ~agent_name : float =
         let json = Yojson.Safe.from_string (Bytes.to_string buf) in
                 Json_util.get_float json "last_reflection" |> Option.value ~default:0.0)
     with exn ->
-      ignore (Printexc.to_string exn);
+      Log.Misc.warn "reflection: meta load failed: %s" (Printexc.to_string exn);
       0.0
   end
 

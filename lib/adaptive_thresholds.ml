@@ -166,7 +166,7 @@ let load_state ~(room : string) : adaptive_state option =
           let json = Yojson.Safe.from_string content in
           state_of_json json)
     with exn ->
-      ignore exn;
+      Log.Misc.warn "adaptive_thresholds: state load failed: %s" (Printexc.to_string exn);
       None
   else None
 

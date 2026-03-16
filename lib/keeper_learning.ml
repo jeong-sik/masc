@@ -88,7 +88,9 @@ let decision_record_of_json (json : Yojson.Safe.t) : decision_record option =
           feedback_comment =
             Safe_ops.json_string ~default:"" "feedback_comment" json;
         }
-  with _exn -> None
+  with exn ->
+    Log.Misc.warn "keeper_learning: decision record parse failed: %s" (Printexc.to_string exn);
+    None
 
 let decisions_path (config : Room.config) (name : string) : string =
   Filename.concat (keeper_dir config) (name ^ ".decisions.jsonl")

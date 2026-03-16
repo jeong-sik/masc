@@ -63,6 +63,7 @@
    dashboard_execution_helpers
    dashboard_execution_fixture
    dashboard_execution_builders
+   dashboard_mission_assembly
    dashboard_mission
    dashboard_proof
    dashboard_mission_briefing
@@ -475,6 +476,8 @@
    keeper_config
    keeper_contract
    keeper_deliberation
+   keeper_types_profile
+   keeper_types_resident
    keeper_types
    keeper_memory
    keeper_memory_policy
@@ -545,6 +548,7 @@
    tool_lodge_autonomous
    trpg_schema
    trpg_types
+   trpg_bestiary
    trpg_action
    trpg_round_fallback
    trpg_round_keeper_parse
@@ -614,6 +618,10 @@
  chain_parser_parse
  chain_parser_validate
  chain_parser_serialize
+ dashboard_mission_assembly
+ keeper_types_profile
+ keeper_types_resident
+ trpg_bestiary
  cp_lifecycle_swarm_live
  llm_client_core
  llm_client_providers

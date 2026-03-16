@@ -3,6 +3,8 @@
     prompt building in Trpg_round_prompt. *)
 
 include Trpg_round_prompt
+include Trpg_action
+include Trpg_bestiary
 open Yojson.Safe.Util
 
 let room_id_for_session session_id =

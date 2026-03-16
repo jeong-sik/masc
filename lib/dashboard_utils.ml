@@ -31,3 +31,68 @@ let string_list_of_json json =
              | `String value -> trim_to_option value
              | _ -> None)
   | _ -> []
+
+let json_string_option value =
+  match value with
+  | Some text when String.trim text <> "" -> `String (String.trim text)
+  | _ -> `Null
+
+let option_to_json f = function
+  | Some value -> f value
+  | None -> `Null
+
+let member_assoc key json =
+  match json with
+  | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
+  | _ -> `Null
+
+let int_field ?(default = 0) key json =
+  match member_assoc key json with
+  | `Int v -> v
+  | `Intlit raw -> (try int_of_string raw with Failure _ -> default)
+  | `Float v -> int_of_float v
+  | _ -> default
+
+let string_field ?(default = "") key json =
+  match member_assoc key json with
+  | `String v -> v
+  | _ -> default
+
+let list_field key json =
+  match member_assoc key json with
+  | `List items -> items
+  | _ -> []
+
+let severity_rank = function
+  | "bad" | "risk" | "critical" -> 2
+  | "warn" | "watch" | "interrupted" | "degraded" -> 1
+  | _ -> 0
+
+let status_rank = function
+  | "busy" -> 4
+  | "active" -> 3
+  | "listening" -> 2
+  | "idle" -> 1
+  | _ -> 0
+
+let rec take n items =
+  if n <= 0 then [] else match items with [] -> [] | x :: xs -> x :: take (n - 1) xs
+
+let compact_text ?(max_len = 160) raw =
+  let normalized =
+    String.trim raw
+    |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.filter (fun v -> v <> "")
+    |> String.concat " "
+    |> String.trim
+  in
+  if normalized = "" then ""
+  else if String.length normalized <= max_len then normalized
+  else String.sub normalized 0 (max_len - 1) ^ "\xe2\x80\xa6"
+
+let string_list_json values =
+  `List (List.map (fun v -> `String v) values)
+
+let normalized_text_key text =
+  compact_text ~max_len:512 text |> String.trim |> String.lowercase_ascii

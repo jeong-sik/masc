@@ -120,10 +120,10 @@ let test_reconcile_failed_spawn_actor_detaches_without_turn () =
       ~planned_end_at:(now +. 120.0)
       ~fallback_policy:Team_session_types.Fallback_none ~model_cascade:[]
   in
-  ignore (unwrap_ok (Tool_team_session.ensure_session_actor config session.session_id "llama-local-failed"));
+  ignore (unwrap_ok (Tool_team_session_spawn.ensure_session_actor config session.session_id "llama-local-failed"));
   let outcome =
     unwrap_ok
-      (Tool_team_session.reconcile_failed_spawn_actor config session.session_id
+      (Tool_team_session_spawn.reconcile_failed_spawn_actor config session.session_id
          "llama-local-failed")
   in
   Alcotest.(check string) "failed spawn actor detached" "detached"
@@ -153,7 +153,7 @@ let test_reconcile_failed_spawn_actor_retains_after_turn () =
   let session_id = start_session_exn ctx ~goal:"retain-failed-spawn-after-turn" |> get_session_id in
   ignore
     (unwrap_ok
-       (Tool_team_session.ensure_session_actor config session_id
+       (Tool_team_session_spawn.ensure_session_actor config session_id
           "llama-local-turned"));
   ignore
     (unwrap_ok
@@ -164,7 +164,7 @@ let test_reconcile_failed_spawn_actor_retains_after_turn () =
           ~task_priority:3));
   let outcome =
     unwrap_ok
-      (Tool_team_session.reconcile_failed_spawn_actor config session_id
+      (Tool_team_session_spawn.reconcile_failed_spawn_actor config session_id
          "llama-local-turned")
   in
   Alcotest.(check string) "actor retained after emitting a turn" "retained"

@@ -207,7 +207,7 @@ let test_parse_step_spawn_specs_applies_top_level_batch_timeout () =
             ] );
       ]
   in
-  let specs = unwrap_ok (Tool_team_session.parse_step_spawn_specs args) in
+  let specs = unwrap_ok (Tool_team_session_spawn.parse_step_spawn_specs args) in
   match specs with
   | [ first; second ] ->
       Alcotest.(check int) "top-level timeout applied to first batch item" 1500
@@ -245,7 +245,7 @@ let test_parse_step_spawn_specs_applies_worker_policy_fields () =
             ] );
       ]
   in
-  let specs = unwrap_ok (Tool_team_session.parse_step_spawn_specs args) in
+  let specs = unwrap_ok (Tool_team_session_spawn.parse_step_spawn_specs args) in
   match specs with
   | [ first; second ] ->
       Alcotest.(check (option bool)) "top-level thinking" (Some true)

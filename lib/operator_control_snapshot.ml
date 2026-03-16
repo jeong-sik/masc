@@ -1,0 +1,526 @@
+module U = Yojson.Safe.Util
+open Tool_args
+include Operator_pending_confirm
+include Operator_digest
+
+type action_log_entry = {
+  trace_id : string;
+  actor : string;
+  remote_session_id : string option;
+  remote_client_type : string;
+  action_type : string;
+  target_type : string;
+  target_id : string option;
+  delegated_tool : string;
+  confirmation_state : string;
+  result_status : string;
+  latency_ms : int;
+  created_at : string;
+}
+
+let json_ok fields =
+  `Assoc (("status", `String "ok") :: fields)
+
+let get_payload args =
+  match U.member "payload" args with
+  | `Assoc _ as payload -> payload
+  | _ -> `Assoc []
+
+let merge_json_objects left right =
+  match (left, right) with
+  | `Assoc left_fields, `Assoc right_fields -> `Assoc (left_fields @ right_fields)
+  | `Assoc left_fields, _ -> `Assoc left_fields
+  | _, `Assoc right_fields -> `Assoc right_fields
+  | _, _ -> `Assoc []
+
+let action_log_path config =
+  Filename.concat (operator_dir config) "action_log.jsonl"
+
+let remote_confirm_ttl_seconds = 900.0
+
+let iso_of_unix = Dashboard_utils.iso_of_unix
+
+let remote_client_type_of_context (ctx : 'a context) =
+  match ctx.mcp_session_id with
+  | Some _ -> "mcp_remote"
+  | None -> "local_api"
+
+let operator_server_profile_json =
+  `Assoc
+    [
+      ("name", `String "operator_remote_v1");
+      ("transport", `String "mcp_streamable_http");
+      ("auth", `String "bearer_token");
+      ("confirm_ttl_seconds", `Float remote_confirm_ttl_seconds);
+      ("curated_tool_count", `Int 4);
+    ]
+
+let action_log_entry_to_yojson (entry : action_log_entry) =
+  `Assoc
+    [
+      ("trace_id", `String entry.trace_id);
+      ("actor", `String entry.actor);
+      ("remote_session_id", string_option_to_json entry.remote_session_id);
+      ("remote_client_type", `String entry.remote_client_type);
+      ("action_type", `String entry.action_type);
+      ("target_type", `String entry.target_type);
+      ("target_id", string_option_to_json entry.target_id);
+      ("delegated_tool", `String entry.delegated_tool);
+      ("confirmation_state", `String entry.confirmation_state);
+      ("result_status", `String entry.result_status);
+      ("latency_ms", `Int entry.latency_ms);
+      ("created_at", `String entry.created_at);
+    ]
+
+let append_action_log config (entry : action_log_entry) =
+  Room_utils.mkdir_p (operator_dir config);
+  let oc =
+    open_out_gen [ Open_creat; Open_text; Open_append ] 0o644
+      (action_log_path config)
+  in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc (Yojson.Safe.to_string (action_log_entry_to_yojson entry));
+      output_char oc '\n')
+
+let recent_actions_json config =
+  if not (Sys.file_exists (action_log_path config)) then
+    `List []
+  else
+    let lines =
+      In_channel.with_open_text (action_log_path config) In_channel.input_lines
+    in
+    let tail =
+      let rev = List.rev lines in
+      rev |> List.to_seq |> Seq.take 20 |> List.of_seq |> List.rev
+    in
+    let items =
+      tail
+      |> List.filter_map (fun line ->
+             try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
+    in
+    `List items
+
+let recent_messages_json config =
+  Room.get_messages_raw config ~since_seq:0 ~limit:20
+  |> List.map Types.message_to_yojson
+  |> fun rows -> `List rows
+
+let latest_keeper_tools_from_metrics config keeper_name =
+  let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
+  Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:40000 ~max_lines:8
+  |> List.rev
+  |> List.find_map (fun line ->
+         try
+           let json = Yojson.Safe.from_string line in
+           let tools =
+             match Yojson.Safe.Util.member "tools_used" json with
+             | `List items ->
+                 items
+                 |> List.filter_map (function
+                        | `String tool ->
+                            let trimmed = String.trim tool in
+                            if trimmed = "" then None else Some trimmed
+                        | _ -> None)
+             | _ -> []
+           in
+           if tools = [] then None else Some (List.sort_uniq String.compare tools)
+         with Yojson.Json_error _ -> None)
+  |> Option.value ~default:[]
+
+let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
+  let fallback_allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let fallback_latest = latest_keeper_tools_from_metrics config meta.name in
+  let fallback_count = None in
+  let fallback_source =
+    if fallback_latest <> [] then Some "keeper_metrics" else None
+  in
+  let fallback_at =
+    let last_autonomous = String.trim meta.last_autonomous_action_at in
+    if last_autonomous <> "" then Some last_autonomous
+    else Some meta.updated_at
+  in
+  match A2a_tools.latest_heartbeat_task meta.agent_name,
+        A2a_tools.latest_heartbeat_result meta.agent_name with
+  | Some task, Some result ->
+      if task.seq > result.seq then
+        ( task.allowed_tools,
+          result.tool_names,
+          Some result.tool_call_count,
+          Some "heartbeat_task_pending_result",
+          Some task.created_at )
+      else
+        ( task.allowed_tools,
+          result.tool_names,
+          Some result.tool_call_count,
+          Some "heartbeat_result",
+          Some result.updated_at )
+  | Some task, None ->
+      (task.allowed_tools, [], None, Some "heartbeat_task", Some task.created_at)
+  | None, Some result ->
+      ( fallback_allowed,
+        result.tool_names,
+        Some result.tool_call_count,
+        Some "heartbeat_result",
+        Some result.updated_at )
+  | None, None ->
+      (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
+
+let keepers_json ?keeper_names config =
+  let names = match keeper_names with
+    | Some n -> n
+    | None -> Keeper_types.resident_keeper_names config
+  in
+  let rows =
+    List.filter_map
+      (fun name ->
+        match Keeper_types.read_meta config name with
+        | Error _ | Ok None -> None
+        | Ok (Some meta) ->
+            let agent_json =
+              Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
+            in
+            let keepalive_running =
+              Keeper_keepalive.keeper_keepalive_running meta.name
+            in
+            let agent_exists =
+              match agent_json |> U.member "exists" with
+              | `Bool value -> value
+              | _ -> false
+            in
+            let now_ts = Time_compat.now () in
+            let keepalive_started_at =
+              Keeper_keepalive.keeper_keepalive_started_at meta.name
+            in
+            let diagnostic =
+              Keeper_exec_status.keeper_diagnostic_json ~meta
+                ~agent_status:agent_json ~keepalive_running ~history_items:[]
+                ~now_ts
+              |> Keeper_exec_status.augment_keeper_diagnostic_json ~desired:true
+                   ~meta ~keepalive_running ~keepalive_started_at ~now_ts
+            in
+            let allowed_tool_names, latest_tool_names, latest_tool_call_count,
+                tool_audit_source, tool_audit_at =
+              keeper_tool_audit_fields config meta
+            in
+            let agent_status =
+              if not agent_exists then "offline"
+              else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
+            in
+            Some
+              (`Assoc
+                [
+                  ("runtime_class", `String "resident_keeper");
+                  ("desired", `Bool true);
+                  ("resident_registered", `Bool true);
+                  ("name", `String meta.name);
+                  ("agent_name", `String meta.agent_name);
+                  ("trace_id", `String meta.trace_id);
+                  ("goal", `String meta.goal);
+                  ("short_goal", `String meta.short_goal);
+                  ("mid_goal", `String meta.mid_goal);
+                  ("long_goal", `String meta.long_goal);
+                  ("status", `String agent_status);
+                  ("agent", agent_json);
+                  ("diagnostic", diagnostic);
+                  ("generation", `Int meta.generation);
+                  ("turn_count", `Int meta.total_turns);
+                  ("context_ratio", `Null);
+                  ("context_tokens", `Int meta.last_total_tokens);
+                  ("last_model_used", `String meta.last_model_used);
+                  ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
+                  ("keepalive_running", `Bool keepalive_running);
+                  ( "next_model_hint",
+                    string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta)
+                  );
+                  ("autonomy_level", `String meta.autonomy_level);
+                  ( "active_goal_ids",
+                    `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
+                  );
+                  ( "last_autonomous_action_at",
+                    if String.trim meta.last_autonomous_action_at = "" then `Null
+                    else `String meta.last_autonomous_action_at );
+                  ("autonomous_action_count", `Int meta.autonomous_action_count);
+                  ("allowed_tool_names", `List (List.map (fun value -> `String value) allowed_tool_names));
+                  ("latest_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
+                  ("recent_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
+                  ("latest_tool_call_count", option_to_json (fun value -> `Int value) latest_tool_call_count);
+                  ("tool_audit_source", string_option_to_json tool_audit_source);
+                  ("tool_audit_at", string_option_to_json tool_audit_at);
+                  ("updated_at", `String meta.updated_at);
+                  ("created_at", `String meta.created_at);
+                  ("recent_activity",
+                    let metrics_path = Keeper_types.keeper_metrics_path config name in
+                    let lines =
+                      Keeper_memory.read_file_tail_lines metrics_path
+                        ~max_bytes:8000 ~max_lines:5
+                    in
+                    `List (List.filter_map (fun line ->
+                      try Some (Yojson.Safe.from_string line)
+                      with Yojson.Json_error _ -> None) lines));
+                ]))
+      names
+  in
+  `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
+
+let persistent_agents_json ?keeper_names config =
+  let names = Keeper_types.persistent_agent_names ?resident_names:keeper_names config in
+  let rows =
+    List.filter_map
+      (fun name ->
+        match Keeper_types.read_meta config name with
+        | Error _ | Ok None -> None
+        | Ok (Some meta) ->
+            let agent_json =
+              Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
+            in
+            let agent_status =
+              match agent_json |> U.member "status" with
+              | `String status -> status
+              | _ -> "unknown"
+            in
+            Some
+              (`Assoc
+                [
+                  ("runtime_class", `String "persistent_agent");
+                  ("desired", `Bool false);
+                  ("resident_registered", `Bool false);
+                  ("name", `String meta.name);
+                  ("agent_name", `String meta.agent_name);
+                  ("trace_id", `String meta.trace_id);
+                  ("goal", `String meta.goal);
+                  ("short_goal", `String meta.short_goal);
+                  ("mid_goal", `String meta.mid_goal);
+                  ("long_goal", `String meta.long_goal);
+                  ("status", `String agent_status);
+                  ("generation", `Int meta.generation);
+                  ("turn_count", `Int meta.total_turns);
+                  ("context_ratio", `Null);
+                  ("context_tokens", `Int meta.last_total_tokens);
+                  ("last_model_used", `String meta.last_model_used);
+                  ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
+                  ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
+                  ("autonomy_level", `String meta.autonomy_level);
+                  ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+                  ("last_autonomous_action_at",
+                    if String.trim meta.last_autonomous_action_at = "" then `Null else `String meta.last_autonomous_action_at);
+                  ("autonomous_action_count", `Int meta.autonomous_action_count);
+                  ("updated_at", `String meta.updated_at);
+                  ("created_at", `String meta.created_at);
+                ]))
+      names
+  in
+  `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
+
+let sessions_json config =
+  let sessions =
+    Team_session_store.list_sessions config
+    |> List.sort (fun (a : Team_session_types.session) (b : Team_session_types.session) ->
+           compare b.started_at a.started_at)
+  in
+  let items =
+    List.map
+      (fun (session : Team_session_types.session) ->
+        let recent_events =
+          Team_session_store.read_events ~max_events:200 config session.session_id
+          |> Team_session_engine_eio.take_last 5
+        in
+        `Assoc
+          [
+            ("session_id", `String session.session_id);
+            ("command_plane_operation_id", `String ("detachment-" ^ session.session_id));
+            ("command_plane_detachment_id", `String ("detachment-" ^ session.session_id));
+            ("status", Team_session_engine_eio.session_status_json config session);
+            ("recent_events", `List recent_events);
+          ])
+      sessions
+  in
+  `Assoc [ ("count", `Int (List.length items)); ("items", `List items) ]
+
+let room_json config =
+  let initialized = Room.is_initialized config in
+  if not initialized then
+    `Assoc
+      [
+        ("initialized", `Bool false);
+        ("project", `String (Filename.basename config.base_path));
+      ]
+  else
+    let state = Room.read_state config in
+    let tempo = Tempo.get_tempo config in
+    let tasks = Room.get_tasks_raw config in
+    let agents = Room.get_agents_raw config in
+    `Assoc
+      [
+        ("initialized", `Bool true);
+        ("cluster", `String (Option.value ~default:"default" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+        ("project", `String state.project);
+        ("current_room", string_option_to_json (Room.read_current_room config));
+        ("paused", `Bool state.paused);
+        ("pause_reason", string_option_to_json state.pause_reason);
+        ("paused_by", string_option_to_json state.paused_by);
+        ("paused_at", string_option_to_json state.paused_at);
+        ("tempo_interval_s", `Float tempo.current_interval_s);
+        ("agent_count", `Int (List.length agents));
+        ("task_count", `Int (List.length tasks));
+        ("message_seq", `Int state.message_seq);
+      ]
+
+type snapshot_view =
+  | Summary
+  | Sessions
+  | Keepers
+  | Messages
+  | Full
+
+let parse_snapshot_view = function
+  | Some raw -> (
+      match String.trim raw |> String.lowercase_ascii with
+      | "summary" -> Summary
+      | "sessions" -> Sessions
+      | "keepers" -> Keepers
+      | "messages" -> Messages
+      | _ -> Full)
+  | None -> Full
+
+(* Snapshot TTL cache: avoids redundant DB queries on repeated calls
+   (dashboard SSE polling, multiple MCP clients). *)
+let _snapshot_cache : (string * Yojson.Safe.t * float) option ref = ref None
+
+let _snapshot_ttl_s =
+  match Sys.getenv_opt "MASC_OPERATOR_CACHE_TTL" with
+  | Some s -> (try Float.of_string s with _ -> 5.0)
+  | None -> 5.0
+
+let invalidate_snapshot_cache () = _snapshot_cache := None
+
+let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
+    ?(include_keepers = true) ?sessions (ctx : 'a context) : Yojson.Safe.t =
+  let cache_key =
+    Printf.sprintf "%s|%s|%b|%b|%b"
+      (Option.value ~default:"" actor)
+      (Option.value ~default:"" view)
+      include_messages include_sessions include_keepers
+  in
+  let now = Time_compat.now () in
+  (match !_snapshot_cache with
+   | Some (k, json, ts) when k = cache_key && now -. ts < _snapshot_ttl_s ->
+       json
+   | _ ->
+  let config = ctx.config in
+  let initialized = Room.is_initialized config in
+  let tracked_sessions =
+    match sessions with
+    | Some s -> s
+    | None ->
+        if initialized then Team_session_store.list_sessions config else []
+  in
+  let trace_id = trace_id "ops" in
+  let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
+  let view = parse_snapshot_view view in
+  let include_sessions =
+    include_sessions
+    &&
+    match view with
+    | Summary | Sessions | Full -> true
+    | Keepers | Messages -> false
+  in
+  let include_keepers =
+    include_keepers
+    &&
+    match view with
+    | Summary | Keepers | Full -> true
+    | Sessions | Messages -> false
+  in
+  let include_messages =
+    include_messages
+    &&
+    match view with
+    | Summary | Messages | Full -> true
+    | Sessions | Keepers -> false
+  in
+  let command_plane_summary =
+    if initialized then
+      Some (Command_plane_v2.summary_json ~sessions:tracked_sessions config)
+    else None
+  in
+  let summary_fields =
+    if initialized && (match view with Summary | Full -> true | _ -> false) then
+      let now = Time_compat.now () in
+      let session_digests =
+        tracked_sessions
+        |> List.map (fun session -> build_session_digest config session ~now)
+      in
+      let room_attention =
+        build_room_attention_items ?command_plane_summary config
+        @ (session_digests |> List.concat_map (fun digest -> digest.attention_items))
+        |> List.sort compare_attention
+      in
+      let room_recommendation_items =
+        room_recommendations ?command_plane_summary config
+        @ (session_digests |> List.concat_map (fun digest -> digest.recommended_actions))
+      in
+      [
+        ("attention_summary", summary_of_attention_items room_attention);
+        ( "recommendation_summary",
+          summary_of_recommendations ~actor:actor_name room_recommendation_items );
+      ]
+    else []
+  in
+  let command_plane_json =
+    if initialized then Command_plane_v2.snapshot_json config else `Assoc []
+  in
+  let swarm_status_json =
+    if initialized then
+      Swarm_status.build_json_from_snapshot config command_plane_json
+    else
+      Swarm_status.empty_json
+  in
+  let keeper_names =
+    if initialized && include_keepers then
+      Keeper_types.resident_keeper_names config
+    else []
+  in
+  let result =
+    `Assoc
+      ([
+         ("trace_id", `String trace_id);
+         ("server_profile", operator_server_profile_json);
+         ("resident_judge_runtime", resident_judge_runtime_json config);
+         ("judgment_owner", `String "fallback_read_model");
+         ("authoritative_judgment_available", `Bool false);
+         ("provenance_summary", operator_surface_contract_json);
+         ("room", room_json config);
+         ( "sessions",
+           if initialized && include_sessions then sessions_json config
+           else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+         ( "keepers",
+           if initialized && include_keepers then keepers_json ~keeper_names config
+           else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+         ( "persistent_agents",
+           if initialized && include_keepers then persistent_agents_json ~keeper_names config
+           else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+         ("command_plane", command_plane_json);
+         ("swarm_status", swarm_status_json);
+         ("role_census", aggregate_worker_class_counts tracked_sessions);
+         ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
+         ("lane_census", aggregate_lane_counts tracked_sessions);
+         ("controller_census", aggregate_controller_counts tracked_sessions);
+         ("control_domains", aggregate_control_domain_counts tracked_sessions);
+         ("model_tiers", aggregate_tier_counts tracked_sessions);
+         ("task_profiles", aggregate_task_profile_counts tracked_sessions);
+         ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
+         ("local_runtime", aggregated_local_runtime_json tracked_sessions);
+         ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
+         ("pending_confirms", pending_confirms_json ?actor config);
+         ("pending_confirm_envelope", pending_confirm_envelope_json ?actor config);
+         ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
+         ("available_actions", available_actions_json);
+         ("recent_actions", recent_actions_json config);
+       ]
+      @ summary_fields)
+  in
+  _snapshot_cache := Some (cache_key, result, now);
+  result)
+

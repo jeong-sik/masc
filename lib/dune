@@ -230,6 +230,7 @@
    response
    room
    room_eio
+   room_gc
    room_walph_eio
    room_git
    room_portal

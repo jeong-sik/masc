@@ -473,6 +473,13 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
               let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
               log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_done"); ("agent", `String agent_name); ("task", `String task_id); ("notes", if notes = "" then `Null else `String notes); ("ts", `String (now_iso ()))]));
+              (* Agent Economy: earn credits for task completion *)
+              (match Agent_economy.earn
+                 ~base_path:config.base_path ~agent_name
+                 ~kind:Earn_task_done ~reason:(Printf.sprintf "completed %s" task_id) () with
+               | Ok _bal -> ()
+               | Error msg ->
+                 Printf.eprintf "[economy] task earn failed: %s\n%!" msg);
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
             end
       with e -> Error (Types.IoError (Printexc.to_string e))

@@ -629,6 +629,11 @@ let create_post store ~author ~content ?title ?body ?post_kind ?meta_json
       incr store.post_count;
       invalidate_post_caches store;
       append_post post;
+      (* Agent Economy: earn credits for board post *)
+      (match Agent_economy.earn
+         ~base_path:(board_base_path ()) ~agent_name:author
+         ~kind:Earn_board_post ~reason:"board post" () with
+       | Ok _ | Error _ -> ());
       Ok post
     end
   )
@@ -858,6 +863,11 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                 let author_name = Agent_id.to_string post.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
                 Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir;
+                (* Agent Economy: earn credits for upvote received *)
+                (if direction = Up then
+                   ignore (Agent_economy.earn
+                     ~base_path:(board_base_path ()) ~agent_name:author_name
+                     ~kind:Earn_upvote ~reason:"upvote on post (flip)" ()));
                 Ok (flipped.votes_up - flipped.votes_down)
             | None ->
                 let updated = match direction with
@@ -873,6 +883,11 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                 let author_name = Agent_id.to_string post.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
                 Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir;
+                (* Agent Economy: earn credits for upvote received *)
+                (if direction = Up then
+                   ignore (Agent_economy.earn
+                     ~base_path:(board_base_path ()) ~agent_name:author_name
+                     ~kind:Earn_upvote ~reason:"upvote on post" ()));
                 Ok (updated.votes_up - updated.votes_down)
       )
 

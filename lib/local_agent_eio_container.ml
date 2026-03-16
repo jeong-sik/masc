@@ -523,7 +523,7 @@ let append_worker_completion_log ~base_path ~team_session_id ~worker_name
       ])
 
 let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
-    ~thinking_enabled ~hooks ~raw_trace =
+    ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = []) () =
   let config =
     {
       Oas.Types.default_config with
@@ -552,6 +552,7 @@ let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
           max_tool_calls_per_turn = Some 12;
         };
       raw_trace = Some raw_trace;
+      periodic_callbacks;
     }
   in
   (config, options)

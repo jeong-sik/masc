@@ -229,6 +229,7 @@
    response
    room
    room_task
+   room_multiroom
    room_eio
    room_gc
    room_walph_eio

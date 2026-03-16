@@ -5,6 +5,7 @@
 
 open Types
 open Room_utils
+open Room_state
 
 (** Add task *)
 let add_task config ~title ~priority ~description =

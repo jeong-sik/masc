@@ -634,6 +634,21 @@ let claim_task_r config ~agent_name ~task_id
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
+    (* Guard: agent must be joined before claiming a task.
+       Inline check because is_agent_joined is defined later in this file. *)
+    let agent_joined =
+      let actual = resolve_agent_name config agent_name in
+      let filename = safe_filename actual ^ ".json" in
+      let room_path = Filename.concat
+        (agents_dir_in_room config (current_room_id config)) filename in
+      if path_exists config room_path then true
+      else
+        let root_path = Filename.concat (agents_dir config) filename in
+        path_exists config root_path
+    in
+    if not agent_joined then
+      Error (Types.AgentNotJoined agent_name)
+    else
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
@@ -1740,11 +1755,12 @@ let () = Room_gc.force_release_task_fn :=
   (fun config ~agent_name ~task_id () ->
     force_release_task_r config ~agent_name ~task_id ())
 
-(** Get all agents with their status *)
+(** Get all agents with their status.
+    Uses room-scoped path for consistency with get_agents_raw. *)
 let get_agents_status config =
   ensure_initialized config;
 
-  let agents_path = agents_dir config in
+  let agents_path = agents_dir_in_room config (current_room_id config) in
   if not (Sys.file_exists agents_path) then
     `Assoc [("agents", `List []); ("count", `Int 0)]
   else begin

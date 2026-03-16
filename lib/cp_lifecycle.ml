@@ -2369,8 +2369,23 @@ let find_pending_decision config ~requested_action ?operation_id ?target_unit_id
          | Some expected, Some actual -> String.equal expected actual
          | Some _, None -> false)
 
+(** Default timeout for pending policy decisions (seconds).
+    Configurable via MASC_DECISION_TIMEOUT_SEC. *)
+let default_decision_timeout_sec =
+  match Sys.getenv_opt "MASC_DECISION_TIMEOUT_SEC" with
+  | Some s -> (try max 60 (int_of_string (String.trim s)) with Failure _ -> 600)
+  | None -> 600
+
 let create_policy_decision config ~(actor : string) ~requested_action ~scope_type
     ~scope_id ?operation_id ?target_unit_id ~reason ?(source = "managed") detail =
+  let now = Types.now_iso () in
+  let default_expires =
+    let t = Time_compat.now () +. float_of_int default_decision_timeout_sec in
+    let tm = Unix.gmtime t in
+    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+  in
   let decision =
     {
       decision_id = next_event_id "dec";
@@ -2385,9 +2400,9 @@ let create_policy_decision config ~(actor : string) ~requested_action ~scope_typ
       reason;
       source;
       detail;
-      created_at = Types.now_iso ();
+      created_at = now;
       decided_at = None;
-      expires_at = None;
+      expires_at = Some default_expires;
     }
   in
   let decisions = read_policy_decisions config in

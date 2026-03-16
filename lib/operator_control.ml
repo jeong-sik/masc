@@ -622,8 +622,11 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
   | None, None ->
       (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
 
-let keepers_json config =
-  let names = Keeper_types.resident_keeper_names config in
+let keepers_json ?keeper_names config =
+  let names = match keeper_names with
+    | Some n -> n
+    | None -> Keeper_types.resident_keeper_names config
+  in
   let rows =
     List.filter_map
       (fun name ->
@@ -716,8 +719,8 @@ let keepers_json config =
   in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
-let persistent_agents_json config =
-  let names = Keeper_types.persistent_agent_names config in
+let persistent_agents_json ?keeper_names config =
+  let names = Keeper_types.persistent_agent_names ?resident_names:keeper_names config in
   let rows =
     List.filter_map
       (fun name ->
@@ -2452,6 +2455,11 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     else
       Swarm_status.empty_json
   in
+  let keeper_names =
+    if initialized && include_keepers then
+      Keeper_types.resident_keeper_names config
+    else []
+  in
   `Assoc
     ([
        ("trace_id", `String trace_id);
@@ -2465,10 +2473,10 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          if initialized && include_sessions then sessions_json config
          else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
        ( "keepers",
-         if initialized && include_keepers then keepers_json config
+         if initialized && include_keepers then keepers_json ~keeper_names config
          else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
        ( "persistent_agents",
-         if initialized && include_keepers then persistent_agents_json config
+         if initialized && include_keepers then persistent_agents_json ~keeper_names config
          else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
        ("command_plane", command_plane_json);
        ("swarm_status", swarm_status_json);

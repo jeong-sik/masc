@@ -83,7 +83,7 @@ let public_tool_help_schemas () =
     Directly removes from hashtable without extra mutex layer.
     Safe in Eio single-fiber context.
 *)
-let unregister_sync = Mcp_server_eio_helpers.unregister_sync
+let unregister_sync = Session.unregister_sync
 
 (** Wait for message using Eio sleep - adapter for Session.registry
 
